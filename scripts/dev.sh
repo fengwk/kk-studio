@@ -18,6 +18,11 @@ FRONTEND_LOG="$WORK_DIR/frontend.log"
 BACKEND_PID_FILE="$WORK_DIR/backend.pid"
 FRONTEND_PID_FILE="$WORK_DIR/frontend.pid"
 BACKEND_JAR="$APP_HOME/web/target/kk-studio-web-1.0.0.jar"
+# 产物与修订绑定：stamp 与 JAR 同目录，`mvn clean` 会同时移除二者。
+BACKEND_JAR_REVISION_STAMP="$APP_HOME/web/target/.kk-studio-revision"
+FRONTEND_PACKAGE_LOCK="$APP_HOME/frontend/package-lock.json"
+FRONTEND_NODE_MODULES="$APP_HOME/frontend/node_modules"
+FRONTEND_PACKAGE_LOCK_STAMP="$FRONTEND_NODE_MODULES/.kk-studio-package-lock.sha"
 
 KILL_PORTS=${DEV_KILL_PORTS:-true}
 SKIP_PACKAGE=${DEV_SKIP_PACKAGE:-false}
@@ -29,12 +34,58 @@ step() {
   echo "==> $1"
 }
 
+# 当前工作区修订；非 Git 工作区（源码快照）输出空值，此时构建产物不受修订绑定约束。
+current_revision() {
+  git -C "$APP_HOME" rev-parse HEAD 2>/dev/null || true
+}
+
+# 判断已有构建产物是否仍然对应当前修订：产物不存在时必须重建；非 Git 工作区
+# （expected-value 为空）只要产物存在就沿用；否则要求产物与记录该产物的修订 stamp
+# 一致。`mvn clean` 会同时移除产物与同目录 stamp，因此旧 stamp 不会掩盖缺失的产物。
+artifact_current() {
+  local artifact=$1
+  local stamp=$2
+  local expected=$3
+  local recorded
+  if [ ! -e "$artifact" ]; then
+    return 1
+  fi
+  if [ -z "$expected" ]; then
+    return 0
+  fi
+  if [ ! -f "$stamp" ]; then
+    return 1
+  fi
+  # stamp 由脚本以 `printf '%s\n'` 写入，比较前去掉任意空白，避免换行/CR 造成假不匹配。
+  recorded=$(cat "$stamp")
+  recorded=${recorded//[[:space:]]/}
+  [ "$recorded" = "$expected" ]
+}
+
+# package-lock.json 的内容摘要；缺失时返回非零，由调用方退回既有行为。
+frontend_package_lock_digest() {
+  if [ ! -f "$FRONTEND_PACKAGE_LOCK" ]; then
+    return 1
+  fi
+  git hash-object "$FRONTEND_PACKAGE_LOCK"
+}
+
+# 记录本次安装所对应的 lock 摘要；`npm ci` 会重建整个 node_modules，所以 stamp 只在
+# 安装完成之后写入。
+record_frontend_package_lock_stamp() {
+  local digest=$1
+  if [ -z "$digest" ] || [ ! -d "$FRONTEND_NODE_MODULES" ]; then
+    return
+  fi
+  printf '%s\n' "$digest" > "$FRONTEND_PACKAGE_LOCK_STAMP"
+}
+
 usage() {
   cat <<EOF
 Usage: $0 {start|stop|restart|status|logs|tail}
 
 Commands:
-  start    Clean-package backend, optionally sync the four real E2E providers, then start backend and frontend.
+  start    Package backend when its recorded revision is stale, optionally sync the four real E2E providers, then start backend and frontend.
   stop     Stop managed dev servers and, by default, listeners on dev ports.
   restart  Stop then start.
   status   Print process status and URLs.
@@ -52,6 +103,7 @@ Environment:
   # e2e profile: complete pairs are written to the matching seeded providers after backend readiness
   DEV_KILL_PORTS=true
   DEV_SKIP_PACKAGE=false
+  # DEV_SKIP_PACKAGE=true 只在 web/target/.kk-studio-revision 记录的是当前 HEAD 时才复用 JAR
   DEV_SKIP_NPM_INSTALL=false
   DEV_READY_TIMEOUT_SECONDS=90   # seconds to wait for backend/frontend readiness before failing
   DEV_WORK_DIR=$APP_HOME/runtime/dev
@@ -187,23 +239,45 @@ wait_http() {
 }
 
 ensure_frontend_deps() {
-  if [ "$SKIP_NPM_INSTALL" = "true" ] || [ -d "$APP_HOME/frontend/node_modules" ]; then
+  if [ "$SKIP_NPM_INSTALL" = "true" ]; then
     return
   fi
-  step "Installing frontend dependencies"
+  local digest
+  digest=$(frontend_package_lock_digest || true)
+  if [ ! -d "$FRONTEND_NODE_MODULES" ]; then
+    step "Installing frontend dependencies"
+    cd "$APP_HOME/frontend"
+    npm install
+    record_frontend_package_lock_stamp "$digest"
+    return
+  fi
+  if [ -z "$digest" ]; then
+    # 没有 package-lock.json 时无法判断依赖是否过期，沿用"已安装即复用"的既有行为。
+    return
+  fi
+  if [ -f "$FRONTEND_PACKAGE_LOCK_STAMP" ] \
+    && [ "$(cat "$FRONTEND_PACKAGE_LOCK_STAMP")" = "$digest" ]; then
+    step "Reusing frontend dependencies installed for the current package-lock.json"
+    return
+  fi
+  step "package-lock.json changed: reinstalling frontend dependencies with npm ci"
   cd "$APP_HOME/frontend"
-  npm install
+  npm ci
+  record_frontend_package_lock_stamp "$digest"
 }
 
 package_backend() {
   local java_home=$1
-  if [ "$SKIP_PACKAGE" = "true" ] && [ -f "$BACKEND_JAR" ]; then
-    step "Skipping backend package"
+  # 只有产物确实由当前修订构建时才允许跳过 Maven；否则会启动与源码不匹配的旧 JAR。
+  if [ "$SKIP_PACKAGE" = "true" ] \
+    && artifact_current "$BACKEND_JAR" "$BACKEND_JAR_REVISION_STAMP" "$(current_revision)"; then
+    step "Skipping backend package: $BACKEND_JAR was built from the current revision"
     return
   fi
   step "Clean packaging backend"
   cd "$APP_HOME"
   env JAVA_HOME="$java_home" mvn -pl web -am -DskipTests clean package
+  printf '%s\n' "$(current_revision)" > "$BACKEND_JAR_REVISION_STAMP"
 }
 
 stop_all() {
@@ -335,28 +409,32 @@ tail_logs() {
 cmd=${1:-}
 target=${2:-all}
 
-case "$cmd" in
-  start)
-    start_all
-    ;;
-  stop)
-    stop_all
-    ;;
-  restart)
-    stop_all
-    start_all
-    ;;
-  status)
-    status_all
-    ;;
-  logs)
-    print_logs "$target"
-    ;;
-  tail)
-    tail_logs "$target"
-    ;;
-  *)
-    usage
-    exit 1
-    ;;
-esac
+# 同一个文件既作为 lifecycle 命令直接执行，也被契约测试 `source` 后逐函数行为化验证；
+# 只有直接执行时才派发子命令。
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  case "$cmd" in
+    start)
+      start_all
+      ;;
+    stop)
+      stop_all
+      ;;
+    restart)
+      stop_all
+      start_all
+      ;;
+    status)
+      status_all
+      ;;
+    logs)
+      print_logs "$target"
+      ;;
+    tail)
+      tail_logs "$target"
+      ;;
+    *)
+      usage
+      exit 1
+      ;;
+  esac
+fi

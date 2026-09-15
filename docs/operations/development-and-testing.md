@@ -239,7 +239,34 @@ runtime。容器以 uid/gid `10001` 运行，`/workspace` 是持久 Git 工作�
   `KK_STUDIO_GIT_BRANCH` 指定（默认 `dev`）；
 - 只有显式设置 `KK_STUDIO_DEV_ALLOW_SOURCE_SEED=true` 时才回退到镜像内源码快照；
 - 已存在的 checkout、未提交工作和未 push 的提交永不被覆盖；checkout 不在
-  `KK_STUDIO_GIT_BRANCH` 时启动失败，entrypoint 不会自动 checkout/reset。
+  `KK_STUDIO_GIT_BRANCH` 时启动失败。
+
+容器每次启动都会先校验持久 checkout 的修订，只有无损快进是可接受的自动变更：
+
+- 工作区没有 `.git`（源码快照工作区）时不参与同步，按原样启动；
+- 有 `.git` 但没有 `origin` remote 时启动失败：修订无法验证；
+- `git fetch origin $KK_STUDIO_GIT_BRANCH` 失败时启动失败，节点不会用未验证的修订
+  继续启动；错误信息不回显远端 URL 或凭据，提示检查挂载的 SSH 凭据与网络后重启；
+- fetch 成功后比较 `HEAD` 与 `origin/$KK_STUDIO_GIT_BRANCH`：相同则按当前修订启动；
+  `HEAD` 是其祖先（落后）且已跟踪文件没有未提交修改时执行 `merge --ff-only`，
+  只允许快进；落后但存在未提交的已跟踪修改时启动失败，必须先提交或显式丢弃再重启；
+  `HEAD` 领先或与远端分叉时启动失败，历史必须显式处理；
+- 未跟踪文件不阻止快进。entrypoint 只执行 `merge --ff-only`，永不 reset、rebase、
+  stash 或 checkout，也不会强推。
+
+同步完成后按修订 stamp 决定是否重建构建产物，避免同一次源码状态被重复编译：
+
+- 后端 JAR 的修订记录在 `web/target/.kk-studio-revision`（与 JAR 同目录，`mvn clean`
+  会同时移除二者）。启动时 `DEV_SKIP_PACKAGE=true` 只在 JAR 存在且 stamp 记录的修订
+  等于当前 `HEAD` 时跳过 Maven；stamp 缺失、不匹配或 JAR 不存在都触发一次
+  `mvn -pl web -am -DskipTests clean package`，成功后写入当前修订。非 Git 工作区没有
+  修订可比，JAR 存在即复用；`deploy/dev/reload.sh` 的增量 package 成功后写入同一
+  stamp，因此 reload 过的修订在容器重启时不会重复全量构建。
+- 前端依赖的锁摘要记录在 `frontend` 下的 `node_modules/.kk-studio-package-lock.sha`，
+  内容是 `frontend/package-lock.json` 的内容哈希。`node_modules` 不存在时执行
+  `npm install`；存在但摘要与当前 lock 不一致时执行 `npm ci` 并更新 stamp；一致时
+  直接复用。`DEV_SKIP_NPM_INSTALL=true` 仍完全跳过这一步，`package-lock.json` 缺失时
+  也沿用“已安装即复用”的行为。
 
 SSH 凭据只在运行时注入：外部 Compose 把宿主 SSH key 以只读 volume 挂到
 `KK_STUDIO_SSH_CREDENTIALS_DIR`（默认 `/run/kk-studio/ssh`），entrypoint 在 clone
@@ -276,8 +303,9 @@ control-plane origin 和 Daemon registration token fail closed，避免错误配
 Maven 25:44、npm 2:00），因此 entrypoint 把 readiness 预算
 `DEV_READY_TIMEOUT_SECONDS` 提升到 `600s`：超过预算仍不就绪时直接以非零状态退出，
 而不是留下一个半启动的容器。同一镜像 healthcheck 的 start period 为 `2700s`，覆盖冷
-cache 首次启动；已有 workspace 的重启（`DEV_SKIP_PACKAGE=true` 且 `node_modules`
-存在）实测 41 秒内恢复健康。
+cache 首次启动；已有 workspace 的重启按修订 stamp 决定重建量：修订未变化时
+（`DEV_SKIP_PACKAGE=true`、JAR 与前端依赖都对应当前修订）只重启受管进程，实测 41 秒
+内恢复健康；修订前进时先无损快进工作区，再重建后端产物。
 
 普通迭代只运行稳定命令 `kk-studio-dev-reload`（增量 package 后重启受管进程，
 Daemon 与容器保持存活，Main 与 Daemon 的连接不中断，并等待两端 readiness）。
@@ -308,7 +336,7 @@ Dev 容器运行环境变量（外部 Compose 只引用名称，真实值由 NAS
 | --- | --- |
 | `KK_STUDIO_WORKSPACE_ROOT` | Daemon environment-root 与持久工作区根，默认 `/workspace` |
 | `KK_STUDIO_REPOSITORY_DIR` | 源码 checkout，默认 `/workspace/kk-studio` |
-| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 SSH remote 与分支，默认不带 remote / `dev` |
+| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 SSH remote 与每次启动 fetch/快进的目标分支，默认不带 remote / `dev` |
 | `KK_STUDIO_SSH_CREDENTIALS_DIR` | 只读 SSH key 挂载目录，默认 `/run/kk-studio/ssh`；`id_*` 在启动时复制到 `/home/kkdaemon/.ssh` |
 | `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
 | `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |

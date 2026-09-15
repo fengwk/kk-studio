@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 from test_build_scripts import function_body
@@ -21,6 +23,7 @@ DEV_HEALTHCHECK = DEV_ROOT / "healthcheck.sh"
 DEV_KNOWN_HOSTS = DEV_ROOT / "ssh_known_hosts"
 DEV_SSH_CONFIG = DEV_ROOT / "ssh_config"
 DEV_ASKPASS = DEV_ROOT / "git-askpass.sh"
+DEV_SCRIPT = REPOSITORY_ROOT / "scripts" / "dev.sh"
 DOCKERIGNORE = REPOSITORY_ROOT / ".dockerignore"
 PUBLISH_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "docker-publish.yml"
 DEPLOYMENT_DOC = REPOSITORY_ROOT / "docs" / "operations" / "deployment.md"
@@ -82,9 +85,21 @@ ENTRYPOINT_ENV_NAMES = (
     "KK_STUDIO_CONTROL_PLANE_BASE_URL",
     "KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED",
     "KK_STUDIO_DAEMON_REGISTRATION_TOKEN",
+    "KK_STUDIO_REPOSITORY_DIR",
+    "KK_STUDIO_GIT_BRANCH",
     "SPRING_PROFILES_ACTIVE",
     "SPRING_FLYWAY_ENABLED",
 )
+# Git must never read the developer's own identity/configuration when a test builds a
+# throwaway repository, and a global `commit.gpgsign` would break every fixture commit.
+GIT_FIXTURE_ENV = {
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_AUTHOR_NAME": "kk-studio test",
+    "GIT_AUTHOR_EMAIL": "test@kk-studio.invalid",
+    "GIT_COMMITTER_NAME": "kk-studio test",
+    "GIT_COMMITTER_EMAIL": "test@kk-studio.invalid",
+}
 
 
 def entrypoint_environment(overrides=None):
@@ -94,6 +109,58 @@ def entrypoint_environment(overrides=None):
         environment.pop(name, None)
     environment.update(overrides or {})
     return environment
+
+
+def run_git(directory, *arguments, env=None, check=True):
+    """Run one git command against a fixture repository with a hermetic configuration."""
+    environment = dict(os.environ)
+    environment.update(GIT_FIXTURE_ENV)
+    environment.update(env or {})
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=directory,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+    if check and result.returncode != 0:
+        raise AssertionError(f"git {' '.join(arguments)} failed: {result.stderr}")
+    return result
+
+
+def commit_file(directory, name, content, message):
+    """Commit one file into a fixture repository and return the resulting revision."""
+    (Path(directory) / name).write_text(content)
+    run_git(directory, "add", name)
+    run_git(directory, "commit", "-m", message)
+    return run_git(directory, "rev-parse", "HEAD").stdout.strip()
+
+
+def build_workspace_fixture(root, branch="dev"):
+    """Create a bare `origin`, a seed clone that publishes to it, and a workspace clone.
+
+    The workspace is cloned from a `file://` bare repository, so every revision-sync
+    behavior can be exercised without network access or real credentials.
+    """
+    root = Path(root)
+    origin = root / "origin.git"
+    seed = root / "seed"
+    workspace = root / "workspace"
+    run_git(root, "init", "--bare", "--initial-branch", branch, str(origin))
+    run_git(root, "init", "--initial-branch", branch, str(seed))
+    commit_file(seed, "tracked.txt", "one\n", "one")
+    run_git(seed, "remote", "add", "origin", f"file://{origin}")
+    run_git(seed, "push", "-u", "origin", branch)
+    run_git(root, "clone", "--branch", branch, f"file://{origin}", str(workspace))
+    return origin, seed, workspace
+
+
+def publish(seed, branch, name, content, message):
+    """Advance the fixture remote by one commit and return the new revision."""
+    revision = commit_file(seed, name, content, message)
+    run_git(seed, "push", "origin", branch)
+    return revision
 
 
 def source_entrypoint(script, env=None):
@@ -703,6 +770,472 @@ class TestNasDevImageContracts(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_entrypoint_syncs_the_workspace_revision_between_prepare_and_start(self):
+        # Intent: a rebuilt container must never boot a durable workspace whose revision
+        # was never verified, and the check must run after the workspace exists and before
+        # any server starts. The step order is what makes a stale JAR impossible to serve
+        # silently, so it is asserted on the real `main` sequence rather than on prose.
+        entrypoint = DEV_ENTRYPOINT.read_text()
+        self.assertIn(
+            "REPOSITORY_DIR=${KK_STUDIO_REPOSITORY_DIR:-$WORKSPACE_ROOT/kk-studio}",
+            entrypoint,
+        )
+        self.assertIn("GIT_BRANCH=${KK_STUDIO_GIT_BRANCH:-dev}", entrypoint)
+        main_body = function_body(DEV_ENTRYPOINT, "main")
+        self.assertLess(
+            main_body.index("prepare_workspace"),
+            main_body.index("sync_workspace_revision"),
+            "the workspace must exist before its revision is verified",
+        )
+        self.assertLess(
+            main_body.index("sync_workspace_revision"),
+            main_body.index("start_managed_servers"),
+            "no server may start from an unverified revision",
+        )
+        self.assertLess(
+            main_body.index("sync_workspace_revision"),
+            main_body.index("run_daemon"),
+            "the Daemon must not start from an unverified revision",
+        )
+
+    def test_entrypoint_revision_sync_never_rewrites_history(self):
+        # Intent: the sync may only add incoming commits. Any rewrite command would let a
+        # container destroy Agent work or published history that nobody reviewed, which is
+        # worse than failing to start, so the whole deploy surface is scanned for them.
+        for script in (DEV_ENTRYPOINT, DEV_RELOAD):
+            body = script.read_text()
+            for forbidden in (
+                "git reset",
+                "git rebase",
+                "git stash",
+                "git push",
+                "git checkout",
+                "git clean",
+                "git -C \"$REPOSITORY_DIR\" reset",
+            ):
+                self.assertNotIn(forbidden, body, f"{script.name} must not run {forbidden}")
+        sync_body = function_body(DEV_ENTRYPOINT, "sync_workspace_revision")
+        self.assertIn('merge --ff-only "origin/$GIT_BRANCH"', sync_body)
+        self.assertIn("status --porcelain --untracked-files=no", sync_body)
+        self.assertIn("merge-base --is-ancestor", sync_body)
+
+    def test_revision_sync_fast_forwards_a_clean_workspace(self):
+        # Intent: the normal self-iteration restart must advance the persistent checkout to
+        # the pushed revision instead of silently serving the previous one. The fixture
+        # publishes a commit and asserts on the resulting HEAD, so a sync that only prints
+        # the step message without merging fails.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, seed, workspace = build_workspace_fixture(temporary)
+            expected = publish(seed, "dev", "tracked.txt", "two\n", "two")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(
+                expected,
+                run_git(workspace, "rev-parse", "HEAD").stdout.strip(),
+                "the workspace must end up on the fetched revision",
+            )
+            self.assertEqual(
+                "two\n", (workspace / "tracked.txt").read_text(), "the incoming file must be applied"
+            )
+            self.assertRegex(result.stdout, r"(?i)fast-forward")
+            self.assertIn(expected[:7], result.stdout)
+
+    def test_revision_sync_is_a_no_op_when_the_workspace_already_matches(self):
+        # Intent: an unchanged node must not touch its checkout at all, otherwise every
+        # container restart would be an unreviewed write to the working tree.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, seed, workspace = build_workspace_fixture(temporary)
+            publish(seed, "dev", "tracked.txt", "two\n", "two")
+            first = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertEqual(0, first.returncode, first.stderr)
+            head = run_git(workspace, "rev-parse", "HEAD").stdout.strip()
+            second = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertEqual(0, second.returncode, second.stderr)
+            self.assertEqual(head, run_git(workspace, "rev-parse", "HEAD").stdout.strip())
+            self.assertNotRegex(second.stdout, r"(?i)fast-forward")
+            self.assertIn(head[:7], second.stdout)
+
+    def test_revision_sync_fails_closed_on_uncommitted_tracked_changes(self):
+        # Intent: a fast-forward would overwrite local edits, and the entrypoint must never
+        # stash or discard them. Failing to start is the only outcome that keeps the work
+        # intact, so both the exit status and the surviving working tree are asserted.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, seed, workspace = build_workspace_fixture(temporary)
+            local_head = run_git(workspace, "rev-parse", "HEAD").stdout.strip()
+            expected = publish(seed, "dev", "tracked.txt", "two\n", "two")
+            (workspace / "tracked.txt").write_text("local work in progress\n")
+            (workspace / "untracked.txt").write_text("scratch\n")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertNotEqual(0, result.returncode, "dirty tracked files must fail closed")
+            self.assertEqual(
+                local_head,
+                run_git(workspace, "rev-parse", "HEAD").stdout.strip(),
+                "the revision must not move while uncommitted tracked changes exist",
+            )
+            self.assertEqual(
+                "local work in progress\n",
+                (workspace / "tracked.txt").read_text(),
+                "the local edit must survive; the entrypoint never stashes or resets",
+            )
+            self.assertEqual("scratch\n", (workspace / "untracked.txt").read_text())
+            self.assertNotIn(expected[:7], run_git(workspace, "rev-parse", "HEAD").stdout)
+            self.assertIn("uncommitted changes to tracked files", result.stderr)
+
+    def test_revision_sync_allows_untracked_files_to_survive_a_fast_forward(self):
+        # Intent: untracked scratch files (reports, local notes) are normal in an Agent
+        # workspace, so they must not block the revision check; only tracked modifications
+        # are a conflict. Without this the node would need manual cleanup before any restart.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, seed, workspace = build_workspace_fixture(temporary)
+            expected = publish(seed, "dev", "tracked.txt", "two\n", "two")
+            (workspace / "scratch.txt").write_text("unrelated\n")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(
+                expected, run_git(workspace, "rev-parse", "HEAD").stdout.strip()
+            )
+            self.assertEqual("unrelated\n", (workspace / "scratch.txt").read_text())
+
+    def test_revision_sync_fails_closed_on_diverged_history(self):
+        # Intent: a local commit that the remote does not have cannot be reconciled by a
+        # fast-forward, and rewriting it silently would discard an unreviewed change.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, seed, workspace = build_workspace_fixture(temporary)
+            publish(seed, "dev", "from-remote.txt", "remote\n", "remote work")
+            run_git(workspace, "fetch", "origin", "dev")
+            local = commit_file(workspace, "local.txt", "local\n", "local work")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertNotEqual(0, result.returncode, "divergence must fail closed")
+            self.assertEqual(local, run_git(workspace, "rev-parse", "HEAD").stdout.strip())
+            self.assertIn("cannot be fast-forwarded", result.stderr)
+            self.assertTrue((workspace / "local.txt").exists())
+
+    def test_revision_sync_fails_closed_when_the_local_branch_is_ahead(self):
+        # Intent: an Agent's unpushed commits are legitimate durable work on the Dev node;
+        # the container must keep serving them instead of being pulled back to the remote.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, _, workspace = build_workspace_fixture(temporary)
+            local = commit_file(workspace, "local.txt", "local\n", "local work")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertNotEqual(0, result.returncode, "ahead-of-remote must fail closed")
+            self.assertEqual(local, run_git(workspace, "rev-parse", "HEAD").stdout.strip())
+            self.assertIn("cannot be fast-forwarded", result.stderr)
+
+    def test_revision_sync_fails_closed_when_fetch_is_impossible(self):
+        # Intent: the whole point of the gate is that an unverified revision never boots.
+        # An unreachable remote (here a missing local path, so no network is needed) must
+        # therefore stop the container, and the guidance the entrypoint itself prints must
+        # point at credentials/network without echoing the remote URL or any secret (git's
+        # own diagnostics are the operator's only source for the underlying reason).
+        with tempfile.TemporaryDirectory() as temporary:
+            _, _, workspace = build_workspace_fixture(temporary)
+            unreachable = Path(temporary) / "absent-origin.git"
+            run_git(workspace, "remote", "set-url", "origin", f"file://{unreachable}")
+            head = run_git(workspace, "rev-parse", "HEAD").stdout.strip()
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertNotEqual(0, result.returncode, "an unverifiable revision must not start")
+            self.assertEqual(head, run_git(workspace, "rev-parse", "HEAD").stdout.strip())
+            self.assertIn("git fetch origin dev failed", result.stderr)
+            self.assertIn("SSH credentials", result.stderr)
+            owned_output = "\n".join(
+                line
+                for line in result.stderr.splitlines()
+                if line.startswith("ERROR:") or line.startswith("       ")
+            )
+            self.assertIn("never started", owned_output)
+            self.assertNotIn(
+                str(unreachable),
+                owned_output,
+                "the entrypoint must not repeat the configured remote URL",
+            )
+
+    def test_revision_sync_fails_closed_without_an_origin_remote(self):
+        # Intent: without `origin` there is nothing to verify a revision against, so the
+        # node would silently run whatever the volume happens to contain.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, _, workspace = build_workspace_fixture(temporary)
+            run_git(workspace, "remote", "remove", "origin")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertNotEqual(0, result.returncode, "a workspace without origin must not start")
+            self.assertIn("no origin remote", result.stderr)
+
+    def test_revision_sync_skips_a_source_snapshot_workspace(self):
+        # Intent: the mirror-initialized source snapshot has no git metadata and is an
+        # explicitly opted-in, intentionally frozen workspace; failing it would remove the
+        # documented offline fallback, so the step must succeed and leave files untouched.
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = Path(temporary) / "workspace"
+            snapshot.mkdir()
+            marker = snapshot / "pom.xml"
+            marker.write_text("<project/>\n")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(snapshot), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("Skipping revision sync", result.stdout)
+            self.assertEqual("<project/>\n", marker.read_text())
+            self.assertEqual(["pom.xml"], sorted(entry.name for entry in snapshot.iterdir()))
+
+    def test_artifact_current_binds_a_built_artifact_to_its_revision(self):
+        # Intent: `DEV_SKIP_PACKAGE=true` is the only thing standing between a rebuilt
+        # container and a JAR from a previous revision, which is exactly the failure this
+        # work removes. Each case asserts the boolean decision of the real function.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "kk-studio-web-1.0.0.jar"
+            stamp = root / ".kk-studio-revision"
+            revision = "9c73718d94be910308e6b075dd70ab7075b2ae46"
+
+            def artifact_current(expected):
+                return subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        (
+                            f"source {shlex.quote(str(DEV_SCRIPT))}\n"
+                            "artifact_current"
+                            f" {shlex.quote(str(artifact))}"
+                            f" {shlex.quote(str(stamp))}"
+                            f" {shlex.quote(expected)}"
+                        ),
+                    ],
+                    cwd=REPOSITORY_ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env={**os.environ, "DEV_WORK_DIR": str(root / "runtime")},
+                )
+
+            self.assertNotEqual(0, artifact_current(revision).returncode, "missing artifact")
+            # A source-snapshot workspace has no revision to compare and keeps its artifact.
+            artifact.write_text("jar\n")
+            self.assertEqual(0, artifact_current("").returncode, "snapshot workspace")
+            self.assertNotEqual(0, artifact_current(revision).returncode, "missing stamp")
+            stamp.write_text("deadbeef\n")
+            self.assertNotEqual(0, artifact_current(revision).returncode, "mismatched stamp")
+            for recorded in (f"{revision}\n", f"\n{revision}\n", f"{revision}"):
+                stamp.write_text(recorded)
+                result = artifact_current(revision)
+                self.assertEqual(
+                    0,
+                    result.returncode,
+                    f"stamp {recorded!r} must match release {revision!r}: {result.stderr}",
+                )
+
+    def test_dev_script_rebuilds_the_backend_when_the_stamp_is_stale(self):
+        # Intent: the stamp written at the previous build is what decides whether Maven may
+        # be skipped; the shell wiring must call the same predicate for the JAR and for the
+        # frontend lock, otherwise the helper could be correct while the lifecycle still
+        # serves stale artifacts.
+        package_body = function_body(DEV_SCRIPT, "package_backend")
+        self.assertIn(
+            'artifact_current "$BACKEND_JAR" "$BACKEND_JAR_REVISION_STAMP" "$(current_revision)"',
+            package_body,
+        )
+        self.assertIn("mvn -pl web -am -DskipTests clean package", package_body)
+        self.assertIn(
+            'printf \'%s\\n\' "$(current_revision)" > "$BACKEND_JAR_REVISION_STAMP"',
+            package_body,
+        )
+        # `mvn clean` removes the JAR and the stamp together, so the stamp can never claim
+        # that a deleted artifact is current.
+        self.assertIn(
+            'BACKEND_JAR_REVISION_STAMP="$APP_HOME/web/target/.kk-studio-revision"',
+            DEV_SCRIPT.read_text(),
+        )
+        revision_fn = function_body(DEV_SCRIPT, "current_revision")
+        self.assertIn('git -C "$APP_HOME" rev-parse HEAD', revision_fn)
+        self.assertIn("|| true", revision_fn)
+
+    def test_ensure_frontend_deps_reinstalls_only_when_the_lock_changed(self):
+        # Intent: `npm install` is only correct for a missing tree; an upgraded
+        # `package-lock.json` needs `npm ci`, otherwise a restarted container keeps
+        # dependency versions that the current lock file no longer allows. Each case runs
+        # the real function against a recorder `npm`, so the assertions are about the
+        # commands the lifecycle actually issues rather than about the script text.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app_home = root / "app"
+            (app_home / "scripts").mkdir(parents=True)
+            shutil.copy(DEV_SCRIPT, app_home / "scripts" / "dev.sh")
+            frontend = app_home / "frontend"
+            frontend.mkdir()
+            lock = frontend / "package-lock.json"
+            lock.write_text('{"lockfileVersion": 3}\n')
+            node_modules = frontend / "node_modules"
+            stamp = node_modules / ".kk-studio-package-lock.sha"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            npm_log = root / "npm.log"
+            recorder = bin_dir / "npm"
+            recorder.write_text(
+                "#!/usr/bin/env bash\n"
+                'printf \'%s\\n\' "$*" >> "$NPM_LOG"\n'
+                # A real install also (re)creates the tree the stamp lives in.
+                "mkdir -p node_modules\n"
+            )
+            recorder.chmod(0o755)
+
+            def run_ensure(overrides=None):
+                environment = dict(os.environ)
+                environment.pop("DEV_SKIP_NPM_INSTALL", None)
+                environment.update(
+                    {
+                        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                        "NPM_LOG": str(npm_log),
+                        "DEV_WORK_DIR": str(root / "runtime"),
+                    }
+                )
+                environment.update(overrides or {})
+                return subprocess.run(
+                    ["bash", "-c", "source scripts/dev.sh\nensure_frontend_deps"],
+                    cwd=app_home,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env=environment,
+                )
+
+            def calls():
+                recorded = npm_log.read_text().splitlines() if npm_log.exists() else []
+                if npm_log.exists():
+                    npm_log.unlink()
+                return recorded
+
+            # A missing tree is a plain install, and the fresh tree is stamped.
+            result = run_ensure()
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(["install"], calls())
+            self.assertTrue(node_modules.is_dir())
+            first_digest = stamp.read_text().strip()
+            self.assertRegex(first_digest, r"^[0-9a-f]{40}$")
+            self.assertEqual(
+                run_git(frontend, "hash-object", "package-lock.json").stdout.strip(),
+                first_digest,
+                "the stamp must be the lock content hash that a later start recomputes",
+            )
+
+            # An unchanged lock reuses the installed tree without invoking npm at all.
+            result = run_ensure()
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([], calls())
+            self.assertEqual(first_digest, stamp.read_text().strip())
+
+            # A changed lock must force `npm ci` and refresh the stamp.
+            lock.write_text('{"lockfileVersion": 3, "changed": 1}\n')
+            result = run_ensure()
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(["ci"], calls())
+            self.assertNotEqual(first_digest, stamp.read_text().strip())
+
+            # The explicit skip switch stays a total opt-out: with a changed lock and even
+            # with no tree at all, the lifecycle must not invoke npm.
+            lock.write_text('{"lockfileVersion": 3, "changed": 2}\n')
+            result = run_ensure({"DEV_SKIP_NPM_INSTALL": "true"})
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([], calls())
+            shutil.rmtree(node_modules)
+            result = run_ensure({"DEV_SKIP_NPM_INSTALL": "true"})
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([], calls())
+            self.assertFalse(
+                node_modules.exists(),
+                "an explicit skip must not install anything, not even for a missing tree",
+            )
+            # `npm` is what recreates the skipped tree, so the stamp it owned is gone too;
+            # the failed-install case below starts from an explicit, known stamp value.
+            node_modules.mkdir()
+            previous_digest = "0" * 40
+            stamp.write_text(f"{previous_digest}\n")
+
+            # A failed install must not leave a fresh-looking stamp, otherwise the next
+            # start would reuse a tree that npm never finished rebuilding.
+            failing_bin = root / "failing-bin"
+            failing_bin.mkdir()
+            failing_npm = failing_bin / "npm"
+            failing_npm.write_text("#!/usr/bin/env bash\nexit 1\n")
+            failing_npm.chmod(0o755)
+            lock.write_text('{"lockfileVersion": 3, "changed": 3}\n')
+            result = run_ensure(
+                {"PATH": f"{failing_bin}{os.pathsep}{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+            )
+            self.assertNotEqual(0, result.returncode, "a failed npm must fail the start")
+            self.assertEqual(
+                previous_digest,
+                stamp.read_text().strip(),
+                "the stamp must only be refreshed after npm succeeded",
+            )
+
+            # Without a lock file there is nothing to compare, so the tree is reused.
+            lock.unlink()
+            shutil.rmtree(node_modules)
+            node_modules.mkdir()
+            result = run_ensure()
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual([], calls())
+            self.assertFalse(stamp.exists(), "no lock file means no stamp to maintain")
+            self.assertNotEqual(
+                0,
+                subprocess.run(
+                    ["bash", "-c", "source scripts/dev.sh\nfrontend_package_lock_digest"],
+                    cwd=app_home,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env={**os.environ, "DEV_WORK_DIR": str(root / "runtime")},
+                ).returncode,
+                "a missing lock file must be reported by status, not by a fabricated digest",
+            )
+
+    def test_reload_records_the_revision_for_the_next_container_start(self):
+        # Intent: reload already produced a JAR for the current revision, so recording it
+        # avoids a redundant full rebuild on the next container start while keeping the
+        # stamp honest. The reload command must not gain a `clean` or any Git rewrite.
+        reload_script = DEV_RELOAD.read_text()
+        self.assertIn("web/target/.kk-studio-revision", reload_script)
+        self.assertIn("rev-parse HEAD", reload_script)
+        self.assertIn('printf \'%s\\n\' "$revision"', reload_script)
+        self.assertNotRegex(reload_script, r"\bclean\b")
+        for forbidden in ("git reset", "git checkout", "git stash", "git push"):
+            self.assertNotIn(forbidden, reload_script, forbidden)
+
+    def test_ssh_config_bounds_the_connection_setup(self):
+        # Intent: a black-holed network would otherwise leave `git fetch` in the entrypoint
+        # hanging for the kernel TCP timeout, delaying the mandatory fail-closed decision
+        # by minutes; the existing non-interactive guarantees must stay.
+        ssh_config = DEV_SSH_CONFIG.read_text()
+        self.assertIn("ConnectTimeout 10", ssh_config)
+        for directive in ("BatchMode yes", "IdentitiesOnly yes", "StrictHostKeyChecking yes"):
+            self.assertIn(directive, ssh_config)
 
 
 if __name__ == "__main__":
