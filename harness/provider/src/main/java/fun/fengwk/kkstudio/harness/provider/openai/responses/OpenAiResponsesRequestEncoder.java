@@ -487,7 +487,6 @@ final class OpenAiResponsesRequestEncoder {
     List<ProviderToolCall> replayToolCalls = new ArrayList<>();
     int reasoningItemCount = 0;
     int emptyReasoningPlaceholderCount = 0;
-    // 仅当 replay 完全无法承载 durable 语义思考（所有 reasoning 都是空占位符）时才置位；其余不一致仍立即失败。
     boolean replayCannotCarryThinkingFallback = false;
 
     for (JsonNode item : outputArray) {
@@ -684,27 +683,22 @@ final class OpenAiResponsesRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST,
           "replay text content mismatch with durable message content");
     }
-    if (!durableThinking.isEmpty()) {
-      if (!replayThinking.toString().equals(durableThinking.toString())) {
-        // 历史不完整 replay：全部 reasoning item 都是“无密文且无可用摘要”的空占位符时，replay 本身不具备
-        // 承载原生推理的能力——这属于上游未提供原生推理，而不是与 durable 思考相矛盾，必须回退语义编码而非让
-        // 后续轮次永远失败。含密文（opaque）或存在可用摘要文本时仍按失配拒绝。
-        if (replayThinking.isEmpty()
-            && reasoningItemCount > 0
-            && emptyReasoningPlaceholderCount == reasoningItemCount) {
-          replayCannotCarryThinkingFallback = true;
-        } else {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "replay thinking content mismatch with durable message thinking");
-        }
-      }
-    } else {
-      if (!replayThinking.isEmpty()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay thinking content mismatch with durable message thinking");
-      }
+    // 只由空 reasoning 占位符构成：至少一个 reasoning，且每个都无密文、无任何非空摘要文本。
+    boolean replayIsEmptyPlaceholderOnly =
+        reasoningItemCount > 0 && emptyReasoningPlaceholderCount == reasoningItemCount;
+    if (replayIsEmptyPlaceholderOnly) {
+      // 只含空占位符（无密文、无可用摘要文本，含纯空白）的 replay 不承载任何原生推理：无论 durable 是否保留
+      // thinking，都回退语义编码，绝不把空 reasoning 原样发往上游。
+      replayCannotCarryThinkingFallback = true;
+    } else if (!durableThinking.isEmpty()
+        && !replayThinking.toString().equals(durableThinking.toString())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay thinking content mismatch with durable message thinking");
+    } else if (durableThinking.isEmpty() && !replayThinking.isEmpty()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay thinking content mismatch with durable message thinking");
     }
     if (replayToolCalls.size() != durableToolCalls.size()) {
       throw new ProviderException(
