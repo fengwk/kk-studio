@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -75,6 +76,17 @@ final class OpenAiResponsesRequestEncoder {
   private static final Set<String> ALLOWED_FUNCTION_CALL_FIELDS =
       Set.of("type", "call_id", "id", "name", "arguments");
 
+  /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
+  private final RequestBodySizeGuard bodySizeGuard;
+
+  OpenAiResponsesRequestEncoder() {
+    this(RequestBodySizeGuard.DEFAULT);
+  }
+
+  OpenAiResponsesRequestEncoder(RequestBodySizeGuard bodySizeGuard) {
+    this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
+  }
+
   OpenAiResponsesEncodedRequest encode(
       ProviderRequest request, ProviderDescriptor descriptor, OpenAiResponsesConfig config) {
     Objects.requireNonNull(request, "request");
@@ -127,6 +139,8 @@ final class OpenAiResponsesRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize OpenAI Responses request JSON");
     }
+
+    bodySizeGuard.enforce(utf8Bytes);
 
     return new OpenAiResponsesEncodedRequest(utf8Bytes, sourcePrefixHash);
   }

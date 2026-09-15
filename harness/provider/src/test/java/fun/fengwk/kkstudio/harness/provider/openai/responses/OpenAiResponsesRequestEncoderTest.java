@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -1257,6 +1258,9 @@ class OpenAiResponsesRequestEncoderTest {
     assertTrue(output3.isArray());
     assertEquals(1, output3.size());
     assertEquals("input_image", output3.get(0).path("type").asText());
+    // 工具结果图片必须逐字节保留完整 base64 data URI 作为 image_url，且 detail 固定为 auto
+    assertEquals("data:image/png;base64,iVBORw0KGgo=", output3.get(0).path("image_url").asText());
+    assertEquals("auto", output3.get(0).path("detail").asText());
 
     // 4. 多块混合（Text + Json + Image）：按原顺序确定性编码进 output content array
     ProviderRequest req4 =
@@ -1952,5 +1956,37 @@ class OpenAiResponsesRequestEncoderTest {
       assertNull(exDurable.getCause());
       assertFalse(exDurable.getMessage().contains(badArg));
     }
+  }
+
+  @Test
+  void finalBodySizeGuardEnforcedAtCallSite() throws Exception {
+    // 测试意图：证明 OpenAiResponsesRequestEncoder.encode 在序列化完成后确实调用应用上限守卫。
+    // 先用默认阈值编码得到真实字节长度，再以该长度验证边界通过、以少 1 字节验证超限拒绝（无昂贵大内存分配）。
+    ProviderRequest request =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("size guard")))));
+
+    int actualBytes =
+        new OpenAiResponsesRequestEncoder()
+            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+            .bodyUtf8Bytes()
+            .length;
+
+    OpenAiResponsesEncodedRequest atLimit =
+        new OpenAiResponsesRequestEncoder(new RequestBodySizeGuard(actualBytes))
+            .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig());
+    assertEquals(actualBytes, atLimit.bodyUtf8Bytes().length);
+
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                new OpenAiResponsesRequestEncoder(new RequestBodySizeGuard(actualBytes - 1))
+                    .encode(request, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertTrue(ex.getMessage().contains("request body exceeds"));
+    assertFalse(ex.getMessage().contains("size guard"));
   }
 }

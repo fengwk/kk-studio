@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -63,6 +64,17 @@ final class OpenAiChatRequestEncoder {
   private static final Set<String> ALLOWED_TOOL_CALL_FIELDS = Set.of("id", "type", "function");
   private static final Set<String> ALLOWED_TOOL_FUNCTION_FIELDS = Set.of("name", "arguments");
 
+  /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
+  private final RequestBodySizeGuard bodySizeGuard;
+
+  OpenAiChatRequestEncoder() {
+    this(RequestBodySizeGuard.DEFAULT);
+  }
+
+  OpenAiChatRequestEncoder(RequestBodySizeGuard bodySizeGuard) {
+    this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
+  }
+
   OpenAiChatEncodedRequest encode(
       ProviderRequest request, ProviderDescriptor descriptor, OpenAiChatConfiguration config) {
     Objects.requireNonNull(request, "request");
@@ -114,6 +126,8 @@ final class OpenAiChatRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize OpenAI chat request to JSON");
     }
+
+    bodySizeGuard.enforce(bodyUtf8Bytes);
 
     return new OpenAiChatEncodedRequest(bodyUtf8Bytes, sourcePrefixHash);
   }
