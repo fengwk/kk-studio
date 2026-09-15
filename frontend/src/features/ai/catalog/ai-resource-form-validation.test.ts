@@ -165,7 +165,7 @@ describe('ai-resource-form-validation', () => {
 
   it('maps reasoning effort and agent variant errors to their fields', () => {
     expect(
-      toUserFacingErrorMessage(new Error('variant medium reasoningEffort must be one of high/medium/low/off')),
+      toUserFacingErrorMessage(new Error('variant medium reasoningEffort must not exceed 64 characters')),
     ).toMatch(/思考强度|Reasoning/)
     expect(toUserFacingErrorMessage(new Error('variant must not be blank'))).toMatch(/Variant/)
     expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toMatch(

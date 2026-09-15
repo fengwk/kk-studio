@@ -70,6 +70,23 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.variants().get(0).reasoningOff());
   }
 
+  /** 厂商自定义 reasoningEffort（如 max, xhigh）被正常解析、归一化并在 round-trip 中保留。 */
+  @Test
+  void acceptsAndRoundTripsCustomReasoningEffort() {
+    String maxConfig =
+        validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"  MAX \"");
+    var parsedMax = parser.parse(maxConfig);
+    assertEquals("max", parsedMax.variants().get(0).reasoningEffort());
+
+    String xhighConfig =
+        validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"xHigh\"");
+    AgentModelConfigDTO decoded = parser.decode(xhighConfig);
+    assertEquals("xhigh", decoded.getVariants().get(0).getReasoningEffort());
+    String reencoded = parser.encode(decoded);
+    var parsedXhigh = parser.parse(reencoded);
+    assertEquals("xhigh", parsedXhigh.variants().get(0).reasoningEffort());
+  }
+
   /** 未声明 reasoningEffort 的 variant 保持 null，与显式 off 是不同语义。 */
   @Test
   void keepsAbsentReasoningEffortAsProtocolDefault() {
@@ -124,8 +141,8 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[]"), "inputModalities must not be empty");
     assertInvalid(
-        validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"extreme\""),
-        "reasoningEffort must be one of");
+        validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"   \""),
+        "reasoningEffort must not be blank");
     assertInvalid(
         validConfig()
             .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
@@ -160,6 +177,11 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(
         validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
         "inputPerMillionTokens must not be negative");
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"" + "a".repeat(65) + "\""),
+        "reasoningEffort must not exceed 64 characters");
   }
 
   /**

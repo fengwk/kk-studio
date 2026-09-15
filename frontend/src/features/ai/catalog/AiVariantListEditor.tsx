@@ -1,7 +1,6 @@
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
-import { REASONING_EFFORT_VALUES } from '@/features/ai/catalog/ai-model-draft-codec'
 import { blankVariant } from '@/features/ai/catalog/ai-resource-form-drafts'
 import { useI18n } from '@/shared/i18n'
 
@@ -81,21 +80,15 @@ export function VariantListEditor({
               {reasoning ? (
                 <label className="form-group">
                   <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
-                  <select
+                  <input
                     aria-label={`${t('ai.catalog.form.reasoningEffortAria')} ${index + 1}`}
                     value={variant.reasoningEffort}
+                    maxLength={64}
                     onChange={(event) =>
                       updateVariant(index, { reasoningEffort: event.target.value })
                     }
-                  >
-                    {/* 空值表示不覆盖协议默认；off 才是显式关闭推理 */}
-                    <option value="">{t('ai.catalog.form.useModelDefault')}</option>
-                    {REASONING_EFFORT_VALUES.map((effort) => (
-                      <option key={effort} value={effort}>
-                        {effort}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder={t('ai.catalog.form.reasoningEffortPlaceholder')}
+                  />
                 </label>
               ) : null}
             </div>

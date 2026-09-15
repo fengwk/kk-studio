@@ -71,6 +71,30 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(variant, decoded);
   }
 
+  /** 厂商自定义 reasoningEffort（如 max、xhigh）走完 codec 必须等价往返并保持小写归一化。 */
+  @Test
+  void roundTripsVariantWithCustomReasoningEfforts() {
+    ModelVariant max = new ModelVariant("id", "max");
+    assertEquals(max, codec.decodeVariant(codec.encodeVariant(max)));
+
+    ModelVariant xhigh = new ModelVariant("id", "xhigh");
+    assertEquals(xhigh, codec.decodeVariant(codec.encodeVariant(xhigh)));
+
+    // 大写与外层空白在解码时被归一化
+    ModelVariant decodedFromNormalized =
+        codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"  MAX \"}");
+    assertEquals("max", decodedFromNormalized.reasoningEffort());
+
+    // 空白与超长 reasoningEffort 必须在解码时被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"   \"}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"" + "a".repeat(65) + "\"}"));
+  }
+
   // ---------- 确定性 / canonical ----------
 
   /** 同一 descriptor 多次 encode 必须产生 bit-identical JSON。 */

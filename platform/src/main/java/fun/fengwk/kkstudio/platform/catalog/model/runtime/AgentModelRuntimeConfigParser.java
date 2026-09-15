@@ -31,8 +31,8 @@ import java.util.Set;
 /**
  * Agent model 配置的唯一类型化 codec/parser。
  *
- * <p>variant 只承载 reasoning effort（high/medium/low/off，off 为显式关闭、null 为协议默认）；输出预算由 {@code
- * limit.output} 承担，采样参数与单次上限不属于本 schema。
+ * <p>variant 只承载 reasoning effort（由厂商自定义，如 high/medium/low/max/xhigh，off 为显式关闭、null 为协议默认）；输出预算由
+ * {@code limit.output} 承担，采样参数与单次上限不属于本 schema。
  *
  * <p>本类独占对持久化 {@code config} JSONB 列的所有读写。变更与读取都必须经过 {@link #decode(String)} / {@link
  * #encode(AgentModelConfigDTO)}；任何自行执行 ObjectMapper 映射的其他路径都会与规范漂移。 校验针对类型化 DTO 进行；持久化 JSON
@@ -193,11 +193,14 @@ public final class AgentModelRuntimeConfigParser {
       if (!ids.add(variant.getId())) {
         throw invalid("config.variants contains duplicate id: " + variant.getId());
       }
-      validateReasoningEffort(variant.getReasoningEffort(), path);
       // reasoning 关闭时任何非 null reasoningEffort 都是自相矛盾配置；null（协议默认）仍然合法。
       if (Boolean.FALSE.equals(abilities.getReasoning()) && variant.getReasoningEffort() != null) {
         throw invalid(
             path + ".reasoningEffort must be null when config.abilities.reasoning is false");
+      }
+      validateReasoningEffort(variant.getReasoningEffort(), path);
+      if (variant.getReasoningEffort() != null) {
+        variant.setReasoningEffort(variant.getReasoningEffort().trim().toLowerCase(Locale.ROOT));
       }
     }
     String defaultVariant = config.getDefaultVariant();
@@ -243,8 +246,16 @@ public final class AgentModelRuntimeConfigParser {
     if (reasoningEffort == null) {
       return;
     }
-    if (!ModelVariant.REASONING_EFFORTS.contains(reasoningEffort.trim().toLowerCase(Locale.ROOT))) {
-      throw invalid(path + ".reasoningEffort must be one of " + ModelVariant.REASONING_EFFORTS);
+    if (reasoningEffort.isBlank()) {
+      throw invalid(path + ".reasoningEffort must not be blank");
+    }
+    String normalized = reasoningEffort.trim().toLowerCase(Locale.ROOT);
+    if (normalized.length() > ModelVariant.MAX_REASONING_EFFORT_LENGTH) {
+      throw invalid(
+          path
+              + ".reasoningEffort must not exceed "
+              + ModelVariant.MAX_REASONING_EFFORT_LENGTH
+              + " characters");
     }
   }
 

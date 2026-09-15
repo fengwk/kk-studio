@@ -193,8 +193,8 @@ final class AnthropicRequestEncoder {
   }
 
   /**
-   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}；{@code
-   * high/medium/low} 按 配置模式映射为 adaptive 或 budget thinking；null 不声明推理字段，由服务端默认决定。
+   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}；ADAPTIVE
+   * 模式原样下发厂商定义值， BUDGET 模式仅将 {@code high/medium/low} 映射为 token 预算；null 不声明推理字段，由服务端默认决定。
    */
   private static boolean applyReasoningParameters(
       ObjectNode root, ProviderRequest request, AnthropicConfiguration config, int maxTokens) {
