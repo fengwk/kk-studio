@@ -512,11 +512,14 @@ final class OpenAiResponsesStreamAccumulator {
       if (isTerminal) {
         explicitTerminalOutputProcessed = true;
         List<JsonNode> priorStreamedItems = new ArrayList<>(rawOutputItems);
+        String priorStreamedThinking = thinkingBuffer.toString();
         rawOutputItems.clear();
         toolsById.clear();
         nextToolOrdinal = 0;
         textBuffer.setLength(0);
         thinkingBuffer.setLength(0);
+        boolean terminalReasoningItemSeen = false;
+        boolean terminalUsableSummarySeen = false;
         for (JsonNode itemNode : outputNode) {
           if (!itemNode.isObject()) {
             rawOutputItems.add(itemNode.deepCopy());
@@ -546,19 +549,35 @@ final class OpenAiResponsesStreamAccumulator {
               }
             }
           } else if ("reasoning".equals(itemType)) {
+            terminalReasoningItemSeen = true;
             JsonNode summary = item.get("summary");
             if (summary != null) {
               if (summary.isArray()) {
                 for (JsonNode s : summary) {
                   if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
-                    thinkingBuffer.append(s.path("text").asText(""));
+                    String summaryText = s.path("text").asText("");
+                    thinkingBuffer.append(summaryText);
+                    if (!summaryText.isBlank()) {
+                      terminalUsableSummarySeen = true;
+                    }
                   }
                 }
               } else if (summary.isTextual()) {
-                thinkingBuffer.append(summary.asText());
+                String summaryText = summary.asText();
+                thinkingBuffer.append(summaryText);
+                if (!summaryText.isBlank()) {
+                  terminalUsableSummarySeen = true;
+                }
               }
             }
           }
+        }
+        // 终态声明了 reasoning 却没有任何可用摘要文本时（例如 MiniMax 的 summary:[] 占位符），流式思考是唯一可得的
+        // 语义表示，必须保留给 durable 消息；非空的权威终态摘要仍然优先，未被终态声明的思考仍按既有语义清除。
+        if (terminalReasoningItemSeen
+            && !terminalUsableSummarySeen
+            && !priorStreamedThinking.isBlank()) {
+          thinkingBuffer.append(priorStreamedThinking);
         }
       }
     }
@@ -724,7 +743,10 @@ final class OpenAiResponsesStreamAccumulator {
     ProviderReplayState replayState = null;
     if (canReplay) {
       ArrayNode replayOutputArray = buildReplayOutputArray();
-      if (!replayOutputArray.isEmpty()) {
+      // 终态只给出空 reasoning 占位符时，该 replay 无法承载 durable 语义思考，属于内部不可用的原生回放；
+      // 整体放弃 native replay（绝不伪造密文或摘要），由下一轮语义编码承载思考。
+      if (!replayOutputArray.isEmpty()
+          && !replayCannotCarrySemanticThinking(replayOutputArray, thinkingBuffer.toString())) {
         ObjectNode payload = NODES.objectNode();
         payload.set("output", replayOutputArray);
         replayState =
@@ -899,6 +921,35 @@ final class OpenAiResponsesStreamAccumulator {
     }
 
     return array;
+  }
+
+  /**
+   * 判断已构造的 replay output 是否完全无法承载 semantic thinking。
+   *
+   * <p>Consumer 对同格式 replay 要求 reasoning 摘要文本与 durable thinking 严格一致。当 durable thinking 非空、而 replay
+   * 的 reasoning item 全都没有非空摘要文本时（上游空占位符，或仅有 {@code encrypted_content}），该 replay 一旦冻结就会让下一轮被判为
+   * thinking 失配而整体失败。此形态必须整体放弃 native replay——绝不伪造密文或摘要来凑合 ——由下一轮语义编码承载思考。
+   */
+  private static boolean replayCannotCarrySemanticThinking(
+      ArrayNode replayOutputArray, String semanticThinking) {
+    if (semanticThinking.isBlank()) {
+      return false;
+    }
+    for (JsonNode item : replayOutputArray) {
+      if (!"reasoning".equals(item.path("type").asText())) {
+        continue;
+      }
+      JsonNode summary = item.get("summary");
+      // summary 缺失或没有任何非空文本时，该 reasoning 项无法向服务端表达 semantic thinking。
+      if (summary != null) {
+        for (JsonNode s : summary) {
+          if (!s.path("text").asText("").isBlank()) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   private static JsonNode parseJson(String data) {

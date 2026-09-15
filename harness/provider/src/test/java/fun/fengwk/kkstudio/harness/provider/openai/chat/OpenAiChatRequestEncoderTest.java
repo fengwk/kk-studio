@@ -1597,6 +1597,51 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
+  @DisplayName("Responses 空 reasoning 占位符 replay 跨格式交接：Chat 语义回退且不泄漏原生结构")
+  void testResponsesEmptyPlaceholderReplayCrossFormatHandoff() throws Exception {
+    // 测试意图：MiniMax Responses 网关产出的不完整 replay（空 reasoning 占位符、无密文、无可用摘要）在交接给
+    // Chat 编码器时，必须整体跨格式回退为语义消息——既不抛出 INVALID_REQUEST，也不把 Responses 原生结构写到 Chat 线路上。
+    ProviderMessage user1 =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    ObjectNode responsesPayload = MAPPER.createObjectNode();
+    ArrayNode responsesOutput = responsesPayload.putArray("output");
+    responsesOutput.addObject().put("type", "reasoning").putArray("summary");
+    ProviderReplayState responsesState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            descriptor.affinity("MiniMax-M2"),
+            "a".repeat(64),
+            responsesPayload);
+    ProviderMessage asstMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("weigh tradeoffs"),
+                new ProviderTextBlock("fallback result"),
+                new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"a\":1}"))),
+            responsesState);
+    ProviderRequest req =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(user1, asstMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode root =
+        MAPPER.readTree(
+            encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
+    JsonNode wireAsst = root.path("messages").get(1);
+    assertEquals("assistant", wireAsst.path("role").asText());
+    assertEquals("fallback result", wireAsst.path("content").asText());
+    assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
+    assertFalse(wireAsst.has("reasoning_content"));
+    assertFalse(
+        wireAsst.has("reasoning"), "Responses-native structural fields must never leak into Chat");
+  }
+
+  @Test
   @DisplayName("tool_calls 嵌套白名单与 type=function 强校验（即使 hash mismatch 也不得忽略）")
   void testToolCallsNestedWhitelistAndTypeRequirement() {
     // 测试意图：验证 tool_calls 每个元素仅允许 id/type/function，function 仅允许 name/arguments，
