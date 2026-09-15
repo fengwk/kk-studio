@@ -65,6 +65,38 @@ describe('AssistantMessageBlock', () => {
     expect(screen.getByText('{"error":"bad request"}')).toBeInTheDocument()
   })
 
+  it('renders long (>128 chars) multiline raw error and HTML body safely escaped in pre block without markdown parsing', () => {
+    // 验证助手错误状态下超长多行 JSON 与 HTML 免 Markdown 解析、纯文本安全转义呈现
+    const rawPayload = [
+      'HTTP 502',
+      '{',
+      '  "error": {',
+      '    "message": "upstream upstream_model_gateway_failed: connection timeout. 详情：上游网关超时",',
+      '    "type": "gateway_timeout",',
+      '    "param": null,',
+      '    "code": "bad_gateway",',
+      '    "request_id": "req_gw_1234567890_timeout_xyz",',
+      '    "response_html": "<html><body><h1>502 Bad Gateway</h1><script>alert(1)</script></body></html>"',
+      '  }',
+      '}',
+    ].join('\n')
+    expect(rawPayload.length).toBeGreaterThan(128)
+
+    const { container } = render(
+      <AssistantMessageBlock
+        message={message({ text: rawPayload, status: 'error' })}
+      />,
+    )
+
+    const pre = container.querySelector('.thread-error-raw')
+    expect(pre).not.toBeNull()
+    expect(pre?.textContent).toBe(rawPayload)
+    // 保证 HTML/脚本未被执行或渲染为 DOM
+    expect(container.querySelector('h1')).toBeNull()
+    expect(container.querySelector('script')).toBeNull()
+    expect(screen.getByText(/req_gw_1234567890_timeout_xyz/)).toBeInTheDocument()
+  })
+
   it('shows the assistant failure message when an error turn has no text or thinking', () => {
     render(<AssistantMessageBlock message={message({ text: '', thinking: '', status: 'error' })} />)
     expect(screen.getByText('助手回复失败')).toBeInTheDocument()
