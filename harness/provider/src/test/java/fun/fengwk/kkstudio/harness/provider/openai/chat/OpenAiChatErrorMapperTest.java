@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
@@ -110,6 +113,19 @@ class OpenAiChatErrorMapperTest {
             TransportErrorKind.HTTP_STATUS, "status", 500, new byte[0], null, null);
     ProviderException pe500 = OpenAiChatErrorMapper.mapTransportException(ex500);
     assertEquals(ProviderErrorKind.TRANSIENT, pe500.kind());
+
+    // 显式 request_too_large 保持优先于服务端状态码
+    TransportException ex500TooLarge =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            500,
+            "{\"error\":{\"code\":\"request_too_large\"}}".getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        OpenAiChatErrorMapper.mapTransportException(ex500TooLarge).kind());
   }
 
   @Test
@@ -159,6 +175,19 @@ class OpenAiChatErrorMapperTest {
     assertEquals(
         ProviderErrorKind.INVALID_REQUEST,
         OpenAiChatErrorMapper.mapTransportException(exCorrupted).kind());
+
+    // 非对象的 JSON 数组降级状态码处理
+    TransportException exArrayJson =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            400,
+            "[\"item\"]".getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    assertEquals(
+        ProviderErrorKind.INVALID_REQUEST,
+        OpenAiChatErrorMapper.mapTransportException(exArrayJson).kind());
 
     // 403 Forbidden
     TransportException ex403 =
@@ -239,5 +268,142 @@ class OpenAiChatErrorMapperTest {
     var ctor = OpenAiChatErrorMapper.class.getDeclaredConstructor();
     ctor.setAccessible(true);
     assertNotNull(ctor.newInstance());
+  }
+
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      textBlock =
+          """
+          {"error":{"type":"invalid_request_error","code":"invalid_value","param":"max_tokens"}} | OpenAI invalid request (type=invalid_request_error, code=invalid_value, param=max_tokens)
+          {"error":{"param":"max_tokens"}}                                                        | OpenAI invalid request (param=max_tokens)
+          {"error":{"type":"invalid_request_error","param":"messages[0].content"}}                 | OpenAI invalid request (type=invalid_request_error, param=messages)
+          {"error":{"param":"/tools/0/function/arguments"}}                                       | OpenAI invalid request (param=tools)
+          """)
+  void testSafeMetadataFormatting(String json, String expected) {
+    TransportException ex =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            400,
+            json.getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    ProviderException pe = OpenAiChatErrorMapper.mapTransportException(ex);
+    assertNotNull(pe);
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, pe.kind());
+    assertEquals(expected, pe.getMessage());
+  }
+
+  @Test
+  void testTypeAndCodeOverflowClassification() {
+    String json =
+        "{\"error\":{\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\"}}";
+    TransportException ex =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            400,
+            json.getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    ProviderException pe = OpenAiChatErrorMapper.mapTransportException(ex);
+    assertNotNull(pe);
+    assertEquals(ProviderErrorKind.OVERFLOW, pe.kind());
+    assertEquals(OpenAiChatErrorMapper.MSG_OVERFLOW, pe.getMessage());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"error\":{\"param\":\"sk-proj-secret-12345\"}}",
+        "{\"error\":{\"param\":\"bearer_secret_token\"}}",
+        "{\"error\":{\"param\":\"https://api.openai.com/v1/chat\"}}",
+        "{\"error\":{\"param\":\"max tokens\"}}",
+        "{\"error\":{\"param\":\"randomUpstreamToken12345\"}}",
+        "{\"error\":{\"type\":\"provider_supplied_identifier\"}}",
+        "{\"error\":{\"param\":12345}}",
+        "{\"error\":{\"param\":true}}"
+      })
+  void testUnsafeAndNonTextMetadataOmission(String json) {
+    TransportException ex =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            400,
+            json.getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    ProviderException pe = OpenAiChatErrorMapper.mapTransportException(ex);
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, pe.kind());
+    assertEquals(OpenAiChatErrorMapper.MSG_INVALID_REQUEST, pe.getMessage());
+  }
+
+  @Test
+  void testOversizedMetadataOmission() {
+    String oversized = "a".repeat(129);
+    String json =
+        "{\"error\":{\"type\":\""
+            + oversized
+            + "\",\"code\":\""
+            + oversized
+            + "\",\"param\":\""
+            + oversized
+            + "\"}}";
+    TransportException ex =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            400,
+            json.getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    assertEquals(
+        OpenAiChatErrorMapper.MSG_INVALID_REQUEST,
+        OpenAiChatErrorMapper.mapTransportException(ex).getMessage());
+  }
+
+  @Test
+  void testRawMessageAndCredentialNonLeakage() {
+    String json =
+        "{\"error\":{\"message\":\"prompt text with sk-secret-key\",\"type\":\"invalid_request_error\",\"param\":\"max_tokens\"}}";
+    TransportException ex400 =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            400,
+            json.getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    ProviderException pe400 = OpenAiChatErrorMapper.mapTransportException(ex400);
+    assertEquals(
+        "OpenAI invalid request (type=invalid_request_error, param=max_tokens)",
+        pe400.getMessage());
+    assertFalse(pe400.getMessage().contains("prompt text"));
+    assertFalse(pe400.getMessage().contains("sk-secret"));
+
+    TransportException ex401 =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "status",
+            401,
+            json.getBytes(StandardCharsets.UTF_8),
+            null,
+            null);
+    assertEquals(
+        OpenAiChatErrorMapper.MSG_AUTH,
+        OpenAiChatErrorMapper.mapTransportException(ex401).getMessage());
+  }
+
+  @Test
+  void testSseSafeErrorEnvelope() throws Exception {
+    String json =
+        "{\"error\":{\"message\":\"secret prompt\",\"type\":\"invalid_request_error\",\"param\":\"messages[0].role\"}}";
+    ProviderException pe = OpenAiChatErrorMapper.mapSseErrorEnvelope(MAPPER.readTree(json));
+    assertNotNull(pe);
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, pe.kind());
+    assertEquals(
+        "OpenAI invalid request (type=invalid_request_error, param=messages)", pe.getMessage());
+    assertFalse(pe.getMessage().contains("secret prompt"));
   }
 }
