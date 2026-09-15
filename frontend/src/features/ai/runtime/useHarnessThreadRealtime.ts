@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import {
+  createRealtimeFrameScheduler,
+  type RealtimeFrameScheduler,
+  type RealtimeFrameSchedulerOptions,
+} from '@/features/ai/runtime/realtime-frame-scheduler'
+import {
   isFailedAttempt,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
@@ -45,6 +50,7 @@ export function useHarnessThreadRealtime(
   modelInvocation: ModelInvocationDTO | null,
   toolInvocations: ToolInvocationDTO[],
   modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
+  schedulerOptions?: Partial<RealtimeFrameSchedulerOptions>,
 ): HarnessThreadRealtimeState {
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
@@ -58,6 +64,7 @@ export function useHarnessThreadRealtime(
   } | null>(null)
   const modelStreamRef = useRef<RealtimeModelStream | null>(null)
   const toolStreamsRef = useRef<Map<string, RealtimeToolStream>>(new Map())
+  const snapshotModelStreamRef = useRef<RealtimeModelStream | null>(null)
   const invocationRef = useRef<ModelInvocationDTO | null>(modelInvocation)
   const toolInvocationsRef = useRef<ToolInvocationDTO[]>(toolInvocations)
   const modelAttemptFailuresRef = useRef<readonly ModelAttemptFailureDTO[]>(modelAttemptFailures)
@@ -71,12 +78,28 @@ export function useHarnessThreadRealtime(
   const toolPartialFingerprintsRef = useRef<Map<string, Set<string>>>(new Map())
   const subscriptionReady = enabled && version != null
 
+  const scheduler = useRealtimeFrameScheduler(
+    modelStreamRef,
+    invocationRef,
+    modelAttemptFailuresRef,
+    toolStreamsRef,
+    setModelStream,
+    setToolStreams,
+    schedulerOptions,
+  )
+
   const { requestGapRecovery, clearRecoveryLoop } = useGapRecoveryLoop(
     queryClient,
     modelStreamRef,
     invocationRef,
     modelAttemptFailuresRef,
   )
+
+  useEffect(() => {
+    return () => {
+      scheduler.cancel()
+    }
+  }, [scheduler])
 
   useEffect(() => {
     setSubscription((current) => {
@@ -92,6 +115,7 @@ export function useHarnessThreadRealtime(
     toolInvocationsRef.current = toolInvocations
     modelAttemptFailuresRef.current = modelAttemptFailures
     const snapshot = snapshotModelStream(threadId, modelInvocation)
+    snapshotModelStreamRef.current = snapshot
     const current = modelStreamRef.current
     let next = current
     if (snapshot == null) {
@@ -144,11 +168,14 @@ export function useHarnessThreadRealtime(
         gapRef.current = null
       }
     }
-    if (current != null && next != null && sameModelStream(current, next)) {
-      next = current
+    const modelStreamDirty =
+      !sameModelStreamNullable(modelStream, next)
+      || !sameModelStreamNullable(modelStreamRef.current, next)
+    if (modelStreamDirty) {
+      modelStreamRef.current = next
+      setModelStream(next)
+      scheduler.cancelModel()
     }
-    modelStreamRef.current = next
-    setModelStream(next)
 
     // 用持久化 snapshot 对账 tool overlay。ToolResult Entry 写入与 invocation 删除
     // 在同一事务原子提交：invocation 仍存在时，终态 resultJson/errorJson 以完整形式
@@ -187,13 +214,17 @@ export function useHarnessThreadRealtime(
       }
     }
     toolPartialFingerprintsRef.current = fingerprints
-    // overlay map 内容未变时提前返回，避免该 effect 自己反复触发
-    // 渲染（稳定的 query 派生输入让重跑成为 no-op）。
-    if (!sameToolStreamMap(toolStreamsRef.current, streams)) {
+    // 检查 React state 或 ref 是否需要对账更新。若有更新则立即同步发布并解除 tool 脏标记，
+    // 避免 snapshot 对账与未决帧之间丢失 partial。
+    const toolStreamsDirty =
+      !sameToolStreamMap(toolStreams, streams)
+      || !sameToolStreamMap(toolStreamsRef.current, streams)
+    if (toolStreamsDirty) {
       toolStreamsRef.current = streams
       setToolStreams(streams)
+      scheduler.cancelTool()
     }
-  }, [modelAttemptFailures, modelInvocation, threadId, toolInvocations])
+  }, [modelAttemptFailures, modelInvocation, modelStream, scheduler, threadId, toolInvocations, toolStreams])
 
   useEffect(() => {
     // 只有 Thread 消失或订阅真正被禁用才清空 overlays；`subscription == null` 或
@@ -202,6 +233,7 @@ export function useHarnessThreadRealtime(
     // 的 subscription 就绪后通过应用级 Manager 建立订阅。
     if (!threadId || !subscriptionReady) {
       clearRecoveryLoop()
+      scheduler.cancel()
       modelStreamRef.current = null
       setModelStream(null)
       toolStreamsRef.current = new Map()
@@ -229,6 +261,9 @@ export function useHarnessThreadRealtime(
         const durable = invocationRef.current
         if (
           durable == null
+          || durable.threadId !== threadId
+          || durable.id !== delta.invocationId
+          || durable.attempt !== delta.attempt
           || durable.resultJson != null
           || durable.errorJson != null
           || durable.resultEntryId != null
@@ -240,21 +275,16 @@ export function useHarnessThreadRealtime(
         if (isFailedAttempt(delta.attempt, durable, modelAttemptFailuresRef.current)) {
           return
         }
-        const snapshot = snapshotModelStream(threadId, durable)
-        if (
-          snapshot == null
-          || snapshot.invocationId !== delta.invocationId
-          || snapshot.attempt !== delta.attempt
-        ) {
-          return
-        }
         const current = modelStreamRef.current
         const base =
           current != null
-          && current.invocationId === snapshot.invocationId
-          && current.attempt === snapshot.attempt
+          && current.invocationId === delta.invocationId
+          && current.attempt === delta.attempt
             ? current
-            : snapshot
+            : (snapshotModelStreamRef.current ?? snapshotModelStream(threadId, durable))
+        if (base == null) {
+          return
+        }
         if (isRealtimeModelDeltaGap(base, delta)) {
           gapRef.current = {
             invocationId: delta.invocationId,
@@ -268,7 +298,7 @@ export function useHarnessThreadRealtime(
         }
         const next = reduceRealtimeModelStream(base, delta)
         modelStreamRef.current = next
-        setModelStream(next)
+        scheduler.notifyModelDirty()
         return
       }
       const partial = parseRealtimeToolPartial(raw)
@@ -317,7 +347,7 @@ export function useHarnessThreadRealtime(
       const next = reduceRealtimeToolStream(current, partial)
       streams.set(partial.invocationId, next)
       toolStreamsRef.current = streams
-      setToolStreams(new Map(streams))
+      scheduler.notifyToolDirty()
     }
 
     // 应用级 manager 订阅：version/resync/subscribed/error 都触发 snapshot
@@ -341,6 +371,7 @@ export function useHarnessThreadRealtime(
     return () => {
       unsubscribe()
       clearRecoveryLoop()
+      scheduler.cancel()
       toolPartialFingerprintsRef.current = new Map()
     }
   }, [
@@ -348,6 +379,7 @@ export function useHarnessThreadRealtime(
     clearRecoveryLoop,
     queryClient,
     requestGapRecovery,
+    scheduler,
     subscription,
     subscriptionReady,
     threadId,
@@ -448,6 +480,19 @@ function sameToolCallDrafts(
   })
 }
 
+function sameModelStreamNullable(
+  left: RealtimeModelStream | null,
+  right: RealtimeModelStream | null,
+): boolean {
+  if (left === right) {
+    return true
+  }
+  if (left == null || right == null) {
+    return false
+  }
+  return sameModelStream(left, right)
+}
+
 function sameModelStream(left: RealtimeModelStream, right: RealtimeModelStream): boolean {
   return left.threadId === right.threadId
     && left.invocationId === right.invocationId
@@ -472,6 +517,52 @@ interface GapRecovery {
   attempt: number
   gapSequence: number
   attempts: number
+}
+
+function useRealtimeFrameScheduler(
+  modelStreamRef: { readonly current: RealtimeModelStream | null },
+  invocationRef: { readonly current: ModelInvocationDTO | null },
+  modelAttemptFailuresRef: { readonly current: readonly ModelAttemptFailureDTO[] },
+  toolStreamsRef: { readonly current: Map<string, RealtimeToolStream> },
+  setModelStream: (stream: RealtimeModelStream | null) => void,
+  setToolStreams: (streams: ReadonlyMap<string, RealtimeToolStream>) => void,
+  schedulerOptions?: Partial<RealtimeFrameSchedulerOptions>,
+): RealtimeFrameScheduler {
+  const [scheduler] = useState(() =>
+    createRealtimeFrameScheduler(schedulerOptions),
+  )
+
+  useEffect(() => {
+    scheduler.setOnFlush(({ modelDirty, toolDirty }) => {
+      if (modelDirty) {
+        const current = modelStreamRef.current
+        const durable = invocationRef.current
+        const isTerminal =
+          durable != null
+          && (durable.resultJson != null || durable.errorJson != null || durable.resultEntryId != null)
+        const isFailed =
+          current != null
+          && durable != null
+          && isFailedAttempt(current.attempt, durable, modelAttemptFailuresRef.current)
+        if (!isTerminal && !isFailed) {
+          setModelStream(current)
+        }
+      }
+      if (toolDirty) {
+        setToolStreams(new Map(toolStreamsRef.current))
+      }
+    })
+  }, [
+    invocationRef,
+    modelAttemptFailuresRef,
+    modelStreamRef,
+    scheduler,
+    setModelStream,
+    setToolStreams,
+    toolStreamsRef,
+  ])
+
+  return scheduler
 }
 
 /**

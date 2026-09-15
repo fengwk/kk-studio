@@ -9,6 +9,7 @@ function sleep(ms: number): Promise<void> {
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
+import type { RealtimeFrameSchedulerOptions } from '@/features/ai/runtime/realtime-frame-scheduler'
 import type {
   ModelAttemptFailureDTO,
   ModelInvocationDTO,
@@ -31,6 +32,7 @@ interface RealtimeProps {
   invocation?: ModelInvocationDTO | null
   invocations?: ToolInvocationDTO[]
   modelAttemptFailures?: ModelAttemptFailureDTO[]
+  schedulerOptions?: Partial<RealtimeFrameSchedulerOptions>
 }
 
 function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
@@ -44,6 +46,7 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
         props.invocation ?? modelInvocation(),
         props.invocations ?? [],
         props.modelAttemptFailures ?? [],
+        props.schedulerOptions,
       ),
     {
       initialProps,
@@ -1193,6 +1196,246 @@ describe('useHarnessThreadRealtime', () => {
       vi.useRealTimers()
     }
   })
+
+  it('coalesces many sequential deltas before a single frame into one render with all text, thinking, and tool content', () => {
+    let frameCallback: FrameRequestCallback | null = null
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      frameCallback = cb
+      return 100
+    })
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const toolInv: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      threadId: THREAD_ID,
+      turnStartEntryId: 'entry-1',
+      requestHeadEntryId: 'entry-1',
+      status: 'RUNNING',
+      attempt: 1,
+      name: 'testTool',
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocation(),
+      invocations: [toolInv],
+      schedulerOptions: { raf, caf },
+    })
+    sockets.openLatest()
+
+    // 连续发送多个 deltas：text, thinking, tool partial
+    emitRealtime(sockets, realtime(1, 'Hello '))
+    emitRealtime(sockets, thinkingRealtime(2, 'Thinking part 1. '))
+    emitRealtime(sockets, realtime(3, 'World!'))
+    emitRealtime(sockets, thinkingRealtime(4, 'Thinking part 2.'))
+    emitRealtime(sockets, toolPartial('tool output chunk 1', 'inv-tool-1', 1))
+    emitRealtime(sockets, toolPartial(' and chunk 2', 'inv-tool-1', 1))
+
+    // 帧触发前，React state 仍保持未发布状态，未进行中间字符级/碎片刷新
+    expect(result.current.modelStream).toBeNull()
+    expect(result.current.toolStreams.get('inv-tool-1')?.text).toBe('')
+    expect(raf).toHaveBeenCalledTimes(1)
+
+    // 触发单帧
+    act(() => {
+      frameCallback!(performance.now())
+    })
+
+    // 单次更新立即发布全部累积内容
+    expect(result.current.modelStream?.sequence).toBe(4)
+    expect(result.current.modelStream?.text).toBe('Hello World!')
+    expect(result.current.modelStream?.thinking).toBe('Thinking part 1. Thinking part 2.')
+    expect(result.current.toolStreams.get('inv-tool-1')?.text).toBe('tool output chunk 1 and chunk 2')
+  })
+
+  it('publishes huge single delta as a whole at the frame, and when done arrives before frame there is no delayed trickle', () => {
+    let frameCallback: FrameRequestCallback | null = null
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      frameCallback = cb
+      return 101
+    })
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocation(),
+      schedulerOptions: { raf, caf },
+    })
+    sockets.openLatest()
+
+    const hugeText = 'A'.repeat(5000)
+    emitRealtime(sockets, realtime(1, hugeText))
+    expect(result.current.modelStream).toBeNull()
+
+    // 帧到达时整块 5000 字符立即全量渲染，绝无逐字 trickle
+    act(() => {
+      frameCallback!(performance.now())
+    })
+    expect(result.current.modelStream?.text).toBe(hugeText)
+
+    // 下一个 delta 调度新帧，但在帧触发前，权威快照已变为 COMPLETED
+    emitRealtime(sockets, realtime(2, 'B'.repeat(100)))
+
+    const doneInvocation: ModelInvocationDTO = {
+      ...modelInvocation(),
+      status: 'COMPLETED',
+      resultJson: JSON.stringify({ text: 'Authoritative completed text', thinking: '', toolCalls: [] }),
+    }
+    rerender({ invocation: doneInvocation })
+
+    // 快照对账立即生效权威终态
+    expect(result.current.modelStream?.status).toBe('done')
+    expect(result.current.modelStream?.text).toBe('Authoritative completed text')
+
+    // 此时即使触发旧帧回调，也不会复活旧 delta 或产生 trickle 覆盖
+    act(() => {
+      if (frameCallback) {
+        frameCallback(performance.now())
+      }
+    })
+    expect(result.current.modelStream?.text).toBe('Authoritative completed text')
+    expect(result.current.modelStream?.status).toBe('done')
+  })
+
+  it('does not drop accumulated deltas when version/resync signal arrives before snapshot returns', async () => {
+    let frameCallback: FrameRequestCallback | null = null
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      frameCallback = cb
+      return 102
+    })
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocation(),
+      schedulerOptions: { raf, caf },
+    })
+    const socket = sockets.openLatest()
+
+    // 发送流式 delta，帧已调度但尚未触发
+    emitRealtime(sockets, realtime(1, 'streaming text'))
+    expect(result.current.modelStream).toBeNull()
+
+    // WebSocket 收到 version 信号，触发 invalidateSnapshot
+    act(() => {
+      socket.emitServer({
+        type: 'event',
+        resource: threadResource,
+        name: 'version',
+        data: { version: '43' },
+        cursor: '43',
+      })
+    })
+    expect(invalidateSpy).toHaveBeenCalled()
+
+    // 重点审查验证：version 信号不能 cancel 丢弃已累积的 delta 帧
+    // 待帧触发时，已累积内容必须正常发布到 React state
+    act(() => {
+      frameCallback!(performance.now())
+    })
+    expect(result.current.modelStream?.text).toBe('streaming text')
+    expect(result.current.modelStream?.sequence).toBe(1)
+  })
+
+  it('does not rollback un-published latest ref when intermediate unrelated render repeats same snapshot', () => {
+    let frameCallback: FrameRequestCallback | null = null
+    const raf = vi.fn((cb: FrameRequestCallback) => {
+      frameCallback = cb
+      return 103
+    })
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const initialInvocation = modelInvocation()
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: initialInvocation,
+      schedulerOptions: { raf, caf },
+    })
+    sockets.openLatest()
+
+    // Delta 1 到达，处于 ref 累积中
+    emitRealtime(sockets, realtime(1, 'accumulated content'))
+
+    // 发生无关父组件重新渲染（传入相同的 snapshot 引用与内容）
+    rerender({ invocation: { ...initialInvocation } })
+
+    // 审查保证：未发布的最新 ref 不被 snapshot 的 seq 0 回退
+    // 触发帧发布后，依然是最新的 'accumulated content'
+    act(() => {
+      if (frameCallback) {
+        frameCallback(performance.now())
+      }
+    })
+    expect(result.current.modelStream?.text).toBe('accumulated content')
+    expect(result.current.modelStream?.sequence).toBe(1)
+  })
+
+  it('does not drop pending tool partial when model reaches terminal, and vice versa', () => {
+    const raf = vi.fn((_cb: FrameRequestCallback) => 104)
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const toolInv: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      threadId: THREAD_ID,
+      turnStartEntryId: 'entry-1',
+      requestHeadEntryId: 'entry-1',
+      status: 'RUNNING',
+      attempt: 1,
+      name: 'testTool',
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocation(),
+      invocations: [toolInv],
+      schedulerOptions: { raf, caf },
+    })
+    sockets.openLatest()
+
+    // Tool 发送 partial，进入 dirty 状态
+    emitRealtime(sockets, toolPartial('tool partial data', 'inv-tool-1', 1))
+
+    // Model 到达终态快照，但 Tool 依然活跃
+    const terminalModel: ModelInvocationDTO = {
+      ...modelInvocation(),
+      status: 'COMPLETED',
+      resultJson: JSON.stringify({ text: 'Model done', thinking: '', toolCalls: [] }),
+    }
+    rerender({ invocation: terminalModel, invocations: [toolInv] })
+
+    // 审查保证：Model 到达终态不能导致 Tool dirty partial 永久丢失！
+    expect(result.current.modelStream?.status).toBe('done')
+    expect(result.current.modelStream?.text).toBe('Model done')
+    // Tool partial 被正确更新
+    expect(result.current.toolStreams.get('inv-tool-1')?.text).toBe('tool partial data')
+  })
+
+  it('cancels pending frame on thread change and unmount so future frame cannot resurrect state', () => {
+    const raf = vi.fn((_cb: FrameRequestCallback) => 105)
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result, rerender, unmount, sockets } = renderRealtime(client, {
+      invocation: modelInvocation(),
+      schedulerOptions: { raf, caf },
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(1, 'delta before thread switch'))
+    expect(raf).toHaveBeenCalled()
+
+    // 切换到新线程
+    rerender({ threadId: THREAD_B_ID, invocation: modelInvocation('inv-2', THREAD_B_ID) })
+    expect(caf).toHaveBeenCalled()
+    expect(result.current.modelStream).toBeNull()
+
+    // 再次发送 delta 并卸载组件
+    emitRealtime(sockets, realtime(1, 'delta before unmount', THREAD_B_ID, 'inv-2'), THREAD_B_ID)
+    caf.mockClear()
+    unmount()
+    expect(caf).toHaveBeenCalled()
+  })
 })
 
 function realtime(
@@ -1205,6 +1448,25 @@ function realtime(
   return JSON.stringify({
     threadId, subjectKind: 'MODEL_INVOCATION', subjectId: invocationId, attempt, sequence,
     type: 'MODEL_DELTA', payload: { kind: 'TEXT_DELTA', text }, createdAt: '2026-01-01T00:00:00Z',
+  })
+}
+
+function thinkingRealtime(
+  sequence: number,
+  thinking: string,
+  threadId = THREAD_ID,
+  invocationId = 'inv-1',
+  attempt = 1,
+) {
+  return JSON.stringify({
+    threadId,
+    subjectKind: 'MODEL_INVOCATION',
+    subjectId: invocationId,
+    attempt,
+    sequence,
+    type: 'MODEL_DELTA',
+    payload: { kind: 'THINKING_DELTA', text: thinking },
+    createdAt: '2026-01-01T00:00:00Z',
   })
 }
 

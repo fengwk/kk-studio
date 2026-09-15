@@ -2343,10 +2343,15 @@ div.is-error {
   font-style: italic;
   font-size: 13px;
   line-height: 1.55;
-  /* 纯文本思考：保留作者换行，但不把「每个字符换行」放得过松 */
-  white-space: pre-wrap;
+  /* Markdown 思考块：段落空白为 normal，段落间空行由 Markdown 本身折叠，代码块/公式由自身预格式化接管 */
+  white-space: normal;
   word-break: normal;
   overflow-wrap: break-word;
+}
+
+.thread-block-thinking .thread-block-body .md-root,
+.thread-thinking-text .md-root {
+  white-space: normal;
 }
 
 .thread-block-assistant .thread-block-body {

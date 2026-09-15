@@ -364,19 +364,32 @@ sequenceDiagram
 
 - `useHarnessThreadRealtime` 先加载 snapshot，再按 thread resource 订阅
   `/api/events/v1`。`subscribed`、`version`、`resync`、`error` 都会触发
-  snapshot 对账；`heartbeat` 只做连接保活。
+  snapshot 对账；`heartbeat` 只做连接保活。`version`/`resync` 触发快照刷新时
+  不会取消或丢弃已在 refs 中累积的未决 delta 帧。
 - Thread `version` 是结构/控制状态的 durable 提示，不是 Snapshot ETag；Model
   checkpoint 可在同一 version 内推进。`realtime` 没有 cursor，是可丢失的
   `MODEL_DELTA`/`TOOL_PARTIAL`。MODEL delta 只接受
   `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；
   tool partial 按 `thread:invocation:attempt` 做有界精确去重。
+- `useHarnessThreadRealtime` 即时消费并归约每条 delta 到 refs 中，以保证 sequence
+  连续性校验、缺口检测（gap recovery）与去重指纹的微秒级准确；React model/tool
+  overlay 发布合并至单个 `requestAnimationFrame` 执行，每帧发布当前累积的全部内容，
+  绝不进行字符级缓动或打字机延时。流式期间通过 cheap identity check 避免对每条 delta
+  重复解析快照 JSON。
 - invocation 的 `resultJson`、`errorJson` 或 `resultEntryId` 出现后建立 terminal
   fence，迟到 delta/partial 丢弃。Snapshot 的 `modelAttemptFailures` 若已记录同一
   `modelInvocationId + attempt`，对应迟到 `MODEL_DELTA` 也会被丢弃，并提前结束该
   attempt 的 gap recovery。持久化终态与失败审计优先于任何较新的 transient overlay。
+  快照对账（snapshot reconciliation）、线程切换和卸载会取消未决帧，且 model 与 tool
+  终态互相独立取消，确保未来帧绝不会覆盖权威快照或复活已失败/冻结的 attempt。
 - MODEL sequence 出现 gap 时启动单飞 recovery：重新拉 snapshot，退避
   `200ms` 到 `2000ms`，最多 `8` 次；即使 Thread version 未变化也读取并合并
-  durable checkpoint，不能通过填补事件猜测内容。
+  durable checkpoint，不能通过填补事件猜测内容。恢复循环的定时器与帧合并调度保持解耦。
+- `ThinkingBlock` 通过 `MarkdownRenderer`（`tone="muted"`）渲染思考内容，保持始终展开
+  的外壳与流式状态。CSS 将思考文本块级空白设为 `normal`，段落间空行由 Markdown 本身折叠，
+  消除上游多换行输出（如 Gemini `A\n\n\nB\n\n\n`）造成的冗余空行，同时完整保留代码块（`pre`）、
+  列表、数学公式和无障碍结构；错误原始视图 `<pre className="thread-error-raw">` 保持
+  `pre-wrap` 不受影响。
 - `thread-events.ts` 把每个 durable Entry 投影为恰好一条记录，把 active
   model/tool invocation 和 attempt failure 作为锚定其 Entry 后的 synthetic
   record。状态为 `pending`、`running`、`completed`、`failed`、`stopped` 五态；
