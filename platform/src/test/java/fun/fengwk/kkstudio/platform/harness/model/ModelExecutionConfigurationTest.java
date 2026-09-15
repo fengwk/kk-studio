@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -33,13 +34,21 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 验证 {@link ModelExecutionConfiguration} 暴露的 4 个 named ProviderFactory bean 全部被收集到 {@link
@@ -88,13 +97,68 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
     assertNotNull(platformModelGateway);
   }
 
-  /** 意图：原生 Provider 复用 Spring 托管 worker，禁止重定向，并由独立 Watchdog 调度器驱动超时。 */
+  /** 意图：原生 Provider 固定 HTTP/1.1、复用受管 worker、禁止重定向，并由独立 Watchdog 驱动超时。 */
   @Test
   void configuresManagedNativeProviderTransport() {
+    assertEquals(HttpClient.Version.HTTP_1_1, modelExecutionHttpClient.version());
     assertEquals(HttpClient.Redirect.NEVER, modelExecutionHttpClient.followRedirects());
     assertSame(modelExecutionExecutor, modelExecutionHttpClient.executor().orElseThrow());
     assertNotNull(modelExecutionTransport);
     assertFalse(modelExecutionWatchdogScheduler.isShutdown());
+  }
+
+  /** 意图：真实明文 HTTP 请求必须保留 JSON、无 h2c 升级头，并能读取 SSE 响应。 */
+  @Test
+  void sendsJsonAndReceivesSseWithoutH2cUpgrade() throws Exception {
+    String body = "{\"model\":\"test\",\"messages\":[],\"stream\":true}";
+    CompletableFuture<Void> requestVerified = new CompletableFuture<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/v1/chat/completions",
+        exchange -> {
+          try (exchange) {
+            try {
+              assertEquals("HTTP/1.1", exchange.getProtocol());
+              assertEquals("POST", exchange.getRequestMethod());
+              assertEquals(
+                  "application/json", exchange.getRequestHeaders().getFirst("Content-Type"));
+              assertNull(exchange.getRequestHeaders().getFirst("Upgrade"));
+              assertNull(exchange.getRequestHeaders().getFirst("HTTP2-Settings"));
+              assertNull(exchange.getRequestHeaders().getFirst("Connection"));
+              assertEquals(
+                  body,
+                  new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+              requestVerified.complete(null);
+            } catch (Throwable failure) {
+              requestVerified.completeExceptionally(failure);
+            }
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write("data: hello\n\n".getBytes(StandardCharsets.UTF_8));
+            exchange.getResponseBody().flush();
+            exchange.getResponseBody().write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));
+          }
+        });
+    server.start();
+    try {
+      HttpRequest request =
+          HttpRequest.newBuilder(
+                  URI.create(
+                      "http://127.0.0.1:" + server.getAddress().getPort() + "/v1/chat/completions"))
+              .timeout(Duration.ofSeconds(5))
+              .header("Content-Type", "application/json")
+              .header("Accept", "text/event-stream")
+              .POST(HttpRequest.BodyPublishers.ofString(body))
+              .build();
+      HttpResponse<String> response =
+          modelExecutionHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      requestVerified.get(5, TimeUnit.SECONDS);
+      assertEquals(200, response.statusCode());
+      assertEquals(HttpClient.Version.HTTP_1_1, response.version());
+      assertEquals("data: hello\n\ndata: [DONE]\n\n", response.body());
+    } finally {
+      server.stop(0);
+    }
   }
 
   @Test
