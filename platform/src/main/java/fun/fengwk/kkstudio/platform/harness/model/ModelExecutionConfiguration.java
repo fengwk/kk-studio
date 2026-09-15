@@ -59,12 +59,13 @@ public class ModelExecutionConfiguration {
         Thread.ofVirtual().name("model-provider-", 0L).factory());
   }
 
-  /** 生产环境大模型 HTTP 调用共享的 JDK 21 HttpClient，遵循严格的重定向限制与受管 worker 执行器。 */
+  /** 模型调用固定使用 HTTP/1.1，避免明文网关链路的 h2c 升级；禁止重定向并复用受管 worker。 */
   @Bean(name = "modelExecutionHttpClient", destroyMethod = "close")
   @ConditionalOnMissingBean(name = "modelExecutionHttpClient")
   public HttpClient modelExecutionHttpClient(
       @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor) {
     return HttpClient.newBuilder()
+        .version(HttpClient.Version.HTTP_1_1)
         .followRedirects(HttpClient.Redirect.NEVER)
         .executor(modelExecutionExecutor)
         .build();

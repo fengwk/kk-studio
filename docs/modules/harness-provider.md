@@ -6,6 +6,8 @@
 依赖，生产直接依赖仅限 [`harness-runtime`](harness-runtime.md) 与 Jackson；Platform 负责注入凭据、长生命周期
 `HttpClient`、工作线程和 Watchdog 调度器。
 
+Platform 默认装配的模型专用 `HttpClient` 固定使用 HTTP/1.1（HTTP 与 HTTPS 均适用），不发起 h2c 升级或协商 HTTP/2；SSE 流式响应与连接复用保持可用，重定向策略为 `Redirect.NEVER`。
+
 ## 职责
 
 ### 核心职责
