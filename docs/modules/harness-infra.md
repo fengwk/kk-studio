@@ -171,7 +171,7 @@ Dispatcher 在初始化时分配唯一的 `nodeInstanceId`，并在每次执行 
 
 `PostgresqlRealtimeEventSink` 负责向 PostgreSQL 的 `harness_realtime` channel 发送实时事件。单条 `append` 以参数化 `pg_notify` 发送；当编码后的 Canonical EVENT JSON 荷载超过 `7900` 字节（UTF-8 编码）时，自动降级发送紧凑的 RESYNC 通知，并将原因标记为 `EVENT_TOO_LARGE`。
 
-批量 `appendAll` 把一个已提交有界批次压缩为每个分块一次 SQL 往返：分块按事件数（`256`）与编码后荷载字节（`256KiB`）双重上界切分，通过 `select pg_notify(?, payload) from unnest(?::text[]) with ordinality ... order by ord` 按输入顺序逐条发送，每个事件仍使用自己独立的 canonical envelope（超限事件同样只把自己降级为 RESYNC）。因此通知顺序与逐条 `append` 完全一致，同时把 N 次往返收敛为有界常数次。JDBC `Array` 在成功与异常路径都必须释放。数据库异常直接向上传播，由 Runtime 既有边界隔离。[`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) 负责规范化编解码，对字段集合、重复字段、尾随字符与 JSON 格式执行确定性严格校验。
+批量 `appendAll` 把一个已提交有界批次压缩为每个分块一次 SQL 往返：分块按事件数（`256`）与编码后荷载字节（`256KiB`）双重上界切分，通过 `select pg_notify(?, payload) from unnest(?::text[]) with ordinality ... order by ord` 按输入顺序逐条发送，每个事件仍使用自己独立的 canonical envelope（超限事件同样只把自己降级为 RESYNC）。因此通知顺序与逐条 `append` 完全一致，SQL 往返次数等于分块数，而不是事件数。JDBC `Array` 在成功与异常路径都必须释放。数据库异常直接向上传播，由 Runtime 既有边界隔离。[`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) 负责规范化编解码，对字段集合、重复字段、尾随字符与 JSON 格式执行确定性严格校验。
 
 [`PostgresqlRealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSource.java) 管理本地事件订阅与分发。长连接与底层监听由共享的 PostgreSQL 监听循环统一维护，通过调用 `onNotification` 投递收到的消息荷载；在连接建立或重连成功后，通过 `onResync` 触发同步。合法 EVENT 按照所属 Thread 精确分发给对应的本地订阅方；当收到畸变或未知消息，以及连接断开重连时，触发全部本地订阅方的快照恢复回调。内部通过全局生命周期锁、Source 级回调完成围栏与 Subscriber 级独立围栏保证并发安全，关闭后不再产生任何回调，用户业务回调始终在全局锁外部执行。
 
