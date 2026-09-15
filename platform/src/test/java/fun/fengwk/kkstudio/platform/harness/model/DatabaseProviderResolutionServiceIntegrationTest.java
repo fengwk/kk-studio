@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -354,6 +355,16 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         @Override
         public ProviderType providerType() {
           return CapturingFactory.this.providerType;
+        }
+
+        /**
+         * 显式声明测试 adapter 的内联媒体能力：避免依赖 {@link ProviderMediaCapabilities#NONE} 默认值而让 Resource
+         * 物化静默退化为文本，掩盖能力传递的真实行为。
+         */
+        @Override
+        public ProviderMediaCapabilities mediaCapabilities() {
+          return new ProviderMediaCapabilities(
+              Set.of(ModelInputModality.IMAGE), Set.of(ModelInputModality.IMAGE));
         }
 
         @Override

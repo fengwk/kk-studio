@@ -295,8 +295,23 @@ virtual-thread-per-task executor，Model admission 默认容量来自 `kk-studio
 1. 当前 Provider 必须存在，且 `providerType`必须等于 durable request 中冻结的 type。
 2. 以当前 factory 读取 endpoint、credential、timeout policy 并创建 adapter。
 3. 根据当前 Provider cache capability 规范化 durable cache control。
-4. 通过 `ProviderResourceMaterializer`物化当前 attempt 的 Resource：图片在 30 MiB 内联为 data URI，audio/video
-   使用 signed URL；blob 不存在或 model 不支持对应模态时 Resource 变为确定性文本回退。
+4. 通过 `ProviderResourceMaterializer` 物化当前 attempt 的 Resource：模型输入模态、adapter 用户/工具结果能力与
+   Blob MIME 同时匹配时，图片、音频、视频和 PDF 统一转换为 Base64 data URI。非 PDF 文档、缺失或非 ACTIVE
+   Blob、能力不匹配及 SYSTEM/ASSISTANT 资源使用确定性文本回退，不读取内容、不生成预签名 URL。
+
+持久化只保存自己的 `ResourceMessageContent` / `ProviderResourceBlock`（Blob ID、名称、有界预览及外部化事实）。
+Base64 只存在于 attempt 的有效请求；durable codec 拒绝 Image/Audio/Video/Document 媒体块。物化保留
+assistant 的原生 `replayState`，不改写签名、加密回放数据、affinity 或源前缀 hash。
+
+`ProviderInlineBlobReader` 经 `StorageBlobContentService` 读取权威 Blob：短事务 retain/release，事务外通过内部
+S3 endpoint 下载原始字节；不使用面向浏览器的 public endpoint。读取后复核 Blob ID、MIME、声明长度及实际长度。
+应用安全上限为单文件原始 **100 MiB**、每请求累计 data URI **160 MiB ASCII 字符**，重复引用和嵌套工具结果
+均逐次计入预算；超限明确失败，不截断。最终协议请求还受各编码器的完整 UTF-8 字节限制。
+
+不可变 Blob 内容的 Base64 使用 Caffeine 缓存：key 为 Blob ID / MIME / 大小，TTL **5 分钟**，总记账上限
+**64 MiB**，单条记账超过 **8 MiB** 不缓存。String 按每字符 2 字节加固定开销保守记账；小对象并发 miss 合并，
+所有下载（包括不缓存的大对象）共享 **2 个并发许可**。缓存命中前仍逐次检查 ACTIVE 状态；失败不缓存。
+以上是应用侧资源保护，不代表具体模型或供应商允许的附件大小。
 
 四个 Provider（OpenAI Chat、OpenAI Responses、Anthropic、Google）均使用 [`harness-provider`](harness-provider.md)
 的原生协议适配器，共享 `modelExecutionTransport`（基于 JDK 21 `HttpClient`、受管虚拟线程 worker 与 Watchdog 调度器）。
