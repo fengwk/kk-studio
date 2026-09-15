@@ -44,12 +44,18 @@ fi
 
 revision=
 if [ -d "$REPOSITORY_DIR/.git" ]; then
-  revision=$(git -C "$REPOSITORY_DIR" rev-parse --short HEAD)
+  revision=$(git -C "$REPOSITORY_DIR" rev-parse HEAD)
 fi
 
 cd "$REPOSITORY_DIR"
-echo "==> Incremental backend package${revision:+ at $revision}"
+echo "==> Incremental backend package${revision:+ at ${revision:0:7}}"
 env JAVA_HOME="$java_home" mvn -B -ntp -pl web -am -DskipTests package
+# 增量 package 后的产物已经对应当前修订：写入与 `scripts/dev.sh` 同一路径、同一格式的
+# revision stamp（完整 SHA），下一次容器启动才会按 `DEV_SKIP_PACKAGE=true` 复用产物
+# 而不是全量重建。非 Git 工作区不写 stamp。
+if [ -n "$revision" ]; then
+  printf '%s\n' "$revision" > "$REPOSITORY_DIR/web/target/.kk-studio-revision"
+fi
 
 echo "==> Restarting managed backend and Vite (Daemon and container stay up)"
 env \

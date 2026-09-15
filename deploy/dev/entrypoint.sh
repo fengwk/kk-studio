@@ -9,9 +9,12 @@
 #      0644；github.com 的 host key 由镜像内的 `/etc/ssh/ssh_known_hosts` 提供。
 #   3. 准备持久 Git 工作区：已存在的 checkout 永不覆盖；首次启动只能从配置的 clean
 #      remote 克隆，或显式允许时使用镜像内的源码快照。
-#   4. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
+#   4. 校验工作区修订：把持久 checkout 无损快进到 `origin/$GIT_BRANCH`；fetch 失败、
+#      历史分叉或落后且存在未提交的已跟踪修改时容器启动失败，不允许静默运行未验证的
+#      修订（entrypoint 永不 reset/rebase/stash/checkout）。
+#   5. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
 #      Flyway/worker disabled、loopback 8080）和 Vite（0.0.0.0:5173、代理 Backend）。
-#   5. 以前台 Environment Daemon 作为容器主进程，经内部 Docker 网络连接稳定 Main
+#   6. 以前台 Environment Daemon 作为容器主进程，经内部 Docker 网络连接稳定 Main
 #      App（唯一 Harness worker 与 Flyway owner）的 WebSocket，`environment-root`
 #      指向持久工作区根。
 #
@@ -212,6 +215,59 @@ prepare_workspace() {
   exit 1
 }
 
+# 持久 checkout 的修订必须在启动进程之前被验证：把工作区无损快进到
+# `origin/$GIT_BRANCH`，任何无法验证的修订（无 origin remote、fetch 失败、历史分叉）
+# 和任何会被快进覆盖的已跟踪修改都直接让容器启动失败，节点不会静默运行落后或未验证的
+# 代码。唯一允许的写操作是 `merge --ff-only`：entrypoint 不改写、丢弃或强推既有历史。
+# 源码快照工作区（没有 `.git`）不参与同步。
+sync_workspace_revision() {
+  if [ ! -d "$REPOSITORY_DIR/.git" ]; then
+    step "Skipping revision sync: $REPOSITORY_DIR is a source snapshot workspace without git metadata"
+    return
+  fi
+  if ! git -C "$REPOSITORY_DIR" remote get-url origin >/dev/null 2>&1; then
+    echo "ERROR: $REPOSITORY_DIR has no origin remote, so its revision cannot be verified." >&2
+    echo "       Add the workspace remote explicitly, then restart the container." >&2
+    exit 1
+  fi
+  # fetch 失败的诊断来自 git 自身，这里只补充容器视角的指引；远端 URL 与凭据都不由本
+  # 脚本回显。
+  if ! git -C "$REPOSITORY_DIR" fetch origin "$GIT_BRANCH"; then
+    echo "ERROR: git fetch origin $GIT_BRANCH failed in $REPOSITORY_DIR." >&2
+    echo "       Check the mounted SSH credentials and the network access to the remote," >&2
+    echo "       then restart the container; an unverified revision is never started." >&2
+    exit 1
+  fi
+  local head remote_head
+  head=$(git -C "$REPOSITORY_DIR" rev-parse HEAD)
+  remote_head=$(git -C "$REPOSITORY_DIR" rev-parse "origin/$GIT_BRANCH")
+  if [ "$head" = "$remote_head" ]; then
+    step "Workspace revision is at origin/$GIT_BRANCH (${head:0:7})"
+    return
+  fi
+  if ! git -C "$REPOSITORY_DIR" merge-base --is-ancestor "$head" "$remote_head"; then
+    echo "ERROR: $REPOSITORY_DIR cannot be fast-forwarded to origin/$GIT_BRANCH." >&2
+    echo "       HEAD ${head:0:7} is not an ancestor of ${remote_head:0:7}: the workspace is" >&2
+    echo "       ahead of, or has diverged from, the remote branch." >&2
+    echo "       Reconcile that history explicitly, then restart the container." >&2
+    exit 1
+  fi
+  # 未跟踪文件不阻止快进；已跟踪文件的未提交修改会与传入的修订冲突，必须先显式处理。
+  if [ -n "$(git -C "$REPOSITORY_DIR" status --porcelain --untracked-files=no)" ]; then
+    echo "ERROR: $REPOSITORY_DIR is behind origin/$GIT_BRANCH (${head:0:7} -> ${remote_head:0:7})" >&2
+    echo "       and has uncommitted changes to tracked files." >&2
+    echo "       Commit or discard them explicitly, then restart the container." >&2
+    exit 1
+  fi
+  if ! git -C "$REPOSITORY_DIR" merge --ff-only "origin/$GIT_BRANCH"; then
+    echo "ERROR: fast-forwarding $REPOSITORY_DIR to origin/$GIT_BRANCH failed." >&2
+    echo "       Resolve the reported obstacle (for example untracked files that the" >&2
+    echo "       incoming revision would overwrite) explicitly, then restart the container." >&2
+    exit 1
+  fi
+  step "Fast-forwarded $REPOSITORY_DIR $head -> $(git -C "$REPOSITORY_DIR" rev-parse HEAD)"
+}
+
 start_managed_servers() {
   step "Starting backend and Vite via scripts/dev.sh (${SPRING_PROFILES_ACTIVE}, flyway=${SPRING_FLYWAY_ENABLED}, workers=${HARNESS_RUNTIME_WORKERS_ENABLED})"
   env \
@@ -252,6 +308,7 @@ main() {
   DAEMON_GATEWAY_URI=$(resolve_daemon_gateway_uri "$CONTROL_PLANE_BASE_URL")
   install_ssh_credentials
   prepare_workspace
+  sync_workspace_revision
   start_managed_servers
   run_daemon
 }

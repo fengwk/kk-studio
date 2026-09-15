@@ -135,7 +135,7 @@ build，不复制进 runtime image。App runtime 不含 Maven、Node 或 source�
 | node-runtime | `node:24.14.0-bookworm-slim` + `npm@11.9.0`，只用于提供与 `distribution` profile 一致的 Node 分发 |
 | runtime | `eclipse-temurin:21.0.8_9-jdk-jammy`，apt 安装 `bash`/`ca-certificates`/`curl`/`ffmpeg`/`git`/`jq`/`lsof`/`openssh-client`/`python3`，从官方 release 安装经 SHA-256 校验的 GitHub CLI `2.100.0`（linux/amd64），并从上面两个 stage 复制 Maven 与 Node |
 | user | `kkdaemon:kkdaemon`，uid/gid `10001`，`HOME=/home/kkdaemon`，`USER 10001:10001`，预建 `.ssh`（`0700`）与 `.config/gh` |
-| process | `/usr/local/bin/kk-studio-dev-entrypoint`：注入挂载的 SSH key，准备持久 Git 工作区，用 `scripts/dev.sh start` 以 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false` 启动 Backend/Vite，最后前台运行 Daemon |
+| process | `/usr/local/bin/kk-studio-dev-entrypoint`：注入挂载的 SSH key，准备持久 Git 工作区，把工作区无损快进到 `origin/$KK_STUDIO_GIT_BRANCH`，用 `scripts/dev.sh start` 以 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false` 启动 Backend/Vite，最后前台运行 Daemon |
 | health | `kk-studio-dev-healthcheck` 同时探测 Backend `/actuator/health` 与 Vite `/threads`；`30s` interval、`10s` timeout、`2700s` start period、`20` retries |
 
 Dev Backend 的 Flyway 和进程内 Harness dispatcher 都关闭，Harness Thread/Model/Tool
@@ -180,17 +180,25 @@ entrypoint 将其派生为
 git 与 `gh` 的 Git 操作都走 SSH，host key 来自镜像内的 `/etc/ssh/ssh_known_hosts`，
 私钥由外部以只读 volume 挂载到 `/run/kk-studio/ssh`（`KK_STUDIO_SSH_CREDENTIALS_DIR`），
 entrypoint 启动时才复制进 `/home/kkdaemon/.ssh`；镜像 SSH 配置使用 non-interactive
-`BatchMode`、`IdentitiesOnly` 和严格 host key 校验。稳定的重启命令是
-`kk-studio-dev-reload`，
+`BatchMode`、`IdentitiesOnly`、严格 host key 校验和 `ConnectTimeout 10`（网络黑洞时
+不长时间挂起，而是让修订校验直接失败）。稳定的重启命令是 `kk-studio-dev-reload`，
 运行规范见
 [自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)。
+
+每次启动 entrypoint 都把持久工作区无损快进到 `origin/$KK_STUDIO_GIT_BRANCH`：远端
+不可达（fetch 失败）、工作区没有 `origin`、落后且存在未提交的已跟踪修改、或本地历史
+分叉时容器直接启动失败，节点不会静默运行未验证的修订；只允许 `merge --ff-only`，
+永不 reset/rebase/stash/checkout。同步后按修订记录决定重建量：后端 JAR 的修订记录在
+`web/target/.kk-studio-revision`（与 JAR 同目录），前端依赖的 lock 摘要记录在
+`frontend` 下的 `node_modules/.kk-studio-package-lock.sha`。
 
 首次启动耗时由 cache volume 决定，实测边界如下（20 核 x86_64 主机）：
 
 | 场景 | 耗时 | 内容 |
 | --- | --- | --- |
 | 冷 cache 首启 | ~29 分钟 | 空 workspace + 空 `~/.m2`/`~/.npm`，Maven 25:44、npm 2:00、Backend/Vite 就绪约 1 分钟 |
-| 已有 workspace 重启 | 秒级 | `DEV_SKIP_PACKAGE=true` 且前端依赖已安装，只重启受管进程 |
+| 已有 workspace 重启（无修订变化） | 秒级 | `DEV_SKIP_PACKAGE=true`、JAR 与前端依赖都记录着当前修订，只重启受管进程 |
+| 已有 workspace 重启（修订前进） | 构建耗时 | 先快进工作区，再 `mvn ... clean package`；前端仅在 `package-lock.json` 变化时 `npm ci` |
 
 `--start-period=2700s` 按冷 cache 路径取值（实测 ~29 分钟 + 约 50% 余量），因此首次
 启动期间不会因为尚未就绪而被判为 unhealthy。真正的引导失败不会因此被掩盖：entrypoint
