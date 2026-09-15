@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,14 +18,14 @@ import java.nio.charset.StandardCharsets;
 /** 验证 OpenAI Responses 提供方的安全防护规则与无 Spring 架构边界隔离。 */
 class OpenAiResponsesSecurityAndArchitectureTest {
 
-  /** 验证异常映射绝不泄漏 API 凭证、原始敏感 URL、敏感参数或未脱敏响应体。 */
+  /** 验证异常映射完整保留上游响应体，且绝不泄漏内部 transport message、请求凭证或底层 cause。 */
   @Test
   void test_sensitiveDataLeakGuards() {
-    String leakToken = "sk-proj-super-secret-token-123456";
-    String internalUrl = "https://internal.openai.corp/v1/responses";
+    String fakeToken = "fake-token-123456";
+    String internalUrl = "https://api.example.com/v1/responses";
     byte[] errorBody =
         ("{\"error\": {\"message\": \"Unauthorized for "
-                + leakToken
+                + fakeToken
                 + " at "
                 + internalUrl
                 + "\", \"code\": \"invalid_api_key\"}}")
@@ -30,13 +33,20 @@ class OpenAiResponsesSecurityAndArchitectureTest {
 
     TransportException transportEx =
         new TransportException(
-            TransportErrorKind.HTTP_STATUS, "auth failure", 401, errorBody, null);
+            TransportErrorKind.HTTP_STATUS,
+            "internal auth failure details",
+            401,
+            errorBody,
+            false,
+            null,
+            new RuntimeException("secret underlying transport cause"));
 
     ProviderException pe = OpenAiResponsesErrorMapper.mapTransportException(transportEx);
     assertNotNull(pe);
-    assertFalse(pe.getMessage().contains(leakToken));
-    assertFalse(pe.getMessage().contains("super-secret"));
-    assertFalse(pe.getMessage().contains("internal.openai.corp"));
+    assertEquals("HTTP 401\n" + new String(errorBody, StandardCharsets.UTF_8), pe.getMessage());
+    assertTrue(pe.getMessage().contains(fakeToken));
+    assertFalse(pe.getMessage().contains("internal auth failure details"));
+    assertNull(pe.getCause());
   }
 
   /** 验证提供方包完全无 Spring 框架依赖与注解，保持纯净轻量。 */

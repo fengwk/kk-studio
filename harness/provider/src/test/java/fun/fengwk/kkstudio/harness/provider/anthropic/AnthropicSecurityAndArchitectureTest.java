@@ -100,7 +100,7 @@ class AnthropicSecurityAndArchitectureTest {
 
   @Test
   void errorMappingNeverLeaksSensitiveUrlOrCause() {
-    String secret = "sk-ant-SECRET-BEARER";
+    String secret = "fake-secret-bearer";
     TransportException ex =
         new TransportException(
             TransportErrorKind.HTTP_STATUS,
@@ -113,8 +113,10 @@ class AnthropicSecurityAndArchitectureTest {
 
     ProviderException mapped = AnthropicErrorMapper.mapTransportException(ex);
     assertNull(mapped.getCause());
-    assertFalse(mapped.getMessage().contains(secret));
-    assertFalse(mapped.getMessage().contains("messages"));
-    assertEquals(AnthropicErrorMapper.MSG_AUTH, mapped.getMessage());
+    assertEquals(
+        "HTTP 401\n{\"error\":{\"message\":\"invalid key " + secret + "\"}}", mapped.getMessage());
+    assertTrue(mapped.getMessage().contains(secret));
+    assertFalse(mapped.getMessage().contains("api.anthropic.com"));
+    assertFalse(mapped.getMessage().contains("failed with key"));
   }
 }

@@ -114,33 +114,32 @@ class AnthropicErrorHandlingTest {
    * 对应上游 AnthropicChatModelErrorsTest#should_handle_error_responses 的 8 状态码错误映射矩阵。
    *
    * <p>测试意图：验证 upstream HTTP 状态码 400/401/403/404/413/429/500/503 分别被精准映射为 kk-studio 的
-   * ProviderErrorKind，且异常消息经过脱敏标准化，绝不向外暴露原始敏感正文、凭据或底层异常栈（cause 严格为 null）。
+   * ProviderErrorKind，且异常消息完整暴露原始 HTTP 状态码与响应正文，绝不向外暴露内部 transport message 或底层异常栈（cause 严格为 null）。
    */
   @ParameterizedTest
   @MethodSource("errorMatrix")
-  void should_handle_error_responses(
-      int httpStatusCode, ProviderErrorKind expectedKind, String expectedMessage) {
-    String sensitiveToken = "sk-ant-secret-key-leaked-" + UUID.randomUUID();
+  void should_handle_error_responses(int httpStatusCode, ProviderErrorKind expectedKind) {
+    String fakeToken = "fake-token-leaked-" + UUID.randomUUID();
     String rawResponseBody =
         """
         {
           "type": "error",
           "error": {
             "type": "does_not_matter",
-            "message": "Sensitive upstream error detail with credential %s for status %d"
+            "message": "Upstream error detail with token %s for status %d"
           }
         }
         """
-            .formatted(sensitiveToken, httpStatusCode);
+            .formatted(fakeToken, httpStatusCode);
 
     TransportException transportException =
         new TransportException(
             TransportErrorKind.HTTP_STATUS,
-            "Internal transport status error: " + sensitiveToken,
+            "Internal transport status error: " + fakeToken,
             httpStatusCode,
             rawResponseBody.getBytes(StandardCharsets.UTF_8),
             null,
-            new RuntimeException("Sensitive underlying network cause: " + sensitiveToken));
+            new RuntimeException("Sensitive underlying network cause: " + fakeToken));
 
     ProviderException mapped = AnthropicErrorMapper.mapTransportException(transportException);
 
@@ -150,41 +149,33 @@ class AnthropicErrorHandlingTest {
         mapped.kind(),
         () -> "HTTP " + httpStatusCode + " must map to " + expectedKind);
     assertEquals(
-        expectedMessage,
+        "HTTP " + httpStatusCode + "\n" + rawResponseBody,
         mapped.getMessage(),
-        () -> "HTTP " + httpStatusCode + " must have sanitized message: " + expectedMessage);
+        () -> "HTTP " + httpStatusCode + " must retain raw HTTP status and body");
     assertNull(
         mapped.getCause(),
         "cause must be strictly null to avoid leaking transport stack or underlying details");
 
-    // 严格断言不包含原始敏感信息或状态码泄露
-    assertFalse(
-        mapped.getMessage().contains(sensitiveToken),
-        "sanitized message must never leak sensitive credential tokens");
-    assertFalse(
-        mapped.getMessage().contains("Sensitive upstream"),
-        "sanitized message must never leak raw upstream response body");
+    // 严格断言上游 body 保留但内部 transport message 与底层 cause 绝不泄露
+    assertTrue(mapped.getMessage().contains(fakeToken));
     assertFalse(
         mapped.getMessage().contains("Internal transport"),
-        "sanitized message must never leak transport exception message");
+        "message must never leak internal transport exception message");
     assertFalse(
-        mapped.getMessage().contains(String.valueOf(httpStatusCode)),
-        "sanitized message should use canonical provider message rather than raw status number");
+        mapped.getMessage().contains("Sensitive underlying network cause"),
+        "message must never leak underlying network cause");
   }
 
   static Stream<Arguments> errorMatrix() {
     return Stream.of(
-        Arguments.of(
-            400, ProviderErrorKind.INVALID_REQUEST, AnthropicErrorMapper.MSG_INVALID_REQUEST),
-        Arguments.of(401, ProviderErrorKind.AUTHENTICATION, AnthropicErrorMapper.MSG_AUTH),
-        Arguments.of(403, ProviderErrorKind.AUTHENTICATION, AnthropicErrorMapper.MSG_AUTH),
-        Arguments.of(
-            404, ProviderErrorKind.INVALID_REQUEST, AnthropicErrorMapper.MSG_INVALID_REQUEST),
-        Arguments.of(
-            413, ProviderErrorKind.INVALID_REQUEST, AnthropicErrorMapper.MSG_INVALID_REQUEST),
-        Arguments.of(429, ProviderErrorKind.TRANSIENT, AnthropicErrorMapper.MSG_TRANSIENT),
-        Arguments.of(500, ProviderErrorKind.TRANSIENT, AnthropicErrorMapper.MSG_TRANSIENT),
-        Arguments.of(503, ProviderErrorKind.TRANSIENT, AnthropicErrorMapper.MSG_TRANSIENT));
+        Arguments.of(400, ProviderErrorKind.INVALID_REQUEST),
+        Arguments.of(401, ProviderErrorKind.AUTHENTICATION),
+        Arguments.of(403, ProviderErrorKind.AUTHENTICATION),
+        Arguments.of(404, ProviderErrorKind.INVALID_REQUEST),
+        Arguments.of(413, ProviderErrorKind.INVALID_REQUEST),
+        Arguments.of(429, ProviderErrorKind.TRANSIENT),
+        Arguments.of(500, ProviderErrorKind.TRANSIENT),
+        Arguments.of(503, ProviderErrorKind.TRANSIENT));
   }
 
   /**
@@ -273,9 +264,9 @@ class AnthropicErrorHandlingTest {
   /**
    * 对应上游 DefaultAnthropicClientTest#shouldHandleStreamingError。
    *
-   * <p>测试意图：验证接收到 SSE 协议级 "error" 事件帧时，系统正确解析 error envelope 并由 AnthropicErrorMapper
-   * 进行脱敏映射，且由于安全加固，绝不向上游暴露原始 message 或 type（如 rate_limit_error 映射为标准的 ProviderErrorKind.TRANSIENT
-   * 且消息为 "Anthropic transient failure"）；同时确保底层流被立即取消， 且后续到达的事件或完成信号被完全静默，只触发且严格触发一次 onError。
+   * <p>测试意图：验证接收到 SSE 协议级 "error" 事件帧时，系统正确解析 error envelope 并由 AnthropicErrorMapper 映射为
+   * ProviderErrorKind.TRANSIENT 且完整保留事件 envelope JSON；同时确保底层流被立即取消， 且后续到达的事件或完成信号被完全静默，只触发且严格触发一次
+   * onError。
    */
   @Test
   void shouldHandleStreamingError() throws Exception {
@@ -289,7 +280,7 @@ class AnthropicErrorHandlingTest {
 
           try (OutputStream os = exchange.getResponseBody()) {
             String sseErrorEvent =
-                "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Rate limit exceeded: quota 100 req/min exceeded with token sk-ant-secret-leak-999 on cluster node-42\"}}\n\n";
+                "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Rate limit exceeded: quota 100 req/min exceeded with token fake-token-leak-999 on cluster node-42\"}}\n\n";
             os.write(sseErrorEvent.getBytes(StandardCharsets.UTF_8));
             os.flush();
 
@@ -357,21 +348,15 @@ class AnthropicErrorHandlingTest {
     assertNotNull(error);
     assertEquals(
         ProviderErrorKind.TRANSIENT, error.kind(), "rate_limit_error in SSE must map to TRANSIENT");
-    assertEquals(
-        AnthropicErrorMapper.MSG_TRANSIENT,
-        error.getMessage(),
-        "SSE error message must be sanitized to canonical transient message");
+    assertTrue(error.getMessage().contains("rate_limit_error"));
+    assertTrue(error.getMessage().contains("Rate limit exceeded"));
+    assertTrue(error.getMessage().contains("fake-token-leak-999"));
+    assertTrue(error.getMessage().contains("node-42"));
     assertNull(error.getCause(), "cause must be null");
-
-    // 严格断言敏感信息未外泄
-    assertFalse(error.getMessage().contains("rate_limit_error"));
-    assertFalse(error.getMessage().contains("Rate limit exceeded"));
-    assertFalse(error.getMessage().contains("sk-ant-secret-leak-999"));
-    assertFalse(error.getMessage().contains("node-42"));
   }
 
   /**
-   * 验证通过真实本地 HTTP 服务端返回非 200 HTTP 状态时，全链路通过 AnthropicModelProvider.stream 派发脱敏异常。
+   * 验证通过真实本地 HTTP 服务端返回非 200 HTTP 状态时，全链路通过 AnthropicModelProvider.stream 派发异常并完整暴露响应正文。
    *
    * <p>测试意图：验证端到端 HTTP 层面的 500 故障在真实网络调用下精准流转至 ProviderStreamHandler.onError， 且不产生任何
    * ProviderCompletion。
@@ -382,7 +367,7 @@ class AnthropicErrorHandlingTest {
         "/v1/messages",
         exchange -> {
           byte[] errorBody =
-              "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Internal backend crash sk-ant-secret-500\"}}"
+              "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Internal backend crash fake-secret-500\"}}"
                   .getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().set("Content-Type", "application/json");
           exchange.sendResponseHeaders(500, errorBody.length);
@@ -432,15 +417,16 @@ class AnthropicErrorHandlingTest {
     ProviderException error = errorRef.get();
     assertNotNull(error);
     assertEquals(ProviderErrorKind.TRANSIENT, error.kind());
-    assertEquals(AnthropicErrorMapper.MSG_TRANSIENT, error.getMessage());
+    assertEquals(
+        "HTTP 500\n{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Internal backend crash fake-secret-500\"}}",
+        error.getMessage());
     assertNull(error.getCause());
-    assertFalse(error.getMessage().contains("sk-ant-secret-500"));
   }
 
   /**
-   * 验证从测试资源文件 error-response.json 读取的错误数据同样能够被安全脱敏映射。
+   * 验证从测试资源文件 error-response.json 读取的错误数据同样能够被完整保留并正确映射。
    *
-   * <p>测试意图：验证按包结构存放的结构化测试 fixture 正确加载，且其内部敏感内容不会逃逸到最终异常。
+   * <p>测试意图：验证按包结构存放的结构化测试 fixture 正确加载，且其原始正文在异常消息中原样保留。
    */
   @Test
   void should_handle_error_response_from_fixture_resource() throws IOException {
@@ -460,9 +446,10 @@ class AnthropicErrorHandlingTest {
     ProviderException mapped = AnthropicErrorMapper.mapTransportException(ex);
     assertNotNull(mapped);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, mapped.kind());
-    assertEquals(AnthropicErrorMapper.MSG_INVALID_REQUEST, mapped.getMessage());
+    assertEquals(
+        "HTTP 400\n" + new String(fixtureBytes, StandardCharsets.UTF_8), mapped.getMessage());
     assertNull(mapped.getCause());
-    assertFalse(mapped.getMessage().contains("sk-ant-secret-test-key"));
+    assertFalse(mapped.getMessage().contains("transport message"));
   }
 
   private static ProviderRequest createTestRequest(String providerName, String modelName) {

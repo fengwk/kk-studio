@@ -3,54 +3,23 @@ package fun.fengwk.kkstudio.harness.provider.openai.chat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
-import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
- * OpenAI Chat Completions 异常映射与脱敏器。
+ * OpenAI Chat Completions 异常映射器。
  *
- * <p>读取 HTTP 状态码与 error envelope 中的 type/code/param 字段进行确定性分类， 仅在 INVALID_REQUEST
- * 时受控追加安全元数据标识符，绝不向外暴露原始 URL、API 密钥、响应 body、底层异常原因或敏感数据。
+ * <p>读取 HTTP 状态码与 error payload 进行确定性分类，直接向外保留上游原始 HTTP 响应正文与完整 SSE error envelope， 绝不附加 request
+ * URI、请求标头、请求凭证或原始底层异常原因。
  */
 final class OpenAiChatErrorMapper {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private static final Pattern SAFE_PARAMETER_PATH =
-      Pattern.compile("^[a-zA-Z][a-zA-Z0-9_]*(?:\\[\\d+]|[./][a-zA-Z0-9_-]+)*$");
-  private static final Set<String> SAFE_ERROR_IDENTIFIERS =
-      Set.of(
-          "context_length_exceeded",
-          "invalid_parameter",
-          "invalid_request",
-          "invalid_request_error",
-          "invalid_value",
-          "model_context_window_exceeded",
-          "model_not_found",
-          "request_too_large",
-          "unsupported_model",
-          "unsupported_parameter",
-          "unsupported_value");
-  private static final Set<String> SAFE_REQUEST_PARAMETERS =
-      Set.of(
-          "max_tokens",
-          "messages",
-          "model",
-          "prompt_cache_key",
-          "prompt_cache_options",
-          "prompt_cache_retention",
-          "reasoning_effort",
-          "stream",
-          "stream_options",
-          "thinking",
-          "tools");
 
   static final String MSG_AUTH = "OpenAI authentication failed";
   static final String MSG_BILLING = "OpenAI billing or quota error";
@@ -62,7 +31,7 @@ final class OpenAiChatErrorMapper {
   private OpenAiChatErrorMapper() {}
 
   /**
-   * 将传输层异常转换为脱敏的 {@link ProviderException}。
+   * 将传输层异常转换为 {@link ProviderException}。
    *
    * @param exception 传输层异常
    * @return 映射后的 ProviderException；若为 CANCELLED、EXECUTOR_REJECTED 或 CALLBACK_FAILED 则返回 null
@@ -72,9 +41,7 @@ final class OpenAiChatErrorMapper {
     if (exception == null) {
       return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
     }
-    if (exception.kind() == TransportErrorKind.CANCELLED
-        || exception.kind() == TransportErrorKind.EXECUTOR_REJECTED
-        || exception.kind() == TransportErrorKind.CALLBACK_FAILED) {
+    if (ProviderErrorHelper.isSilentTransportKind(exception.kind())) {
       return null;
     }
     if (exception.kind() == TransportErrorKind.TIMEOUT) {
@@ -88,39 +55,45 @@ final class OpenAiChatErrorMapper {
     }
     if (exception.kind() == TransportErrorKind.HTTP_STATUS) {
       int status = exception.statusCode();
-      ErrorMetadata metadata = extractMetadata(exception.errorBodyBytes());
-      return mapStatusAndMetadata(status, metadata);
+      String[] typeAndCode = extractTypeAndCode(exception.errorBodyBytes());
+      ProviderErrorKind kind = classify(status, typeAndCode[0], typeAndCode[1]);
+      String fallback = fallbackForKind(kind);
+      String message = ProviderErrorHelper.formatHttpErrorMessage(exception, fallback);
+      return new ProviderException(kind, message);
     }
     return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
   }
 
-  /** 将 SSE 接收到的 error 事件 envelope 进行脱敏映射。 */
+  /** 将 SSE 接收到的 error 事件 envelope 进行映射。 */
   static ProviderException mapSseErrorEnvelope(JsonNode errorEventNode) {
-    if (errorEventNode == null || !errorEventNode.isObject()) {
+    if (errorEventNode == null) {
       return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
     }
-    ErrorMetadata metadata = extractMetadata(errorEventNode);
-    return mapStatusAndMetadata(0, metadata);
+    if (!errorEventNode.isObject()) {
+      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, errorEventNode.toString());
+    }
+    String[] typeAndCode = extractTypeAndCode(errorEventNode);
+    ProviderErrorKind kind = classify(0, typeAndCode[0], typeAndCode[1]);
+    return new ProviderException(kind, errorEventNode.toString());
   }
 
-  private static ProviderException mapStatusAndMetadata(int status, ErrorMetadata metadata) {
-    String typeLower = metadata.rawType != null ? metadata.rawType.toLowerCase(Locale.ROOT) : "";
-    String codeLower = metadata.rawCode != null ? metadata.rawCode.toLowerCase(Locale.ROOT) : "";
+  private static ProviderErrorKind classify(int status, String rawType, String rawCode) {
+    String typeLower = rawType != null ? rawType.toLowerCase(Locale.ROOT) : "";
+    String codeLower = rawCode != null ? rawCode.toLowerCase(Locale.ROOT) : "";
 
     if (matchesAny(typeLower, codeLower, "auth", "permission") || status == 401 || status == 403) {
-      return new ProviderException(ProviderErrorKind.AUTHENTICATION, MSG_AUTH);
+      return ProviderErrorKind.AUTHENTICATION;
     }
     if (matchesAny(typeLower, codeLower, "billing", "insufficient_quota", "quota", "credit")
         || status == 402) {
-      return new ProviderException(ProviderErrorKind.BILLING, MSG_BILLING);
+      return ProviderErrorKind.BILLING;
     }
     if (matchesAny(typeLower, codeLower, "context_length_exceeded", "model_context_window_exceeded")
         || matchesContextOverflow(typeLower, codeLower)) {
-      return new ProviderException(ProviderErrorKind.OVERFLOW, MSG_OVERFLOW);
+      return ProviderErrorKind.OVERFLOW;
     }
     if (matchesAny(typeLower, codeLower, "request_too_large") || status == 413) {
-      return new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, buildInvalidRequestMessage(metadata));
+      return ProviderErrorKind.INVALID_REQUEST;
     }
     if (matchesAny(
             typeLower,
@@ -132,16 +105,26 @@ final class OpenAiChatErrorMapper {
             "transient")
         || status == 429
         || (status >= 500 && status <= 599)) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
+      return ProviderErrorKind.TRANSIENT;
     }
     if (matchesAny(typeLower, codeLower, "invalid_request") || (status >= 400 && status < 500)) {
-      return new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, buildInvalidRequestMessage(metadata));
+      return ProviderErrorKind.INVALID_REQUEST;
     }
     if (status >= 500) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
+      return ProviderErrorKind.TRANSIENT;
     }
-    return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
+    return ProviderErrorKind.INVALID_RESPONSE;
+  }
+
+  private static String fallbackForKind(ProviderErrorKind kind) {
+    return switch (kind) {
+      case AUTHENTICATION -> MSG_AUTH;
+      case BILLING -> MSG_BILLING;
+      case OVERFLOW -> MSG_OVERFLOW;
+      case INVALID_REQUEST -> MSG_INVALID_REQUEST;
+      case TRANSIENT -> MSG_TRANSIENT;
+      case INVALID_RESPONSE, CANCELLED -> MSG_INVALID_RESPONSE;
+    };
   }
 
   private static boolean matchesAny(String typeLower, String codeLower, String... patterns) {
@@ -158,52 +141,27 @@ final class OpenAiChatErrorMapper {
         || (codeLower.contains("context") && codeLower.contains("overflow"));
   }
 
-  private static String buildInvalidRequestMessage(ErrorMetadata metadata) {
-    if (metadata == null || !metadata.hasSafeMetadata()) {
-      return MSG_INVALID_REQUEST;
-    }
-    List<String> parts = new ArrayList<>(3);
-    if (metadata.safeType != null) {
-      parts.add("type=" + metadata.safeType);
-    }
-    if (metadata.safeCode != null) {
-      parts.add("code=" + metadata.safeCode);
-    }
-    if (metadata.safeParam != null) {
-      parts.add("param=" + metadata.safeParam);
-    }
-    return MSG_INVALID_REQUEST + " (" + String.join(", ", parts) + ")";
-  }
-
-  private static ErrorMetadata extractMetadata(byte[] bodyBytes) {
+  private static String[] extractTypeAndCode(byte[] bodyBytes) {
     if (bodyBytes == null || bodyBytes.length == 0) {
-      return ErrorMetadata.EMPTY;
+      return new String[] {null, null};
     }
     try {
-      return extractMetadata(OBJECT_MAPPER.readTree(bodyBytes));
+      return extractTypeAndCode(OBJECT_MAPPER.readTree(bodyBytes));
     } catch (Exception ignored) {
-      // 无法按 JSON 解析则降级为依据状态码处理
-      return ErrorMetadata.EMPTY;
+      return new String[] {null, null};
     }
   }
 
-  private static ErrorMetadata extractMetadata(JsonNode root) {
+  private static String[] extractTypeAndCode(JsonNode root) {
     if (root == null || !root.isObject()) {
-      return ErrorMetadata.EMPTY;
+      return new String[] {null, null};
     }
     JsonNode err = root.get("error");
     JsonNode node = err != null && err.isObject() ? err : root;
 
     String rawType = getTextField(node, "type");
     String rawCode = getTextField(node, "code");
-    String rawParam = getTextField(node, "param");
-
-    return new ErrorMetadata(
-        rawType,
-        rawCode,
-        sanitizeErrorIdentifier(rawType),
-        sanitizeErrorIdentifier(rawCode),
-        sanitizeParameter(rawParam));
+    return new String[] {rawType, rawCode};
   }
 
   private static String getTextField(JsonNode node, String fieldName) {
@@ -214,43 +172,5 @@ final class OpenAiChatErrorMapper {
       }
     }
     return null;
-  }
-
-  private static String sanitizeErrorIdentifier(String value) {
-    if (value == null || value.length() > 128) {
-      return null;
-    }
-    String normalized = value.toLowerCase(Locale.ROOT);
-    return SAFE_ERROR_IDENTIFIERS.contains(normalized) ? normalized : null;
-  }
-
-  private static String sanitizeParameter(String value) {
-    if (value == null || value.isEmpty() || value.length() > 128) {
-      return null;
-    }
-    String normalized = value.startsWith("/") ? value.substring(1) : value;
-    if (!SAFE_PARAMETER_PATH.matcher(normalized).matches()) {
-      return null;
-    }
-    String lower = normalized.toLowerCase(Locale.ROOT);
-    int separator = lower.length();
-    for (char candidate : new char[] {'.', '[', '/'}) {
-      int index = lower.indexOf(candidate);
-      if (index >= 0) {
-        separator = Math.min(separator, index);
-      }
-    }
-    String root = lower.substring(0, separator);
-    return SAFE_REQUEST_PARAMETERS.contains(root) ? root : null;
-  }
-
-  private record ErrorMetadata(
-      String rawType, String rawCode, String safeType, String safeCode, String safeParam) {
-
-    static final ErrorMetadata EMPTY = new ErrorMetadata(null, null, null, null, null);
-
-    boolean hasSafeMetadata() {
-      return safeType != null || safeCode != null || safeParam != null;
-    }
   }
 }

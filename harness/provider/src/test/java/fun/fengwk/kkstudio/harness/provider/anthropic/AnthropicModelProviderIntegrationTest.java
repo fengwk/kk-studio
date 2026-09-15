@@ -277,7 +277,9 @@ class AnthropicModelProviderIntegrationTest {
     ProviderException error = errorRef.get();
     assertNotNull(error);
     assertEquals(ProviderErrorKind.AUTHENTICATION, error.kind());
-    assertEquals(AnthropicErrorMapper.MSG_AUTH, error.getMessage());
+    assertEquals(
+        "HTTP 401\n{\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid api key\"}}",
+        error.getMessage());
   }
 
   @Test

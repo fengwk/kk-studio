@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -320,11 +319,11 @@ class AnthropicStreamAccumulatorTest {
             () ->
                 accumulator.handleEvent(
                     "error",
-                    "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"secret_key_leak\"}}"));
+                    "{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"fake_key_err\"}}"));
 
     assertEquals(ProviderErrorKind.AUTHENTICATION, ex.kind());
-    assertEquals(AnthropicErrorMapper.MSG_AUTH, ex.getMessage());
-    assertFalse(ex.getMessage().contains("secret_key_leak"));
+    assertTrue(ex.getMessage().contains("authentication_error"));
+    assertTrue(ex.getMessage().contains("fake_key_err"));
   }
 
   @Test

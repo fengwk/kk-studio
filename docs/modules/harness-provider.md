@@ -13,7 +13,7 @@
 - 基于 JDK 21 `HttpClient` 提供异步 SSE 传输（`JdkHttpSseTransport`），在受管工作线程与受管调度器 Watchdog 下受控执行，返回可安全取消的 `ProviderStream`。
 - 实现双维度有界防护（`HttpSseLimits`）：支持单行字节限制、单事件字节限制、成功流累计字节上限与错误响应体抓取上限，超限立即中止请求并关闭底层 TCP 连接。
 - 实现逐字节增量 SSE 解析器（`IncrementalSseParser`），原生支持 CRLF、LF 与孤立 CR 换行，支持跨 chunk 拼装 UTF-8 多字节字符，静默剔除前导 UTF-8 BOM，检测并严格拦截 NUL 字节与畸形 UTF-8 序列。
-- 构建 Secret-Safe 脱敏异常体系（`TransportException` 与 `HttpOpenMetadata`）：严格采用最小白名单放行协议诊断标头（丢弃所有未知标头，杜绝回显凭据泄露），在 `getMessage()`、`toString()` 以及受控的 `SafeCauseException` 异常因果链中严格抹除敏感请求头、Token、URI 参数与未经授权的响应正文，杜绝任何凭据在日志或异常转储中外泄。
+- 传输异常（`TransportException`）不展开请求凭据、URI 与底层异常上下文；响应元数据（`HttpOpenMetadata`）仅放行安全诊断标头。协议层独立保留上游错误正文，不对白名单之外的错误字段做过滤，也不将真实错误替换为通用文案。
 - 实现 Anthropic Messages 请求编码、SSE content block 状态机、错误与 usage 归一化、terminal replay
   以及 LENGTH 截断工具诊断；支持文本、thinking/signature、redacted thinking、图片、PDF 和客户端工具。
 - Anthropic Prompt Cache 支持 SYSTEM、TOOLS、CONVERSATION 三类显式断点；SHORT 使用默认短 TTL，LONG
@@ -52,6 +52,7 @@ Reactor、JDBC 与外部 HTTP 客户端。
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
+| `fun.fengwk.kkstudio.harness.provider` | 跨协议共享的 HTTP 错误格式化与静默传输类型判断 | 不解析厂商错误分类，不修改原始响应正文 |
 | `fun.fengwk.kkstudio.harness.provider.transport` | JDK 21 HttpClient 异步流式传输、增量 SSE 字节解析器、有界流限制、响应元数据与 Secret-Safe 传输异常 | 仅依赖 `harness-runtime` 基础模型与 JDK 标准库；禁止暴露任何敏感凭据或包含未清洗的异常上下文 |
 | `fun.fengwk.kkstudio.harness.provider.anthropic` | Anthropic Messages wire 编码、流式聚合、cache、usage、错误、replay 与 Runtime adapter | 只经 transport 发起 I/O；opaque replay 不进入公共 DTO、日志或异常 |
 | `fun.fengwk.kkstudio.harness.provider.gemini` | Google AI Gemini GenerateContent wire 编码、流式聚合、隐式 Prompt Cache 与 Runtime adapter | 只经 transport 发起 I/O；固定声明 AUTOMATIC 缓存能力 |
@@ -79,6 +80,18 @@ Reactor、JDBC 与外部 HTTP 客户端。
 ### TransportErrorKind 与 TransportException
 
 [`TransportErrorKind`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/TransportErrorKind.java) 与 [`TransportException`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/TransportException.java) 构成安全的异常通信信道。异常原因链被限制为纯类名与安全消息，错误正文与敏感 URI 绝不在 `getMessage()` 或 `toString()` 中展开；上层可通过受保护的 `errorBodyBytes()` 防御性副本读取经过有界截断的诊断正文，并通过 `isErrorBodyTruncated()` 明确获知是否发生截断。
+
+### Provider 错误透传
+
+OpenAI Chat、OpenAI Responses、Anthropic 与 Gemini 的错误映射器将错误分类与消息内容分开处理：
+
+- HTTP 错误消息为 `HTTP <status>\n<原始 UTF-8 响应正文>`，保留空白、非 JSON 正文、厂商扩展字段、请求 ID 及上游返回的全部错误详情，不脱敏、不做字段白名单过滤。
+- 错误正文仍受 `maxErrorBodyBytes` 限制；传输层截断时，消息明确追加 ` [TRUNCATED]`。没有正文时才使用状态码与分类兜底文案。
+- SSE 协议错误保留完整解析后 JSON envelope，使用 `JsonNode.toString()` 序列化，不保证原始 JSON 排版或 SSE wire 字节一致。
+- 错误分类、重试和取消语义不因消息透传而改变；不额外拼接请求标头、请求 URI、配置凭据或底层异常 cause。
+- Runtime、持久化错误与客户端 DTO 继续传递同一消息。对话错误卡片和 `/debug` 详情按纯文本展示，不将上游 HTML 当作页面执行。
+
+上游正文自身若回显敏感内容，也会原样进入错误记录和客户端；访问、保存和分享这些诊断信息时应按敏感数据处理。
 
 ### IncrementalSseParser
 
