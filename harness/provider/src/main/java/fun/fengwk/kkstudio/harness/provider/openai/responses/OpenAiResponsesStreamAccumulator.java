@@ -577,6 +577,8 @@ final class OpenAiResponsesStreamAccumulator {
         if (terminalReasoningItemSeen
             && !terminalUsableSummarySeen
             && !priorStreamedThinking.isBlank()) {
+          // 丢弃终态给出的纯空白摘要，避免与流式思考拼接出额外空白。
+          thinkingBuffer.setLength(0);
           thinkingBuffer.append(priorStreamedThinking);
         }
       }
@@ -743,10 +745,8 @@ final class OpenAiResponsesStreamAccumulator {
     ProviderReplayState replayState = null;
     if (canReplay) {
       ArrayNode replayOutputArray = buildReplayOutputArray();
-      // 终态只给出空 reasoning 占位符时，该 replay 无法承载 durable 语义思考，属于内部不可用的原生回放；
-      // 整体放弃 native replay（绝不伪造密文或摘要），由下一轮语义编码承载思考。
-      if (!replayOutputArray.isEmpty()
-          && !replayCannotCarrySemanticThinking(replayOutputArray, thinkingBuffer.toString())) {
+      // 只含空 reasoning 占位符的 replay 不承载任何原生推理，冻结它没有语义价值，交由下一轮语义编码。
+      if (!replayOutputArray.isEmpty() && !replayIsEmptyPlaceholderOnly(replayOutputArray)) {
         ObjectNode payload = NODES.objectNode();
         payload.set("output", replayOutputArray);
         replayState =
@@ -924,23 +924,22 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   /**
-   * 判断已构造的 replay output 是否完全无法承载 semantic thinking。
+   * 判断 replay output 是否只由“无法承载 semantic thinking 的空 reasoning 占位符”构成。
    *
-   * <p>Consumer 对同格式 replay 要求 reasoning 摘要文本与 durable thinking 严格一致。当 durable thinking 非空、而 replay
-   * 的 reasoning item 全都没有非空摘要文本时（上游空占位符，或仅有 {@code encrypted_content}），该 replay 一旦冻结就会让下一轮被判为
-   * thinking 失配而整体失败。此形态必须整体放弃 native replay——绝不伪造密文或摘要来凑合 ——由下一轮语义编码承载思考。
+   * <p>占位符指既无 {@code encrypted_content}、也无任何非空摘要文本的 reasoning item。至少要有一个 reasoning item
+   * 才构成该形态；含密文的 opaque reasoning（必须原样保留，绝不剥离）或含非空摘要的 reasoning 都不属于此形态。
    */
-  private static boolean replayCannotCarrySemanticThinking(
-      ArrayNode replayOutputArray, String semanticThinking) {
-    if (semanticThinking.isBlank()) {
-      return false;
-    }
+  private static boolean replayIsEmptyPlaceholderOnly(ArrayNode replayOutputArray) {
+    boolean reasoningItemSeen = false;
     for (JsonNode item : replayOutputArray) {
       if (!"reasoning".equals(item.path("type").asText())) {
         continue;
       }
+      reasoningItemSeen = true;
+      if (!item.path("encrypted_content").asText("").isBlank()) {
+        return false;
+      }
       JsonNode summary = item.get("summary");
-      // summary 缺失或没有任何非空文本时，该 reasoning 项无法向服务端表达 semantic thinking。
       if (summary != null) {
         for (JsonNode s : summary) {
           if (!s.path("text").asText("").isBlank()) {
@@ -949,7 +948,7 @@ final class OpenAiResponsesStreamAccumulator {
         }
       }
     }
-    return true;
+    return reasoningItemSeen;
   }
 
   private static JsonNode parseJson(String data) {

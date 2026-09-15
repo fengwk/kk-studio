@@ -51,12 +51,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 精确回归“上游返回空 reasoning 摘要占位符”导致的 native replay 中毒问题。
+ * 覆盖“上游返回空 reasoning 摘要占位符”时的 Responses replay 语义。
  *
- * <p>MiniMax 等网关使用 Responses 协议时，终态 reasoning item 可能是 {@code {"type":"reasoning","summary":[]}}（既无
- * {@code encrypted_content} 也无法用摘要承载思考）。修复前该形态会让下一轮请求在 OpenAiResponsesRequestEncoder 的 “reasoning
- * 必须携带密文或非空摘要”检查处永久失败，且终态清空流式思考后 durable 消息仍保留语义思考，形成无法自洽的 replay。本测试覆盖：流式思考保留 → 可用 replay 判定 →
- * durable codec 往返 → 下一轮请求成功。
+ * <p>MiniMax 等网关使用 Responses 协议时，终态 reasoning item 可能是 {@code {"type":"reasoning","summary":[]}}：
+ * 既无 {@code encrypted_content}，也无法用摘要文本承载思考。此类空占位符不承载原生推理，必须由语义编码承载 durable
+ * 思考，且不得影响密文、摘要与工具调用的严格校验。本测试覆盖：流式思考保留 → 可用 replay 判定 → durable codec 往返 → 下一轮请求成功。
  */
 class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
@@ -142,14 +141,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     return payload;
   }
 
-  /**
-   * 意图：空 reasoning 占位符的终态不得吞掉流式思考，也不得冻结一个自身无法承载该思考的 native replay。
-   *
-   * <p>修复前：thinking 被清空、replay 带空占位符被冻结，下一轮必然 thinking 失配或结构拒绝。
-   */
+  /** 意图：空 reasoning 占位符的终态不得吞掉流式思考，也不得冻结只含空占位符的 native replay。 */
   @Test
-  void emptyReasoningSummaryPreservesStreamedThinkingAndDeclinesUnusableNativeReplay()
-      throws Exception {
+  void emptyReasoningSummaryPreservesStreamedThinkingAndDeclinesNativeReplay() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
     ProviderRequest firstRequest =
@@ -177,12 +171,10 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
   /**
    * 意图：MiniMax 形态的完整链路——fixture 流 → 语义思考 → durable codec 往返 → 下一轮请求成功且不伪造密文。
    *
-   * <p>历史不完整 replay（空 reasoning 占位符，无密文、无可用摘要）必须被识别为“原生推理不可用”并回退语义编码， 而不是抛出 INVALID_REQUEST
-   * 让会话永久卡死。
+   * <p>只含空占位符（空 reasoning 项，无密文、无可用摘要文本）的 replay 不承载原生推理，必须回退语义编码。
    */
   @Test
-  void historicalEmptyPlaceholderReplayFallsBackToSemanticAndNextRequestSucceeds()
-      throws Exception {
+  void emptyPlaceholderReplayFallsBackToSemanticAndNextRequestSucceeds() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
     String durableThinking = "Weigh the tradeoffs of bounded replay repair";
@@ -322,7 +314,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertTrue(ex.getMessage().contains("replay tool call mismatch with durable tool call"));
   }
 
-  /** 意图：可用的 encrypted-only replay 不得因本次修复而放宽——opaque 密文无法承载 durable 语义思考时仍必须拒绝。 */
+  /** 意图：含 opaque 密文但无摘要的 replay 无法承载 durable 语义思考时，仍必须严格拒绝。 */
   @Test
   void encryptedOnlyReplayStillRejectedWhenDurableThinkingCannotBeRepresented() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
@@ -358,7 +350,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
-  /** 意图：合法的 encrypted + summary replay 必须原样原位回放，opaque 数据逐字节保持，不被本次修复改写。 */
+  /** 意图：合法的 encrypted + summary replay 必须原样原位回放，opaque 数据逐字节保持。 */
   @Test
   void validEncryptedAndSummaryReplayStillReplaysInPlaceAndPreservesOpaqueData() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
@@ -415,9 +407,9 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asText());
   }
 
-  /** 意图：同一代际下空占位符 replay 仍按既有安全规则处理——识别为不完整后可回退；而思考缺失时该 replay 依然可用。 */
+  /** 意图：即使 durable 没有 thinking，全空占位符 replay 也必须回退语义编码——绝不把空 reasoning 项直接发给上游。 */
   @Test
-  void emptyPlaceholderReplayWithoutDurableThinkingRemainsReplayable() throws Exception {
+  void emptyPlaceholderReplayWithoutDurableThinkingStillFallsBackToSemantic() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -455,11 +447,11 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
                     .bodyUtf8Bytes())
             .get("input");
 
-    // 无 durable thinking 时占位符不构成矛盾，原位回放该（空 reasoning）项。
-    assertEquals(3, input.size());
-    assertEquals("reasoning", input.get(1).path("type").asText());
-    assertTrue(input.get(1).path("summary").isArray());
-    assertEquals(0, input.get(1).path("summary").size());
+    // 无 durable thinking 时占位符不构成“矛盾”，但空 reasoning 不承载任何语义，仍必须回退为纯语义消息。
+    assertEquals(2, input.size());
+    assertEquals("message", input.get(0).path("type").asText());
+    assertEquals("message", input.get(1).path("type").asText());
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
   }
 
   /** 意图：代际/前缀失配时仍按既有规则回退语义编码，思考由 summary 承载。 */
@@ -665,11 +657,11 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
   }
 
   /**
-   * 意图：终态 reasoning 只有 {@code encrypted_content}（无摘要）时，opaque 密文无法承载 durable 语义思考， 该 replay
-   * 必须被整体放弃，且不得把密文当作 thinking 文本外泄。
+   * 意图：终态 reasoning 只有 {@code encrypted_content}（无摘要）时，opaque 密文必须原样冻结进 native replay，
+   * 绝不被剥离；密文也不得作为 thinking 文本外泄。
    */
   @Test
-  void terminalEncryptedOnlyReasoningDeclinesUnusableNativeReplay() throws Exception {
+  void terminalEncryptedOnlyReasoningKeepsOpaqueReplay() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
     ProviderRequest firstRequest =
@@ -701,9 +693,12 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertFalse(
         response.thinking().contains("opaque_blob"),
         "opaque encrypted content must never be exposed as thinking text");
-    assertNull(
-        accumulator.replayState(),
-        "an encrypted-only replay cannot carry durable semantic thinking and must not be frozen");
+    ProviderReplayState replay = accumulator.replayState();
+    assertNotNull(replay, "含密文的 reasoning 不属于空占位符，opaque replay 必须原样保留");
+    assertEquals(
+        "opaque_blob",
+        replay.payload().get("output").get(0).path("encrypted_content").asText(),
+        "opaque 密文绝不允许被剥离");
   }
 
   /** 意图：终态没有任何 reasoning item 时，按既有语义丢弃未被终态声明的流式思考草稿。 */
@@ -762,12 +757,12 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
   }
 
   /**
-   * 意图：终态给出多个空白 summary 文本块时，仍属于无法承载思考的空占位符，必须整体放弃 native replay。
+   * 意图：终态给出多个空白 summary 文本块时仍属于空占位符，不冻结 native replay。
    *
-   * <p>同时覆盖多块占位符的逐块判定路径（全部文本为空白时不得误判为可用摘要）。
+   * <p>同时覆盖多块占位符的逐块判定（全部文本为空白时不得误判为可用摘要）。
    */
   @Test
-  void terminalMultipleBlankSummaryBlocksStillDeclineUnusableNativeReplay() throws Exception {
+  void terminalMultipleBlankSummaryBlocksStillDeclineNativeReplay() throws Exception {
     ProviderDescriptor descriptor = createDescriptor();
     ProviderRequest firstRequest =
         request(
@@ -793,6 +788,111 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
 
     assertEquals("streamed thinking", accumulator.response().thinking());
     assertNull(accumulator.replayState(), "多个空白摘要块仍无法承载思考，native replay 必须整体放弃");
+  }
+
+  /** 意图：producer 绝不因为“没有可用摘要”而丢弃带 {@code encrypted_content} 的 opaque reasoning——密文必须原样冻结。 */
+  @Test
+  void producerNeverStripsEncryptedReasoningWhenSummaryIsEmpty() throws Exception {
+    ProviderDescriptor descriptor = createDescriptor();
+    ProviderRequest firstRequest =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            """
+            {"type":"response.completed","response":{"id":"resp_enc_keep","status":"completed","output":[
+              {"id":"rs_keep","type":"reasoning","encrypted_content":"opaque_keep_exact","summary":[]},
+              {"id":"msg_keep","type":"message","role":"assistant","content":[
+                {"type":"output_text","text":"answer"}]}
+            ]}}
+            """));
+
+    ProviderReplayState replay = accumulator.replayState();
+    assertNotNull(replay, "带密文的 reasoning 不属于空占位符，native replay 必须保留");
+    JsonNode reasoning = replay.payload().get("output").get(0);
+    assertEquals(
+        "opaque_keep_exact", reasoning.path("encrypted_content").asText(), "opaque 密文绝不允许被剥离");
+  }
+
+  /** 意图：终态只给空白摘要时不改变实际流式思考——不得出现额外前导空白或换行拼接。 */
+  @Test
+  void whitespaceOnlyTerminalSummaryKeepsStreamedThinkingExact() throws Exception {
+    ProviderDescriptor descriptor = createDescriptor();
+    ProviderRequest firstRequest =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("propose a fix")))));
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, "a".repeat(64), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"delta\":\"exact streamed thinking\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            """
+            {"type":"response.completed","response":{"id":"resp_ws","status":"completed","output":[
+              {"id":"rs_ws","type":"reasoning","summary":[
+                {"type":"summary_text","text":"  \\n "}]},
+              {"id":"msg_ws","type":"message","role":"assistant","content":[
+                {"type":"output_text","text":"answer"}]}
+            ]}}
+            """));
+
+    assertEquals(
+        "exact streamed thinking", accumulator.response().thinking(), "空白终态摘要不得给流式思考引入前导空白或换行");
+  }
+
+  /** 意图：空白摘要与空占位符等价——消费历史 replay 时同样回退语义编码，而非把纯空白占位发出去。 */
+  @Test
+  void whitespaceOnlySummaryPlaceholderReplayAlsoFallsBackToSemantic() throws Exception {
+    ProviderDescriptor descriptor = createDescriptor();
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+
+    ObjectNode payload = MAPPER.createObjectNode();
+    ArrayNode output = payload.putArray("output");
+    output
+        .addObject()
+        .put("type", "reasoning")
+        .putArray("summary")
+        .addObject()
+        .put("type", "summary_text")
+        .put("text", "  \n ");
+    ObjectNode message = output.addObject();
+    message.put("type", "message").put("role", "assistant");
+    ObjectNode contentBlock = message.putArray("content").addObject();
+    contentBlock.put("type", "output_text");
+    contentBlock.put("text", "answer");
+
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderThinkingBlock("durable thought"), new ProviderTextBlock("answer")),
+            new ProviderReplayState(
+                ProviderReplayFormat.OPENAI_RESPONSES,
+                descriptor.affinity("MiniMax-M2"),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                payload));
+
+    JsonNode input =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(List.of(assistant)),
+                        descriptor,
+                        OpenAiResponsesConfig.defaultConfig())
+                    .bodyUtf8Bytes())
+            .get("input");
+
+    assertEquals(2, input.size());
+    assertEquals("reasoning", input.get(0).path("type").asText());
+    assertEquals("durable thought", input.get(0).path("summary").get(0).path("text").asText());
+    assertEquals("answer", input.get(1).path("content").get(0).path("text").asText());
   }
 
   private void assertRejected(

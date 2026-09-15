@@ -171,7 +171,7 @@ blocks。`AnthropicStreamAccumulator` 按原生 block index 独立维护交错�
 - 输出上限：`max_output_tokens` 取 variant 上限与本 Provider 下限 `16` 的较大者——低于 16 的值提升到 16，显式更大值原样保留，未声明时不发送该字段。
 - 提示缓存：缺省 `AUTOMATIC` 模式遵循 Provider 自治缓存语义（`PromptCacheCapability.automatic()`），不发送任何缓存提示（不发送 `prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options` 或 `prompt_cache_breakpoint`）；显式模式 `LEGACY`（affinity + retention）与 `GPT_5_6_EXPLICIT`（options + breakpoints）继续按配置映射对应字段。
 - Replay：`COMPLETE` / `LENGTH` 且无工具诊断时把白名单 native output（`reasoning` 的 `encrypted_content` 与 `summary`、`message`、`function_call`）冻结为 durable replay state；流式接收的 `reasoning.encrypted_content` 在 terminal output 省略该字段时被合并保留；下一轮仅在 affinity 与 `sourcePrefixHash` 匹配、且回放项与 durable 消息内容一致时原位回放，否则回退语义编码；私有推理文本只作为 `summary`/durable thinking 暴露，`encrypted_content` 不作为文本外泄。
-- 不完整推理回放修复：终态 `reasoning` 只给出空占位符（例如 `summary: []` 且无 `encrypted_content`）时，流式累积的思考是唯一可得的语义表示并予以保留（非空的权威终态摘要仍优先），且不冻结自身无法承载该思考的 native replay，改由语义编码承载。消费历史 replay 时，无密文且无任何可用摘要文本的 `reasoning` 占位符被识别为“上游未提供原生推理”而非损坏请求，整体回退语义编码；结构性损坏、未知字段、密文/摘要与 durable 思考矛盾、以及消息文本与工具调用不一致仍严格抛出 `INVALID_REQUEST`，绝不伪造签名或密文，持久化 payload 不被改写。
+- 推理回放边界：终态 `reasoning` 只给出空占位符（`summary: []` 且无 `encrypted_content`）时，流式累积的思考是唯一可得的语义表示并予以保留（非空的权威终态摘要仍优先）；只含此类空占位符的 replay 不承载原生推理，不被冻结也不被原位回放，改由语义编码承载。消费历史 replay 时，无密文且无任何可用摘要文本（含纯空白）的 `reasoning` 占位符按“上游未提供原生推理”回退语义编码；结构损坏、未知字段、含密文的 opaque reasoning 与 durable 思考矛盾、非空摘要矛盾、以及消息文本或工具调用不一致仍严格抛出 `INVALID_REQUEST`，密文原样保留，持久化 payload 不被改写。
 - Token 审计：当服务端事件流 usage 缺失 `total_tokens` 时，原生总 token 置为 `0L`，且 `rawUsageJson` 白名单中不输出 `total_tokens` 键。
 
 上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)。
