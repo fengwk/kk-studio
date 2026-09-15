@@ -142,6 +142,28 @@ describe('createRealtimeFrameScheduler', () => {
     expect(onFlush).not.toHaveBeenCalled()
   })
 
+  // 旧代际回调即使晚到，也不得清除新帧句柄，导致重复调度或无法取消新帧。
+  it('keeps a newer pending frame intact when a cancelled callback arrives late', () => {
+    const callbacks: FrameRequestCallback[] = []
+    const raf = vi.fn((callback: FrameRequestCallback) => callbacks.push(callback))
+    const caf = vi.fn()
+    const onFlush = vi.fn()
+    const scheduler = createRealtimeFrameScheduler({ onFlush, raf, caf })
+
+    scheduler.notifyModelDirty()
+    scheduler.cancel()
+    scheduler.notifyToolDirty()
+    callbacks[0](performance.now())
+    scheduler.notifyModelDirty()
+
+    expect(raf).toHaveBeenCalledTimes(2)
+    expect(onFlush).not.toHaveBeenCalled()
+    scheduler.cancel()
+    expect(caf).toHaveBeenLastCalledWith(2)
+    callbacks[1](performance.now())
+    expect(onFlush).not.toHaveBeenCalled()
+  })
+
   it('uses default window rAF and cAF when custom functions are omitted', () => {
     const onFlush = vi.fn()
     const rafSpy = vi.spyOn(window, 'requestAnimationFrame')

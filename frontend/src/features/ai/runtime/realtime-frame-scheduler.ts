@@ -73,10 +73,10 @@ export function createRealtimeFrameScheduler(
     }
     const capturedGen = generation
     frameHandle = requestFrame(() => {
-      frameHandle = null
       if (generation !== capturedGen) {
         return
       }
+      frameHandle = null
       const wasModelDirty = modelDirty
       const wasToolDirty = toolDirty
       modelDirty = false
