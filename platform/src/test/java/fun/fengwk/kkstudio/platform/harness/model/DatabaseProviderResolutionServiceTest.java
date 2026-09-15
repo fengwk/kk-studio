@@ -15,6 +15,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -37,9 +38,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -464,6 +469,75 @@ class DatabaseProviderResolutionServiceTest {
     assertTrue(
         effectiveResult.contents().stream().noneMatch(ProviderResourceBlock.class::isInstance),
         "effectiveRequest must not expose nested ProviderResourceBlock to the adapter");
+  }
+
+  /**
+   * 意图：resolve 交给 transport 的 effectiveRequest 必须原样保留 assistant 的 native replay state（同一实例），
+   * 即使同时存在需要物化的用户 Resource——物化边界不得解析或重建 replay payload。
+   */
+  @ParameterizedTest
+  @EnumSource(ProviderReplayFormat.class)
+  void resolvePreservesAssistantReplayStateThroughResourceMaterialization(
+      ProviderReplayFormat format) {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            factory(
+                ProviderType.OPENAI,
+                PromptCacheCapability.affinity(Set.of(PromptCacheRetention.SHORT)),
+                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
+    ProviderReplayState replayState = sampleReplayState(format);
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("reasoning")),
+            replayState);
+    ProviderRequest persisted =
+        request(
+            ProviderCacheControl.none(),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(new ProviderResourceBlock(new UUID(0L, 1L), "scan.txt", "tiny"))),
+                assistant),
+            List.of());
+
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+
+    List<ProviderMessage> effective = resolved.effectiveRequest().messages();
+    assertEquals(2, effective.size());
+    assertEquals(ProviderMessageRole.USER, effective.get(0).role());
+    assertTrue(
+        effective.get(0).contents().stream().noneMatch(ProviderResourceBlock.class::isInstance),
+        "Resource 必须已被物化");
+    assertEquals(ProviderMessageRole.ASSISTANT, effective.get(1).role());
+    assertSame(replayState, effective.get(1).replayState(), "replay state 必须是同一实例");
+    assertEquals(format, effective.get(1).replayState().format());
+    assertEquals(
+        replayState.payload(),
+        effective.get(1).replayState().payload(),
+        "不同 Provider 的 replay payload 必须逐字段保持不变（本边界不得解析或重写 payload）");
+    assertEquals(replayState.affinity(), effective.get(1).replayState().affinity());
+    assertEquals(replayState.sourcePrefixHash(), effective.get(1).replayState().sourcePrefixHash());
+    assertSame(
+        assistant.contents().get(1),
+        effective.get(1).contents().get(1),
+        "durable thinking 必须保持 identity，绝不重建");
+  }
+
+  /** 合成 replay state：payload 刻意不透明，只为验证 resolve 边界的对象透传。 */
+  private static ProviderReplayState sampleReplayState(ProviderReplayFormat format) {
+    try {
+      return new ProviderReplayState(
+          format,
+          new ProviderReplayAffinity(ProviderType.OPENAI, PROVIDER_NAME, GENERATION_ID, "model"),
+          "0".repeat(64),
+          new ObjectMapper()
+              .readTree("{\"output\":[{\"type\":\"opaque-" + format.name() + "\"}]}"));
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException(error);
+    }
   }
 
   @Test

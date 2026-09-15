@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,16 +15,25 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
@@ -341,6 +352,132 @@ class ProviderResourceMaterializerTest {
     // 绝不查询 blob 或调用存储服务
     verify(blobManager, never()).getBlob(BLOB_ID);
     verify(storageService, never()).download(any(), anyLong());
+  }
+
+  // ---------- assistant provider replay state 透传 ----------
+
+  /** 意图：物化边界不解析 replay payload；四种 Provider format 的 replay state 都必须以同一对象穿过本类。 */
+  @ParameterizedTest
+  @EnumSource(ProviderReplayFormat.class)
+  void assistantReplayStateSurvivesMaterializationForEveryFormat(ProviderReplayFormat format) {
+    ProviderReplayState replayState = replayState(format);
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("reasoning")),
+            replayState);
+
+    // 无任何 Resource：内容块必须保持 identity，replay state 必须保持同一实例。
+    ProviderMessage materialized = materialize(List.of(assistant), Set.of()).get(0);
+
+    assertSame(replayState, materialized.replayState(), format + " replay state must be identical");
+    assertSame(assistant.contents().get(0), materialized.contents().get(0));
+    assertSame(assistant.contents().get(1), materialized.contents().get(1));
+  }
+
+  /** 意图：用户 Resource 与 assistant replay 混排时，顺序、Resource 物化与 replay identity 必须同时保持。 */
+  @Test
+  void mixedUserResourceAndAssistantReplayPreservesOrderAndReplayIdentity() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    S3StorageService storageService = mock(S3StorageService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", 42L));
+    when(storageService.download(
+            StorageObjectKeys.blobOriginal(BLOB_ID),
+            ProviderResourceMaterializer.MAX_INLINE_IMAGE_BYTES))
+        .thenReturn(new S3ObjectContent(new byte[] {0, 1, 2}, "image/png"));
+    ProviderReplayState replayState = replayState(ProviderReplayFormat.OPENAI_CHAT);
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("reasoning")),
+            replayState);
+
+    List<ProviderMessage> materialized =
+        ProviderResourceMaterializer.withStorage(blobManager, storageService)
+            .materialize(
+                List.of(
+                    new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE)),
+                    assistant,
+                    new ProviderMessage(ProviderMessageRole.USER, List.of(RESOURCE))),
+                Set.of(ModelInputModality.IMAGE));
+
+    assertEquals(3, materialized.size(), "消息顺序与数量必须保持不变");
+    assertEquals(ProviderMessageRole.USER, materialized.get(0).role());
+    assertEquals(ProviderMessageRole.ASSISTANT, materialized.get(1).role());
+    assertEquals(ProviderMessageRole.USER, materialized.get(2).role());
+    assertEquals(
+        "data:image/png;base64,AAEC",
+        ((ProviderImageBlock) materialized.get(0).contents().get(0)).source());
+    assertEquals(
+        "data:image/png;base64,AAEC",
+        ((ProviderImageBlock) materialized.get(2).contents().get(0)).source());
+    assertSame(replayState, materialized.get(1).replayState());
+    assertTrue(materialized.get(1).hasReplayState());
+    assertEquals(2, materialized.get(1).contents().size());
+  }
+
+  /** 意图：只有 assistant 允许携带 replay state；物化不得为其他角色合成 replay state。 */
+  @Test
+  void materializationNeverSynthesizesReplayStateForNonAssistantMessages() {
+    ProviderReplayState replayState = replayState(ProviderReplayFormat.OPENAI_CHAT);
+    List<ProviderMessage> materialized =
+        materialize(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("s"))),
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("u"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderTextBlock("a")),
+                    replayState)),
+            Set.of());
+
+    assertNull(materialized.get(0).replayState());
+    assertNull(materialized.get(1).replayState());
+    assertSame(replayState, materialized.get(2).replayState());
+  }
+
+  /** 意图：无 replay state 的 assistant 消息物化后仍必须保持无 replay state，绝不伪造 thinking 或 replay。 */
+  @Test
+  void assistantWithoutReplayStateStaysWithoutReplayState() {
+    List<ProviderMessage> materialized =
+        materialize(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("plain")))),
+            Set.of());
+
+    assertFalse(materialized.get(0).hasReplayState());
+    assertNull(materialized.get(0).replayState());
+    assertEquals("plain", ((ProviderTextBlock) materialized.get(0).contents().get(0)).text());
+  }
+
+  private static List<ProviderMessage> materialize(
+      List<ProviderMessage> messages, Set<ModelInputModality> inputModalities) {
+    return new ProviderResourceMaterializer(
+            mock(StorageBlobManager.class), mock(S3StorageService.class))
+        .materialize(messages, inputModalities);
+  }
+
+  /** 合成 replay state：各 format 使用各自真实的 payload 形态，payload 对本边界保持完全不透明。 */
+  private static ProviderReplayState replayState(ProviderReplayFormat format) {
+    String payload =
+        switch (format) {
+          case OPENAI_RESPONSES -> "{\"output\":[{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}]}";
+          case OPENAI_CHAT -> "{\"role\":\"assistant\",\"content\":\"opaque\",\"reasoning_content\":\"opaque\"}";
+          case ANTHROPIC_MESSAGES -> "{\"content\":[{\"type\":\"thinking\",\"signature\":\"opaque\"}]}";
+          case GEMINI_CONTENT -> "{\"parts\":[{\"thoughtSignature\":\"opaque\"}]}";
+        };
+    try {
+      return new ProviderReplayState(
+          format,
+          new ProviderReplayAffinity(
+              ProviderType.OPENAI, "test-provider", new UUID(0L, 9L), "test-model"),
+          "0".repeat(64),
+          new ObjectMapper().readTree(payload));
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException(error);
+    }
   }
 
   private static StorageBlob activeBlob(String mediaType, long sizeBytes) {
