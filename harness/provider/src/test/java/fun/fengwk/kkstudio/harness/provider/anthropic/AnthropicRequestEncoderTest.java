@@ -232,19 +232,23 @@ class AnthropicRequestEncoderTest {
     assertEquals(5, contents.size());
     // 0: text
     assertEquals("text", contents.get(0).path("type").asText());
-    // 1: base64 image
+    // 1: base64 image —— 必须逐字节保留去掉 data URI 前缀后的原始 base64 载荷
     assertEquals("image", contents.get(1).path("type").asText());
     assertEquals("base64", contents.get(1).path("source").path("type").asText());
     assertEquals("image/png", contents.get(1).path("source").path("media_type").asText());
+    assertEquals(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        contents.get(1).path("source").path("data").asText());
     // 2: url image
     assertEquals("image", contents.get(2).path("type").asText());
     assertEquals("url", contents.get(2).path("source").path("type").asText());
     assertEquals(
         "https://example.com/test.jpg", contents.get(2).path("source").path("url").asText());
-    // 3: base64 document
+    // 3: base64 document —— 同样必须逐字节保留原始 base64 载荷
     assertEquals("document", contents.get(3).path("type").asText());
     assertEquals("base64", contents.get(3).path("source").path("type").asText());
     assertEquals("application/pdf", contents.get(3).path("source").path("media_type").asText());
+    assertEquals("JVBERi0xLjUK", contents.get(3).path("source").path("data").asText());
     // 4: json as text
     assertEquals("text", contents.get(4).path("type").asText());
     assertEquals("{\"key\":\"value\"}", contents.get(4).path("text").asText());
@@ -889,6 +893,7 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void encodesToolResultWithJsonImageAndDocumentBlocks() throws IOException {
+    String base64Img = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA";
     ProviderRequest req =
         request(
             defaultVariant(),
@@ -901,7 +906,7 @@ class AnthropicRequestEncoderTest {
                             "name",
                             List.of(
                                 new ProviderJsonBlock("{\"ans\":1}"),
-                                new ProviderImageBlock("image/png", "https://ex.com/p.png"),
+                                new ProviderImageBlock("image/png", base64Img),
                                 new ProviderDocumentBlock(
                                     "application/pdf", "data:application/pdf;base64,JVBERi0xLjUK")),
                             false,
@@ -918,6 +923,15 @@ class AnthropicRequestEncoderTest {
     assertEquals("text", nested.get(0).path("type").asText());
     assertEquals("image", nested.get(1).path("type").asText());
     assertEquals("document", nested.get(2).path("type").asText());
+    // 工具结果中的媒体同样必须逐字节保留原始 base64 载荷
+    assertEquals("base64", nested.get(1).path("source").path("type").asText());
+    assertEquals("image/png", nested.get(1).path("source").path("media_type").asText());
+    assertEquals(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA",
+        nested.get(1).path("source").path("data").asText());
+    assertEquals("base64", nested.get(2).path("source").path("type").asText());
+    assertEquals("application/pdf", nested.get(2).path("source").path("media_type").asText());
+    assertEquals("JVBERi0xLjUK", nested.get(2).path("source").path("data").asText());
   }
 
   @Test

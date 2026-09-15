@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -426,6 +427,27 @@ class OpenAiChatRequestEncoderTest {
     ArrayNode parts = (ArrayNode) rootImg.path("messages").get(0).path("content");
     assertEquals("image_url", parts.get(0).path("type").asText());
     assertEquals("https://example.com/a.jpg", parts.get(0).path("image_url").path("url").asText());
+
+    // 2b. base64 data URI 图片必须逐字节保留完整 data URI 作为 image_url.url（不重编码、不丢载荷）
+    String base64Png =
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    ProviderMessage userImgBase64 =
+        new ProviderMessage(
+            ProviderMessageRole.USER, List.of(new ProviderImageBlock("image/png", base64Png)));
+    ProviderRequest reqImgBase64 =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userImgBase64),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode rootImgBase64 =
+        MAPPER.readTree(encoder.encode(reqImgBase64, descriptor, configImg).bodyUtf8Bytes());
+    ArrayNode imgBase64Parts = (ArrayNode) rootImgBase64.path("messages").get(0).path("content");
+    assertEquals("image_url", imgBase64Parts.get(0).path("type").asText());
+    assertEquals(base64Png, imgBase64Parts.get(0).path("image_url").path("url").asText());
+    assertFalse(imgBase64Parts.get(0).path("image_url").path("url").asText().contains(" "));
 
     // 3. 音频处理：URL 必须拒绝
     ProviderMessage userAudioUrl =
@@ -2010,5 +2032,118 @@ class OpenAiChatRequestEncoderTest {
       assertNull(exDurable.getCause());
       assertFalse(exDurable.getMessage().contains(badArg));
     }
+  }
+
+  @Test
+  @DisplayName("最终 UTF-8 请求体应用上限：使用可注入小阈值覆盖调用点边界，不进行昂贵的大内存分配")
+  void testFinalBodySizeGuardEnforcedAtCallSite() {
+    // 测试意图：证明 OpenAiChatRequestEncoder.encode 在序列化完成后确实调用应用上限守卫。
+    // 通过在正常请求上先用默认阈值成功编码得到真实字节长度，再用该长度作为精确阈值验证边界通过/超限拒绝。
+    ProviderMessage userMsg =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("size guard")));
+    ProviderRequest request =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    int actualBytes =
+        new OpenAiChatRequestEncoder()
+            .encode(request, descriptor, OpenAiChatConfiguration.defaults())
+            .bodyUtf8Bytes()
+            .length;
+
+    // 恰好等于真实长度：通过
+    OpenAiChatEncodedRequest atLimit =
+        new OpenAiChatRequestEncoder(new RequestBodySizeGuard(actualBytes))
+            .encode(request, descriptor, OpenAiChatConfiguration.defaults());
+    assertEquals(actualBytes, atLimit.bodyUtf8Bytes().length);
+
+    // 比真实长度少 1 字节：调用点必须拒绝，且错误消息不泄露请求体内容
+    RequestBodySizeGuard tiny = new RequestBodySizeGuard(actualBytes - 1);
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                new OpenAiChatRequestEncoder(tiny)
+                    .encode(request, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertTrue(ex.getMessage().contains("request body exceeds"));
+    assertFalse(ex.getMessage().contains("size guard"));
+  }
+
+  @Test
+  @DisplayName("合法 replay 的 tool_calls 必须原位保留 type/function.name/function.arguments，而非仅保留 id")
+  void testValidReplayPreservesFullToolCallShape() throws Exception {
+    // 意图：用真实 prefix hash 命中回放；原生 reasoning_content 区分回放与语义 fallback，并校验工具参数。
+    ProviderMessage turn1User =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("call it")));
+    ProviderRequest turn1Req =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(turn1User),
+            List.of(),
+            ProviderCacheControl.none());
+    String turn1Hash =
+        encoder.encode(turn1Req, descriptor, OpenAiChatConfiguration.defaults()).sourcePrefixHash();
+
+    ObjectNode replayPayload = MAPPER.createObjectNode();
+    replayPayload.put("role", "assistant");
+    replayPayload.putNull("content");
+    replayPayload.put("reasoning_content", "native reasoning");
+    ArrayNode replayCalls = replayPayload.putArray("tool_calls");
+    ObjectNode replayCall = replayCalls.addObject();
+    replayCall.put("id", "call_replay_1");
+    replayCall.put("type", "function");
+    replayCall
+        .putObject("function")
+        .put("name", "weather_query")
+        .put("arguments", "{\"city\":\"Berlin\"}");
+
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            turn1Hash,
+            replayPayload);
+
+    ProviderMessage assistantMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("native reasoning"),
+                new ProviderToolCallBlock(
+                    new ProviderToolCall(
+                        "call_replay_1", "weather_query", "{\"city\":\"Berlin\"}"))),
+            replayState);
+    ProviderRequest turn2Req =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(turn1User, assistantMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode wire =
+        MAPPER.readTree(
+            encoder
+                .encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    JsonNode wireCalls = wire.path("messages").get(1).path("tool_calls");
+
+    assertEquals(
+        "native reasoning", wire.path("messages").get(1).path("reasoning_content").asText());
+    assertEquals(1, wireCalls.size());
+    assertEquals("call_replay_1", wireCalls.get(0).path("id").asText());
+    assertEquals("function", wireCalls.get(0).path("type").asText());
+    assertEquals("weather_query", wireCalls.get(0).path("function").path("name").asText());
+    assertEquals(
+        "{\"city\":\"Berlin\"}", wireCalls.get(0).path("function").path("arguments").asText());
   }
 }

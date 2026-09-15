@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -414,7 +415,43 @@ class GeminiRequestEncoderTest {
     JsonNode part = json.get("contents").get(0).get("parts").get(0);
     assertTrue(part.has("inlineData"));
     assertEquals("image/png", part.get("inlineData").get("mimeType").asText());
-    assertTrue(part.get("inlineData").get("data").asText().startsWith("iVBORw"));
+    // base64 载荷必须逐字节保留（去除 data URI 前缀后原样进入 inlineData.data）
+    assertEquals(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        part.get("inlineData").get("data").asText());
+  }
+
+  /** 验证 DOCUMENT/PDF 的 base64 data URI 与 image/audio/video 一样被编码为 inlineData，载荷逐字节保留。 */
+  @Test
+  void encodesUserPdfDataUriToInlineDataPreservingPayload() throws Exception {
+    String pdfBase64 = "data:application/pdf;base64,JVBERi0xLjQgZHVtbXkgcGRmIGNvbnRlbnQ=";
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            1024,
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER,
+                    List.of(
+                        new ProviderTextBlock("inspect:"),
+                        new ProviderDocumentBlock("application/pdf", pdfBase64)))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    ArrayNode parts = (ArrayNode) json.path("contents").get(0).path("parts");
+
+    assertEquals(2, parts.size());
+    assertEquals("inspect:", parts.get(0).path("text").asText());
+    assertTrue(parts.get(1).has("inlineData"));
+    assertEquals("application/pdf", parts.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals(
+        "JVBERi0xLjQgZHVtbXkgcGRmIGNvbnRlbnQ=",
+        parts.get(1).path("inlineData").path("data").asText());
+    // base64 文档不得退化为 fileData，也不得保留 data: 前缀
+    assertFalse(parts.get(1).has("fileData"));
+    assertFalse(parts.get(1).path("inlineData").path("data").asText().startsWith("data:"));
   }
 
   /** 验证图片、音频和视频 data URI 的 MIME 类型均从 URI 无损透传。 */
@@ -1089,13 +1126,62 @@ class GeminiRequestEncoderTest {
     assertEquals(
         "Here is the chart:",
         parts.get(0).get("functionResponse").get("response").get("result").asText());
-    // part 1: inlineData
+    // part 1: inlineData —— 工具结果的 base64 载荷必须逐字节保留
     assertTrue(parts.get(1).has("inlineData"));
     assertEquals("image/png", parts.get(1).get("inlineData").get("mimeType").asText());
+    assertEquals(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        parts.get(1).get("inlineData").get("data").asText());
     // part 2: fileData
     assertTrue(parts.get(2).has("fileData"));
     assertEquals(
         "https://example.com/spec.pdf", parts.get(2).get("fileData").get("fileUri").asText());
+  }
+
+  /** 验证 Gemini 工具结果中的音频/视频/文档 base64 媒体验证与其 inlineData 载荷逐字节保留。 */
+  @Test
+  void encodesToolResultBlocks_base64MediaForAllModalitiesPreservedVerbatim() throws Exception {
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            1024,
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "probe", "{}")))),
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "c1",
+                            "probe",
+                            List.of(
+                                new ProviderTextBlock("media:"),
+                                new ProviderAudioBlock(
+                                    "audio/wav", "data:audio/wav;base64,UklGRg=="),
+                                new ProviderVideoBlock(
+                                    "video/mp4", "data:video/mp4;base64,AAAAIGZ0eXA="),
+                                new ProviderDocumentBlock(
+                                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK")),
+                            false,
+                            "{}")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    ArrayNode parts = (ArrayNode) json.path("contents").get(2).path("parts");
+
+    // functionResponse + 3 个媒体 part
+    assertEquals(4, parts.size());
+    assertEquals("UklGRg==", parts.get(1).path("inlineData").path("data").asText());
+    assertEquals("audio/wav", parts.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals("AAAAIGZ0eXA=", parts.get(2).path("inlineData").path("data").asText());
+    assertEquals("video/mp4", parts.get(2).path("inlineData").path("mimeType").asText());
+    assertEquals("JVBERi0xLjQK", parts.get(3).path("inlineData").path("data").asText());
+    assertEquals("application/pdf", parts.get(3).path("inlineData").path("mimeType").asText());
   }
 
   /** 验证工具结果中出现不受支持的块类型（如嵌套的 tool call）时抛出脱敏的 INVALID_REQUEST。 */
@@ -2140,5 +2226,36 @@ class GeminiRequestEncoderTest {
         assertThrows(ProviderException.class, () -> encoder.encode(reqArrayArgs, descriptor()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exArray.kind());
     assertEquals("invalid Gemini replay payload", exArray.getMessage());
+  }
+
+  @Test
+  void finalBodySizeGuardEnforcedAtCallSite() {
+    // 测试意图：证明 GeminiRequestEncoder.encode 在序列化完成后确实调用应用上限守卫。
+    // 先用默认阈值编码得到真实字节长度，再以该长度验证边界通过、以少 1 字节验证超限拒绝（无昂贵大内存分配）。
+    ProviderRequest req =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            1024,
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    int actualBytes = encoder.encode(req, descriptor()).bodyUtf8Bytes().length;
+
+    GeminiEncodedRequest atLimit =
+        new GeminiRequestEncoder(new RequestBodySizeGuard(actualBytes)).encode(req, descriptor());
+    assertEquals(actualBytes, atLimit.bodyUtf8Bytes().length);
+
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                new GeminiRequestEncoder(new RequestBodySizeGuard(actualBytes - 1))
+                    .encode(req, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertTrue(ex.getMessage().contains("request body exceeds"));
+    assertFalse(ex.getMessage().contains("Q"));
   }
 }

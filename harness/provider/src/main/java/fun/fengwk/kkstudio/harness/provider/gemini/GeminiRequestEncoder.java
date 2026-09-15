@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -60,6 +61,17 @@ final class GeminiRequestEncoder {
   // data:[<mediatype>][;base64],<data>
   private static final Pattern DATA_URI_PATTERN =
       Pattern.compile("^data:([^;,]+)(?:;base64)?,(.*)$", Pattern.CASE_INSENSITIVE);
+
+  /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
+  private final RequestBodySizeGuard bodySizeGuard;
+
+  GeminiRequestEncoder() {
+    this(RequestBodySizeGuard.DEFAULT);
+  }
+
+  GeminiRequestEncoder(RequestBodySizeGuard bodySizeGuard) {
+    this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
+  }
 
   GeminiEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
     Objects.requireNonNull(request, "request");
@@ -180,6 +192,7 @@ final class GeminiRequestEncoder {
 
     try {
       byte[] bytes = OBJECT_MAPPER.writeValueAsBytes(root);
+      bodySizeGuard.enforce(bytes);
       return new GeminiEncodedRequest(bytes, finalPrefixHash);
     } catch (JsonProcessingException e) {
       throw new ProviderException(

@@ -1,14 +1,18 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
+import java.util.EnumSet;
 import java.util.Objects;
+import java.util.Set;
 
 /** OpenAI Chat Completions 协议适配器。 */
 public final class OpenAiChatProviderAdapter implements ProviderAdapter {
@@ -40,6 +44,24 @@ public final class OpenAiChatProviderAdapter implements ProviderAdapter {
   @Override
   public ProviderType providerType() {
     return ProviderType.OPENAI;
+  }
+
+  /**
+   * 由连接配置 {@code openAiChatMediaTypes} 派生的内联媒体能力：配置的 IMAGE/AUDIO/PDF 分别映射为
+   * IMAGE/AUDIO/DOCUMENT，未配置即为空（默认 {@link ProviderMediaCapabilities#NONE} 语义）；工具结果只接受文本与
+   * JSON，因此永远为空。这是本编码器实际可编码的 schema，不构成厂商能力承诺。
+   */
+  @Override
+  public ProviderMediaCapabilities mediaCapabilities() {
+    Set<ModelInputModality> userModalities = EnumSet.noneOf(ModelInputModality.class);
+    for (OpenAiChatConfiguration.MediaType mediaType : configuration.mediaTypes()) {
+      switch (mediaType) {
+        case IMAGE -> userModalities.add(ModelInputModality.IMAGE);
+        case AUDIO -> userModalities.add(ModelInputModality.AUDIO);
+        case PDF -> userModalities.add(ModelInputModality.DOCUMENT);
+      }
+    }
+    return new ProviderMediaCapabilities(userModalities, Set.of());
   }
 
   @Override

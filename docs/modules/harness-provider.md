@@ -67,6 +67,30 @@ Reactor、JDBC 与外部 HTTP 客户端。
 
 [`ServerSentEvent`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/ServerSentEvent.java) 表示解析完成的标准 SSE 事件单元：包含可选的 `event` 类型字段与非空的 `data` 正文字符串。其 `toString()` 方法仅输出 `eventLength` 与 `dataLength` 长度，避免在日常调试日志中打印完整事件名称或模型输出流。
 
+### 内联媒体与原生回放
+
+`ProviderAdapter.mediaCapabilities()` 按用户内容与工具结果分别声明当前编码器可表达的模态。Platform
+将此能力与模型的 `inputModalities` 取交集，把 durable Blob 引用转换为 attempt-only Base64 data URI；
+编码器不访问 Blob 存储，也不为附件生成私网地址或预签名 URL。未声明能力的 adapter 默认为空。
+
+| 协议 | 用户内容 | 工具结果 | Base64 wire 形态 |
+| --- | --- | --- | --- |
+| OpenAI Chat | 配置启用的 IMAGE / AUDIO / PDF | 无媒体 | 图片 `image_url.url`；音频 `input_audio.data/format`；PDF `file.file_data` |
+| OpenAI Responses | 图片、PDF | 图片 | `input_image.image_url`、`input_file.file_data` |
+| Anthropic | 图片、PDF | 图片、PDF | `source.type=base64`、`source.media_type/data` |
+| Gemini | 图片、音频、视频、PDF | 图片、音频、视频、PDF | `inlineData.mimeType/data` |
+
+Chat 的 `openAiChatMediaTypes` 缺省为空；PDF 映射为 Runtime `DOCUMENT`。能力声明不替代编码器的
+MIME / 格式校验，也不承诺具体上游模型支持该模态。Chat 单个纯文本块保持字符串，多块或媒体使用数组。
+
+Chat、Responses、Gemini 在最终 UTF-8 序列化后实施 **192 MiB 应用安全上限**；Anthropic 保持
+**32 MiB** 上限。超限明确失败，不截断、不改写请求；具体供应商仍可能有更严格限制。
+
+附件物化必须原样保留 assistant 的 `ProviderReplayState`，包括 Chat `reasoning_content`、
+Responses `encrypted_content`、Anthropic thinking/signature/redacted thinking 和 Gemini
+`thoughtSignature`。原生回放仍要求 format、affinity、源前缀 hash 与 durable 内容一致；本边界不伪造思考，
+不取消损坏校验，也不把不透明签名或加密数据当作普通思考文本。
+
 ### HttpSseLimits
 
 [`HttpSseLimits`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/transport/HttpSseLimits.java) 统一定义流式传输与错误响应的字节级有界限制：
