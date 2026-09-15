@@ -278,13 +278,15 @@ Commands 与 Work，不增加表或调度协议。
 
 Thread version 是 Thread 行结构与控制状态的 CAS / invalidation cursor，不是完整
 Snapshot 的 ETag。Model 流式 delta 先在单个 execution 内按默认 `200ms / 256 events /
-64KiB` 的时间与容量阈值聚合；每条 delta 保留只读 ownership fence，flush 时再次
-fence，并以一次 Invocation UPDATE 保存最新 text/thinking checkpoint。事务提交后，
-单 drain owner 才在事务和状态 monitor 外按原 sequence 逐条发布 realtime。纯工具
-批次不更新 checkpoint；terminal 在一次 UPDATE 中将未刷安全内容并入终态
-checkpoint，retry 在一次 `RUNNING -> READY` UPDATE 中将其冻结到失败审计并清空活动
-checkpoint。checkpoint 仍可在相同 Thread version 下推进，因此恢复与 gap 对账必须
-重新读取完整 Snapshot，不能仅凭 version 相等跳过响应内容。
+64KiB` 的时间与容量阈值聚合；delta 只做本地缓冲，ownership fence 延后到提交边界
+（flush / terminal / retry）在同一次短事务内重校验 `RUNNING` + attempt + claimed
+lease，并以一次 Invocation UPDATE 保存最新 text/thinking checkpoint。所有权丢失由
+下一围栏边界或 heartbeat 收敛，任何边界都拒绝提交并整体丢弃缓冲事件。事务提交后，
+单 drain owner 才在事务和状态 monitor 外按原 sequence 以有界分块批量发布 realtime，
+不构造无界列表或单次无界调用。纯工具批次不更新 checkpoint；terminal 在一次 UPDATE 中
+将未刷安全内容并入终态 checkpoint，retry 在一次 `RUNNING -> READY` UPDATE 中将其冻结
+到失败审计并清空活动 checkpoint。checkpoint 仍可在相同 Thread version 下推进，因此恢复
+与 gap 对账必须重新读取完整 Snapshot，不能仅凭 version 相等跳过响应内容。
 
 ### Canvas：Command 与 Function
 

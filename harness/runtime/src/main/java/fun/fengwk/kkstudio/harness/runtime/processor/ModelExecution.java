@@ -45,10 +45,11 @@ import java.util.function.Consumer;
  *
  * <p>Listener 回调在持久化 RUNNING 落地前由回调门控缓冲；两阶段激活（{@link #activate}）：先安全 attach handle，再持久化
  * markRunning，最后调用外部 {@code handle.activate()}（通知 Gateway 打开回调门控），成功后按到达顺序重放缓冲信号。 激活后通过
- * per-execution 单 drain owner 顺序处理流式增量事件、内部批次 FLUSH 与终态信号； 每 delta
- * 执行只读所有权围栏，按有界时间窗口与容量阈值聚合为批次，在独立的短事务中单次落地最新 checkpoint， commit 后在事务与 monitor 外按原 sequence
- * 逐条发布；纯工具批次仅通过 fence 并推进 sequence 水位，不更新 checkpoint； terminal / retry 信号直接吸收未刷批次，在同一次状态事务中单次更新
- * ModelInvocation； lost ownership 或 Stop 竞态立即收敛关闭，绝不补写或发布未提交批次。
+ * per-execution 单 drain owner 顺序处理流式增量事件、内部批次 FLUSH 与终态信号； delta
+ * 只做本地缓冲，按有界时间窗口与容量阈值聚合为批次，围栏只在提交边界（flush / terminal / retry）内以同一次短事务重校验 RUNNING + attempt +
+ * claimed lease，随后单次落地最新 checkpoint， commit 后在事务与 monitor 外按原 sequence 以有界分块批量发布； 纯工具批次仅通过 fence
+ * 并推进 sequence 水位，不更新 checkpoint； terminal / retry 信号直接吸收未刷批次，在同一次状态事务中单次更新 ModelInvocation； lost
+ * ownership 或 Stop 竞态立即收敛关闭，绝不补写或发布未提交批次。
  */
 @Slf4j
 final class ModelExecution implements ModelGateway.Listener {
@@ -468,25 +469,14 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * 处理一个 stream delta：per-delta 纯 fence 校验 RUNNING + attempt 与 lease 所有权； 容量超限时同步 flush
-   * 形成背压；text/thinking delta 更新 lastSafeSequence； 未满容量时调度单次无防抖批次定时器。整个处理与发布在单 drain owner 内顺序执行。
+   * 处理一个 stream delta：per-delta 只做本地缓冲，不触达数据库； 容量超限时同步 flush（提交前在同一事务内重校验 RUNNING + attempt +
+   * claimed lease）形成背压；text/thinking delta 更新 lastSafeSequence； 未满容量时调度单次无防抖批次定时器。整个处理与发布在单 drain
+   * owner 内顺序执行。
+   *
+   * <p>所有权损失的检测因此不在每个 token 上发生，而收敛到批次定时器 / 容量 flush / terminal 的提交围栏，或 heartbeat 丢失 lease 后触发的
+   * {@link #abandon}：尚未提交的缓冲事件在 flush 失败时整体丢弃，绝不发布。
    */
   private Applied processEvent(ProviderStreamEvent event) {
-    Instant now = clock.instant();
-    boolean fenced;
-    try {
-      fenced = Boolean.TRUE.equals(store.transaction(tx -> checkRunningOwnership(tx, now)));
-    } catch (RuntimeException failure) {
-      log.warn(
-          "cannot verify running ownership for {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(failure));
-      throw new BatchInfrastructureException("running ownership fence failed", failure);
-    }
-    if (!fenced) {
-      return Applied.LOST;
-    }
-
     long eventBytes = StreamFlushConfig.eventPayloadBytes(event);
     StreamFlushConfig flushConfig = config.streamFlushConfig();
 
@@ -776,14 +766,6 @@ final class ModelExecution implements ModelGateway.Listener {
     batchItems.clear();
     batchPayloadBytes = 0;
     return Applied.PROGRESSED;
-  }
-
-  private boolean checkRunningOwnership(HarnessStore.Transaction tx, Instant now) {
-    ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-    if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
-      return false;
-    }
-    return model.status() == ModelInvocationStatus.RUNNING && model.attempt() == attempt;
   }
 
   private Applied finishSuccessLocked(ProviderCompletion completion, List<Publish> publishes) {
@@ -1130,10 +1112,20 @@ final class ModelExecution implements ModelGateway.Listener {
     }
   }
 
+  /**
+   * 按 sequence 顺序发布一批已提交 delta。
+   *
+   * <p>发布以 {@link StreamFlushConfig} 的批次上界分块（事件数 + 增量载荷字节），每个分块恰好调用一次 {@link
+   * RealtimeEventSink#appendAll}：终态补齐的大量 gap delta 或单个超大事件都不会构造无界列表或单次无界调用。分块失败按调用隔离，只降低实时体验，
+   * 绝不改变已提交的 durable 状态或终态。
+   */
   private void publishAll(List<Publish> publishes) {
     if (compaction) {
       return;
     }
+    StreamFlushConfig publishConfig = config.streamFlushConfig();
+    List<RealtimeEvent> chunk = new ArrayList<>();
+    long chunkPayloadBytes = 0;
     for (Publish publish : publishes) {
       if (publish.sequence() > lastCommittedSequence) {
         throw new IllegalStateException(
@@ -1142,18 +1134,35 @@ final class ModelExecution implements ModelGateway.Listener {
                 + "; committed watermark is "
                 + lastCommittedSequence);
       }
-      appendRealtime(publish.event(), publish.sequence());
+      long payloadBytes = StreamFlushConfig.eventPayloadBytes(publish.event());
+      if (!chunk.isEmpty()
+          && (chunk.size() >= publishConfig.maxEvents()
+              || chunkPayloadBytes + payloadBytes > publishConfig.maxPayloadBytes())) {
+        dispatchRealtime(chunk);
+        chunk = new ArrayList<>();
+        chunkPayloadBytes = 0;
+      }
+      chunk.add(toRealtime(publish));
+      chunkPayloadBytes += payloadBytes;
     }
+    dispatchRealtime(chunk);
   }
 
-  private void appendRealtime(ProviderStreamEvent event, long sequence) {
+  /** 单次有界批量发布；sink 异常在此隔离，绝不影响 durable 状态与调用方返回的终态。 */
+  private void dispatchRealtime(List<RealtimeEvent> events) {
+    if (events.isEmpty()) {
+      return;
+    }
     try {
-      realtimeEventSink.append(
-          new RealtimeEvent.ModelDelta(
-              threadId, invocationId, attempt, sequence, event, clock.instant()));
+      realtimeEventSink.appendAll(events);
     } catch (RuntimeException failure) {
       log.warn("realtime model delta projection failed for invocation {}", invocationId, failure);
     }
+  }
+
+  private RealtimeEvent toRealtime(Publish publish) {
+    return new RealtimeEvent.ModelDelta(
+        threadId, invocationId, attempt, publish.sequence(), publish.event(), clock.instant());
   }
 
   private void cancelHandle() {

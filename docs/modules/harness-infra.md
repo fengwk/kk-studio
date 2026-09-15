@@ -169,7 +169,9 @@ Dispatcher 在初始化时分配唯一的 `nodeInstanceId`，并在每次执行 
 
 ### Realtime source / sink
 
-`PostgresqlRealtimeEventSink` 负责向 PostgreSQL 的 `harness_realtime` channel 发送实时事件。当编码后的 Canonical EVENT JSON 荷载超过 `7900` 字节（UTF-8 编码）时，自动降级发送紧凑的 RESYNC 通知，并将原因标记为 `EVENT_TOO_LARGE`。[`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) 负责规范化编解码，对字段集合、重复字段、尾随字符与 JSON 格式执行确定性严格校验。
+`PostgresqlRealtimeEventSink` 负责向 PostgreSQL 的 `harness_realtime` channel 发送实时事件。单条 `append` 以参数化 `pg_notify` 发送；当编码后的 Canonical EVENT JSON 荷载超过 `7900` 字节（UTF-8 编码）时，自动降级发送紧凑的 RESYNC 通知，并将原因标记为 `EVENT_TOO_LARGE`。
+
+批量 `appendAll` 把一个已提交有界批次压缩为每个分块一次 SQL 往返：分块按事件数（`256`）与编码后荷载字节（`256KiB`）双重上界切分，通过 `select pg_notify(?, payload) from unnest(?::text[]) with ordinality ... order by ord` 按输入顺序逐条发送，每个事件仍使用自己独立的 canonical envelope（超限事件同样只把自己降级为 RESYNC）。因此通知顺序与逐条 `append` 完全一致，同时把 N 次往返收敛为有界常数次。JDBC `Array` 在成功与异常路径都必须释放。数据库异常直接向上传播，由 Runtime 既有边界隔离。[`RealtimeNotificationCodec`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodec.java) 负责规范化编解码，对字段集合、重复字段、尾随字符与 JSON 格式执行确定性严格校验。
 
 [`PostgresqlRealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSource.java) 管理本地事件订阅与分发。长连接与底层监听由共享的 PostgreSQL 监听循环统一维护，通过调用 `onNotification` 投递收到的消息荷载；在连接建立或重连成功后，通过 `onResync` 触发同步。合法 EVENT 按照所属 Thread 精确分发给对应的本地订阅方；当收到畸变或未知消息，以及连接断开重连时，触发全部本地订阅方的快照恢复回调。内部通过全局生命周期锁、Source 级回调完成围栏与 Subscriber 级独立围栏保证并发安全，关闭后不再产生任何回调，用户业务回调始终在全局锁外部执行。
 
@@ -230,7 +232,7 @@ PostgreSQL 临时断连不会改写已提交的数据；Work 租约到期后，�
 - 终态防御（Final Work Fence）：Processor 的业务数据持久化先于 Work 终态变更。`completeWork` 在排他锁下校验 `lease_token` 与认领时的 `wake_version`；若执行期间有新唤醒推进了版本号，系统清除租约并保留任务行供后续调度；若租约已失效则抛出异常回滚事务。
 - 执行器过载恢复：Worker 线程池拒绝任务时，Dispatcher 校验租约有效性后通过延迟 `rescheduleWork` 释放租约；若归还失败则等待租约自然超时后由后续调度恢复。
 - 通知通道容错：NOTIFY 唤醒信号出现丢失、乱序或重复时，系统通过后台固定周期的定期轮询与租约到期重认领机制实现最终一致与收敛。
-- 实时广播降级：EVENT 载荷超过 7900 字节时，Sink 改发 RESYNC；通知畸变、类型未知或监听连接重建时，Source 通知订阅方重新拉取持久化快照。数据库发送失败向上层传播，并由 Runtime 的实时事件边界隔离。
+- 实时广播降级：EVENT 载荷超过 7900 字节时，Sink 改发 RESYNC；批量 `appendAll` 保持同一逐事件降级规则，分块上界为 256 个事件或 256KiB 编码后荷载，且总往返次数有界。通知畸变、类型未知或监听连接重建时，Source 通知订阅方重新拉取持久化快照。未提交事务不产生任何通知；数据库发送失败向上层传播，并由 Runtime 的实时事件边界隔离。
 - 本地资源不可变性：LocalFileResourceStore 采用 create-only 写入与原子硬链接发布；任何阶段检测到文件损坏、符号链接或摘要大小不符，均抛出 `IllegalStateException` 阻断读取与发布。
 - 级联删除顺序：级联清理按锁序自底向上执行，先清理下游的 Command、Model、Tool 与 Work 实体，再清理 Thread；Entry 树先删除叶子节点，最终删除 ROOT 节点与 Session。
 
@@ -280,7 +282,7 @@ maxDispatchTasks
 - [`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java)、[`PostgresqlInvocationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlInvocationTest.java)：验证并发锁序递增控制、Invocation 状态流转与终态事实的一致性。
 - [`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java)、[`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java)：验证任务 claim、lease、wake、NOTIFY 唤醒与周期轮询语义。
 - [`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherDrainTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherDrainTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)：验证单次排空循环、轮询调度、有界分发、执行器拒绝处理与平滑停止。
-- [`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java)、[`PostgresqlRealtimeEventSinkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkTest.java)、[`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)：验证 Source 围栏控制、超限降级发送 RESYNC 与规范编解码。
+- [`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java)、[`PostgresqlRealtimeEventSinkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkTest.java)、[`PostgresqlRealtimeEventSinkIntegrationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkIntegrationTest.java)、[`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)：验证 Source 围栏控制、单条与批量发送的规范编解码、超限降级发送 RESYNC、分块上界与 Array 释放；真实 PostgreSQL 集成测试验证批量投递保序、chunk 边界、批量内单条降级与回滚不产生任何通知。
 - [`LocalFileResourceStoreTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStoreTest.java)：验证基于内容的哈希寻址、并发 create-only 原子发布、NOFOLLOW 打开与精确 size/sha 校验。
 
 ---
