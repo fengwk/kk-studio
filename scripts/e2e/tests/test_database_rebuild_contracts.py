@@ -136,6 +136,15 @@ require_external_work_directory
         self.assertNotEqual(0, result.returncode)
         self.assertIn("backup output must be outside the repository", result.stderr)
 
+    def test_work_directory_resolution_does_not_require_realpath(self):
+        """The NAS BusyBox host has Python but no standalone realpath binary."""
+        source = SCRIPT.read_text()
+        preflight = function_body(SCRIPT, "preflight")
+        work_directory_guard = function_body(SCRIPT, "require_external_work_directory")
+        self.assertNotIn("require_command realpath", preflight)
+        self.assertIn("os.path.realpath", work_directory_guard)
+        self.assertNotIn("$(realpath", source)
+
     def test_script_is_executable_and_has_strict_shell_defaults(self):
         """Strict mode and private artifact permissions are non-negotiable."""
         source = SCRIPT.read_text()

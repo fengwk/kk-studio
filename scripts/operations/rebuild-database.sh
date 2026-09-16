@@ -153,7 +153,13 @@ require_positive_integer() {
 
 require_external_work_directory() {
   local resolved_work_dir
-  resolved_work_dir=$(realpath -m "$WORK_DIR")
+  resolved_work_dir=$(python3 - "$WORK_DIR" <<'PY'
+import os
+import sys
+
+print(os.path.realpath(sys.argv[1]))
+PY
+  )
   case "$resolved_work_dir" in
     "$APP_HOME"|"$APP_HOME"/*)
       fail "backup output must be outside the repository"
@@ -259,7 +265,6 @@ capture_database_metadata() {
 preflight() {
   require_command docker
   require_command python3
-  require_command realpath
   require_command sha256sum
   require_identifier "$DB_NAME" "database name"
   require_identifier "$DB_USER" "database user"
