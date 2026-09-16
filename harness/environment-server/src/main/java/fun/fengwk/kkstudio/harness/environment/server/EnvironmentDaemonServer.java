@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -41,23 +42,25 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /**
- * Environment daemon 的服务端会话核心：唯一拥有连接代际的握手、sequence、lease、pending invocation 与终态状态。
+ * Environment daemon 的服务端会话核心：唯一拥有连接代际的握手、租约围栏、在途 invocation 与终态状态。
  *
- * <p>协议为当前 daemon wire v3：HELLO scope 为 null 且 payload 携带 {@code registrationToken}；核心通过 {@link
- * DaemonRegistrationDirectory} 解析环境身份，通过 {@link DaemonLeaseStore} 以 {@code (environment_id,
- * owner_node_id, lease_token)} 围栏原子抢占路由（已有活跃路由返回 RETRY_LATER），成功后下发 WELCOME。READY、HEARTBEAT
- * 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。
+ * <p>协议为当前 daemon wire：HELLO scope 为 null 且 payload 携带 {@code registrationToken} 与规范随机 {@code
+ * daemonInstanceId}；核心通过 {@link DaemonRegistrationDirectory} 解析环境身份，通过 {@link DaemonLeaseStore} 以
+ * {@code (environment_id, owner_node_id, lease_token)} 围栏原子抢占路由（已有活跃路由返回 RETRY_LATER），成功后下发
+ * WELCOME。READY、HEARTBEAT 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。
  *
- * <p><b>并发所有权：</b>调用只按 {@code (environmentId, invocationId)} 关联；同一 Environment 的多个 invocation
- * 立即发送并并发持有， 不存在 per-Environment 并发槽位、队列或容量配置。同一 Environment 内重复的活动 {@code invocationId} 属于调用方错误。
+ * <p><b>实例身份与重连恢复：</b>调用只按 {@code (environmentId, invocationId)} 关联，物理连接失效不终结在途调用。同一 {@code
+ * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 重放每个在途 INVOKE，Daemon journal 负责重放 STARTED
+ * 或终态而不重复执行。只有身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用才被判定为结果不确定（exactly-once 通知）。
  *
  * <p><b>终态唯一：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation 的迟到
- * PARTIAL/STARTED 静默丢弃，未知 invocation 的回调按协议违规关闭连接。
+ * STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。
  *
- * <p><b>锁边界：</b>每个连接一代的 {@code gate} 只串行化入站协议处理；{@code state} 只保护该连接的协议字段；{@code inventory} 保护连接与
+ * <p><b>锁边界：</b>每个连接一代的 {@code gate} 只串行化入站协议处理；{@code state} 只保护该连接的协议字段；{@code inventory} 保护环境 与
  * invocation 目录。锁顺序固定为 {@code gate > state > inventory}；租约存储访问、会话监听器回调与连接关闭都在这些锁之外执行。
  *
  * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
@@ -77,14 +80,15 @@ public final class EnvironmentDaemonServer
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
 
-  /** 保护连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
+  /** 保护环境/连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
   private final Object inventory = new Object();
 
   private final Map<String, ConnectionState> connections = new HashMap<>();
-  private final Map<EnvironmentId, ConnectionState> environmentConnections = new HashMap<>();
+  private final Map<EnvironmentId, EnvironmentState> environments = new HashMap<>();
   private final Map<EnvironmentId, LinkedHashMap<UUID, ActiveInvocation>> invocationsByEnvironment =
       new HashMap<>();
   private final Map<EnvironmentId, ArrayDeque<UUID>> invocationTombstones = new HashMap<>();
+  private final AtomicLong connectionGenerations = new AtomicLong();
 
   public EnvironmentDaemonServer(
       DaemonLeaseStore leaseStore,
@@ -103,7 +107,7 @@ public final class EnvironmentDaemonServer
   public void open(DaemonChannel channel) {
     Objects.requireNonNull(channel, "channel");
     String connectionId = requireNonBlank(channel.connectionId(), "connectionId");
-    ConnectionState state = new ConnectionState(channel);
+    ConnectionState state = new ConnectionState(channel, connectionGenerations.incrementAndGet());
     ConnectionState previous;
     synchronized (inventory) {
       previous = connections.put(connectionId, state);
@@ -132,9 +136,6 @@ public final class EnvironmentDaemonServer
       try {
         DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
         receivedEnvironmentId = envelope.environmentId();
-        if (!state.acceptInbound(envelope, envelopeCodec.readPayload(envelope))) {
-          return;
-        }
         handleInbound(state, envelope, deferred);
       } catch (RuntimeException error) {
         protocolError = error;
@@ -147,7 +148,7 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 幂等关闭连接代际：解绑路由、终结全部未完成调用并关闭传输。 */
+  /** 幂等关闭连接代际：解绑路由、释放租约围栏并关闭传输；在途调用保留等待同实例重连。 */
   @Override
   public void close(String connectionId) {
     Objects.requireNonNull(connectionId, "connectionId");
@@ -165,7 +166,7 @@ public final class EnvironmentDaemonServer
     Objects.requireNonNull(environmentId, "environmentId");
     ConnectionState state;
     synchronized (inventory) {
-      state = environmentConnections.get(environmentId);
+      state = connectionOf(environmentId);
     }
     return state != null && state.isReady();
   }
@@ -181,7 +182,7 @@ public final class EnvironmentDaemonServer
     Objects.requireNonNull(environmentId, "environmentId");
     ConnectionState state;
     synchronized (inventory) {
-      state = environmentConnections.get(environmentId);
+      state = connectionOf(environmentId);
     }
     if (state == null) {
       return false;
@@ -201,8 +202,9 @@ public final class EnvironmentDaemonServer
   public Set<EnvironmentId> readyEnvironments() {
     Set<EnvironmentId> ready = new HashSet<>();
     synchronized (inventory) {
-      for (Map.Entry<EnvironmentId, ConnectionState> entry : environmentConnections.entrySet()) {
-        if (entry.getValue().isReady()) {
+      for (Map.Entry<EnvironmentId, EnvironmentState> entry : environments.entrySet()) {
+        ConnectionState state = entry.getValue().connection;
+        if (state != null && state.isReady()) {
           ready.add(entry.getKey());
         }
       }
@@ -228,10 +230,11 @@ public final class EnvironmentDaemonServer
     UUID invocationId = parseUuid(request.call().id(), "call.id");
 
     ConnectionState state;
+    UUID leaseToken;
     synchronized (inventory) {
-      state = environmentConnections.get(environmentId);
+      state = connectionOf(environmentId);
+      leaseToken = state == null ? null : state.leaseToken;
     }
-    UUID leaseToken = state == null ? null : state.leaseToken;
     if (state == null || leaseToken == null || !state.isReady()) {
       throw unavailable(environmentId, descriptor.id().value());
     }
@@ -256,33 +259,47 @@ public final class EnvironmentDaemonServer
                 descriptor.version(),
                 request.call().argumentsJson(),
                 request.timeout()));
-    ActiveInvocation active = new ActiveInvocation(environmentId, state, invocationId, listener);
-    DaemonSendOutcome outcome;
+    ActiveInvocation active =
+        new ActiveInvocation(environmentId, invocationId, listener, invokePayload);
+    DaemonOfferResult outcome = null;
+    RuntimeException sendFailure = null;
     synchronized (state) {
       if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
         throw unavailable(environmentId, descriptor.id().value());
       }
       register(active);
-      outcome = state.sendOutcome(DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
+      try {
+        outcome = state.offer(DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
+        if (outcome == DaemonOfferResult.ACCEPTED) {
+          active.sentGeneration = state.generation;
+        }
+      } catch (RuntimeException error) {
+        sendFailure = error;
+      }
     }
-    if (outcome == DaemonSendOutcome.SENT) {
+    if (sendFailure != null) {
+      // 传输在递交过程中失败：连接失效，调用保持活动并由同实例重连以同一 invocationId 重放。
+      close(state.connection.connectionId());
+      return active;
+    }
+    if (outcome == DaemonOfferResult.ACCEPTED) {
       return active;
     }
     unregister(active);
     active.markTerminal();
-    if (outcome == DaemonSendOutcome.NOT_SENT) {
-      // 连接在准入与写入之间失效：帧肯定未送达 daemon，调用肯定未执行。
-      throw unavailable(environmentId, descriptor.id().value());
+    if (outcome == DaemonOfferResult.BUSY) {
+      // 本地队列容量/字节预算拒绝：帧肯定未发送，连接仍然可用，调用方可以安全重试。
+      throw new EnvironmentCapabilityBusyException(
+          "daemon outbound queue is full for environment " + environmentId);
     }
-    close(state.connection.connectionId());
-    throw new EnvironmentCapabilitySendUncertainException(
-        "INVOKE send outcome is uncertain for environment " + environmentId);
+    // 连接已关闭：帧肯定未发送，调用肯定未执行。
+    throw unavailable(environmentId, descriptor.id().value());
   }
 
   /**
    * 终结一次由调用方判定超时或放弃的调用：移出活动目录、登记 tombstone 并至多发送一次 CANCEL。
    *
-   * <p>该方法不向 listener 发送终态；超时判定由调用方在自身 deadline 上完成。
+   * <p>该方法不向 listener 发送终态；超时判定由调用方在自身 deadline 上完成。调用被放弃后不再随重连重放，因此即使 CANCEL 未能 送达也不会重复执行。
    */
   public void expire(EnvironmentCapabilityExecutionHandle handle) {
     Objects.requireNonNull(handle, "handle");
@@ -303,14 +320,11 @@ public final class EnvironmentDaemonServer
         return;
       }
       active.markTerminal();
-      state = environmentConnections.get(active.environmentId);
-      if (state != active.connection) {
-        return;
-      }
       addTombstone(active.environmentId, active.invocationId);
+      state = connectionOf(active.environmentId);
     }
-    if (shouldCancel) {
-      send(state, DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
+    if (shouldCancel && state != null) {
+      offer(state, DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
     }
   }
 
@@ -352,16 +366,11 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  private boolean consumeTombstone(EnvironmentId environmentId, UUID invocationId) {
+  private List<ActiveInvocation> activeInvocations(EnvironmentId environmentId) {
     synchronized (inventory) {
-      ArrayDeque<UUID> tombstones = invocationTombstones.get(environmentId);
-      if (tombstones == null || !tombstones.remove(invocationId)) {
-        return false;
-      }
-      if (tombstones.isEmpty()) {
-        invocationTombstones.remove(environmentId);
-      }
-      return true;
+      LinkedHashMap<UUID, ActiveInvocation> invocations =
+          invocationsByEnvironment.get(environmentId);
+      return invocations == null ? List.of() : List.copyOf(invocations.values());
     }
   }
 
@@ -399,23 +408,23 @@ public final class EnvironmentDaemonServer
           "envelope environmentId does not match bound connection: " + envelope.environmentId());
     }
     switch (envelope.messageType()) {
-      case HELLO -> handleHello(state, envelope);
+      case HELLO -> handleHello(state, envelope, deferred);
       case READY -> handleReady(state, envelope, deferred);
       case HEARTBEAT -> handleHeartbeat(state, envelope);
       case STARTED -> handleStarted(state, envelope);
-      case PARTIAL -> handlePartial(state, envelope, deferred);
+      case PROGRESS -> handleProgress(state, envelope, deferred);
       case COMPLETED -> handleCompleted(state, envelope, deferred);
       case FAILED -> handleFailed(state, envelope, deferred);
       case CANCELLED -> handleCancelled(state, envelope, deferred);
-      case ACK -> handleAck(state, envelope);
       case ERROR -> handleError(state, envelope);
       case WELCOME, INVOKE, CANCEL -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to server");
     }
   }
 
-  /** 处理 daemon 首帧 HELLO：解析注册凭据、抢占路由租约并完成 WELCOME 回包。 */
-  private void handleHello(ConnectionState state, DaemonEnvelope envelope) {
+  /** 处理 daemon 首帧 HELLO：解析实例身份与注册凭据、抢占路由租约并完成 WELCOME 回包。 */
+  private void handleHello(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     if (state.helloReceived) {
       throw new DaemonProtocolException("HELLO may only be sent once per connection");
     }
@@ -426,7 +435,8 @@ public final class EnvironmentDaemonServer
     ObjectNode payload = envelopeCodec.readPayload(envelope);
     rejectUnexpectedFields(
         payload,
-        Set.of("protocolVersion", "registrationToken", "capabilityCatalogVersion"),
+        Set.of(
+            "protocolVersion", "registrationToken", "capabilityCatalogVersion", "daemonInstanceId"),
         "HELLO payload");
     if (envelope.protocolVersion() != DaemonProtocol.VERSION
         || requiredLong(payload, "protocolVersion", "HELLO payload") != DaemonProtocol.VERSION) {
@@ -437,6 +447,9 @@ public final class EnvironmentDaemonServer
       throw new DaemonProtocolException(
           "HELLO capabilityCatalogVersion does not match server catalog");
     }
+    String daemonInstanceId =
+        parseUuid(requiredText(payload, "daemonInstanceId", "HELLO payload"), "daemonInstanceId")
+            .toString();
     String registrationToken = requiredText(payload, "registrationToken", "HELLO payload");
 
     DaemonRegistration registration =
@@ -476,25 +489,68 @@ public final class EnvironmentDaemonServer
       if (previous != null) {
         closeConnectionState(previous);
       }
+      // 身份不同的新进程接管：旧进程已不可能再给出该 Environment 的终态，其全部在途调用按结果不确定终结恰好一次。
+      List<ActiveInvocation> abandoned =
+          replaceDaemonInstance(environmentId, daemonInstanceId)
+              ? takeAbandonedInvocations(environmentId)
+              : List.of();
       state.bind(environmentId, acquired.leaseToken());
       synchronized (inventory) {
-        environmentConnections.put(environmentId, state);
+        environmentOf(environmentId).connection = state;
+      }
+      for (ActiveInvocation active : abandoned) {
+        deferred.add(
+            () ->
+                active.listener.onError(
+                    new EnvironmentCapabilitySendUncertainException(
+                        "Environment daemon instance changed for "
+                            + environmentId
+                            + "; capability invocation outcome is uncertain.")));
       }
       ObjectNode welcomePayload = envelopeCodec.createPayload();
       welcomePayload.put("environmentId", environmentId.toString());
       welcomePayload.put("name", registration.displayName());
-      state.send(DaemonMessageType.WELCOME, null, welcomePayload.toString());
+      offer(state, DaemonMessageType.WELCOME, null, welcomePayload.toString());
     }
+  }
+
+  /**
+   * 记录新的 daemon 实例身份。
+   *
+   * @return 该 Environment 此前已有不同实例身份（新进程接管）时返回 true
+   */
+  private boolean replaceDaemonInstance(EnvironmentId environmentId, String daemonInstanceId) {
+    synchronized (inventory) {
+      EnvironmentState environment = environmentOf(environmentId);
+      String previous = environment.daemonInstanceId;
+      environment.daemonInstanceId = daemonInstanceId;
+      return previous != null && !previous.equals(daemonInstanceId);
+    }
+  }
+
+  /** 取走该 Environment 的全部在途调用并登记 tombstone：新进程无法再提供它们的终态，其迟到帧一律忽略。 */
+  private List<ActiveInvocation> takeAbandonedInvocations(EnvironmentId environmentId) {
+    List<ActiveInvocation> abandoned;
+    synchronized (inventory) {
+      LinkedHashMap<UUID, ActiveInvocation> invocations =
+          invocationsByEnvironment.remove(environmentId);
+      abandoned = invocations == null ? List.of() : List.copyOf(invocations.values());
+    }
+    for (ActiveInvocation active : abandoned) {
+      active.markTerminal();
+      addTombstone(environmentId, active.invocationId);
+    }
+    return abandoned;
   }
 
   private ConnectionState otherConnectionOf(ConnectionState self, EnvironmentId environmentId) {
     synchronized (inventory) {
-      ConnectionState existing = environmentConnections.get(environmentId);
+      ConnectionState existing = connectionOf(environmentId);
       return existing == self ? null : existing;
     }
   }
 
-  /** 处理 daemon READY 声明：围栏式登记 READY 能力并在锁外唤醒会话监听器。 */
+  /** 处理 daemon READY 声明：围栏式登记 READY 能力、唤醒会话监听器并重放同实例的在途调用。 */
   private void handleReady(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireHello(state);
@@ -524,6 +580,45 @@ public final class EnvironmentDaemonServer
       state.daemonOperatingSystem = capabilities.environment().operatingSystem();
     }
     deferred.add(() -> notifyEnvironmentReady(environmentId));
+    resendActiveInvocations(state, environmentId);
+  }
+
+  /**
+   * 以相同 invocationId 重放尚未在当前连接代际发出的在途 INVOKE。
+   *
+   * <p>Daemon 的 invocation journal 以 invocationId 去重：RUNNING 重放 STARTED，已终结重放终态，因此重放不会重复执行副作用。
+   * 本地队列拒绝不改变在途调用的存在，仅留待下一次 READY 或由调用方 deadline 收敛。
+   */
+  private void resendActiveInvocations(ConnectionState state, EnvironmentId environmentId) {
+    for (ActiveInvocation active : activeInvocations(environmentId)) {
+      if (active.sentGeneration == state.generation || active.isTerminal()) {
+        continue;
+      }
+      DaemonOfferResult outcome;
+      synchronized (state) {
+        if (!state.isReady() || active.sentGeneration == state.generation) {
+          continue;
+        }
+        try {
+          outcome =
+              state.offer(
+                  DaemonMessageType.INVOKE, active.invocationId.toString(), active.invokePayload);
+        } catch (RuntimeException transportFailure) {
+          outcome = null;
+        }
+        if (outcome == DaemonOfferResult.ACCEPTED) {
+          active.sentGeneration = state.generation;
+        }
+      }
+      if (outcome == null) {
+        // 传输在递交过程中失败：连接已失效。关闭包含租约存储访问，必须在连接状态锁之外执行。
+        close(state.connection.connectionId());
+        return;
+      }
+      if (outcome == DaemonOfferResult.CLOSED) {
+        return;
+      }
+    }
   }
 
   private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
@@ -538,21 +633,6 @@ public final class EnvironmentDaemonServer
     boolean ok = leaseStore.heartbeat(environmentId, leaseToken, timeout());
     if (!ok) {
       throw new DaemonProtocolException("route fence lost for environment " + environmentId);
-    }
-  }
-
-  private void handleAck(ConnectionState state, DaemonEnvelope envelope) {
-    requireReady(state);
-    requireNoInvocationId(envelope);
-    ObjectNode payload = envelopeCodec.readPayload(envelope);
-    rejectUnexpectedFields(payload, Set.of("acknowledgedSequence"), "ACK payload");
-    long acknowledgedSequence = requiredLong(payload, "acknowledgedSequence", "ACK payload");
-    long sent;
-    synchronized (state) {
-      sent = state.outboundSequence;
-    }
-    if (acknowledgedSequence < 0 || acknowledgedSequence >= sent) {
-      throw new DaemonProtocolException("ACK payload.acknowledgedSequence is not a sent frame");
     }
   }
 
@@ -575,7 +655,7 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  private void handlePartial(
+  private void handleProgress(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveInvocation active = callbackTarget(state, envelope);
     EnvironmentCapabilityResult result =
@@ -622,12 +702,12 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 返回匹配当前连接代际与 invocationId 的活动调用；已知迟到 invocation 返回 null，其余为协议错误。 */
+  /** 返回匹配 invocationId 的活动调用；已终结调用返回 null（迟到帧静默忽略），其余为协议错误。 */
   private ActiveInvocation callbackTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
     ActiveInvocation active = registeredInvocation(state.environmentId, invocationId);
-    if (active != null && active.connection == state) {
+    if (active != null) {
       return active;
     }
     if (hasTombstone(state.environmentId, invocationId)) {
@@ -638,33 +718,43 @@ public final class EnvironmentDaemonServer
   }
 
   private boolean isActive(ActiveInvocation active) {
-    if (active.terminal.get()) {
+    if (active.isTerminal()) {
       return false;
     }
     return registeredInvocation(active.environmentId, active.invocationId) == active;
   }
 
-  /** 原子终结并移除与入站连接和 invocationId 匹配的活动调用；已知迟到终态消费 tombstone 后忽略。 */
+  /**
+   * 原子终结并移除匹配 invocationId 的活动调用，并登记 tombstone。
+   *
+   * <p>tombstone 让同一 invocation 的迟到/重放终态被静默忽略：Daemon 的 journal 会在重连后重放终态，重放不是越权回调，也不得触发协议错误。
+   */
   private ActiveInvocation takeTerminalTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
     ActiveInvocation active = registeredInvocation(state.environmentId, invocationId);
-    if (active != null && active.connection == state) {
+    if (active != null) {
       unregister(active);
       active.markTerminal();
+      addTombstone(state.environmentId, invocationId);
       return active;
     }
-    if (consumeTombstone(state.environmentId, invocationId)) {
+    if (hasTombstone(state.environmentId, invocationId)) {
       return null;
     }
     throw new DaemonProtocolException(
         "daemon terminal callback does not own invocationId: " + envelope.invocationId());
   }
 
-  private boolean send(
+  /** 递交一帧；传输同步失败意味着连接已失效：断开该连接并返回 false。 */
+  private boolean offer(
       ConnectionState state, DaemonMessageType type, String invocationId, String payloadJson) {
-    DaemonSendOutcome outcome = state.send(type, invocationId, payloadJson);
-    return outcome == DaemonSendOutcome.SENT;
+    try {
+      return state.offer(type, invocationId, payloadJson) == DaemonOfferResult.ACCEPTED;
+    } catch (RuntimeException error) {
+      close(state.connection.connectionId());
+      return false;
+    }
   }
 
   /**
@@ -712,7 +802,7 @@ public final class EnvironmentDaemonServer
     close(state.connection.connectionId());
   }
 
-  /** 幂等清理连接代际：解绑路由租约、终结全部未完成调用，并将未终结调用通知为结果不确定。 */
+  /** 幂等清理连接代际：解绑路由租约并关闭传输；在途调用保留等待同实例重连重放。 */
   private void closeConnectionState(ConnectionState state) {
     EnvironmentId environmentId;
     UUID leaseToken;
@@ -722,19 +812,16 @@ public final class EnvironmentDaemonServer
         return;
       }
       state.cleaned = true;
-      state.sendFailed = true;
       environmentId = state.environmentId;
       leaseToken = state.leaseToken;
       closeAfterFlush = state.closeAfterFlush;
     }
-    List<ActiveInvocation> lost;
     synchronized (inventory) {
       if (environmentId != null) {
-        environmentConnections.remove(environmentId, state);
-        lost = removeInvocations(environmentId);
-        invocationTombstones.remove(environmentId);
-      } else {
-        lost = List.of();
+        EnvironmentState environment = environments.get(environmentId);
+        if (environment != null && environment.connection == state) {
+          environment.connection = null;
+        }
       }
       connections.remove(state.connection.connectionId(), state);
     }
@@ -752,25 +839,6 @@ public final class EnvironmentDaemonServer
       }
     } catch (RuntimeException ignored) {
     }
-    List<Runnable> deferred = new ArrayList<>();
-    for (ActiveInvocation active : lost) {
-      if (active.markTerminalIfOpen()) {
-        deferred.add(
-            () ->
-                active.listener.onError(
-                    new EnvironmentCapabilitySendUncertainException(
-                        "Daemon connection lost for environment "
-                            + active.environmentId
-                            + "; capability invocation outcome is uncertain.")));
-      }
-    }
-    runDeferred(deferred);
-  }
-
-  private List<ActiveInvocation> removeInvocations(EnvironmentId environmentId) {
-    LinkedHashMap<UUID, ActiveInvocation> invocations =
-        invocationsByEnvironment.remove(environmentId);
-    return invocations == null ? List.of() : List.copyOf(invocations.values());
   }
 
   private void notifyEnvironmentReady(EnvironmentId environmentId) {
@@ -795,6 +863,17 @@ public final class EnvironmentDaemonServer
 
   private EnvironmentServerSettings settings() {
     return Objects.requireNonNull(settings.get(), "settings");
+  }
+
+  /** 调用方必须持有 {@code inventory}；不存在时创建空状态。 */
+  private EnvironmentState environmentOf(EnvironmentId environmentId) {
+    return environments.computeIfAbsent(environmentId, ignored -> new EnvironmentState());
+  }
+
+  /** 调用方必须持有 {@code inventory}。 */
+  private ConnectionState connectionOf(EnvironmentId environmentId) {
+    EnvironmentState environment = environments.get(environmentId);
+    return environment == null ? null : environment.connection;
   }
 
   private static EnvironmentCapabilityUnavailableException unavailable(
@@ -890,27 +969,33 @@ public final class EnvironmentDaemonServer
   /**
    * 一次能力调用的所有权记录：终态唯一、CANCEL 至多一次，cancel/expire/连接清理竞争只产生一个赢家。
    *
-   * <p>{@link #cancel()} 只表达取消请求，不终结本地所有权；终态仍由 daemon 回调或连接清理给出。
+   * <p>{@link #cancel()} 只表达取消请求，不终结本地所有权；终态仍由 daemon 回调、实例接管或调用方 deadline 给出。
    */
   private final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
 
     private final EnvironmentId environmentId;
-    private final ConnectionState connection;
     private final UUID invocationId;
     private final EnvironmentCapabilityExecutionListener listener;
+    private final String invokePayload;
     private final AtomicBoolean terminal = new AtomicBoolean();
     private final AtomicBoolean cancelSent = new AtomicBoolean();
     private volatile boolean cancelled;
 
+    /**
+     * 最近一次成功递交 INVOKE 的连接代际；0 表示尚未递交。重连后与当前代际不同即触发重放，因此该字段的良性竞争最多导致一次冗余重放 （Daemon journal 以
+     * invocationId 去重）。
+     */
+    private volatile long sentGeneration;
+
     private ActiveInvocation(
         EnvironmentId environmentId,
-        ConnectionState connection,
         UUID invocationId,
-        EnvironmentCapabilityExecutionListener listener) {
+        EnvironmentCapabilityExecutionListener listener,
+        String invokePayload) {
       this.environmentId = environmentId;
-      this.connection = connection;
       this.invocationId = invocationId;
       this.listener = listener;
+      this.invokePayload = invokePayload;
     }
 
     @Override
@@ -921,7 +1006,13 @@ public final class EnvironmentDaemonServer
           return;
         }
       }
-      send(connection, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
+      ConnectionState state;
+      synchronized (inventory) {
+        state = connectionOf(environmentId);
+      }
+      if (state != null) {
+        offer(state, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
+      }
     }
 
     @Override
@@ -929,36 +1020,34 @@ public final class EnvironmentDaemonServer
       return cancelled;
     }
 
+    private boolean isTerminal() {
+      return terminal.get();
+    }
+
     private void markTerminal() {
       terminal.set(true);
     }
-
-    /** 未终结时标记终结并返回 true；已终结返回 false，保证终态只通知一次。 */
-    private boolean markTerminalIfOpen() {
-      return terminal.compareAndSet(false, true);
-    }
   }
 
-  /** 单个连接代际的协议状态与出站 sequence。 */
+  /** 单个连接代际的协议状态；{@code generation} 用于识别需要重放 INVOKE 的新连接。 */
   private final class ConnectionState {
 
     /** 只串行化该连接的入站协议处理；不与其它锁嵌套反向获取。 */
     private final Object gate = new Object();
 
     private final DaemonChannel connection;
+    private final long generation;
     private volatile UUID leaseToken;
     private volatile EnvironmentId environmentId;
     private volatile boolean helloReceived;
     private volatile DaemonOperatingSystem daemonOperatingSystem;
     private volatile boolean ready;
-    private volatile boolean sendFailed;
     private volatile boolean cleaned;
     private boolean closeAfterFlush;
-    private long outboundSequence;
-    private InboundEnvelopeIdentity lastInbound;
 
-    private ConnectionState(DaemonChannel connection) {
+    private ConnectionState(DaemonChannel connection, long generation) {
       this.connection = Objects.requireNonNull(connection, "connection");
+      this.generation = generation;
     }
 
     /** 完成 HELLO 绑定；重复绑定属于协议违规。 */
@@ -978,114 +1067,49 @@ public final class EnvironmentDaemonServer
 
     private boolean isReady() {
       return !cleaned
-          && !sendFailed
           && ready
           && connection.isOpen()
           && environmentId != null
           && leaseToken != null;
     }
 
-    private DaemonSendOutcome send(
+    private synchronized DaemonOfferResult offer(
         DaemonMessageType type, String invocationId, String payloadJson) {
-      synchronized (this) {
-        return sendOutcome(type, invocationId, payloadJson);
-      }
-    }
-
-    private synchronized DaemonSendOutcome sendOutcome(
-        DaemonMessageType type, String invocationId, String payloadJson) {
-      if (cleaned
-          || sendFailed
-          || !connection.isOpen()
-          || environmentId == null
-          || leaseToken == null) {
-        return DaemonSendOutcome.NOT_SENT;
+      if (cleaned || environmentId == null || leaseToken == null) {
+        return DaemonOfferResult.CLOSED;
       }
       String text = encode(type, environmentId, invocationId, payloadJson);
-      try {
-        if (connection.sendText(text)) {
-          return DaemonSendOutcome.SENT;
-        }
-        // 传输拒绝接受该帧：本次写入不可确认，连接进入不可用状态（fail-closed）。
-        sendFailed = true;
-        return DaemonSendOutcome.UNCERTAIN;
-      } catch (RuntimeException error) {
-        sendFailed = true;
-        return DaemonSendOutcome.UNCERTAIN;
-      }
+      return connection.offerText(text);
     }
 
     /** 协议错误帧：未绑定环境时回退到入站声明的 environmentId，入队成功后要求 flush 后关闭。 */
     private synchronized void enqueueError(
         EnvironmentId receivedEnvironmentId, String payloadJson) {
-      if (cleaned || sendFailed || !connection.isOpen()) {
+      if (cleaned || !connection.isOpen()) {
         return;
       }
       EnvironmentId scope = environmentId != null ? environmentId : receivedEnvironmentId;
       String text = encode(DaemonMessageType.ERROR, scope, null, payloadJson);
       try {
-        if (connection.sendText(text)) {
+        if (connection.offerText(text) == DaemonOfferResult.ACCEPTED) {
           closeAfterFlush = true;
-        } else {
-          sendFailed = true;
         }
       } catch (RuntimeException ignored) {
-        sendFailed = true;
+        // 传输不可用；连接关闭由 closeConnectionState 完成。
       }
     }
 
     private String encode(
         DaemonMessageType type, EnvironmentId scope, String invocationId, String payloadJson) {
       return envelopeCodec.encode(
-          new DaemonEnvelope(
-              DaemonProtocol.VERSION, type, scope, invocationId, outboundSequence++, payloadJson));
-    }
-
-    /** 入站 sequence 必须严格递增；完全相同的重放被静默丢弃，其余冲突为协议违规。 */
-    private synchronized boolean acceptInbound(DaemonEnvelope envelope, JsonNode payload) {
-      InboundEnvelopeIdentity next = InboundEnvelopeIdentity.from(envelope, payload);
-      if (lastInbound == null) {
-        lastInbound = next;
-        return true;
-      }
-      if (next.sequence == lastInbound.sequence + 1) {
-        lastInbound = next;
-        return true;
-      }
-      if (next.sequence == lastInbound.sequence) {
-        if (next.equals(lastInbound)) {
-          return false;
-        }
-        throw new DaemonProtocolException(
-            "inbound sequence reused by a conflicting envelope: " + next.sequence);
-      }
-      if (next.sequence < lastInbound.sequence) {
-        throw new DaemonProtocolException("inbound sequence moved backwards: " + next.sequence);
-      }
-      throw new DaemonProtocolException(
-          "inbound sequence must immediately follow "
-              + lastInbound.sequence
-              + ": "
-              + next.sequence);
+          new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payloadJson));
     }
   }
 
-  private record InboundEnvelopeIdentity(
-      int protocolVersion,
-      DaemonMessageType messageType,
-      EnvironmentId environmentId,
-      String invocationId,
-      long sequence,
-      JsonNode payload) {
+  /** Environment 级事实：当前 READY 连接与最近一次 accepted 的 daemon 进程身份；字段由 {@code inventory} 保护。 */
+  private static final class EnvironmentState {
 
-    private static InboundEnvelopeIdentity from(DaemonEnvelope envelope, JsonNode payload) {
-      return new InboundEnvelopeIdentity(
-          envelope.protocolVersion(),
-          envelope.messageType(),
-          envelope.environmentId(),
-          envelope.invocationId(),
-          envelope.sequence(),
-          payload);
-    }
+    private String daemonInstanceId;
+    private ConnectionState connection;
   }
 }

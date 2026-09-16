@@ -6,6 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okio.ByteString;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,14 +37,10 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -55,6 +57,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String REGISTRATION_TOKEN = "test-registration-token";
+  private static final String DAEMON_INSTANCE_ID = "22222222-2222-2222-2222-222222222222";
   private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
@@ -94,47 +97,48 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
         "test wire frame must exceed the default 8 KiB Tomcat text buffer");
 
     FrameListener listener = new FrameListener();
-    WebSocket socket =
-        HttpClient.newHttpClient()
-            .newWebSocketBuilder()
-            .buildAsync(endpointUri(), listener)
-            .get(10, TimeUnit.SECONDS);
-
-    boolean readyReached = false;
+    OkHttpClient client = new OkHttpClient();
     try {
-      socket.sendText(ENVELOPE_CODEC.encode(helloEnvelope(0)), true).get(5, TimeUnit.SECONDS);
-      String welcomeJson = listener.awaitText(5_000);
-      assertEquals("WELCOME", readMessageType(welcomeJson));
+      WebSocket socket =
+          client.newWebSocket(
+              new Request.Builder().url(endpointUri().toASCIIString()).build(), listener);
 
-      // 危险帧：因为缓冲区已被调高，绝不能触发 close code 1009。
-      socket.sendText(readyEnvelope, true).get(5, TimeUnit.SECONDS);
-      // 轮询最多 10 秒，等待注册表标记为 READY
-      readyReached = awaitReady();
+      boolean readyReached = false;
+      try {
+        assertTrue(socket.send(ENVELOPE_CODEC.encode(helloEnvelope())));
+        String welcomeJson = listener.awaitText(5_000);
+        assertEquals("WELCOME", readMessageType(welcomeJson));
+
+        // 危险帧：因为缓冲区已被调高，绝不能触发 close code 1009。
+        assertTrue(socket.send(readyEnvelope));
+        // 轮询最多 10 秒，等待注册表标记为 READY
+        readyReached = awaitReady();
+      } finally {
+        closeQuietly(socket);
+      }
+
+      assertTrue(
+          readyReached,
+          "live registry did not mark environment READY within timeout; observed close code="
+              + listener.observedCloseCode
+              + " reason="
+              + listener.observedCloseReason);
+      assertNotEquals(
+          1009,
+          listener.observedCloseCode,
+          "server closed connection with code 1009 (frame too large) during the handshake");
+      assertTrue(
+          16L * 1024 * 1024 > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
+          "premise: gateway buffer limit must be raised above the 8 KiB default");
     } finally {
-      closeQuietly(socket);
+      client.dispatcher().executorService().shutdown();
+      client.connectionPool().evictAll();
     }
-
-    assertTrue(
-        readyReached,
-        "live registry did not mark environment READY within timeout; observed close code="
-            + listener.observedCloseCode
-            + " reason="
-            + listener.observedCloseReason);
-    assertNotEquals(
-        1009,
-        listener.observedCloseCode,
-        "server closed connection with code 1009 (frame too large) during the handshake");
-    assertTrue(
-        16L * 1024 * 1024 > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
-        "premise: gateway buffer limit must be raised above the 8 KiB default");
   }
 
   private static void closeQuietly(WebSocket socket) {
-    try {
-      socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(5, TimeUnit.SECONDS);
-    } catch (Exception ignored) {
-      // 服务端可能已经关闭；测试只关心握手是否完成且未出现 close code 1009，这一点在前面已经断言。
-    }
+    // 服务端可能已经关闭；测试只关心握手是否完成且未出现 close code 1009。
+    socket.close(1000, "test complete");
   }
 
   private boolean awaitReady() throws InterruptedException {
@@ -198,13 +202,12 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
             List.of(new DaemonSkillSourceSnapshot(FAT_SOURCE_ID, 1, REVISION, skills, List.of()))));
   }
 
-  private static DaemonEnvelope helloEnvelope(long sequence) {
+  private static DaemonEnvelope helloEnvelope() {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.HELLO,
         null,
         null,
-        sequence,
         "{"
             + "\"protocolVersion\":"
             + DaemonProtocol.VERSION
@@ -214,15 +217,18 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
             + "\","
             + "\"registrationToken\":\""
             + REGISTRATION_TOKEN
+            + "\","
+            + "\"daemonInstanceId\":\""
+            + DAEMON_INSTANCE_ID
             + "\"}");
   }
 
   private static DaemonEnvelope readyEnvelope(String payloadJson) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION, DaemonMessageType.READY, ENVIRONMENT_ID, null, 1, payloadJson);
+        DaemonProtocol.VERSION, DaemonMessageType.READY, ENVIRONMENT_ID, null, payloadJson);
   }
 
-  private static final class FrameListener implements WebSocket.Listener {
+  private static final class FrameListener extends WebSocketListener {
 
     private final StringBuilder currentMessage = new StringBuilder();
     private final CompletableFuture<String> nextMessage = new CompletableFuture<>();
@@ -231,35 +237,44 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     volatile String observedCloseReason;
 
     @Override
-    public void onOpen(WebSocket webSocket) {
-      webSocket.request(1);
+    public void onOpen(WebSocket webSocket, Response response) {
+      // 连接已建立，无需额外动作。
     }
 
     @Override
-    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-      currentMessage.append(data);
-      if (last) {
-        String complete = currentMessage.toString();
-        currentMessage.setLength(0);
-        nextMessage.complete(complete);
-      }
-      webSocket.request(1);
-      return CompletableFuture.completedFuture(null);
+    public void onMessage(WebSocket webSocket, String text) {
+      currentMessage.append(text);
+      String complete = currentMessage.toString();
+      currentMessage.setLength(0);
+      nextMessage.complete(complete);
     }
 
     @Override
-    public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
-      webSocket.request(1);
-      return CompletableFuture.completedFuture(null);
+    public void onMessage(WebSocket webSocket, ByteString bytes) {
+      // 该端点只传输文本帧。
     }
 
     @Override
-    public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+    public void onClosed(WebSocket webSocket, int statusCode, String reason) {
+      recordClose(statusCode, reason);
+    }
+
+    @Override
+    public void onClosing(WebSocket webSocket, int statusCode, String reason) {
+      recordClose(statusCode, reason);
+      webSocket.close(statusCode, null);
+    }
+
+    @Override
+    public void onFailure(WebSocket webSocket, Throwable error, Response response) {
+      recordClose(-1, error == null ? null : error.getMessage());
+    }
+
+    private void recordClose(int statusCode, String reason) {
       if (closeCount.incrementAndGet() == 1) {
         observedCloseCode = statusCode;
         observedCloseReason = reason;
       }
-      return CompletableFuture.completedFuture(null);
     }
 
     String awaitText(long timeoutMillis) throws Exception {

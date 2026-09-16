@@ -6,13 +6,12 @@ public enum DaemonMessageType {
   READY,
   HEARTBEAT,
   STARTED,
-  PARTIAL,
+  PROGRESS,
   COMPLETED,
   FAILED,
   CANCELLED,
   WELCOME,
   INVOKE,
   CANCEL,
-  ACK,
   ERROR
 }

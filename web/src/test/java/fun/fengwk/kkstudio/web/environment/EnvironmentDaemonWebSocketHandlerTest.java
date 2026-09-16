@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.web.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,14 +14,22 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketExtension;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.adapter.NativeWebSocketSession;
 
 import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonEndpoint;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 
-/** Environment Daemon handler 的连接装配、入站桥接与幂等解绑契约。 */
+import java.io.IOException;
+import java.util.List;
+
+/** Environment Daemon handler 的连接装配、压缩门禁、入站桥接与幂等解绑契约。 */
 class EnvironmentDaemonWebSocketHandlerTest {
+
+  private static final WebSocketExtension PERMESSAGE_DEFLATE =
+      new WebSocketExtension("permessage-deflate");
 
   @Test
   void exposesTheHarnessEnvironmentDaemonPath() {
@@ -32,9 +42,7 @@ class EnvironmentDaemonWebSocketHandlerTest {
     DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
         new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
-    WebSocketSession session = mock(WebSocketSession.class);
-    when(session.getId()).thenReturn("connection-id");
-    when(session.isOpen()).thenReturn(true);
+    WebSocketSession session = deflateSession("connection-id");
     handler.afterConnectionEstablished(session);
     ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
     verify(endpoint).open(connectionCaptor.capture());
@@ -57,6 +65,7 @@ class EnvironmentDaemonWebSocketHandlerTest {
     Session jsrSession = mock(Session.class);
     when(session.getId()).thenReturn("connection-id");
     when(session.isOpen()).thenReturn(true);
+    when(session.getExtensions()).thenReturn(List.of(PERMESSAGE_DEFLATE));
     when(session.getNativeSession(Session.class)).thenReturn(jsrSession);
 
     handler.afterConnectionEstablished(session);
@@ -64,6 +73,67 @@ class EnvironmentDaemonWebSocketHandlerTest {
     verify(session).setBinaryMessageSizeLimit(4 * 1024 * 1024);
     verify(jsrSession).setMaxTextMessageBufferSize(4 * 1024 * 1024);
     verify(jsrSession).setMaxBinaryMessageBufferSize(4 * 1024 * 1024);
+  }
+
+  /** 未协商 permessage-deflate 时：以 1010 关闭、不向会话核心开放通道、不套用消息缓冲。 */
+  @Test
+  void rejectsConnectionWithoutPermessageDeflate() throws Exception {
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
+    EnvironmentDaemonWebSocketHandler handler =
+        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+    WebSocketSession session = mock(WebSocketSession.class);
+    when(session.getId()).thenReturn("connection-id");
+    when(session.isOpen()).thenReturn(true);
+    when(session.getExtensions()).thenReturn(List.of(new WebSocketExtension("x-custom")));
+
+    handler.afterConnectionEstablished(session);
+
+    verify(session).close(CloseStatus.REQUIRED_EXTENSION);
+    verify(endpoint, never()).open(any());
+    verify(session, never()).setTextMessageSizeLimit(any(Integer.class));
+  }
+
+  /** 扩展声明缺失时同样拒绝，避免把「未协商」误判为「已协商」。 */
+  @Test
+  void rejectsConnectionWhenExtensionsAreUnavailable() throws Exception {
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
+    EnvironmentDaemonWebSocketHandler handler =
+        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+    WebSocketSession session = mock(WebSocketSession.class);
+    when(session.getId()).thenReturn("connection-id");
+    when(session.isOpen()).thenReturn(true);
+    when(session.getExtensions()).thenReturn(null);
+
+    handler.afterConnectionEstablished(session);
+
+    verify(session).close(CloseStatus.REQUIRED_EXTENSION);
+    verify(endpoint, never()).open(any());
+  }
+
+  /** 通道把本地容量拒绝原样表达为 BUSY，不回传为连接失效。 */
+  @Test
+  void mapsBusyOfferResultWithoutClosingChannel() throws Exception {
+    DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
+    EnvironmentDaemonWebSocketHandler handler =
+        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+    WebSocketSession session = deflateSession("connection-id");
+    handler.afterConnectionEstablished(session);
+    ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
+    verify(endpoint).open(connectionCaptor.capture());
+
+    DaemonChannel connection = connectionCaptor.getValue();
+    assertEquals(DaemonOfferResult.ACCEPTED, connection.offerText("first"));
+    connection.closeAfterFlush();
+    assertEquals(DaemonOfferResult.CLOSED, connection.offerText("after-fence"));
+  }
+
+  /** 构造与端点一致的已协商压缩会话。 */
+  private static WebSocketSession deflateSession(String connectionId) throws IOException {
+    WebSocketSession session = mock(WebSocketSession.class);
+    when(session.getId()).thenReturn(connectionId);
+    when(session.isOpen()).thenReturn(true);
+    when(session.getExtensions()).thenReturn(List.of(PERMESSAGE_DEFLATE));
+    return session;
   }
 
   private static EnvironmentDaemonTransportProperties transportProperties(long maxMessageBytes) {

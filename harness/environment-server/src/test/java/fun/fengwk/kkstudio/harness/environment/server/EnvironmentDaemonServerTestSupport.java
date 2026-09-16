@@ -30,7 +30,7 @@ import java.util.UUID;
 /**
  * 核心测试的内存基座：可控 fake channel / lease store，以及握手与帧构造辅助。
  *
- * <p>Fake 只表达核心真正依赖的窄端口语义（围栏返回值、发送结果、连接开关），不模拟 SQL 或 WebSocket；任何测试都不需要 Spring、JDBC 或产品 DTO
+ * <p>Fake 只表达核心真正依赖的窄端口语义（围栏返回值、递交结果、连接开关），不模拟 SQL 或 WebSocket；任何测试都不需要 Spring、JDBC 或产品 DTO
  * 即可驱动完整状态机。
  */
 final class EnvironmentDaemonServerTestSupport {
@@ -43,6 +43,12 @@ final class EnvironmentDaemonServerTestSupport {
   static final UUID CALL_TWO = new UUID(0L, 9102L);
   static final String TOKEN = "registration-token";
   static final String OTHER_TOKEN = "other-token";
+
+  /** 同一 Daemon 进程在多次重连中复用的实例身份。 */
+  static final String INSTANCE_ID = "33333333-3333-3333-3333-333333333333";
+
+  /** 另一个 Daemon 进程的实例身份：出现即意味着旧进程已不可能再提供终态。 */
+  static final String OTHER_INSTANCE_ID = "44444444-4444-4444-4444-444444444444";
 
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
@@ -72,23 +78,25 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static String helloPayload(String token) {
+    return helloPayload(token, INSTANCE_ID);
+  }
+
+  static String helloPayload(String token, String daemonInstanceId) {
     return "{\"protocolVersion\":"
         + DaemonProtocol.VERSION
         + ",\"registrationToken\":\""
         + token
         + "\",\"capabilityCatalogVersion\":\""
         + EnvironmentCapabilityCatalog.version()
+        + "\",\"daemonInstanceId\":\""
+        + daemonInstanceId
         + "\"}";
   }
 
   static String encode(
-      EnvironmentId scope,
-      DaemonMessageType type,
-      String invocationId,
-      long sequence,
-      String payload) {
+      EnvironmentId scope, DaemonMessageType type, String invocationId, String payload) {
     return ENVELOPE_CODEC.encode(
-        new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, sequence, payload));
+        new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payload));
   }
 
   /** 一个通过 READY OS（LINUX）发送前 workdir 校验的 fs.read 请求：frame send 前必须携带显式绝对 workdir。 */
@@ -149,43 +157,47 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     FakeChannel connectReady(String connectionId) {
+      return connectReady(connectionId, INSTANCE_ID);
+    }
+
+    FakeChannel connectReady(String connectionId, String daemonInstanceId) {
       FakeChannel channel = new FakeChannel(connectionId);
       server.open(channel);
-      receiveHello(channel);
+      receiveHello(channel, TOKEN, ENVIRONMENT_ID, daemonInstanceId);
       receiveReady(channel);
       return channel;
     }
 
-    /** 旧持有者为失效代际（例如租约过期）后，用新代际重新完成握手。 */
+    /** 旧持有者为失效代际（例如租约过期）后，用新代际重新完成握手；同一实例身份表示同一 Daemon 进程重连。 */
     FakeChannel reconnectReady(String connectionId) {
       leaseStore.activeLeaseToken = false;
       return connectReady(connectionId);
     }
 
     void receiveHello(FakeChannel channel) {
-      receiveHelloAs(channel, TOKEN, ENVIRONMENT_ID);
+      receiveHello(channel, TOKEN, ENVIRONMENT_ID);
     }
 
-    void receiveHelloAs(FakeChannel channel, String token, EnvironmentId environmentId) {
-      channel.boundEnvironmentId = environmentId;
+    void receiveHello(FakeChannel channel, String token, EnvironmentId environmentId) {
+      receiveHello(channel, token, environmentId, INSTANCE_ID);
+    }
+
+    void receiveHello(
+        FakeChannel channel, String token, EnvironmentId environmentId, String daemonInstanceId) {
       server.receive(
           channel.connectionId(),
-          encode(null, DaemonMessageType.HELLO, null, 0, helloPayload(token)));
+          encode(null, DaemonMessageType.HELLO, null, helloPayload(token, daemonInstanceId)));
+      channel.boundEnvironmentId = environmentId;
     }
 
     void receiveReady(FakeChannel channel) {
-      receive(channel, DaemonMessageType.READY, null, 1, readyPayload());
+      receive(channel, DaemonMessageType.READY, null, readyPayload());
     }
 
-    void receive(
-        FakeChannel channel,
-        DaemonMessageType type,
-        String invocationId,
-        long sequence,
-        String payload) {
+    void receive(FakeChannel channel, DaemonMessageType type, String invocationId, String payload) {
       EnvironmentId scope =
           channel.boundEnvironmentId != null ? channel.boundEnvironmentId : ENVIRONMENT_ID;
-      server.receive(channel.connectionId(), encode(scope, type, invocationId, sequence, payload));
+      server.receive(channel.connectionId(), encode(scope, type, invocationId, payload));
     }
   }
 
@@ -273,6 +285,7 @@ final class EnvironmentDaemonServerTestSupport {
     final List<EnvironmentCapabilityResult> partials = new ArrayList<>();
     EnvironmentCapabilityResult completed;
     Throwable error;
+    int errorCount;
 
     @Override
     public void onPartial(EnvironmentCapabilityResult partial) {
@@ -287,6 +300,7 @@ final class EnvironmentDaemonServerTestSupport {
     @Override
     public void onError(Throwable error) {
       this.error = error;
+      errorCount++;
     }
 
     String completedText() {
@@ -298,7 +312,7 @@ final class EnvironmentDaemonServerTestSupport {
     }
   }
 
-  /** 内存连接：记录出站帧，并可按需拒绝或中断一次发送。 */
+  /** 内存连接：记录出站帧，并可按需模拟队列容量拒绝或传输失败。 */
   static final class FakeChannel implements DaemonChannel {
 
     private final String connectionId;
@@ -308,8 +322,13 @@ final class EnvironmentDaemonServerTestSupport {
     private boolean closed;
     private int closeCount;
     private int closeAfterFlushCount;
-    boolean failNextSend;
-    boolean failNextSendUncertain;
+
+    /** 下一次递交返回 BUSY：模拟本地出站队列容量/字节预算拒绝。 */
+    boolean busyNextOffer;
+
+    /** 下一次递交抛出异常：模拟传输自身发送失败。 */
+    boolean failNextOffer;
+
     EnvironmentId boundEnvironmentId;
 
     FakeChannel(String connectionId) {
@@ -327,24 +346,24 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     @Override
-    public boolean sendText(String text) {
+    public DaemonOfferResult offerText(String text) {
       if (!open) {
-        throw new IllegalStateException("closed");
+        return DaemonOfferResult.CLOSED;
       }
       DaemonEnvelope envelope = codec.decode(text);
-      if (failNextSend) {
-        failNextSend = false;
-        return false;
+      if (busyNextOffer) {
+        busyNextOffer = false;
+        return DaemonOfferResult.BUSY;
       }
-      if (failNextSendUncertain) {
-        failNextSendUncertain = false;
-        throw new IllegalStateException("send outcome uncertain");
+      if (failNextOffer) {
+        failNextOffer = false;
+        throw new IllegalStateException("transport send failed");
       }
       envelopes.add(envelope);
       if (envelope.environmentId() != null) {
         boundEnvironmentId = envelope.environmentId();
       }
-      return true;
+      return DaemonOfferResult.ACCEPTED;
     }
 
     @Override
@@ -366,6 +385,10 @@ final class EnvironmentDaemonServerTestSupport {
 
     List<DaemonMessageType> messageTypes() {
       return envelopes.stream().map(DaemonEnvelope::messageType).toList();
+    }
+
+    long countOf(DaemonMessageType type) {
+      return envelopes.stream().filter(envelope -> envelope.messageType() == type).count();
     }
 
     DaemonEnvelope lastEnvelope() {

@@ -6,7 +6,7 @@
 
 - 确立规范的环境唯一标识（`EnvironmentId`），它是冻结执行的唯一环境绑定形态；
 - 定义独立于上层模型工具编排的标准原子能力目录（Capability catalog）、执行 SPI 及传输确定性契约；
-- 提供 Environment Daemon WebSocket 协议 v3 的封包结构（`DaemonEnvelope`）、控制与执行消息类型、READY capabilities v2、调用与流式结果编解码器，以及 workdir 与 Skill 来源配置的严格校验规则。
+- 提供 Environment Daemon WebSocket 协议 v1 的封包结构（`DaemonEnvelope`）、控制与执行消息类型、READY capabilities、调用与流式结果编解码器，以及 workdir 与 Skill 来源配置的严格校验规则。
 
 该模块仅依赖 [`harness-common`](harness-common.md) 的基础值对象（`InputSchema`、`ResultContent`、`ResourceRef`）与 Jackson，独立于具体的模型工具编排、执行运行时、外部存储、网络基础设施及 Daemon 实现。
 
@@ -17,7 +17,7 @@
 - 将分支持久化配置（`BranchSettings` 的 `agentName`）、Platform 寻址路由与 Daemon 物理传输收敛到统一的 `EnvironmentId` 标识体系。
 - 确立与模型层解耦的原子能力标准（Capability catalog），通过稳定的能力标识、输入模式（schema）与版本约束规范环境执行标准。
 - 确立传输层（Transport）调用语义，保证发送确定性、有序流式事件及单次终态（terminal-once）约束。
-- 统一使用 Daemon protocol v3 通用协议封包与严格编解码契约，旧 wire/READY 形状不做兼容回退。
+- 统一使用 Daemon protocol v1 通用协议封包与严格编解码契约，其他版本与未知形状不做兼容回退。
 - 为需要目录的能力提供发送前的纯词法 workdir 形状校验，目录本身只存在于具体能力 arguments 中。
 
 ### 协作边界
@@ -37,7 +37,7 @@ harness-common + Jackson
 harness-environment
   ├─ EnvironmentId
   ├─ Capability catalog + execution/transport SPI
-  └─ Daemon protocol v3 values + codecs
+  └─ Daemon protocol v1 values + codecs
 ```
 
 生产依赖单向受限于 `harness-common` 与 Jackson；Agent Runtime、Tool 编排层、持久化存储以及 Daemon 具体实现均向本模块单向依赖。详细依赖声明见 [`pom.xml`](../../harness/environment/pom.xml)，依赖方向由 [`EnvironmentModuleArchitectureTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentModuleArchitectureTest.java) 自动化守卫。
@@ -47,8 +47,8 @@ harness-environment
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.environment` | 环境身份标识。定义跨 Runtime、Platform Gateway 与 Daemon 共享的规范 UUID 路由身份（`EnvironmentId`）。本包聚焦纯内存值对象与 canonical 格式校验，物理文件与网络 I/O 交由各端具体实现承载。 |
-| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。目录版本为 `"3"`，定义 11 项模型可见能力和 4 项管理专用能力、底层异步执行接口以及传输窄端口；严格约束发送异常确定性和 `PARTIAL* -> exactly one terminal`。管理能力只复用执行通道，不进入模型 Tool 目录。 |
-| `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 WebSocket JSON 协议（v3）。包含协议封包、READY v2 来源快照、通用调用与结果编解码器、Skill 来源/描述/诊断值对象、资源引用模型及 workdir 词法校验。连接代际、路由租约与执行日志分别由网关和 Daemon 状态机管理。 |
+| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。目录版本为 `"3"`，定义 11 项模型可见能力和 4 项管理专用能力、底层异步执行接口以及传输窄端口；严格约束发送异常确定性和 `PROGRESS* -> exactly one terminal`。管理能力只复用执行通道，不进入模型 Tool 目录。 |
+| `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 WebSocket JSON 协议（v1）。包含协议封包、READY 来源快照、通用调用与结果编解码器、Skill 来源/描述/诊断值对象、资源引用模型及 workdir 词法校验。连接代际、路由租约与执行日志分别由网关和 Daemon 状态机管理。 |
 
 ## 核心模型 / API
 
@@ -132,55 +132,60 @@ EnvironmentCapabilityExecutionHandle invoke(
 调用成功返回执行句柄后，监听器接收的事件严格遵循确定性时序：
 
 ```text
-PARTIAL* -> exactly one terminal
+PROGRESS* -> exactly one terminal
 ```
 
 远端报告的 `FAILED` 与 `CANCELLED` 分别转换为强类型异常 `EnvironmentCapabilityFailedException` 与 `EnvironmentCapabilityCancelledException`。终态产生后，任何延迟到达的事件均直接丢弃；取消指令直接透传给底层句柄，严格保持事件流的先后顺序。
 
-### Daemon protocol v3
+### Daemon protocol v1
 
-[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `3`。v3 用按来源分组的 READY v2 替代旧顶层平铺 Skill 摘要，并加入管理专用来源操作；协议消息集合保持：
+[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `1`。协议消息集合：
 
 ```text
 HELLO / WELCOME / READY / HEARTBEAT
-INVOKE / STARTED / PARTIAL / COMPLETED / FAILED
-CANCEL / CANCELLED / ACK / ERROR
+INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
+CANCEL / CANCELLED / ERROR
 ```
 
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 包含以下固定字段：
 
 ```text
 protocolVersion / messageType / environmentId
-invocationId? / sequence / payload
+invocationId? / payload
 ```
+
+协议没有全局序号，也没有 ACK：消息可靠性来自 `invocationId` 与 Daemon invocation journal，而不是传输层确认，因此编解码与运行时都不做任何跨消息顺序校验。
 
 `environmentId` 是 nullable scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 及全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。所有与特定执行相关的消息（`INVOKE`、`CANCEL` 及全部生命周期回调）均必须携带非空的 `invocationId`；载荷必须为 JSON 对象。编解码器采用严格校验策略，遇到未知字段、重复键、尾随字符或作用域不匹配时直接作为协议异常拒绝。
 
 握手与主执行时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=1)
+Daemon -> HELLO(protocolVersion=1, registrationToken, capabilityCatalogVersion=1,
+                daemonInstanceId)
 Gateway -> WELCOME(environmentId)
 Daemon -> READY(capability descriptors)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
-Daemon -> ACK
 Daemon -> STARTED
-Daemon -> PARTIAL*
+Daemon -> PROGRESS*
 Daemon -> COMPLETED | FAILED
 
 Gateway -> CANCEL
-Daemon -> ACK
 Daemon -> CANCELLED | 已冻结 terminal replay
 ```
+
+传输层强制协商 `permessage-deflate`：Daemon 侧由 OkHttp 在生产连接上声明并要求服务端接受，Gateway 侧在握手未见该扩展时以 RFC 6455 close code `1010` 关闭，双方都不退化为未压缩会话。
+
+`daemonInstanceId` 是 Daemon 进程在构造期随机生成一次、所有重连复用的规范 UUID：同一进程断开重连时 Gateway 以相同 `invocationId` 重放在途 INVOKE（Daemon journal 去重，副作用不重复执行），身份不同则判定为换进程接管。
 
 ### READY、INVOKE 与 result codec
 
 [`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY 阶段的能力载荷：
 
 ```text
-version=2
+version=1
 environment: operatingSystem / timeZone / note / rootPath
 sourceSetVersion
 skillSources:
@@ -189,7 +194,7 @@ skillSources:
   diagnostics: location / message
 ```
 
-READY 载荷公开操作系统类型、时区、可信操作者备注、Daemon 实际 canonical Environment root、已发布来源集合的生成版本，以及按来源分组的成功 revision、Skill 描述和有界诊断。单 payload 最多 512 个来源、4096 个 Skill，每来源最多 256 条诊断；source ID 唯一，Skill name 跨来源唯一，descriptor 的 source 身份/版本必须与所在快照一致。顶层 `sourceSetVersion` 是必填非负整数（与行级 `sourceVersion` 独立），缺失、负数或非整数一律协议错误：Platform 以它为该 READY 报告做持久围栏，缺失就无法判断该报告是否已被更新的集合超越。`operatingSystem` 是发送前 workdir 词法校验的目标 OS 依据；`rootPath` 只展示。凭证、请求头、环境变量、命令、Git URL/ref 与 Skill 正文不进入 READY。旧 `version=1`、顶层 `skills` 形状或缺省 `sourceSetVersion` 的 v2 形状直接拒绝。
+READY 载荷公开操作系统类型、时区、可信操作者备注、Daemon 实际 canonical Environment root、已发布来源集合的生成版本，以及按来源分组的成功 revision、Skill 描述和有界诊断。单 payload 最多 512 个来源、4096 个 Skill，每来源最多 256 条诊断；source ID 唯一，Skill name 跨来源唯一，descriptor 的 source 身份/版本必须与所在快照一致。顶层 `sourceSetVersion` 是必填非负整数（与行级 `sourceVersion` 独立），缺失、负数或非整数一律协议错误：Platform 以它为该 READY 报告做持久围栏，缺失就无法判断该报告是否已被更新的集合超越。`operatingSystem` 是发送前 workdir 词法校验的目标 OS 依据；`rootPath` 只展示。凭证、请求头、环境变量、命令、Git URL/ref 与 Skill 正文不进入 READY。非当前 `version` 或缺少 `sourceSetVersion` 的形状直接拒绝。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java) 规范调用请求结构，固定包含以下字段：
 
@@ -202,7 +207,7 @@ timeoutMillis
 
 所有字段均为必填项；arguments 必须是 JSON 对象；timeoutMillis 必须为非负整数毫秒。INVOKE 外壳不携带目录字段，需要目录的能力由具体 arguments 携带目标 OS 上的绝对 `workdir`。
 
-[`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 负责通用流式（`PARTIAL`）与完成态（`COMPLETED`）结果编解码。所有能力（包括技能正文加载 `skill.load`）均统一通过通用 `INVOKE` 模型与流式结果协议交互，保持编解码管道的一致性。
+[`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 负责通用流式（`PROGRESS`）与完成态（`COMPLETED`）结果编解码。所有能力（包括技能正文加载 `skill.load`）均统一通过通用 `INVOKE` 模型与流式结果协议交互，保持编解码管道的一致性。
 
 `skill.load` 成功结果是 `{body, baseDirectory}` JSON；精确 revision 不再保留时以 `EnvironmentCapabilityResultCodes.RESOURCE_CHANGED` 结束。`skill.source.refresh/install/update` 使用相同 INVOKE/CANCEL/terminal 通道，但只供 Platform 管理执行器调用，不属于 contributor/model tool catalog。
 
@@ -222,7 +227,7 @@ daemon 包内的 `DaemonWorkdirSyntax` 提供发送前的纯文本校验 `requir
 - 每个逻辑 Environment 由一个 `EnvironmentId` 标识，该标识贯穿路由寻址、冻结执行与协议封包。
 - 分支历史只冻结 `agentName` 与 model；环境由 Agent definition 决定，目录只来自每次工具调用自己的 arguments，调用之间不继承。
 - 原子能力目录与上层模型工具目录保持独立解耦；能力标识或版本不匹配直接判定为确定性的协议错误。
-- 协议严格限定为 v3，READY 严格限定为 capabilities v2；任何旧版本、未定义消息类型或旧平铺 Skill 形状都直接拒绝。
+- 协议严格限定为 v1；任何其他版本、未定义消息类型或非当前 READY 形状都直接拒绝。
 - 遇到 `SendUncertainException` 异常时，表明远端执行状态未知且可能已产生副作用，调用方必须停止自动重试，转入既定恢复流程。
 - 协议编解码器专注于数据包格式与字段值的严格校验；连接代际管理与执行日志重放由 Daemon 承载，路由租约由 Platform 维持，持久化状态恢复由 Runtime 统一协调。
 
@@ -240,7 +245,7 @@ daemon 包内的 `DaemonWorkdirSyntax` 提供发送前的纯文本校验 `requir
 - [`EnvironmentModuleArchitectureTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentModuleArchitectureTest.java)：验证模块依赖方向与隔离边界。
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java)：验证身份标识生成与 canonical 解析规则。
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)、[`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java)、[`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：验证能力目录注册完整性、workdir 版本约束、异常确定性分类与事件有序性。
-- [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)、[`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：验证 protocol v3、READY v2 来源快照及严格载荷校验；INVOKE 只接受 `capabilityId`、`capabilityVersion`、`arguments` 与 `timeoutMillis`，额外外壳字段与旧版本都无兼容回退。
+- [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)、[`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java)、[`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：验证 protocol v1、READY 来源快照及严格载荷校验；INVOKE 只接受 `capabilityId`、`capabilityVersion`、`arguments` 与 `timeoutMillis`，额外外壳字段与其他版本都无兼容回退。
 
 ---
 

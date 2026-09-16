@@ -1,7 +1,7 @@
 /**
  * Environment 会话服务端核心：纯 Java 的 {@link
  * fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer} 独占
- * HELLO/WELCOME/READY/HEARTBEAT/INVOKE 等 daemon 协议会话状态、序列号、租约围栏（{@link
+ * HELLO/WELCOME/READY/HEARTBEAT/INVOKE 等 daemon 协议会话状态、租约围栏（{@link
  * fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore}）以及按 invocation 维度的在途调用生命周期。
  *
  * <p>边界与职责：本包只依赖 JDK、Jackson、harness.common 与 harness.environment；连接注册解析、租约存储、传输通道与 READY

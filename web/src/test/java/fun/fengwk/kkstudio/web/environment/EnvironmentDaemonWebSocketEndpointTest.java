@@ -7,25 +7,34 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okio.ByteString;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.WebSocket;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/** Daemon WebSocket 适配器的网络契约；web 层不保存任何协议状态。 */
+/**
+ * Daemon WebSocket 适配器的网络契约；web 层不保存任何协议状态。
+ *
+ * <p>客户端使用 OkHttp 是因为 JDK {@code HttpClient} 的 WebSocket 不支持扩展协商，无法满足端点强制的 {@code
+ * permessage-deflate} 要求。
+ */
 class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
 
   @LocalServerPort private int port;
@@ -38,38 +47,42 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
   void bridgesDaemonConnectionFramesAndClose() throws Exception {
     BlockingQueue<String> received = new LinkedBlockingQueue<>();
     QueueingListener listener = new QueueingListener(received);
-    WebSocket socket =
-        HttpClient.newHttpClient()
-            .newWebSocketBuilder()
-            .buildAsync(endpointUri(), listener)
-            .get(10, TimeUnit.SECONDS);
+    OkHttpClient client = new OkHttpClient();
+    try {
+      WebSocket socket =
+          client.newWebSocket(
+              new Request.Builder().url(endpointUri().toASCIIString()).build(), listener);
 
-    ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
-    verify(endpoint, timeout(15_000)).open(connectionCaptor.capture());
-    DaemonChannel connection = connectionCaptor.getValue();
-    assertNotNull(connection);
-    assertTrue(connection.isOpen());
+      ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
+      verify(endpoint, timeout(15_000)).open(connectionCaptor.capture());
+      DaemonChannel connection = connectionCaptor.getValue();
+      assertNotNull(connection);
+      assertTrue(connection.isOpen());
 
-    socket.sendText("daemon-frame", true).get(10, TimeUnit.SECONDS);
-    verify(endpoint, timeout(15_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
+      assertTrue(socket.send("daemon-frame"));
+      verify(endpoint, timeout(15_000)).receive(eq(connection.connectionId()), eq("daemon-frame"));
 
-    assertTrue(connection.sendText("gateway-frame"));
-    assertEquals("gateway-frame", received.poll(10, TimeUnit.SECONDS));
+      assertEquals(DaemonOfferResult.ACCEPTED, connection.offerText("gateway-frame"));
+      assertEquals("gateway-frame", received.poll(10, TimeUnit.SECONDS));
 
-    socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(10, TimeUnit.SECONDS);
-    socket.request(1);
-    listener.awaitClose();
-    verify(endpoint, timeout(15_000)).close(connection.connectionId());
+      socket.close(1000, "test complete");
+      listener.awaitClose();
+      verify(endpoint, timeout(15_000)).close(connection.connectionId());
+    } finally {
+      client.dispatcher().executorService().shutdown();
+      client.connectionPool().evictAll();
+    }
   }
 
   private URI endpointUri() {
     return URI.create("ws://localhost:" + port + EnvironmentDaemonWebSocketHandler.PATH);
   }
 
-  private static final class QueueingListener implements WebSocket.Listener {
+  /** 收集完整文本帧并记录关闭事件，验证端点确实协商了 permessage-deflate。 */
+  private static final class QueueingListener extends WebSocketListener {
 
     private final BlockingQueue<String> messages;
-    private final StringBuilder currentMessage = new StringBuilder();
+    private final CompletableFuture<String> negotiatedExtension = new CompletableFuture<>();
     private final CompletableFuture<Void> closed = new CompletableFuture<>();
 
     private QueueingListener(BlockingQueue<String> messages) {
@@ -77,29 +90,36 @@ class EnvironmentDaemonWebSocketEndpointTest extends WebPostgresTestSupport {
     }
 
     @Override
-    public void onOpen(WebSocket webSocket) {
-      webSocket.request(1);
+    public void onOpen(WebSocket webSocket, Response response) {
+      String extensions = response.header("Sec-WebSocket-Extensions");
+      negotiatedExtension.complete(extensions == null ? "" : extensions);
     }
 
     @Override
-    public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
-      currentMessage.append(data);
-      if (last) {
-        messages.add(currentMessage.toString());
-        currentMessage.setLength(0);
-      }
-      webSocket.request(1);
-      return CompletableFuture.completedFuture(null);
+    public void onMessage(WebSocket webSocket, String text) {
+      messages.add(text);
     }
 
     @Override
-    public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+    public void onMessage(WebSocket webSocket, ByteString bytes) {
+      // 端点只传输文本帧。
+    }
+
+    @Override
+    public void onClosed(WebSocket webSocket, int code, String reason) {
       closed.complete(null);
-      return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public void onFailure(WebSocket webSocket, Throwable error, Response response) {
+      closed.complete(null);
     }
 
     private void awaitClose() throws Exception {
       closed.get(5, TimeUnit.SECONDS);
+      assertTrue(
+          negotiatedExtension.get(5, TimeUnit.SECONDS).contains("permessage-deflate"),
+          "gateway must negotiate permessage-deflate");
     }
   }
 }

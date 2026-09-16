@@ -19,65 +19,60 @@ class DaemonEnvelopeTest {
   void invocationMessagesRequireScopeAndInvocationId() {
     assertEquals(
         ID,
-        new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.INVOKE, ID, "invocation", 0, "{}")
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.INVOKE, ID, "invocation", "{}")
             .environmentId());
     assertThrows(
         NullPointerException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.INVOKE, null, "invocation", 0, "{}"));
+                DaemonProtocol.VERSION, DaemonMessageType.INVOKE, null, "invocation", "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.INVOKE, ID, " ", 0, "{}"));
+        () -> new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.INVOKE, ID, " ", "{}"));
   }
 
   /** HELLO scope 必须为 null；READY/HEARTBEAT 等 connection 消息必须非空。 */
   @Test
   void connectionMessagesFollowScopeContract() {
     assertNull(
-        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, null, null, 0, "{}")
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, null, null, "{}")
             .environmentId());
     assertEquals(
         ID,
-        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, 0, "{}")
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, "{}")
             .environmentId());
     assertThrows(
         NullPointerException.class,
         () ->
-            new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.READY, null, null, 0, "{}"));
+            new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, null, null, "{}"));
     assertThrows(
         NullPointerException.class,
         () ->
             new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.HEARTBEAT, null, null, 0, "{}"));
+                DaemonProtocol.VERSION, DaemonMessageType.HEARTBEAT, null, null, "{}"));
     // 握手前的 ERROR 允许空 scope。
     assertNull(
-        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.ERROR, null, null, 0, "{}")
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.ERROR, null, null, "{}")
             .environmentId());
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, ID, null, 0, "{}"));
+        () -> new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, ID, null, "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.READY, ID, "   ", 0, "{}"));
+        () -> new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, "   ", "{}"));
   }
 
-  /** 其余 envelope 字段的构造期契约：版本、序号规则。 */
+  /** 只有当前协议版本可以构造；其他版本一律拒绝，不做版本兼容。 */
   @Test
-  void rejectsInvalidProtocolVersionAndSequence() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new DaemonEnvelope(0, DaemonMessageType.READY, ID, null, 0, "{}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new DaemonEnvelope(
-                DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, -1, "{}"));
+  void rejectsAnyProtocolVersionOtherThanCurrent() {
+    assertEquals(
+        1,
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, "{}")
+            .protocolVersion());
+    for (int version : new int[] {0, 2, 3}) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new DaemonEnvelope(version, DaemonMessageType.READY, ID, null, "{}"));
+    }
   }
 }

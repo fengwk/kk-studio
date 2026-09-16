@@ -3,12 +3,16 @@ package fun.fengwk.kkstudio.harness.environment.server;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.CALL_ONE;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.CALL_TWO;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.ENVIRONMENT_ID;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.INSTANCE_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_ENVIRONMENT_ID;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_INSTANCE_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_TOKEN;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.TOKEN;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.capabilityRequest;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.completedPayload;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.helloPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.partialPayload;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.readyPayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -19,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
@@ -31,7 +36,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
@@ -47,14 +51,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * {@link EnvironmentDaemonServer} 的会话、并发与终态所有权契约测试。
+ * {@link EnvironmentDaemonServer} 的会话、并发、重连恢复与终态所有权契约测试。
  *
- * <p>全部测试使用内存 fake channel/lease store：核心对同一 Environment 的多个 invocation 必须并发关联，且 cancel/expire/
- * 连接清理与 daemon 终态竞争只产生一个终态。
+ * <p>全部测试使用内存 fake channel/lease store：核心对同一 Environment 的多个 invocation 必须并发关联；连接丢失不得终结在途调用，
+ * 同实例重连以相同 invocationId 重放；不同实例接管与调用方 expire 才产生终态。
  */
 class EnvironmentDaemonServerTest {
-
-  private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
 
   /**
    * 测试意图：同一 Environment 的第二个 invocation 必须立即发送并并发持有（无 Busy、无容量槽位），且两个 invocation 的 COMPLETED
@@ -80,13 +82,11 @@ class EnvironmentDaemonServerTest {
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        2,
         completedPayload(CALL_ONE, "one"));
     fixture.receive(
         channel,
         DaemonMessageType.COMPLETED,
         CALL_TWO.toString(),
-        3,
         completedPayload(CALL_TWO, "two"));
 
     assertEquals("one", first.completedText());
@@ -140,7 +140,6 @@ class EnvironmentDaemonServerTest {
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        2,
         completedPayload(CALL_ONE, "one"));
 
     assertTrue(reentered.get());
@@ -175,16 +174,15 @@ class EnvironmentDaemonServerTest {
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        2,
         completedPayload(CALL_ONE, "one"));
 
     assertTrue(entered.await(2, TimeUnit.SECONDS));
     assertTrue(readyInsideCallback.get());
   }
 
-  /** 测试意图：PARTIAL 事件按序透传，且不改变该 invocation 的所有权。 */
+  /** 测试意图：PROGRESS 事件按序透传，且不改变该 invocation 的所有权。 */
   @Test
-  void partialsAreForwardedInOrder() {
+  void progressEventsAreForwardedInOrder() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-partials");
     RecordingListener listener = new RecordingListener();
@@ -192,21 +190,18 @@ class EnvironmentDaemonServerTest {
 
     fixture.receive(
         channel,
-        DaemonMessageType.PARTIAL,
+        DaemonMessageType.PROGRESS,
         CALL_ONE.toString(),
-        2,
         partialPayload(CALL_ONE, "chunk-1"));
     fixture.receive(
         channel,
-        DaemonMessageType.PARTIAL,
+        DaemonMessageType.PROGRESS,
         CALL_ONE.toString(),
-        3,
         partialPayload(CALL_ONE, "chunk-2"));
     fixture.receive(
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        4,
         completedPayload(CALL_ONE, "done"));
 
     assertEquals(2, listener.partials.size());
@@ -216,37 +211,145 @@ class EnvironmentDaemonServerTest {
   }
 
   /**
-   * 测试意图：传输拒绝接受 INVOKE 帧或写入抛异常都表达发送结果不确定：必须关闭连接、报 uncertain，且不遗留活动 invocation （同一 invocationId
-   * 在新连接代际上可以重新发起）。
+   * 测试意图：本地出站队列拒绝（BUSY）不得被当成传输不确定 —— 调用方必须收到确定性的 busy 异常，连接保持可用，且该调用不残留在途目录 （同一 invocationId
+   * 可以立即重新发起并成功）。
    */
   @Test
-  void uncertainInvokeSendClosesConnectionAndLeavesNoActiveInvocation() {
-    Fixture rejected = new Fixture();
-    FakeChannel rejectedChannel = rejected.connectReady("channel-reject");
-    rejectedChannel.failNextSend = true;
-    assertThrows(
-        EnvironmentCapabilitySendUncertainException.class,
-        () ->
-            rejected.server.invoke(
-                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
-    assertTrue(rejectedChannel.closed());
-    assertFalse(rejected.server.isReady(ENVIRONMENT_ID));
+  void queueRejectionIsDeterministicBusyAndKeepsConnectionUsable() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-busy");
 
-    Fixture thrown = new Fixture();
-    FakeChannel thrownChannel = thrown.connectReady("channel-throw");
-    thrownChannel.failNextSendUncertain = true;
+    channel.busyNextOffer = true;
     assertThrows(
-        EnvironmentCapabilitySendUncertainException.class,
+        EnvironmentCapabilityBusyException.class,
         () ->
-            thrown.server.invoke(
+            fixture.server.invoke(
                 ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
-    assertTrue(thrownChannel.closed());
 
-    // 未成功登记的 invocation 不得残留：新代际可以复用同一 invocationId。
-    FakeChannel retried = rejected.reconnectReady("channel-reject-retry");
-    rejected.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    assertFalse(channel.closed());
+    assertTrue(channel.isOpen());
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+    // 只有 WELCOME：被拒绝的 INVOKE 没有产生任何 wire 帧。
+    assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
+
+    // 同一 invocationId 立即重试成功，证明拒绝未留下任何在途残留。
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), retried.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "done"));
+    assertEquals("done", listener.completedText());
+  }
+
+  /**
+   * 测试意图：物理连接丢失不得终结在途调用。同一 Daemon 进程（相同 daemonInstanceId）重连 READY 后，核心必须以相同 invocationId 重放
+   * INVOKE，并继续为同一 invocation 派发 daemon 终态。
+   */
+  @Test
+  void sameDaemonInstanceReconnectReplaysActiveInvokeAndKeepsTerminalOwnership() {
+    Fixture fixture = new Fixture();
+    FakeChannel first = fixture.connectReady("channel-instance-a");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), first.messageTypes());
+
+    // 物理 socket 丢失：连接代际被清理，但在途调用必须保留。
+    fixture.server.close(first.connectionId());
+    assertTrue(first.closed());
+    assertNull(listener.error);
+    assertNull(listener.completed);
+    assertEquals(Set.of(), fixture.server.readyEnvironments());
+
+    FakeChannel second = fixture.connectReady("channel-instance-b");
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), second.messageTypes());
+    assertEquals(CALL_ONE.toString(), second.envelopes().get(1).invocationId());
+    // 每次 READY 都唤醒一次会话监听器：重连后 Environment 再次被登记为可用。
+    assertEquals(List.of(ENVIRONMENT_ID, ENVIRONMENT_ID), fixture.readyNotifications);
+
+    // 终态仍归属同一 invocation：重放的 STARTED 静默接受，COMPLETED 只回调一次。
+    fixture.receive(second, DaemonMessageType.STARTED, CALL_ONE.toString(), "{\"replayed\":true}");
+    fixture.receive(
+        second,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "replayed"));
+    fixture.receive(
+        second,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "duplicate"));
+    assertEquals("replayed", listener.completedText());
+    assertNull(listener.error);
+    assertFalse(second.closed());
+  }
+
+  /**
+   * 测试意图：身份不同的 Daemon 进程接管同一 Environment 时，旧进程已不可能再提供这些调用的终态，因此每个在途调用必须恰好一次地以 send-uncertain
+   * 终结，且新进程随后不得再为其派发终态。
+   */
+  @Test
+  void differentDaemonInstanceTakesOverAndOldInvocationBecomesUncertainOnce() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-old-instance");
+    RecordingListener first = new RecordingListener();
+    RecordingListener second = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), first);
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), second);
+
+    fixture.server.close("channel-old-instance");
+    FakeChannel replacement = fixture.connectReady("channel-new-instance", OTHER_INSTANCE_ID);
+
+    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, first.error);
+    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, second.error);
+    assertEquals(1, first.errorCount);
+    assertEquals(1, second.errorCount);
+    assertEquals(List.of(DaemonMessageType.WELCOME), replacement.messageTypes());
+
+    // 旧调用已终结：新连接上的迟到终态被忽略（tombstone），不再是新进程的越权回调。
+    fixture.receive(
+        replacement,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "late"));
+    assertNull(first.completed);
+    assertEquals(1, first.errorCount);
+    assertFalse(replacement.closed());
+  }
+
+  /** 测试意图：同一 Daemon 进程在第 N 次断开重连后仍不产生终态；只有换进程或调用方放弃才收敛，且 BUSY 拒绝不等于放弃。 */
+  @Test
+  void transportFailureKeepsInvocationActiveForSameInstanceRecovery() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-send-failure");
+    RecordingListener listener = new RecordingListener();
+    channel.failNextOffer = true;
+
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    assertNotNull(handle);
+    assertNull(listener.error);
+    assertNull(listener.completed);
+    assertTrue(channel.closed());
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
+
+    // 同一实例重连：INVOKE 被重放，调用仍在途并可正常收敛。
+    FakeChannel reconnected = fixture.connectReady("channel-send-failure-retry");
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), reconnected.messageTypes());
+    fixture.receive(
+        reconnected,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "done"));
+    assertEquals("done", listener.completedText());
+    assertNull(listener.error);
   }
 
   /**
@@ -262,7 +365,7 @@ class EnvironmentDaemonServerTest {
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(
-        channel, DaemonMessageType.FAILED, CALL_ONE.toString(), 2, "{\"message\":\"boom\"}");
+        channel, DaemonMessageType.FAILED, CALL_ONE.toString(), "{\"message\":\"boom\"}");
     assertInstanceOf(EnvironmentCapabilityFailedException.class, listener.error);
     assertEquals("boom", listener.error.getMessage());
 
@@ -275,11 +378,10 @@ class EnvironmentDaemonServerTest {
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        3,
         completedPayload(CALL_ONE, "late"));
     assertNull(listener.completed);
-    assertTrue(channel.closed());
-    assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
+    assertEquals(1, listener.errorCount);
+    assertFalse(channel.closed());
   }
 
   /** 测试意图：daemon 主动 CANCELLED 终态映射为取消异常，并释放该 invocation 的关联。 */
@@ -291,7 +393,7 @@ class EnvironmentDaemonServerTest {
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     fixture.receive(
-        channel, DaemonMessageType.CANCELLED, CALL_ONE.toString(), 2, "{\"reason\":\"stop\"}");
+        channel, DaemonMessageType.CANCELLED, CALL_ONE.toString(), "{\"reason\":\"stop\"}");
 
     assertInstanceOf(EnvironmentCapabilityCancelledException.class, listener.error);
     assertEquals("stop", listener.error.getMessage());
@@ -305,20 +407,22 @@ class EnvironmentDaemonServerTest {
     RecordingListener listener = new RecordingListener();
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
-    fixture.receive(channel, DaemonMessageType.STARTED, CALL_ONE.toString(), 2, "{}");
-    fixture.receive(
-        channel, DaemonMessageType.STARTED, CALL_ONE.toString(), 3, "{\"replayed\":true}");
+    fixture.receive(channel, DaemonMessageType.STARTED, CALL_ONE.toString(), "{}");
+    fixture.receive(channel, DaemonMessageType.STARTED, CALL_ONE.toString(), "{\"replayed\":true}");
     assertFalse(channel.closed());
     assertEquals(
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
 
     fixture.receive(
-        channel, DaemonMessageType.STARTED, CALL_ONE.toString(), 4, "{\"replayed\":false}");
+        channel, DaemonMessageType.STARTED, CALL_ONE.toString(), "{\"replayed\":false}");
     assertTrue(channel.closed());
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
   }
 
-  /** 测试意图：显式 expire（超时路径）与随后到达的 daemon 终态竞争时，expire 只发一次 CANCEL，且 daemon 终态不再回调 listener。 */
+  /**
+   * 测试意图：显式 expire（调用方 deadline 路径）是终态收敛点：只发一次 CANCEL、移出在途目录（不再随重连重放），且随后到达的 daemon 终态不再回调
+   * listener。
+   */
   @Test
   void expireSendsCancelOnceAndSuppressesLaterTerminalCallback() {
     Fixture fixture = new Fixture();
@@ -339,11 +443,15 @@ class EnvironmentDaemonServerTest {
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        2,
         completedPayload(CALL_ONE, "late"));
     assertNull(listener.completed);
     assertNull(listener.error);
     assertFalse(channel.closed());
+
+    // 已放弃的调用不再随重连重放（否则会重新执行副作用）。
+    fixture.server.close(channel.connectionId());
+    FakeChannel reconnected = fixture.connectReady("channel-expire-retry");
+    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
   }
 
   /** 测试意图：expire 只接受本核心签发的执行句柄。 */
@@ -376,17 +484,12 @@ class EnvironmentDaemonServerTest {
     handle.cancel();
     handle.cancel();
     assertTrue(handle.isCancelled());
-    assertEquals(
-        1,
-        channel.envelopes().stream()
-            .filter(envelope -> envelope.messageType() == DaemonMessageType.CANCEL)
-            .count());
+    assertEquals(1, channel.countOf(DaemonMessageType.CANCEL));
 
     fixture.receive(
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        2,
         completedPayload(CALL_ONE, "done"));
     int afterTerminal = channel.envelopes().size();
     handle.cancel();
@@ -394,29 +497,7 @@ class EnvironmentDaemonServerTest {
     assertEquals("done", listener.completedText());
   }
 
-  /** 测试意图：连接在调用活动期间关闭时，未完结调用收到 exactly-once 的不确定终态，且关闭幂等并解绑 READY。 */
-  @Test
-  void closeNotifiesUnfinishedInvocationsExactlyOnceAsUncertain() {
-    Fixture fixture = new Fixture();
-    FakeChannel channel = fixture.connectReady("channel-close");
-    RecordingListener first = new RecordingListener();
-    RecordingListener second = new RecordingListener();
-    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), first);
-    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), second);
-
-    fixture.server.close(channel.connectionId());
-    fixture.server.close(channel.connectionId());
-
-    assertTrue(channel.closed());
-    assertEquals(1, channel.closeCount());
-    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, first.error);
-    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, second.error);
-    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
-    assertEquals(Set.of(), fixture.server.readyEnvironments());
-    assertTrue(fixture.leaseStore.disconnected);
-  }
-
-  /** 测试意图：同 connectionId 的新连接代际必须幂等清理旧代际及其未完结调用。 */
+  /** 测试意图：同 connectionId 的新连接代际必须幂等清理旧代际，但不终结其保留的在途调用。 */
   @Test
   void reopeningSameConnectionIdCleansUpPreviousGeneration() {
     Fixture fixture = new Fixture();
@@ -427,7 +508,9 @@ class EnvironmentDaemonServerTest {
     FakeChannel second = fixture.connectReady("channel-same-id");
 
     assertTrue(first.closed());
-    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, listener.error);
+    assertNull(listener.error);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), second.messageTypes());
     assertTrue(second.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
@@ -444,12 +527,13 @@ class EnvironmentDaemonServerTest {
     FakeChannel second = fixture.reconnectReady("channel-second");
 
     assertTrue(first.closed());
-    assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, firstListener.error);
-    assertEquals(List.of(DaemonMessageType.WELCOME), second.messageTypes());
+    assertNull(firstListener.error);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), second.messageTypes());
 
     // 旧代际已解绑：迟到帧被直接丢弃，不产生协议错误帧，也不影响新代际。
     int secondEnvelopes = second.envelopes().size();
-    fixture.receive(first, DaemonMessageType.HEARTBEAT, null, 5, "{}");
+    fixture.receive(first, DaemonMessageType.HEARTBEAT, null, "{}");
     assertEquals(secondEnvelopes, second.envelopes().size());
     assertTrue(second.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
@@ -462,7 +546,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = fixture.connectReady("channel-fence-lost");
     fixture.leaseStore.heartbeatResult = false;
 
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, 2, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
 
     assertTrue(channel.closed());
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
@@ -658,7 +742,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = new FakeChannel("channel-bad-token");
     fixture.server.open(channel);
 
-    fixture.receiveHelloAs(channel, "wrong-token", ENVIRONMENT_ID);
+    fixture.receiveHello(channel, "wrong-token", ENVIRONMENT_ID);
 
     assertTrue(channel.closed());
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
@@ -728,11 +812,11 @@ class EnvironmentDaemonServerTest {
     FakeChannel heartbeatChannel = new FakeChannel("channel-heartbeat-first");
     heartbeatFirst.server.open(heartbeatChannel);
     heartbeatFirst.receiveHello(heartbeatChannel);
-    heartbeatFirst.receive(heartbeatChannel, DaemonMessageType.HEARTBEAT, null, 2, "{}");
+    heartbeatFirst.receive(heartbeatChannel, DaemonMessageType.HEARTBEAT, null, "{}");
     assertTrue(heartbeatChannel.closed());
   }
 
-  /** 测试意图：重复 HELLO、HELLO 声明 environmentId、协议版本与 catalog 版本不匹配都必须关闭连接。 */
+  /** 测试意图：重复 HELLO、HELLO 声明 environmentId、协议版本、catalog 版本与实例身份非法都必须关闭连接。 */
   @Test
   void helloValidationRejectsMalformedHandshakes() {
     // 重复 HELLO：第二个 HELLO 是协议违规。
@@ -744,18 +828,13 @@ class EnvironmentDaemonServerTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR),
         duplicateChannel.messageTypes());
 
-    // 重复 READY：相同 sequence 的完全重放被静默忽略；递增 sequence 的第二次 READY 是协议违规。
+    // 重复 READY 是协议违规：协议没有可重放的序号，READY 只能推进一次会话事实。
     Fixture duplicateReady = new Fixture();
     FakeChannel readyChannel = duplicateReady.connectReady("channel-duplicate-ready");
     duplicateReady.receiveReady(readyChannel);
-    assertFalse(readyChannel.closed());
-    duplicateReady.receive(
-        readyChannel,
-        DaemonMessageType.READY,
-        null,
-        2,
-        EnvironmentDaemonServerTestSupport.readyPayload());
     assertTrue(readyChannel.closed());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.ERROR), readyChannel.messageTypes());
 
     assertTrue(
         helloRejected(
@@ -764,6 +843,8 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
+                + "\",\"daemonInstanceId\":\""
+                + INSTANCE_ID
                 + "\"}"));
     assertTrue(
         helloRejected(
@@ -772,7 +853,9 @@ class EnvironmentDaemonServerTest {
                 + DaemonProtocol.VERSION
                 + ",\"registrationToken\":\""
                 + TOKEN
-                + "\",\"capabilityCatalogVersion\":\"999\"}"));
+                + "\",\"capabilityCatalogVersion\":\"999\",\"daemonInstanceId\":\""
+                + INSTANCE_ID
+                + "\"}"));
     assertTrue(
         helloRejected(
             "channel-unexpected-field",
@@ -782,6 +865,8 @@ class EnvironmentDaemonServerTest {
                 + TOKEN
                 + "\",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
+                + "\",\"daemonInstanceId\":\""
+                + INSTANCE_ID
                 + "\",\"extra\":true}"));
     assertTrue(
         helloRejected(
@@ -790,7 +875,26 @@ class EnvironmentDaemonServerTest {
                 + DaemonProtocol.VERSION
                 + ",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
+                + "\",\"daemonInstanceId\":\""
+                + INSTANCE_ID
                 + "\"}"));
+    // 实例身份必须是 canonical UUID：缺失或非规范形态都关闭连接。
+    assertTrue(
+        helloRejected(
+            "channel-missing-instance",
+            "{\"protocolVersion\":"
+                + DaemonProtocol.VERSION
+                + ",\"registrationToken\":\""
+                + TOKEN
+                + "\",\"capabilityCatalogVersion\":\""
+                + EnvironmentCapabilityCatalog.version()
+                + "\"}"));
+    assertTrue(
+        helloRejected(
+            "channel-non-canonical-instance",
+            helloPayload(TOKEN, "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")));
+    assertTrue(
+        helloRejected("channel-braced-instance", helloPayload(TOKEN, "{" + INSTANCE_ID + "}")));
   }
 
   /** 直接发送一个 HELLO 帧并返回该连接是否被协议错误关闭。 */
@@ -800,7 +904,7 @@ class EnvironmentDaemonServerTest {
     fixture.server.open(channel);
     fixture.server.receive(
         channel.connectionId(),
-        EnvironmentDaemonServerTestSupport.encode(null, DaemonMessageType.HELLO, null, 0, payload));
+        EnvironmentDaemonServerTestSupport.encode(null, DaemonMessageType.HELLO, null, payload));
     return channel.closed();
   }
 
@@ -812,54 +916,14 @@ class EnvironmentDaemonServerTest {
     mismatched.server.receive(
         mismatchedChannel.connectionId(),
         EnvironmentDaemonServerTestSupport.encode(
-            OTHER_ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 2, "{}"));
+            OTHER_ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, "{}"));
     assertTrue(mismatchedChannel.closed());
 
     // 方向错误：daemon 不得向服务端发送 INVOKE。
     Fixture direction = new Fixture();
     FakeChannel directionChannel = direction.connectReady("channel-wrong-direction");
-    direction.receive(directionChannel, DaemonMessageType.INVOKE, CALL_ONE.toString(), 2, "{}");
+    direction.receive(directionChannel, DaemonMessageType.INVOKE, CALL_ONE.toString(), "{}");
     assertTrue(directionChannel.closed());
-  }
-
-  /** 测试意图：入站 sequence 冲突（倒退或跳号）必须关闭连接，完全相同的重放被静默忽略。 */
-  @Test
-  void inboundSequenceViolationsAreDetected() {
-    Fixture skipped = new Fixture();
-    FakeChannel skippedChannel = skipped.connectReady("channel-sequence-skip");
-    skipped.receive(skippedChannel, DaemonMessageType.HEARTBEAT, null, 5, "{}");
-    assertTrue(skippedChannel.closed());
-
-    Fixture backwards = new Fixture();
-    FakeChannel backwardsChannel = backwards.connectReady("channel-sequence-backwards");
-    backwards.receive(backwardsChannel, DaemonMessageType.HEARTBEAT, null, 2, "{}");
-    backwards.receive(backwardsChannel, DaemonMessageType.HEARTBEAT, null, 1, "{}");
-    assertTrue(backwardsChannel.closed());
-
-    // 完全相同的重放：静默忽略，不产生额外 ERROR 帧，也不关闭连接。
-    Fixture replayed = new Fixture();
-    FakeChannel replayChannel = replayed.connectReady("channel-sequence-replay");
-    int beforeReplay = replayChannel.envelopes().size();
-    replayed.receive(
-        replayChannel,
-        DaemonMessageType.READY,
-        null,
-        1,
-        EnvironmentDaemonServerTestSupport.readyPayload());
-    assertEquals(beforeReplay, replayChannel.envelopes().size());
-    assertFalse(replayChannel.closed());
-
-    // 同 sequence 但内容不同的冲突：协议违规。
-    Fixture conflicting = new Fixture();
-    FakeChannel conflictChannel = conflicting.connectReady("channel-sequence-conflict");
-    conflicting.receive(
-        conflictChannel,
-        DaemonMessageType.READY,
-        null,
-        1,
-        EnvironmentDaemonServerTestSupport.readyPayload());
-    conflicting.receive(conflictChannel, DaemonMessageType.HEARTBEAT, null, 1, "{}");
-    assertTrue(conflictChannel.closed());
   }
 
   /** 测试意图：READY/HEARTBEAT payload 必须严格匹配，包含意外字段即协议违规。 */
@@ -867,25 +931,20 @@ class EnvironmentDaemonServerTest {
   void readyAndHeartbeatPayloadsAreStrict() {
     Fixture heartbeatExtra = new Fixture();
     FakeChannel extraChannel = heartbeatExtra.connectReady("channel-heartbeat-extra");
-    heartbeatExtra.receive(
-        extraChannel, DaemonMessageType.HEARTBEAT, null, 2, "{\"unexpected\":1}");
+    heartbeatExtra.receive(extraChannel, DaemonMessageType.HEARTBEAT, null, "{\"unexpected\":1}");
     assertTrue(extraChannel.closed());
 
     Fixture readyInvalid = new Fixture();
     FakeChannel readyChannel = new FakeChannel("channel-ready-invalid");
     readyInvalid.server.open(readyChannel);
     readyInvalid.receiveHello(readyChannel);
-    readyInvalid.receive(readyChannel, DaemonMessageType.READY, null, 1, "{}");
+    readyInvalid.receive(readyChannel, DaemonMessageType.READY, null, "{}");
     assertTrue(readyChannel.closed());
 
     Fixture readyWithInvocation = new Fixture();
     FakeChannel invocationChannel = readyWithInvocation.connectReady("channel-ready-invocation");
     readyWithInvocation.receive(
-        invocationChannel,
-        DaemonMessageType.READY,
-        CALL_ONE.toString(),
-        2,
-        EnvironmentDaemonServerTestSupport.readyPayload());
+        invocationChannel, DaemonMessageType.READY, CALL_ONE.toString(), readyPayload());
     assertTrue(invocationChannel.closed());
   }
 
@@ -894,63 +953,49 @@ class EnvironmentDaemonServerTest {
   void errorPayloadsAreStrict() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-error");
-    fixture.receive(channel, DaemonMessageType.ERROR, null, 2, "{\"message\":\"daemon oops\"}");
+    fixture.receive(channel, DaemonMessageType.ERROR, null, "{\"message\":\"daemon oops\"}");
     assertFalse(channel.closed());
 
-    fixture.receive(channel, DaemonMessageType.ERROR, null, 3, "{\"message\":\"\",\"code\":\"X\"}");
+    fixture.receive(channel, DaemonMessageType.ERROR, null, "{\"message\":\"\",\"code\":\"X\"}");
     assertTrue(channel.closed());
   }
 
-  /** 测试意图：ACK 只能确认实际已发送的 sequence，非法确认属于协议违规。 */
+  /** 测试意图：未知 invocationId 的回调不得被静默接受，必须按协议违规关闭连接。 */
   @Test
-  void ackValidatesSentSequence() {
-    Fixture fixture = new Fixture();
-    FakeChannel channel = fixture.connectReady("channel-ack");
-    fixture.receive(channel, DaemonMessageType.ACK, null, 2, "{\"acknowledgedSequence\":0}");
-    assertFalse(channel.closed());
-
-    fixture.receive(channel, DaemonMessageType.ACK, null, 3, "{\"acknowledgedSequence\":9}");
-    assertTrue(channel.closed());
-
-    Fixture extra = new Fixture();
-    FakeChannel extraChannel = extra.connectReady("channel-ack-extra");
-    extra.receive(
-        extraChannel, DaemonMessageType.ACK, null, 2, "{\"acknowledgedSequence\":0,\"x\":1}");
-    assertTrue(extraChannel.closed());
-  }
-
-  /** 测试意图：未知 invocationId 与错误连接代际的回调不得被静默接受，必须按协议违规关闭连接。 */
-  @Test
-  void foreignInvocationCallbackClosesConnection() {
+  void unknownInvocationCallbackClosesConnection() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-unknown-invocation");
-    fixture.receive(channel, DaemonMessageType.PARTIAL, UUID.randomUUID().toString(), 2, "{}");
+    fixture.receive(channel, DaemonMessageType.PROGRESS, UUID.randomUUID().toString(), "{}");
     assertTrue(channel.closed());
-
-    Fixture otherConnection = new Fixture();
-    FakeChannel owner = otherConnection.connectReady("channel-owner");
-    otherConnection.server.invoke(
-        ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
-
-    // 同一 Environment 的另一个连接代际不得冒领该 invocation 的回调。
-    FakeChannel impostor = otherConnection.reconnectReady("channel-impostor");
-    otherConnection.receive(
-        impostor,
-        DaemonMessageType.COMPLETED,
-        CALL_ONE.toString(),
-        2,
-        completedPayload(CALL_ONE, "x"));
-    assertTrue(impostor.closed());
-    assertTrue(owner.closed());
   }
 
-  /** 测试意图：未绑定连接收到 PARTIAL 时按协议违规关闭（未知 invocation 且无 tombstone）。 */
+  /** 测试意图：回调只按 invocationId 归属，不按连接代际 —— 同一 Daemon 进程重连后的新连接代际是这些在途调用的合法持有者，其终态必须被派发。 */
   @Test
-  void partialBeforeTerminalOwnershipIsProtocolViolation() {
+  void reconnectedSameInstanceOwnsCallbackForReplayedInvocation() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-owner");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    FakeChannel reconnected = fixture.reconnectReady("channel-reconnected");
+    fixture.receive(
+        reconnected,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "x"));
+
+    assertFalse(reconnected.closed());
+    assertEquals("x", listener.completedText());
+    assertNull(listener.error);
+  }
+
+  /** 测试意图：未绑定 invocation 的 PROGRESS 按协议违规关闭（未知 invocation 且无 tombstone）。 */
+  @Test
+  void progressBeforeTerminalOwnershipIsProtocolViolation() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-partial-unknown");
     fixture.receive(
-        channel, DaemonMessageType.PARTIAL, CALL_ONE.toString(), 2, partialPayload(CALL_ONE, "x"));
+        channel, DaemonMessageType.PROGRESS, CALL_ONE.toString(), partialPayload(CALL_ONE, "x"));
     assertTrue(channel.closed());
   }
 
@@ -979,7 +1024,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel first = fixture.connectReady("channel-env-1");
     FakeChannel second = new FakeChannel("channel-env-2");
     fixture.server.open(second);
-    fixture.receiveHelloAs(second, OTHER_TOKEN, OTHER_ENVIRONMENT_ID);
+    fixture.receiveHello(second, OTHER_TOKEN, OTHER_ENVIRONMENT_ID, OTHER_INSTANCE_ID);
     fixture.receiveReady(second);
 
     RecordingListener firstListener = new RecordingListener();
@@ -993,11 +1038,7 @@ class EnvironmentDaemonServerTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), second.messageTypes());
 
     fixture.receive(
-        first,
-        DaemonMessageType.COMPLETED,
-        CALL_ONE.toString(),
-        2,
-        completedPayload(CALL_ONE, "one"));
+        first, DaemonMessageType.COMPLETED, CALL_ONE.toString(), completedPayload(CALL_ONE, "one"));
     assertNotNull(firstListener.completed);
     assertNull(secondListener.completed);
   }
@@ -1009,7 +1050,7 @@ class EnvironmentDaemonServerTest {
     fixture.server.receive(
         "missing-connection",
         EnvironmentDaemonServerTestSupport.encode(
-            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 0, "{}"));
+            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, "{}"));
     fixture.server.close("missing-connection");
     assertEquals(Set.of(), fixture.server.readyEnvironments());
   }
@@ -1028,12 +1069,12 @@ class EnvironmentDaemonServerTest {
     assertEquals(Set.of(), fixture.server.readyEnvironments());
   }
 
-  /** 测试意图：连接发送失败后，协议错误也必须走 close-after-flush 语义并保持连接关闭幂等。 */
+  /** 测试意图：协议错误走 close-after-flush 语义，保证已入队的 ERROR 帧先被送出。 */
   @Test
   void protocolErrorUsesCloseAfterFlush() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-error-close");
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, 5, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{\"unexpected\":1}");
 
     assertEquals(1, channel.closeAfterFlushCount());
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
@@ -1045,7 +1086,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel channel = new FakeChannel("channel-error-scope");
     fixture.server.open(channel);
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, 0, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
 
     assertEquals(ENVIRONMENT_ID, channel.lastEnvelope().environmentId());
   }
@@ -1067,7 +1108,6 @@ class EnvironmentDaemonServerTest {
         channel,
         DaemonMessageType.COMPLETED,
         CALL_ONE.toString(),
-        2,
         completedPayload(CALL_ONE, "done"));
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
@@ -1127,7 +1167,7 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
 
     // 非 canonical UUID（大写/带花括号）同样被拒绝，避免同一 invocation 有多个文本形态。
-    fixture.receive(channel, DaemonMessageType.PARTIAL, CALL_ONE.toString().toUpperCase(), 2, "{}");
+    fixture.receive(channel, DaemonMessageType.PROGRESS, CALL_ONE.toString().toUpperCase(), "{}");
     assertTrue(channel.closed());
   }
 
@@ -1154,12 +1194,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel unbound = new FakeChannel("channel-ready-never-hello");
     fixture.server.open(unbound);
-    fixture.receive(
-        unbound,
-        DaemonMessageType.READY,
-        null,
-        1,
-        EnvironmentDaemonServerTestSupport.readyPayload());
+    fixture.receive(unbound, DaemonMessageType.READY, null, readyPayload());
 
     assertTrue(unbound.closed());
     assertEquals(DaemonMessageType.ERROR, unbound.lastEnvelope().messageType());
@@ -1174,7 +1209,7 @@ class EnvironmentDaemonServerTest {
     fixture.server.receive(
         "stale-connection",
         EnvironmentDaemonServerTestSupport.encode(
-            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, 2, "{}"));
+            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, "{}"));
 
     assertTrue(channel.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));

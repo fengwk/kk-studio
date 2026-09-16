@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
-import fun.fengwk.kkstudio.harness.daemon.transport.JdkWebSocketTransport;
+import fun.fengwk.kkstudio.harness.daemon.transport.OkHttpWebSocketTransport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -54,6 +54,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -72,9 +73,13 @@ import java.util.function.Supplier;
  * Environment Daemon 的连接、协议和本地 Environment Capability 执行基座。
  *
  * <p>Invocation journal 是进程内执行事实源；WebSocket 连接仅作为消息传输管道。连接断开后 Daemon 保留 journal 事实并重新握手与重连； 若
- * Gateway 再次发送相同 {@code invocationId}，RUNNING 与 terminal journal 条目分别重放 STARTED 与 terminal 报文。
+ * Gateway 再次发送相同 {@code invocationId}（包括物理连接丢失后的同实例重连重放），RUNNING 与 terminal journal 条目分别重放 STARTED
+ * 与 terminal 报文，绝不重复执行副作用。
  *
- * <p>每次连接尝试由独立的 {@code connectionGeneration} 标识，隔离跨连接事件干扰；入站消息在单个代际内执行严格单调序列检查。
+ * <p>本进程的 {@code daemonInstanceId} 在构造期随机生成一次并在每个 HELLO 中声明；同一进程的多次重连复用同一身份，因此 Gateway 可以区分「同一
+ * Daemon 重连」与「另一个 Daemon 进程接管」。
+ *
+ * <p>每次连接尝试由独立的 {@code connectionGeneration} 标识，隔离跨连接事件干扰；wire 协议没有序号，入站消息不做跨消息顺序校验。
  *
  * <p>Daemon 只拥有两个执行生命周期资源：单线程 scheduler 处理 heartbeat、reconnect 与 timeout，共享的
  * virtual-thread-per-task executor 处理 Coding/目录浏览等阻塞调用。transport/JDK 内部线程不在该生命周期内。
@@ -103,7 +108,10 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
-  private final AtomicLong outboundSequence = new AtomicLong();
+
+  /** 本 Daemon 进程的生命周期身份：构造期随机生成一次，所有重连复用，用于区分同实例恢复与换进程接管。 */
+  private final String daemonInstanceId = UUID.randomUUID().toString();
+
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
   private final AtomicLong connectionGeneration = new AtomicLong();
   private final AtomicBoolean started = new AtomicBoolean();
@@ -188,7 +196,7 @@ public final class DaemonRuntime implements AutoCloseable {
     boolean completed = false;
     try {
       taskExecutor = newTaskExecutor();
-      transport = new JdkWebSocketTransport(config.gatewayUri());
+      transport = new OkHttpWebSocketTransport(config.gatewayUri());
       DaemonCapabilityRegistry capabilityRegistry = new DaemonCapabilityRegistry();
       registrar.register(capabilityRegistry, taskExecutor, scheduler);
       DaemonRuntime runtime =
@@ -525,6 +533,7 @@ public final class DaemonRuntime implements AutoCloseable {
     payload.put("protocolVersion", DaemonProtocol.VERSION);
     payload.put("registrationToken", config.registrationToken());
     payload.put("capabilityCatalogVersion", EnvironmentCapabilityCatalog.version());
+    payload.put("daemonInstanceId", daemonInstanceId);
     return sendOn(connection, DaemonMessageType.HELLO, null, envelopeCodec.writeJson(payload));
   }
 
@@ -555,32 +564,25 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
       requireProtocolVersion(envelope);
       verifyScope(envelope);
-      InboundEnvelopeIdentity identity =
-          InboundEnvelopeIdentity.from(envelope, envelopeCodec.readPayload(envelope));
       switch (envelope.messageType()) {
         case INVOKE -> {
           requireInvocationId(envelope);
-          InvokePayload payload = readInvokePayload(envelope);
-          connection.acceptInboundEnvelope(identity);
-          processInvoke(connection, envelope, payload);
+          handleInvoke(connection, envelope, readInvokePayload(envelope));
         }
         case CANCEL -> {
           requireInvocationId(envelope);
-          connection.acceptInboundEnvelope(identity);
-          processCancel(connection, envelope);
+          handleCancel(envelope);
         }
-        case WELCOME -> {
-          connection.acceptInboundEnvelope(identity);
-          handleWelcome(connection, envelope);
-        }
-        case ACK -> {
-          connection.acceptInboundEnvelope(identity);
-          // Gateway 协议消息不改变 Daemon invocation 事实。
-        }
-        case ERROR -> {
-          connection.acceptInboundEnvelope(identity);
-          handleError(connection, envelope);
-        }
+        case WELCOME -> handleWelcome(connection, envelope);
+        case ERROR -> handleError(connection, envelope);
+        case READY,
+            HEARTBEAT,
+            STARTED,
+            PROGRESS,
+            COMPLETED,
+            FAILED,
+            CANCELLED -> throw new DaemonProtocolException(
+            "daemon must not receive " + envelope.messageType() + " from server");
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
       }
@@ -674,12 +676,6 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
-  private void processInvoke(
-      ActiveConnection connection, DaemonEnvelope envelope, InvokePayload payload) {
-    sendAck(connection, envelope.sequence());
-    handleInvoke(connection, envelope, payload);
-  }
-
   private void handleInvoke(
       ActiveConnection connection, DaemonEnvelope envelope, InvokePayload payload) {
     if (!started.get()) {
@@ -737,11 +733,6 @@ public final class DaemonRuntime implements AutoCloseable {
           new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
           false);
     }
-  }
-
-  private void processCancel(ActiveConnection connection, DaemonEnvelope envelope) {
-    sendAck(connection, envelope.sequence());
-    handleCancel(envelope);
   }
 
   private void handleCancel(DaemonEnvelope envelope) {
@@ -827,12 +818,6 @@ public final class DaemonRuntime implements AutoCloseable {
         .orElse(false);
   }
 
-  private void sendAck(ActiveConnection connection, long acknowledgedSequence) {
-    ObjectNode payload = envelopeCodec.createPayload();
-    payload.put("acknowledgedSequence", acknowledgedSequence);
-    sendOn(connection, DaemonMessageType.ACK, null, envelopeCodec.writeJson(payload));
-  }
-
   private boolean send(DaemonMessageType messageType, String invocationId, String payloadJson) {
     ActiveConnection connection = activeConnection.get();
     return connection != null && sendOn(connection, messageType, invocationId, payloadJson);
@@ -871,7 +856,6 @@ public final class DaemonRuntime implements AutoCloseable {
         messageType,
         hello ? null : boundEnvironmentId.get(),
         invocationId,
-        outboundSequence.getAndIncrement(),
         payloadJson);
   }
 
@@ -1036,7 +1020,6 @@ public final class DaemonRuntime implements AutoCloseable {
     private final AtomicBoolean helloSent = new AtomicBoolean();
     private final AtomicBoolean welcomed = new AtomicBoolean();
     private final AtomicBoolean ready = new AtomicBoolean();
-    private InboundEnvelopeIdentity lastInboundIdentity;
 
     private ActiveConnection(long generation, DaemonConnection connection) {
       this.generation = generation;
@@ -1049,42 +1032,6 @@ public final class DaemonRuntime implements AutoCloseable {
 
     DaemonConnection connection() {
       return connection;
-    }
-
-    /**
-     * 在当前连接代际内校验并记录入站 envelope sequence。
-     *
-     * <p>严格约束：
-     *
-     * <ul>
-     *   <li>序列号必须从基线开始严格相邻单调递增（sequence == last + 1）；
-     *   <li>相同序列号且 envelope 完全相同判定为网络重放（duplicate），静默接受；
-     *   <li>相同序列号但内容不一致判定为序号冲突复用，抛出协议异常；
-     *   <li>序列号回退或出现空洞跳号均判定为协议违规，拒绝处理。
-     * </ul>
-     */
-    private synchronized void acceptInboundEnvelope(InboundEnvelopeIdentity identity) {
-      if (lastInboundIdentity == null
-          || identity.sequence() == lastInboundIdentity.sequence() + 1) {
-        lastInboundIdentity = identity;
-        return;
-      }
-      if (identity.sequence() == lastInboundIdentity.sequence()) {
-        if (identity.equals(lastInboundIdentity)) {
-          return;
-        }
-        throw new DaemonProtocolException(
-            "inbound sequence reused by a conflicting envelope: " + identity.sequence());
-      }
-      if (identity.sequence() < lastInboundIdentity.sequence()) {
-        throw new DaemonProtocolException(
-            "inbound sequence moved backwards: " + identity.sequence());
-      }
-      throw new DaemonProtocolException(
-          "inbound sequence must immediately follow "
-              + lastInboundIdentity.sequence()
-              + ": "
-              + identity.sequence());
     }
 
     void markHelloSent() {
@@ -1101,25 +1048,6 @@ public final class DaemonRuntime implements AutoCloseable {
 
     void markReady() {
       ready.set(true);
-    }
-  }
-
-  private record InboundEnvelopeIdentity(
-      int protocolVersion,
-      DaemonMessageType messageType,
-      EnvironmentId environmentId,
-      String invocationId,
-      long sequence,
-      JsonNode payload) {
-
-    private static InboundEnvelopeIdentity from(DaemonEnvelope envelope, JsonNode payload) {
-      return new InboundEnvelopeIdentity(
-          envelope.protocolVersion(),
-          envelope.messageType(),
-          envelope.environmentId(),
-          envelope.invocationId(),
-          envelope.sequence(),
-          payload);
     }
   }
 
@@ -1257,7 +1185,7 @@ public final class DaemonRuntime implements AutoCloseable {
       }
       try {
         String payloadJson = resultCodec.encodePartial(partial, resourceWriter());
-        send(DaemonMessageType.PARTIAL, invocation.invocationId(), payloadJson);
+        send(DaemonMessageType.PROGRESS, invocation.invocationId(), payloadJson);
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "partial");
       }

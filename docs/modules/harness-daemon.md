@@ -2,7 +2,7 @@
 
 ## 定位
 
-Environment Daemon 是独立运行的宿主进程，负责代码能力执行、受管 Skill 来源的发现/持久化/精确加载，以及 Daemon WebSocket 协议 v3 通信。它引入 `harness-common` 的基础值对象与 `harness-environment` 的能力 SPI 及通信协议编解码器，与上层的 Model、Tool、Runtime 状态机及业务数据库保持解耦。
+Environment Daemon 是独立运行的宿主进程，负责代码能力执行、受管 Skill 来源的发现/持久化/精确加载，以及 Daemon WebSocket 协议 v1 通信。它引入 `harness-common` 的基础值对象与 `harness-environment` 的能力 SPI 及通信协议编解码器，与上层的 Model、Tool、Runtime 状态机及业务数据库保持解耦。
 
 [`DaemonMain`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java) 是进程入口；[`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) 统筹网络连接、执行日志（journal）、能力异步调度、重连退避、超时判定以及进程生命周期。Daemon 进程内以 Invocation journal 维护执行状态的权威事实；WebSocket 连接作为纯消息传输管道，连接的中断与重建不会破坏正在进行的执行状态，支持重连后幂等重放。
 
@@ -20,7 +20,7 @@ Environment Daemon 是独立运行的宿主进程，负责代码能力执行、�
 
 - 会话生命周期与决策事实：Session、Turn、Entry 树与长期状态持久化归属 Runtime 模块；权限准入策略由 Platform 与 Runtime 判定，Daemon 聚焦于已授权指令的本地能力执行。
 - 本地路径与 Skill 配置事实：CLI 只确定 Environment root 和必填的 Daemon data directory；Skill 来源配置由 Platform 持有并通过管理调用下发。Environment root 只用于本地资源存储与 READY 展示，不作为调用 cwd 或路径边界。
-- READY 元数据：能力通告 v2 包含操作系统、时区、可信备注、canonical Environment root，以及按来源分组的版本化 Skill 描述和有界诊断；凭证、请求头、环境变量、命令与连接 URL 不进入 READY。
+- READY 元数据：能力通告包含操作系统、时区、可信备注、canonical Environment root，以及按来源分组的版本化 Skill 描述和有界诊断；凭证、请求头、环境变量、命令与连接 URL 不进入 READY。
 - 执行状态持久性：执行事实独立保存在进程内存日志中；连接断开仅触发传输层重连，执行生命周期不受网络连接波动影响。
 
 ## 依赖边界
@@ -30,7 +30,7 @@ DaemonMain
   ├─ DaemonConfig / CodingToolsConfig
   ├─ DaemonSkillRegistry
   └─ DaemonRuntime
-       ├─ JdkWebSocketTransport
+       ├─ OkHttpWebSocketTransport
        ├─ DaemonCapabilityRegistry
        ├─ InMemoryDaemonInvocationJournal
        ├─ scheduler (1 thread)
@@ -51,7 +51,7 @@ Daemon 的生产依赖止于 `harness-common` 与 `harness-environment`；`harne
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 Invocation 的运行态与终态（RUNNING、COMPLETED、FAILED、CANCELLED），通过原子操作确保单次执行并记录终态结果；在网络重连时支持针对重复 `INVOKE` 幂等重放 STARTED 与终态消息，确保单次终态（terminal-once）契约。执行日志在整个进程生命周期中持续生效，网络断开时维持执行状态。 |
 | `fun.fengwk.kkstudio.harness.daemon.skill` | Platform-owned PATH/GIT Skill 来源的发现、持久化与精确加载。完整候选快照经校验后原子发布到 `--data-dir`；READY 按来源通告版本、revision、Skill 描述与诊断；`skill.load` 按 `(sourceId, name, revision)` 返回正文与基目录。该包不接受会话 `workdir`。 |
 | `fun.fengwk.kkstudio.harness.daemon.mcp` | Local stdio MCP 执行基础与子进程生命周期管理。严格解析 Platform 下发的本地 MCP 配置（`type=local`、`environmentId`、`command`、`cwd` 必填，整值 `${VAR}` 由 Daemon 运行时通过 `System.getenv` 解析，`cwd` 仅强制目标操作系统词法绝对路径，受信任执行且无路径白名单）；`DaemonLocalMcpManager` 按 `(serverId, configVersion)` 懒共享子进程，新版本自动 fencing 旧版本并在活动调用归零后关闭（drain），同版本配置漂移时 fail-closed；对外注册管理专用 `mcp.local.discover`（返回工具 envelope）与模型运行时 `mcp.local.call` 能力，使用单一绝对 deadline 覆盖 lazy 初始化与执行，支持单调用精确取消且不打断并发调用。 |
-| `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 JDK `HttpClient` WebSocket 的生产实现。提供连接管理、报文收发及传输监听机制；强制执行文本帧检查与单消息累积上限（默认 16 MiB），遇到二进制帧或报文超限时按照 RFC 6455 发送 close code 1008 并关闭连接。 |
+| `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 OkHttp WebSocket 的生产实现。提供连接管理、报文收发及传输监听机制，强制协商 `permessage-deflate`；同时执行文本帧检查与单消息累积上限（默认 16 MiB），遇到二进制帧或报文超限时按照 RFC 6455 发送 close code 1008 并关闭连接。 |
 
 ## 核心模型 / API
 
@@ -114,28 +114,33 @@ lsp.goto-definition, lsp.workspace-symbols, lsp.java-decompile
 
 ### WebSocket protocol
 
-生产网络传输使用 [`JdkWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransport.java)，基于 JDK `HttpClient` WebSocket 构建。传输通道仅接收文本帧；当分片累积长度超过配置上限（默认 16 MiB 字符）或收到二进制帧时，确定性发送一次 RFC 6455 close code `1008` 策略违规关闭帧，并中断连接。
+生产网络传输使用 [`OkHttpWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java)，基于 OkHttp WebSocket 构建，并强制要求本次握手协商 `permessage-deflate`：OkHttp 在 upgrade 请求中声明该扩展，服务端未接受时传输以 RFC 6455 close code `1010` 关闭且不交付连接，绝不退化为未压缩会话。传输通道仅接收文本帧；当单条文本超过配置上限（默认 16 MiB 字符）或收到二进制帧时，确定性发送一次 RFC 6455 close code `1008` 策略违规关闭帧，并中断连接。
 
 握手与连接状态跃迁：
 
 ```text
 DISCONNECTED -> CONNECTING
-  -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=1)
+  -> HELLO(protocolVersion=1, registrationToken, capabilityCatalogVersion=1,
+           daemonInstanceId)
   <- WELCOME(environmentId)
   -> READY(capability descriptors, environment + sourceSetVersion + skillSources)
   -> READY + HEARTBEAT
 ```
 
-每个封包均包含协议版本、消息类型、规范环境作用域（`EnvironmentId`）、消息序号及载荷；出站序号由运行时严格递增。在单一连接代际（connection generation）内，入站序号必须从基线开始连续递增；序号与内容完全一致的重复封包会被静默去重，序号冲突、回退或跳号则作为协议错误回复 ERROR，报文不会进入执行流程。连接重连后，新代际重新确立序号基线。
+每个封包只有五个字段：协议版本、消息类型、规范环境作用域（`EnvironmentId`）、可空 `invocationId` 与载荷。协议没有全局序号，也没有 ACK：消息可靠性来自 `invocationId` 与 Daemon invocation journal，而不是传输层确认，因此运行时不做任何跨消息顺序校验。
 
 入站消息控制：
 
 ```text
 INVOKE / CANCEL           -> invocationId required
-WELCOME / ACK / ERROR     -> handshake/control
+WELCOME / ERROR           -> handshake/control
 ```
 
 封包的作用域（`EnvironmentId`）必须与当前已绑定的环境标识完全一致。协议版本、消息类型、载荷或作用域校验失败时，运行时回复 ERROR，并保留现有 Invocation journal。网关返回 `REGISTRATION_REJECTED` 时，运行时跃迁至 FAILED、停止重连并以非零状态码退出；`RETRY_LATER` 触发断线与退避重连；未携带 code 的 ERROR 仅作为控制消息接收。
+
+### 实例身份与同进程重连恢复
+
+运行时在构造期随机生成一次 `daemonInstanceId`，并在每个 HELLO 中声明；同一进程的所有重连复用同一身份，因此 Gateway 能区分「同一 Daemon 重连」与「另一个 Daemon 进程接管」。物理连接失效不改变 journal 事实：Gateway 以相同 `invocationId` 重放 INVOKE 时，journal 的 RUNNING 条目重放 `STARTED(replayed=true)`，已终结条目重放对应终态报文，副作用绝不重复执行。
 
 ### Coding Capabilities 与显式 workdir
 
@@ -170,7 +175,7 @@ lspBridgeCommand = 空（--lsp-bridge-command 启用）
 
 输出体积与本地磁盘状态永远不是终止进程的理由：内联阈值（50 KiB / 2000 行）之外转为落盘，达到捕获预算（默认 1 GiB）后只停止文件捕获并继续统计总数，磁盘写失败只降级为无路径的有界预览。三种情况都让子进程自然退出，退出码始终是权威事实；失败路径在删除中转文件前先关闭文件流，既不泄漏文件描述符也不残留幽灵文件。LSP bridge 与 `javap` 子进程经 [`ChildProcessRunner`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunner.java) 并发排空 stdout/stderr（stdout 是调用方载荷故完整保留，stderr 只保留有界诊断尾部），deadline 绑定 `request.effectiveTimeout()`，超时或取消都终止整棵进程树。
 
-输出结果由 `DaemonCapabilityResultCodec` 编解码：流式 `PARTIAL` 仅允许文本与 JSON 数据，终态 `COMPLETED` 在通过资源预检后方允许执行读写存储；默认资源聚合上限 8 MiB、最终载荷上限 16 MiB、内容条目上限 64 项。`DaemonCapabilityResultCodec` 专注于流式与终态结果（`EnvironmentCapabilityResult`）的网络报文编解码，底层执行 SPI 则由 `EnvironmentCapability` 独立承载。
+输出结果由 `DaemonCapabilityResultCodec` 编解码：流式 `PROGRESS` 仅允许文本与 JSON 数据，终态 `COMPLETED` 在通过资源预检后方允许执行读写存储；默认资源聚合上限 8 MiB、最终载荷上限 16 MiB、内容条目上限 64 项。`DaemonCapabilityResultCodec` 专注于流式与终态结果（`EnvironmentCapabilityResult`）的网络报文编解码，底层执行 SPI 则由 `EnvironmentCapability` 独立承载。
 
 ### Skills
 
@@ -205,15 +210,14 @@ sequenceDiagram
   participant D as DaemonRuntime
   participant J as InvocationJournal
   participant C as Local Capability
-  G->>D: INVOKE(protocol v3, invocationId, capabilityId, capabilityVersion, arguments, timeoutMillis)
-  D-->>G: ACK
+  G->>D: INVOKE(protocol v1, invocationId, capabilityId, capabilityVersion, arguments, timeoutMillis)
   D->>J: journal.start
   alt new invocation
     D->>D: descriptor/version + timeout
     D-->>G: STARTED
     D->>C: EnvironmentCapability.execute
-    C-->>D: PARTIAL*
-    D-->>G: PARTIAL*
+    C-->>D: PROGRESS*
+    D-->>G: PROGRESS*
     C-->>D: complete/error
     D->>J: terminal-once
     D-->>G: COMPLETED / FAILED
@@ -230,7 +234,7 @@ sequenceDiagram
 
 - `EnvironmentId` 是当前 Daemon 连接的通信作用域；作用域不匹配按协议错误处理。
 - 能力 descriptor 注册表在运行时构造完成后冻结；Skill 快照只由成功的来源管理操作原子替换，并在后续 READY/重连中通告当前 manifest。
-- 单连接代际内入站序号严格保持相邻递增或等值重复；网络重连后开启新代际并重新确立基线。
+- 协议不使用全局序号或 ACK；调用可靠性由 `invocationId`、进程级 `daemonInstanceId` 与 Invocation journal 共同保证。
 - 调用日志 `start` 操作执行原子去重，状态跃迁严格遵循 RUNNING 到终态的单向流动，保证终态回调触发一次。
 - 能力版本及请求参数全部验证通过后方可发出 STARTED 确认；任何前置校验失败均直接以 FAILED 终态返回。
 - 每次调用独立解析自己的绝对 workdir，调用之间不继承目录；Daemon 不提供默认 cwd、HOME 回退或 Environment root 回退。
@@ -243,7 +247,7 @@ sequenceDiagram
 - 环境能力通过 `harness-environment` 的 `EnvironmentCapability` SPI 与 `DaemonCapabilityRegistry` 进行装配，并与标准原子能力目录的描述符和版本严格对齐。
 - 虚拟线程执行器、定时调度器与本地资源存储由 `DaemonRuntime` 集中管理与生命周期注入，保证进程退出时资源完全回收。
 - Skill 来源由 Platform 配置并经管理 capability 下发；Daemon CLI 只提供持久 `--data-dir`，启动恢复最近成功 manifest。
-- 测试环境支持注入内存传输通道（`DaemonTransport`）、内存执行日志、专用执行器与资源存储；生产环境使用基于 JDK WebSocket 的网络传输、内存执行日志与运行时托管的线程池。
+- 测试环境支持注入内存传输通道（`DaemonTransport`）、内存执行日志、专用执行器与资源存储；生产环境使用基于 OkHttp 的 WebSocket 网络传输、内存执行日志与运行时托管的线程池。
 - 网关可通过 `INVOKE` 报文中的 `timeoutMillis` 覆盖能力默认超时，当值为 `0` 时沿用默认配置，调用截止时间始终生效。
 
 ## 测试与源码入口
@@ -252,18 +256,18 @@ sequenceDiagram
 
 - [`DaemonMain.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java)、[`DaemonConfig.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java)、[`DaemonRuntime.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java)
 - [`DaemonCapabilityRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java)、[`CodingCapabilities.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java)、[`EnvironmentPaths.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java)
-- [`DaemonTransport.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/DaemonTransport.java)、[`JdkWebSocketTransport.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransport.java)
+- [`DaemonTransport.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/DaemonTransport.java)、[`OkHttpWebSocketTransport.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java)
 - [`DaemonInvocationJournal.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/journal/DaemonInvocationJournal.java)、[`InMemoryDaemonInvocationJournal.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/journal/InMemoryDaemonInvocationJournal.java)
 - [`DaemonSkillRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java)、[`SkillLoadCapability.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapability.java)
 
 ### 关键测试守卫
 
 - [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)：验证模块依赖方向与线程池所有权边界。
-- [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：验证 `--registration-token-file` 契约与凭证不外泄、`--data-dir` 默认/绝对约束、三个本地执行程序参数、已删除系统属性与 `--registration-token`/`--skill-dir` 的 fail-closed、握手重连、日志重放、协议 v3 入站校验及超时取消生命周期。
+- [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：验证 `--registration-token-file` 契约与凭证不外泄、`--data-dir` 默认/绝对约束、三个本地执行程序参数、已删除系统属性与 `--registration-token`/`--skill-dir` 的 fail-closed、握手重连、日志重放、协议 v1 入站校验及超时取消生命周期。
 - [`DaemonDataDirectoryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectoryTest.java)、[`DaemonTokenFileTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFileTest.java)：验证数据目录布局与 0700 收敛、进程内与跨 JVM 独占锁、重启后锁释放、启动期只清理遗留 `.part` 并保留已发布数据、`defaultRoot` 纯计算，以及凭证文件的绝对路径/普通文件/0600 校验与空白剥离。
 - [`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesEdgeTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：验证编码能力执行、显式 workdir 语义、`.gitignore` 检索、大输出落盘与捕获预算/磁盘失败降级、LSP 有效超时与取消终止进程树，以及资源存储边界。
 - [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`ChildProcessRunnerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunnerTest.java)：验证内联/落盘阈值、有界预览的字符边界与重叠去重、行数与 `TextStreams` 逐行扫描一致、捕获预算与磁盘失败只降级且清理干净不留句柄、原子发布与 durable 语义、stdout 载荷完整保留、stderr 有界诊断、并发排空不死锁，以及 deadline/取消终止整棵进程树。
-- [`JdkWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransportTest.java)：验证文本帧传输、二进制拦截、16 MiB 报文上限与策略违规关闭行为。
+- [`OkHttpWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransportTest.java)：验证强制 `permessage-deflate` 协商门禁（缺失或无关扩展以 1010 拒绝）、文本帧传输、二进制拦截、16 MiB 报文上限与策略违规关闭行为。
 - [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)、[`DaemonGitManagerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonGitManagerTest.java)、[`SkillPathScannerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPathScannerTest.java)：验证来源扫描、持久恢复、版本/并发围栏、Git ref 与取消、诊断边界、loadability 及精确 revision 加载。
 
 ---

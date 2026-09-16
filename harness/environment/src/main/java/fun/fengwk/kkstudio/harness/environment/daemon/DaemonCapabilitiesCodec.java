@@ -20,9 +20,8 @@ import java.util.UUID;
  * Daemon READY 能力 payload 的严格 codec：版本化、类型化，拒绝未知字段、重复键、尾随内容与缺失字段。
  *
  * <p>wire shape：{@code
- * {"version":2,"environment":{...},"sourceSetVersion":0,"skillSources":[{sourceId,sourceVersion,
- * sourceRevision,skills,diagnostics}]}}。{@code sourceSetVersion} 是必填的非负顶层整数，缺失、负数或非整数都按协议错误拒绝；旧
- * shape （v1 顶层平铺 {@code skills}、无 {@code sourceSetVersion} 的 v2）被明确拒绝，不做双解码。
+ * {"version":1,"environment":{...},"sourceSetVersion":0,"skillSources":[{sourceId,sourceVersion,
+ * sourceRevision,skills,diagnostics}]}}。{@code sourceSetVersion} 是必填的非负顶层整数，缺失、负数或非整数都按协议错误拒绝。
  */
 public final class DaemonCapabilitiesCodec {
 

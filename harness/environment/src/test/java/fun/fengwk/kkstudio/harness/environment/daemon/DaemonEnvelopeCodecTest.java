@@ -26,7 +26,6 @@ class DaemonEnvelopeCodecTest {
             DaemonMessageType.INVOKE,
             ID,
             "invocation",
-            7,
             "{\"request\":\"test\"}");
 
     String json = codec.encode(envelope);
@@ -35,64 +34,69 @@ class DaemonEnvelopeCodecTest {
     assertEquals(envelope, decoded);
     assertEquals(ID, decoded.environmentId());
     assertTrue(json.contains("\"environmentId\":\"" + ID_TEXT + "\""));
+    assertTrue(json.contains("\"invocationId\":\"invocation\""));
   }
 
-  /** 未知版本、未知类型、负序号、非对象 payload 和未知字段必须分别在 wire 边界拒绝。 */
+  /** 未知版本、未知类型、非对象 payload 和未知字段必须分别在 wire 边界拒绝。 */
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {
-    // 相对当前版本的前后版本都必须被拒绝：v3 之前的 v2 与之后的 v4 都不是可接受协议。
+    // 相邻版本与非当前版本都不可接受：不做版本协商或双解码。
     for (int unsupported : new int[] {DaemonProtocol.VERSION - 1, DaemonProtocol.VERSION + 1}) {
       assertProtocolError(
           "{\"protocolVersion\":"
               + unsupported
               + ",\"messageType\":\"READY\",\"environmentId\":\""
               + ID_TEXT
-              + "\",\"sequence\":0,\"payload\":{}}");
+              + "\",\"payload\":{}}");
     }
     assertProtocolError(
         current("\"messageType\":\"FUTURE\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":{}}");
+            + "\"payload\":{}}");
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":-1,\"payload\":{}}");
+            + "\"payload\":[]}");
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":[]}");
+            + "\"payload\":{},\"unexpected\":true}");
+    assertProtocolError(current("\"environmentId\":\"" + ID_TEXT + "\",") + "\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":{},\"unexpected\":true}");
-    assertProtocolError(
-        current("\"environmentId\":\"" + ID_TEXT + "\",") + "\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        current("\"messageType\":123,\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":{}}");
+        current("\"messageType\":123,\"environmentId\":\"" + ID_TEXT + "\",") + "\"payload\":{}}");
     assertProtocolError(
         current("\"messageType\":\"   \",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":{}}");
-    assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":\"0\",\"payload\":{}}");
+            + "\"payload\":{}}");
     assertProtocolError(
         current(
                 "\"messageType\":\"INVOKE\",\"environmentId\":\""
                     + ID_TEXT
                     + "\",\"invocationId\":\"   \",")
+            + "\"payload\":{}}");
+  }
+
+  /** 已删除的 wire 字段（sequence/ACK）必须按未知字段拒绝，证明不存在兼容解析。 */
+  @Test
+  void rejectsRemovedEnvelopeFields() {
+    assertProtocolError(
+        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
             + "\"sequence\":0,\"payload\":{}}");
+    assertProtocolError(
+        "{\"protocolVersion\":"
+            + DaemonProtocol.VERSION
+            + ",\"messageType\":\"ACK\",\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"payload\":{}}");
   }
 
   /** READY 等 connection 消息必须携带 canonical UUID scope。 */
   @Test
   void rejectsMissingOrNonCanonicalEnvironmentId() {
-    assertProtocolError(current("\"messageType\":\"READY\",\"sequence\":0,\"payload\":{}}"));
+    assertProtocolError(current("\"messageType\":\"READY\",\"payload\":{}}"));
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":\"not-a-uuid\",")
-            + "\"sequence\":0,\"payload\":{}}");
+        current("\"messageType\":\"READY\",\"environmentId\":\"not-a-uuid\",") + "\"payload\":{}}");
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT.toUpperCase() + "\",")
-            + "\"sequence\":0,\"payload\":{}}");
+            + "\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":7,")
-            + "\"sequence\":0,\"payload\":{}}");
+        current("\"messageType\":\"READY\",\"environmentId\":7,") + "\"payload\":{}}");
   }
 
   /** HELLO envelope 不得声明 scope；HELLO 上的 environmentId 字段在边界拒绝。 */
@@ -100,9 +104,8 @@ class DaemonEnvelopeCodecTest {
   void rejectsScopeOnHello() {
     assertProtocolError(
         current("\"messageType\":\"HELLO\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":{}}");
-    DaemonEnvelope hello =
-        codec.decode(current("\"messageType\":\"HELLO\",\"sequence\":0,\"payload\":{}}"));
+            + "\"payload\":{}}");
+    DaemonEnvelope hello = codec.decode(current("\"messageType\":\"HELLO\",\"payload\":{}}"));
     assertNull(hello.environmentId());
   }
 
@@ -117,22 +120,22 @@ class DaemonEnvelopeCodecTest {
             + ",\"messageType\":\"READY\","
             + "\"environmentId\":\""
             + ID_TEXT
-            + "\",\"sequence\":0,\"payload\":{}}");
+            + "\",\"payload\":{}}");
     assertProtocolError(
         current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":0,\"payload\":{}} trailing");
+            + "\"payload\":{}} trailing");
   }
 
   /** connection-level（无 invocationId）envelope 可往返；payload helper 与嵌套 JSON 读写可用。 */
   @Test
   void encodesConnectionLevelEnvelopeAndExposesPayloadHelpers() {
     DaemonEnvelope envelope =
-        new DaemonEnvelope(
-            DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, 0, "{\"k\":1}");
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, "{\"k\":1}");
 
     String json = codec.encode(envelope);
     assertEquals(envelope, codec.decode(json));
     assertTrue(json.contains("\"payload\":{\"k\":1}"));
+    assertNull(codec.decode(json).invocationId());
 
     assertEquals(0, codec.createPayload().size());
     assertEquals(1, codec.readPayload(codec.decode(json)).get("k").asInt());
@@ -140,19 +143,20 @@ class DaemonEnvelopeCodecTest {
     assertThrows(DaemonProtocolException.class, () -> codec.readJson("not json"));
   }
 
-  /** 根节点非对象、protocolVersion/sequence 类型错误必须在 wire 边界拒绝。 */
+  /** 根节点非对象、protocolVersion 类型错误必须在 wire 边界拒绝。 */
   @Test
-  void rejectsNonObjectRootAndWrongTypedNumericFields() {
+  void rejectsNonObjectRootAndWrongTypedVersionField() {
     assertProtocolError("[]");
     assertProtocolError(
         "{\"protocolVersion\":\""
             + DaemonProtocol.VERSION
             + "\",\"messageType\":\"READY\",\"environmentId\":\""
             + ID_TEXT
-            + "\",\"sequence\":0,\"payload\":{}}");
+            + "\",\"payload\":{}}");
     assertProtocolError(
-        current("\"messageType\":\"READY\",\"environmentId\":\"" + ID_TEXT + "\",")
-            + "\"sequence\":1.5,\"payload\":{}}");
+        "{\"protocolVersion\":1.5,\"messageType\":\"READY\",\"environmentId\":\""
+            + ID_TEXT
+            + "\",\"payload\":{}}");
   }
 
   private static String current(String fields) {

@@ -26,7 +26,7 @@ public record DaemonCapabilities(
     List<DaemonSkillSourceSnapshot> skillSources) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 2;
+  public static final int VERSION = 1;
 
   /** 单个 payload 内的来源数上限。 */
   public static final int MAX_SOURCES = 512;

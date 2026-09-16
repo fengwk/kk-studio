@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -50,6 +51,10 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   private static final EnvironmentId DEV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String REGISTRATION_TOKEN = "test-token";
+
+  /** 本测试只模拟单个 daemon 进程身份：重连由同一身份表达。 */
+  private static final String DAEMON_INSTANCE_ID = "22222222-2222-2222-2222-222222222222";
+
   private static final Instant NOW = Instant.parse("2026-08-30T10:00:00Z");
   private static final Duration LEASE_DURATION = Duration.ofSeconds(60);
   private static final DaemonCapabilities CAPABILITIES =
@@ -193,7 +198,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
 
-    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
 
     EnvironmentConnection env = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
@@ -207,7 +212,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(DEV, envelopes.get(0).environmentId());
 
     // 发送 READY
-    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), ready(DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
@@ -218,7 +223,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void invalidRegistrationTokenFailsTerminal() {
     FakeConnection conn1 = new FakeConnection("conn-invalid");
     serverNode1.open(conn1);
-    serverNode1.receive(conn1.connectionId(), hello(0, "wrong-token"));
+    serverNode1.receive(conn1.connectionId(), hello("wrong-token"));
 
     List<DaemonEnvelope> envelopes = conn1.envelopes();
     assertEquals(1, envelopes.size());
@@ -233,13 +238,13 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 1. Node 1 成功绑定 DEV
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
-    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(DEV));
 
     // 2. 另一个连接（如 Node 2）尝试绑定 DEV -> RETRY_LATER
     FakeConnection conn2 = new FakeConnection("conn-2");
     serverNode2.open(conn2);
-    serverNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode2.receive(conn2.connectionId(), hello(REGISTRATION_TOKEN));
 
     List<DaemonEnvelope> envelopes2 = conn2.envelopes();
     assertEquals(1, envelopes2.size());
@@ -257,8 +262,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 1. Node 1 绑定 DEV
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
-    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(DEV));
 
     // 2. 模拟租约在数据库中过期
     jdbcTemplate.update(
@@ -268,7 +273,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 3. Node 2 尝试绑定 DEV -> 成功接管
     FakeConnection conn2 = new FakeConnection("conn-2");
     serverNode2.open(conn2);
-    serverNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode2.receive(conn2.connectionId(), hello(REGISTRATION_TOKEN));
 
     EnvironmentConnection env = registryNode2.find(DEV).orElseThrow();
     assertEquals(node2, env.ownerNodeId());
@@ -283,7 +288,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void routeFenceRejectsStaleTokenUpdates() {
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
-    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
 
     // 在数据库中篡改 lease_token
     jdbcTemplate.update(
@@ -292,7 +297,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         DEV.value());
 
     // 发送 READY -> 应当因为 fence 失败而被关闭
-    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), ready(DEV));
 
     assertTrue(conn1.closed);
   }
@@ -301,8 +306,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void disconnectPreservesConnectingWithGracePeriod() {
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
-    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
@@ -325,8 +330,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
   void gracePeriodAllowsSameNodeReconnectWithoutManualLeaseRewindWhileBlockingOtherNode() {
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
-    serverNode1.receive(conn1.connectionId(), hello(0, REGISTRATION_TOKEN));
-    serverNode1.receive(conn1.connectionId(), ready(1, DEV));
+    serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
+    serverNode1.receive(conn1.connectionId(), ready(DEV));
 
     EnvironmentConnection readyEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.READY, readyEnv.status());
@@ -342,7 +347,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 异节点 Node 2 在宽限期内尝试连接 -> 必须被拒绝（收到 RETRY_LATER 并关闭）
     FakeConnection conn2 = new FakeConnection("conn-2");
     serverNode2.open(conn2);
-    serverNode2.receive(conn2.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode2.receive(conn2.connectionId(), hello(REGISTRATION_TOKEN));
     assertTrue(conn2.closed);
     assertEquals(DaemonMessageType.ERROR, conn2.envelopes().get(0).messageType());
     assertTrue(
@@ -351,7 +356,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     // 同节点 Node 1 在宽限期内重新连接（不手工回拨 lease_until）-> 必须成功收到 WELCOME
     FakeConnection conn1b = new FakeConnection("conn-1b");
     serverNode1.open(conn1b);
-    serverNode1.receive(conn1b.connectionId(), hello(0, REGISTRATION_TOKEN));
+    serverNode1.receive(conn1b.connectionId(), hello(REGISTRATION_TOKEN));
     assertFalse(conn1b.closed);
     assertEquals(1, conn1b.envelopes().size());
     assertEquals(DaemonMessageType.WELCOME, conn1b.envelopes().get(0).messageType());
@@ -363,43 +368,38 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertEquals(LiveEnvironmentStatus.CONNECTING, reconnectedEnv.status());
   }
 
-  private static String hello(long sequence, String token) {
+  private static String hello(String token) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.HELLO,
             null,
             null,
-            sequence,
             "{\"protocolVersion\":"
                 + DaemonProtocol.VERSION
                 + ",\"capabilityCatalogVersion\":\""
                 + EnvironmentCapabilityCatalog.version()
                 + "\",\"registrationToken\":\""
                 + token
+                + "\",\"daemonInstanceId\":\""
+                + DAEMON_INSTANCE_ID
                 + "\"}"));
   }
 
-  private static String ready(long sequence, EnvironmentId environmentId) {
+  private static String ready(EnvironmentId environmentId) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
             DaemonProtocol.VERSION,
             DaemonMessageType.READY,
             environmentId,
             null,
-            sequence,
             CAPABILITIES_CODEC.encode(CAPABILITIES)));
   }
 
-  private static String heartbeat(long sequence, EnvironmentId environmentId) {
+  private static String heartbeat(EnvironmentId environmentId) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION,
-            DaemonMessageType.HEARTBEAT,
-            environmentId,
-            null,
-            sequence,
-            "{}"));
+            DaemonProtocol.VERSION, DaemonMessageType.HEARTBEAT, environmentId, null, "{}"));
   }
 
   private static final class FakeConnection implements DaemonChannel {
@@ -423,12 +423,12 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     }
 
     @Override
-    public synchronized boolean sendText(String text) {
+    public synchronized DaemonOfferResult offerText(String text) {
       if (!isOpen()) {
-        return false;
+        return DaemonOfferResult.CLOSED;
       }
       envelopes.add(ENVELOPE_CODEC.decode(text));
-      return true;
+      return DaemonOfferResult.ACCEPTED;
     }
 
     @Override

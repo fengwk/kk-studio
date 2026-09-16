@@ -3,7 +3,8 @@ package fun.fengwk.kkstudio.web.environment;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
-import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
+
+import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,16 +17,17 @@ import java.util.function.Consumer;
 /**
  * 每个 Environment Daemon WebSocket 连接的有界串行出站发送器。
  *
- * <p>{@link #enqueue(String)} 只在内存中完成有界入队；唯一 sender 虚拟线程按入队顺序调用 Spring {@link
- * WebSocketSession#sendMessage}。待发预算同时限制帧数与 UTF-8 字节数，并包含当前正在发送的帧。发送异常或超时会先关闭入队围栏，再在锁外通知 Gateway
- * 收敛连接，最后尽力关闭 WebSocket。
+ * <p>{@link #offerText(String)} 只在内存中完成有界入队并返回确定性结果：容量/字节预算拒绝为 {@link
+ * DaemonOfferResult#BUSY}，围栏已关闭为 {@link DaemonOfferResult#CLOSED}，二者都保证帧未被发送且不改变连接可用性。唯一 sender
+ * 虚拟线程按 入队顺序调用 Spring {@link WebSocketSession#sendMessage}；待发预算同时限制帧数与 UTF-8
+ * 字节数，并包含当前正在发送的帧。发送异常或超时会先关闭 入队围栏，再在锁外通知 Gateway 收敛连接，最后尽力关闭 WebSocket。
  *
  * <p>{@link #close()} 幂等地清空未发送帧并禁止后续入队；外部 {@code sendMessage}/{@code close} 调用都不持有 sender
  * 状态锁。已经进入底层阻塞调用的单帧由 session close/线程中断终止，后续帧绝不会继续发送。
  */
 final class DaemonOutboundSender implements AutoCloseable {
 
-  private final ConcurrentWebSocketSessionDecorator session;
+  private final WebSocketSession session;
   private final int capacity;
   private final long maxBytes;
   private final long sendTimeoutMillis;
@@ -57,7 +59,9 @@ final class DaemonOutboundSender implements AutoCloseable {
     if (sendTimeoutMillis <= 0) {
       throw new IllegalArgumentException("sendTimeoutMillis must be positive");
     }
-    this.session = new ConcurrentWebSocketSessionDecorator(session, sendTimeoutMillis, maxBytes);
+    // 帧的串行化、帧数/字节预算与发送超时都由本类唯一 sender 线程持有；不再叠加 Spring 的并发装饰器，
+    // 避免出现第二份无界缓冲与双重超时语义。
+    this.session = session;
     this.capacity = capacity;
     this.maxBytes = maxBytes;
     this.sendTimeoutMillis = sendTimeoutMillis;
@@ -67,22 +71,27 @@ final class DaemonOutboundSender implements AutoCloseable {
         Thread.ofVirtual().name("environment-daemon-outbound-" + session.getId()).start(this::run);
   }
 
-  /** 非阻塞入队；待发帧数/UTF-8 字节达到上限、单帧超过字节上限或 sender 已关闭时返回 {@code false}。 */
-  boolean enqueue(String text) {
+  /**
+   * 非阻塞入队并返回确定性结果。
+   *
+   * <p>待发帧数/UTF-8 字节达到上限或单帧超过字节上限时返回 {@link DaemonOfferResult#BUSY}，sender 已关闭或正在 drain-close 时返回
+   * {@link DaemonOfferResult#CLOSED}；两者都表示该帧肯定未发送，连接语义不变。
+   */
+  DaemonOfferResult offerText(String text) {
     Objects.requireNonNull(text, "text");
     Frame frame = new Frame(text, text.getBytes(StandardCharsets.UTF_8).length);
     synchronized (lock) {
-      if (closed
-          || closeAfterFlush
-          || outstandingFrames >= capacity
-          || outstandingBytes + frame.bytes() > maxBytes) {
-        return false;
+      if (closed || closeAfterFlush) {
+        return DaemonOfferResult.CLOSED;
+      }
+      if (outstandingFrames >= capacity || outstandingBytes + frame.bytes() > maxBytes) {
+        return DaemonOfferResult.BUSY;
       }
       queue.addLast(frame);
       outstandingFrames++;
       outstandingBytes += frame.bytes();
       lock.notifyAll();
-      return true;
+      return DaemonOfferResult.ACCEPTED;
     }
   }
 
