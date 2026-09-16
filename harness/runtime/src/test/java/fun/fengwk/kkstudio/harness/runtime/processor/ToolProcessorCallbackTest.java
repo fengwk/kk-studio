@@ -70,14 +70,17 @@ class ToolProcessorCallbackTest {
     return fixture;
   }
 
-  /** partial：校验 RUNNING + attempt 与 ownership 后发布 ToolPartial；无任何 durable mutation。 */
+  /** partial：经进程内 attempt / terminal 围栏校验后发布 ToolPartial；不执行 per-chunk DB 锁或事务。 */
   @Test
   void partialIsPublishedAfterRunningFence() {
     ToolProcessorTestSupport.Fixture fixture = startedFixture();
     ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
+    int txBefore = fixture.store.transactionCount();
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
+    int txAfter = fixture.store.transactionCount();
 
+    assertEquals(txBefore, txAfter, "partial progress must not acquire store transactions");
     assertEquals(1, fixture.sink.events.size());
     RealtimeEvent.ToolPartial event = (RealtimeEvent.ToolPartial) fixture.sink.events.get(0);
     assertEquals(fixture.baseline.threadId(), event.threadId());
@@ -877,9 +880,11 @@ class ToolProcessorCallbackTest {
         5, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
-  /** Stop deleteWork 后到达的 late partial：ownership 校验失败，不发布、不写 durable，并关闭本地执行。 */
+  /**
+   * Stop deleteWork 后到达的 callback：partial 经内存 fence 仍发布，terminal 校验 ownership 失败后关闭本地执行且不写 durable。
+   */
   @Test
-  void partialAfterWorkDeletionIsLostWithoutPublishing() {
+  void callbackAfterWorkDeletionLosesTerminalWithoutDurableWrite() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -896,11 +901,15 @@ class ToolProcessorCallbackTest {
     ToolProcessorTestSupport.deleteToolWork(fixture);
 
     listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
+    assertEquals(1, fixture.sink.events.size());
+
+    listener.onSucceeded(
+        ToolSuccess.withoutEffects(
+            ToolProcessorTestSupport.successResult("call-1", new TextResultContent("ok"))));
 
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertTrue(fixture.sink.events.isEmpty());
     assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }

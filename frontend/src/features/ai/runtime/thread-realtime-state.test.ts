@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
+  boundProcessOutputText,
   isFailedAttempt,
+  isProcessOutputPartial,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
+  parseProcessOutputDetails,
   parseRealtimeModelDelta,
   parseRealtimeToolPartial,
   parseStreamCheckpoint,
   parseToolErrorText,
+  PROCESS_OUTPUT_MAX_CHARS,
+  PROCESS_OUTPUT_MAX_LINES,
+  PROCESS_OUTPUT_OMISSION_MARKER,
   reduceRealtimeModelStream,
   reduceRealtimeToolStream,
   snapshotModelStream,
@@ -1152,6 +1158,361 @@ describe('thread realtime state', () => {
     expect(isFailedAttempt(0, invocation, [failureForCurrent])).toBe(false)
     expect(isFailedAttempt(-1, invocation, [failureForCurrent])).toBe(false)
     expect(isFailedAttempt(1, invocation, [])).toBe(false)
+  })
+
+  describe('process.output bounded real-time stream', () => {
+    it('parses valid process.output details and rejects invalid envelopes', () => {
+      expect(
+        parseProcessOutputDetails({
+          kind: 'process.output',
+          mode: 'APPEND',
+          startOffset: 0,
+          endOffset: 100,
+          observedBytes: 100,
+        }),
+      ).toEqual({
+        kind: 'process.output',
+        mode: 'APPEND',
+        startOffset: 0,
+        endOffset: 100,
+        observedBytes: 100,
+      })
+
+      // case-insensitive mode & string details parsing
+      expect(
+        parseProcessOutputDetails(
+          JSON.stringify({
+            kind: 'process.output',
+            mode: 'snapshot',
+            startOffset: 50,
+            endOffset: 200,
+            observedBytes: 200,
+          }),
+        ),
+      ).toEqual({
+        kind: 'process.output',
+        mode: 'SNAPSHOT',
+        startOffset: 50,
+        endOffset: 200,
+        observedBytes: 200,
+      })
+
+      // rejected shapes
+      expect(parseProcessOutputDetails(null)).toBeNull()
+      expect(parseProcessOutputDetails({})).toBeNull()
+      expect(parseProcessOutputDetails({ kind: 'other' })).toBeNull()
+      expect(parseProcessOutputDetails({ kind: 'process.output', mode: 'UNKNOWN' })).toBeNull()
+      expect(
+        parseProcessOutputDetails({
+          kind: 'process.output',
+          mode: 'APPEND',
+          startOffset: 10,
+          endOffset: 5, // end < start
+          observedBytes: 10,
+        }),
+      ).toBeNull()
+      expect(
+        parseProcessOutputDetails({
+          kind: 'process.output',
+          mode: 'APPEND',
+          startOffset: -1,
+          endOffset: 5,
+          observedBytes: 5,
+        }),
+      ).toBeNull()
+
+      expect(
+        isProcessOutputPartial({
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: 10,
+            observedBytes: 10,
+          },
+        }),
+      ).toBe(true)
+      expect(isProcessOutputPartial({ details: null })).toBe(false)
+    })
+
+    it('bounds text by lines and characters with a single deterministic omission marker', () => {
+      // Small text: no omission
+      const small = boundProcessOutputText('line 1\nline 2')
+      expect(small.text).toBe('line 1\nline 2')
+      expect(small.hasOmittedPrefix).toBe(false)
+
+      // Exceeding line budget (> 2000 lines)
+      const manyLines = Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`).join('\n')
+      const boundedLines = boundProcessOutputText(manyLines)
+      expect(boundedLines.hasOmittedPrefix).toBe(true)
+      expect(boundedLines.text.startsWith(`${PROCESS_OUTPUT_OMISSION_MARKER}\n`)).toBe(true)
+      const contentLines = boundedLines.text.split('\n')
+      // Marker + 2000 lines
+      expect(contentLines.length).toBe(PROCESS_OUTPUT_MAX_LINES + 1)
+      expect(contentLines[contentLines.length - 1]).toBe('line 2500')
+      expect(contentLines[1]).toBe('line 501')
+
+      // Exceeding char budget (> 512 KiB)
+      const largeContent = 'a'.repeat(PROCESS_OUTPUT_MAX_CHARS + 5000)
+      const boundedChars = boundProcessOutputText(largeContent)
+      expect(boundedChars.hasOmittedPrefix).toBe(true)
+      expect(boundedChars.text.startsWith(PROCESS_OUTPUT_OMISSION_MARKER)).toBe(true)
+      expect(boundedChars.text.length).toBeLessThanOrEqual(
+        PROCESS_OUTPUT_MAX_CHARS + PROCESS_OUTPUT_OMISSION_MARKER.length + 10,
+      )
+
+      // Repeated bounding preserves exactly one omission marker at the top
+      const repeatedlyBounded = boundProcessOutputText(boundedLines.text + '\nnew line')
+      expect(
+        repeatedlyBounded.text.indexOf(PROCESS_OUTPUT_OMISSION_MARKER),
+      ).toBe(repeatedlyBounded.text.lastIndexOf(PROCESS_OUTPUT_OMISSION_MARKER))
+    })
+
+    it('processes sequential contiguous APPEND chunks in order', () => {
+      const p1 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'chunk 1\n' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: 8,
+            observedBytes: 8,
+          },
+        },
+        createdAt: '2026-07-28T10:00:00Z',
+      }
+      const p2 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'chunk 2\n' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 8,
+            endOffset: 16,
+            observedBytes: 16,
+          },
+        },
+        createdAt: '2026-07-28T10:00:01Z',
+      }
+
+      const s1 = reduceRealtimeToolStream(null, p1)
+      expect(s1.text).toBe('chunk 1\n')
+      expect(s1.processOutput).toEqual({
+        mode: 'APPEND',
+        startOffset: 0,
+        endOffset: 8,
+        observedBytes: 8,
+        hasOmittedPrefix: false,
+        gapPending: false,
+      })
+
+      const s2 = reduceRealtimeToolStream(s1, p2)
+      expect(s2.text).toBe('chunk 1\nchunk 2\n')
+      expect(s2.processOutput?.endOffset).toBe(16)
+      expect(s2.processOutput?.observedBytes).toBe(16)
+    })
+
+    it('ignores duplicate and overlapping APPEND frames', () => {
+      const p1 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'hello ' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: 6,
+            observedBytes: 6,
+          },
+        },
+        createdAt: '2026-07-28T10:00:00Z',
+      }
+      const s1 = reduceRealtimeToolStream(null, p1)
+
+      // Exact duplicate
+      const s1Dup = reduceRealtimeToolStream(s1, p1)
+      expect(s1Dup).toBe(s1)
+      expect(s1Dup.text).toBe('hello ')
+
+      // Overlapping frame (startOffset < current.endOffset)
+      const pOverlap = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'llo world' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 2,
+            endOffset: 11,
+            observedBytes: 11,
+          },
+        },
+        createdAt: '2026-07-28T10:00:01Z',
+      }
+      const sOverlap = reduceRealtimeToolStream(s1, pOverlap)
+      expect(sOverlap).toBe(s1)
+      expect(sOverlap.text).toBe('hello ')
+    })
+
+    it('detects gaps, ignores discontinuous APPEND chunks, and converges on SNAPSHOT', () => {
+      const p1 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'part 1\n' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: 7,
+            observedBytes: 7,
+          },
+        },
+        createdAt: '2026-07-28T10:00:00Z',
+      }
+      const s1 = reduceRealtimeToolStream(null, p1)
+
+      // Gap: startOffset 20 > endOffset 7
+      const pGap = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'part 3\n' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 20,
+            endOffset: 27,
+            observedBytes: 27,
+          },
+        },
+        createdAt: '2026-07-28T10:00:02Z',
+      }
+      const sGap = reduceRealtimeToolStream(s1, pGap)
+      expect(sGap.processOutput?.gapPending).toBe(true)
+      // Text remains part 1; discontinuous chunk is not appended
+      expect(sGap.text).toBe('part 1\n')
+
+      // SNAPSHOT arrives and repairs the gap
+      const pSnapshot = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'part 1\npart 2\npart 3\n' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'SNAPSHOT',
+            startOffset: 0,
+            endOffset: 21,
+            observedBytes: 21,
+          },
+        },
+        createdAt: '2026-07-28T10:00:03Z',
+      }
+      const sRecovered = reduceRealtimeToolStream(sGap, pSnapshot)
+      expect(sRecovered.processOutput?.gapPending).toBe(false)
+      expect(sRecovered.processOutput?.endOffset).toBe(21)
+      expect(sRecovered.text).toBe('part 1\npart 2\npart 3\n')
+
+      // Subsequent contiguous APPEND works normally
+      const p4 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'part 4\n' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 21,
+            endOffset: 28,
+            observedBytes: 28,
+          },
+        },
+        createdAt: '2026-07-28T10:00:04Z',
+      }
+      const sFinal = reduceRealtimeToolStream(sRecovered, p4)
+      expect(sFinal.text).toBe('part 1\npart 2\npart 3\npart 4\n')
+      expect(sFinal.processOutput?.endOffset).toBe(28)
+    })
+
+    it('resets progress overlay when attempt changes on retry', () => {
+      const p1 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'attempt 1 text' }],
+          error: true,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: 14,
+            observedBytes: 14,
+          },
+        },
+        createdAt: '2026-07-28T10:00:00Z',
+      }
+      const s1 = reduceRealtimeToolStream(null, p1)
+      expect(s1.text).toBe('attempt 1 text')
+      expect(s1.error).toBe(true)
+
+      const p2 = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 2,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'attempt 2 fresh start' }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: 21,
+            observedBytes: 21,
+          },
+        },
+        createdAt: '2026-07-28T10:00:05Z',
+      }
+      const s2 = reduceRealtimeToolStream(s1, p2)
+      expect(s2.attempt).toBe(2)
+      expect(s2.text).toBe('attempt 2 fresh start')
+      expect(s2.error).toBe(false)
+      expect(s2.processOutput?.endOffset).toBe(21)
+    })
   })
 })
 

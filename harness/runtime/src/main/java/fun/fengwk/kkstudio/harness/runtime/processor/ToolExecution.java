@@ -46,13 +46,13 @@ import java.util.function.Consumer;
  * activate 竞态）：activation 开始前 abandon 获胜则 activate 绝不调用；开始后 abandon 把 cancel 推迟到 activate 返回，外部调用序
  * 恒为 ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持 monitor 避免与 Listener 回调死锁）。partial 先做
  * toolCallId / content 校验（拒绝 Binary / Resource content，partial 不可持久资源）与 canonical JSON 256 KiB
- * 编码尺寸上限（bounded 编码器测量，超限即中止，不物化完整 JSON），再在校验 RUNNING + attempt 与 claim ownership
- * 的短事务中确认（无持久化状态修改），commit 后才 best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink
- * 失败不影响执行。terminal 回调一次生效（拒绝 BinaryResultContent——Gateway 必须先外部化为稳定 ResourceResultContent
- * ref），随后对即将持久化的结果做 bounded 编码尺寸校验，超过 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable 失败只在
- * sideEffect 为 READ_ONLY / IDEMPOTENT 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate / late /
- * stale 一律 no-op；lost ownership 立即关闭回调门控、cancel handle 并停止 heartbeat，且不反写任何持久化状态。{@code
- * handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN terminal，激活前缓冲的信号全部丢弃。
+ * 编码尺寸上限（bounded 编码器测量，超限即中止，不物化完整 JSON），由进程内 attempt / terminal 围栏保护（无需每 chunk 事务加锁）， 直接
+ * best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次生效（拒绝
+ * BinaryResultContent——Gateway 必须先外部化为稳定 ResourceResultContent ref），随后对即将持久化的结果做 bounded 编码尺寸校验，超过
+ * 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT
+ * 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate / late / stale 一律 no-op；lost ownership
+ * 立即关闭回调门控、cancel handle 并停止 heartbeat，且不反写任何持久化状态。{@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN
+ * terminal，激活前缓冲的信号全部丢弃。
  */
 @Slf4j
 final class ToolExecution implements ToolGateway.Listener {
@@ -394,9 +394,8 @@ final class ToolExecution implements ToolGateway.Listener {
 
   /**
    * 处理一个 partial：先验证 toolCallId 匹配 request、不含 Binary / Resource content（partial 不可持久资源，违反即 协议破坏，确定性
-   * FAILED）且 canonical JSON 不超过 256 KiB（bounded 编码器测量，N×内联大文本不得撑爆实时通道）；再短事务锁 Tool -&gt; claimed
-   * Work 校验 RUNNING + attempt（无 durable mutation）， commit 后 best-effort 发布 {@link
-   * RealtimeEvent.ToolPartial}；duplicate / late / stale no-op。
+   * FAILED）且 canonical JSON 不超过 256 KiB（bounded 编码器测量，N×内联大文本不得撑爆实时通道）；由进程内 attempt / terminal
+   * 围栏保护，直接 best-effort 发布 {@link RealtimeEvent.ToolPartial}，无需每 chunk 执行 DB 短事务。
    */
   private Applied processPartialLocked(ToolResult partial, List<Publish> publishes) {
     String validation = validatePartial(partial);
@@ -406,19 +405,6 @@ final class ToolExecution implements ToolGateway.Listener {
           publishes);
     }
     Instant now = clock.instant();
-    boolean committed =
-        Boolean.TRUE.equals(
-            store.transaction(
-                tx -> {
-                  ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-                  if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
-                    return false;
-                  }
-                  return tool.status() == ToolInvocationStatus.RUNNING && tool.attempt() == attempt;
-                }));
-    if (!committed) {
-      return Applied.LOST;
-    }
     publishes.add(new Publish(partial, now));
     return Applied.PROGRESSED;
   }

@@ -8,6 +8,7 @@ import {
 } from '@/features/ai/runtime/realtime-frame-scheduler'
 import {
   isFailedAttempt,
+  isProcessOutputPartial,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
   parseRealtimeModelDelta,
@@ -321,33 +322,35 @@ export function useHarnessThreadRealtime(
       ) {
         return
       }
-      // 精确去重 fence：realtime notification 可能重投递同一 TOOL_PARTIAL 事件；稳定
-      // 指纹（规范化 payload + createdAt）不能让同一块追加两次。
-      const fingerprintKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
-      let fingerprints = toolPartialFingerprintsRef.current.get(fingerprintKey)
-      if (fingerprints == null) {
-        fingerprints = new Set()
-        toolPartialFingerprintsRef.current.set(fingerprintKey, fingerprints)
-      }
-      const fingerprint = fingerprintOf(partial)
-      if (fingerprints.has(fingerprint)) {
-        return
-      }
-      // 有界 FIFO：只淘汰最旧的指纹，保证最近 N 个保持去重
-      // （整体清空会让立即重投递的事件再次追加）。
-      if (fingerprints.size >= TOOL_PARTIAL_FINGERPRINT_LIMIT) {
-        const oldest = fingerprints.values().next().value
-        if (oldest !== undefined) {
-          fingerprints.delete(oldest)
+      const isProcessOutput = isProcessOutputPartial(partial.payload)
+      if (!isProcessOutput) {
+        // 精确去重 fence：仅对普通非 process.output 的 partial 事件使用指纹去重（process.output 依赖 offset 严格去重）
+        const fingerprintKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
+        let fingerprints = toolPartialFingerprintsRef.current.get(fingerprintKey)
+        if (fingerprints == null) {
+          fingerprints = new Set()
+          toolPartialFingerprintsRef.current.set(fingerprintKey, fingerprints)
         }
+        const fingerprint = fingerprintOf(partial)
+        if (fingerprints.has(fingerprint)) {
+          return
+        }
+        if (fingerprints.size >= TOOL_PARTIAL_FINGERPRINT_LIMIT) {
+          const oldest = fingerprints.values().next().value
+          if (oldest !== undefined) {
+            fingerprints.delete(oldest)
+          }
+        }
+        fingerprints.add(fingerprint)
       }
-      fingerprints.add(fingerprint)
       const streams = toolStreamsRef.current
       const current = streams.get(partial.invocationId) ?? null
       const next = reduceRealtimeToolStream(current, partial)
-      streams.set(partial.invocationId, next)
-      toolStreamsRef.current = streams
-      scheduler.notifyToolDirty()
+      if (next !== current) {
+        streams.set(partial.invocationId, next)
+        toolStreamsRef.current = streams
+        scheduler.notifyToolDirty()
+      }
     }
 
     // 应用级 manager 订阅：version/resync/subscribed/error 都触发 snapshot
@@ -425,6 +428,25 @@ function sameToolStream(left: RealtimeToolStream, right: RealtimeToolStream): bo
     && left.error === right.error
     && left.errorText === right.errorText
     && sameAttachments(left.attachments, right.attachments)
+    && sameProcessOutput(left.processOutput, right.processOutput)
+}
+
+function sameProcessOutput(
+  left: RealtimeToolStream['processOutput'],
+  right: RealtimeToolStream['processOutput'],
+): boolean {
+  if (left == null && right == null) {
+    return true
+  }
+  if (left == null || right == null) {
+    return false
+  }
+  return left.mode === right.mode
+    && left.startOffset === right.startOffset
+    && left.endOffset === right.endOffset
+    && left.observedBytes === right.observedBytes
+    && left.hasOmittedPrefix === right.hasOmittedPrefix
+    && left.gapPending === right.gapPending
 }
 
 function sameAttachments(

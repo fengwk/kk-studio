@@ -1436,7 +1436,203 @@ describe('useHarnessThreadRealtime', () => {
     unmount()
     expect(caf).toHaveBeenCalled()
   })
+
+  it('handles process.output streaming with contiguous APPEND, duplicate/overlap dedup, and gap healing via SNAPSHOT', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const active: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      modelInvocationId: 'inv-1',
+      assistantEntryId: 'entry-2',
+      callIndex: 0,
+      status: 'RUNNING',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      toolVersion: null,
+      rendererKey: 'bash',
+      toolId: 'base.bash',
+      environment: null,
+      argumentsJson: '{"command":"build.sh"}',
+      approvalJson: null,
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
+
+    // 1. 连续 APPEND
+    emitRealtime(sockets, toolProcessOutputPartial('chunk1\n', 'APPEND', 0, 7, 7))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('chunk1\n'),
+    )
+
+    // 2. 重复/重叠帧被忽略
+    emitRealtime(sockets, toolProcessOutputPartial('chunk1\n', 'APPEND', 0, 7, 7))
+    emitRealtime(sockets, toolProcessOutputPartial('unk1\n', 'APPEND', 2, 7, 7))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('chunk1\n'),
+    )
+
+    // 3. 连续下一个 APPEND
+    emitRealtime(sockets, toolProcessOutputPartial('chunk2\n', 'APPEND', 7, 14, 14))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('chunk1\nchunk2\n'),
+    )
+
+    // 4. 出现缺口（startOffset 25 > 14）：不追加
+    emitRealtime(sockets, toolProcessOutputPartial('chunk4\n', 'APPEND', 25, 32, 32))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('chunk1\nchunk2\n'),
+    )
+
+    // 5. SNAPSHOT 到达：修复缺口并替换为最新完整窗口
+    emitRealtime(
+      sockets,
+      toolProcessOutputPartial('chunk1\nchunk2\nchunk3\nchunk4\n', 'SNAPSHOT', 0, 28, 28),
+    )
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe(
+        'chunk1\nchunk2\nchunk3\nchunk4\n',
+      ),
+    )
+  })
+
+  it('handles high-volume process.output chunks batching and keeps UI budget bounded', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const active: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      modelInvocationId: 'inv-1',
+      assistantEntryId: 'entry-2',
+      callIndex: 0,
+      status: 'RUNNING',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      toolVersion: null,
+      rendererKey: 'bash',
+      toolId: 'base.bash',
+      environment: null,
+      argumentsJson: '{"command":"generate-lots-of-logs.sh"}',
+      approvalJson: null,
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
+
+    // 连续发射 2200 行输出（超过 2000 行 UI 预算）
+    let offset = 0
+    for (let i = 0; i < 2200; i++) {
+      const line = `log line ${i}\n`
+      const len = line.length
+      emitRealtime(
+        sockets,
+        toolProcessOutputPartial(line, 'APPEND', offset, offset + len, offset + len),
+      )
+      offset += len
+    }
+
+    await waitFor(() => {
+      const stream = result.current?.toolStreams.get('inv-tool-1')
+      expect(stream).toBeDefined()
+      expect(stream?.text).toContain('log line 2199')
+    })
+
+    const stream = result.current?.toolStreams.get('inv-tool-1')
+    expect(stream?.text.startsWith('... [output omitted] ...\n')).toBe(true)
+    const lines = stream?.text.split('\n') ?? []
+    // 1 marker line + 2000 content lines + 1 trailing empty string from split
+    expect(lines.length).toBeLessThanOrEqual(2002)
+    expect(lines[lines.length - 2]).toBe('log line 2199')
+  })
+
+  it('replaces transient process.output progress immediately when durable terminal result arrives and ignores late progress', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const active: ToolInvocationDTO = {
+      id: 'inv-tool-1',
+      modelInvocationId: 'inv-1',
+      assistantEntryId: 'entry-2',
+      callIndex: 0,
+      status: 'RUNNING',
+      attempt: 1,
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      toolVersion: null,
+      rendererKey: 'bash',
+      toolId: 'base.bash',
+      environment: null,
+      argumentsJson: '{"command":"test.sh"}',
+      approvalJson: null,
+      resultJson: null,
+      errorJson: null,
+      createTime: '2026-01-01T00:00:00Z',
+      updateTime: '2026-01-01T00:00:00Z',
+    }
+    const { result, rerender, sockets } = renderRealtime(client, { invocations: [active] })
+    sockets.openLatest()
+
+    emitRealtime(sockets, toolProcessOutputPartial('running step 1\n', 'APPEND', 0, 15, 15))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('running step 1\n'),
+    )
+
+    // 持久化终态到达：快照 resultJson 成为权威
+    const terminalInvocation: ToolInvocationDTO = {
+      ...active,
+      resultJson: JSON.stringify({
+        toolCallId: 'call-1',
+        contents: [{ type: 'text', text: 'durable completed result' }],
+        error: false,
+        details: {},
+      }),
+    }
+    rerender({ invocations: [terminalInvocation] })
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('durable completed result'),
+    )
+
+    // 终态后到达的迟到 partial 进度被严格忽略
+    emitRealtime(sockets, toolProcessOutputPartial('late progress\n', 'APPEND', 15, 29, 29))
+    await waitFor(() =>
+      expect(result.current?.toolStreams.get('inv-tool-1')?.text).toBe('durable completed result'),
+    )
+  })
 })
+
+function toolProcessOutputPartial(
+  text: string,
+  mode: 'APPEND' | 'SNAPSHOT',
+  startOffset: number,
+  endOffset: number,
+  observedBytes: number,
+  invocationId = 'inv-tool-1',
+  attempt = 1,
+) {
+  return JSON.stringify({
+    threadId: THREAD_ID,
+    subjectKind: 'TOOL_INVOCATION',
+    subjectId: invocationId,
+    attempt,
+    type: 'TOOL_PARTIAL',
+    payload: {
+      toolCallId: 'call-1',
+      contents: [{ type: 'text', text }],
+      error: false,
+      details: {
+        kind: 'process.output',
+        mode,
+        startOffset,
+        endOffset,
+        observedBytes,
+      },
+    },
+    createdAt: '2026-01-01T00:00:00Z',
+  })
+}
 
 function realtime(
   sequence: number,

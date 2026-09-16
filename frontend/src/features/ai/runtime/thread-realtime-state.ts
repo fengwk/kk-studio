@@ -62,6 +62,27 @@ export interface RealtimeToolPartial {
   createdAt: string
 }
 
+export const PROCESS_OUTPUT_MAX_CHARS = 512 * 1024
+export const PROCESS_OUTPUT_MAX_LINES = 2000
+export const PROCESS_OUTPUT_OMISSION_MARKER = '... [output omitted] ...'
+
+export interface ProcessOutputDetails {
+  kind: 'process.output'
+  mode: 'APPEND' | 'SNAPSHOT'
+  startOffset: number
+  endOffset: number
+  observedBytes: number
+}
+
+export interface ProcessOutputStreamState {
+  mode: 'APPEND' | 'SNAPSHOT'
+  startOffset: number
+  endOffset: number
+  observedBytes: number
+  hasOmittedPrefix?: boolean
+  gapPending?: boolean
+}
+
 /** 一次 invocation attempt 的瞬态 tool-result overlay。 */
 export interface RealtimeToolStream {
   threadId: string
@@ -78,6 +99,8 @@ export interface RealtimeToolStream {
    * 永远不会贡献 attachments。
    */
   attachments?: ToolAttachment[]
+  /** Environment process.output 结构化流状态（mode、offsets、observedBytes、omission）。 */
+  processOutput?: ProcessOutputStreamState
   createdAt: string
 }
 
@@ -601,8 +624,112 @@ export function parseToolErrorText(json: string | null): string | null {
   }
 }
 
+export function parseProcessOutputDetails(details: unknown): ProcessOutputDetails | null {
+  let record: Record<string, unknown> | null = null
+  if (isRecord(details)) {
+    record = details
+  } else if (typeof details === 'string' && details.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(details)
+      if (isRecord(parsed)) {
+        record = parsed
+      }
+    } catch {
+      return null
+    }
+  }
+  if (record == null || record.kind !== 'process.output') {
+    return null
+  }
+  const rawMode = typeof record.mode === 'string' ? record.mode.toUpperCase() : ''
+  if (rawMode !== 'APPEND' && rawMode !== 'SNAPSHOT') {
+    return null
+  }
+  const mode = rawMode as 'APPEND' | 'SNAPSHOT'
+  const startOffset =
+    typeof record.startOffset === 'number'
+    && Number.isSafeInteger(record.startOffset)
+    && record.startOffset >= 0
+      ? record.startOffset
+      : null
+  const endOffset =
+    typeof record.endOffset === 'number'
+    && Number.isSafeInteger(record.endOffset)
+    && record.endOffset >= 0
+      ? record.endOffset
+      : null
+  const observedBytes =
+    typeof record.observedBytes === 'number'
+    && Number.isSafeInteger(record.observedBytes)
+    && record.observedBytes >= 0
+      ? record.observedBytes
+      : null
+
+  if (
+    startOffset == null
+    || endOffset == null
+    || observedBytes == null
+    || endOffset < startOffset
+  ) {
+    return null
+  }
+
+  return {
+    kind: 'process.output',
+    mode,
+    startOffset,
+    endOffset,
+    observedBytes,
+  }
+}
+
+export function isProcessOutputPartial(payload: Record<string, unknown>): boolean {
+  return parseProcessOutputDetails(payload.details) != null
+}
+
+export function boundProcessOutputText(
+  rawText: string,
+  forceOmissionMarker = false,
+): { text: string; hasOmittedPrefix: boolean } {
+  let content = rawText
+  let hasOmission = forceOmissionMarker
+  if (content.startsWith(PROCESS_OUTPUT_OMISSION_MARKER + '\n')) {
+    content = content.slice(PROCESS_OUTPUT_OMISSION_MARKER.length + 1)
+    hasOmission = true
+  } else if (content === PROCESS_OUTPUT_OMISSION_MARKER) {
+    content = ''
+    hasOmission = true
+  }
+
+  const lines = content.split('\n')
+  if (lines.length > PROCESS_OUTPUT_MAX_LINES) {
+    content = lines.slice(-PROCESS_OUTPUT_MAX_LINES).join('\n')
+    hasOmission = true
+  }
+
+  if (content.length > PROCESS_OUTPUT_MAX_CHARS) {
+    let sliced = content.slice(-PROCESS_OUTPUT_MAX_CHARS)
+    const firstNewline = sliced.indexOf('\n')
+    if (firstNewline !== -1 && firstNewline < 1024) {
+      sliced = sliced.slice(firstNewline + 1)
+    }
+    content = sliced
+    hasOmission = true
+  }
+
+  const resultText = hasOmission
+    ? (content ? `${PROCESS_OUTPUT_OMISSION_MARKER}\n${content}` : PROCESS_OUTPUT_OMISSION_MARKER)
+    : content
+
+  return {
+    text: resultText,
+    hasOmittedPrefix: hasOmission,
+  }
+}
+
 /**
  * 将一条 TOOL_PARTIAL chunk 聚合到 overlay 中：只有 text/json chunk 会追加到 text。
+ * 支持 process.output 结构化流（APPEND / SNAPSHOT / gap healing / offset 去重与 UI 有界裁剪）。
  * runtime 禁止 TOOL_PARTIAL 携带 Resource 内容，因此 attachments 不会在这里聚合——
  * 它们仅由 {@link snapshotToolStream} 从持久终止态 resultJson 投影得到。
  * attempt 发生变化（即重试）时会替换掉之前所有的片段。
@@ -612,13 +739,75 @@ export function reduceRealtimeToolStream(
   partial: RealtimeToolPartial,
 ): RealtimeToolStream {
   const chunkText = partialText(partial.payload)
+  const processDetails = parseProcessOutputDetails(partial.payload.details)
   const replaceText = isTaskStatusPartial(partial.payload)
-  if (
+  const isNewAttempt =
     current == null
     || current.threadId !== partial.threadId
     || current.invocationId !== partial.invocationId
     || current.attempt !== partial.attempt
-  ) {
+
+  if (isNewAttempt) {
+    if (processDetails != null) {
+      if (processDetails.mode === 'SNAPSHOT') {
+        const bounded = boundProcessOutputText(chunkText, processDetails.startOffset > 0)
+        return {
+          threadId: partial.threadId,
+          invocationId: partial.invocationId,
+          attempt: partial.attempt,
+          toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+          text: bounded.text,
+          error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+          processOutput: {
+            mode: 'SNAPSHOT',
+            startOffset: processDetails.startOffset,
+            endOffset: processDetails.endOffset,
+            observedBytes: processDetails.observedBytes,
+            hasOmittedPrefix: bounded.hasOmittedPrefix,
+            gapPending: false,
+          },
+          createdAt: partial.createdAt,
+        }
+      }
+      if (processDetails.startOffset === 0) {
+        const bounded = boundProcessOutputText(chunkText, false)
+        return {
+          threadId: partial.threadId,
+          invocationId: partial.invocationId,
+          attempt: partial.attempt,
+          toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+          text: bounded.text,
+          error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+          processOutput: {
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: processDetails.endOffset,
+            observedBytes: processDetails.observedBytes,
+            hasOmittedPrefix: bounded.hasOmittedPrefix,
+            gapPending: false,
+          },
+          createdAt: partial.createdAt,
+        }
+      }
+      return {
+        threadId: partial.threadId,
+        invocationId: partial.invocationId,
+        attempt: partial.attempt,
+        toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+        text: '',
+        error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+        processOutput: {
+          mode: 'APPEND',
+          startOffset: 0,
+          endOffset: 0,
+          observedBytes: processDetails.observedBytes,
+          hasOmittedPrefix: false,
+          gapPending: true,
+        },
+        createdAt: partial.createdAt,
+      }
+    }
+
     return {
       threadId: partial.threadId,
       invocationId: partial.invocationId,
@@ -629,21 +818,104 @@ export function reduceRealtimeToolStream(
       createdAt: partial.createdAt,
     }
   }
+
   const nextError = current.error || partial.payload[TOOL_RESULT_ERROR_KEY] === true
+
+  if (processDetails != null) {
+    if (processDetails.mode === 'SNAPSHOT') {
+      const bounded = boundProcessOutputText(chunkText, processDetails.startOffset > 0)
+      return {
+        ...current,
+        text: bounded.text,
+        error: nextError,
+        processOutput: {
+          mode: 'SNAPSHOT',
+          startOffset: processDetails.startOffset,
+          endOffset: processDetails.endOffset,
+          observedBytes: Math.max(
+            current.processOutput?.observedBytes ?? 0,
+            processDetails.observedBytes,
+          ),
+          hasOmittedPrefix: bounded.hasOmittedPrefix,
+          gapPending: false,
+        },
+        createdAt: partial.createdAt,
+      }
+    }
+
+    const currentEndOffset = current.processOutput?.endOffset ?? 0
+    const gapPending = current.processOutput?.gapPending === true
+
+    if (
+      processDetails.endOffset <= currentEndOffset
+      || processDetails.startOffset < currentEndOffset
+    ) {
+      if (nextError !== current.error) {
+        return {
+          ...current,
+          error: nextError,
+          createdAt: partial.createdAt,
+        }
+      }
+      return current
+    }
+
+    if (gapPending || processDetails.startOffset > currentEndOffset) {
+      if (current.processOutput?.gapPending && nextError === current.error) {
+        return current
+      }
+      return {
+        ...current,
+        error: nextError,
+        processOutput: {
+          mode: 'APPEND',
+          startOffset: current.processOutput?.startOffset ?? 0,
+          endOffset: currentEndOffset,
+          observedBytes: Math.max(
+            current.processOutput?.observedBytes ?? 0,
+            processDetails.observedBytes,
+          ),
+          hasOmittedPrefix: current.processOutput?.hasOmittedPrefix ?? false,
+          gapPending: true,
+        },
+        createdAt: partial.createdAt,
+      }
+    }
+
+    const unconstrained = current.text + chunkText
+    const bounded = boundProcessOutputText(
+      unconstrained,
+      current.processOutput?.hasOmittedPrefix ?? false,
+    )
+    return {
+      ...current,
+      text: bounded.text,
+      error: nextError,
+      processOutput: {
+        mode: 'APPEND',
+        startOffset: current.processOutput?.startOffset ?? 0,
+        endOffset: processDetails.endOffset,
+        observedBytes: Math.max(
+          current.processOutput?.observedBytes ?? 0,
+          processDetails.observedBytes,
+        ),
+        hasOmittedPrefix: bounded.hasOmittedPrefix,
+        gapPending: false,
+      },
+      createdAt: partial.createdAt,
+    }
+  }
+
   const currentTaskStatus = replaceText ? taskStatusFingerprint(current.text) : null
   if (
     currentTaskStatus != null
     && nextError === current.error
     && currentTaskStatus === taskStatusFingerprint(chunkText)
   ) {
-    // heartbeat 的传输时间与 JSON 字段顺序不属于 task 状态；语义未变化时复用
-    // 现有对象，避免每秒制造无意义的 transcript/widget 重渲染。
     return current
   }
   return {
     ...current,
-    // task.status 是完整快照 heartbeat，而不是增量文本；只保留最新一帧，
-    // 避免长任务每秒追加同一 JSON 并保证刷新后的审批状态可恢复。
     text: replaceText ? chunkText : current.text + chunkText,
     error: nextError,
     createdAt: partial.createdAt,
