@@ -189,6 +189,8 @@ Flyway locations
 `classpath:db/migration`：Main 是共享 schema 的唯一 Flyway owner，Dev 设置
 `SPRING_FLYWAY_ENABLED=false`。修改 V1 必须先停止共享数据库的全部使用节点，并在
 Human 明确批准的维护窗口内重建空库；普通自迭代不得改写已运行数据库的 V1 历史。
+标准重建入口、保留表范围、checksum 围栏及敏感备份约束见
+[NAS main/dev 自迭代运行规范](../operations/development-and-testing.md#44-nas-maindev-自迭代运行规范)。
 
 就地放宽既有列的约束（例如 `varchar(n)` -> `text`）可以避免重建空库，但仍属于
 维护窗口操作：需要先停止全部 App 节点，执行放宽语句，并把

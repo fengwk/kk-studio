@@ -163,6 +163,47 @@ Human 完成 Review 和 Main 集成。仓库只保留完整声明当前结构的
 Human 明确批准的维护窗口内由 Main 重建空库。普通自迭代不得重置共享 database 或
 删除共享 bucket。
 
+共享 database 的标准重建入口是
+[`scripts/operations/rebuild-database.sh`](../../scripts/operations/rebuild-database.sh)：
+
+```bash
+# 只读预检；不创建文件、不停止容器、不修改 database
+./scripts/operations/rebuild-database.sh --dry-run
+
+# 仅在 Human 批准的维护窗口内执行
+./scripts/operations/rebuild-database.sh
+```
+
+执行前必须让 Main 容器指向由当前仓库 revision 构建的镜像，但保持停止；脚本会把
+仓库 `V1__schema.sql` 的 Flyway checksum 与 Main 实际写入的 checksum 对比，不一致
+就停止回灌并保持 App 关闭。流程固定为：
+
+```text
+停止 Main/Dev
+  -> 全库 custom-format 安全备份
+  -> 导出保留配置
+  -> 旧库原地改名并冻结
+  -> 按原 owner/locale 创建空库
+  -> Main 执行 V1
+  -> 停止 Main
+  -> 单事务回灌并逐表校验内容指纹
+  -> 启动 Main/Dev
+  -> 等待 healthcheck 与 Environment Daemon 重连
+```
+
+保留集合仅为 `environment`、`environment_skill_source`、
+`environment_inventory`、`environment_skill`、`agent_provider`、
+`agent_model`、`agent_definition`。`environment_connection` 是重连后重新生成的
+租约；`system_setting` 来自 V1 默认聚合；会话、Harness、Canvas、Project、Issue 与
+Storage 运行数据不回灌。
+
+备份 archive 含 Provider credential 与 Environment registration token，必须按敏感
+数据处理。脚本默认写到仓库外的
+`~/.local/state/kk-studio/database-rebuild`，目录权限为 `0700`、文件权限为 `0600`，
+并拒绝把输出目录设到仓库内。禁止把 archive、恢复日志或其内容提交到 Git、写入文档、
+粘贴到日志/工单或上传到公共存储；维护完成并确认冻结快照的保留策略后，应由 Human
+按部署侧备份策略安全处置。
+
 Dev 容器内的 Environment Daemon 经内部 Docker 网络连接 Main App，既不连接
 Dev Backend，也不经过公共 Gateway。Main 的 HTTP(S) origin 统一保存在外部 Compose
 项目的 `.env`，`docker-compose.yml` 只做同名变量映射；entrypoint 再派生出 Daemon
