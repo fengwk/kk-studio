@@ -9,9 +9,10 @@
 #      0644；github.com 的 host key 由镜像内的 `/etc/ssh/ssh_known_hosts` 提供。
 #   3. 准备持久 Git 工作区：已存在的 checkout 永不覆盖；首次启动只能从配置的 clean
 #      remote 克隆，或显式允许时使用镜像内的源码快照。
-#   4. 校验工作区修订：把持久 checkout 无损快进到 `origin/$GIT_BRANCH`；fetch 失败、
-#      历史分叉或落后且存在未提交的已跟踪修改时容器启动失败，不允许静默运行未验证的
-#      修订（entrypoint 永不 reset/rebase/stash/checkout）。
+#   4. 校验工作区修订：把持久 checkout 无损快进到 `origin/$GIT_BRANCH`；fetch 失败或
+#      两侧历史互不包含时容器启动失败，落后且 git 拒绝快进（本地修改或未跟踪文件会被
+#      覆盖）时也启动失败，不允许静默运行未验证的修订。未 push 的本地提交按原样服务，
+#      entrypoint 永不 reset/rebase/stash/checkout。
 #   5. 用仓库既有 lifecycle `scripts/dev.sh start` 启动 Backend（prod profile、
 #      Flyway/worker disabled、loopback 8080）和 Vite（0.0.0.0:5173、代理 Backend）。
 #   6. 以前台 Environment Daemon 作为容器主进程，经内部 Docker 网络连接稳定 Main
@@ -216,9 +217,12 @@ prepare_workspace() {
 }
 
 # 持久 checkout 的修订必须在启动进程之前被验证：把工作区无损快进到
-# `origin/$GIT_BRANCH`，任何无法验证的修订（无 origin remote、fetch 失败、历史分叉）
-# 和任何会被快进覆盖的已跟踪修改都直接让容器启动失败，节点不会静默运行落后或未验证的
-# 代码。唯一允许的写操作是 `merge --ff-only`：entrypoint 不改写、丢弃或强推既有历史。
+# `origin/$GIT_BRANCH`，任何无法验证的修订（无 origin remote、fetch 失败）和任何无法
+# 无损推进的历史（本地与远端互不包含）都直接让容器启动失败，节点不会静默运行落后或
+# 未验证的代码。未 push 的本地提交是 Dev 节点上合法的 durable 工作：`HEAD` 包含
+# 远端时按原样继续服务，entrypoint 不移动任何引用。
+# 是否被快进覆盖交给 git 判定：`merge --ff-only` 会拒绝覆盖本地修改与未跟踪文件，
+# 本函数不预判工作区状态，也不改写成 stash/reset。唯一允许的写操作是 `merge --ff-only`。
 # 源码快照工作区（没有 `.git`）不参与同步。
 sync_workspace_revision() {
   if [ ! -d "$REPOSITORY_DIR/.git" ]; then
@@ -245,23 +249,22 @@ sync_workspace_revision() {
     step "Workspace revision is at origin/$GIT_BRANCH (${head:0:7})"
     return
   fi
+  # 本地领先：未 push 的提交是节点上合法的 durable 工作，按原样服务，不移动引用。
+  if git -C "$REPOSITORY_DIR" merge-base --is-ancestor "$remote_head" "$head"; then
+    step "Workspace is ahead of origin/$GIT_BRANCH (${head:0:7}); serving the local commits as is"
+    return
+  fi
   if ! git -C "$REPOSITORY_DIR" merge-base --is-ancestor "$head" "$remote_head"; then
-    echo "ERROR: $REPOSITORY_DIR cannot be fast-forwarded to origin/$GIT_BRANCH." >&2
-    echo "       HEAD ${head:0:7} is not an ancestor of ${remote_head:0:7}: the workspace is" >&2
-    echo "       ahead of, or has diverged from, the remote branch." >&2
+    echo "ERROR: $REPOSITORY_DIR has diverged from origin/$GIT_BRANCH." >&2
+    echo "       HEAD ${head:0:7} and origin/$GIT_BRANCH ${remote_head:0:7} contain commits the" >&2
+    echo "       other does not, so the workspace cannot be fast-forwarded." >&2
     echo "       Reconcile that history explicitly, then restart the container." >&2
     exit 1
   fi
-  # 未跟踪文件不阻止快进；已跟踪文件的未提交修改会与传入的修订冲突，必须先显式处理。
-  if [ -n "$(git -C "$REPOSITORY_DIR" status --porcelain --untracked-files=no)" ]; then
-    echo "ERROR: $REPOSITORY_DIR is behind origin/$GIT_BRANCH (${head:0:7} -> ${remote_head:0:7})" >&2
-    echo "       and has uncommitted changes to tracked files." >&2
-    echo "       Commit or discard them explicitly, then restart the container." >&2
-    exit 1
-  fi
+  # 落后：只允许快进，是否会被本地修改或未跟踪文件覆盖由 git 自己判定并拒绝。
   if ! git -C "$REPOSITORY_DIR" merge --ff-only "origin/$GIT_BRANCH"; then
     echo "ERROR: fast-forwarding $REPOSITORY_DIR to origin/$GIT_BRANCH failed." >&2
-    echo "       Resolve the reported obstacle (for example untracked files that the" >&2
+    echo "       Resolve the reported obstacle (local modifications or untracked files the" >&2
     echo "       incoming revision would overwrite) explicitly, then restart the container." >&2
     exit 1
   fi
