@@ -111,6 +111,7 @@ public class ComfyuiWorkflowApiMutationFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> factory.newCreateMutation(createDTO));
   }
 
+  // 测试意图: 断言 name 与 null body 仍被拒绝，而 description 已放开为 text 不再受 512 限制
   @Test
   public void shouldRejectNullBodyAndOversizeFields() {
     ComfyuiWorkflowApiMutationFactory factory = newFactory();
@@ -125,8 +126,8 @@ public class ComfyuiWorkflowApiMutationFactoryTest {
     assertThrows(IllegalArgumentException.class, () -> factory.newCreateMutation(dto));
 
     dto.setName("ok");
-    dto.setDescription("x".repeat(513));
-    assertThrows(IllegalArgumentException.class, () -> factory.newCreateMutation(dto));
+    dto.setDescription("x".repeat(4096));
+    assertEquals("x".repeat(4096), factory.newCreateMutation(dto).description());
   }
 
   private static ComfyuiWorkflowApiCreateDTO baseCreate() {

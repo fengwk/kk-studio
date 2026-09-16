@@ -24,7 +24,7 @@ public class ComfyuiWorkflowApiDTO {
   /** 必填展示名：trim 后非空白且 ≤128 字符。 */
   private String name;
 
-  /** 可空描述：≤512 字符。 */
+  /** 可空描述：text，无长度上限。 */
   private String description;
 
   /** 必填 ComfyUI API 格式 workflow JSON（持久化为 jsonb 列）。 */

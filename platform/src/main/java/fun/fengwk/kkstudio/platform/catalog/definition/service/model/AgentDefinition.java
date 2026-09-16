@@ -12,7 +12,7 @@ public class AgentDefinition {
   /** 全局唯一名称（主键，映射 {@code agent_definition.name}，最长 64，不允许首尾空白与 '/'）。 */
   private String name;
 
-  /** 描述，可选；映射 varchar(512)，null 表示未填写。 */
+  /** 描述，可选；映射 text 列，null 表示未填写。 */
   private String description;
 
   /** 系统提示词，可选；映射 text 列。 */

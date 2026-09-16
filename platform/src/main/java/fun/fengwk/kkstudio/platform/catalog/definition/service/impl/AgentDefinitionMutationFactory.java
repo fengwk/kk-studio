@@ -23,7 +23,6 @@ final class AgentDefinitionMutationFactory {
 
   private static final String RESOURCE = "agent_definition";
   private static final int NAME_MAX_LENGTH = 64;
-  private static final int DESCRIPTION_MAX_LENGTH = 512;
   private static final int VARIANT_MAX_LENGTH = 64;
 
   private final AgentEditableSupport editableSupport;
@@ -82,7 +81,6 @@ final class AgentDefinitionMutationFactory {
     String variant = editableSupport.trimToNull(properties.getVariant());
     UUID environmentId = parseNullableEnvironmentId(properties.getEnvironmentId());
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
-    editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "variant", variant, VARIANT_MAX_LENGTH);
     AgentDefinitionConfigDTO config = properties.getConfig();
     if (config == null) {

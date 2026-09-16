@@ -17,7 +17,7 @@ public class AgentModelDO {
   /** 发往上游 Provider 的真实模型标识（必填，varchar(256)，不参与唯一性约束）。 */
   private String modelId;
 
-  /** 描述，可选；varchar(512)，null 表示未填写。 */
+  /** 描述，可选；text，null 表示未填写。 */
   private String description;
 
   /**

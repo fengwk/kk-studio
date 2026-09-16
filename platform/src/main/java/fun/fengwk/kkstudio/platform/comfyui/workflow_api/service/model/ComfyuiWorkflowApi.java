@@ -22,7 +22,7 @@ public class ComfyuiWorkflowApi {
   /** 展示名，必填：非空白且不超过 128 字符。 */
   private String name;
 
-  /** 描述，可选：不超过 512 字符，null 表示未填写。 */
+  /** 描述，可选：映射 text 列，null 表示未填写。 */
   private String description;
 
   /** ComfyUI API 格式 workflow JSON（jsonb，必填），运行时可被 {@code Workflow.fromApiJson} 解析。 */

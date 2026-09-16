@@ -81,6 +81,29 @@ class ModelRequestSpecJsonCodecTest {
     assertEquals(requestSpec, codec.decode(encoded));
   }
 
+  // 测试意图: agent_definition.description 放开为 text 后，subagent 描述不能再被 512 字符上限拒绝，
+  // 且长描述必须无损地穿过冻结 spec 的编解码边界。
+  @Test
+  void roundTripsSubagentDescriptionBeyondLegacyLengthLimit() {
+    ModelRequestSpec base = hostModelRequest();
+    String longDescription = "d".repeat(4096);
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            base.preambleMessages(),
+            base.toolBindings(),
+            base.skillBindings(),
+            List.of(new SubagentBinding("reviewer", longDescription)),
+            base.cacheControl());
+
+    ModelRequestSpec decoded = codec.decode(codec.encode(requestSpec));
+    assertEquals(longDescription, decoded.subagentBindings().getFirst().description());
+  }
+
   @Test
   void encodedSpecContainsExactlyTheFrozenInvocationFields() {
     ObjectNode encoded = codec.encodeNode(environmentModelRequest());

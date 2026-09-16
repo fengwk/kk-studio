@@ -8,9 +8,6 @@ public record SubagentBinding(String name, String description) {
   public SubagentBinding {
     name = requireCanonical(name, "name", 64);
     description = Objects.requireNonNull(description, "description");
-    if (description.length() > 512) {
-      throw new IllegalArgumentException("description must be <= 512 characters");
-    }
   }
 
   private static String requireCanonical(String value, String field, int maxLength) {

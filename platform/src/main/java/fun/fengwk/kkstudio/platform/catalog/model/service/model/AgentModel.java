@@ -17,7 +17,7 @@ public class AgentModel {
   /** 发往上游 Provider 的真实模型标识（必填，映射 {@code model_id}，不唯一）。 */
   private String modelId;
 
-  /** 描述，可选；映射 varchar(512)，null 表示未填写。 */
+  /** 描述，可选；映射 text 列，null 表示未填写。 */
   private String description;
 
   /**
