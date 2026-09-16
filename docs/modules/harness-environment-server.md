@@ -12,11 +12,10 @@ DTO；宿主通过构造器注入全部外部能力，因此会话状态机可�
 
 ### 核心职责
 
-- 拥有 daemon 协议 v3 的服务端会话状态：HELLO 认证与 WELCOME 下发、READY v2 能力登记、HEARTBEAT 续约、入站/出站 sequence、
-  连接代际与关闭清理。
+- 拥有 daemon 协议 v1 的服务端会话状态：HELLO 认证与 WELCOME 下发、READY 能力登记、HEARTBEAT 续约、连接代际与关闭清理。
 - 以 `DaemonLeaseStore` 的围栏返回值推进租约语义：抢占/接管、READY 写入、心跳续约、断开宽限；存储不可用时 fail-closed。
-- 按 `(environmentId, invocationId)` 协调在途调用：发送 `INVOKE`、透传 `STARTED/PARTIAL`、收敛唯一终态、处理 `CANCEL` 与
-  超时 `expire`，并以有界 tombstone 吸收迟到回调。
+- 按 `(environmentId, invocationId)` 协调在途调用：发送 `INVOKE`、透传 `STARTED/PROGRESS`、收敛唯一终态、处理 `CANCEL` 与
+  超时 `expire`，并以有界 tombstone 吸收迟到回调；同一 `daemonInstanceId` 重连时以相同 `invocationId` 重放在途 INVOKE。
 - 对外提供 `DaemonEndpoint`（transport 适配器入口）与 `EnvironmentCapabilityTransport`（调用方入口）两种窄端口。
 
 ### 协作边界
@@ -64,16 +63,17 @@ DaemonEndpoint                 -> open / receive / close           （transport 
 EnvironmentCapabilityTransport -> invoke                            （产品调用方调用）
 ```
 
-握手时序与协议编解码仍由 `harness-environment` 的 v3 契约定义；本模块负责把协议推进为可观察状态：
+握手时序与协议编解码仍由 `harness-environment` 的 v1 契约定义；本模块负责把协议推进为可观察状态：
 
 ```text
 open(channel)
-Daemon -> HELLO(registrationToken)
+Daemon -> HELLO(registrationToken, daemonInstanceId)
   核心 -> registrationDirectory.findByRegistrationToken
   核心 -> leaseStore.hasActiveLeaseToken（同节点活跃连接防冲突）
   核心 -> leaseStore.tryAcquire（原子抢占/接管）
   core -> WELCOME(environmentId, name)
 Daemon -> READY(capabilities)  -> leaseStore.markReady（围栏失效即协议错误）
+                               -> 同实例重放未在当前代际发出的 INVOKE
 Daemon -> HEARTBEAT*           -> leaseStore.heartbeat（围栏失效即协议错误）
 close(connectionId)            -> leaseStore.disconnect（幂等，保留重连宽限）
 ```
@@ -95,34 +95,36 @@ invoke(environmentId, request, listener)
   -> 仅对 requiresWorkdir capability 按 READY 目标 OS 词法校验 arguments.workdir
   -> 读取本节点 READY 连接与其 leaseToken
   -> leaseStore.holdsReadyLease（准入围栏，存储访问在核心锁外）
-  -> 登记 ActiveInvocation 并发送 INVOKE
-       SENT      -> 返回执行句柄
-       NOT_SENT  -> 抛出 EnvironmentCapabilityUnavailableException，调用确定未执行
-       UNCERTAIN -> 关闭连接并抛出 EnvironmentCapabilitySendUncertainException
+  -> 登记 ActiveInvocation 并递交 INVOKE
+       ACCEPTED -> 返回执行句柄
+       BUSY     -> 抛出 EnvironmentCapabilityBusyException，帧确定未发送且连接保持可用
+       CLOSED   -> 抛出 EnvironmentCapabilityUnavailableException，调用确定未执行
 ```
 
 发送结果由
-[`DaemonSendOutcome`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSendOutcome.java)
-的 `SENT`/`NOT_SENT`/`UNCERTAIN` 三态表达，与 `EnvironmentCapabilityTransport` 的发送前异常确定性契约一一对应。
+[`DaemonOfferResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java)
+的 `ACCEPTED`/`BUSY`/`CLOSED` 三态表达，与 `EnvironmentCapabilityTransport` 的发送前异常确定性契约一一对应。“已交给传输”不等于“对端已收到”：异步发送失败只体现为连接失效，并由同实例重连以相同 `invocationId` 重放收敛。
 
 ### 终态唯一与迟到帧
 
-`COMPLETED`/`FAILED`/`CANCELLED` 回调、连接清理与显式 `expire` 竞争时只有一个赢家：
+`COMPLETED`/`FAILED`/`CANCELLED` 回调、实例接管与显式 `expire` 竞争时只有一个赢家：
 
 - 显式 [`expire(handle)`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java)
-  由调用方在自身 deadline 上判定超时，至多发送一次 `CANCEL`，不向 listener 补发终态；
-- 连接清理把全部未完成调用以 `EnvironmentCapabilitySendUncertainException` 收敛为结果不确定（副作用无法确认）；
-- 已终结 invocation 的迟到 `COMPLETED`/`FAILED`/`CANCELLED` 由有界 tombstone 吸收并静默丢弃，`PARTIAL`/`STARTED` 同样不回调；
-- 未知 `invocationId` 或错误连接代际的回调按协议违规关闭连接；
-- 连接在准入与写入之间失效时抛 `EnvironmentCapabilityUnavailableException`（确定未执行），写入结果不可确认时关闭连接。
+  由调用方在自身 deadline 上判定超时，至多发送一次 `CANCEL`，不向 listener 补发终态，并把该 invocation 移出重放集合；
+- 物理连接失效**不**终结在途调用：同一 `daemonInstanceId` 重连 READY 后以相同 `invocationId` 重放，Daemon journal 负责重放
+  `STARTED`/终态而不重复执行副作用；
+- 身份不同的新 Daemon 进程接管该 Environment 时，旧进程已不可能再提供终态，其全部在途调用恰好一次地以
+  `EnvironmentCapabilitySendUncertainException` 收敛为结果不确定；
+- 已终结 invocation 的迟到/重放 `COMPLETED`/`FAILED`/`CANCELLED` 由有界 tombstone 吸收并静默丢弃，`PROGRESS`/`STARTED` 同样不回调；
+- 未知 `invocationId` 的回调按协议违规关闭连接（回调只按 `invocationId` 归属，不按连接代际）。
 
 listener 回调一律在核心锁外执行，回调中重入核心 API 不会死锁。
 
 ### 锁边界
 
 - 每个连接代际的 `gate` 只串行化该连接的入站协议处理；
-- `state` 只保护该连接的协议字段与出站 sequence；
-- `inventory` 保护连接目录与 invocation 目录；
+- `state` 只保护该连接的协议字段与连接代际；
+- `inventory` 保护环境/连接目录与 invocation 目录；
 - 锁顺序固定为 `gate > state > inventory`；租约存储访问、会话监听器回调与连接关闭都在这些锁之外执行。
 
 ### 会话事件与现读设置
@@ -135,10 +137,10 @@ listener 回调一律在核心锁外执行，回调中重入核心 API 不会死
 ## 不变量、failure / recovery
 
 - 同一 Environment 允许任意数量 invocation 并发在途，仅以 `invocationId` 区分；不存在环境级并发上限、容量通告或排队。
-- 每次 `INVOKE` 发送前都以租约围栏复核归属；围栏失效即判定环境不可用且不发送 wire。
+- 每次 `INVOKE` 递交前都以租约围栏复核归属；围栏失效即判定环境不可用且不发送 wire。
 - 租约存储不可用时 HELLO、READY、HEARTBEAT 与 INVOKE 全部 fail-closed。
-- 发送结果不确定时关闭连接并按 `UNCERTAIN` 收敛在途调用；绝不重发可能已产生副作用的请求。
-- 连接关闭、同 connectionId 新代际接管、环境被新 HELLO 抢占都幂等清理旧代际，并把未完成调用收敛为不确定。
+- 物理连接失效不终结在途调用；只有身份不同的 Daemon 进程接管或调用方 `expire` 才收敛为不确定，绝不重发可能已产生副作用的请求。
+- 连接关闭、同 connectionId 新代际接管、环境被新 HELLO 抢占都幂等清理旧代际；在途调用交给同实例重连重放。
 - 核心不持久化任何状态：进程重启后的会话事实由 daemon 重新握手建立。
 
 ## 测试与源码入口
@@ -147,12 +149,12 @@ listener 回调一律在核心锁外执行，回调中重入核心 API 不会死
 
 - [`EnvironmentDaemonServer.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java)、[`DaemonEndpoint.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonEndpoint.java)、[`DaemonChannel.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonChannel.java)
 - [`DaemonLeaseStore.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonLeaseStore.java)、[`LeaseBindResult.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/LeaseBindResult.java)、[`DaemonRegistrationDirectory.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonRegistrationDirectory.java)
-- [`EnvironmentSessionListener.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)、[`EnvironmentServerSettings.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java)、[`DaemonSendOutcome.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSendOutcome.java)
+- [`EnvironmentSessionListener.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)、[`EnvironmentServerSettings.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java)、[`DaemonOfferResult.java`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java)
 
 ### 关键测试守卫
 
 - [`EnvironmentServerModuleArchitectureTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerModuleArchitectureTest.java)：验证主源码只依赖 JDK、Jackson、`harness-common` 与 `harness-environment`，且 POM 生产依赖白名单之外没有新增声明。
-- [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake channel/lease store 驱动完整状态机，覆盖同环境并发调用、终态唯一、超时 `expire`、连接代际接管、握手校验、sequence 冲突与租约围栏 fail-closed。
+- [`EnvironmentDaemonServerTest.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake channel/lease store 驱动完整状态机，覆盖同环境并发调用、终态唯一、超时 `expire`、队列 BUSY 拒绝、同实例重连重放、异实例接管、连接代际接管、握手校验与租约围栏 fail-closed。
 - [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment-server/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java)：测试基座，只表达核心真正依赖的窄端口语义，不模拟 SQL 或 WebSocket。
 
 模块级覆盖率门禁为本模块 POM 中绑定到 `verify` 的 JaCoCo `check`：`EnvironmentDaemonServer` 行覆盖率必须不低于 `0.90`。

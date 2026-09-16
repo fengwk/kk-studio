@@ -269,7 +269,7 @@ Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由�
 `(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由，并实现会话核心的 `DaemonLeaseStore`。
 
 `harness/environment-server` 的 `EnvironmentDaemonServer` 唯一拥有本节点 daemon 会话状态：连接代际、HELLO/WELCOME/READY/
-HEARTBEAT 握手推进、sequence、在途 invocation 与终态所有权。Platform 通过 `EnvironmentServerConfiguration` 装配它，并提供
+HEARTBEAT 握手推进、在途 invocation 与终态所有权。Platform 通过 `EnvironmentServerConfiguration` 装配它，并提供
 三个窄端口实现：`EnvironmentRegistry`（租约围栏）、`EnvironmentRepository` 解析的注册凭据（`DaemonRegistrationDirectory`）与
 `SystemSettingsSnapshot`（每次判定现读的心跳超时与资源上限）。
 
@@ -282,10 +282,11 @@ skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.lo
 也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动 `invocationId`（调用方错误）。发送前按该连接
 READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；真实存在性、目录类型与可访问性由 Daemon 判定。
 
-会话核心只接受 protocol v3 HELLO、capability catalog `"1"` 与 READY capabilities v2。INVOKE payload 使用
+会话核心只接受 protocol v1 HELLO、capability catalog `"1"` 与 READY capabilities。INVOKE payload 使用
 `capabilityId`、`capabilityVersion`、`arguments`、`timeoutMillis`，不携带 model
-Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PARTIAL/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
-`invocationId` 关联。发送不确定时关闭连接并把在途 invocation 收敛为 uncertain，不重发可能已经产生副作用的请求。
+Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PROGRESS/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
+`invocationId` 关联。物理连接失效不终结在途 invocation：同一 `daemonInstanceId` 重连时以相同 `invocationId` 重放在途 INVOKE；只有身份不同的
+Daemon 进程接管或调用方 deadline `expire` 才收敛为 uncertain，绝不重发可能已经产生副作用的请求。
 
 ### Provider adapters 与 PlatformModelGateway
 

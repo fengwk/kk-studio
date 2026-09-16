@@ -6,18 +6,17 @@
  *
  * <p>当前 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
- * {"version":2,"environment":{"operatingSystem","timeZone","note","rootPath"},"sourceSetVersion":0,
+ * {"version":1,"environment":{"operatingSystem","timeZone","note","rootPath"},"sourceSetVersion":0,
  * "skillSources":[{"sourceId","sourceVersion","sourceRevision","skills":[{"sourceId","sourceVersion",
- * "name","description","baseDirectory","contentRevision"}],"diagnostics":[{location,message}]}]}}。旧顶层平铺
- * {@code skills} 形状被明确拒绝。
+ * "name","description","baseDirectory","contentRevision"}],"diagnostics":[{location,message}]}]}}。
  *
  * <p>Capability INVOKE payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec} 编解码，字段固定为 {@code
  * capabilityId}、{@code capabilityVersion}、{@code arguments} 和 {@code timeoutMillis}；Environment
- * Daemon 使用 {@link fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol#VERSION} (v3)。
- * {@code skill.source.refresh/install/update} 只复用该 INVOKE/CANCEL/结果通道，不成为模型 Tool。
+ * Daemon 使用 {@link fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol#VERSION}。 {@code
+ * skill.source.refresh/install/update} 只复用该 INVOKE/CANCEL/结果通道，不成为模型 Tool。
  *
- * <p>result payload（{@code PARTIAL} / {@code COMPLETED}）由 {@link
+ * <p>result payload（{@code PROGRESS} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec} 编解码，通过通用 {@code
  * INVOKE} 模型承载所有能力（包括 Skill），Resource 引用由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef} 建模。

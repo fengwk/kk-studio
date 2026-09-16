@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.ACK;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.CANCELLED;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.COMPLETED;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.ERROR;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.HELLO;
-import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.PARTIAL;
+import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.PROGRESS;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.READY;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.STARTED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -157,14 +156,14 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
-            + "\"sequence\":1,\"payload\":{\"code\":\"REGISTRATION_REJECTED\","
+            + "\"payload\":{\"code\":\"REGISTRATION_REJECTED\","
             + "\"message\":\"environment already bound to another active daemon\"}}");
 
     assertEquals(DaemonRuntimeState.FAILED, runtime.state());
@@ -184,19 +183,19 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
-            + "\"sequence\":1,\"payload\":{\"code\":\"RETRY_LATER\","
+            + "\"payload\":{\"code\":\"RETRY_LATER\","
             + "\"message\":\"server busy, retry later\"}}");
 
     assertNotEquals(DaemonRuntimeState.FAILED, runtime.state());
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     assertMessageTypes(transport.takeMessages(2), HELLO, READY);
   }
 
@@ -208,13 +207,13 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"ERROR\",\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
-            + "\"sequence\":1,\"payload\":{\"message\":\"informational\"}}");
+            + "\"payload\":{\"message\":\"informational\"}}");
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
 
@@ -226,7 +225,7 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     List<DaemonEnvelope> handshake = transport.takeMessages(2);
     assertMessageTypes(handshake, HELLO, READY);
     JsonNode hello = codec.readPayload(handshake.get(0));
@@ -243,7 +242,7 @@ class DaemonRuntimeTest {
 
     transport.disconnect();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     List<DaemonEnvelope> reconnected = transport.takeMessages(2);
     assertMessageTypes(reconnected, HELLO, READY);
     assertEquals(
@@ -363,7 +362,7 @@ class DaemonRuntimeTest {
 
       runtime.start();
       transport.awaitConnections(1);
-      completeHandshake(0);
+      completeHandshake();
       List<DaemonEnvelope> handshake = transport.takeMessages(2);
       assertMessageTypes(handshake, HELLO, READY);
 
@@ -407,7 +406,7 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     List<DaemonEnvelope> handshake = transport.takeMessages(3);
     assertMessageTypes(handshake, HELLO, READY, DaemonMessageType.HEARTBEAT);
 
@@ -423,7 +422,7 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(2);
-    completeHandshake(0);
+    completeHandshake();
 
     assertMessageTypes(transport.takeMessages(2), HELLO, READY);
   }
@@ -437,17 +436,17 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(8);
+    completeHandshake();
     transport.takeMessages(2);
     transport.failNextSend();
-    transport.receive(invoke("send-failure", 9));
+    transport.receive(invoke("send-failure"));
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     assertMessageTypes(transport.takeMessages(2), HELLO, READY);
     assertEquals(1, tool.executions.get());
 
-    transport.receive(invoke("send-failure", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("send-failure"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     assertEquals(1, tool.executions.get());
   }
 
@@ -460,13 +459,13 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("unknown-invocation", 1, "missing"));
+    transport.receive(invoke("unknown-invocation", "missing"));
 
-    List<DaemonEnvelope> messages = transport.takeMessages(2);
-    assertMessageTypes(messages, ACK, DaemonMessageType.FAILED);
-    assertTrue(messages.get(1).payloadJson().contains("unknown Environment capability"));
+    List<DaemonEnvelope> messages = transport.takeMessages(1);
+    assertMessageTypes(messages, DaemonMessageType.FAILED);
+    assertTrue(messages.get(0).payloadJson().contains("unknown Environment capability"));
     assertEquals(
         DaemonInvocationState.FAILED, journal.find("unknown-invocation").orElseThrow().state());
   }
@@ -484,14 +483,14 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
@@ -499,7 +498,7 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":2,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":1,\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
 
@@ -507,14 +506,14 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":3,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"workspacePath\":\".\",\"arguments\":{},\"timeoutMillis\":100}}");
     assertMessageTypes(transport.takeMessages(1), ERROR);
     assertEquals(0, tool.executions.get());
 
     // 去掉 workspacePath 的严格 v2 payload 正常执行，证明拒绝只针对该未知字段。
-    transport.receive(invoke("valid-after-rejected-workspace", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("valid-after-rejected-workspace"));
+    transport.takeMessages(1);
     assertEquals(1, tool.executions.get());
   }
 
@@ -540,15 +539,14 @@ class DaemonRuntimeTest {
 
       runtime.start();
       transport.awaitConnections(1);
-      completeHandshake(0);
+      completeHandshake();
       transport.takeMessages(2);
 
       // 省略 workdir：schema 必填校验在构造执行请求时失败 → 直接 FAILED，绝不发出 STARTED。
-      transport.receive(
-          invoke("missing-workdir", 1, "fs.read", "1", 100, "{\"path\":\"local.txt\"}"));
-      List<DaemonEnvelope> missing = transport.takeMessages(2);
-      assertMessageTypes(missing, ACK, DaemonMessageType.FAILED);
-      String failure = missing.get(1).payloadJson();
+      transport.receive(invoke("missing-workdir", "fs.read", "1", 100, "{\"path\":\"local.txt\"}"));
+      List<DaemonEnvelope> missing = transport.takeMessages(1);
+      assertMessageTypes(missing, DaemonMessageType.FAILED);
+      String failure = missing.get(0).payloadJson();
       assertTrue(failure.contains("workdir"), failure);
       assertFalse(failure.contains("from-environment-root"), failure);
 
@@ -556,12 +554,11 @@ class DaemonRuntimeTest {
       transport.receive(
           invoke(
               "explicit-workdir",
-              2,
               "fs.read",
               "1",
               100,
               "{\"path\":\"local.txt\",\"workdir\":\"" + jsonEscape(root.toString()) + "\"}"));
-      assertMessageTypes(transport.takeMessages(3), ACK, STARTED, DaemonMessageType.COMPLETED);
+      assertMessageTypes(transport.takeMessages(2), STARTED, DaemonMessageType.COMPLETED);
     } finally {
       deleteRecursively(root);
     }
@@ -575,7 +572,7 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.receive(
         new DaemonEnvelope(
@@ -583,7 +580,6 @@ class DaemonRuntimeTest {
             DaemonMessageType.INVOKE,
             EnvironmentId.parse("22222222-2222-2222-2222-222222222222"),
             "wrong-scope",
-            1,
             "{\"capabilityId\":\"test\",\"arguments\":{}}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
@@ -593,7 +589,6 @@ class DaemonRuntimeTest {
             DaemonMessageType.INVOKE,
             ENVIRONMENT_ID,
             "bad-payload",
-            2,
             "{\"capabilityId\":\"test\",\"arguments\":[]}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
@@ -603,7 +598,6 @@ class DaemonRuntimeTest {
             DaemonMessageType.INVOKE,
             ENVIRONMENT_ID,
             "invalid-capability-id",
-            3,
             "{\"capabilityId\":\"TEST\",\"capabilityVersion\":\"1.0.0\","
                 + "\"arguments\":{},\"timeoutMillis\":1000}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
@@ -618,24 +612,24 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.receiveRaw(
         "{\"protocolVersion\":3,\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
     transport.receiveRaw(
         "{\"protocolVersion\":4,\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,"
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
             + "\"payload\":{\"capabilityId\":\"test\",\"capabilityVersion\":\"1.0.0\","
             + "\"arguments\":{},\"timeoutMillis\":1000}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
-    transport.receive(invoke("valid-after-unsupported-version", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("valid-after-unsupported-version"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
   }
 
   /** 缺失 invocationId 在 codec 边界失败，不得触达 journal 或 capability SPI。 */
@@ -647,13 +641,13 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.receiveRaw(
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{\"capabilityId\":\"test\","
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{\"capabilityId\":\"test\","
             + "\"capabilityVersion\":\"1.0.0\",\"arguments\":{},"
             + "\"timeoutMillis\":1000}}");
 
@@ -662,85 +656,56 @@ class DaemonRuntimeTest {
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"CANCEL\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":1,\"payload\":{}}");
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{}}");
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
-    transport.receive(invoke("valid-after-missing-id", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("valid-after-missing-id"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
   }
 
-  /** 当前连接只接受连续 sequence；完全相同的最新 envelope 重发会 ACK 并复用 journal。 */
+  /** 测试意图：wire 协议没有序号，同一 invocationId 的重复 INVOKE（同实例重连后的重放）必须复用 journal 并重放 STARTED，绝不重复执行。 */
   @Test
-  void rejectsOutOfOrderSequenceAndHandlesIdenticalReplayIdempotently()
-      throws InterruptedException {
+  void replaysInvokeByInvocationIdWithoutRestartingExecution() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(3);
+    completeHandshake();
     transport.takeMessages(2);
-    DaemonEnvelope invoke = invoke("sequence-invocation", 4);
+    DaemonEnvelope invoke = invoke("replayed-invocation");
     transport.receive(invoke);
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     transport.receive(invoke);
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    List<DaemonEnvelope> replayed = transport.takeMessages(1);
+    assertMessageTypes(replayed, STARTED);
+    assertEquals("{\"replayed\":true}", replayed.get(0).payloadJson());
     assertEquals(1, tool.executions.get());
 
-    transport.receive(invoke("backward", 3));
-    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
-    transport.receive(invoke("jump", 6));
-    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
-    transport.receive(cancel("sequence-invocation", 5));
-    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+    transport.receive(cancel("replayed-invocation"));
+    assertMessageTypes(transport.takeMessages(1), CANCELLED);
   }
 
-  /** 相同 sequence 的 messageType、invocationId 或 payload 冲突必须在任何副作用前拒绝。 */
+  /** 测试意图：只有 ERROR 是服务端控制消息，到达时不创建 invocation 也不产生响应；daemon 不得接收自身的 READY 等消息类型。 */
   @Test
-  void rejectsConflictingEnvelopeThatReusesLatestSequence() throws InterruptedException {
+  void acceptsServerControlMessagesWithoutCreatingInvocations() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(3);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("original", 4));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-
-    transport.receive(invoke("different-invocation", 4));
-    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
-    transport.receive(invoke("original", 4, "test", "1.0.0", 2000));
-    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
-    transport.receive(cancel("original", 4));
-    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
-    assertEquals(1, tool.executions.get());
-    assertEquals(0, tool.handle.cancelCalls.get());
-
-    transport.receive(invoke("different-invocation", 5));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
-    assertEquals(2, tool.executions.get());
-  }
-
-  /** ACK/ERROR 只推进连接 sequence，不创建 invocation 或发送额外响应；WELCOME 由握手阶段消耗。 */
-  @Test
-  void acceptsInboundPlatformProtocolMessagesWithinSequence() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    TestCapability tool = new TestCapability();
-    runtime = runtime(transport, tool);
-
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake(0);
-    transport.takeMessages(2);
-    transport.receive(platformMessage(DaemonMessageType.ACK, 1));
-    transport.receive(platformMessage(DaemonMessageType.ERROR, 2));
+    transport.receive(platformMessage(DaemonMessageType.ERROR));
     assertFalse(transport.hasMessages());
 
-    transport.receive(invoke("after-control", 3));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(platformMessage(DaemonMessageType.READY));
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
+
+    transport.receive(invoke("after-control"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     assertEquals(1, tool.executions.get());
   }
 
@@ -765,13 +730,12 @@ class DaemonRuntimeTest {
 
       runtime.start();
       transport.awaitConnections(1);
-      completeHandshake(0);
+      completeHandshake();
       transport.takeMessages(2);
 
       transport.receive(
           invoke(
               "skill-1",
-              1,
               EnvironmentCapabilityIds.SKILL_LOAD,
               EnvironmentCapabilityCatalog.VERSION,
               "{\"sourceId\":\""
@@ -779,9 +743,9 @@ class DaemonRuntimeTest {
                   + "\",\"name\":\"my-skill\",\"revision\":\""
                   + descriptor.contentRevision()
                   + "\"}"));
-      List<DaemonEnvelope> messages = transport.takeMessages(3);
-      assertMessageTypes(messages, ACK, STARTED, COMPLETED);
-      JsonNode result = codec.readPayload(messages.get(2)).path("result");
+      List<DaemonEnvelope> messages = transport.takeMessages(2);
+      assertMessageTypes(messages, STARTED, COMPLETED);
+      JsonNode result = codec.readPayload(messages.get(1)).path("result");
       assertFalse(result.path("error").asBoolean());
       JsonNode payload = result.path("contents").get(0).path("json");
       assertEquals("# My Skill Body\nInstruction content.", payload.path("body").asText());
@@ -791,7 +755,6 @@ class DaemonRuntimeTest {
       transport.receive(
           invoke(
               "skill-2",
-              2,
               EnvironmentCapabilityIds.SKILL_LOAD,
               EnvironmentCapabilityCatalog.VERSION,
               "{\"sourceId\":\""
@@ -799,10 +762,10 @@ class DaemonRuntimeTest {
                   + "\",\"name\":\"my-skill\",\"revision\":\""
                   + "0".repeat(64)
                   + "\"}"));
-      List<DaemonEnvelope> missing = transport.takeMessages(3);
-      assertMessageTypes(missing, ACK, STARTED, COMPLETED);
+      List<DaemonEnvelope> missing = transport.takeMessages(2);
+      assertMessageTypes(missing, STARTED, COMPLETED);
       EnvironmentCapabilityResult missingResult =
-          resultCodec.decodeResult(missing.get(2).payloadJson());
+          resultCodec.decodeResult(missing.get(1).payloadJson());
       assertTrue(missingResult.error());
       // 稳定码走结构化 details，可读文本保持固定：调用方据码判定，不解析自由文本。
       assertTrue(
@@ -826,11 +789,11 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("version-mismatch", 1, "test", "2.0.0", 1000));
+    transport.receive(invoke("version-mismatch", "test", "2.0.0", 1000));
 
-    assertMessageTypes(transport.takeMessages(2), ACK, DaemonMessageType.FAILED);
+    assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
     assertEquals(0, tool.executions.get());
     assertEquals(
         DaemonInvocationState.FAILED, journal.find("version-mismatch").orElseThrow().state());
@@ -845,15 +808,15 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(6);
+    completeHandshake();
     transport.takeMessages(2);
-    DaemonEnvelope invoke = invoke("invocation-1", 7);
+    DaemonEnvelope invoke = invoke("invocation-1");
     transport.receive(invoke);
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     assertEquals(1, tool.executions.get());
 
     transport.receive(invoke);
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     assertEquals(1, tool.executions.get());
 
     tool.complete(
@@ -867,10 +830,10 @@ class DaemonRuntimeTest {
 
     transport.disconnect();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("invocation-1", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, COMPLETED);
+    transport.receive(invoke("invocation-1"));
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
     assertEquals(1, tool.executions.get());
   }
 
@@ -883,10 +846,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("timeout", 1, "test", "1.0.0", 30));
-    transport.takeMessages(2);
+    transport.receive(invoke("timeout", "test", "1.0.0", 30));
+    transport.takeMessages(1);
 
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
     assertMessageTypes(terminal, DaemonMessageType.FAILED);
@@ -906,17 +869,17 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("maximum-timeout", 1, "test", "1.0.0", Long.MAX_VALUE));
+    transport.receive(invoke("maximum-timeout", "test", "1.0.0", Long.MAX_VALUE));
 
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     assertFalse(transport.awaitMessage(Duration.ofMillis(100)));
     assertEquals(
         DaemonInvocationState.RUNNING, journal.find("maximum-timeout").orElseThrow().state());
 
-    transport.receive(cancel("maximum-timeout", 2));
-    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+    transport.receive(cancel("maximum-timeout"));
+    assertMessageTypes(transport.takeMessages(1), CANCELLED);
     assertEquals(
         DaemonInvocationState.CANCELLED, journal.find("maximum-timeout").orElseThrow().state());
     assertEquals(1, tool.handle.cancelCalls.get());
@@ -968,12 +931,11 @@ class DaemonRuntimeTest {
       handshakeTransport = transport;
       runtime.start();
       transport.awaitConnections(1);
-      completeHandshake(0);
+      completeHandshake();
       transport.takeMessages(2);
       transport.receive(
           invoke(
               "write-timeout",
-              1,
               "fs.write",
               "1",
               100,
@@ -981,7 +943,7 @@ class DaemonRuntimeTest {
                   + jsonEscape(root.toString())
                   + "\",\"path\":\"timeout.txt\",\"content\":\"must not be written\"}"));
 
-      assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+      assertMessageTypes(transport.takeMessages(1), STARTED);
       List<DaemonEnvelope> terminal = transport.takeMessages(1);
       assertMessageTypes(terminal, DaemonMessageType.FAILED);
       assertTrue(terminal.getFirst().payloadJson().contains("timed out"));
@@ -1008,10 +970,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invokeWithoutTimeout("omitted-descriptor-timeout", 1, "test", "1.0.0"));
-    transport.takeMessages(2);
+    transport.receive(invokeWithoutTimeout("omitted-descriptor-timeout", "test", "1.0.0"));
+    transport.takeMessages(1);
 
     assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
   }
@@ -1025,10 +987,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invokeWithoutTimeout("omitted-default-timeout", 1, "fallback", "1.0.0"));
-    transport.takeMessages(2);
+    transport.receive(invokeWithoutTimeout("omitted-default-timeout", "fallback", "1.0.0"));
+    transport.takeMessages(1);
 
     assertEquals(Duration.ofSeconds(12), tool.request.effectiveTimeout());
   }
@@ -1043,18 +1005,18 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("zero-timeout", 1, "test", "1.0.0", 0));
-    transport.takeMessages(2);
+    transport.receive(invoke("zero-timeout", "test", "1.0.0", 0));
+    transport.takeMessages(1);
     assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
     tool.complete(new EnvironmentCapabilityResult("zero-timeout", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
 
-    transport.receive(invoke("cancel-before-timeout", 2, "test", "1.0.0", 30));
-    transport.takeMessages(2);
-    transport.receive(cancel("cancel-before-timeout", 3));
-    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+    transport.receive(invoke("cancel-before-timeout", "test", "1.0.0", 30));
+    transport.takeMessages(1);
+    transport.receive(cancel("cancel-before-timeout"));
+    assertMessageTypes(transport.takeMessages(1), CANCELLED);
     assertFalse(transport.awaitMessage(Duration.ofMillis(80)));
   }
 
@@ -1067,10 +1029,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("default-timeout", 1, "fallback", "1.0.0", 0));
-    transport.takeMessages(2);
+    transport.receive(invoke("default-timeout", "fallback", "1.0.0", 0));
+    transport.takeMessages(1);
 
     assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
     tool.complete();
@@ -1086,10 +1048,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("complete-before-timeout", 1, "test", "1.0.0", 50));
-    transport.takeMessages(2);
+    transport.receive(invoke("complete-before-timeout", "test", "1.0.0", 50));
+    transport.takeMessages(1);
     tool.complete(
         new EnvironmentCapabilityResult("complete-before-timeout", List.of(), false, "{}"));
 
@@ -1098,7 +1060,7 @@ class DaemonRuntimeTest {
     assertEquals(0, tool.handle.cancelCalls.get());
   }
 
-  /** 流式 PARTIAL 只承载 text/json；resource 内容在 PARTIAL 路径被拒绝并收敛为 FAILED。 */
+  /** 流式 PROGRESS 只承载 text/json；resource 内容在 PROGRESS 路径被拒绝并收敛为 FAILED。 */
   @Test
   void partialSerializesTextAndJsonButRejectsResourceContents() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -1109,10 +1071,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("structured-content", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("structured-content"));
+    transport.takeMessages(1);
     tool.partial(
         new EnvironmentCapabilityResult(
             "structured-content",
@@ -1121,16 +1083,16 @@ class DaemonRuntimeTest {
             "{}"));
 
     List<DaemonEnvelope> messages = transport.takeMessages(1);
-    assertMessageTypes(messages, PARTIAL);
+    assertMessageTypes(messages, PROGRESS);
     String payload = messages.get(0).payloadJson();
     assertTrue(payload.contains("\"type\":\"json\""));
     assertTrue(payload.contains("\"json\":[1,2]"));
     assertTrue(payload.contains("\"type\":\"text\""));
     assertTrue(payload.contains("\"text\":\"hi\""));
 
-    // PARTIAL 携带 resource → 编码在任何 store 访问前拒绝，收敛为 FAILED。
-    transport.receive(invoke("structured-content-2", 2));
-    transport.takeMessages(2);
+    // PROGRESS 携带 resource → 编码在任何 store 访问前拒绝，收敛为 FAILED。
+    transport.receive(invoke("structured-content-2"));
+    transport.takeMessages(1);
     ResourceRef storedRef =
         new ResourceRef(
             stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
@@ -1143,7 +1105,7 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * Capability 重构不可退化的 fitness gate：daemon wire 必须按序发送两个 PARTIAL，再发送唯一 COMPLETED，并保留
+   * Capability 重构不可退化的 fitness gate：daemon wire 必须按序发送两个 PROGRESS，再发送唯一 COMPLETED，并保留
    * invocation/call id。
    */
   @Test
@@ -1155,9 +1117,9 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke(invocationId, 1));
+    transport.receive(invoke(invocationId));
     tool.partial(
         new EnvironmentCapabilityResult(
             invocationId, List.of(new TextResultContent("partial1")), false, "{}"));
@@ -1168,18 +1130,16 @@ class DaemonRuntimeTest {
         new EnvironmentCapabilityResult(
             invocationId, List.of(new TextResultContent("complete")), false, "{}"));
 
-    List<DaemonEnvelope> messages = transport.takeMessages(5);
-    assertMessageTypes(messages, ACK, STARTED, PARTIAL, PARTIAL, COMPLETED);
-    assertNull(messages.get(0).invocationId());
-    for (int index = 1; index < messages.size(); index++) {
-      assertEquals(invocationId, messages.get(index).invocationId());
+    List<DaemonEnvelope> messages = transport.takeMessages(4);
+    assertMessageTypes(messages, STARTED, PROGRESS, PROGRESS, COMPLETED);
+    for (DaemonEnvelope message : messages) {
+      assertEquals(invocationId, message.invocationId());
     }
-    assertEquals(1, codec.readPayload(messages.get(0)).path("acknowledgedSequence").asLong());
-    assertTrue(codec.readPayload(messages.get(1)).isEmpty());
+    assertTrue(codec.readPayload(messages.get(0)).isEmpty());
 
     DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
     List<EnvironmentCapabilityResult> results =
-        messages.subList(2, 5).stream()
+        messages.subList(1, 4).stream()
             .map(message -> resultCodec.decodeResult(message.payloadJson()))
             .toList();
     assertEquals(
@@ -1204,10 +1164,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("resource-rewrite", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("resource-rewrite"));
+    transport.takeMessages(1);
     ResourceRef ref =
         new ResourceRef(
             stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
@@ -1249,10 +1209,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("binary-content", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("binary-content"));
+    transport.takeMessages(1);
     tool.complete(
         new EnvironmentCapabilityResult(
             "binary-content",
@@ -1277,7 +1237,7 @@ class DaemonRuntimeTest {
     assertArrayEquals(data, store.read(wireRef));
   }
 
-  /** resource reader / 编码失败必须让 PARTIAL/COMPLETED 收敛为 FAILED，callback 不会泄漏 local-only ref。 */
+  /** resource reader / 编码失败必须让 PROGRESS/COMPLETED 收敛为 FAILED，callback 不会泄漏 local-only ref。 */
   @Test
   void convergesResourceFailuresToFailedTerminal() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -1301,14 +1261,14 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("resource-fail", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("resource-fail"));
+    transport.takeMessages(1);
 
     ResourceRef localRef =
         new ResourceRef(local.uri(), local.mediaType(), local.name(), local.size(), local.sha256());
-    // PARTIAL 失败必须收敛为 FAILED，且不再发出 PARTIAL 或 COMPLETED。
+    // PROGRESS 失败必须收敛为 FAILED，且不再发出 PROGRESS 或 COMPLETED。
     tool.partial(
         new EnvironmentCapabilityResult(
             "resource-fail", List.of(new ResourceResultContent(localRef)), false, "{}"));
@@ -1323,8 +1283,8 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
 
     // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
-    transport.receive(invoke("resource-fail-2", 2));
-    transport.takeMessages(2);
+    transport.receive(invoke("resource-fail-2"));
+    transport.takeMessages(1);
     tool.complete(
         new EnvironmentCapabilityResult(
             "resource-fail-2",
@@ -1348,10 +1308,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("no-source", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("no-source"));
+    transport.takeMessages(1);
 
     tool.complete(
         new EnvironmentCapabilityResult(
@@ -1384,15 +1344,15 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("tool-error", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("tool-error"));
+    transport.takeMessages(1);
     tool.error(new IllegalStateException("tool failed"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
 
-    transport.receive(invoke("wrong-result", 2));
-    transport.takeMessages(2);
+    transport.receive(invoke("wrong-result"));
+    transport.takeMessages(1);
     tool.complete(new EnvironmentCapabilityResult("another-id", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.FAILED);
   }
@@ -1407,10 +1367,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("null-error", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("null-error"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
 
     tool.error(null);
     List<DaemonEnvelope> terminal = transport.takeMessages(1);
@@ -1445,10 +1405,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("adversarial-error", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("adversarial-error"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
 
     tool.error(new ExplodingMessageException());
     List<DaemonEnvelope> errorTerminal = transport.takeMessages(1);
@@ -1461,8 +1421,8 @@ class DaemonRuntimeTest {
     tool.complete(new EnvironmentCapabilityResult("adversarial-error", List.of(), false, "{}"));
     assertFalse(transport.hasMessages());
 
-    transport.receive(invoke("adversarial-result", 2));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("adversarial-result"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     tool.complete(
         new EnvironmentCapabilityResult(
             "adversarial-result",
@@ -1484,8 +1444,8 @@ class DaemonRuntimeTest {
     assertEquals(
         DaemonInvocationState.FAILED, journal.find("adversarial-result").orElseThrow().state());
 
-    transport.receive(invoke("runtime-still-usable", 3));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("runtime-still-usable"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     tool.complete(new EnvironmentCapabilityResult("runtime-still-usable", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
     assertEquals(
@@ -1493,7 +1453,7 @@ class DaemonRuntimeTest {
         journal.find("runtime-still-usable").orElseThrow().state());
   }
 
-  /** PARTIAL 必须流式转发，CANCEL 后迟到 complete callback 不能覆盖 CANCELLED 终态。 */
+  /** PROGRESS 必须流式转发，CANCEL 后迟到 complete callback 不能覆盖 CANCELLED 终态。 */
   @Test
   void forwardsPartialAndGuardsCancelledInvocationAgainstLateCallbacks()
       throws InterruptedException {
@@ -1503,20 +1463,20 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("invocation-2", 1));
-    transport.takeMessages(2);
+    transport.receive(invoke("invocation-2"));
+    transport.takeMessages(1);
 
     tool.partial(
         new EnvironmentCapabilityResult(
             "invocation-2", List.of(new TextResultContent("chunk")), false, "{}"));
     List<DaemonEnvelope> partial = transport.takeMessages(1);
-    assertMessageTypes(partial, PARTIAL);
+    assertMessageTypes(partial, PROGRESS);
     assertTrue(partial.get(0).payloadJson().contains("chunk"));
 
-    transport.receive(cancel("invocation-2", 2));
-    assertMessageTypes(transport.takeMessages(2), ACK, CANCELLED);
+    transport.receive(cancel("invocation-2"));
+    assertMessageTypes(transport.takeMessages(1), CANCELLED);
     assertEquals(1, tool.handle.cancelCalls.get());
 
     tool.complete(
@@ -1548,7 +1508,7 @@ class DaemonRuntimeTest {
 
       runtime.start();
       transport.awaitConnections(1);
-      completeHandshake(0);
+      completeHandshake();
       List<DaemonEnvelope> handshake = transport.takeMessages(2);
       assertMessageTypes(handshake, HELLO, READY);
 
@@ -1593,7 +1553,7 @@ class DaemonRuntimeTest {
     runtime.start();
 
     transport.awaitConnections(3);
-    completeHandshake(0);
+    completeHandshake();
     assertMessageTypes(transport.takeMessages(2), HELLO, READY);
     assertEquals(DaemonRuntimeState.READY, runtime.state());
   }
@@ -1615,7 +1575,7 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  /** 上一代连接迟到的消息不得进入当前连接的 sequence 或 invocation 生命周期。 */
+  /** 上一代连接迟到的消息不得进入当前连接的 invocation 生命周期。 */
   @Test
   void ignoresLateMessageFromSupersededConnection() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
@@ -1624,42 +1584,42 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.disconnect();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
-    transport.receiveFromConnection(0, invoke("stale-invocation", 1));
+    transport.receiveFromConnection(0, invoke("stale-invocation"));
     assertFalse(transport.hasMessages());
     assertEquals(0, tool.executions.get());
 
-    transport.receive(invoke("current-invocation", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("current-invocation"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
     assertEquals(1, tool.executions.get());
   }
 
-  /** CANCEL 的即时 ACK 只允许回到接收该消息的连接，不能泄漏到重连后的连接。 */
+  /** 上一代连接的 CANCEL 不得影响 replacement connection 上的 invocation 生命周期。 */
   @Test
-  void doesNotRouteStaleCancelAcknowledgementToReplacementConnection() throws InterruptedException {
+  void doesNotRouteStaleCancelToReplacementConnection() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.disconnect();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
-    transport.receiveFromConnection(0, cancel("stale-cancel", 1));
+    transport.receiveFromConnection(0, cancel("stale-cancel"));
     assertFalse(transport.hasMessages());
 
-    transport.receive(cancel("current-cancel", 1));
-    assertMessageTypes(transport.takeMessages(1), ACK);
+    transport.receive(cancel("current-cancel"));
+    assertFalse(transport.hasMessages());
   }
 
   /** stale INVOKE 响应及其协议 ERROR 均不得被发送到 replacement connection。 */
@@ -1671,24 +1631,24 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     transport.disconnect();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
-    transport.receiveFromConnection(0, invoke("stale-invoke", 1));
+    transport.receiveFromConnection(0, invoke("stale-invoke"));
     transport.receiveRawFromConnection(
         0,
         "{\"protocolVersion\":"
             + DaemonProtocol.VERSION
             + ",\"messageType\":\"INVOKE\","
-            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"sequence\":2,\"payload\":{}}");
+            + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\",\"payload\":{}}");
     assertFalse(transport.hasMessages());
 
-    transport.receive(invoke("current-invoke", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("current-invoke"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
   }
 
   /** 被提前关闭的 scheduler 不能让 runtime 停在 started=true 但永远不会连接的半启动状态。 */
@@ -1732,15 +1692,15 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
     transport.receive(
-        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, null, null, 1, "{}"));
+        new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.HELLO, null, null, "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
 
-    transport.receive(cancel("unknown-cancel", 1));
-    assertMessageTypes(transport.takeMessages(1), ACK);
+    transport.receive(cancel("unknown-cancel"));
+    assertFalse(transport.hasMessages());
 
     transport.receive(
         new DaemonEnvelope(
@@ -1748,7 +1708,6 @@ class DaemonRuntimeTest {
             DaemonMessageType.INVOKE,
             ENVIRONMENT_ID,
             "invalid-invoke-payload",
-            2,
             "{}"));
     assertMessageTypes(transport.takeMessages(1), DaemonMessageType.ERROR);
     assertEquals(0, tool.executions.get());
@@ -1764,10 +1723,10 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("shutdown-invocation", 1));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    transport.receive(invoke("shutdown-invocation"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
 
     runtime.close();
 
@@ -1875,7 +1834,7 @@ class DaemonRuntimeTest {
     try {
       runtime.start();
       transport.awaitConnections(1);
-      completeHandshake(0);
+      completeHandshake();
       transport.takeMessages(2);
 
       transport.awaitNextMessageType(DaemonMessageType.HEARTBEAT);
@@ -1900,7 +1859,7 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
 
     runtime.close();
@@ -1921,15 +1880,14 @@ class DaemonRuntimeTest {
 
     runtime.start();
     transport.awaitConnections(1);
-    completeHandshake(0);
+    completeHandshake();
     transport.takeMessages(2);
     Thread invocationThread =
         new Thread(
-            () -> transport.receive(invoke("shutdown-race", 1, "blocking")),
-            "invoke-shutdown-race");
+            () -> transport.receive(invoke("shutdown-race", "blocking")), "invoke-shutdown-race");
     invocationThread.start();
     assertTrue(tool.executionStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
-    assertMessageTypes(transport.takeMessages(2), ACK, STARTED);
+    assertMessageTypes(transport.takeMessages(1), STARTED);
 
     runtime.close();
     tool.allowReturn.countDown();
@@ -2211,36 +2169,28 @@ class DaemonRuntimeTest {
     }
   }
 
-  /**
-   * 模拟 Cloud 完成 HELLO/WELCOME/READY 握手：发送 WELCOME 让 daemon 推进到 READY。后续入站 sequence 必须从 {@code
-   * welcomeSequence + 1} 起严格递增。
-   */
-  private void completeHandshake(long welcomeSequence) throws InterruptedException {
+  /** 模拟 Gateway 完成 HELLO/WELCOME 握手：发送 WELCOME 让 daemon 推进到 READY。 */
+  private void completeHandshake() throws InterruptedException {
     handshakeTransport.awaitNextMessageType(DaemonMessageType.HELLO);
-    handshakeTransport.receive(platformMessage(DaemonMessageType.WELCOME, welcomeSequence));
+    handshakeTransport.receive(platformMessage(DaemonMessageType.WELCOME));
   }
 
-  private DaemonEnvelope invoke(String invocationId, long sequence) {
-    return invoke(invocationId, sequence, "test");
+  private DaemonEnvelope invoke(String invocationId) {
+    return invoke(invocationId, "test");
   }
 
-  private DaemonEnvelope invoke(String invocationId, long sequence, String capabilityId) {
-    return invoke(invocationId, sequence, capabilityId, "1.0.0", 1000);
+  private DaemonEnvelope invoke(String invocationId, String capabilityId) {
+    return invoke(invocationId, capabilityId, "1.0.0", 1000);
   }
 
   private DaemonEnvelope invoke(
-      String invocationId,
-      long sequence,
-      String capabilityId,
-      String capabilityVersion,
-      long timeoutMillis) {
-    return invoke(invocationId, sequence, capabilityId, capabilityVersion, timeoutMillis, "{}");
+      String invocationId, String capabilityId, String capabilityVersion, long timeoutMillis) {
+    return invoke(invocationId, capabilityId, capabilityVersion, timeoutMillis, "{}");
   }
 
   /** 严格 v2 INVOKE：外壳只有 capabilityId/capabilityVersion/arguments/timeoutMillis，目录只来自 arguments。 */
   private DaemonEnvelope invoke(
       String invocationId,
-      long sequence,
       String capabilityId,
       String capabilityVersion,
       long timeoutMillis,
@@ -2250,7 +2200,6 @@ class DaemonRuntimeTest {
         DaemonMessageType.INVOKE,
         ENVIRONMENT_ID,
         invocationId,
-        sequence,
         "{\"capabilityId\":\""
             + capabilityId
             + "\",\"capabilityVersion\":\""
@@ -2273,13 +2222,12 @@ class DaemonRuntimeTest {
   }
 
   private DaemonEnvelope invokeWithoutTimeout(
-      String invocationId, long sequence, String capabilityId, String capabilityVersion) {
+      String invocationId, String capabilityId, String capabilityVersion) {
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.INVOKE,
         ENVIRONMENT_ID,
         invocationId,
-        sequence,
         "{\"capabilityId\":\""
             + capabilityId
             + "\",\"capabilityVersion\":\""
@@ -2289,7 +2237,6 @@ class DaemonRuntimeTest {
 
   private DaemonEnvelope invoke(
       String invocationId,
-      long sequence,
       EnvironmentCapabilityId capabilityId,
       String capabilityVersion,
       String argumentsJson) {
@@ -2298,7 +2245,6 @@ class DaemonRuntimeTest {
         DaemonMessageType.INVOKE,
         ENVIRONMENT_ID,
         invocationId,
-        sequence,
         "{\"capabilityId\":\""
             + capabilityId.value()
             + "\",\"capabilityVersion\":\""
@@ -2308,19 +2254,13 @@ class DaemonRuntimeTest {
             + ",\"timeoutMillis\":10000}");
   }
 
-  private DaemonEnvelope platformMessage(DaemonMessageType messageType, long sequence) {
-    return new DaemonEnvelope(
-        DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, sequence, "{}");
+  private DaemonEnvelope platformMessage(DaemonMessageType messageType) {
+    return new DaemonEnvelope(DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, "{}");
   }
 
-  private DaemonEnvelope cancel(String invocationId, long sequence) {
+  private DaemonEnvelope cancel(String invocationId) {
     return new DaemonEnvelope(
-        DaemonProtocol.VERSION,
-        DaemonMessageType.CANCEL,
-        ENVIRONMENT_ID,
-        invocationId,
-        sequence,
-        "{}");
+        DaemonProtocol.VERSION, DaemonMessageType.CANCEL, ENVIRONMENT_ID, invocationId, "{}");
   }
 
   private List<String> jsonTexts(JsonNode array) {

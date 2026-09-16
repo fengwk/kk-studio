@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
+
+import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 
 import java.io.IOException;
 import java.util.List;
@@ -42,7 +45,7 @@ class DaemonOutboundSenderTest {
         () -> new DaemonOutboundSender(session, 1, 100, 0, error -> {}));
   }
 
-  /** 底层首帧阻塞时 enqueue 仍立即返回，释放后按入队顺序串行发送。 */
+  /** 底层首帧阻塞时 offerText 仍立即返回 ACCEPTED，释放后按入队顺序串行发送。 */
   @Test
   void sendsStrictlyInOrderWithoutBlockingEnqueue() throws Exception {
     CountDownLatch firstEntered = new CountDownLatch(1);
@@ -59,10 +62,10 @@ class DaemonOutboundSenderTest {
             });
     DaemonOutboundSender sender = new DaemonOutboundSender(session, 4, 100, 5_000, error -> {});
     try {
-      assertTrue(sender.enqueue("a"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("a"));
       assertTrue(firstEntered.await(5, TimeUnit.SECONDS));
-      assertTrue(sender.enqueue("b"));
-      assertTrue(sender.enqueue("c"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("b"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("c"));
       assertEquals(List.of("a"), sent);
       releaseFirst.countDown();
       await(() -> sent.size() == 3);
@@ -73,7 +76,7 @@ class DaemonOutboundSenderTest {
     }
   }
 
-  /** 帧数与 UTF-8 字节都包含在途帧；恰好到限允许，超过一字节或一帧拒绝。 */
+  /** 帧数与 UTF-8 字节都包含在途帧；恰好到限允许（ACCEPTED），超过一帧或一字节返回 BUSY 且不关闭连接。 */
   @Test
   void enforcesFrameAndUtf8ByteBounds() throws Exception {
     CountDownLatch entered = new CountDownLatch(1);
@@ -86,18 +89,21 @@ class DaemonOutboundSenderTest {
             });
     DaemonOutboundSender sender = new DaemonOutboundSender(session, 2, 7, 5_000, error -> {});
     try {
-      assertTrue(sender.enqueue("中文"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("中文"));
       assertTrue(entered.await(5, TimeUnit.SECONDS));
-      assertTrue(sender.enqueue("x"));
-      assertFalse(sender.enqueue("y"));
-      assertFalse(sender.enqueue("toolong"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("x"));
+      assertEquals(DaemonOfferResult.BUSY, sender.offerText("y"));
+      assertEquals(DaemonOfferResult.BUSY, sender.offerText("toolong"));
+      // BUSY 只表达本地容量拒绝：连接仍然可用，且从未被关闭。
+      assertTrue(sender.isOpen());
+      verify(session, never()).close(any());
     } finally {
       sender.close();
       release.countDown();
     }
   }
 
-  /** 同步 send 异常关闭连接、通知一次失败，并允许失败回调重入 close 而不死锁。 */
+  /** 同步 send 异常关闭连接、通知一次失败，并允许失败回调重入 close 而不死锁；此后递交一律 CLOSED。 */
   @Test
   void sendFailureClosesAndAllowsReentrantClose() throws Exception {
     AtomicInteger failures = new AtomicInteger();
@@ -119,13 +125,16 @@ class DaemonOutboundSenderTest {
             });
     senderRef.set(sender);
 
-    assertTrue(sender.enqueue("a"));
+    assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("a"));
     verify(session, timeout(5_000)).close(any());
     assertEquals(1, failures.get());
-    assertFalse(sender.enqueue("b"));
+    assertEquals(DaemonOfferResult.CLOSED, sender.offerText("b"));
   }
 
-  /** 底层 session 已关闭时不调用 sendMessage；失败回调自身异常也不能阻止 close，close IOException 被吞掉。 */
+  /**
+   * 底层 session 已关闭时不调用 sendMessage；失败回调自身异常也不能阻止 close，close IOException 被吞掉； 失败收敛后 sender 对外表现为
+   * CLOSED，而不是把发送失败回传给递交方。
+   */
   @Test
   void closedSessionAndFailingCallbackStillCloseIdempotently() throws Exception {
     WebSocketSession session = session(message -> {});
@@ -147,9 +156,9 @@ class DaemonOutboundSenderTest {
             });
 
     assertFalse(sender.isOpen());
-    assertTrue(sender.enqueue("a"));
+    assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("a"));
     verify(session, timeout(5_000)).close(any());
-    assertFalse(sender.enqueue("b"));
+    assertEquals(DaemonOfferResult.CLOSED, sender.offerText("b"));
     sender.close();
   }
 
@@ -166,17 +175,17 @@ class DaemonOutboundSenderTest {
     DaemonOutboundSender sender =
         new DaemonOutboundSender(session, 4, 100, 30, error -> failed.countDown());
     try {
-      assertTrue(sender.enqueue("a"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("a"));
       assertTrue(failed.await(5, TimeUnit.SECONDS));
       verify(session, timeout(5_000)).close(any());
-      assertFalse(sender.enqueue("b"));
+      assertEquals(DaemonOfferResult.CLOSED, sender.offerText("b"));
     } finally {
       release.countDown();
       sender.close();
     }
   }
 
-  /** close 清除排队帧并建立拒绝围栏，已阻塞首帧结束后不会再调用第二次 sendMessage。 */
+  /** close 清除排队帧并建立拒绝围栏（CLOSED），已阻塞首帧结束后不会再调用第二次 sendMessage。 */
   @Test
   void closePreventsQueuedAndFutureSends() throws Exception {
     CountDownLatch firstEntered = new CountDownLatch(1);
@@ -195,19 +204,19 @@ class DaemonOutboundSenderTest {
               }
             });
     DaemonOutboundSender sender = new DaemonOutboundSender(session, 4, 100, 5_000, error -> {});
-    assertTrue(sender.enqueue("a"));
+    assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("a"));
     assertTrue(firstEntered.await(5, TimeUnit.SECONDS));
-    assertTrue(sender.enqueue("b"));
+    assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("b"));
 
     sender.close();
-    assertFalse(sender.enqueue("c"));
+    assertEquals(DaemonOfferResult.CLOSED, sender.offerText("c"));
     releaseFirst.countDown();
     assertTrue(firstExited.await(5, TimeUnit.SECONDS));
     assertEquals(1, sends.get());
     sender.close();
   }
 
-  /** protocol ERROR 使用 drain-close：先建立入队围栏，已接受帧发送完成后再关闭，后续普通 close 不得丢帧。 */
+  /** protocol ERROR 使用 drain-close：先建立入队围栏（后续递交 CLOSED），已接受帧发送完成后再关闭，普通 close 不得丢帧。 */
   @Test
   void closeAfterFlushDrainsAcceptedFrameBeforeClosing() throws Exception {
     CountDownLatch sendEntered = new CountDownLatch(1);
@@ -222,11 +231,11 @@ class DaemonOutboundSenderTest {
             });
     DaemonOutboundSender sender = new DaemonOutboundSender(session, 2, 100, 5_000, error -> {});
     try {
-      assertTrue(sender.enqueue("protocol-error"));
+      assertEquals(DaemonOfferResult.ACCEPTED, sender.offerText("protocol-error"));
       assertTrue(sendEntered.await(5, TimeUnit.SECONDS));
       sender.closeAfterFlush();
       sender.close();
-      assertFalse(sender.enqueue("after-fence"));
+      assertEquals(DaemonOfferResult.CLOSED, sender.offerText("after-fence"));
       releaseSend.countDown();
       verify(session, timeout(5_000)).close(any());
       assertEquals(List.of("protocol-error"), sent);

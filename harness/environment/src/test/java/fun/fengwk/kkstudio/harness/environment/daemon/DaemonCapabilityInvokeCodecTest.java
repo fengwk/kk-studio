@@ -116,7 +116,7 @@ class DaemonCapabilityInvokeCodecTest {
     assertInvalid("{\"capabilityId\":\"fs.read\",\"capabilityVersion\":\"1\",\"arguments\":{}}");
   }
 
-  /** v1 外壳的 workspacePath 字段已被协议 v2 移除，必须作为 unknown 字段拒绝且无兼容回退。 */
+  /** INVOKE 外壳不携带 workspacePath：该字段必须作为 unknown 字段拒绝且无兼容回退。 */
   @Test
   void rejectsRemovedWorkspacePathField() {
     assertInvalid(

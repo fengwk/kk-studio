@@ -369,15 +369,17 @@ realtime source，Canvas 只使用 version source，Projects 连接数据库失�
 1. 在 Spring WebSocket 和 native JSR-356 session 两侧设置 `max-message-bytes`；
 2. 创建 `SpringWebSocketConnection`和每连接 `DaemonOutboundSender`；
 3. 把 open/receive/close 委托给会话核心的 `DaemonEndpoint`（`harness/environment-server` 的 `EnvironmentDaemonServer`）；
-4. 会话核心只接受 protocol v3 HELLO、capability catalog `"1"` 与 READY capabilities v2，并负责校验通用 capability INVOKE payload；
+4. 会话核心只接受 protocol v1 HELLO、capability catalog `"1"` 与 READY capabilities，并负责校验通用 capability INVOKE payload；
 5. 会话核心先解绑 registry、在途 invocation 和 pending request，再关闭 sender。
 
 `SpringWebSocketConnection`只实现核心的 `DaemonChannel`；web 层不解释协议，也不保存任何会话状态。
 
-`DaemonOutboundSender`使用 `ConcurrentWebSocketSessionDecorator`和每连接一个 virtual-thread sender。入队是非阻塞的，
-同时受 frame count 与 UTF-8 bytes 限制（均含 in-flight frame）；sender 按入队顺序调用 `sendMessage`。每帧有
-send timeout，超时/异常会关闭入队围栏、通知会话核心进行 uncertain/unavailable cleanup，再关闭 transport。慢连接
-不会占住 receive、会话核心锁或其它连接。
+`DaemonOutboundSender`使用每连接一个 virtual-thread sender；帧的串行化、frame count 与 UTF-8 bytes 双限（均含
+in-flight frame）以及 send timeout 都由它独占，不叠加 Spring 并发装饰器。递交是非阻塞的并返回确定性结果：容量/字节预算拒绝为
+`BUSY`（帧未发送、连接保持可用），围栏已关闭为 `CLOSED`；sender 按入队顺序调用 `sendMessage`。超时/异常会关闭入队围栏、通知会话核心进行
+uncertain/unavailable cleanup，再关闭 transport。慢连接不会占住 receive、会话核心锁或其它连接。
+
+端点强制本次握手协商 `permessage-deflate`：扩展缺失或未包含该 token 时以 RFC 6455 close code `1010` 关闭，且不向会话核心暴露通道。
 
 非 servlet Spring context（MockMvc、`WebEnvironment.MOCK`）中
 `EnvironmentDaemonWebSocketContainerFactoryBean`检测不到 `ServerContainer`时 no-op，因此测试 context 不需要

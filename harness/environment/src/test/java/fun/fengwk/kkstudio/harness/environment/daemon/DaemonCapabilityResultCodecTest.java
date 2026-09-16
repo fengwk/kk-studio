@@ -27,7 +27,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 
-/** Daemon wire PARTIAL / COMPLETED payload codec 的双向与拒绝契约测试。 */
+/** Daemon wire PROGRESS / COMPLETED payload codec 的双向与拒绝契约测试。 */
 class DaemonCapabilityResultCodecTest {
 
   private static final String EXPORT_URI = "file:///export/abc";
@@ -342,7 +342,7 @@ class DaemonCapabilityResultCodecTest {
                     + "]}}"));
   }
 
-  /** PARTIAL（allowResources=false）必须在任何回调前拒绝 resource 内容。 */
+  /** PROGRESS（allowResources=false）必须在任何回调前拒绝 resource 内容。 */
   @Test
   void rejectsResourceWhenNotAllowed() {
     byte[] data = "xx".getBytes(StandardCharsets.UTF_8);
@@ -359,7 +359,7 @@ class DaemonCapabilityResultCodecTest {
         assertThrows(
             DaemonProtocolException.class,
             () -> codec.decodePartialForInvocation(payload, "call-3", 1024));
-    assertTrue(error.getMessage().contains("PARTIAL"));
+    assertTrue(error.getMessage().contains("PROGRESS"));
   }
 
   /** 单 item 声明 size 超限必须在 Base64 分配前拒绝。 */
@@ -631,7 +631,7 @@ class DaemonCapabilityResultCodecTest {
     assertTrue(error.getMessage().contains("resource fields are invalid"));
   }
 
-  /** contents 元素数上限由 CapabilityResult 构造期统一强制（与解码侧共用同一来源）；恰好 64 条经 COMPLETED/PARTIAL 编码均通过。 */
+  /** contents 元素数上限由 CapabilityResult 构造期统一强制（与解码侧共用同一来源）；恰好 64 条经 COMPLETED/PROGRESS 编码均通过。 */
   @Test
   void countCapIsEnforcedAtCapabilityResultConstruction() {
     List<ResultContent> atLimit = new ArrayList<>();
@@ -679,7 +679,7 @@ class DaemonCapabilityResultCodecTest {
     assertTrue(error.getMessage().contains("must declare size and sha256"));
   }
 
-  /** PARTIAL 编码只接受 text/json；resource/binary 在任何 store 操作之前被拒绝（NoopStore 遇调用即失败）。 */
+  /** PROGRESS 编码只接受 text/json；resource/binary 在任何 store 操作之前被拒绝（NoopStore 遇调用即失败）。 */
   @Test
   void encodePartialAcceptsTextAndJsonAndRejectsResourceOrBinaryBeforeAnyStoreCall() {
     EnvironmentCapabilityResult partial =
@@ -891,7 +891,7 @@ class DaemonCapabilityResultCodecTest {
         assertThrows(
             DaemonProtocolException.class,
             () -> codec.decodePartialForInvocation(resourcePayload, "call-x", 1024));
-    assertTrue(partialRejectsResource.getMessage().contains("PARTIAL"));
+    assertTrue(partialRejectsResource.getMessage().contains("PROGRESS"));
     assertEquals(
         1, codec.decodeCompletedForInvocation(resourcePayload, "call-x", 1024).contents().size());
 

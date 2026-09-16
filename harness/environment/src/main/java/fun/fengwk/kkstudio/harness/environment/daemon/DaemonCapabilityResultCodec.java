@@ -33,7 +33,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Daemon wire {@code PARTIAL}/{@code COMPLETED} payload 的 capability-result codec。
+ * Daemon wire {@code PROGRESS}/{@code COMPLETED} payload 的 capability-result codec。
  *
  * <p>wire shape:
  *
@@ -97,7 +97,7 @@ public final class DaemonCapabilityResultCodec {
           "textMetadata");
 
   /**
-   * 编码 PARTIAL 结果：只允许 text/json 内容；任何 {@link ResourceResultContent}/{@link BinaryResultContent} 都在
+   * 编码 PROGRESS 结果：只允许 text/json 内容；任何 {@link ResourceResultContent}/{@link BinaryResultContent} 都在
    * 任何 store 操作之前被拒绝。
    */
   public String encodePartial(
@@ -107,7 +107,7 @@ public final class DaemonCapabilityResultCodec {
     for (ResultContent content : partial.contents()) {
       if (!(content instanceof TextResultContent) && !(content instanceof JsonResultContent)) {
         throw new DaemonProtocolException(
-            "PARTIAL result must not contain " + content.getClass().getSimpleName() + " content");
+            "PROGRESS result must not contain " + content.getClass().getSimpleName() + " content");
       }
     }
     return writeBoundedPayload(buildResultTree(partial, resourceStore));
@@ -171,7 +171,7 @@ public final class DaemonCapabilityResultCodec {
   }
 
   /**
-   * 解码 PARTIAL 结果（专用入口：拒绝 resource）。
+   * 解码 PROGRESS 结果（专用入口：拒绝 resource）。
    *
    * @param expectedCallId 期望的调用 ID；空白或 null 时拒绝。
    * @param maximumResourceBytes 单条/聚合资源字节预算。
@@ -361,7 +361,7 @@ public final class DaemonCapabilityResultCodec {
       }
       case "resource" -> {
         if (!allowResources) {
-          throw new DaemonProtocolException("PARTIAL result must not contain resource content");
+          throw new DaemonProtocolException("PROGRESS result must not contain resource content");
         }
         rejectUnknownFields(obj, RESOURCE_FIELDS, context);
         String uri = requiredText(obj, "uri", context);

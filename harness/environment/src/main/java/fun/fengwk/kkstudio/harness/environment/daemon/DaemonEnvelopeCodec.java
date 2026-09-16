@@ -17,7 +17,7 @@ import java.util.Set;
  *
  * <p>codec 在边界拒绝未知版本、未知消息类型、缺失字段、duplicate field、trailing token 和非对象 payload，避免将不完整 wire
  * 消息传给运行时；wire 字段 {@code environmentId} 必须是 canonical UUID 文本。HELLO 的 scope 必须为 null， 其余消息（除握手前的
- * ERROR）scope 必须非空。
+ * ERROR）scope 必须非空。envelope 不含全局序号或 ACK，因此 codec 不做任何跨消息顺序校验。
  */
 public final class DaemonEnvelopeCodec {
 
@@ -29,8 +29,7 @@ public final class DaemonEnvelopeCodec {
   }
 
   private static final Set<String> ENVELOPE_FIELDS =
-      Set.of(
-          "protocolVersion", "messageType", "environmentId", "invocationId", "sequence", "payload");
+      Set.of("protocolVersion", "messageType", "environmentId", "invocationId", "payload");
 
   /** 将 envelope 编码为协议规定的 JSON 字段；environmentId 编码为 canonical UUID 文本（null 省略）。 */
   public String encode(DaemonEnvelope envelope) {
@@ -43,7 +42,6 @@ public final class DaemonEnvelopeCodec {
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
     }
-    root.put("sequence", envelope.sequence());
     root.set("payload", readPayload(envelope.payloadJson()));
     try {
       return OBJECT_MAPPER.writeValueAsString(root);
@@ -67,10 +65,6 @@ public final class DaemonEnvelopeCodec {
     } catch (IllegalArgumentException error) {
       throw new DaemonProtocolException("unknown daemon messageType: " + messageTypeValue, error);
     }
-    long sequence = requiredLong(root, "sequence");
-    if (sequence < 0) {
-      throw new DaemonProtocolException("sequence must not be negative");
-    }
     JsonNode payload = root.get("payload");
     if (payload == null || !payload.isObject()) {
       throw new DaemonProtocolException("payload must be a JSON object");
@@ -79,7 +73,7 @@ public final class DaemonEnvelopeCodec {
     EnvironmentId environmentId = decodeScope(root, messageType);
     try {
       return new DaemonEnvelope(
-          protocolVersion, messageType, environmentId, invocationId, sequence, writeJson(payload));
+          protocolVersion, messageType, environmentId, invocationId, writeJson(payload));
     } catch (RuntimeException error) {
       throw new DaemonProtocolException("envelope fields are invalid", error);
     }
@@ -173,14 +167,6 @@ public final class DaemonEnvelopeCodec {
       throw new DaemonProtocolException(fieldName + " must be an integer");
     }
     return value.intValue();
-  }
-
-  private long requiredLong(JsonNode root, String fieldName) {
-    JsonNode value = root.get(fieldName);
-    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new DaemonProtocolException(fieldName + " must be a long integer");
-    }
-    return value.longValue();
   }
 
   private String requiredText(JsonNode root, String fieldName) {
