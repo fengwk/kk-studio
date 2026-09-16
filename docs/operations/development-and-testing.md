@@ -248,11 +248,13 @@ runtime。容器以 uid/gid `10001` 运行，`/workspace` 是持久 Git 工作�
 - `git fetch origin $KK_STUDIO_GIT_BRANCH` 失败时启动失败，节点不会用未验证的修订
   继续启动；错误信息不回显远端 URL 或凭据，提示检查挂载的 SSH 凭据与网络后重启；
 - fetch 成功后比较 `HEAD` 与 `origin/$KK_STUDIO_GIT_BRANCH`：相同则按当前修订启动；
-  `HEAD` 是其祖先（落后）且已跟踪文件没有未提交修改时执行 `merge --ff-only`，
-  只允许快进；落后但存在未提交的已跟踪修改时启动失败，必须先提交或显式丢弃再重启；
-  `HEAD` 领先或与远端分叉时启动失败，历史必须显式处理；
-- 未跟踪文件不阻止快进。entrypoint 只执行 `merge --ff-only`，永不 reset、rebase、
-  stash 或 checkout，也不会强推。
+  `HEAD` 是该分支的祖先（落后）时执行 `merge --ff-only`，只有快进被 git 接受才继续，
+  git 拒绝快进（本地修改或未跟踪文件会被传入修订覆盖）时启动失败；
+  `HEAD` 包含该分支（存在未 push 的本地提交）时按原样启动并提示 ahead，节点继续服务
+  本地提交；两侧互不包含（历史分叉）时启动失败，历史必须显式处理；
+- 是否会被覆盖完全由 git 判定，entrypoint 不预判工作区状态。未跟踪文件不阻止快进，
+  不冲突的本地修改会随快进保留。entrypoint 只执行 `merge --ff-only`，永不 reset、
+  rebase、stash 或 checkout，也不会强推。
 
 同步完成后按修订 stamp 决定是否重建构建产物，避免同一次源码状态被重复编译：
 

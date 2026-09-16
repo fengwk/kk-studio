@@ -186,8 +186,9 @@ entrypoint 启动时才复制进 `/home/kkdaemon/.ssh`；镜像 SSH 配置使用
 [自迭代运行规范](development-and-testing.md#44-nas-maindev-自迭代运行规范)。
 
 每次启动 entrypoint 都把持久工作区无损快进到 `origin/$KK_STUDIO_GIT_BRANCH`：远端
-不可达（fetch 失败）、工作区没有 `origin`、落后且存在未提交的已跟踪修改、或本地历史
-分叉时容器直接启动失败，节点不会静默运行未验证的修订；只允许 `merge --ff-only`，
+不可达（fetch 失败）、工作区没有 `origin`、快进会被本地修改或未跟踪文件覆盖（git
+拒绝）、或本地历史与远端互不包含时容器直接启动失败，节点不会静默运行未验证的修订；
+存在未 push 本地提交（本地领先）时按原样启动并提示 ahead。只允许 `merge --ff-only`，
 永不 reset/rebase/stash/checkout。同步后按修订记录决定重建量：后端 JAR 的修订记录在
 `web/target/.kk-studio-revision`（与 JAR 同目录），前端依赖的 lock 摘要记录在
 `frontend` 下的 `node_modules/.kk-studio-package-lock.sha`。

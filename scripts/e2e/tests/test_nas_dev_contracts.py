@@ -817,8 +817,11 @@ class TestNasDevImageContracts(unittest.TestCase):
                 self.assertNotIn(forbidden, body, f"{script.name} must not run {forbidden}")
         sync_body = function_body(DEV_ENTRYPOINT, "sync_workspace_revision")
         self.assertIn('merge --ff-only "origin/$GIT_BRANCH"', sync_body)
-        self.assertIn("status --porcelain --untracked-files=no", sync_body)
         self.assertIn("merge-base --is-ancestor", sync_body)
+        # The safety decision belongs to git: no pre-emptive working-tree inspection may
+        # reject a workspace that `merge --ff-only` would accept.
+        self.assertNotIn("status --porcelain", sync_body)
+        self.assertNotIn("--untracked-files", sync_body)
 
     def test_revision_sync_fast_forwards_a_clean_workspace(self):
         # Intent: the normal self-iteration restart must advance the persistent checkout to
@@ -865,39 +868,40 @@ class TestNasDevImageContracts(unittest.TestCase):
             self.assertNotRegex(second.stdout, r"(?i)fast-forward")
             self.assertIn(head[:7], second.stdout)
 
-    def test_revision_sync_fails_closed_on_uncommitted_tracked_changes(self):
-        # Intent: a fast-forward would overwrite local edits, and the entrypoint must never
-        # stash or discard them. Failing to start is the only outcome that keeps the work
-        # intact, so both the exit status and the surviving working tree are asserted.
+    def test_revision_sync_fails_closed_when_git_refuses_to_overwrite_local_changes(self):
+        # Intent: git itself is the authority on whether a fast-forward is lossless. When
+        # the incoming revision would overwrite a local edit, `merge --ff-only` refuses and
+        # the container must fail rather than stash, reset or drop that work, so both the
+        # exit status and the surviving working tree are asserted.
         with tempfile.TemporaryDirectory() as temporary:
             _, seed, workspace = build_workspace_fixture(temporary)
             local_head = run_git(workspace, "rev-parse", "HEAD").stdout.strip()
-            expected = publish(seed, "dev", "tracked.txt", "two\n", "two")
+            # The remote revision rewrites the very file that is also edited locally.
+            expected = publish(seed, "dev", "tracked.txt", "remote revision\n", "remote edit")
             (workspace / "tracked.txt").write_text("local work in progress\n")
-            (workspace / "untracked.txt").write_text("scratch\n")
             result = source_entrypoint(
                 "sync_workspace_revision",
                 {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
             )
-            self.assertNotEqual(0, result.returncode, "dirty tracked files must fail closed")
+            self.assertNotEqual(0, result.returncode, "a refused fast-forward must fail closed")
             self.assertEqual(
                 local_head,
                 run_git(workspace, "rev-parse", "HEAD").stdout.strip(),
-                "the revision must not move while uncommitted tracked changes exist",
+                "the revision must not move when the merge was refused",
             )
             self.assertEqual(
                 "local work in progress\n",
                 (workspace / "tracked.txt").read_text(),
                 "the local edit must survive; the entrypoint never stashes or resets",
             )
-            self.assertEqual("scratch\n", (workspace / "untracked.txt").read_text())
             self.assertNotIn(expected[:7], run_git(workspace, "rev-parse", "HEAD").stdout)
-            self.assertIn("uncommitted changes to tracked files", result.stderr)
+            self.assertIn("fast-forwarding", result.stderr)
+            self.assertIn("local modifications or untracked files", result.stderr)
 
     def test_revision_sync_allows_untracked_files_to_survive_a_fast_forward(self):
         # Intent: untracked scratch files (reports, local notes) are normal in an Agent
-        # workspace, so they must not block the revision check; only tracked modifications
-        # are a conflict. Without this the node would need manual cleanup before any restart.
+        # workspace and do not conflict with an incoming revision, so they must not block
+        # the revision check. Without this the node would need manual cleanup first.
         with tempfile.TemporaryDirectory() as temporary:
             _, seed, workspace = build_workspace_fixture(temporary)
             expected = publish(seed, "dev", "tracked.txt", "two\n", "two")
@@ -912,9 +916,39 @@ class TestNasDevImageContracts(unittest.TestCase):
             )
             self.assertEqual("unrelated\n", (workspace / "scratch.txt").read_text())
 
+    def test_revision_sync_keeps_local_edits_the_incoming_revision_does_not_touch(self):
+        # Intent: this is the observable contract of handing the safety decision to git.
+        # A local edit to a file the remote revision does not modify is not an obstacle, so
+        # the workspace must advance to the remote revision and carry that edit along;
+        # a pre-emptive `status` check would have refused to start here for no reason.
+        with tempfile.TemporaryDirectory() as temporary:
+            _, seed, workspace = build_workspace_fixture(temporary)
+            local_head = run_git(workspace, "rev-parse", "HEAD").stdout.strip()
+            # The remote revision touches a file the local edit does not.
+            expected = publish(seed, "dev", "from-remote.txt", "remote\n", "remote work")
+            (workspace / "tracked.txt").write_text("local work in progress\n")
+            result = source_entrypoint(
+                "sync_workspace_revision",
+                {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertNotEqual(local_head, expected)
+            self.assertEqual(
+                expected,
+                run_git(workspace, "rev-parse", "HEAD").stdout.strip(),
+                "a fast-forward that does not conflict must still be applied",
+            )
+            self.assertEqual(
+                "local work in progress\n",
+                (workspace / "tracked.txt").read_text(),
+                "the untouched local edit must survive the fast-forward",
+            )
+            self.assertEqual("remote\n", (workspace / "from-remote.txt").read_text())
+            self.assertRegex(result.stdout, r"(?i)fast-forward")
+
     def test_revision_sync_fails_closed_on_diverged_history(self):
-        # Intent: a local commit that the remote does not have cannot be reconciled by a
-        # fast-forward, and rewriting it silently would discard an unreviewed change.
+        # Intent: local and remote each hold commits the other lacks, so no fast-forward
+        # exists and rewriting either side silently would discard an unreviewed change.
         with tempfile.TemporaryDirectory() as temporary:
             _, seed, workspace = build_workspace_fixture(temporary)
             publish(seed, "dev", "from-remote.txt", "remote\n", "remote work")
@@ -926,12 +960,14 @@ class TestNasDevImageContracts(unittest.TestCase):
             )
             self.assertNotEqual(0, result.returncode, "divergence must fail closed")
             self.assertEqual(local, run_git(workspace, "rev-parse", "HEAD").stdout.strip())
-            self.assertIn("cannot be fast-forwarded", result.stderr)
+            self.assertIn("has diverged from origin/dev", result.stderr)
             self.assertTrue((workspace / "local.txt").exists())
 
-    def test_revision_sync_fails_closed_when_the_local_branch_is_ahead(self):
-        # Intent: an Agent's unpushed commits are legitimate durable work on the Dev node;
-        # the container must keep serving them instead of being pulled back to the remote.
+    def test_revision_sync_keeps_serving_unpushed_local_commits(self):
+        # Intent: unpushed commits are legitimate durable work on the Dev node (the branch
+        # asks Agents to commit before restarting, and pushing is a milestone decision), so
+        # the container must keep serving them instead of refusing to start or being pulled
+        # back to the remote.
         with tempfile.TemporaryDirectory() as temporary:
             _, _, workspace = build_workspace_fixture(temporary)
             local = commit_file(workspace, "local.txt", "local\n", "local work")
@@ -939,9 +975,15 @@ class TestNasDevImageContracts(unittest.TestCase):
                 "sync_workspace_revision",
                 {"KK_STUDIO_REPOSITORY_DIR": str(workspace), "KK_STUDIO_GIT_BRANCH": "dev"},
             )
-            self.assertNotEqual(0, result.returncode, "ahead-of-remote must fail closed")
-            self.assertEqual(local, run_git(workspace, "rev-parse", "HEAD").stdout.strip())
-            self.assertIn("cannot be fast-forwarded", result.stderr)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(
+                local,
+                run_git(workspace, "rev-parse", "HEAD").stdout.strip(),
+                "the local commit must remain HEAD; no reference may move",
+            )
+            self.assertTrue((workspace / "local.txt").exists())
+            self.assertIn("ahead of origin/dev", result.stdout)
+            self.assertIn(local[:7], result.stdout)
 
     def test_revision_sync_fails_closed_when_fetch_is_impossible(self):
         # Intent: the whole point of the gate is that an unverified revision never boots.
