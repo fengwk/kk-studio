@@ -875,4 +875,60 @@ describe('ToolMessageBlock', () => {
     expect(screen.queryByText('{"path":"demo"}')).not.toBeInTheDocument()
     expect(screen.queryByText('default partial')).not.toBeInTheDocument()
   })
+
+  it('renders streaming process.output in one Tool card with concise collapsed preview and expandable bounded live viewport', async () => {
+    const user = userEvent.setup()
+    const streamingLines = Array.from({ length: 30 }, (_, i) => `build step ${i + 1}`).join('\n')
+    const boundedText = `... [output omitted] ...\n${streamingLines}`
+
+    const { container, rerender } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'bash',
+          arguments: '{"command":"npm run build"}',
+          status: 'streaming',
+          partial: boundedText,
+        })}
+      />,
+    )
+
+    // 保持单个 Tool 卡片
+    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
+
+    // 收起态展示简要末尾预览
+    const toggle = screen.getByRole('button', { name: '展开工具预览' })
+    expect(toggle).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 30')
+
+    // 展开后展示完整有界 live 输出
+    await user.click(toggle)
+    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('... [output omitted] ...')
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 1')
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 30')
+
+    // 终态持久结果到达：替换瞬态进度
+    rerender(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          toolName: 'bash',
+          arguments: '{"command":"npm run build"}',
+          status: 'done',
+        })}
+        result={message({
+          phase: 'result',
+          toolName: 'bash',
+          status: 'done',
+          text: 'build succeeded in 3.2s',
+        })}
+      />,
+    )
+    expect(container.querySelectorAll('.thread-tool-surface')).toHaveLength(1)
+    expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-success')
+    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build succeeded in 3.2s')
+    expect(container.querySelector('.thread-tool-output')).not.toHaveTextContent('... [output omitted] ...')
+  })
 })

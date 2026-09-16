@@ -28,9 +28,9 @@ class ToolExecutionFailureTest {
     }
   }
 
-  /** partial fence 的 Store 异常是本地基础设施失败，不是 Gateway 协议错误：只 abandon，保留 RUNNING 供 lease 恢复为 UNKNOWN。 */
+  /** invalid partial 触发 terminal 时的 Store 异常是本地基础设施失败：只 abandon，保留 RUNNING 供 lease 恢复为 UNKNOWN。 */
   @Test
-  void partialStoreFailureAbandonsWithoutFalseProtocolFailure() {
+  void invalidPartialTerminalStoreFailureAbandonsWithoutFalseProtocolFailure() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     scheduler = fixture.scheduler;
     ClaimedWork claim =
@@ -44,7 +44,7 @@ class ToolExecutionFailureTest {
     assertEquals(ProcessResult.STARTED, execution.activate(handle));
 
     store.failNext();
-    execution.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
+    execution.onPartial(ToolProcessorTestSupport.partialResult("invalid-mismatched-call"));
 
     assertEquals(
         ToolInvocationStatus.RUNNING,

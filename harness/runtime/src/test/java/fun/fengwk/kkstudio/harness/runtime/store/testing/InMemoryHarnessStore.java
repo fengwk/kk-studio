@@ -130,6 +130,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
     HarnessStoreTime.requireMillisecondPrecision(instant);
   }
 
+  private int transactionCount;
+
+  public int transactionCount() {
+    synchronized (monitor) {
+      return transactionCount;
+    }
+  }
+
+  public void resetTransactionCount() {
+    synchronized (monitor) {
+      transactionCount = 0;
+    }
+  }
+
   @Override
   public <T> T transaction(Function<Transaction, T> callback) {
     Objects.requireNonNull(callback, "callback");
@@ -138,6 +152,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalStateException("nested transactions are not supported");
       }
       inTransaction = true;
+      transactionCount++;
       try {
         InMemoryTransaction tx = new InMemoryTransaction(State.copyOf(committed));
         try {
