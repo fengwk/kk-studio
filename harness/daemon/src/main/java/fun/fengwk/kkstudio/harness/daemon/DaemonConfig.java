@@ -11,34 +11,49 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * Daemon 独立进程的连接与执行配置。
+ * Daemon 独立进程的连接与本地执行配置。
  *
- * <p>连接、身份、说明、environment root 与本地数据目录的唯一配置来源是 CLI：{@code --registration-token}、gateway 连接参数、可选且唯一
- * {@code --note}、唯一 {@code --environment-root} 与唯一必填绝对 {@code --data-dir}。{@code --data-dir} 承载受管
- * Git checkout、不可变 skill 正文与 manifest；它由 Daemon 自行创建。{@code --registration-token} 是该 Environment
- * 颁发的 HELLO 注册凭证。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。environment root
- * 默认启动用户 canonical HOME，只是宿主展示元数据，不构成任何工具的默认目录。
+ * <p>连接、身份、说明、本地执行程序、environment root 与数据目录的唯一配置来源是 CLI：{@code --registration-token-file}、gateway
+ * 连接参数、可选且唯一 {@code --note}、唯一 {@code --environment-root}、 可选 {@code --data-dir} 与三个可选的本地执行程序
+ * {@code --bash-executable}、{@code --lsp-bridge-command}、 {@code --javap-executable}。
+ *
+ * <p>{@code --registration-token-file} 指向 owner-only 普通文件：凭证文本只存在于该文件，进程参数、环境变量与日志都不携带它；本 record
+ * 只保存路径，因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。已删除的 {@code
+ * --registration-token} 作为未知参数 fail closed，不提供兼容回退。
+ *
+ * <p>{@code --data-dir} 承载受管 Git checkout、不可变 skill 正文与 manifest、本地 Resource 导出、本地大文本输出与 daemon
+ * 进程锁； 省略时为 {@link #defaultDataDir()}。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME
+ * 消息中下发。 environment root 默认启动用户 canonical HOME，只是宿主展示元数据，不构成任何工具的默认目录。
  *
  * <p>不存在的 Skill 来源不再由 CLI 覆盖：来源是 Platform 的受管配置，Daemon 只按请求扫描。{@code --note} 会进入受信任的模型 SYSTEM
  * Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
     URI gatewayUri,
-    String registrationToken,
+    Path registrationTokenFile,
     Duration heartbeatInterval,
     Duration initialReconnectDelay,
     Duration maxReconnectDelay,
     Duration defaultToolTimeout,
     String note,
     Path environmentRoot,
-    Path dataDir) {
+    Path dataDir,
+    String bashExecutable,
+    String lspBridgeCommand,
+    String javapExecutable) {
+
+  /** 未显式配置时的 bash 可执行文件。 */
+  public static final String DEFAULT_BASH_EXECUTABLE = "bash";
+
+  /** 未显式配置时的 javap 可执行文件。 */
+  public static final String DEFAULT_JAVAP_EXECUTABLE = "javap";
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
     if (!"ws".equals(gatewayUri.getScheme()) && !"wss".equals(gatewayUri.getScheme())) {
       throw new IllegalArgumentException("gatewayUri must use ws or wss");
     }
-    registrationToken = requireNonBlank(registrationToken, "registrationToken");
+    registrationTokenFile = DaemonTokenFile.validate(registrationTokenFile);
     heartbeatInterval = requirePositive(heartbeatInterval, "heartbeatInterval");
     initialReconnectDelay = requireNonNegative(initialReconnectDelay, "initialReconnectDelay");
     maxReconnectDelay = requirePositive(maxReconnectDelay, "maxReconnectDelay");
@@ -49,13 +64,45 @@ public record DaemonConfig(
     note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
     environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
     dataDir = requireAbsoluteDirectory(dataDir);
+    bashExecutable = blankToDefault(bashExecutable, DEFAULT_BASH_EXECUTABLE, "bashExecutable");
+    lspBridgeCommand = blankToNull(lspBridgeCommand);
+    javapExecutable = blankToDefault(javapExecutable, DEFAULT_JAVAP_EXECUTABLE, "javapExecutable");
   }
 
-  /** 解析 CLI 参数。{@code --data-dir} 必须显式给出且为绝对路径；已删除 {@code --skill-dir} 及其默认目录回退。 */
+  /** 便捷构造器：本地执行程序使用默认值，LSP bridge 处于禁用状态。 */
+  public DaemonConfig(
+      URI gatewayUri,
+      Path registrationTokenFile,
+      Duration heartbeatInterval,
+      Duration initialReconnectDelay,
+      Duration maxReconnectDelay,
+      Duration defaultToolTimeout,
+      String note,
+      Path environmentRoot,
+      Path dataDir) {
+    this(
+        gatewayUri,
+        registrationTokenFile,
+        heartbeatInterval,
+        initialReconnectDelay,
+        maxReconnectDelay,
+        defaultToolTimeout,
+        note,
+        environmentRoot,
+        dataDir,
+        DEFAULT_BASH_EXECUTABLE,
+        null,
+        DEFAULT_JAVAP_EXECUTABLE);
+  }
+
+  /**
+   * 解析 CLI 参数。{@code --data-dir} 可省略并回退到 {@link #defaultDataDir()}；已删除的 {@code --skill-dir} 与
+   * {@code --registration-token} 都作为未知参数失败，避免操作者以为旧契约仍然生效。
+   */
   public static DaemonConfig fromArgs(String[] args) {
     Objects.requireNonNull(args, "args");
     String gatewayUri = null;
-    String registrationToken = null;
+    String registrationTokenFile = null;
     String heartbeat = null;
     String reconnectInitial = null;
     String reconnectMax = null;
@@ -63,16 +110,28 @@ public record DaemonConfig(
     String environmentRoot = null;
     String note = null;
     String dataDir = null;
+    String bashExecutable = null;
+    String lspBridgeCommand = null;
+    String javapExecutable = null;
 
     for (int index = 0; index < args.length; index++) {
       String arg = args[index];
       switch (arg) {
         case "--gateway-uri" -> gatewayUri = requireArgValue(args, ++index, arg);
-        case "--registration-token" -> registrationToken = requireArgValue(args, ++index, arg);
+        case "--registration-token-file" -> {
+          if (registrationTokenFile != null) {
+            throw new IllegalArgumentException(
+                "--registration-token-file may only be specified once");
+          }
+          registrationTokenFile = requireArgValue(args, ++index, arg);
+        }
         case "--heartbeat" -> heartbeat = requireArgValue(args, ++index, arg);
         case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
         case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
+        case "--bash-executable" -> bashExecutable = requireArgValue(args, ++index, arg);
+        case "--lsp-bridge-command" -> lspBridgeCommand = requireArgValue(args, ++index, arg);
+        case "--javap-executable" -> javapExecutable = requireArgValue(args, ++index, arg);
         case "--note" -> {
           if (note != null) {
             throw new IllegalArgumentException("--note may only be specified once");
@@ -97,19 +156,37 @@ public record DaemonConfig(
 
     return new DaemonConfig(
         URI.create(requirePresent(gatewayUri, "gateway-uri")),
-        requirePresent(registrationToken, "registration-token"),
+        Path.of(requirePresent(registrationTokenFile, "registration-token-file")),
         parseDuration(heartbeat, Duration.ofSeconds(15)),
         parseDuration(reconnectInitial, Duration.ofSeconds(1)),
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
         parseDuration(toolTimeout, Duration.ofMinutes(5)),
         note,
         environmentRoot == null ? defaultEnvironmentRoot() : Path.of(environmentRoot),
-        Path.of(requirePresent(dataDir, "data-dir")));
+        dataDir == null ? defaultDataDir() : Path.of(dataDir),
+        bashExecutable,
+        lspBridgeCommand,
+        javapExecutable);
   }
 
   /** 默认 Environment Root：启动用户 HOME 的 canonical 目录。 */
   public static Path defaultEnvironmentRoot() {
     return canonicalDirectory(Path.of(System.getProperty("user.home")), "user.home");
+  }
+
+  /** 默认数据目录：启动用户 HOME 下的 {@code .kk-studio}。 */
+  public static Path defaultDataDir() {
+    return DaemonDataDirectory.defaultRoot();
+  }
+
+  /**
+   * 按需读取注册凭证文本。凭证不缓存在字段中，因此不会随 record 的 {@code equals}/{@code hashCode}/{@code toString}
+   * 扩散到日志或诊断输出。
+   *
+   * @throws IllegalStateException 文件被删除、不可读或为空
+   */
+  public String registrationToken() {
+    return DaemonTokenFile.read(registrationTokenFile);
   }
 
   /** 可信操作者设置的显式 note 优先；省略时按 Daemon 实测 OS 生成稳定默认说明。 */
@@ -152,13 +229,6 @@ public record DaemonConfig(
     return Duration.parse(value);
   }
 
-  private static String requireNonBlank(String value, String name) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(name + " must not be blank");
-    }
-    return value;
-  }
-
   private static Duration requirePositive(Duration value, String name) {
     value = Objects.requireNonNull(value, name);
     if (value.isNegative() || value.isZero()) {
@@ -175,6 +245,22 @@ public record DaemonConfig(
     return value;
   }
 
+  private static String blankToDefault(String value, String defaultValue, String name) {
+    String normalized = blankToNull(value);
+    return normalized == null ? requireNonBlank(defaultValue, name) : normalized;
+  }
+
+  private static String requireNonBlank(String value, String name) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(name + " must not be blank");
+    }
+    return value;
+  }
+
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
+  }
+
   private static Path canonicalDirectory(Path value, String name) {
     try {
       Path path = Objects.requireNonNull(value, name).toRealPath();
@@ -187,7 +273,7 @@ public record DaemonConfig(
     }
   }
 
-  /** 数据目录必须显式绝对；不必预先存在，Daemon 会创建它。 */
+  /** 数据目录可省略，但一旦显式给出就必须绝对；不必预先存在，Daemon 会创建它。 */
   private static Path requireAbsoluteDirectory(Path value) {
     Path path = Objects.requireNonNull(value, "dataDir");
     if (!path.isAbsolute()) {

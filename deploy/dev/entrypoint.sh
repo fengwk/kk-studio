@@ -288,11 +288,22 @@ start_managed_servers() {
 
 run_daemon() {
   step "Starting Environment Daemon against $DAEMON_GATEWAY_URI with environment-root $WORKSPACE_ROOT"
+  if [ -z "$registration_token" ]; then
+    echo "ERROR: KK_STUDIO_DAEMON_REGISTRATION_TOKEN is required to register the Daemon." >&2
+    exit 1
+  fi
+  local token_dir="${HOME:-/home/kkdaemon}/.kkstudio"
+  local token_file="$token_dir/daemon-registration.token"
+  mkdir -p "$token_dir"
+  chmod 700 "$token_dir"
+  (umask 077 && printf '%s\n' "$registration_token" > "$token_file")
+  chmod 600 "$token_file"
+  unset registration_token
   exec java -XX:MaxRAMPercentage=75.0 \
     -cp "$DAEMON_JAR:$DAEMON_LIB/*" \
     fun.fengwk.kkstudio.harness.daemon.DaemonMain \
     --gateway-uri "$DAEMON_GATEWAY_URI" \
-    --registration-token "$registration_token" \
+    --registration-token-file "$token_file" \
     --note "$DAEMON_NOTE" \
     --environment-root "$WORKSPACE_ROOT" \
     --data-dir "$DAEMON_DATA_DIR"

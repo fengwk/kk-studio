@@ -257,8 +257,7 @@ class WorkdirPathSemanticsTest {
   }
 
   private CodingToolsConfig config() {
-    return new CodingToolsConfig(
-        environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore());
+    return TestCodingConfig.withoutBridge(environmentRoot, new InMemoryResourceStore());
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)

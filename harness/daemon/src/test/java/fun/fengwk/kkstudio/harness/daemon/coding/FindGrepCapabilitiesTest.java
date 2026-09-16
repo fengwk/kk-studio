@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,8 +49,7 @@ class FindGrepCapabilitiesTest {
   }
 
   private CodingToolsConfig config() {
-    return new CodingToolsConfig(
-        workdir, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
+    return TestCodingConfig.withBridge(workdir, new InMemoryResourceStore());
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String argumentsJson)
@@ -217,9 +216,9 @@ class FindGrepCapabilitiesTest {
     assertTrue(out.contains("[2 results limit reached. Refine the pattern or raise limit.]"));
   }
 
-  /** 验证 FindCapability 在结果超过行数或字节阈值时外置为 ResourceResultContent。 */
+  /** 验证 FindCapability 在结果超过行数阈值时返回单个 TextResultContent：有界预览加本地路径，而不是 Resource。 */
   @Test
-  void findSpoolsLargeResultsToResource() throws Exception {
+  void findSpoolsLargeResultsToBoundedTextResultWithPath() throws Exception {
     Path dir = Files.createDirectories(workdir.resolve("many"));
     for (int i = 0; i < 2005; i++) {
       Files.writeString(dir.resolve(String.format("f_%04d.txt", i)), "x");
@@ -234,12 +233,19 @@ class FindGrepCapabilitiesTest {
                 + "}");
     assertFalse(res.error());
     assertEquals(1, res.contents().size());
-    assertInstanceOf(ResourceResultContent.class, res.contents().getFirst());
-    ResourceResultContent resource = (ResourceResultContent) res.contents().getFirst();
-    assertNotNull(resource.preview());
-    assertTrue(resource.preview().contains("many/f_0000.txt"));
-    assertNotNull(resource.textMetadata());
-    assertEquals(2005, resource.textMetadata().totalLines());
+    assertInstanceOf(TextResultContent.class, res.contents().getFirst());
+    assertFalse(res.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
+    String out = text(res);
+    assertTrue(out.contains("many/f_0000.txt"), "预览必须包含头部结果");
+
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER.readTree(res.detailsJson()).path("textOutput");
+    assertEquals(2005, textOutput.path("totalLines").asLong());
+    Path published = Path.of(textOutput.path("path").asText());
+    assertTrue(published.isAbsolute());
+    assertTrue(out.contains(published.toString()), "预览必须内联绝对路径");
+    assertEquals(2005, Files.readAllLines(published).size(), "durable 全文必须保留全部结果行");
+    assertTrue(Files.readAllLines(published).contains("many/f_2004.txt"));
   }
 
   /** 验证 GrepCapability 使用 RE2/J 并拒绝非法的正则语法（lookaround、backreference）。 */
@@ -494,9 +500,9 @@ class FindGrepCapabilitiesTest {
     assertEquals("No matches found", text(res));
   }
 
-  /** 验证 GrepCapability 大输出外置为 ResourceResultContent。 */
+  /** 验证 GrepCapability 大输出返回单个 TextResultContent：有界预览加本地路径，而不是 Resource。 */
   @Test
-  void grepSpoolsLargeResultsToResource() throws Exception {
+  void grepSpoolsLargeResultsToBoundedTextResultWithPath() throws Exception {
     StringBuilder sb = new StringBuilder();
     for (int i = 0; i < 2005; i++) {
       sb.append("match_line_").append(i).append("\n");
@@ -512,11 +518,17 @@ class FindGrepCapabilitiesTest {
                 + "}");
     assertFalse(res.error());
     assertEquals(1, res.contents().size());
-    assertInstanceOf(ResourceResultContent.class, res.contents().getFirst());
-    ResourceResultContent resource = (ResourceResultContent) res.contents().getFirst();
-    assertNotNull(resource.preview());
-    assertNotNull(resource.textMetadata());
-    assertEquals(2005, resource.textMetadata().totalLines());
+    assertInstanceOf(TextResultContent.class, res.contents().getFirst());
+    assertFalse(res.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
+    assertTrue(text(res).contains("match_line_0"), "预览必须包含头部匹配");
+
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER.readTree(res.detailsJson()).path("textOutput");
+    assertEquals(2005, textOutput.path("totalLines").asLong());
+    Path published = Path.of(textOutput.path("path").asText());
+    assertTrue(published.isAbsolute());
+    assertTrue(text(res).contains(published.toString()), "预览必须内联绝对路径");
+    assertEquals(2005, Files.readAllLines(published).size(), "durable 全文必须保留全部匹配行");
   }
 
   /** 验证 SearchFiles 遍历不跟随符号链接，并校验目录参数。 */
