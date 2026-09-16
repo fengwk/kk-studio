@@ -23,7 +23,6 @@ final class ComfyuiWorkflowApiMutationFactory {
   static final Pattern API_NAME_PATTERN = Pattern.compile("^[a-z][a-z0-9-]{0,63}$");
 
   static final int MAX_NAME_LENGTH = 128;
-  private static final int MAX_DESCRIPTION_LENGTH = 512;
 
   private final ComfyuiWorkflowApiBindingsParser bindingsParser;
 
@@ -104,10 +103,6 @@ final class ComfyuiWorkflowApiMutationFactory {
       throw new IllegalArgumentException("name must not exceed " + MAX_NAME_LENGTH + " chars");
     }
     String description = trimToNull(properties.getDescription());
-    if (description != null && description.length() > MAX_DESCRIPTION_LENGTH) {
-      throw new IllegalArgumentException(
-          "description must not exceed " + MAX_DESCRIPTION_LENGTH + " chars");
-    }
     String apiName = trimToNull(properties.getApiName());
     if (apiName != null && !API_NAME_PATTERN.matcher(apiName).matches()) {
       throw new IllegalArgumentException(

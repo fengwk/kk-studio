@@ -190,6 +190,12 @@ Flyway locations
 `SPRING_FLYWAY_ENABLED=false`。修改 V1 必须先停止共享数据库的全部使用节点，并在
 Human 明确批准的维护窗口内重建空库；普通自迭代不得改写已运行数据库的 V1 历史。
 
+就地放宽既有列的约束（例如 `varchar(n)` -> `text`）可以避免重建空库，但仍属于
+维护窗口操作：需要先停止全部 App 节点，执行放宽语句，并把
+`flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则
+Main 启动时 Flyway 校验失败。`varchar(n)` -> `text` 在 PostgreSQL 是二进制兼容变更，
+不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果一致。
+
 ## 测试与源码入口
 
 - `schema/pom.xml`

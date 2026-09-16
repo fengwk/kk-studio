@@ -16,7 +16,6 @@ final class AgentModelMutationFactory {
   private static final String RESOURCE = "agent_model";
   private static final int NAME_MAX_LENGTH = 128;
   private static final int MODEL_ID_MAX_LENGTH = 256;
-  private static final int DESCRIPTION_MAX_LENGTH = 512;
 
   private final AgentEditableSupport editableSupport;
   private final AgentModelRuntimeConfigParser runtimeConfigParser;
@@ -76,7 +75,6 @@ final class AgentModelMutationFactory {
     }
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
     editableSupport.validateMaxLength(RESOURCE, "modelId", modelId, MODEL_ID_MAX_LENGTH);
-    editableSupport.validateMaxLength(RESOURCE, "description", description, DESCRIPTION_MAX_LENGTH);
     AgentModelConfigDTO config = properties.getConfig();
     if (config == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " config must not be null");

@@ -109,6 +109,11 @@ public class AgentDefinitionMutationFactoryTest {
         create("n".repeat(65), "provider/model", config(List.of(), List.of()), null);
     assertThrows(
         AiValidationException.class, () -> factory.newAgent(oversized.getName(), oversized));
+    // description 已放开为 text：超长文本不再被拒绝，也不再截断。
+    AgentDefinitionCreateDTO longDescription =
+        create("agent", "provider/model", config(List.of(), List.of()), null);
+    longDescription.setDescription("d".repeat(4096));
+    assertEquals("d".repeat(4096), factory.newAgent("agent", longDescription).getDescription());
     AgentDefinitionCreateDTO pathBreaking =
         create("agent/name", "provider/model", config(List.of(), List.of()), null);
     assertThrows(

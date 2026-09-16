@@ -534,6 +534,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "environment_operation", "arguments");
     assertColumnType("jsonb", "environment_operation", "parameter_summary");
     assertColumnType("jsonb", "environment_operation", "result_summary");
+    // description 是自由文本字段，不受列宽限制：Catalog 与 ComfyUI 的四个资源都使用 text。
+    assertColumnType("text", "agent_provider", "description");
+    assertColumnType("text", "agent_model", "description");
+    assertColumnType("text", "agent_definition", "description");
+    assertColumnType("text", "comfyui_workflow_api", "description");
     // V4 表不得存放任何文件正文：Skill 正文只存在于 Daemon 的不可变 blob 中。
     assertColumnType("character", "environment_skill", "content_revision");
     assertColumnType("integer", "canvas_function_run", "attempt");

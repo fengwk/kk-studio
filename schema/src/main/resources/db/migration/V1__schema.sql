@@ -67,7 +67,7 @@ create index idx_environment_updated
 
 create table agent_provider (
     name            varchar(64)   primary key,
-    description     varchar(512),
+    description     text,
     provider_type   varchar(64)   not null,
     base_url        varchar(512),
     credential      varchar(512),
@@ -92,7 +92,7 @@ create table agent_model (
     provider_name   varchar(64)   not null,
     name            varchar(128)  not null,
     model_id        varchar(256)  not null,
-    description     varchar(512),
+    description     text,
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
@@ -118,7 +118,7 @@ comment on column agent_model.model_id is
 
 create table agent_definition (
     name            varchar(64)   primary key,
-    description     varchar(512),
+    description     text,
     system_prompt   text,
     model_provider_name varchar(64) not null,
     model_name      varchar(128)  not null,
@@ -280,7 +280,7 @@ create table comfyui_workflow_api (
     id                uuid          primary key,
     api_name          varchar(64)   not null,
     name              varchar(128)  not null,
-    description       varchar(512),
+    description       text,
     workflow          jsonb         not null,
     input_bindings    jsonb         not null,
     default_selector  varchar(1024),

@@ -105,6 +105,7 @@ public class AgentProviderMutationFactoryTest {
     assertNull(error.getCause());
   }
 
+  // 测试意图: 断言 name/baseUrl/credential 仍受 schema 列宽约束，而 description 已放开为 text
   @Test
   public void shouldEnforceProviderSchemaStringLimitsAfterNormalization() {
     AgentProviderMutationFactory factory = factory();
@@ -118,6 +119,10 @@ public class AgentProviderMutationFactoryTest {
     AgentProvider persisted = factory.newProvider(accepted.getName(), accepted);
     assertEquals("n".repeat(64), persisted.getName());
 
+    AgentProviderCreateDTO unbounded = provider("provider", "c".repeat(512));
+    unbounded.setDescription("d".repeat(4096));
+    assertEquals("d".repeat(4096), factory.newProvider("provider", unbounded).getDescription());
+
     AgentProviderCreateDTO oversizedName = provider("n".repeat(65), null);
     assertThrows(
         AiValidationException.class,
@@ -130,6 +135,11 @@ public class AgentProviderMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newProvider(oversizedCredential.getName(), oversizedCredential));
+    AgentProviderCreateDTO oversizedBaseUrl = provider("provider", "c".repeat(512));
+    oversizedBaseUrl.setBaseUrl("u".repeat(513));
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newProvider(oversizedBaseUrl.getName(), oversizedBaseUrl));
   }
 
   @Test

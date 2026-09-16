@@ -12,7 +12,7 @@ public class AgentProviderDO {
   /** Provider 唯一名称（主键，varchar(64)，不允许首尾空白与 '/'）。 */
   private String name;
 
-  /** 描述，可选；varchar(512)，null 表示未填写。 */
+  /** 描述，可选；text，null 表示未填写。 */
   private String description;
 
   /** Provider 协议类型稳定 wire 值，映射 varchar(64)，必填。 */

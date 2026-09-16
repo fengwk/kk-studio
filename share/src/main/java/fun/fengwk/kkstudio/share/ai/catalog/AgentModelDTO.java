@@ -17,7 +17,7 @@ public class AgentModelDTO {
   /** 发往上游 Provider 的真实模型标识；与 {@link #name} 独立且不唯一。 */
   private String modelId;
 
-  /** 可空描述（≤512 字符）。 */
+  /** 可空描述（text，无长度上限）。 */
   private String description;
 
   /** 完整结构化可执行配置（limit/abilities/pricing/defaultVariant/variants）。 */

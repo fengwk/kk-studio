@@ -13,7 +13,7 @@ public class AgentModelEditablePropertiesDTO {
   /** 必填发往上游 Provider 的真实模型标识：trim 后非空白、无环绕空白、≤256 字符；不要求全局唯一。 */
   private String modelId;
 
-  /** 可空描述（≤512 字符）；null/空白视为清除。 */
+  /** 可空描述（text，无长度上限）；null/空白视为清除。 */
   private String description;
 
   /**

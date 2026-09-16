@@ -102,6 +102,7 @@ public class AgentModelMutationFactoryTest {
     assertEquals(new BigDecimal("4"), persisted.getPricing().getReasoningPerMillionTokens());
   }
 
+  // 测试意图: 断言 name/modelId 仍受 schema 列宽约束，而 description 已放开为 text 不再拒绝长文本
   @Test
   public void shouldEnforceModelSchemaStringLimits() {
     AgentModelMutationFactory factory = factory();
@@ -110,15 +111,20 @@ public class AgentModelMutationFactoryTest {
     assertEquals("n".repeat(128), persisted.getName());
     assertEquals("d".repeat(512), persisted.getDescription());
 
+    AgentModelCreateDTO unbounded = create("model", "d".repeat(4096));
+    assertEquals(
+        "d".repeat(4096), factory.newModel("provider", "model", unbounded).getDescription());
+
     assertThrows(
         AiValidationException.class,
         () -> factory.newModel("provider", "\u2003model\u2003", create("model", null)));
     assertThrows(
         AiValidationException.class,
         () -> factory.newModel("provider", "n".repeat(129), create("n".repeat(129), null)));
+    AgentModelCreateDTO oversizedModelId = create("model", null);
+    oversizedModelId.setModelId("m".repeat(257));
     assertThrows(
-        AiValidationException.class,
-        () -> factory.newModel("provider", "model", create("model", "d".repeat(513))));
+        AiValidationException.class, () -> factory.newModel("provider", "model", oversizedModelId));
   }
 
   @Test

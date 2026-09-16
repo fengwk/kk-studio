@@ -11,7 +11,7 @@ public class AgentProviderDTO {
   /** Provider 唯一名（资源路由身份）：非空白、不得包含 {@code '/'}、≤64 字符。 */
   private String name;
 
-  /** 可空描述（≤512 字符）。 */
+  /** 可空描述（text，无长度上限）。 */
   private String description;
 
   /** 供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_response}、{@code anthropic}、{@code google}。 */
