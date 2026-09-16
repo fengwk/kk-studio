@@ -59,8 +59,10 @@ RUN set -eux; \
 COPY --from=node-runtime /usr/local/ /usr/local/
 COPY --from=builder --chown=kkdaemon:kkdaemon /build/runtime/daemon.jar /opt/kk-studio/daemon.jar
 COPY --from=builder --chown=kkdaemon:kkdaemon /build/runtime/lib/ /opt/kk-studio/lib/
+COPY deploy/reliability/daemon-entrypoint.sh /usr/local/bin/kk-studio-daemon-entrypoint
+RUN chmod 0755 /usr/local/bin/kk-studio-daemon-entrypoint
 
 WORKDIR /workspace
 USER 10001:10001
 
-ENTRYPOINT ["java", "-cp", "/opt/kk-studio/daemon.jar:/opt/kk-studio/lib/*", "fun.fengwk.kkstudio.harness.daemon.DaemonMain"]
+ENTRYPOINT ["/usr/local/bin/kk-studio-daemon-entrypoint"]

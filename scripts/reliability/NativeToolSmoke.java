@@ -35,13 +35,17 @@ final class NativeToolSmoke {
     }
     try {
       seed(root);
+      // 与生产一致：文本/中转目录位于数据目录 resources 下，大输出终态必须是可继续 read/grep 的本地全文。
       CodingToolsConfig config =
           new CodingToolsConfig(
               root,
               CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
               CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
               "bash",
-              new LocalFileResourceStore(root.resolve(".resources")));
+              new LocalFileResourceStore(root.resolve("resources/blobs")),
+              TextOutputStore.open(root.resolve("resources/text"), root.resolve("resources/staging")),
+              null,
+              CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
 
       EnvironmentCapabilityResult recursive =
           invoke(

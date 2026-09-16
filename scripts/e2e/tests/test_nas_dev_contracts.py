@@ -477,7 +477,11 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn("FRONTEND_HOST=${FRONTEND_HOST:-0.0.0.0}", entrypoint)
         self.assertIn("FRONTEND_PORT=${FRONTEND_PORT:-5173}", entrypoint)
         self.assertIn('"$REPOSITORY_DIR/scripts/dev.sh" start', entrypoint)
-        self.assertIn('--registration-token "$registration_token"', entrypoint)
+        # 凭证只经 owner-only 文件进入 daemon；argv 中不得再出现明文 token。
+        self.assertIn('--registration-token-file "$token_file"', entrypoint)
+        self.assertNotIn('--registration-token "$registration_token"', entrypoint)
+        self.assertIn('chmod 600 "$token_file"', entrypoint)
+        self.assertIn('chmod 700 "$token_dir"', entrypoint)
         self.assertIn('--environment-root "$WORKSPACE_ROOT"', entrypoint)
         self.assertIn(
             "DAEMON_DATA_DIR=${KK_STUDIO_DAEMON_DATA_DIR:-$WORKSPACE_ROOT/.kkstudio/daemon}",
@@ -551,6 +555,47 @@ class TestNasDevImageContracts(unittest.TestCase):
             self.assertIn("KK_STUDIO_CONTROL_PLANE_BASE_URL", result.stderr)
             self.assertNotIn(REJECTED_ORIGIN_MARKER, result.stderr + result.stdout)
             self.assertEqual("", result.stdout)
+
+    def test_entrypoint_materializes_the_token_as_an_owner_only_file(self):
+        # Intent: the Daemon must read its credential from a 0600 file instead of argv, so
+        # `ps` and `/proc/<pid>/environ` can never expose it. `run_daemon` ends in `exec java`,
+        # so a probe `java` on PATH receives exactly the argv the real Daemon would receive.
+        with tempfile.TemporaryDirectory() as home:
+            probe_dir = Path(home)
+            argv_file = probe_dir / "argv.txt"
+            probe = probe_dir / "java"
+            probe.write_text(
+                "#!/bin/bash\n"
+                'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n'
+                'env >"$PROBE_ENVIRON"\n'
+            )
+            probe.chmod(0o755)
+
+            result = source_entrypoint(
+                "run_daemon\n",
+                {
+                    "HOME": home,
+                    "PATH": f"{probe_dir}:{os.environ.get('PATH', '')}",
+                    "PROBE_ARGV": str(argv_file),
+                    "PROBE_ENVIRON": str(probe_dir / "environ.txt"),
+                    "DAEMON_GATEWAY_URI": DAEMON_GATEWAY_URI,
+                    "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
+                },
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            argv = argv_file.read_text().splitlines()
+            self.assertIn("--registration-token-file", argv)
+            self.assertNotIn("--registration-token", argv)
+            # 凭证文本绝不能出现在 argv 或子进程环境中。
+            self.assertNotIn("probe-secret-token", argv)
+            self.assertNotIn("probe-secret-token", (probe_dir / "environ.txt").read_text())
+            self.assertNotIn("probe-secret-token", result.stderr + result.stdout)
+            token_path = Path(argv[argv.index("--registration-token-file") + 1])
+            self.assertTrue(token_path.is_absolute())
+            # 文件必须在 exec 时刻仍然存在、内容正确且为 0600。
+            self.assertEqual(0o600, token_path.stat().st_mode & 0o777)
+            self.assertEqual("probe-secret-token", token_path.read_text().strip())
 
     def test_dev_harness_dispatcher_is_disabled_by_default_and_fail_closed(self):
         # Intent: Main is the only Harness worker; the image default, the entrypoint default,

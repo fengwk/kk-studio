@@ -41,6 +41,9 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
     if (!bridge.bridgeAvailable()) {
       throw new IllegalStateException(LspBridge.UNAVAILABLE_MESSAGE);
     }
-    return success(request.call().id(), bridge.gotoDefinition(workdir, path, line, character));
+    return success(
+        request.call().id(),
+        bridge.gotoDefinition(
+            workdir, path, line, character, request.effectiveTimeout(), execution::isCancelled));
   }
 }

@@ -65,7 +65,7 @@ public final class FindCapability extends AbstractCodingCapability {
     boolean limitReached = matchedPaths.size() > limit;
     int displayCount = Math.min(limit, matchedPaths.size());
 
-    try (OutputSpool spool = new OutputSpool()) {
+    try (OutputSpool spool = new OutputSpool(config.textOutputStore(), request.call().id())) {
       for (int i = 0; i < displayCount; i++) {
         if (i > 0) {
           spool.write((int) '\n');
@@ -77,7 +77,7 @@ public final class FindCapability extends AbstractCodingCapability {
             ("\n\n[" + limit + " results limit reached. Refine the pattern or raise limit.]")
                 .getBytes(StandardCharsets.UTF_8));
       }
-      return spool.finish(request.call().id(), false, config.resourceStore(), "text/plain");
+      return spool.finish(false);
     }
   }
 

@@ -50,8 +50,7 @@ class ReadWriteEditCapabilitiesTest {
   }
 
   private CodingToolsConfig config() {
-    return new CodingToolsConfig(
-        workdir, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
+    return TestCodingConfig.withBridge(workdir, new InMemoryResourceStore());
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String argumentsJson)
@@ -854,11 +853,62 @@ class ReadWriteEditCapabilitiesTest {
         ex.getMessage().contains("read response exceeds 49152 bytes invariant: 49153 bytes"));
   }
 
+  /**
+   * 验证 fs.read 能分页读取远超 64 MiB 的文本：去掉了“文件超过 64 MiB 就拒绝”的旧上界。
+   *
+   * <p>该 fixture 约 76.8 MiB，旧实现会直接以 {@code file exceeds 64 MiB maximum read limit} 失败；现在头部与尾部窗口都能
+   * 正确读取，说明总行数与行内容来自流式扫描而不是整文件读入。
+   */
+  @Test
+  void readStreamsTextFilesLargerThan64MiBWithBoundedMemory() throws Exception {
+    Path file = workdir.resolve("huge.log");
+    // 每行约 84 字节，共 1,200,000 行 => 约 100 MB，稳定超过旧的 64 MiB 上界。
+    long lineCount = 1_200_000L;
+    try (var writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+      for (long index = 0; index < lineCount; index++) {
+        writer.write("line-" + index + "-" + "x".repeat(70) + "\n");
+      }
+    }
+    assertTrue(Files.size(file) > 64L * 1024 * 1024, "fixture 必须超过旧的 64 MiB 上界");
+
+    ReadCapability read = new ReadCapability(config(), executor);
+    // 头部读取
+    EnvironmentCapabilityResult head =
+        invoke(
+            read,
+            "{\"path\":\"huge.log\",\"offset\":1,\"limit\":3,\"workdir\":"
+                + json(workdir.toString())
+                + "}");
+    assertFalse(head.error(), text(head));
+    assertTrue(text(head).contains("1|line-0-"), text(head));
+    assertTrue(text(head).contains("of " + lineCount), text(head));
+    assertTrue(text(head).contains("Re-run read with offset=4"), text(head));
+
+    // 尾部读取：分页定位到文件末尾仍然正确，说明总行数是流式统计出来的。
+    EnvironmentCapabilityResult tail =
+        invoke(
+            read,
+            "{\"path\":\"huge.log\",\"offset\":"
+                + lineCount
+                + ",\"limit\":2,\"workdir\":"
+                + json(workdir.toString())
+                + "}");
+    assertFalse(tail.error(), text(tail));
+    assertTrue(text(tail).contains(lineCount + "|line-" + (lineCount - 1) + "-"), text(tail));
+
+    // 图片附件行为不受影响。
+    Path png = workdir.resolve("pic.png");
+    Files.write(png, new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4});
+    EnvironmentCapabilityResult image =
+        invoke(read, "{\"path\":\"pic.png\",\"workdir\":" + json(workdir.toString()) + "}");
+    assertFalse(image.error());
+    assertTrue(image.contents().getFirst() instanceof ResourceResultContent);
+  }
+
   /** 验证 ReadCapability 识别支持的图片 MIME 并返回 ResourceResultContent。 */
   @Test
   void readDetectsSupportedImageMimes() throws Exception {
     ReadCapability read = new ReadCapability(config(), executor);
-
     // JPEG
     Path jpg = workdir.resolve("test.jpg");
     Files.write(jpg, new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff, 1, 2, 3});

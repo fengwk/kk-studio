@@ -7,7 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -25,12 +27,15 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -152,8 +157,7 @@ class CodingCapabilitiesTest {
   void readReportsLspBridgeConfigurationStatus() throws Exception {
     Files.writeString(environmentRoot.resolve("lsp-status.txt"), "x\n");
     CodingToolsConfig bridged =
-        new CodingToolsConfig(
-            environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), "echo", "javap");
+        TestCodingConfig.withBridge(environmentRoot, new InMemoryResourceStore());
 
     EnvironmentCapabilityResult disabled =
         invoke(
@@ -184,14 +188,8 @@ class CodingCapabilitiesTest {
         """);
     assertTrue(bridge.toFile().setExecutable(true));
     CodingToolsConfig config =
-        new CodingToolsConfig(
-            environmentRoot,
-            2000,
-            50 * 1024,
-            "bash",
-            new InMemoryResourceStore(),
-            bridge.toString(),
-            "javap");
+        TestCodingConfig.withBridgeCommand(
+            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
 
     EnvironmentCapabilityResult result =
         invoke(
@@ -402,6 +400,249 @@ class CodingCapabilitiesTest {
     assertFalse(text(findResult).contains("ignored.txt"));
   }
 
+  /**
+   * 验证 Bash live partial 的 APPEND 契约：details 声明 {@code process.output}/APPEND，区间连续且与已观测总量一致，
+   * 拼接结果等于真实输出；终态内容与 live partial 不重复。
+   */
+  @Test
+  void bashEmitsCoalescedAppendPartialsWithExactByteRanges() throws Exception {
+    BashCapability bash = bash(config());
+    RecordingListener listener =
+        invokeAsync(
+            bash,
+            "{\"command\":\"printf 'alpha'; sleep 0.4; printf 'beta'; sleep 0.4; printf 'gamma'\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofSeconds(10));
+    assertTrue(listener.await());
+    assertFalse(listener.result.error(), text(listener.result));
+    assertTrue(listener.partials.size() >= 2, "慢速分片输出必须产生多条 partial");
+
+    StringBuilder appended = new StringBuilder();
+    long expectedStart = 0;
+    for (EnvironmentCapabilityResult partial : listener.partials) {
+      JsonNode details = AbstractCodingCapability.OBJECT_MAPPER.readTree(partial.detailsJson());
+      assertEquals(BashCapability.PARTIAL_KIND, details.path("kind").asText());
+      assertEquals(BashCapability.PARTIAL_MODE_APPEND, details.path("mode").asText());
+      assertEquals(expectedStart, details.path("startOffset").asLong(), details.toString());
+      assertTrue(details.path("endOffset").asLong() >= expectedStart, details.toString());
+      expectedStart = details.path("endOffset").asLong();
+      assertTrue(
+          details.path("observedBytes").asLong() >= expectedStart, "已观测总量必须覆盖本区间：" + details);
+      String chunk = ((TextResultContent) partial.contents().getFirst()).text();
+      assertTrue(
+          chunk.getBytes(StandardCharsets.UTF_8).length <= BashCapability.LIVE_PARTIAL_UTF8_BYTES,
+          "单条 partial 必须有界");
+      appended.append(chunk);
+    }
+    assertEquals("alphabetagamma", appended.toString(), "partial 拼接必须等于真实输出");
+    assertEquals("alphabetagamma", text(listener.result), "终态仍是权威全文");
+    // 区间与拼接字节数一致，说明没有重复也没有丢失。
+    assertEquals(expectedStart, "alphabetagamma".getBytes(StandardCharsets.UTF_8).length);
+  }
+
+  /** 验证输出体积永远不终止进程：超过捕获预算时只停止文件捕获并补发 SNAPSHOT，命令仍跑到最后一行。 */
+  @Test
+  void bashTruncatedCaptureEmitsSnapshotAndNeverKillsTheProcess() throws Exception {
+    TextOutputStore smallBudget =
+        TextOutputStore.open(
+            environmentRoot.resolve("budget/text"),
+            environmentRoot.resolve("budget/staging"),
+            2048);
+    CodingToolsConfig budgetConfig =
+        new CodingToolsConfig(
+            environmentRoot,
+            CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
+            CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
+            "bash",
+            new InMemoryResourceStore(),
+            smallBudget,
+            null,
+            CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
+
+    RecordingListener listener =
+        invokeAsync(
+            new BashCapability(budgetConfig, executor, scheduler),
+            "{\"command\":\"seq 1 20000; echo tail-marker\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofSeconds(30));
+    assertTrue(listener.await());
+    assertFalse(listener.result.error(), "输出体积不得导致失败：" + text(listener.result));
+
+    boolean sawSnapshot =
+        listener.partials.stream()
+            .anyMatch(
+                partial -> {
+                  try {
+                    return BashCapability.PARTIAL_MODE_SNAPSHOT.equals(
+                        AbstractCodingCapability.OBJECT_MAPPER
+                            .readTree(partial.detailsJson())
+                            .path("mode")
+                            .asText());
+                  } catch (Exception error) {
+                    throw new AssertionError(error);
+                  }
+                });
+    assertTrue(sawSnapshot, "捕获被截断时必须补发 SNAPSHOT partial，让调用方尽早知道全文不完整");
+
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER
+            .readTree(listener.result.detailsJson())
+            .path("textOutput");
+    assertTrue(textOutput.path("captureTruncated").asBoolean(), textOutput.toString());
+    assertTrue(
+        textOutput.path("totalBytes").asLong() > textOutput.path("capturedBytes").asLong(),
+        "总数必须完整统计，证明排空没有停止：" + textOutput);
+    // seq 1 20000 加上最后一行 tail-marker：总数完整说明命令跑到了最后一行，进程没有被体积或预算终止。
+    assertEquals(20001, textOutput.path("totalLines").asLong(), textOutput.toString());
+    assertTrue(textOutput.path("path").asText().endsWith(".log"), "已捕获前缀仍必须发布为可读文件：" + textOutput);
+    assertTrue(
+        Files.readString(Path.of(textOutput.path("path").asText()), StandardCharsets.UTF_8)
+            .startsWith("1\n"),
+        "发布文件必须是输出的前缀");
+  }
+
+  /**
+   * 验证本地磁盘写失败只降级为有界预览：不抛异常、不产生路径，更不终止子进程。
+   *
+   * <p>把 staging 目录设为不可写即可确定性地触发 IOException，无需任何 mock。
+   */
+  @Test
+  void bashSurvivesLocalStorageFailureWithoutKillingTheProcess() throws Exception {
+    assumeTrue(
+        FileSystems.getDefault().supportedFileAttributeViews().contains("posix"),
+        "需要 POSIX 权限位来构造确定性的本地写入失败");
+    Path resources = Files.createDirectories(environmentRoot.resolve("broken/resources"));
+    TextOutputStore brokenStore =
+        TextOutputStore.open(resources.resolve("text"), resources.resolve("staging"));
+    Files.setPosixFilePermissions(
+        brokenStore.stagingDirectory(),
+        Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_EXECUTE));
+    CodingToolsConfig brokenConfig =
+        new CodingToolsConfig(
+            environmentRoot,
+            CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
+            CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
+            "bash",
+            new InMemoryResourceStore(),
+            brokenStore,
+            null,
+            CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
+
+    RecordingListener listener =
+        invokeAsync(
+            new BashCapability(brokenConfig, executor, scheduler),
+            // 输出远超内联阈值，必然尝试落盘；命令最后一行证明进程跑完了。
+            "{\"command\":\"seq 1 20000; echo tail-marker\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofSeconds(30));
+    assertTrue(listener.await());
+    assertFalse(listener.result.error(), "本地写入失败不得使调用失败：" + text(listener.result));
+
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER
+            .readTree(listener.result.detailsJson())
+            .path("textOutput");
+    assertTrue(textOutput.path("captureFailed").asBoolean(), textOutput.toString());
+    assertTrue(textOutput.path("path").isMissingNode(), "失败时不得给出不存在的路径");
+    assertEquals(20001, textOutput.path("totalLines").asLong(), "进程必须跑完，总数仍然完整");
+    assertTrue(
+        text(listener.result).contains("could not be saved to local storage"),
+        text(listener.result));
+    assertTrue(
+        listener.result.contents().stream().noneMatch(ResourceResultContent.class::isInstance),
+        "降级预览不得变成 Resource");
+  }
+
+  /**
+   * 验证 LSP 子进程使用调用方有效超时而不是隐藏的 30 秒常量：bridge 故意挂住时必须在有效超时内失败返回。
+   *
+   * <p>若实现退回旧的固定 30 秒常量，本测试的 5 秒 await 会超时失败。
+   */
+  @Test
+  void lspBridgeHonoursTheEffectiveTimeoutInsteadOfAHiddenDefault() throws Exception {
+    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+    Path bridge = environmentRoot.resolve("hanging-bridge.sh");
+    Files.writeString(bridge, "#!/bin/sh\ncat >/dev/null\nsleep 30\n");
+    assertTrue(bridge.toFile().setExecutable(true));
+    Files.writeString(environmentRoot.resolve("App.java"), "class App {}\n");
+
+    CodingToolsConfig config =
+        TestCodingConfig.withBridgeCommand(
+            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
+
+    long started = System.nanoTime();
+    RecordingListener listener =
+        invokeAsync(
+            new LspGotoDefinitionCapability(config, executor),
+            "{\"path\":\"App.java\",\"line\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofMillis(1200));
+    assertTrue(listener.await(), "必须在有效超时内返回，而不是等隐藏常量");
+    long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
+
+    assertTrue(listener.result.error(), text(listener.result));
+    assertTrue(text(listener.result).contains("timed out"), text(listener.result));
+    assertTrue(elapsedMillis < 10_000, "必须在调用方有效超时附近返回，实际 " + elapsedMillis + "ms");
+  }
+
+  /** 验证 LSP 调用被取消后整棵 bridge 进程树都被终止：后代不再继续写 tick 文件。 */
+  @Test
+  void lspBridgeCancellationTerminatesTheProcessTree() throws Exception {
+    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
+    Path marker = environmentRoot.resolve("bridge-ticks.log");
+    Path bridge = environmentRoot.resolve("ticking-bridge.sh");
+    Files.writeString(
+        bridge,
+        "#!/bin/sh\n"
+            + "cat >/dev/null\n"
+            + "(while true; do echo child >> "
+            + marker
+            + "; sleep 0.05; done) &\n"
+            + "while true; do echo parent >> "
+            + marker
+            + "; sleep 0.05; done\n");
+    assertTrue(bridge.toFile().setExecutable(true));
+    Files.writeString(environmentRoot.resolve("App.java"), "class App {}\n");
+
+    CodingToolsConfig config =
+        TestCodingConfig.withBridgeCommand(
+            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
+
+    RecordingListener listener =
+        invokeAsync(
+            new LspGotoDefinitionCapability(config, executor),
+            "{\"path\":\"App.java\",\"line\":1,\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofSeconds(30));
+    // 等待 bridge 真正开始产出，再取消。
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (ticks(marker) == 0 && System.nanoTime() < deadline) {
+      Thread.sleep(20);
+    }
+    assertTrue(ticks(marker) > 0, "取消前 bridge 进程树必须已经在产出输出");
+
+    listener.handle.cancel();
+    assertTrue(listener.await());
+    assertTrue(text(listener.result).contains("Operation cancelled"), text(listener.result));
+
+    long ticksAtCancel = ticks(marker);
+    Thread.sleep(700);
+    assertEquals(ticksAtCancel, ticks(marker), "取消必须终止整棵 bridge 进程树，后代不得继续写入");
+  }
+
+  private static long ticks(Path marker) {
+    try {
+      return Files.readAllLines(marker).size();
+    } catch (Exception error) {
+      return 0;
+    }
+  }
+
   @Test
   void bashStreamsAndReportsTimeoutAndIdempotentCancellation() throws Exception {
     BashCapability bash = bash(config());
@@ -446,46 +687,128 @@ class CodingCapabilitiesTest {
     assertTrue(text(cancelled.result).contains("Operation cancelled"));
   }
 
-  /** 验证 Bash 大输出跨越 2000 行内联限制后，生成包含 preview 与 TextArtifactMetadata 的单个 ResourceResultContent。 */
+  /**
+   * 验证 Bash 大输出跨越 2000 行内联限制后返回单个 TextResultContent：有界 head/tail 预览、绝对本地路径、总字节/行数与 read/grep 指引。
+   *
+   * <p>大文本绝不是 Resource：不经过 ResourceStore，也不做内容寻址。
+   */
   @Test
-  void bashSpoolsLargeOutputToSingleResourceResultWithPreviewAndMetadata() throws Exception {
+  void bashSpoolsLargeOutputToBoundedTextResultWithPath() throws Exception {
     BashCapability bash = bash(config());
     RecordingListener listener =
         invokeAsync(
             bash,
-            "{\"command\":\"seq 1 2500\",\"workdir\":" + json(environmentRoot.toString()) + "}",
-            Duration.ofSeconds(5));
+            "{\"command\":\"seq 1 20000\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ofSeconds(20));
     assertTrue(listener.await());
     assertFalse(listener.result.error());
     assertEquals(1, listener.result.contents().size());
-    assertTrue(listener.result.contents().getFirst() instanceof ResourceResultContent);
+    assertTrue(listener.result.contents().getFirst() instanceof TextResultContent);
+    assertFalse(
+        listener.result.contents().stream().anyMatch(ResourceResultContent.class::isInstance),
+        "大文本不得作为 Resource 附件返回");
 
-    ResourceResultContent content = (ResourceResultContent) listener.result.contents().getFirst();
-    assertNotNull(content.preview());
-    assertTrue(content.preview().startsWith("1\n2\n"));
-    assertNotNull(content.textMetadata());
-    assertEquals(2500, content.textMetadata().totalLines());
-    assertTrue(content.resource().size() > 0);
+    String text = text(listener.result);
+    // 预览有界：头部前若干行可见，中间被省略并标注，尾部可见。
+    assertTrue(text.startsWith("1\n2\n"), text);
+    assertTrue(text.contains("bytes omitted here"), text);
+    assertTrue(text.contains("20000 lines"), text);
+    assertTrue(text.contains("Use read with offset/limit to page through the file"), text);
+
+    JsonNode details =
+        AbstractCodingCapability.OBJECT_MAPPER.readTree(listener.result.detailsJson());
+    JsonNode textOutput = details.path("textOutput");
+    assertEquals(20000, textOutput.path("totalLines").asLong());
+    assertFalse(textOutput.path("captureTruncated").asBoolean());
+
+    Path published = Path.of(textOutput.path("path").asText());
+    assertTrue(published.isAbsolute());
+    assertTrue(text.contains(published.toString()), "预览必须内联绝对路径");
+    // durable 全文保留全部 20000 行，模型可继续 read/grep 分页。
+    List<String> lines = Files.readAllLines(published);
+    assertEquals(20000, lines.size());
+    assertEquals("1", lines.getFirst());
+    assertEquals("20000", lines.getLast());
   }
 
-  /** 验证 Bash 输出超过 16 MiB 硬上限时立即停止并返回 OUTPUT_TOO_LARGE 错误。 */
+  /**
+   * 验证输出体积永远不是终止进程或让调用失败的理由：远超 16 MiB 的输出仍然正常完成，退出码是权威事实。
+   *
+   * <p>这是对旧 {@code OUTPUT_TOO_LARGE} 语义的显式反向断言。
+   */
   @Test
-  void bashEnforcesHardLimitAndReturnsOutputTooLargeError() throws Exception {
+  void bashNeverFailsOrKillsProcessOnLargeOutputVolume() throws Exception {
     BashCapability bash = bash(config());
     RecordingListener listener =
         invokeAsync(
             bash,
-            "{\"command\":\"head -c 17000000 /dev/zero | tr '\\\\0' 'a'\",\"workdir\":"
+            "{\"command\":\"seq 1 4000000\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ofSeconds(60));
+    assertTrue(listener.await());
+    assertFalse(listener.result.error(), "输出体积不得导致调用失败：" + text(listener.result));
+
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER
+            .readTree(listener.result.detailsJson())
+            .path("textOutput");
+    // 远大于旧的 16 MiB 硬上限，且进程正常退出、计数完整。
+    assertTrue(textOutput.path("totalBytes").asLong() > 16L * 1024 * 1024, textOutput.toString());
+    assertEquals(4000000, textOutput.path("totalLines").asLong());
+    assertTrue(
+        textOutput.path("captureTruncated").asBoolean()
+            || textOutput.path("path").asText().endsWith(".log"),
+        "大输出必须落本地 durable 全文：" + textOutput);
+
+    Path published = Path.of(textOutput.path("path").asText());
+    assertTrue(Files.isRegularFile(published));
+    assertEquals(4000000, Files.readAllLines(published).size(), "durable 全文必须保留全部行（未被体积截断）");
+  }
+
+  /** 达到捕获预算只停止文件捕获并明确报告截断，命令本身仍必须跑完，退出码仍然有效。 */
+  @Test
+  void bashCaptureBudgetStopsCaptureWithoutStoppingTheProcess() throws Exception {
+    TextOutputStore smallBudget =
+        TextOutputStore.open(
+            environmentRoot.resolve("budget/text"),
+            environmentRoot.resolve("budget/staging"),
+            4096);
+    CodingToolsConfig budgetConfig =
+        new CodingToolsConfig(
+            environmentRoot,
+            CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
+            CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
+            "bash",
+            new InMemoryResourceStore(),
+            smallBudget,
+            null,
+            CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
+
+    BashCapability bash = new BashCapability(budgetConfig, executor, scheduler);
+    RecordingListener listener =
+        invokeAsync(
+            bash,
+            "{\"command\":\"seq 1 5000; echo done-marker\",\"workdir\":"
                 + json(environmentRoot.toString())
                 + "}",
-            Duration.ofSeconds(5));
+            Duration.ofSeconds(15));
     assertTrue(listener.await());
-    assertTrue(listener.result.error());
-    assertEquals(1, listener.result.contents().size());
-    assertTrue(listener.result.contents().getFirst() instanceof TextResultContent);
-    assertTrue(text(listener.result).contains("OUTPUT_TOO_LARGE"));
-    assertFalse(
-        listener.result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
+    // 命令跑到了最后，证明进程没有被体积或预算终止。
+    assertFalse(listener.result.error(), text(listener.result));
+
+    JsonNode textOutput =
+        AbstractCodingCapability.OBJECT_MAPPER
+            .readTree(listener.result.detailsJson())
+            .path("textOutput");
+    assertTrue(textOutput.path("captureTruncated").asBoolean(), textOutput.toString());
+    assertTrue(textOutput.path("capturedBytes").asLong() <= 4096, textOutput.toString());
+    // 总数仍然完整统计，说明排空从未停止。
+    assertTrue(textOutput.path("totalBytes").asLong() > textOutput.path("capturedBytes").asLong());
+
+    Path published = Path.of(textOutput.path("path").asText());
+    assertTrue(Files.isRegularFile(published), "已捕获的前缀仍必须发布为可读文件");
+    assertTrue(
+        new String(Files.readAllBytes(published), StandardCharsets.UTF_8).startsWith("1\n"),
+        "发布文件必须是输出的前缀");
   }
 
   @Test
@@ -604,8 +927,7 @@ class CodingCapabilitiesTest {
   }
 
   private CodingToolsConfig config(int lines, int bytes) {
-    return new CodingToolsConfig(
-        environmentRoot, lines, bytes, "bash", new InMemoryResourceStore());
+    return TestCodingConfig.withLimits(environmentRoot, lines, bytes, new InMemoryResourceStore());
   }
 
   /** 以 JSON 字符串字面量表示任意本地路径，避免手工拼接转义。 */

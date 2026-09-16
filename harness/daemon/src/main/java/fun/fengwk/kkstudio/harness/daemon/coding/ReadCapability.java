@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -20,13 +21,22 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 
-/** 读取有界文本窗口或确定性的目录清单。 */
+/**
+ * 读取有界文本窗口或确定性的目录清单。
+ *
+ * <p>文本读取不按整文件分配内存：媒体类型只由文件前缀判定；文本以固定大小的字符块流式解码，并按 offset/limit 只保留所需窗口内、且每行与整体都各有字符上界的行内容。因此
+ * Daemon 自己或外部工具生成的超大文本（包括 {@code process.exec} 落盘的全文）都可以被分页读取，不存在“文本文件超过 N MiB 就拒绝”的限制。
+ *
+ * <p>图片仍是 Resource 语义：探测到受支持的图片签名时，整文件字节交给 ResourceStore 成为不可变附件。二进制判定同样来自流式解码：非法 UTF-8 序列或 NUL
+ * 字符立即以明确的“看似二进制文件”失败。
+ *
+ * <p>输出协议保持稳定：同样的 header 行、同样的 {@code "N|"} 行格式、同样的截断与分页 footer、同样的 48 KiB 响应上界。
+ */
 public final class ReadCapability extends AbstractCodingCapability {
 
   private static final int DEFAULT_LIMIT = 200;
   private static final int MAX_LIMIT = 2000;
   private static final int MAX_LINE_CODE_POINTS = 2000;
-  private static final long MAX_FILE_BYTES = 64 * 1024 * 1024L;
   private static final int MAX_RESPONSE_BYTES = 48 * 1024;
 
   public ReadCapability(CodingToolsConfig config, ExecutorService executor) {
@@ -47,98 +57,17 @@ public final class ReadCapability extends AbstractCodingCapability {
       if (columnOffset != null) {
         throw new IllegalArgumentException("column_offset is only supported for text files");
       }
-      List<String> names;
-      try (var entries = Files.list(path)) {
-        names =
-            entries
-                .map(ReadCapability::directoryEntryName)
-                .sorted(Comparator.naturalOrder())
-                .toList();
-      }
-      int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
-      int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
-      int totalEntries = names.size();
-      int start = Math.min(offset, totalEntries + 1);
-      int end = Math.min(totalEntries, start + limit - 1);
-
-      List<String> headers = List.of("path: " + displayPath, "kind: directory", "");
-      if (offset > totalEntries) {
-        List<String> output = new ArrayList<>(headers);
-        output.add("[Showing 0 entries of " + totalEntries + ".]");
-        return textResponse(request.call().id(), String.join("\n", output));
-      }
-
-      int actualEnd = start - 1;
-      List<String> entriesList = new ArrayList<>();
-      if (start <= totalEntries) {
-        for (int i = start; i <= end; i++) {
-          String entry = names.get(i - 1);
-          List<String> candidateEntries = new ArrayList<>(entriesList);
-          candidateEntries.add(entry);
-
-          List<String> candidateOutput = new ArrayList<>(headers);
-          candidateOutput.addAll(candidateEntries);
-          if (i < totalEntries) {
-            candidateOutput.add("");
-            candidateOutput.add(
-                "[Showing entries "
-                    + start
-                    + "-"
-                    + i
-                    + " of "
-                    + totalEntries
-                    + ". Re-run read with offset="
-                    + (i + 1)
-                    + " to continue.]");
-          }
-          int candidateBytes = responseUtf8Bytes(candidateOutput);
-          if (candidateBytes > MAX_RESPONSE_BYTES) {
-            if (i == start) {
-              throw new IllegalStateException(
-                  "directory read response exceeds "
-                      + MAX_RESPONSE_BYTES
-                      + " bytes on first entry: "
-                      + candidateBytes
-                      + " bytes");
-            }
-            break;
-          }
-          entriesList = candidateEntries;
-          actualEnd = i;
-        }
-      }
-
-      List<String> output = new ArrayList<>(headers);
-      output.addAll(entriesList);
-      if (actualEnd < totalEntries && start <= totalEntries) {
-        output.add("");
-        output.add(
-            "[Showing entries "
-                + start
-                + "-"
-                + actualEnd
-                + " of "
-                + totalEntries
-                + ". Re-run read with offset="
-                + (actualEnd + 1)
-                + " to continue.]");
-      }
-
-      return textResponse(request.call().id(), String.join("\n", output));
+      return directoryResponse(request, args, path, displayPath);
     }
 
-    long fileSize = Files.size(path);
-    if (fileSize > MAX_FILE_BYTES) {
-      throw new IllegalArgumentException(
-          "file exceeds 64 MiB maximum read limit: " + fileSize + " bytes");
-    }
-    byte[] bytes = Files.readAllBytes(path);
+    byte[] probe = TextStreams.probe(path);
 
-    String imageMime = detectImageMediaType(bytes);
+    String imageMime = detectImageMediaType(probe);
     if (imageMime != null) {
       if (columnOffset != null) {
         throw new IllegalArgumentException("column_offset is only supported for text files");
       }
+      byte[] bytes = Files.readAllBytes(path);
       DaemonResourceRef stored = config.resourceStore().store(bytes, imageMime);
       ResourceRef ref =
           new ResourceRef(
@@ -147,87 +76,240 @@ public final class ReadCapability extends AbstractCodingCapability {
           request.call().id(), List.of(new ResourceResultContent(ref)), false, "{}");
     }
 
-    TextFileCodec.Decoded decoded = TextFileCodec.decode(bytes);
+    TextStreams.Encoding encoding = TextStreams.detectEncoding(probe);
+    if (encoding.looksBinary(probe)) {
+      throw new IllegalArgumentException("file appears to be binary");
+    }
+
     int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
     int defaultLimit = columnOffset != null ? 1 : DEFAULT_LIMIT;
     int limit = optionalPositiveInt(args, "limit", defaultLimit, MAX_LIMIT);
     if (columnOffset != null && limit != 1) {
       throw new IllegalArgumentException("limit must be 1 when column_offset is specified");
     }
-    String original = decoded.text();
-    boolean endsWithNewline = original.endsWith("\n") || original.endsWith("\r");
-    String normalized = original.replace("\r\n", "\n").replace('\r', '\n');
-    List<String> lines =
-        original.isEmpty() ? List.of() : new ArrayList<>(List.of(normalized.split("\n", -1)));
-    if (endsWithNewline && !lines.isEmpty()) {
-      lines.remove(lines.size() - 1);
-    }
-    int totalLines = lines.size();
-    int start = Math.min(offset, totalLines + 1);
-    int end = Math.min(totalLines, start + limit - 1);
 
-    String lang = detectLanguage(path);
-    String lspStatus =
-        config.lspBridgeCommand() != null
-            ? ("supported" + (lang != null ? " (" + lang + ")" : ""))
-            : "unsupported";
+    TextWindow window = TextWindow.scan(path, offset, limit, encoding);
 
     List<String> headers = new ArrayList<>();
     headers.add("path: " + displayPath);
-    headers.add("ends_with_newline: " + (endsWithNewline ? "yes" : "no"));
-    headers.add("lsp: " + lspStatus);
+    headers.add("ends_with_newline: " + (window.endsWithNewline() ? "yes" : "no"));
+    headers.add("lsp: " + lspStatus(path));
     headers.add("");
 
-    if (offset > totalLines) {
+    if (offset > window.totalLines()) {
       List<String> output = new ArrayList<>(headers);
-      output.add("[Showing 0 lines of " + totalLines + ".]");
+      output.add("[Showing 0 lines of " + window.totalLines() + ".]");
       return textResponse(request.call().id(), String.join("\n", output));
     }
 
-    int width = Math.max(1, Integer.toString(Math.max(1, totalLines)).length());
-    int actualEnd = start - 1;
+    int width = Math.max(1, Integer.toString(Math.max(1, window.totalLines())).length());
+    int actualEnd = offset - 1;
     List<String> bodyLines = new ArrayList<>();
     List<String> columnFooters = new ArrayList<>();
 
-    if (start <= totalLines) {
+    for (int index = offset; index <= window.totalLines(); index++) {
+      String line = window.lineAt(index);
+      if (line == null) {
+        // 窗口字符预算已经耗尽：剩余部分由 footer 指引继续分页读取。
+        break;
+      }
+      LineSlice slice = sliceLine(line, index, width, columnOffset);
+
+      List<String> candidateBody = new ArrayList<>(bodyLines);
+      if (slice.formatted() != null) {
+        candidateBody.add(slice.formatted());
+      }
+      List<String> candidateColumnFooters = new ArrayList<>(columnFooters);
+      if (slice.columnFooter() != null) {
+        candidateColumnFooters.add(slice.columnFooter());
+      }
+      List<String> candidateFooters =
+          buildFooters(offset, index, window.totalLines(), columnOffset, candidateColumnFooters);
+      int candidateBytes =
+          responseUtf8Bytes(assembleOutput(headers, candidateBody, candidateFooters));
+
+      if (candidateBytes > MAX_RESPONSE_BYTES) {
+        if (index == offset) {
+          throw new IllegalStateException(
+              "read response exceeds "
+                  + MAX_RESPONSE_BYTES
+                  + " bytes on first line: "
+                  + candidateBytes
+                  + " bytes");
+        }
+        break;
+      }
+
+      bodyLines = candidateBody;
+      columnFooters = candidateColumnFooters;
+      actualEnd = index;
+    }
+
+    List<String> footers =
+        buildFooters(offset, actualEnd, window.totalLines(), columnOffset, columnFooters);
+    return textResponse(
+        request.call().id(), String.join("\n", assembleOutput(headers, bodyLines, footers)));
+  }
+
+  private String lspStatus(Path path) {
+    if (config.lspBridgeCommand() == null) {
+      return "unsupported";
+    }
+    String language = detectLanguage(path);
+    return "supported" + (language != null ? " (" + language + ")" : "");
+  }
+
+  @SuppressWarnings("PMD.CognitiveComplexity")
+  private EnvironmentCapabilityResult directoryResponse(
+      EnvironmentCapabilityExecutionRequest request, JsonNode args, Path path, String displayPath)
+      throws Exception {
+    List<String> names;
+    try (var entries = Files.list(path)) {
+      names =
+          entries
+              .map(ReadCapability::directoryEntryName)
+              .sorted(Comparator.naturalOrder())
+              .toList();
+    }
+    int offset = optionalPositiveInt(args, "offset", 1, Integer.MAX_VALUE);
+    int limit = optionalPositiveInt(args, "limit", DEFAULT_LIMIT, MAX_LIMIT);
+    int totalEntries = names.size();
+    int start = Math.min(offset, totalEntries + 1);
+    int end = Math.min(totalEntries, start + limit - 1);
+
+    List<String> headers = List.of("path: " + displayPath, "kind: directory", "");
+    if (offset > totalEntries) {
+      List<String> output = new ArrayList<>(headers);
+      output.add("[Showing 0 entries of " + totalEntries + ".]");
+      return textResponse(request.call().id(), String.join("\n", output));
+    }
+
+    int actualEnd = start - 1;
+    List<String> entriesList = new ArrayList<>();
+    if (start <= totalEntries) {
       for (int index = start; index <= end; index++) {
-        String line = lines.get(index - 1);
-        LineSlice slice = sliceLine(line, index, width, columnOffset);
+        List<String> candidateEntries = new ArrayList<>(entriesList);
+        candidateEntries.add(names.get(index - 1));
 
-        List<String> candidateBody = new ArrayList<>(bodyLines);
-        if (slice.formatted() != null) {
-          candidateBody.add(slice.formatted());
+        List<String> candidateOutput = new ArrayList<>(headers);
+        candidateOutput.addAll(candidateEntries);
+        if (index < totalEntries) {
+          candidateOutput.add("");
+          candidateOutput.add(
+              "[Showing entries "
+                  + start
+                  + "-"
+                  + index
+                  + " of "
+                  + totalEntries
+                  + ". Re-run read with offset="
+                  + (index + 1)
+                  + " to continue.]");
         }
-        List<String> candidateColumnFooters = new ArrayList<>(columnFooters);
-        if (slice.columnFooter() != null) {
-          candidateColumnFooters.add(slice.columnFooter());
-        }
-        List<String> candidateFooters =
-            buildFooters(start, index, totalLines, columnOffset, candidateColumnFooters);
-        List<String> candidateOutput = assembleOutput(headers, candidateBody, candidateFooters);
         int candidateBytes = responseUtf8Bytes(candidateOutput);
-
         if (candidateBytes > MAX_RESPONSE_BYTES) {
           if (index == start) {
             throw new IllegalStateException(
-                "read response exceeds "
+                "directory read response exceeds "
                     + MAX_RESPONSE_BYTES
-                    + " bytes on first line: "
+                    + " bytes on first entry: "
                     + candidateBytes
                     + " bytes");
           }
           break;
         }
-
-        bodyLines = candidateBody;
-        columnFooters = candidateColumnFooters;
+        entriesList = candidateEntries;
         actualEnd = index;
       }
     }
 
-    List<String> footers = buildFooters(start, actualEnd, totalLines, columnOffset, columnFooters);
-    List<String> output = assembleOutput(headers, bodyLines, footers);
+    List<String> output = new ArrayList<>(headers);
+    output.addAll(entriesList);
+    if (actualEnd < totalEntries && start <= totalEntries) {
+      output.add("");
+      output.add(
+          "[Showing entries "
+              + start
+              + "-"
+              + actualEnd
+              + " of "
+              + totalEntries
+              + ". Re-run read with offset="
+              + (actualEnd + 1)
+              + " to continue.]");
+    }
     return textResponse(request.call().id(), String.join("\n", output));
+  }
+
+  /**
+   * 流式文本窗口：单遍扫描文件，只保留请求区间内、字符总量有上界的行内容与确定性元数据。
+   *
+   * <p>行分隔统一为 LF：CRLF 与单独 CR 都记作一次换行。整个窗口的保留字符总量有上界，因此极大窗口不会带来无界内存；超出行内容上界的单行由 {@link
+   * TextStreams#MAX_LINE_CHARS} 截断。窗口未覆盖的剩余部分由 footer 的分页指引覆盖。
+   */
+  private static final class TextWindow {
+
+    /** 整个窗口保留字符上界：响应本身另有 48 KiB 上界，这里只作为病态输入的兜底。 */
+    private static final int MAX_RETAINED_WINDOW_CHARS = 1024 * 1024;
+
+    private final int totalLines;
+    private final boolean endsWithNewline;
+    private final int firstLineOffset;
+    private final List<String> capturedLines;
+
+    private TextWindow(
+        int totalLines, boolean endsWithNewline, int firstLineOffset, List<String> capturedLines) {
+      this.totalLines = totalLines;
+      this.endsWithNewline = endsWithNewline;
+      this.firstLineOffset = firstLineOffset;
+      this.capturedLines = capturedLines;
+    }
+
+    /**
+     * 扫描 {@code path} 并保留第 {@code [offset, offset + limit - 1]} 行。
+     *
+     * @throws IllegalArgumentException 文件不是合法文本或包含 NUL
+     */
+    private static TextWindow scan(Path path, int offset, int limit, TextStreams.Encoding encoding)
+        throws IOException {
+      int lastWanted = offset + limit - 1;
+      List<String> captured = new ArrayList<>();
+      int[] retainedChars = {0};
+      TextStreams.Outcome outcome;
+      try {
+        outcome =
+            TextStreams.forEachLine(
+                path,
+                encoding,
+                (lineNumber, line, truncated) -> {
+                  if (lineNumber >= offset
+                      && lineNumber <= lastWanted
+                      && retainedChars[0] < MAX_RETAINED_WINDOW_CHARS) {
+                    captured.add(line);
+                    retainedChars[0] += line.length();
+                  }
+                  return true;
+                });
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw new IOException("text scan was interrupted", error);
+      }
+      return new TextWindow(outcome.totalLines(), outcome.endsWithNewline(), offset, captured);
+    }
+
+    private int totalLines() {
+      return totalLines;
+    }
+
+    private boolean endsWithNewline() {
+      return endsWithNewline;
+    }
+
+    /** 按行号取已保留内容；不在保留范围内时返回 {@code null}。 */
+    private String lineAt(int lineNumber) {
+      int position = lineNumber - firstLineOffset;
+      return position >= 0 && position < capturedLines.size() ? capturedLines.get(position) : null;
+    }
   }
 
   static String detectImageMediaType(byte[] bytes) {

@@ -4,10 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -15,7 +11,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,19 +20,19 @@ import java.util.regex.Pattern;
  * <p>这里有意不做成完整的 LSP client。未配置 bridge 命令时，goto 与 workspace-symbol 查询会以明确的不可用消息失败；{@code
  * java_decompile} 对可解析的 class 名或 class 文件仍可通过 {@code javap} 成功。
  *
- * <p>bridge 与 {@code javap} 子进程都在本次 capability arguments 显式指定的 workdir 中启动，不继承 Daemon 进程目录。
+ * <p>bridge 与 {@code javap} 子进程都在本次 capability arguments 显式指定的 workdir 中启动，不继承 Daemon 进程目录；两者共享
+ * {@link ChildProcessRunner} 的并发排空、调用方有效超时与进程树终止语义。
  */
 final class LspBridge {
 
   static final String UNAVAILABLE_MESSAGE =
-      "LSP bridge is unavailable. Configure kkstudio.daemon.lsp-bridge to enable real LSP queries.";
+      "LSP bridge is unavailable. Pass --lsp-bridge-command to enable real LSP queries.";
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final Pattern JDT_CLASS =
       Pattern.compile("jdt://contents/[^/]+/(.+?)\\.class(?:\\?.*)?$");
   private static final Pattern CLASS_TOKEN =
       Pattern.compile("([A-Za-z_][\\w.$]*(?:/[\\w.$]+)*\\.class)");
-  private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
   private final String bridgeCommand;
   private final String javapExecutable;
@@ -61,7 +56,20 @@ final class LspBridge {
     return bridgeCommand != null;
   }
 
-  String gotoDefinition(Path workdir, Path path, int line, int character) throws Exception {
+  /**
+   * 解析符号定义。
+   *
+   * @param cancellation 调用方取消信号；deadline 由 {@code timeout} 表达
+   * @param timeout 本次调用的有效超时
+   */
+  String gotoDefinition(
+      Path workdir,
+      Path path,
+      int line,
+      int character,
+      Duration timeout,
+      ChildProcessRunner.CancellationCheck cancellation)
+      throws Exception {
     String output =
         invokeBridge(
             workdir,
@@ -69,11 +77,20 @@ final class LspBridge {
                 .put("workdir", workdir.toString())
                 .put("path", path.toString())
                 .put("line", line)
-                .put("character", character));
+                .put("character", character),
+            timeout,
+            cancellation);
     return relativizeLspText(output, workdir);
   }
 
-  String workspaceSymbols(Path workdir, Path path, String query, int limit) throws Exception {
+  String workspaceSymbols(
+      Path workdir,
+      Path path,
+      String query,
+      int limit,
+      Duration timeout,
+      ChildProcessRunner.CancellationCheck cancellation)
+      throws Exception {
     String output =
         invokeBridge(
             workdir,
@@ -81,11 +98,19 @@ final class LspBridge {
                 .put("workdir", workdir.toString())
                 .put("path", path.toString())
                 .put("query", query)
-                .put("limit", limit));
+                .put("limit", limit),
+            timeout,
+            cancellation);
     return relativizeLspText(output, workdir);
   }
 
-  String javaDecompile(Path workdir, Path path, String target) throws Exception {
+  String javaDecompile(
+      Path workdir,
+      Path path,
+      String target,
+      Duration timeout,
+      ChildProcessRunner.CancellationCheck cancellation)
+      throws Exception {
     if (bridgeAvailable()) {
       try {
         String output =
@@ -94,10 +119,21 @@ final class LspBridge {
                 request("java_decompile")
                     .put("workdir", workdir.toString())
                     .put("path", path.toString())
-                    .put("target", target));
+                    .put("target", target),
+                timeout,
+                cancellation);
         return relativizeLspText(output, workdir);
-      } catch (IllegalStateException | IOException bridgeError) {
-        String fallback = tryJavap(workdir, path, target);
+      } catch (ChildProcessRunner.ChildProcessException bridgeError) {
+        String fallback = tryJavap(workdir, path, target, timeout, cancellation);
+        if (fallback != null) {
+          return fallback
+              + "\n\n(note: LSP bridge failed; used javap fallback: "
+              + bridgeError.getMessage()
+              + ")";
+        }
+        throw bridgeError;
+      } catch (IllegalStateException bridgeError) {
+        String fallback = tryJavap(workdir, path, target, timeout, cancellation);
         if (fallback != null) {
           return fallback
               + "\n\n(note: LSP bridge failed; used javap fallback: "
@@ -107,7 +143,7 @@ final class LspBridge {
         throw bridgeError;
       }
     }
-    String fallback = tryJavap(workdir, path, target);
+    String fallback = tryJavap(workdir, path, target, timeout, cancellation);
     if (fallback != null) {
       return fallback + "\n\n(note: LSP bridge unavailable; used javap fallback)";
     }
@@ -136,7 +172,13 @@ final class LspBridge {
     return result;
   }
 
-  String tryJavap(Path workdir, Path sourcePath, String target) throws Exception {
+  String tryJavap(
+      Path workdir,
+      Path sourcePath,
+      String target,
+      Duration timeout,
+      ChildProcessRunner.CancellationCheck cancellation)
+      throws Exception {
     ResolvedClass resolved = resolveClassTarget(target, sourcePath);
     if (resolved == null) {
       return null;
@@ -150,25 +192,18 @@ final class LspBridge {
       command.add(resolved.classpath());
     }
     command.add(resolved.className());
-    ProcessBuilder builder = new ProcessBuilder(command).directory(workdir.toFile());
-    builder.redirectErrorStream(true);
-    Process process = builder.start();
-    String output = readFully(process.getInputStream());
-    boolean finished = process.waitFor(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-    if (!finished) {
-      process.destroyForcibly();
-      throw new IllegalStateException("javap timed out for " + resolved.className());
-    }
-    if (process.exitValue() != 0) {
+    ChildProcessRunner.Result result =
+        ChildProcessRunner.run(command, workdir, null, timeout, cancellation);
+    if (result.exitCode() != 0) {
       throw new IllegalStateException(
           "javap failed for "
               + resolved.className()
               + " (exit "
-              + process.exitValue()
+              + result.exitCode()
               + "): "
-              + output.trim());
+              + result.merged().trim());
     }
-    return output;
+    return result.stdout();
   }
 
   private ObjectNode request(String op) {
@@ -177,26 +212,24 @@ final class LspBridge {
     return node;
   }
 
-  private String invokeBridge(Path workdir, ObjectNode request) throws Exception {
+  private String invokeBridge(
+      Path workdir,
+      ObjectNode request,
+      Duration timeout,
+      ChildProcessRunner.CancellationCheck cancellation)
+      throws Exception {
     if (!bridgeAvailable()) {
       throw new IllegalStateException(UNAVAILABLE_MESSAGE);
     }
     List<String> command = shellCommand(bridgeCommand);
-    ProcessBuilder builder = new ProcessBuilder(command).directory(workdir.toFile());
-    builder.redirectErrorStream(true);
-    Process process = builder.start();
-    process.getOutputStream().write(MAPPER.writeValueAsBytes(request));
-    process.getOutputStream().close();
-    String raw = readFully(process.getInputStream());
-    boolean finished = process.waitFor(DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-    if (!finished) {
-      process.destroyForcibly();
-      throw new IllegalStateException("LSP bridge timed out");
-    }
-    if (process.exitValue() != 0) {
+    ChildProcessRunner.Result result =
+        ChildProcessRunner.run(
+            command, workdir, MAPPER.writeValueAsBytes(request), timeout, cancellation);
+    if (result.exitCode() != 0) {
       throw new IllegalStateException(
-          "LSP bridge exited with code " + process.exitValue() + ": " + raw.trim());
+          "LSP bridge exited with code " + result.exitCode() + ": " + result.merged().trim());
     }
+    String raw = result.stdout();
     JsonNode response = MAPPER.readTree(raw.isBlank() ? "{}" : raw);
     if (response.path("ok").asBoolean(false)) {
       JsonNode text = response.get("text");
@@ -272,12 +305,6 @@ final class LspBridge {
       return List.of("cmd.exe", "/c", command);
     }
     return List.of("sh", "-c", command);
-  }
-
-  private static String readFully(InputStream input) throws IOException {
-    ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-    input.transferTo(buffer);
-    return buffer.toString(StandardCharsets.UTF_8);
   }
 
   private static String summarizeTarget(String target) {

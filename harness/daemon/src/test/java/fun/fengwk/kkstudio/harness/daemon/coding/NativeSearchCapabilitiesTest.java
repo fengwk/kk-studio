@@ -388,7 +388,7 @@ class NativeSearchCapabilitiesTest {
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return new CodingToolsConfig(environmentRoot, lines, bytes, "bash", store);
+    return TestCodingConfig.withLimits(environmentRoot, lines, bytes, store);
   }
 
   private void write(String relative, String content) throws Exception {

@@ -27,7 +27,9 @@ public final class GrepCapability extends AbstractCodingCapability {
   private static final int MAX_DISPLAY_LINE_CHARS = 500;
   static final int DEFAULT_TIMEOUT_SECONDS = 15;
   static final int MAX_TIMEOUT_SECONDS = 3600;
-  private static final long MAX_FILE_BYTES = 64 * 1024 * 1024L;
+
+  /** 只有多行模式需要整文件视图；单行模式流式扫描，因此不受此上界限制。 */
+  private static final long MAX_MULTILINE_FILE_BYTES = 64 * 1024 * 1024L;
 
   public GrepCapability(CodingToolsConfig config, ExecutorService executor) {
     super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP));
@@ -108,7 +110,7 @@ public final class GrepCapability extends AbstractCodingCapability {
     boolean limitReached = completeLines.size() > limit;
     int displayCount = Math.min(limit, completeLines.size());
 
-    try (OutputSpool spool = new OutputSpool()) {
+    try (OutputSpool spool = new OutputSpool(config.textOutputStore(), request.call().id())) {
       for (int i = 0; i < displayCount; i++) {
         if (i > 0) {
           spool.write((int) '\n');
@@ -120,7 +122,7 @@ public final class GrepCapability extends AbstractCodingCapability {
             ("\n\n[" + limit + " results limit reached. Refine the pattern or raise limit.]")
                 .getBytes(StandardCharsets.UTF_8));
       }
-      return spool.finish(request.call().id(), false, config.resourceStore(), "text/plain");
+      return spool.finish(false);
     }
   }
 
@@ -142,11 +144,99 @@ public final class GrepCapability extends AbstractCodingCapability {
         return;
       }
     }
-    long size = Files.size(file);
-    if (size > MAX_FILE_BYTES) {
+    String display = displayPath(workdir, file);
+    if (multiline) {
+      searchMultiline(file, display, directFile, pattern, control, completeLines, limit);
+      return;
+    }
+    searchSingleLines(file, display, directFile, pattern, control, completeLines, limit);
+  }
+
+  /**
+   * 单行模式流式扫描：内存占用与文件大小无关，因此 Daemon 自己或外部工具生成的超大文本（包括 {@code process.exec} 落盘的全文）都能被搜索，不存在 “文件超过 N
+   * MiB 就拒绝”的限制。
+   */
+  private static void searchSingleLines(
+      Path file,
+      String display,
+      boolean directFile,
+      Pattern pattern,
+      SearchControl control,
+      List<String> completeLines,
+      int limit)
+      throws Exception {
+    byte[] probe;
+    TextStreams.Encoding encoding;
+    try {
+      probe = TextStreams.probe(file);
+      encoding = TextStreams.detectEncoding(probe);
+    } catch (IOException | SecurityException error) {
+      if (directFile) {
+        throw new IllegalArgumentException("path is not readable: " + display);
+      }
+      return;
+    }
+    if (encoding.looksBinary(probe)) {
+      if (directFile) {
+        throw new IllegalArgumentException("file appears to be binary: " + display);
+      }
+      return;
+    }
+    try {
+      TextStreams.forEachLine(
+          file,
+          encoding,
+          (lineNumber, line, truncated) -> {
+            control.check();
+            if (completeLines.size() > limit) {
+              return false;
+            }
+            Matcher matcher = pattern.matcher(line);
+            if (matcher.find()) {
+              completeLines.add(
+                  display
+                      + ":"
+                      + lineNumber
+                      + ":"
+                      + matchCenteredExcerpt(line, matcher.start(), matcher.end()));
+            }
+            return true;
+          });
+    } catch (IllegalArgumentException error) {
+      // 流式严格解码发现非法 UTF-8：与整文件解码保持一致的“看似二进制文件”语义。
+      if (directFile) {
+        throw new IllegalArgumentException("file appears to be binary: " + display, error);
+      }
+    }
+  }
+
+  /** 多行模式仍需要整文件视图（跨行匹配），因此保留显式大小上界。 */
+  private static void searchMultiline(
+      Path file,
+      String display,
+      boolean directFile,
+      Pattern pattern,
+      SearchControl control,
+      List<String> completeLines,
+      int limit)
+      throws Exception {
+    long size;
+    try {
+      size = Files.size(file);
+    } catch (IOException | SecurityException error) {
+      if (directFile) {
+        throw new IllegalArgumentException("path is not readable: " + display);
+      }
+      return;
+    }
+    if (size > MAX_MULTILINE_FILE_BYTES) {
       if (directFile) {
         throw new IllegalArgumentException(
-            "file exceeds 64 MiB maximum read limit: " + displayPath(workdir, file));
+            "multiline search requires loading the whole file; "
+                + "file exceeds "
+                + (MAX_MULTILINE_FILE_BYTES / (1024 * 1024))
+                + " MiB maximum for multiline: "
+                + display);
       }
       return;
     }
@@ -155,7 +245,7 @@ public final class GrepCapability extends AbstractCodingCapability {
       bytes = Files.readAllBytes(file);
     } catch (IOException | SecurityException error) {
       if (directFile) {
-        throw new IllegalArgumentException("path is not readable: " + displayPath(workdir, file));
+        throw new IllegalArgumentException("path is not readable: " + display);
       }
       return;
     }
@@ -164,42 +254,13 @@ public final class GrepCapability extends AbstractCodingCapability {
       decoded = TextFileCodec.decode(bytes);
     } catch (IllegalArgumentException error) {
       if (directFile) {
-        throw new IllegalArgumentException(
-            "file appears to be binary: " + displayPath(workdir, file));
+        throw new IllegalArgumentException("file appears to be binary: " + display);
       }
       return;
     }
 
     TextLines text = TextLines.from(decoded.text());
-    String display = displayPath(workdir, file);
-
-    if (multiline) {
-      matchingMultiline(pattern, text, display, control, completeLines, limit);
-    } else {
-      matchingSingleLines(pattern, text, display, control, completeLines, limit);
-    }
-  }
-
-  private static void matchingSingleLines(
-      Pattern pattern,
-      TextLines text,
-      String displayPath,
-      SearchControl control,
-      List<String> completeLines,
-      int limit)
-      throws InterruptedException {
-    for (int index = 0; index < text.lines().size(); index++) {
-      control.check();
-      if (completeLines.size() > limit) {
-        break;
-      }
-      String content = text.lines().get(index).content();
-      Matcher matcher = pattern.matcher(content);
-      if (matcher.find()) {
-        String excerpt = matchCenteredExcerpt(content, matcher.start(), matcher.end());
-        completeLines.add(displayPath + ":" + (index + 1) + ":" + excerpt);
-      }
-    }
+    matchingMultiline(pattern, text, display, control, completeLines, limit);
   }
 
   private static void matchingMultiline(

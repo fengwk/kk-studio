@@ -36,6 +36,9 @@ public final class LspJavaDecompileCapability extends AbstractCodingCapability {
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
-    return success(request.call().id(), bridge.javaDecompile(workdir, path, target));
+    return success(
+        request.call().id(),
+        bridge.javaDecompile(
+            workdir, path, target, request.effectiveTimeout(), execution::isCancelled));
   }
 }

@@ -61,7 +61,8 @@ Daemon 的生产依赖止于 `harness-common` 与 `harness-environment`；`harne
 
 ```text
 CLI -> DaemonConfig
-   -> CodingToolsConfig.fromSystemProperties
+   -> DaemonDataDirectory.open(dataDir)   # owner-only 布局 + daemon.lock
+   -> CodingToolsConfig.fromCli(environmentRoot, dataDir/resources, ...)
    -> DaemonSkillRegistry.open(dataDir, userHome)
    -> DaemonRuntime.create
    -> shutdown hook
@@ -72,17 +73,22 @@ CLI -> DaemonConfig
 
 ```text
 --gateway-uri (ws / wss)
---registration-token
+--registration-token-file (required, absolute, owner-only regular file)
 --heartbeat
 --reconnect-initial
 --reconnect-max
 --tool-timeout
 --note
 --environment-root
---data-dir (required, absolute)
+--data-dir (optional, absolute; defaults to ~/.kk-studio)
+--bash-executable (optional; defaults to bash)
+--lsp-bridge-command (optional; blank disables the bridge)
+--javap-executable (optional; defaults to javap)
 ```
 
-配置默认值：心跳间隔（heartbeat）15 秒、初始重连退避（reconnect initial）1 秒、最大重连退避（reconnect max）30 秒、能力调用超时 5 分钟；环境根目录（environment root）默认为当前启动用户 HOME 目录对应的真实绝对路径，只作为本地资源存储根与 READY 展示路径。`data-dir` 无默认值，必须显式提供绝对路径，Daemon 会创建目录并从中恢复最近一次成功发布的 Skill manifest；启动不会扫描任何默认 Skill 目录。`note` 支持操作者显式指定或按操作系统生成稳定默认文本，限制为单行且不超过 512 字符。已删除的 `--skill-dir` 会作为未知参数失败。
+注册凭证只以 owner-only 普通文件存在：CLI 只接收 `--registration-token-file` 路径，record 不保存凭证文本，因此 `equals`/`hashCode`/`toString` 与日志都不会扩散秘密；凭证在 HELLO 前按需读取。已删除的 `--registration-token` 与 `--skill-dir` 都作为未知参数 fail closed，不提供兼容回退。
+
+配置默认值：心跳间隔（heartbeat）15 秒、初始重连退避（reconnect initial）1 秒、最大重连退避（reconnect max）30 秒、能力调用超时 5 分钟；环境根目录（environment root）默认为当前启动用户 HOME 目录对应的真实绝对路径，只作为宿主展示元数据，不参与工具路径解析或资源存储。`data-dir` 省略时为 `~/.kk-studio`，Daemon 会以 owner-only 权限创建固定布局 `{daemon.lock,resources/{text,staging,blobs}}`、持有进程独占锁并从中恢复最近一次成功发布的 Skill manifest；启动只清理 `resources/staging` 下遗留的 `*.part`，已发布的 `resources/text` 与 `resources/blobs` 永不自动删除（durable history 可能仍引用其路径）。`note` 支持操作者显式指定或按操作系统生成稳定默认文本，限制为单行且不超过 512 字符。
 
 [`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在运行时构造完成时冻结，确保运行期能力集合不可变。生产编码能力集合由 [`CodingCapabilities`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java) 固定注册 9 项能力：
 
@@ -142,27 +148,29 @@ WELCOME / ACK / ERROR     -> handshake/control
 
 `fs.read` 与 `write`/`edit` 共享统一的文件编码、预览截断与文件修改边界：
 - 文本按既有编码、BOM 与行尾表示写回，同一文件的修改通过进程内锁串行化。
+- **流式分页读取**：媒体类型只由文件前缀判定，文本以固定大小字符块流式解码，因此不存在任何“文本文件超过 N MiB 就拒绝”的上界；`process.exec` 落盘的全文可以直接被分页读取。图片仍是 Resource 语义：探测到受支持的图片签名时整文件字节交给 ResourceStore 成为不可变附件。
 - **纯净编号正文**：`fs.read` 彻底移除正文中的合成截断标记（如 `... (line truncated to 2000 chars)`），`line|` 编号后严格为按 LF 读取协议归一化的真实行片段，可直接完整复制为 `fs.edit` 的 `old_string` 进行精确比对与替换。
 - **长行列分页（`column_offset`）**：单行文本超过 2000 码点时按 Unicode 码点切片，不截断代理对（Surrogate Pairs）；支持可选参数 `column_offset`（1-based 正整数码点偏移量，仅限纯文本文件）。指定 `column_offset` 时 `limit` 缺省为 1 且必须等于 1。
 - **精确有界输出（<= 48 KiB）**：包含 Header 元数据、编号正文、分隔空行、水平切片尾注与垂直续读尾注在内的完整 UTF-8 输出严格受控于 48 KiB（49,152 字节）上限。多行读取时若下一行导致整体超限则有界截断并给出续读 offset，底层设有终态防御断言，杜绝超大载荷逃逸。
 - 越界定位元数据（如 `[Showing 0 lines of N.]` 或 `[Showing 0 columns of N on line X.]`）及续读提示均统一置于非编号尾部，不污染正文编号结构。
 
-`grep` 与 `find` 使用 Java NIO 原生遍历与 JGit 规则解析 `.gitignore`（规则基线取检索目标祖先链上的 `.gitignore`），直接在 JVM 内完成检索；LSP 能力通过可选的本地进程桥接（`kkstudio.daemon.lsp-bridge`）承载，当缺少相关工具链时返回明确的不可用提示，其中 `lsp_java_decompile` 对可解析的 class 目标支持回退到 `javap`。参数配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)：
+`grep` 与 `find` 使用 Java NIO 原生遍历与 JGit 规则解析 `.gitignore`（规则基线取检索目标祖先链上的 `.gitignore`），直接在 JVM 内完成检索；LSP 能力通过可选的本地进程桥接（`--lsp-bridge-command`）承载，当缺少相关工具链时返回明确的不可用提示，其中 `lsp_java_decompile` 对可解析的 class 目标支持回退到 `javap`。`grep` 的单行模式流式扫描，因此不受任何单文件大小上界限制；只有需要整文件视图的 `multiline` 模式保留 64 MiB 上界。参数配置见 [`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java)，其唯一权威来源是 CLI：
 
 ```text
 previewMaxLines = 2000
 previewMaxBytes = 51200
-bashExecutable = bash
-javapExecutable = javap
-system properties:
-  kkstudio.daemon.resource-directory
-  kkstudio.daemon.bash
-  kkstudio.daemon.max-resource-bytes
-  kkstudio.daemon.lsp-bridge
-  kkstudio.daemon.javap
+bashExecutable = bash（--bash-executable 覆盖）
+javapExecutable = javap（--javap-executable 覆盖）
+lspBridgeCommand = 空（--lsp-bridge-command 启用）
 ```
 
-资源存储默认采用环境根目录下 `.kkstudio/resources` 的本地内容寻址存储（`LocalFileResourceStore`）；大文本与二进制输出统一转换为不可变 Resource 引用。输出结果由 `DaemonCapabilityResultCodec` 编解码：流式 `PARTIAL` 仅允许文本与 JSON 数据，终态 `COMPLETED` 在通过资源预检后方允许执行读写存储；默认资源聚合上限 8 MiB、最终载荷上限 16 MiB、内容条目上限 64 项。`DaemonCapabilityResultCodec` 专注于流式与终态结果（`EnvironmentCapabilityResult`）的网络报文编解码，底层执行 SPI 则由 `EnvironmentCapability` 独立承载。
+资源布局完全由数据目录决定、与 environment root 无关：[`LocalFileResourceStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStore.java) 的图片导出落在 `<data-dir>/resources/blobs`；二进制结果仍统一转换为不可变 Resource 引用。**大文本不是 Resource**：`process.exec`/`grep`/`find` 的超阈值文本经 [`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 写入 `<data-dir>/resources/staging/*.part`（0600）后原子发布为 `<data-dir>/resources/text/*.log`（durable，永不隐式删除）。终态无论大小都只返回一个 `TextResultContent`：小输出完整内联；大输出为有界 head/tail 预览加绝对路径、总字节/行数与 read/grep 指引，同一事实写入 `detailsJson.textOutput`。
+
+预览与行数都是可被模型直接消费的事实，因此有三条硬约束。**字符边界**：head/tail 的字节上界可能落在多字节字符内部，裁剪按完整字符边界回退后再解码，预览不产生 U+FFFD 替换字符，`bytes omitted` 也始终是精确的原始字节差。**不重复**：输出量小于 head 与 tail 缓冲容量之和时两个窗口覆盖同一段内容，预览会扣除重叠，不会把同一批字节展示两次。**行数一致**：总行数按 CR、LF、CRLF 三种终止符统计（CRLF 只记一次），与 `read` 分页读取同一文件时经 [`TextStreams`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextStreams.java) 报告的总行数完全一致，模型不会看到两个互相矛盾的总数。发布前对中转文件 `force(true)`，发布后的全文是已落盘的 durable 事实。
+
+输出体积与本地磁盘状态永远不是终止进程的理由：内联阈值（50 KiB / 2000 行）之外转为落盘，达到捕获预算（默认 1 GiB）后只停止文件捕获并继续统计总数，磁盘写失败只降级为无路径的有界预览。三种情况都让子进程自然退出，退出码始终是权威事实；失败路径在删除中转文件前先关闭文件流，既不泄漏文件描述符也不残留幽灵文件。LSP bridge 与 `javap` 子进程经 [`ChildProcessRunner`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunner.java) 并发排空 stdout/stderr（stdout 是调用方载荷故完整保留，stderr 只保留有界诊断尾部），deadline 绑定 `request.effectiveTimeout()`，超时或取消都终止整棵进程树。
+
+输出结果由 `DaemonCapabilityResultCodec` 编解码：流式 `PARTIAL` 仅允许文本与 JSON 数据，终态 `COMPLETED` 在通过资源预检后方允许执行读写存储；默认资源聚合上限 8 MiB、最终载荷上限 16 MiB、内容条目上限 64 项。`DaemonCapabilityResultCodec` 专注于流式与终态结果（`EnvironmentCapabilityResult`）的网络报文编解码，底层执行 SPI 则由 `EnvironmentCapability` 独立承载。
 
 ### Skills
 
@@ -251,8 +259,10 @@ sequenceDiagram
 ### 关键测试守卫
 
 - [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)：验证模块依赖方向与线程池所有权边界。
-- [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：验证必填 `--data-dir`、握手重连、日志重放、协议 v3 入站校验及超时取消生命周期。
-- [`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesEdgeTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：验证编码能力执行、显式 workdir 语义、`.gitignore` 检索以及资源存储边界。
+- [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：验证 `--registration-token-file` 契约与凭证不外泄、`--data-dir` 默认/绝对约束、三个本地执行程序参数、已删除系统属性与 `--registration-token`/`--skill-dir` 的 fail-closed、握手重连、日志重放、协议 v3 入站校验及超时取消生命周期。
+- [`DaemonDataDirectoryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectoryTest.java)、[`DaemonTokenFileTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFileTest.java)：验证数据目录布局与 0700 收敛、进程内与跨 JVM 独占锁、重启后锁释放、启动期只清理遗留 `.part` 并保留已发布数据、`defaultRoot` 纯计算，以及凭证文件的绝对路径/普通文件/0600 校验与空白剥离。
+- [`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesEdgeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesEdgeTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)、[`LocalFileResourceStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalFileResourceStoreTest.java)：验证编码能力执行、显式 workdir 语义、`.gitignore` 检索、大输出落盘与捕获预算/磁盘失败降级、LSP 有效超时与取消终止进程树，以及资源存储边界。
+- [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`ChildProcessRunnerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunnerTest.java)：验证内联/落盘阈值、有界预览的字符边界与重叠去重、行数与 `TextStreams` 逐行扫描一致、捕获预算与磁盘失败只降级且清理干净不留句柄、原子发布与 durable 语义、stdout 载荷完整保留、stderr 有界诊断、并发排空不死锁，以及 deadline/取消终止整棵进程树。
 - [`JdkWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/JdkWebSocketTransportTest.java)：验证文本帧传输、二进制拦截、16 MiB 报文上限与策略违规关闭行为。
 - [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)、[`DaemonGitManagerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonGitManagerTest.java)、[`SkillPathScannerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPathScannerTest.java)：验证来源扫描、持久恢复、版本/并发围栏、Git ref 与取消、诊断边界、loadability 及精确 revision 加载。
 

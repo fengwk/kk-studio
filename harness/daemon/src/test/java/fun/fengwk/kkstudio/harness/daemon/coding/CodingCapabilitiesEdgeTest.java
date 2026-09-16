@@ -286,63 +286,109 @@ class CodingCapabilitiesEdgeTest {
     assertFalse(result.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
   }
 
+  /** 已删除的 {@code kkstudio.daemon.*} 系统属性不再是配置来源；配置只从 CLI 显式取值与数据目录资源根构建。 */
   @Test
-  void configSystemPropertiesAndValidationCoverStandaloneStartupInputs() throws Exception {
-    String[] names = {
+  void cliOnlyConfigurationIgnoresRemovedSystemProperties() throws Exception {
+    String[] removed = {
       "kkstudio.daemon.environment-root",
       "kkstudio.daemon.resource-directory",
       "kkstudio.daemon.max-resource-bytes",
-      "kkstudio.daemon.bash"
+      "kkstudio.daemon.bash",
+      "kkstudio.daemon.lsp-bridge-command",
+      "kkstudio.daemon.javap"
     };
-    String[] old = new String[names.length];
-    Path customRoot = Files.createDirectory(environmentRoot.resolve("custom-root"));
-    for (int index = 0; index < names.length; index++) {
-      old[index] = System.getProperty(names[index]);
+    String[] previous = new String[removed.length];
+    for (int index = 0; index < removed.length; index++) {
+      previous[index] = System.getProperty(removed[index]);
+      System.setProperty(removed[index], "must-be-ignored");
     }
     try {
-      System.setProperty(names[0], customRoot.toString());
-      System.setProperty(names[1], environmentRoot.resolve("local-resources").toString());
-      System.setProperty(names[2], "4");
-      System.setProperty(names[3], "custom-bash");
-      CodingToolsConfig properties = CodingToolsConfig.fromSystemProperties(environmentRoot);
-      assertEquals(environmentRoot.toRealPath(), properties.environmentRoot());
-      assertEquals("custom-bash", properties.bashExecutable());
-      assertTrue(properties.resourceStore() instanceof LocalFileResourceStore);
-      // 配置的 max-resource-bytes 必须落到 store：超限字节在写入前拒绝。
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> properties.resourceStore().store(new byte[] {1, 2, 3, 4, 5}, "text/plain"));
-      System.setProperty(names[2], "0");
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> CodingToolsConfig.fromSystemProperties(environmentRoot));
-      System.setProperty(names[2], "not-a-number");
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> CodingToolsConfig.fromSystemProperties(environmentRoot));
+      Path resources = Files.createDirectories(environmentRoot.resolve("data/resources"));
+      CodingToolsConfig config =
+          CodingToolsConfig.fromCli(
+              environmentRoot, resources, "/usr/bin/bash", "bridge --stdio", "/opt/jdk/bin/javap");
+
+      // 唯一权威来源是 CLI：被删除的属性不得改写任何取值。
+      assertEquals("/usr/bin/bash", config.bashExecutable());
+      assertEquals("bridge --stdio", config.lspBridgeCommand());
+      assertEquals("/opt/jdk/bin/javap", config.javapExecutable());
+      assertEquals(environmentRoot.toRealPath(), config.environmentRoot());
+      // 资源布局完全由数据目录决定、与 environment root 无关。
+      assertTrue(config.resourceStore() instanceof LocalFileResourceStore);
+      Path blobs = ((LocalFileResourceStore) config.resourceStore()).directory();
+      assertEquals(resources.resolve("blobs"), blobs);
+      assertEquals(resources.resolve("text"), config.textOutputStore().textDirectory());
+      assertEquals(resources.resolve("staging"), config.textOutputStore().stagingDirectory());
+      assertFalse(blobs.startsWith(environmentRoot.resolve("export")));
     } finally {
-      for (int index = 0; index < names.length; index++) {
-        if (old[index] == null) {
-          System.clearProperty(names[index]);
+      for (int index = 0; index < removed.length; index++) {
+        if (previous[index] == null) {
+          System.clearProperty(removed[index]);
         } else {
-          System.setProperty(names[index], old[index]);
+          System.setProperty(removed[index], previous[index]);
         }
       }
     }
+  }
+
+  /** 三个本地执行程序参数的默认值与显式覆盖：空白回退默认，显式取值原样保留。 */
+  @Test
+  void cliConfigurationResolvesLocalExecutableDefaults() throws Exception {
+    Path resources = Files.createDirectories(environmentRoot.resolve("data/resources"));
+
+    CodingToolsConfig defaults =
+        CodingToolsConfig.fromCli(environmentRoot, resources, "  ", null, " ");
+    assertEquals(CodingToolsConfig.DEFAULT_BASH_EXECUTABLE, defaults.bashExecutable());
+    assertEquals(CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE, defaults.javapExecutable());
+    assertNull(defaults.lspBridgeCommand(), "空白 bridge 命令表示禁用");
+
+    CodingToolsConfig explicit =
+        CodingToolsConfig.fromCli(environmentRoot, resources, "custom-bash", "", "custom-javap");
+    assertEquals("custom-bash", explicit.bashExecutable());
+    assertEquals("custom-javap", explicit.javapExecutable());
+    assertNull(explicit.lspBridgeCommand());
+  }
+
+  /** 无效配置必须在构造期 fail closed：非正阈值、缺失 environment root、缺失 store 都不允许进入运行期。 */
+  @Test
+  void configurationRejectsInvalidLimitsAndRoots() throws Exception {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CodingToolsConfig(environmentRoot, 0, 1, "bash", new InMemoryResourceStore()));
+        () -> TestCodingConfig.withLimits(environmentRoot, 0, 1, new InMemoryResourceStore()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CodingToolsConfig(environmentRoot, 1, 1, "", new InMemoryResourceStore()));
+        () -> TestCodingConfig.withLimits(environmentRoot, 1, 0, new InMemoryResourceStore()));
+    assertThrows(
+        NullPointerException.class, () -> TestCodingConfig.withLimits(environmentRoot, 1, 1, null));
+
+    // environmentRoot 必须是现存目录：直接用已存在的 data root 建 store，避免测试基座顺手创建该目录。
+    Path dataRoot = Files.createDirectories(environmentRoot.resolve("data-root"));
+    Files.writeString(environmentRoot.resolve("config-file.txt"), "not a directory");
+    TextOutputStore store = TestCodingConfig.textOutputStore(dataRoot);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                environmentRoot.resolve("missing"), 1, 1, "bash", new InMemoryResourceStore()));
+                environmentRoot.resolve("missing"),
+                1,
+                1,
+                "bash",
+                new InMemoryResourceStore(),
+                store,
+                null,
+                "javap"));
     assertThrows(
-        NullPointerException.class,
-        () -> new CodingToolsConfig(environmentRoot, 1, 1, "bash", null));
+        IllegalArgumentException.class,
+        () ->
+            new CodingToolsConfig(
+                environmentRoot.resolve("config-file.txt"),
+                1,
+                1,
+                "bash",
+                new InMemoryResourceStore(),
+                store,
+                null,
+                "javap"));
   }
 
   @Test
@@ -399,9 +445,7 @@ class CodingCapabilitiesEdgeTest {
   @Test
   void bashReportsStartupAndNonZeroFailuresWithoutDuplicateTerminalCallbacks() throws Exception {
     BashCapability missing =
-        bash(
-            new CodingToolsConfig(
-                environmentRoot, 10, 100, "missing-bash", new InMemoryResourceStore()));
+        bash(TestCodingConfig.withBash(environmentRoot, 10, 100, "missing-bash"));
     assertTrue(
         text(invoke(
                 missing,
@@ -568,8 +612,7 @@ class CodingCapabilitiesEdgeTest {
   @Test
   void lspCapabilitiesReportUnavailableWhenBridgeNotConfigured() throws Exception {
     CodingToolsConfig noBridgeConfig =
-        new CodingToolsConfig(
-            environmentRoot, 2000, 50 * 1024, "bash", new InMemoryResourceStore(), null, "javap");
+        TestCodingConfig.withoutBridge(environmentRoot, new InMemoryResourceStore());
 
     Files.createDirectories(environmentRoot.resolve("src"));
     Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
@@ -634,8 +677,14 @@ class CodingCapabilitiesEdgeTest {
     assertEquals("LocalClass", fromFile.className());
 
     LspBridge bridge = new LspBridge(null, "javap");
+    // javap 回退路径同样受调用方有效超时与取消信号约束。
     String decompiled =
-        bridge.javaDecompile(environmentRoot, file("src/App.java"), "java." + "lang.Object");
+        bridge.javaDecompile(
+            environmentRoot,
+            file("src/App.java"),
+            "java." + "lang.Object",
+            Duration.ofSeconds(30),
+            () -> false);
     assertNotNull(decompiled);
     assertTrue(
         decompiled.contains("class java." + "lang.Object")
@@ -665,14 +714,8 @@ class CodingCapabilitiesEdgeTest {
     assertTrue(bridge.toFile().setExecutable(true));
 
     CodingToolsConfig config =
-        new CodingToolsConfig(
-            environmentRoot,
-            2000,
-            50 * 1024,
-            "bash",
-            new InMemoryResourceStore(),
-            bridge.toString(),
-            "javap");
+        TestCodingConfig.withBridgeCommand(
+            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
 
     Files.createDirectories(environmentRoot.resolve("src"));
     Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
@@ -741,7 +784,7 @@ class CodingCapabilitiesEdgeTest {
   }
 
   private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return new CodingToolsConfig(environmentRoot, lines, bytes, "bash", store);
+    return TestCodingConfig.withLimits(environmentRoot, lines, bytes, store);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)

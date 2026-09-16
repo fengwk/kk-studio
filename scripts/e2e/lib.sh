@@ -258,14 +258,24 @@ start_daemon() {
   # put the reactor-built jar first so clean-slate daemon/tool protocol changes are exercised.
   cp="$DAEMON_JAR:$DAEMON_TOOL_JAR:$(cat "$DAEMON_CP_FILE")"
   step "Starting daemon env=$DAEMON_ENV_NAME"
+  if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
+    die "DAEMON_REGISTRATION_TOKEN is required to start the daemon"
+  fi
+  chmod 700 "$WORK_DIR"
+  local token_file
+  token_file=$(cd "$WORK_DIR" && pwd)/daemon-registration.token
+  (umask 077 && printf '%s\n' "$DAEMON_REGISTRATION_TOKEN" > "$token_file")
+  chmod 600 "$token_file"
   local -a test_env_unsets=()
   mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   nohup env \
     "${test_env_unsets[@]}" \
+    -u DAEMON_REGISTRATION_TOKEN \
+    -u KK_STUDIO_DAEMON_REGISTRATION_TOKEN \
     JAVA_HOME="$java_home" "$java_home/bin/java" \
     -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \
-    --registration-token "$DAEMON_REGISTRATION_TOKEN" \
+    --registration-token-file "$token_file" \
     --note "$DAEMON_NOTE" \
     --environment-root "$DAEMON_ENV_ROOT" \
     --data-dir "$DAEMON_DATA_DIR" \

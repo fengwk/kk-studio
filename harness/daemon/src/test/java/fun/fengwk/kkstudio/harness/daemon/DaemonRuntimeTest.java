@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ReadCapability;
 import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
+import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
@@ -63,9 +64,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -99,6 +103,9 @@ class DaemonRuntimeTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
 
+  /** 测试用注册凭证：与真实部署一样，只以 owner-only 文件形式存在，argv/日志中不出现明文。 */
+  private static final String REGISTRATION_TOKEN = "test-registration-token";
+
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private DaemonRuntime runtime;
@@ -110,6 +117,29 @@ class DaemonRuntimeTest {
   /** 为一次 registry 构造创建隔离的数据目录父目录。 */
   private Path dataDir() {
     return testRoot.resolve("daemon-data");
+  }
+
+  /**
+   * 物化一个 owner-only 的注册凭证文件。
+   *
+   * <p>DaemonConfig 只接受凭证文件路径，因此每个需要凭证的用例都必须先准备这个文件；权限位与生产部署一致（POSIX 上 0600）。
+   */
+  private Path registrationTokenFile() {
+    Path directory = testRoot.resolve("credentials");
+    Path tokenFile = directory.resolve("registration.token");
+    if (!Files.exists(tokenFile)) {
+      try {
+        Files.createDirectories(directory);
+        Files.writeString(tokenFile, REGISTRATION_TOKEN);
+        if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+          Files.setPosixFilePermissions(
+              tokenFile, Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+        }
+      } catch (IOException error) {
+        throw new UncheckedIOException(error);
+      }
+    }
+    return tokenFile;
   }
 
   @AfterEach
@@ -200,7 +230,7 @@ class DaemonRuntimeTest {
     List<DaemonEnvelope> handshake = transport.takeMessages(2);
     assertMessageTypes(handshake, HELLO, READY);
     JsonNode hello = codec.readPayload(handshake.get(0));
-    assertEquals("test-registration-token", hello.path("registrationToken").asText());
+    assertEquals(REGISTRATION_TOKEN, hello.path("registrationToken").asText());
     assertEquals(DaemonProtocol.VERSION, hello.path("protocolVersion").asInt());
     assertEquals(
         EnvironmentCapabilityCatalog.version(), hello.path("capabilityCatalogVersion").asText());
@@ -227,7 +257,7 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -252,7 +282,7 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -261,8 +291,7 @@ class DaemonRuntimeTest {
             ENVIRONMENT_ROOT,
             dataDir());
     CodingToolsConfig toolsConfig =
-        new CodingToolsConfig(
-            ENVIRONMENT_ROOT, 2000, 50 * 1024, "bash", new InMemoryResourceStore());
+        TestCodingConfig.withBridge(ENVIRONMENT_ROOT, new InMemoryResourceStore());
 
     runtime = DaemonRuntime.create(config, toolsConfig, DaemonSkillTestSupport.open(dataDir()));
 
@@ -277,7 +306,7 @@ class DaemonRuntimeTest {
     DaemonConfig config =
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -350,7 +379,7 @@ class DaemonRuntimeTest {
       assertEquals(
           new DaemonConfig(
                   URI.create("ws://localhost/gateway"),
-                  "test-registration-token",
+                  registrationTokenFile(),
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
@@ -505,7 +534,7 @@ class DaemonRuntimeTest {
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
           new ReadCapability(
-              new CodingToolsConfig(root, 2000, 50 * 1024, "bash", new InMemoryResourceStore()),
+              TestCodingConfig.withBridge(root, new InMemoryResourceStore()),
               Executors.newVirtualThreadPerTaskExecutor()));
       runtime = runtime(transport, registry, root);
 
@@ -916,13 +945,12 @@ class DaemonRuntimeTest {
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
           new WriteCapability(
-              new CodingToolsConfig(root, 2000, 50 * 1024, "bash", new InMemoryResourceStore()),
-              taskExecutor));
+              TestCodingConfig.withBridge(root, new InMemoryResourceStore()), taskExecutor));
       runtime =
           new DaemonRuntime(
               new DaemonConfig(
                   URI.create("ws://localhost/gateway"),
-                  "test-registration-token",
+                  registrationTokenFile(),
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
@@ -1782,7 +1810,7 @@ class DaemonRuntimeTest {
         new DaemonRuntime(
             new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
-                "test-registration-token",
+                registrationTokenFile(),
                 Duration.ofMinutes(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
@@ -1829,7 +1857,7 @@ class DaemonRuntimeTest {
         new DaemonRuntime(
             new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
-                "test-registration-token",
+                registrationTokenFile(),
                 Duration.ofMillis(20),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
@@ -1931,7 +1959,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -1955,7 +1983,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -1977,7 +2005,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -2002,7 +2030,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -2036,7 +2064,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -2063,7 +2091,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -2089,7 +2117,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
@@ -2149,7 +2177,7 @@ class DaemonRuntimeTest {
     return new DaemonRuntime(
         new DaemonConfig(
             URI.create("ws://localhost/gateway"),
-            "test-registration-token",
+            registrationTokenFile(),
             heartbeatInterval,
             Duration.ZERO,
             Duration.ofSeconds(1),

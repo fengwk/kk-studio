@@ -46,6 +46,9 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
     if (!bridge.bridgeAvailable()) {
       throw new IllegalStateException(LspBridge.UNAVAILABLE_MESSAGE);
     }
-    return success(request.call().id(), bridge.workspaceSymbols(workdir, path, query, limit));
+    return success(
+        request.call().id(),
+        bridge.workspaceSymbols(
+            workdir, path, query, limit, request.effectiveTimeout(), execution::isCancelled));
   }
 }

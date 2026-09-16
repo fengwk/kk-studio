@@ -8,8 +8,11 @@ import java.util.Objects;
 /**
  * Daemon coding capabilities 共享的不可变本地执行配置。
  *
- * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments，本配置只持有 Daemon 资源存储根与输出/进程参数。 {@code
- * environmentRoot} 仅用于 Daemon 资源存储与宿主 metadata，绝不参与工具路径解析或作为授权边界。
+ * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments。本配置只持有本地资源根、本地执行程序与输出/进程参数。 {@code
+ * environmentRoot} 仅用于 Daemon 宿主 metadata 展示，绝不参与工具路径解析、资源存储或作为授权边界。
+ *
+ * <p>所有取值都来自 CLI（{@link fun.fengwk.kkstudio.harness.daemon.DaemonConfig}），本类型不再读取任何 {@code
+ * kkstudio.daemon.*} 系统属性：一条配置只有一个权威来源。
  */
 public record CodingToolsConfig(
     Path environmentRoot,
@@ -17,11 +20,13 @@ public record CodingToolsConfig(
     int previewMaxBytes,
     String bashExecutable,
     ResourceStore resourceStore,
+    TextOutputStore textOutputStore,
     String lspBridgeCommand,
     String javapExecutable) {
 
   public static final int DEFAULT_PREVIEW_MAX_LINES = 2000;
   public static final int DEFAULT_PREVIEW_MAX_BYTES = 50 * 1024;
+  public static final String DEFAULT_BASH_EXECUTABLE = "bash";
   public static final String DEFAULT_JAVAP_EXECUTABLE = "javap";
 
   public CodingToolsConfig {
@@ -31,6 +36,7 @@ public record CodingToolsConfig(
     }
     bashExecutable = requireNonBlank(bashExecutable, "bashExecutable");
     resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
+    textOutputStore = Objects.requireNonNull(textOutputStore, "textOutputStore");
     lspBridgeCommand = blankToNull(lspBridgeCommand);
     javapExecutable =
         requireNonBlank(
@@ -46,53 +52,51 @@ public record CodingToolsConfig(
       int previewMaxLines,
       int previewMaxBytes,
       String bashExecutable,
-      ResourceStore resourceStore) {
+      ResourceStore resourceStore,
+      TextOutputStore textOutputStore) {
     this(
         environmentRoot,
         previewMaxLines,
         previewMaxBytes,
         bashExecutable,
         resourceStore,
+        textOutputStore,
         null,
         DEFAULT_JAVAP_EXECUTABLE);
   }
 
-  /** 使用 CLI 冻结的唯一 environment root，并从其余稳定 Daemon 系统属性构建独立运行配置。 */
-  public static CodingToolsConfig fromSystemProperties(Path environmentRoot) {
-    Path root = canonicalDirectory(environmentRoot, "environmentRoot");
-    Path resourceDirectory =
-        Path.of(
-            System.getProperty(
-                "kkstudio.daemon.resource-directory",
-                root.resolve(".kkstudio").resolve("resources").toString()));
+  /**
+   * 用 CLI 的显式取值与数据目录资源根构建配置。
+   *
+   * <p>资源布局完全由数据目录决定、与 environment root 无关：图片导出落在 {@code <resources>/blobs}，本地大文本落在 {@code
+   * <resources>/text} 与 {@code <resources>/staging}。
+   *
+   * @param environmentRoot 宿主展示用的 environment root，不参与任何资源或工具路径解析
+   * @param resources 数据目录下的资源根（{@code <data-dir>/resources}）
+   * @param bashExecutable 显式 bash 可执行文件，空白时回退默认值
+   * @param lspBridgeCommand 显式 LSP bridge 命令；空白表示禁用
+   * @param javapExecutable 显式 javap 可执行文件，空白时回退默认值
+   */
+  public static CodingToolsConfig fromCli(
+      Path environmentRoot,
+      Path resources,
+      String bashExecutable,
+      String lspBridgeCommand,
+      String javapExecutable) {
+    Path root = Objects.requireNonNull(resources, "resources").toAbsolutePath().normalize();
     return new CodingToolsConfig(
-        root,
+        environmentRoot,
         DEFAULT_PREVIEW_MAX_LINES,
         DEFAULT_PREVIEW_MAX_BYTES,
-        System.getProperty("kkstudio.daemon.bash", "bash"),
-        new LocalFileResourceStore(
-            resourceDirectory,
-            parsePositiveLong(
-                System.getProperty("kkstudio.daemon.max-resource-bytes"),
-                LocalFileResourceStore.DEFAULT_MAX_RESOURCE_BYTES,
-                "kkstudio.daemon.max-resource-bytes")),
-        System.getProperty("kkstudio.daemon.lsp-bridge"),
-        System.getProperty("kkstudio.daemon.javap", DEFAULT_JAVAP_EXECUTABLE));
-  }
-
-  private static long parsePositiveLong(String value, long defaultValue, String property) {
-    if (value == null || value.isBlank()) {
-      return defaultValue;
-    }
-    try {
-      long parsed = Long.parseLong(value.trim());
-      if (parsed <= 0) {
-        throw new IllegalArgumentException(property + " must be positive");
-      }
-      return parsed;
-    } catch (NumberFormatException error) {
-      throw new IllegalArgumentException(property + " must be a positive long", error);
-    }
+        bashExecutable == null || bashExecutable.isBlank()
+            ? DEFAULT_BASH_EXECUTABLE
+            : bashExecutable,
+        new LocalFileResourceStore(root.resolve("blobs")),
+        TextOutputStore.open(root.resolve("text"), root.resolve("staging")),
+        lspBridgeCommand,
+        javapExecutable == null || javapExecutable.isBlank()
+            ? DEFAULT_JAVAP_EXECUTABLE
+            : javapExecutable);
   }
 
   private static Path canonicalDirectory(Path value, String name) {

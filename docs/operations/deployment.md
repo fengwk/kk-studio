@@ -429,10 +429,18 @@ Daemon command 当前固定：
 
 ```text
 --gateway-uri ws://app:8080/api/harness/environment-daemon/v1
---registration-token ${RELIABILITY_REGISTRATION_TOKEN:-e2e-token-reliability}
 --note "Isolated Docker reliability environment."
 --environment-root /workspace
+--data-dir /workspace/.kkstudio/daemon
 ```
+
+注册凭证不经 argv 传递：Compose 只向容器注入
+`KK_STUDIO_DAEMON_REGISTRATION_TOKEN`，镜像入口
+[`daemon-entrypoint.sh`](../../deploy/reliability/daemon-entrypoint.sh)
+把它写成 `/home/kkdaemon/.kkstudio/daemon-registration.token`（目录 0700、
+文件 0600）并从环境中 `unset`，然后只传
+`--registration-token-file <绝对路径>`。因此凭证既不出现在 `ps` 可见的
+argv，也不留在 `/proc/<pid>/environ`。
 
 ### 9.2 Daemon image 和 non-root
 
@@ -442,8 +450,9 @@ Daemon command 当前固定：
 1. Maven JDK 21 builder 构建 `harness/daemon` 及 runtime dependencies；
 2. Node `22.19.0-bookworm-slim` stage 固定 npm `11.19.0`；
 3. `eclipse-temurin:21.0.8_9-jdk-jammy` runtime 安装 bash、ca-certificates、
-   git，创建 `kkdaemon` uid/gid `10001`，运行
-   `DaemonMain`。
+   git，创建 `kkdaemon` uid/gid `10001`，并以
+   `/usr/local/bin/kk-studio-daemon-entrypoint` 作为 `ENTRYPOINT` 启动
+   `DaemonMain`（入口先把凭证物化为 owner-only 文件，再 `exec java`）。
 
 runtime 具备 JDK/`javap`、Node `22.19.x`、npm `11.19.0`、bash、git；不
 安装 `rg` 或 `fd`。Daemon 只挂载一个 `/workspace` named volume，无宿主
@@ -617,7 +626,8 @@ Main runtime image 不包含源码、Maven、Node 或 credential。Dev image
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、
 Gateway、registration credential 和 SSH 私钥不进入本仓库、Docker build context、
-image layer、日志或报告；registration token 当前作为 Daemon 启动参数传递。Main 与
+image layer、日志或报告；registration token 当前经 owner-only 凭证文件传递
+（`--registration-token-file`），不出现在 Daemon argv 或环境变量中。Main 与
 Dev 可以共享逻辑 database 和 bucket；Main 是唯一 Flyway owner 与唯一 Harness
 worker；Dev 关闭这两者，Harness 层只提供 control/query preview，其 Daemon 经内部
 Docker 网络连接 Main 的 `KK_STUDIO_CONTROL_PLANE_BASE_URL` origin（公共 Gateway
