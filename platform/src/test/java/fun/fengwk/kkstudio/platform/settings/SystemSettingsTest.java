@@ -55,7 +55,7 @@ class SystemSettingsTest {
     assertEquals(0L, defaults.aiRuntime().subagentIdleTimeoutMillis());
     assertEquals(50, defaults.aiRuntime().subagentMaxTurns());
 
-    assertEquals(8L * 1024 * 1024, defaults.environment().maxResourceBytes());
+    assertEquals(16L * 1024 * 1024, defaults.environment().maxResourceBytes());
     assertEquals(60_000L, defaults.environment().heartbeatTimeoutMillis());
 
     SystemSettings.Integrations integrations = defaults.integrations();

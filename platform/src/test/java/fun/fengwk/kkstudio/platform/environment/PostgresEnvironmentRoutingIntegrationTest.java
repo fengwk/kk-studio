@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -66,6 +67,26 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           List.of());
 
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
+
+  /** 本测试只验证路由租约，不涉及资源上传；任何票据请求都是测试自身的错误。 */
+  private static final DaemonResourceTicketService UNUSED_TICKET_SERVICE =
+      new DaemonResourceTicketService() {
+        @Override
+        public Ticket reserve(
+            EnvironmentId environmentId, String invocationId, TransferRequest request) {
+          throw new AssertionError("routing test must not reserve an upload");
+        }
+
+        @Override
+        public Ticket commit(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+          throw new AssertionError("routing test must not commit an upload");
+        }
+
+        @Override
+        public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+          throw new AssertionError("routing test must not release an upload");
+        }
+      };
 
   private JdbcTemplate jdbcTemplate;
   private UUID node1;
@@ -187,10 +208,10 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =
         serverConfiguration.environmentDaemonServer(
-            registryNode1, environmentRepository, sessionListener, snapshot);
+            registryNode1, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
-            registryNode2, environmentRepository, sessionListener, snapshot);
+            registryNode2, environmentRepository, sessionListener, UNUSED_TICKET_SERVICE, snapshot);
   }
 
   @Test

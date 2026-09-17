@@ -9,7 +9,11 @@ import type {
 } from '@/shared/api/contracts/system-settings'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
-import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
+import {
+  DEFAULT_MAX_RESOURCE_BYTES,
+  makeSettingsDto,
+  makeSettingsSchema,
+} from '@/test-support/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
 
@@ -313,7 +317,7 @@ describe('system settings server editor', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '重置' }))
     expect(screen.getByText('已是最新')).toBeInTheDocument()
-    expect(field).toHaveValue('8388608')
+    expect(field).toHaveValue(DEFAULT_MAX_RESOURCE_BYTES)
     expect(mocks.update).not.toHaveBeenCalled()
   })
 

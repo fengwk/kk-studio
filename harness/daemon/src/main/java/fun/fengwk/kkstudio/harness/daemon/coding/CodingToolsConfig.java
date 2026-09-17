@@ -8,8 +8,11 @@ import java.util.Objects;
 /**
  * Daemon coding capabilities 共享的不可变本地执行配置。
  *
- * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments。本配置只持有本地资源根、本地执行程序与输出/进程参数。 {@code
- * environmentRoot} 仅用于 Daemon 宿主 metadata 展示，绝不参与工具路径解析、资源存储或作为授权边界。
+ * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments。本配置只持有本地执行程序、输出存储与进程参数。 {@code environmentRoot}
+ * 仅用于 Daemon 宿主 metadata 展示，绝不参与工具路径解析或作为授权边界。
+ *
+ * <p>没有本地二进制 resource 导出根：图片等二进制内容以 {@code BinaryResultContent} 直接进入终态，由 Daemon 侧上传端口直传全局对象
+ * 存储；本地只保留大文本全文（{@link TextOutputStore}）。
  *
  * <p>所有取值都来自 CLI（{@link fun.fengwk.kkstudio.harness.daemon.DaemonConfig}），本类型不再读取任何 {@code
  * kkstudio.daemon.*} 系统属性：一条配置只有一个权威来源。
@@ -19,7 +22,6 @@ public record CodingToolsConfig(
     int previewMaxLines,
     int previewMaxBytes,
     String bashExecutable,
-    ResourceStore resourceStore,
     TextOutputStore textOutputStore,
     String lspBridgeCommand,
     String javapExecutable) {
@@ -35,7 +37,6 @@ public record CodingToolsConfig(
       throw new IllegalArgumentException("preview output limits must be positive");
     }
     bashExecutable = requireNonBlank(bashExecutable, "bashExecutable");
-    resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
     textOutputStore = Objects.requireNonNull(textOutputStore, "textOutputStore");
     lspBridgeCommand = blankToNull(lspBridgeCommand);
     javapExecutable =
@@ -52,14 +53,12 @@ public record CodingToolsConfig(
       int previewMaxLines,
       int previewMaxBytes,
       String bashExecutable,
-      ResourceStore resourceStore,
       TextOutputStore textOutputStore) {
     this(
         environmentRoot,
         previewMaxLines,
         previewMaxBytes,
         bashExecutable,
-        resourceStore,
         textOutputStore,
         null,
         DEFAULT_JAVAP_EXECUTABLE);
@@ -68,8 +67,8 @@ public record CodingToolsConfig(
   /**
    * 用 CLI 的显式取值与数据目录资源根构建配置。
    *
-   * <p>资源布局完全由数据目录决定、与 environment root 无关：图片导出落在 {@code <resources>/blobs}，本地大文本落在 {@code
-   * <resources>/text} 与 {@code <resources>/staging}。
+   * <p>输出布局完全由数据目录决定、与 environment root 无关：本地大文本落在 {@code <resources>/text} 与 {@code
+   * <resources>/staging}。
    *
    * @param environmentRoot 宿主展示用的 environment root，不参与任何资源或工具路径解析
    * @param resources 数据目录下的资源根（{@code <data-dir>/resources}）
@@ -91,7 +90,6 @@ public record CodingToolsConfig(
         bashExecutable == null || bashExecutable.isBlank()
             ? DEFAULT_BASH_EXECUTABLE
             : bashExecutable,
-        new LocalFileResourceStore(root.resolve("blobs")),
         TextOutputStore.open(root.resolve("text"), root.resolve("staging")),
         lspBridgeCommand,
         javapExecutable == null || javapExecutable.isBlank()

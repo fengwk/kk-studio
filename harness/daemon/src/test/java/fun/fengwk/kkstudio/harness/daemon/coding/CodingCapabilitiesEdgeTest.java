@@ -247,7 +247,7 @@ class CodingCapabilitiesEdgeTest {
   }
 
   @Test
-  void codecAndResourceStoresPreserveAllSupportedBomFormats() throws Exception {
+  void codecPreservesAllSupportedBomFormats() throws Exception {
     byte[] utf16le = new byte[] {(byte) 0xff, (byte) 0xfe, 'a', 0, '\n', 0};
     byte[] utf16be = new byte[] {(byte) 0xfe, (byte) 0xff, 0, 'a', 0, '\n'};
     TextFileCodec.Decoded little = TextFileCodec.decode(utf16le);
@@ -257,16 +257,6 @@ class CodingCapabilitiesEdgeTest {
         utf16le, TextFileCodec.encode(little.text(), little.charset(), little.bomLength()));
     assertArrayEquals(utf16be, TextFileCodec.encode(big.text(), big.charset(), big.bomLength()));
     assertThrows(IllegalArgumentException.class, () -> TextFileCodec.decode(new byte[] {0, 1}));
-
-    LocalFileResourceStore local = new LocalFileResourceStore(environmentRoot.resolve("export"));
-    var reference = local.store(new byte[] {7, 8}, "application/octet-stream");
-    assertArrayEquals(
-        new byte[] {7, 8}, Files.readAllBytes(local.directory().resolve(reference.sha256())));
-    InMemoryResourceStore memory = new InMemoryResourceStore();
-    var memoryReference = memory.store(new byte[] {9}, "text/plain");
-    byte[] copy = memory.get(memoryReference.sha256());
-    copy[0] = 0;
-    assertArrayEquals(new byte[] {9}, memory.get(memoryReference.sha256()));
   }
 
   @Test
@@ -313,13 +303,11 @@ class CodingCapabilitiesEdgeTest {
       assertEquals("bridge --stdio", config.lspBridgeCommand());
       assertEquals("/opt/jdk/bin/javap", config.javapExecutable());
       assertEquals(environmentRoot.toRealPath(), config.environmentRoot());
-      // 资源布局完全由数据目录决定、与 environment root 无关。
-      assertTrue(config.resourceStore() instanceof LocalFileResourceStore);
-      Path blobs = ((LocalFileResourceStore) config.resourceStore()).directory();
-      assertEquals(resources.resolve("blobs"), blobs);
+      // 输出布局完全由数据目录决定、与 environment root 无关；本地不再有二进制 resource 导出根。
       assertEquals(resources.resolve("text"), config.textOutputStore().textDirectory());
       assertEquals(resources.resolve("staging"), config.textOutputStore().stagingDirectory());
-      assertFalse(blobs.startsWith(environmentRoot.resolve("export")));
+      assertFalse(
+          config.textOutputStore().textDirectory().startsWith(environmentRoot.resolve("export")));
     } finally {
       for (int index = 0; index < removed.length; index++) {
         if (previous[index] == null) {
@@ -349,17 +337,13 @@ class CodingCapabilitiesEdgeTest {
     assertNull(explicit.lspBridgeCommand());
   }
 
-  /** 无效配置必须在构造期 fail closed：非正阈值、缺失 environment root、缺失 store 都不允许进入运行期。 */
+  /** 无效配置必须在构造期 fail closed：非正阈值与缺失 environment root 都不允许进入运行期。 */
   @Test
   void configurationRejectsInvalidLimitsAndRoots() throws Exception {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> TestCodingConfig.withLimits(environmentRoot, 0, 1, new InMemoryResourceStore()));
+        IllegalArgumentException.class, () -> TestCodingConfig.withLimits(environmentRoot, 0, 1));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> TestCodingConfig.withLimits(environmentRoot, 1, 0, new InMemoryResourceStore()));
-    assertThrows(
-        NullPointerException.class, () -> TestCodingConfig.withLimits(environmentRoot, 1, 1, null));
+        IllegalArgumentException.class, () -> TestCodingConfig.withLimits(environmentRoot, 1, 0));
 
     // environmentRoot 必须是现存目录：直接用已存在的 data root 建 store，避免测试基座顺手创建该目录。
     Path dataRoot = Files.createDirectories(environmentRoot.resolve("data-root"));
@@ -369,26 +353,12 @@ class CodingCapabilitiesEdgeTest {
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                environmentRoot.resolve("missing"),
-                1,
-                1,
-                "bash",
-                new InMemoryResourceStore(),
-                store,
-                null,
-                "javap"));
+                environmentRoot.resolve("missing"), 1, 1, "bash", store, null, "javap"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CodingToolsConfig(
-                environmentRoot.resolve("config-file.txt"),
-                1,
-                1,
-                "bash",
-                new InMemoryResourceStore(),
-                store,
-                null,
-                "javap"));
+                environmentRoot.resolve("config-file.txt"), 1, 1, "bash", store, null, "javap"));
   }
 
   @Test
@@ -611,8 +581,7 @@ class CodingCapabilitiesEdgeTest {
 
   @Test
   void lspCapabilitiesReportUnavailableWhenBridgeNotConfigured() throws Exception {
-    CodingToolsConfig noBridgeConfig =
-        TestCodingConfig.withoutBridge(environmentRoot, new InMemoryResourceStore());
+    CodingToolsConfig noBridgeConfig = TestCodingConfig.withoutBridge(environmentRoot);
 
     Files.createDirectories(environmentRoot.resolve("src"));
     Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
@@ -714,8 +683,7 @@ class CodingCapabilitiesEdgeTest {
     assertTrue(bridge.toFile().setExecutable(true));
 
     CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(
-            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
+        TestCodingConfig.withBridgeCommand(environmentRoot, 2000, 50 * 1024, bridge.toString());
 
     Files.createDirectories(environmentRoot.resolve("src"));
     Files.writeString(environmentRoot.resolve("src/App.java"), "class App {}");
@@ -756,7 +724,7 @@ class CodingCapabilitiesEdgeTest {
   }
 
   private CodingToolsConfig config() {
-    return config(2000, 50 * 1024, new InMemoryResourceStore());
+    return config(2000, 50 * 1024);
   }
 
   private ReadCapability read(CodingToolsConfig config) {
@@ -783,8 +751,8 @@ class CodingCapabilitiesEdgeTest {
     return new BashCapability(config, executor, scheduler);
   }
 
-  private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return TestCodingConfig.withLimits(environmentRoot, lines, bytes, store);
+  private CodingToolsConfig config(int lines, int bytes) {
+    return TestCodingConfig.withLimits(environmentRoot, lines, bytes);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)

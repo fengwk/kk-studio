@@ -182,7 +182,7 @@ PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。�
 | `harness/common` | Prompt template/loader、JSON 边界工具、ResourceRef、统一 ResultContent 与 InputSchema 体系 | 依赖 JDK/Jackson，无其它 Harness 依赖 |
 | `harness/mcp` | 可复用 MCP 传输与协议适配；LangChain4j 生产依赖收敛地，提供自定义 Stdio 传输、进程树清理与超时/取消管理 | 依赖 `harness-common`、`langchain4j-mcp` 与 Jackson |
 | `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
-| `harness/environment` | Environment 身份、Capability SPI/catalog 与 Daemon v2 wire（CapabilityResult 组合 ResultContent） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
+| `harness/environment` | Environment 身份、Capability SPI/catalog 与唯一 Daemon protocol v1（控制面与 Blob 数据面契约） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
 | `harness/environment-server` | Environment daemon 会话核心：连接代际、租约围栏与按 `invocationId` 的调用协调 | 依赖 `harness-common`、`harness-environment` 与 Jackson，绝不依赖 Spring/JDBC/web |
 | `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
 | `harness/provider` | JDK 21 HttpClient + SSE 传输、增量解析与原生 Anthropic Messages 协议 | 直接依赖仅 `harness-runtime` 与 Jackson，无 Spring/LangChain4j 依赖 |
@@ -464,7 +464,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [harness-common 模块](modules/harness-common.md)：Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约。
 - [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
 - [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
-- [harness-environment 模块](modules/harness-environment.md)：Environment 身份、Capability catalog 与 Daemon v2 wire。
+- [harness-environment 模块](modules/harness-environment.md)：Environment 身份、Capability catalog 与唯一 Daemon protocol v1。
 - [harness-environment-server 模块](modules/harness-environment-server.md)：daemon 会话、租约围栏与 `invocationId` 调用协调核心。
 - [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
 - [harness-mcp 模块](modules/harness-mcp.md)：Remote/Local MCP client、总预算、取消与 stdio 进程生命周期。

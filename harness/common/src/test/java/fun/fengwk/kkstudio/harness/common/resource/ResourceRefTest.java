@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.UUID;
 
 /** ResourceRef 全 scheme / 全限制 / 规范 / 安全边界的构造校验测试。 */
 class ResourceRefTest {
@@ -411,6 +412,50 @@ class ResourceRefTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ResourceRef(percentEncodedOversized, "text/plain", null, 1L, sha256("x")));
+  }
+
+  /** blob-upload 是 Daemon 直传对象存储后的瞬态引用：必须精确 {@code blob-upload:<canonical-uuid>} 且携带非空 size/sha。 */
+  @Test
+  void acceptsCanonicalBlobUploadUrisAndRoundTripsUploadId() {
+    UUID uploadId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    ResourceRef ref =
+        new ResourceRef(
+            ResourceRef.blobUploadUri(uploadId), "text/plain", "a.txt", 3L, sha256("abc"));
+    assertEquals(uploadId, ref.blobUploadId());
+    assertEquals(uploadId, ResourceRef.blobUploadId("blob-upload:" + uploadId));
+    // 非 blob-upload scheme 一律不识别为上传引用。
+    assertNull(ResourceRef.blobUploadId("file:///export/abc"));
+    assertNull(ResourceRef.blobUploadId(null));
+  }
+
+  /** blob-upload 只接受规范小写 UUID：大写、非 UUID、缺少 scheme 或携带额外成分都返回 null。 */
+  @Test
+  void blobUploadIdRejectsNonCanonicalForms() {
+    UUID uploadId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    assertNull(ResourceRef.blobUploadId("blob-upload:" + uploadId.toString().toUpperCase()));
+    assertNull(ResourceRef.blobUploadId("blob-upload:not-a-uuid"));
+    assertNull(ResourceRef.blobUploadId(uploadId.toString()));
+    assertNull(ResourceRef.blobUploadId("blob-upload:"));
+    assertNull(ResourceRef.blobUploadId("blob-upload:" + uploadId + "/x"));
+    assertNull(ResourceRef.blobUploadId("blob-upload:" + uploadId + "?a=b"));
+    assertNull(ResourceRef.blobUploadId("x-blob-upload:" + uploadId));
+  }
+
+  /** blob-upload 必须携带非空 size/sha，且不得携带 authority/query/fragment。 */
+  @Test
+  void rejectsBlobUploadUriViolations() {
+    UUID uploadId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
+    String uri = ResourceRef.blobUploadUri(uploadId);
+    assertThrows(
+        IllegalArgumentException.class, () -> new ResourceRef(uri, "text/plain", null, null, null));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ResourceRef(uri, "text/plain", null, 1L, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ResourceRef(uri + "?a=b", "text/plain", null, 1L, sha256("a")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ResourceRef(uri.toUpperCase(), "text/plain", null, 1L, sha256("a")));
   }
 
   /** 验证 null URI 被拒绝。 */

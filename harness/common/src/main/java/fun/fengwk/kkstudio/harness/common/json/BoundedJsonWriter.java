@@ -30,11 +30,27 @@ public final class BoundedJsonWriter {
    * @throws IllegalArgumentException maxBytes 非正数或序列化失败时
    */
   public static String write(JsonNode node, int maxBytes) {
+    BoundedUtf8OutputStream out = serialize(node, maxBytes, true);
+    return out == null ? null : out.toStringUtf8();
+  }
+
+  /**
+   * 判断 {@link JsonNode} 的 UTF-8 JSON 输出是否不超过上限，不保留序列化字节。
+   *
+   * @param node 待序列化节点，不能为 null
+   * @param maxBytes 正数 UTF-8 字节上限
+   */
+  public static boolean fits(JsonNode node, int maxBytes) {
+    return serialize(node, maxBytes, false) != null;
+  }
+
+  private static BoundedUtf8OutputStream serialize(
+      JsonNode node, int maxBytes, boolean retainBytes) {
     Objects.requireNonNull(node, "node");
     if (maxBytes <= 0) {
       throw new IllegalArgumentException("maxBytes must be positive");
     }
-    BoundedUtf8OutputStream out = new BoundedUtf8OutputStream(maxBytes);
+    BoundedUtf8OutputStream out = new BoundedUtf8OutputStream(maxBytes, retainBytes);
     try {
       OBJECT_MAPPER.writeValue(out, node);
     } catch (Utf8LimitExceededException error) {
@@ -42,7 +58,7 @@ public final class BoundedJsonWriter {
     } catch (IOException exception) {
       throw new IllegalArgumentException("cannot encode JSON", exception);
     }
-    return out.toStringUtf8();
+    return out;
   }
 
   /** 编码超过上限时由 bounded 输出流抛出（IOException 使 Jackson 不做二次包装）。 */
@@ -53,23 +69,28 @@ public final class BoundedJsonWriter {
   /** 有界 UTF-8 输出流：累计超过 maxBytes 即抛出中止异常，不物化完整内容；正常完成时按 UTF-8 还原文本。 */
   private static final class BoundedUtf8OutputStream extends OutputStream {
     private final int maxBytes;
-    private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    private final ByteArrayOutputStream bytes;
     private int count;
 
-    private BoundedUtf8OutputStream(int maxBytes) {
+    private BoundedUtf8OutputStream(int maxBytes, boolean retainBytes) {
       this.maxBytes = maxBytes;
+      this.bytes = retainBytes ? new ByteArrayOutputStream() : null;
     }
 
     @Override
     public void write(int b) throws IOException {
       check(1);
-      bytes.write(b);
+      if (bytes != null) {
+        bytes.write(b);
+      }
     }
 
     @Override
     public void write(byte[] buffer, int offset, int length) throws IOException {
       check(length);
-      bytes.write(buffer, offset, length);
+      if (bytes != null) {
+        bytes.write(buffer, offset, length);
+      }
     }
 
     private void check(int length) throws IOException {
@@ -80,6 +101,9 @@ public final class BoundedJsonWriter {
     }
 
     private String toStringUtf8() {
+      if (bytes == null) {
+        throw new IllegalStateException("serialized bytes were not retained");
+      }
       return bytes.toString(StandardCharsets.UTF_8);
     }
   }

@@ -16,21 +16,17 @@ import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Daemon wire {@code PROGRESS}/{@code COMPLETED} payload 的 capability-result codec。
@@ -41,27 +37,26 @@ import java.util.Set;
  *   <li>{@code {"result":{"callId":string,"error":bool,"details":object,"contents":[...]}}}；
  *   <li>text: {@code {"type":"text","text":string}}；
  *   <li>json: {@code {"type":"json","json":value}}（value 原样编码）；
- *   <li>resource: {@code {"type":"resource","uri":string,"mediaType":string,"name":string|null,
- *       "size":long,"sha256":string,"contentBase64":string}}；{@code size}/{@code sha256} 必填且先于任何
- *       Base64 分配完成校验；{@code contentBase64} 是 resource 原始 bytes 的 RFC 4648 basic Base64（无换行），
- *       且解码后长度必须等于声明 {@code size}、摘要必须等于声明 {@code sha256}。
+ *   <li>resource: {@code
+ *       {"type":"resource","uploadId":uuid,"mediaType":string,"name":string|null,"size":long,
+ *       "sha256":string,"preview":string?}} —— 纯元数据；{@code uploadId} 是 Platform 全局 Blob 上传行的 id。
  * </ul>
  *
- * <p>编码分相：{@link #encodePartial} 只允许 text/json，任何 resource/binary 内容在任何 store 操作之前拒绝； {@link
- * #encodeCompleted} 先对全部内容做计数/单条/聚合资源字节预算预检（默认 {@link #DEFAULT_MAX_RESOURCE_BYTES} 8
- * MiB），预检全部通过后才允许任何 store 读写，杜绝后置条目超限造成半途副作用。最终 payload 的 UTF-8 字节数必须 ≤ {@link
- * #MAX_PAYLOAD_UTF8_BYTES}（16 MiB），由 bounded 输出辅助在物化前中止。
+ * <p><b>无二进制数据面：</b>wire 上永远不出现 resource bytes（既非 Base64 也非二进制帧）。Daemon 终态编码前先把 {@link
+ * BinaryResultContent} 的字节经 {@link DaemonResourceUploader} 直传对象存储，因此 wire 只携带全局上传 id；接收方只做 id
+ * 与尺寸校验，不解析、不下载、不持久化任何 daemon 本地地址。解码侧把该 id 还原为进程内的瞬态 {@link
+ * ResourceRef#blobUploadUri(java.util.UUID)} 引用（{@code blob-upload:<uploadId>}），该 scheme 只在本进程内存在。
  *
- * <p>解码侧：{@link ResourceResultContent} 通过 {@link DaemonResourceStore#read} 读取字节并复核 size/sha； {@link
- * BinaryResultContent} 先经 {@link DaemonResourceStore#store} 落盘再编码返回的 resource。解码将 resource bytes
- * 还原为内联 {@link BinaryResultContent} 并保留可复核的文本 metadata，不传播 preview，也不在 codec 边界持久化（入站 daemon URI
- * 永远不是 durable 目的地）。解码先施加原始 payload 的 UTF-8 上限（{@link #MAX_PAYLOAD_UTF8_BYTES}），再在 Base64 分配前按“当前
- * size 是否超过剩余聚合预算”拒绝超限条目， 并配置 Jackson {@link StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
+ * <p>编码分相：{@link #encodeProgress} 只允许 text/json，任何 resource/binary 内容在任何上传之前拒绝；{@link
+ * #encodeCompleted} 先完成全部计数与尺寸预算预检，预检全部通过后才开始上传，杜绝后置条目超限造成半途副作用。最终 payload 的 UTF-8 字节数必须 ≤ {@link
+ * #MAX_PAYLOAD_UTF8_BYTES}（16 MiB），由 bounded 输出辅助在物化前中止；由于 resource 不再内联字节，该上限实际上 只约束 text/json
+ * 与元数据。
+ *
+ * <p>解码侧：resource 还原为携带瞬态 {@code blob-upload:<uploadId>} 引用的 {@link ResourceResultContent}，并复核声明尺寸
+ * 落在 {@code maximumResourceBytes} 聚合预算内。解码先施加原始 payload 的 UTF-8 上限，并配置 Jackson {@link
+ * StreamReadConstraints} 限制字符串/嵌套/数字长度以防解析放大。
  */
 public final class DaemonCapabilityResultCodec {
-
-  /** 默认单资源/聚合资源字节预算：8 MiB（Base64 后约 10.7 MiB 字符，适配 gateway 默认 16 MiB 入站文本上限）。 */
-  public static final long DEFAULT_MAX_RESOURCE_BYTES = 8L * 1024 * 1024;
 
   /** 结果 payload 的原始 UTF-8 上限（解码前）与最终编码输出上限：16 MiB。 */
   public static final int MAX_PAYLOAD_UTF8_BYTES = 16 * 1024 * 1024;
@@ -85,55 +80,46 @@ public final class DaemonCapabilityResultCodec {
   }
 
   private static final Set<String> RESOURCE_FIELDS =
-      Set.of(
-          "type",
-          "uri",
-          "mediaType",
-          "name",
-          "size",
-          "sha256",
-          "contentBase64",
-          "preview",
-          "textMetadata");
+      Set.of("type", "uploadId", "mediaType", "name", "size", "sha256", "preview");
+  private static final UUID PREFLIGHT_UPLOAD_ID = new UUID(0L, 0L);
+  private static final DaemonResourceUploader PREFLIGHT_UPLOADER =
+      (invocationId, mediaType, name, bytes) ->
+          new ResourceRef(
+              ResourceRef.blobUploadUri(PREFLIGHT_UPLOAD_ID),
+              mediaType,
+              name,
+              (long) bytes.length,
+              "0".repeat(64));
 
   /**
-   * 编码 PROGRESS 结果：只允许 text/json 内容；任何 {@link ResourceResultContent}/{@link BinaryResultContent} 都在
-   * 任何 store 操作之前被拒绝。
+   * 编码 PROGRESS 结果：只允许 text/json 内容；任何 {@link ResourceResultContent}/{@link BinaryResultContent}
+   * 都在任何上传之前被拒绝。
    */
-  public String encodePartial(
-      EnvironmentCapabilityResult partial, DaemonResourceStore resourceStore) {
+  public String encodeProgress(EnvironmentCapabilityResult partial) {
     Objects.requireNonNull(partial, "partial");
-    Objects.requireNonNull(resourceStore, "resourceStore");
     for (ResultContent content : partial.contents()) {
       if (!(content instanceof TextResultContent) && !(content instanceof JsonResultContent)) {
         throw new DaemonProtocolException(
             "PROGRESS result must not contain " + content.getClass().getSimpleName() + " content");
       }
     }
-    return writeBoundedPayload(buildResultTree(partial, resourceStore));
-  }
-
-  /** 编码 COMPLETED 结果，使用默认资源字节预算 {@link #DEFAULT_MAX_RESOURCE_BYTES}。 */
-  public String encodeCompleted(
-      EnvironmentCapabilityResult result, DaemonResourceStore resourceStore) {
-    return encodeCompleted(result, DEFAULT_MAX_RESOURCE_BYTES, resourceStore);
+    return writeBoundedPayload(buildResultTree(partial, null, null));
   }
 
   /**
    * 编码 COMPLETED 结果。
    *
-   * <p>在第一个 {@code store.store}/{@code store.read}、Base64 与输出树构建之前完成全部预检：内容数 ≤ {@link
-   * EnvironmentCapabilityResult#MAX_CONTENT_ITEMS}（由 EnvironmentCapabilityResult 构造期强制，codec
-   * 不再重复）；resource ref 必须携带非空 size/sha； binary 大小取自内容；单条与聚合资源字节都必须 ≤ {@code
-   * maximumResourceBytes}。任何后置条目超限都不会产生任何 store 副作用。 最终 payload 必须 ≤ {@link
-   * #MAX_PAYLOAD_UTF8_BYTES} UTF-8 字节。
+   * <p>在第一个上传或字节读取之前完成全部预检：resource ref 必须携带非空 size/sha、binary 大小取自内容、单条与聚合资源字节都必须 ≤ {@code
+   * maximumResourceBytes}。任何后置条目超限都不会产生任何上传副作用。
+   *
+   * @param maximumResourceBytes 本连接 WELCOME 通告的单条/聚合资源字节预算
+   * @param uploader 把 binary 字节直传对象存储的端口；为 {@code null} 时 binary 内容确定性失败
    */
   public String encodeCompleted(
       EnvironmentCapabilityResult result,
       long maximumResourceBytes,
-      DaemonResourceStore resourceStore) {
+      DaemonResourceUploader uploader) {
     Objects.requireNonNull(result, "result");
-    Objects.requireNonNull(resourceStore, "resourceStore");
     if (maximumResourceBytes <= 0) {
       throw new IllegalArgumentException("maximumResourceBytes must be positive");
     }
@@ -142,13 +128,25 @@ public final class DaemonCapabilityResultCodec {
       long size;
       if (content instanceof ResourceResultContent resource) {
         ResourceRef ref = resource.resource();
+        if (ref.blobUploadId() == null) {
+          throw new DaemonProtocolException(
+              "resource must be uploaded to global storage before encoding");
+        }
         if (ref.size() == null || ref.sha256() == null) {
           throw new DaemonProtocolException(
               "resource ref must declare size and sha256 for the daemon wire");
         }
+        if (resource.textMetadata() != null) {
+          throw new DaemonProtocolException(
+              "daemon resource result must not declare text artifact metadata");
+        }
         size = ref.size();
       } else if (content instanceof BinaryResultContent binary) {
-        size = binary.content().length;
+        if (binary.textMetadata() != null) {
+          throw new DaemonProtocolException(
+              "daemon binary result must not declare text artifact metadata");
+        }
+        size = binary.size();
       } else {
         size = 0;
       }
@@ -159,15 +157,21 @@ public final class DaemonCapabilityResultCodec {
       }
       aggregate += size;
     }
-    return writeBoundedPayload(buildResultTree(result, resourceStore));
+    // 用固定长度 uploadId/sha 元数据构建等尺寸 wire 树，只计数不保留输出；完整 payload
+    // 通过上限后才允许真实上传，避免后置 text/json 超限留下无消费者对象。
+    ObjectNode preflight = buildResultTree(result, maximumResourceBytes, PREFLIGHT_UPLOADER);
+    if (!BoundedJsonWriter.fits(preflight, MAX_PAYLOAD_UTF8_BYTES)) {
+      throw payloadTooLarge();
+    }
+    return writeBoundedPayload(buildResultTree(result, maximumResourceBytes, uploader));
   }
 
   /**
-   * 将 wire JSON 文本解码为 {@link EnvironmentCapabilityResult}；resource 还原为内联 {@link
-   * BinaryResultContent}。
+   * 将 wire JSON 文本解码为 {@link EnvironmentCapabilityResult}；resource 还原为携带 {@code blob-upload:} 引用的
+   * {@link ResourceResultContent}。
    */
   public EnvironmentCapabilityResult decodeResult(String payloadJson) {
-    return decodeResult(payloadJson, null, DEFAULT_MAX_RESOURCE_BYTES, true);
+    return decodeResult(payloadJson, null, Long.MAX_VALUE, true);
   }
 
   /**
@@ -176,13 +180,13 @@ public final class DaemonCapabilityResultCodec {
    * @param expectedCallId 期望的调用 ID；空白或 null 时拒绝。
    * @param maximumResourceBytes 单条/聚合资源字节预算。
    */
-  public EnvironmentCapabilityResult decodePartialForInvocation(
+  public EnvironmentCapabilityResult decodeProgressForInvocation(
       String payloadJson, String expectedCallId, long maximumResourceBytes) {
     return decodeResult(payloadJson, requireCallId(expectedCallId), maximumResourceBytes, false);
   }
 
   /**
-   * 解码 COMPLETED 结果（专用入口：允许 resource 并还原为内联 {@link BinaryResultContent}）。
+   * 解码 COMPLETED 结果（专用入口：允许 resource 并还原为 {@code blob-upload:} 引用）。
    *
    * @param expectedCallId 期望的调用 ID；空白或 null 时拒绝。
    * @param maximumResourceBytes 单条/聚合资源字节预算。
@@ -220,15 +224,13 @@ public final class DaemonCapabilityResultCodec {
       throw new DaemonProtocolException("payload is not valid Unicode");
     }
     ObjectNode root = readRootObject(payloadJson, "result");
-    Set<String> allowedTop = Set.of("result");
-    rejectUnknownFields(root, allowedTop, "result");
+    rejectUnknownFields(root, Set.of("result"), "result");
     JsonNode resultNode = root.get("result");
     if (resultNode == null || resultNode.isNull()) {
       throw new DaemonProtocolException("payload must declare 'result'");
     }
     ObjectNode resultObject = requiredObject(resultNode, "result");
-    Set<String> allowedResult = Set.of("callId", "error", "details", "contents");
-    rejectUnknownFields(resultObject, allowedResult, "result");
+    rejectUnknownFields(resultObject, Set.of("callId", "error", "details", "contents"), "result");
     String callId = requiredText(resultObject, "callId", "result");
     if (expectedCallId != null && !expectedCallId.equals(callId)) {
       throw new DaemonProtocolException("result callId does not match expected invocationId");
@@ -256,17 +258,14 @@ public final class DaemonCapabilityResultCodec {
               + " items");
     }
     List<ResultContent> contents = new ArrayList<>();
-    long decodedResourceBytes = 0;
+    long declaredResourceBytes = 0;
     int index = 0;
     for (JsonNode element : contentsNode) {
-      // 剩余聚合预算在 readContent 内先于任何 Base64 分配完成预检；预检保证累加不溢出。
+      // 先按声明尺寸扣减剩余聚合预算，再解析任何其它字段；超限条目在构造 ResourceRef 前即被拒绝。
+      long remaining = maximumResourceBytes - declaredResourceBytes;
       DecodedContent decoded =
-          readContent(
-              element,
-              "result.contents[" + index + "]",
-              maximumResourceBytes - decodedResourceBytes,
-              allowResources);
-      decodedResourceBytes += decoded.resourceBytes;
+          readContent(element, "result.contents[" + index + "]", remaining, allowResources);
+      declaredResourceBytes += decoded.resourceBytes;
       contents.add(decoded.content);
       index++;
     }
@@ -279,7 +278,9 @@ public final class DaemonCapabilityResultCodec {
   }
 
   private ObjectNode buildResultTree(
-      EnvironmentCapabilityResult result, DaemonResourceStore resourceStore) {
+      EnvironmentCapabilityResult result,
+      Long maximumResourceBytes,
+      DaemonResourceUploader uploader) {
     ObjectNode root = OBJECT_MAPPER.createObjectNode();
     ObjectNode wireResult = root.putObject("result");
     wireResult.put("callId", result.callId());
@@ -288,7 +289,7 @@ public final class DaemonCapabilityResultCodec {
     wireResult.set("details", details);
     ArrayNode contents = wireResult.putArray("contents");
     for (ResultContent content : result.contents()) {
-      writeContent(contents, content, resourceStore);
+      writeContent(contents, content, result.callId(), maximumResourceBytes, uploader);
     }
     return root;
   }
@@ -297,13 +298,22 @@ public final class DaemonCapabilityResultCodec {
   private String writeBoundedPayload(ObjectNode root) {
     String payload = BoundedJsonWriter.write(root, MAX_PAYLOAD_UTF8_BYTES);
     if (payload == null) {
-      throw new DaemonProtocolException(
-          "daemon payload exceeds " + MAX_PAYLOAD_UTF8_BYTES + " UTF-8 bytes");
+      throw payloadTooLarge();
     }
     return payload;
   }
 
-  private void writeContent(ArrayNode contents, ResultContent content, DaemonResourceStore store) {
+  private DaemonProtocolException payloadTooLarge() {
+    return new DaemonProtocolException(
+        "daemon payload exceeds " + MAX_PAYLOAD_UTF8_BYTES + " UTF-8 bytes");
+  }
+
+  private void writeContent(
+      ArrayNode contents,
+      ResultContent content,
+      String invocationId,
+      Long maximumResourceBytes,
+      DaemonResourceUploader uploader) {
     ObjectNode wireContent = contents.addObject();
     if (content instanceof TextResultContent text) {
       wireContent.put("type", "text");
@@ -311,27 +321,43 @@ public final class DaemonCapabilityResultCodec {
     } else if (content instanceof JsonResultContent json) {
       wireContent.put("type", "json");
       wireContent.set("json", readJson(json.json()));
+    } else if (content instanceof BinaryResultContent binary) {
+      // 字节永不进入 wire：先直传对象存储，再把返回的瞬时引用编码为纯元数据。
+      ResourceRef uploaded =
+          upload(invocationId, binary.mediaType(), null, binary.content(), uploader);
+      writeResource(wireContent, uploadIdOf(uploaded), uploaded, null);
     } else if (content instanceof ResourceResultContent resource) {
       ResourceRef ref = resource.resource();
-      DaemonResourceRef dRef =
-          new DaemonResourceRef(ref.uri(), ref.mediaType(), ref.name(), ref.size(), ref.sha256());
-      byte[] bytes = readAndVerify(store, dRef, ref);
-      writeResource(wireContent, ref, bytes, resource.preview(), resource.textMetadata());
-    } else if (content instanceof BinaryResultContent binary) {
-      ResourceRef ref;
-      try {
-        DaemonResourceRef stored = store.store(binary.content(), binary.mediaType());
-        ref =
-            new ResourceRef(
-                stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
-      } catch (IOException error) {
-        throw new DaemonProtocolException("cannot store binary result content");
-      } catch (RuntimeException error) {
-        throw new DaemonProtocolException("cannot store binary result content");
+      // 只有已直传全局存储的上传引用可以进入终态：wire 只承载 uploadId，本地地址不是可跨节点取数地址。
+      UUID uploadId = ref.blobUploadId();
+      if (uploadId == null) {
+        throw new DaemonProtocolException(
+            "resource must be uploaded to global storage before encoding");
       }
-      writeResource(wireContent, ref, binary.content(), null, binary.textMetadata());
+      writeResource(wireContent, uploadId, ref, resource.preview());
     } else {
       throw new DaemonProtocolException("unsupported result content: " + content.getClass());
+    }
+  }
+
+  private ResourceRef upload(
+      String invocationId,
+      String mediaType,
+      String name,
+      byte[] bytes,
+      DaemonResourceUploader uploader) {
+    if (uploader == null) {
+      throw new DaemonProtocolException("resource upload is not configured");
+    }
+    try {
+      return uploader.upload(invocationId, mediaType, name, bytes);
+    } catch (IOException error) {
+      throw new DaemonProtocolException("cannot upload resource content");
+    } catch (RuntimeException error) {
+      if (error instanceof DaemonProtocolException protocol) {
+        throw protocol;
+      }
+      throw new DaemonProtocolException("cannot upload resource content");
     }
   }
 
@@ -339,12 +365,12 @@ public final class DaemonCapabilityResultCodec {
       JsonNode node, String context, long remainingResourceBytes, boolean allowResources) {
     ObjectNode obj = requiredObject(node, context);
     String type = requiredText(obj, "type", context);
-    switch (type) {
+    return switch (type) {
       case "text" -> {
         rejectUnknownFields(obj, Set.of("type", "text"), context);
         // 空字符串是合法文本内容；只要求类型是 string。
         String text = requiredString(obj, "text", context);
-        return new DecodedContent(new TextResultContent(text), 0);
+        yield new DecodedContent(new TextResultContent(text), 0);
       }
       case "json" -> {
         rejectUnknownFields(obj, Set.of("type", "json"), context);
@@ -354,159 +380,78 @@ public final class DaemonCapabilityResultCodec {
         }
         try {
           // JsonResultContent 构造期的 1 MiB 上限校验：超限/非法 Unicode 按协议错误拒绝。
-          return new DecodedContent(new JsonResultContent(writeJson(value)), 0);
+          yield new DecodedContent(new JsonResultContent(writeJson(value)), 0);
         } catch (IllegalArgumentException error) {
           throw new DaemonProtocolException(context + " 'json' is invalid or too large");
         }
       }
-      case "resource" -> {
-        if (!allowResources) {
-          throw new DaemonProtocolException("PROGRESS result must not contain resource content");
-        }
-        rejectUnknownFields(obj, RESOURCE_FIELDS, context);
-        String uri = requiredText(obj, "uri", context);
-        String mediaType = requiredText(obj, "mediaType", context);
-        String name = optionalTextOrNull(obj, "name", context);
-        // size/sha256 对每个 wire resource 都是必填：缺失或 null 直接拒绝，杜绝声明为 null 绕过大小预检。
-        long size = requiredLong(obj, "size", context);
-        String sha256 = requiredText(obj, "sha256", context);
-        String contentBase64 = requiredString(obj, "contentBase64", context);
-        String preview = null;
-        JsonNode previewNode = obj.get("preview");
-        if (previewNode != null && !previewNode.isNull()) {
-          if (!previewNode.isTextual()) {
-            throw new DaemonProtocolException(context + " 'preview' must be a string or null");
-          }
-          preview = previewNode.textValue();
-          if (ResourceRef.utf8LengthUpTo(preview, "preview", ResourceRef.MAX_PREVIEW_UTF8_BYTES)
-              > ResourceRef.MAX_PREVIEW_UTF8_BYTES) {
-            throw new DaemonProtocolException(
-                context
-                    + " 'preview' exceeds "
-                    + ResourceRef.MAX_PREVIEW_UTF8_BYTES
-                    + " UTF-8 bytes");
-          }
-        }
-        TextArtifactMetadata textMetadata = null;
-        JsonNode metaNode = obj.get("textMetadata");
-        if (metaNode != null && !metaNode.isNull()) {
-          ObjectNode metaObj = requiredObject(metaNode, context + ".textMetadata");
-          rejectUnknownFields(
-              metaObj, Set.of("totalBytes", "totalLines"), context + ".textMetadata");
-          long totalBytes = requiredLong(metaObj, "totalBytes", context + ".textMetadata");
-          long totalLines = requiredLong(metaObj, "totalLines", context + ".textMetadata");
-          if (totalBytes < 0 || totalLines < 0) {
-            throw new DaemonProtocolException(
-                context + ".textMetadata totalBytes and totalLines must not be negative");
-          }
-          textMetadata = new TextArtifactMetadata(totalBytes, totalLines);
-        }
-        ResourceRef ref;
-        // 先完成全量字段/URI 校验，再进行任何 Base64 分配。
-        try {
-          ref = new ResourceRef(uri, mediaType, name, size, sha256);
-        } catch (IllegalArgumentException error) {
-          throw new DaemonProtocolException(context + " resource fields are invalid");
-        }
-        // 聚合预检先于 Base64 校验/分配：即使 contentBase64 非法，预算耗尽也必须报聚合错误。
-        if (size > remainingResourceBytes) {
-          throw new DaemonProtocolException(
-              "aggregate decoded resource bytes exceed maximumResourceBytes: declared="
-                  + size
-                  + " remaining="
-                  + remainingResourceBytes);
-        }
-        if (contentBase64.length() != canonicalBase64Length(size)) {
-          throw new DaemonProtocolException(
-              context
-                  + " 'contentBase64' must use canonical Base64 with encoded length matching "
-                  + "'size'");
-        }
-        byte[] bytes;
-        try {
-          bytes = Base64.getDecoder().decode(contentBase64);
-        } catch (IllegalArgumentException error) {
-          throw new DaemonProtocolException(context + " 'contentBase64' is not valid Base64");
-        }
-        if (!Base64.getEncoder().encodeToString(bytes).equals(contentBase64)) {
-          throw new DaemonProtocolException(context + " 'contentBase64' must use canonical Base64");
-        }
-        if (bytes.length != size) {
-          throw new DaemonProtocolException(
-              context
-                  + " 'contentBase64' decoded length does not match 'size': declared="
-                  + size
-                  + " actual="
-                  + bytes.length);
-        }
-        if (!sha256.equals(sha256Hex(bytes))) {
-          throw new DaemonProtocolException(
-              context + " 'sha256' does not match decoded 'contentBase64' bytes");
-        }
-        try {
-          return new DecodedContent(
-              new BinaryResultContent(mediaType, bytes, textMetadata), bytes.length);
-        } catch (IllegalArgumentException invalid) {
-          throw new DaemonProtocolException(
-              context + " text metadata does not match decoded resource bytes");
-        }
-      }
+      case "resource" -> readResource(obj, context, remainingResourceBytes, allowResources);
       default -> throw new DaemonProtocolException(context + " unknown content type: " + type);
-    }
+    };
   }
 
-  private static byte[] readAndVerify(
-      DaemonResourceStore store, DaemonResourceRef dRef, ResourceRef ref) {
-    byte[] bytes;
-    try {
-      bytes = store.read(dRef);
-    } catch (IOException | RuntimeException error) {
-      throw new DaemonProtocolException("cannot read resource bytes");
+  private DecodedContent readResource(
+      ObjectNode obj, String context, long remainingResourceBytes, boolean allowResources) {
+    if (!allowResources) {
+      throw new DaemonProtocolException("PROGRESS result must not contain resource content");
     }
-    if (bytes == null) {
-      throw new DaemonProtocolException("resource store returned null bytes");
-    }
-    if (ref.size() != null && bytes.length != ref.size()) {
+    rejectUnknownFields(obj, RESOURCE_FIELDS, context);
+    UUID uploadId = requiredUuid(obj, "uploadId", context);
+    String mediaType = requiredText(obj, "mediaType", context);
+    String name = optionalTextOrNull(obj, "name", context);
+    // size/sha256 对每个 wire resource 都是必填：缺失或 null 直接拒绝，杜绝声明为 null 绕过大小预检。
+    long size = requiredLong(obj, "size", context);
+    String sha256 = requiredText(obj, "sha256", context);
+    String preview = readPreview(obj, context);
+    // 聚合预检先于任何引用解析：预算耗尽必须报聚合错误，而不是更晚的字段错误。
+    if (size > remainingResourceBytes) {
       throw new DaemonProtocolException(
-          "resource store size mismatch: declared=" + ref.size() + " actual=" + bytes.length);
+          "aggregate declared resource bytes exceed maximumResourceBytes: declared="
+              + size
+              + " remaining="
+              + remainingResourceBytes);
     }
-    if (ref.sha256() != null && !ref.sha256().equals(sha256Hex(bytes))) {
-      throw new DaemonProtocolException("resource store sha256 mismatch");
+    ResourceRef ref;
+    try {
+      ref = new ResourceRef(ResourceRef.blobUploadUri(uploadId), mediaType, name, size, sha256);
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(context + " resource fields are invalid");
     }
-    return bytes;
+    // wire 只承载元数据：解码结果保留进程内的瞬态上传引用，字节由消费方通过全局上传契约原子转移。
+    return new DecodedContent(new ResourceResultContent(ref, preview, null), size);
+  }
+
+  private String readPreview(ObjectNode obj, String context) {
+    JsonNode previewNode = obj.get("preview");
+    if (previewNode == null || previewNode.isNull()) {
+      return null;
+    }
+    if (!previewNode.isTextual()) {
+      throw new DaemonProtocolException(context + " 'preview' must be a string or null");
+    }
+    String preview = previewNode.textValue();
+    if (ResourceRef.utf8LengthUpTo(preview, "preview", ResourceRef.MAX_PREVIEW_UTF8_BYTES)
+        > ResourceRef.MAX_PREVIEW_UTF8_BYTES) {
+      throw new DaemonProtocolException(
+          context + " 'preview' exceeds " + ResourceRef.MAX_PREVIEW_UTF8_BYTES + " UTF-8 bytes");
+    }
+    return preview;
   }
 
   private void writeResource(
-      ObjectNode wireContent,
-      ResourceRef ref,
-      byte[] bytes,
-      String preview,
-      TextArtifactMetadata textMetadata) {
-    if (ref.size() == null || ref.sha256() == null) {
+      ObjectNode wireContent, UUID uploadId, ResourceRef ref, String preview) {
+    if (uploadId == null || ref.size() == null || ref.sha256() == null) {
       throw new DaemonProtocolException(
-          "resource ref must declare size and sha256 for the daemon wire");
-    }
-    if (bytes.length != ref.size()) {
-      throw new DaemonProtocolException(
-          "resource size mismatch: declared=" + ref.size() + " actual=" + bytes.length);
-    }
-    if (!ref.sha256().equals(sha256Hex(bytes))) {
-      throw new DaemonProtocolException("resource sha256 mismatch");
+          "resource ref must declare an upload id and size/sha256 for the daemon wire");
     }
     wireContent.put("type", "resource");
-    wireContent.put("uri", ref.uri());
+    wireContent.put("uploadId", uploadId.toString());
     wireContent.put("mediaType", ref.mediaType());
     putNullableText(wireContent, "name", ref.name());
-    putNullableLong(wireContent, "size", ref.size());
-    putNullableText(wireContent, "sha256", ref.sha256());
-    wireContent.put("contentBase64", Base64.getEncoder().encodeToString(bytes));
+    wireContent.put("size", ref.size());
+    wireContent.put("sha256", ref.sha256());
     if (preview != null) {
       wireContent.put("preview", preview);
-    }
-    if (textMetadata != null) {
-      ObjectNode meta = wireContent.putObject("textMetadata");
-      meta.put("totalBytes", textMetadata.totalBytes());
-      meta.put("totalLines", textMetadata.totalLines());
     }
   }
 
@@ -604,17 +549,13 @@ public final class DaemonCapabilityResultCodec {
     return value.textValue();
   }
 
-  private Long optionalLongOrNull(ObjectNode obj, String field, String context) {
+  private long requiredLong(ObjectNode obj, String field, String context) {
     JsonNode value = obj.get(field);
-    if (value == null) {
+    if (value == null || value.isNull()) {
       throw new DaemonProtocolException(context + " must declare '" + field + "'");
     }
-    if (value.isNull()) {
-      return null;
-    }
     if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw new DaemonProtocolException(
-          context + " '" + field + "' must be a long integer or null");
+      throw new DaemonProtocolException(context + " '" + field + "' must be a long integer");
     }
     long result = value.longValue();
     if (result < 0) {
@@ -623,12 +564,18 @@ public final class DaemonCapabilityResultCodec {
     return result;
   }
 
-  private long requiredLong(ObjectNode obj, String field, String context) {
-    Long value = optionalLongOrNull(obj, field, context);
-    if (value == null) {
-      throw new DaemonProtocolException(context + " must declare '" + field + "'");
+  /** 严格读取一个规范小写 UUID 字符串字段。 */
+  private UUID requiredUuid(ObjectNode obj, String field, String context) {
+    String text = requiredText(obj, field, context);
+    try {
+      UUID parsed = UUID.fromString(text);
+      if (!parsed.toString().equals(text)) {
+        throw new DaemonProtocolException(context + " '" + field + "' must be a canonical UUID");
+      }
+      return parsed;
+    } catch (IllegalArgumentException error) {
+      throw new DaemonProtocolException(context + " '" + field + "' must be a canonical UUID");
     }
-    return value;
   }
 
   private boolean requiredBoolean(ObjectNode obj, String field, String context) {
@@ -642,22 +589,6 @@ public final class DaemonCapabilityResultCodec {
     return value.booleanValue();
   }
 
-  private long canonicalBase64Length(long sizeBytes) {
-    long groups = sizeBytes / 3;
-    if (sizeBytes % 3 != 0) {
-      groups++;
-    }
-    return groups > Long.MAX_VALUE / 4 ? Long.MAX_VALUE : groups * 4;
-  }
-
-  private static String sha256Hex(byte[] bytes) {
-    try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 unavailable", error);
-    }
-  }
-
   private static void putNullableText(ObjectNode node, String field, String value) {
     if (value == null) {
       node.putNull(field);
@@ -666,12 +597,10 @@ public final class DaemonCapabilityResultCodec {
     }
   }
 
-  private static void putNullableLong(ObjectNode node, String field, Long value) {
-    if (value == null) {
-      node.putNull(field);
-    } else {
-      node.put(field, value.longValue());
-    }
+  /** 从瞬态 {@code blob-upload:<uploadId>} 引用中取出 uploadId；非该 scheme 时返回 null。 */
+  public static UUID uploadIdOf(ResourceRef ref) {
+    Objects.requireNonNull(ref, "ref");
+    return ref.blobUploadId();
   }
 
   private void rejectUnknownFields(ObjectNode obj, Set<String> allowed, String context) {

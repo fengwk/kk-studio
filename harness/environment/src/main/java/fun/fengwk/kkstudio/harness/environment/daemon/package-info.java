@@ -1,7 +1,7 @@
 /**
  * Platform 与 Environment Daemon 共享的 WebSocket JSON wire 协议。
  *
- * <p>Envelope 只描述传输顺序和关联标识；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical {@code
+ * <p>Envelope 只描述消息类型和关联标识，不承载全局顺序；具体 payload 在协议版本内按 message type 解释。scope 字段为 canonical {@code
  * EnvironmentId}（Environment 的唯一路由 UUID）。
  *
  * <p>当前 {@code READY} payload 由 {@link
@@ -18,8 +18,11 @@
  *
  * <p>result payload（{@code PROGRESS} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec} 编解码，通过通用 {@code
- * INVOKE} 模型承载所有能力（包括 Skill），Resource 引用由 {@link
- * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef} 建模。
+ * INVOKE} 模型承载所有能力（包括 Skill）。resource 内容不在 wire 上传输：Daemon 终态编码前把字节经 {@link
+ * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader} 直传全局对象存储，wire 只承载 {@code
+ * uploadId} 与权威元数据，控制面由 {@link
+ * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec} 的 {@code
+ * RESOURCE_UPLOAD_REQUEST}/{@code COMMIT}/{@code TICKET} 消息承载。
  *
  * <p>需要 workdir 的能力由具体 arguments 携带目标 OS 上的绝对目录；{@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax} 提供发送前的纯词法形状校验。

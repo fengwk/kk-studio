@@ -12,11 +12,11 @@
  * <p>稳定的能力集合：{@code fs.read}、{@code fs.write}、{@code fs.edit}、{@code process.exec}、{@code
  * fs.grep}、{@code fs.find}、{@code lsp.goto-definition}、{@code lsp.workspace-symbols}、{@code
  * lsp.java-decompile}。{@code fs.write} 与 {@code fs.edit} 只处理 UTF-8 文本并保留既有编码、BOM 与行尾表示；LSP
- * capabilities 使用可选的本机命令 bridge（{@code kkstudio.daemon.lsp-bridge}）； 未配置时返回明确的不可用错误，但 {@code
+ * capabilities 使用可选的本机命令 bridge（{@code --lsp-bridge-command}）； 未配置时返回明确的不可用错误，但 {@code
  * lsp_java_decompile} 对可解析的 class 目标可回退到 {@code javap}。
  *
- * <p>大型或二进制输出通过 {@link fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore}（独立部署时为 {@link
- * fun.fengwk.kkstudio.harness.daemon.coding.LocalFileResourceStore}）存储为不可变 Resource，并以 Resource
- * 引用形式发出。
+ * <p>大文本输出由 {@link fun.fengwk.kkstudio.harness.daemon.coding.TextOutputStore} 保存在 data
+ * directory，并返回有界 preview 与本地可分页读取路径；图片等二进制结果以内存 {@code BinaryResultContent} 交给 Daemon 运行时，经预签名 PUT
+ * 直传全局对象存储，不在本包落盘或通过 WebSocket 携带字节。
  */
 package fun.fengwk.kkstudio.harness.daemon.coding;

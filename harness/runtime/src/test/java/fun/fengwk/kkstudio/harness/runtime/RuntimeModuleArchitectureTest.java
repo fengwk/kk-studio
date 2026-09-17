@@ -144,6 +144,7 @@ class RuntimeModuleArchitectureTest {
         Set.of(
             "com.fasterxml.jackson.core:jackson-databind",
             "com.google.re2j:re2j",
+            "com.squareup.okhttp3:okhttp",
             "dev.langchain4j:langchain4j-skills",
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",

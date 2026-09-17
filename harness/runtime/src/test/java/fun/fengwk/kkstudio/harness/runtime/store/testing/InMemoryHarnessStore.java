@@ -132,6 +132,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
   private int transactionCount;
 
+  /** 测试钩子：在每个事务开始前执行，用于确定性地观察事务与并发回调的因果关系。 */
+  public volatile Runnable beforeTransaction;
+
   public int transactionCount() {
     synchronized (monitor) {
       return transactionCount;
@@ -147,6 +150,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
   @Override
   public <T> T transaction(Function<Transaction, T> callback) {
     Objects.requireNonNull(callback, "callback");
+    Runnable hook = beforeTransaction;
+    if (hook != null) {
+      hook.run();
+    }
     synchronized (monitor) {
       if (inTransaction) {
         throw new IllegalStateException("nested transactions are not supported");

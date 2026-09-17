@@ -36,6 +36,9 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.StorageS3TestConfiguration;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
+import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -74,6 +77,7 @@ class GlobalStorageToolResultHistoryMaterializerTest extends PostgresSpringTestS
   @Autowired private ManagedResourceStore resourceStore;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private StorageUploadService uploadService;
 
   private TransactionTemplate tx;
 
@@ -336,6 +340,207 @@ class GlobalStorageToolResultHistoryMaterializerTest extends PostgresSpringTestS
                 SESSION,
                 "demo_tool",
                 new ToolResult("call-1", List.of(new ResourceResultContent(ref)), false, "{}")));
+  }
+
+  /**
+   * Daemon 直传路径：终态只携带 {@code blob-upload:<uploadId>} 引用，物化必须在同一事务内把它原子转移为 Session 引用。
+   *
+   * <p>本用例同时锁定核心契约：顺序为 {@code lockReady → 校验 blob 权威事实 → retainRef → delete}；durable history 只保留
+   * blobId，绝不携带 bucket/对象 key/预签名 URL。
+   */
+  @Test
+  void uploadedResourceIsConsumedAtomicallyWithAuthoritativeFilename() {
+    byte[] bytes = "daemon-uploaded".getBytes(StandardCharsets.UTF_8);
+    String uploadId = reserveAndCompleteUpload("daemon-original.png", "image/png", bytes);
+
+    List<AgentMessageContent> contents =
+        inTransaction(
+            new ToolResult(
+                "call-1",
+                List.of(
+                    new ResourceResultContent(
+                        blobUploadRef(uploadId, "image/png", bytes, "untrusted.png"),
+                        "daemon preview")),
+                false,
+                "{}"));
+
+    ResourceMessageContent media = assertInstanceOf(ResourceMessageContent.class, contents.get(0));
+    assertFalse(media.isExternalizedText());
+    // 权威文件名来自上传行，而不是终态消息声明的不可信名称。
+    assertEquals("daemon-original.png", media.name());
+    assertEquals("daemon preview", media.preview());
+    assertArrayEquals(bytes, s3Storage.objectBytes(StorageObjectKeys.blobOriginal(media.blobId())));
+
+    // 消费后 Session 恰好持有一个引用，且 consume 已请求释放旧的上传 owner。
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from session_blob_ref where session_id = ? and blob_id = ?",
+            Integer.class,
+            SESSION,
+            media.blobId()));
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            UUID.fromString(uploadId)));
+  }
+
+  /** 未就绪或与上传行权威事实不符的引用必须整体回滚，绝不产生部分 history 或悬空引用。 */
+  @Test
+  void uploadedResourceRejectsNotReadyAndMismatchedReferences() {
+    byte[] bytes = "payload".getBytes(StandardCharsets.UTF_8);
+    String readyUploadId = reserveAndCompleteUpload("ready.bin", "application/octet-stream", bytes);
+
+    // 仅 reserve、未 complete：上传行仍是 PENDING，lockReady 必须拒绝。
+    byte[] pendingBytes = "pending-payload".getBytes(StandardCharsets.UTF_8);
+    StorageUploadReserveRequestDTO pendingRequest = new StorageUploadReserveRequestDTO();
+    pendingRequest.setFilename("pending.bin");
+    pendingRequest.setMediaType("application/octet-stream");
+    pendingRequest.setSizeBytes((long) pendingBytes.length);
+    pendingRequest.setSha256(sha256Hex(pendingBytes));
+    StorageUploadDTO pending = uploadService.reserve(pendingRequest);
+
+    List<ResourceResultContent> rejected =
+        List.of(
+            new ResourceResultContent(
+                blobUploadRef(pending.getId(), "application/octet-stream", pendingBytes, null)),
+            new ResourceResultContent(blobUploadRef(readyUploadId, "image/png", bytes, null)),
+            new ResourceResultContent(uploadedRefWithSha(readyUploadId, bytes, "a".repeat(64))),
+            new ResourceResultContent(
+                uploadedRefWithSize(
+                    readyUploadId, "application/octet-stream", bytes, bytes.length + 1)));
+
+    for (ResourceResultContent resource : rejected) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> inTransaction(new ToolResult("call-1", List.of(resource), false, "{}")));
+    }
+
+    // 全部失败路径都不得留下 Session 引用。
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from session_blob_ref where session_id = ?", Integer.class, SESSION));
+  }
+
+  /** 直传路径同样受 {@code advanced.resourceMaxBytes} 上界约束：超限声明在锁定上传行之前拒绝，不产生副作用。 */
+  @Test
+  void uploadedResourceRejectsOversizedDeclarationBeforeLocking() {
+    byte[] bytes = "small".getBytes(StandardCharsets.UTF_8);
+    String uploadId = reserveAndCompleteUpload("small.bin", "application/octet-stream", bytes);
+    String oversizedSha = "a".repeat(64);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                new ToolResult(
+                    "call-1",
+                    List.of(
+                        new ResourceResultContent(
+                            new ResourceRef(
+                                ResourceRef.blobUploadUri(UUID.fromString(uploadId)),
+                                "application/octet-stream",
+                                "huge.bin",
+                                17L * 1024 * 1024,
+                                oversizedSha))),
+                    false,
+                    "{}")));
+
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from session_blob_ref where session_id = ?", Integer.class, SESSION));
+    // 上传行未被消费：cleanup 尚未被请求。
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            UUID.fromString(uploadId)));
+  }
+
+  /** 事务回滚语义：同一结果中后置条目失败时，前置条目的 consume 也必须整体回滚。 */
+  @Test
+  void uploadedResourceConsumptionRollsBackWithTheWholeTransaction() {
+    byte[] first = "first".getBytes(StandardCharsets.UTF_8);
+    byte[] second = "second".getBytes(StandardCharsets.UTF_8);
+    String firstUploadId = reserveAndCompleteUpload("first.bin", "application/octet-stream", first);
+    String secondUploadId =
+        reserveAndCompleteUpload("second.bin", "application/octet-stream", second);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                new ToolResult(
+                    "call-1",
+                    List.of(
+                        new ResourceResultContent(
+                            blobUploadRef(firstUploadId, "application/octet-stream", first, null)),
+                        new ResourceResultContent(
+                            uploadedRefWithSha(secondUploadId, second, "a".repeat(64)))),
+                    false,
+                    "{}")));
+
+    // 第二个直传引用在第一个完成 owner 转移后失败；整体回滚后仍没有 Session 引用或 cleanup request。
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from session_blob_ref where session_id = ?", Integer.class, SESSION));
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id in (?, ?) and cleanup_requested_at is not null",
+            Integer.class,
+            UUID.fromString(firstUploadId),
+            UUID.fromString(secondUploadId)));
+  }
+
+  /** 预留并完成一次 Daemon 风格直传，返回上传行 id。 */
+  private String reserveAndCompleteUpload(String filename, String mediaType, byte[] bytes) {
+    StorageUploadReserveRequestDTO request = new StorageUploadReserveRequestDTO();
+    request.setFilename(filename);
+    request.setMediaType(mediaType);
+    request.setSizeBytes((long) bytes.length);
+    request.setSha256(sha256Hex(bytes));
+    StorageUploadDTO pending = uploadService.reserve(request);
+    s3Storage.putDirect(
+        StorageObjectKeys.uploadOriginal(UUID.fromString(pending.getId())), bytes, mediaType);
+    return uploadService.complete(UUID.fromString(pending.getId())).getId();
+  }
+
+  /** 构造一个 Daemon 直传引用（终态最多能看到这种形状）。 */
+  private static ResourceRef blobUploadRef(
+      String uploadId, String mediaType, byte[] bytes, String untrustedName) {
+    return new ResourceRef(
+        ResourceRef.blobUploadUri(UUID.fromString(uploadId)),
+        mediaType,
+        untrustedName,
+        (long) bytes.length,
+        sha256Hex(bytes));
+  }
+
+  private static ResourceRef uploadedRefWithSize(
+      String uploadId, String mediaType, byte[] bytes, long declaredSize) {
+    return new ResourceRef(
+        ResourceRef.blobUploadUri(UUID.fromString(uploadId)),
+        mediaType,
+        null,
+        declaredSize,
+        sha256Hex(bytes));
+  }
+
+  private static ResourceRef uploadedRefWithSha(
+      String uploadId, byte[] bytes, String declaredSha256) {
+    return new ResourceRef(
+        ResourceRef.blobUploadUri(UUID.fromString(uploadId)),
+        "application/octet-stream",
+        null,
+        (long) bytes.length,
+        declaredSha256);
   }
 
   private List<AgentMessageContent> inTransaction(ToolResult result) {

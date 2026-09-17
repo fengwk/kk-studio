@@ -166,7 +166,8 @@ public record SystemSettings(
   /** environment section：daemon gateway 的资源边界与心跳超时。 */
   public record Environment(long maxResourceBytes, long heartbeatTimeoutMillis) {
 
-    public static final Environment DEFAULT = new Environment(8L * 1024 * 1024, 60_000L);
+    /** 默认单条/聚合资源字节预算：16 MiB，与 {@code advanced.resourceMaxBytes} 同一业务上限。 */
+    public static final Environment DEFAULT = new Environment(16L * 1024 * 1024, 60_000L);
 
     public Environment {
       SystemSettingsValidation.requirePositiveMillis(

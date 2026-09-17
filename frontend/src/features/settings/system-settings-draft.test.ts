@@ -7,7 +7,10 @@ import {
   setDraftValue,
   settingsSectionsToDraft,
 } from '@/features/settings/system-settings-draft'
-import { makeSettingsDto } from '@/test-support/settings-test-fixtures'
+import {
+  DEFAULT_MAX_RESOURCE_BYTES,
+  makeSettingsDto,
+} from '@/test-support/settings-test-fixtures'
 
 describe('system settings draft codec', () => {
   it('derives a string-value draft from the wire aggregate (Long stays string, Integer becomes string)', () => {
@@ -17,7 +20,7 @@ describe('system settings draft codec', () => {
       { tool: 'base.edit', rules: [{ pattern: '*', action: 'ask' }] },
       { tool: 'base.bash', rules: [{ pattern: '*', action: 'ask' }] },
     ])
-    expect(draft.environment.maxResourceBytes).toBe('8388608')
+    expect(draft.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
     expect(draft.aiRuntime.retryMaxRetries).toBe('3')
     expect(draft.aiRuntime.subagentMaxTotalConcurrency).toBe('0')
     expect(draft.storageMedia.thumbnailQuality).toBe('80')
@@ -37,7 +40,7 @@ describe('system settings draft codec', () => {
     expect(update.aiRuntime.retryMaxRetries).toBe(5)
     expect(update.aiRuntime.subagentMaxTotalConcurrency).toBe(12)
     expect(update.aiRuntime.retryMaxDelayMillis).toBe('60000')
-    expect(update.environment.maxResourceBytes).toBe('8388608')
+    expect(update.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
     expect(update.advanced.processorLeaseDurationMillis).toBe('30000')
     // 六个 section 全部完整存在于请求体。
     expect(Object.keys(update).sort()).toEqual(

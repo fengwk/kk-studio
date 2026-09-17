@@ -672,11 +672,18 @@ final class ToolProcessorTestSupport {
     final List<RealtimeEvent> events = new CopyOnWriteArrayList<>();
     volatile RuntimeException failure;
 
+    /** 测试钩子：在事件真正入列之前执行，用于精确制造并发窗口。 */
+    volatile Runnable beforeAppend;
+
     @Override
     public void append(RealtimeEvent event) {
       RuntimeException current = failure;
       if (current != null) {
         throw current;
+      }
+      Runnable hook = beforeAppend;
+      if (hook != null) {
+        hook.run();
       }
       events.add(event);
     }

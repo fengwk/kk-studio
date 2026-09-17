@@ -23,6 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -36,13 +38,20 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityI
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -57,6 +66,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 同实例重连以相同 invocationId 重放；不同实例接管与调用方 expire 才产生终态。
  */
 class EnvironmentDaemonServerTest {
+
+  /** 测试用 SHA-256 摘要：{@code "abc"} 的标准摘要。 */
+  private static final String SHA_A =
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+  private static final UUID TRANSFER_ONE = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+  private static final Charset UTF_8 = StandardCharsets.UTF_8;
 
   /**
    * 测试意图：同一 Environment 的第二个 invocation 必须立即发送并并发持有（无 Busy、无容量槽位），且两个 invocation 的 COMPLETED
@@ -1228,6 +1245,507 @@ class EnvironmentDaemonServerTest {
     assertEquals(
         Duration.ofSeconds(1),
         new EnvironmentServerSettings(Duration.ofSeconds(1), 1024L).heartbeatTimeout());
+  }
+
+  /** 测试意图：同一 transfer 的重复申请（含同实例重连后的重发）必须完全幂等——只发生一次 reserve，且回执同一 uploadId。 */
+  @Test
+  void repeatedUploadRequestIsExactlyIdempotent() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-transfer-idempotent");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    String request = uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A);
+    fixture.receive(
+        channel, DaemonMessageType.RESOURCE_UPLOAD_REQUEST, CALL_ONE.toString(), request);
+    fixture.receive(
+        channel, DaemonMessageType.RESOURCE_UPLOAD_REQUEST, CALL_ONE.toString(), request);
+
+    assertEquals(1, fixture.ticketService.reserves.size());
+    assertEquals(2, channel.countOf(DaemonMessageType.RESOURCE_UPLOAD_TICKET));
+    // 票据 envelope 的 invocationId 是被调用的活动调用；transferId 只出现在 payload 中。
+    for (DaemonEnvelope envelope : channel.envelopes()) {
+      if (envelope.messageType() == DaemonMessageType.RESOURCE_UPLOAD_TICKET) {
+        assertEquals(CALL_ONE.toString(), envelope.invocationId());
+      }
+    }
+    assertFalse(channel.closed());
+  }
+
+  /** 测试意图：同一 transfer 以不同请求内容重申请属于协议违规，必须关闭连接。 */
+  @Test
+  void conflictingUploadRequestRebindingIsProtocolFailure() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-transfer-conflict");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "b.txt", 3L, SHA_A));
+
+    assertTrue(channel.closed());
+    assertEquals(1, fixture.ticketService.reserves.size());
+  }
+
+  /** 测试意图：commit 必须指向已申请的 transfer 且 uploadId 一致；未知 transferId 与错配 uploadId 都是协议违规。 */
+  @Test
+  void commitRequiresOwnedTransferAndMatchingUploadId() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-transfer-commit");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
+        CALL_ONE.toString(),
+        uploadCommit(TRANSFER_ONE, TRANSFER_ONE));
+    assertTrue(channel.closed(), "commit for an unrequested transfer must close the connection");
+  }
+
+  /** 测试意图：commit 与申请票据的 uploadId 不一致时属于伪造，必须关闭连接且不触达票据服务。 */
+  @Test
+  void commitWithForeignUploadIdIsProtocolFailure() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-transfer-forged-commit");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
+        CALL_ONE.toString(),
+        uploadCommit(TRANSFER_ONE, UUID.randomUUID()));
+
+    assertTrue(channel.closed());
+    assertTrue(fixture.ticketService.commits.isEmpty());
+  }
+
+  /** 测试意图：终态 COMPLETED 引用未申请的 uploadId、重复 uploadId 或与申请元数据不符的 uploadId 都属于协议违规。 */
+  @Test
+  void completedRejectsForgedDuplicateOrMismatchedUploads() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-completed-forged");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    // 未申请：本调用不拥有该 uploadId。
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayload(
+            CALL_ONE, uploadedRef(UUID.randomUUID(), "text/plain", "a.txt", "abc"), null));
+    assertTrue(channel.closed());
+    assertEquals(0, fixture.ticketService.reserves.size());
+  }
+
+  /** 测试意图：终态重复声明同一 uploadId 属于协议违规。 */
+  @Test
+  void completedRejectsDuplicateUploadIds() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-completed-duplicate");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+    ResourceRef ref = uploadedRefWithSize(uploadId, "text/plain", "a.txt", 3L, SHA_A);
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayloads(CALL_ONE, List.of(ref, ref)));
+
+    assertTrue(channel.closed());
+  }
+
+  /** 测试意图：终态引用与申请元数据（name/size/sha/mediaType）不符时拒绝，绝不把不匹配内容交给消费方。 */
+  @Test
+  void completedRejectsMetadataMismatch() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-completed-mismatch");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    DaemonEnvelope ticket = ticketEnvelope(channel);
+    UUID uploadId = uploadIdOfTicket(ticket);
+    // 声明 size 与申请不一致。
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayload(
+            CALL_ONE, uploadedRefWithSize(uploadId, "text/plain", "a.txt", 4L, SHA_A), null));
+
+    assertTrue(channel.closed());
+  }
+
+  /** 测试意图：终态在 READY 之前到达（申请票据尚未就绪）时拒绝，避免消费方拿到不可用引用。 */
+  @Test
+  void completedRequiresReadyUpload() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-completed-not-ready");
+    fixture.ticketService.pendingReserve = true;
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayload(
+            CALL_ONE, uploadedRefWithSize(uploadId, "text/plain", "a.txt", 3L, SHA_A), null));
+
+    assertTrue(channel.closed(), "terminal before ready must be a protocol failure");
+  }
+
+  /** 测试意图：合法的 READY 上传引用在终态被接受并透传给消费方，未被引用的上传在终态后按 uploadId 释放。 */
+  @Test
+  void completedAcceptsReadyUploadAndReleasesUnreferenced() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-completed-accept");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayload(
+            CALL_ONE, uploadedRefWithSize(uploadId, "text/plain", "a.txt", 3L, SHA_A), null));
+
+    assertNull(listener.error);
+    assertNotNull(listener.completed);
+    assertEquals(
+        uploadId,
+        ((ResourceResultContent) listener.completed.contents().get(0)).resource().blobUploadId());
+    // 被引用的上传必须保留给 history 消费，不得在这里释放。
+    assertFalse(fixture.ticketService.releases.contains(uploadId));
+    assertFalse(channel.closed());
+  }
+
+  /** 测试意图：调用失败终态与调用方 expire 都按已绑定 uploadId 释放上传，绝不泄漏上传行。 */
+  @Test
+  void failedAndExpiredInvocationsReleaseBoundUploads() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-release-on-terminal");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    fixture.receive(
+        channel, DaemonMessageType.FAILED, CALL_ONE.toString(), "{\"message\":\"boom\"}");
+
+    assertEquals(List.of(uploadId), fixture.ticketService.releases);
+  }
+
+  /** 测试意图：上传控制帧只能指向本连接当前活动的调用；未知或已终结的 invocationId 属于协议违规。 */
+  @Test
+  void uploadControlRequiresActiveInvocation() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-upload-scope");
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+
+    assertTrue(channel.closed());
+    assertTrue(fixture.ticketService.reserves.isEmpty());
+  }
+
+  /** 测试意图：并发 transfer 数量有上限，恶意 Daemon 无法靠无限申请无界创建上传行。 */
+  @Test
+  void concurrentTransfersPerInvocationAreBounded() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-transfer-bound");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    for (int index = 0; index < 16; index++) {
+      fixture.receive(
+          channel,
+          DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+          CALL_ONE.toString(),
+          uploadRequest(UUID.randomUUID(), "text/plain", "a.txt", 3L, SHA_A));
+    }
+    assertFalse(channel.closed());
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(UUID.randomUUID(), "text/plain", "a.txt", 3L, SHA_A));
+
+    assertTrue(channel.closed());
+    assertEquals(16, fixture.ticketService.reserves.size());
+  }
+
+  /** 测试意图：去重命中（申请即 READY）时终态可直接引用该上传，且 reserve 只发生一次。 */
+  @Test
+  void dedupReadyReserveIsAcceptedByTerminalWithoutCommit() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-dedup-ready");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    // 去重命中：无需任何 COMMIT，终态直接引用即可。
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayload(
+            CALL_ONE, uploadedRefWithSize(uploadId, "text/plain", "a.txt", 3L, SHA_A), null));
+
+    assertNull(listener.error);
+    assertNotNull(listener.completed);
+    assertTrue(fixture.ticketService.commits.isEmpty(), "dedup 命中不应触发任何 commit");
+    assertFalse(channel.closed());
+  }
+
+  /** 测试意图：票据服务瞬时 FAILED 不缓存——同一 transfer 的下一次申请必须再次触达票据服务，而不是重放失败结论。 */
+  @Test
+  void transientReserveFailureIsRetriedInsteadOfCached() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-reserve-retry");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.ticketService.failNextReserve = true;
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    assertEquals(DaemonMessageType.RESOURCE_UPLOAD_TICKET, ticketEnvelope(channel).messageType());
+    assertTrue(
+        new DaemonResourceTransferCodec()
+            .decodeTicket(ticketEnvelope(channel).payloadJson())
+            .state()
+            .name()
+            .equals("FAILED"));
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+
+    assertEquals(2, fixture.ticketService.reserves.size(), "FAILED 必须允许重试再次触达票据服务");
+    assertEquals(DaemonMessageType.RESOURCE_UPLOAD_TICKET, ticketEnvelope(channel).messageType());
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        EnvironmentDaemonServerTestSupport.completedResourcePayload(
+            CALL_ONE, uploadedRefWithSize(uploadId, "text/plain", "a.txt", 3L, SHA_A), null));
+    assertFalse(channel.closed());
+  }
+
+  /** 测试意图：commit 重复到达时只触达票据服务一次，且回执 READY 票据不再重复 I/O。 */
+  @Test
+  void repeatedCommitIsAnsweredFromTheCachedTicket() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-commit-repeat");
+    fixture.ticketService.pendingReserve = true;
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    String commit = uploadCommit(TRANSFER_ONE, uploadId);
+    fixture.receive(channel, DaemonMessageType.RESOURCE_UPLOAD_COMMIT, CALL_ONE.toString(), commit);
+    fixture.receive(channel, DaemonMessageType.RESOURCE_UPLOAD_COMMIT, CALL_ONE.toString(), commit);
+
+    assertEquals(List.of(uploadId), fixture.ticketService.commits, "重复 commit 只应触达票据服务一次");
+    assertFalse(channel.closed());
+  }
+
+  /** 测试意图：调用失败/取消/超时三条清理路径都只按已绑定的 uploadId 释放，且释放恰好一次。 */
+  @Test
+  void cancelledAndExpiredInvocationsReleaseExactlyOnce() {
+    // 取消路径。
+    Fixture cancelled = new Fixture();
+    FakeChannel cancelChannel = cancelled.connectReady("channel-release-cancelled");
+    cancelled.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    cancelled.receive(
+        cancelChannel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID cancelledUploadId = uploadIdOfTicket(ticketEnvelope(cancelChannel));
+    cancelled.receive(
+        cancelChannel, DaemonMessageType.CANCELLED, CALL_ONE.toString(), "{\"reason\":\"stop\"}");
+    assertEquals(List.of(cancelledUploadId), cancelled.ticketService.releases);
+    // 迟到终态被 tombstone 静默忽略，不重复释放。
+    cancelled.receive(
+        cancelChannel, DaemonMessageType.FAILED, CALL_ONE.toString(), "{\"message\":\"late\"}");
+    assertEquals(List.of(cancelledUploadId), cancelled.ticketService.releases);
+
+    // 调用方 expire 路径。
+    Fixture expired = new Fixture();
+    FakeChannel expireChannel = expired.connectReady("channel-release-expired");
+    EnvironmentCapabilityExecutionHandle handle =
+        expired.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    expired.receive(
+        expireChannel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID expiredUploadId = uploadIdOfTicket(ticketEnvelope(expireChannel));
+    expired.server.expire(handle);
+    expired.server.expire(handle);
+    assertEquals(List.of(expiredUploadId), expired.ticketService.releases, "expire 必须幂等释放且恰好一次");
+  }
+
+  /** 测试意图：实例接管时取走在途调用并释放其绑定上传；旧连接的迟到控制帧一律忽略，不泄漏也不误判。 */
+  @Test
+  void takeoverReleasesUploadsAndIgnoresLateControlFrames() {
+    Fixture fixture = new Fixture();
+    FakeChannel first = fixture.connectReady("channel-takeover-first");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    fixture.receive(
+        first,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(first));
+
+    // 旧进程断连；调用为「同实例可重连」保留，其绑定上传此时仍未释放。
+    fixture.server.close("channel-takeover-first");
+    assertTrue(fixture.ticketService.releases.isEmpty());
+
+    // 身份不同的新进程接管该 Environment：在途调用被取走并登记 tombstone，绑定上传被释放。
+    FakeChannel second = fixture.connectReady("channel-takeover-second", OTHER_INSTANCE_ID);
+
+    assertEquals(List.of(uploadId), fixture.ticketService.releases);
+
+    // 旧调用已终结：重连后的迟到终态被 tombstone 静默忽略，不重复释放、不协议报错。
+    fixture.receive(
+        second, DaemonMessageType.FAILED, CALL_ONE.toString(), "{\"message\":\"late\"}");
+    assertFalse(second.closed());
+    assertEquals(List.of(uploadId), fixture.ticketService.releases);
+  }
+
+  /** 测试意图：未知 invocationId 的上传控制帧是协议违规；已 tombstone 调用的控制帧同样不得触达票据服务。 */
+  @Test
+  void unknownAndTombstonedControlFramesAreRejected() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-control-unknown");
+    // 未知调用：任何上传控制帧都必须是协议错误。
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
+        CALL_ONE.toString(),
+        uploadCommit(TRANSFER_ONE, TRANSFER_ONE));
+    assertTrue(channel.closed());
+    assertTrue(fixture.ticketService.commits.isEmpty());
+
+    // tombstone 调用：终态先行终结该调用，随后同一 invocation 的控制帧不得触达票据服务。
+    Fixture tombstoned = new Fixture();
+    FakeChannel tombstoneChannel = tombstoned.connectReady("channel-control-tombstone");
+    tombstoned.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    tombstoned.receive(
+        tombstoneChannel, DaemonMessageType.FAILED, CALL_ONE.toString(), "{\"message\":\"boom\"}");
+    int reservesBefore = tombstoned.ticketService.reserves.size();
+    tombstoned.receive(
+        tombstoneChannel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    assertTrue(tombstoneChannel.closed());
+    assertEquals(reservesBefore, tombstoned.ticketService.reserves.size());
+  }
+
+  private static String uploadRequest(
+      UUID transferId, String mediaType, String name, long size, String sha256) {
+    return "{\"transferId\":\""
+        + transferId
+        + "\",\"mediaType\":\""
+        + mediaType
+        + "\",\"name\":\""
+        + name
+        + "\",\"size\":"
+        + size
+        + ",\"sha256\":\""
+        + sha256
+        + "\"}";
+  }
+
+  private static String uploadCommit(UUID transferId, UUID uploadId) {
+    return "{\"transferId\":\"" + transferId + "\",\"uploadId\":\"" + uploadId + "\"}";
+  }
+
+  private static ResourceRef uploadedRef(
+      UUID uploadId, String mediaType, String name, String bytes) {
+    return uploadedRefWithSize(
+        uploadId, mediaType, name, bytes.length(), sha256Hex(bytes.getBytes(UTF_8)));
+  }
+
+  private static ResourceRef uploadedRefWithSize(
+      UUID uploadId, String mediaType, String name, long size, String sha256) {
+    return new ResourceRef(ResourceRef.blobUploadUri(uploadId), mediaType, name, size, sha256);
+  }
+
+  private static DaemonEnvelope ticketEnvelope(FakeChannel channel) {
+    return channel.envelopes().stream()
+        .filter(envelope -> envelope.messageType() == DaemonMessageType.RESOURCE_UPLOAD_TICKET)
+        .reduce((first, second) -> second)
+        .orElseThrow();
+  }
+
+  private static UUID uploadIdOfTicket(DaemonEnvelope ticket) {
+    return new DaemonResourceTransferCodec().decodeTicket(ticket.payloadJson()).uploadId();
+  }
+
+  private static String sha256Hex(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException(error);
+    }
   }
 
   private static EnvironmentCapabilityDescriptor descriptor() {

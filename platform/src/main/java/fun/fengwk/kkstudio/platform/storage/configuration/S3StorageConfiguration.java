@@ -212,14 +212,23 @@ public class S3StorageConfiguration {
     return new ProviderResourceMaterializer(storageBlobManager, blobContentService);
   }
 
-  /** Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history。 */
+  /**
+   * Tool outcome 的 durable history 物化端口：瞬时 Resource 引用外部化为全局 blob 后进入 history，Daemon 直传的 {@code
+   * blob-upload} 引用则在同一事务内原子转移为 Session 引用。
+   */
   @Bean
   public GlobalStorageToolResultHistoryMaterializer globalStorageToolResultHistoryMaterializer(
       StorageBlobIngestService ingestService,
+      StorageUploadService uploadService,
+      SessionBlobRefManager refManager,
+      StorageBlobManager blobManager,
       ResourceStore resourceStore,
       SystemSettingsSnapshot snapshot) {
     return new GlobalStorageToolResultHistoryMaterializer(
         ingestService,
+        uploadService,
+        blobManager,
+        refManager,
         resourceStore,
         Math.toIntExact(snapshot.get().advanced().resourceMaxBytes()));
   }

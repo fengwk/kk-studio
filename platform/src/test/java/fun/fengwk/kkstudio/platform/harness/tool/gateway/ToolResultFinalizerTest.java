@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * {@link ToolResultFinalizer} 单元测试：
@@ -437,11 +438,78 @@ class ToolResultFinalizerTest {
     assertTrue(store.puts.isEmpty());
   }
 
+  /** Daemon 已直传的 media 引用只做形状/体积校验并原样透传，不得再次读取或写入宿主 ResourceStore。 */
+  @Test
+  void daemonUploadReferencePassesThroughWithoutResourceStoreIo() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, 100);
+    byte[] bytes = new byte[] {1, 2, 3};
+    ResourceRef upload =
+        new ResourceRef(
+            ResourceRef.blobUploadUri(UUID.randomUUID()),
+            "image/png",
+            "untrusted.png",
+            (long) bytes.length,
+            sha256Hex(bytes));
+    ResourceResultContent source = new ResourceResultContent(upload, "preview");
+
+    ToolResultFinalizer.Outcome.Success success =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Success.class,
+            finalizer.finalizeResult(
+                TOOL_NAME, new ToolResult("call-1", List.of(source), false, "{}")));
+
+    assertEquals(source, success.result().contents().getFirst());
+    assertEquals(0, store.reads);
+    assertTrue(store.puts.isEmpty());
+  }
+
+  /** Daemon 直传仅用于 media；文本工件元数据与超出业务上限的声明必须在任何 Store I/O 前拒绝。 */
+  @Test
+  void daemonUploadReferenceRejectsTextMetadataAndOversize() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, 100);
+    byte[] bytes = new byte[] {1, 2, 3};
+    ResourceRef upload =
+        new ResourceRef(
+            ResourceRef.blobUploadUri(UUID.randomUUID()),
+            "application/octet-stream",
+            null,
+            (long) bytes.length,
+            sha256Hex(bytes));
+
+    ToolResultFinalizer.Outcome textArtifact =
+        finalizer.finalizeResult(
+            TOOL_NAME,
+            new ToolResult(
+                "call-1",
+                List.of(
+                    new ResourceResultContent(
+                        upload, null, new TextArtifactMetadata(bytes.length, 1))),
+                false,
+                "{}"));
+    ToolResultFinalizer.Outcome oversized =
+        new ToolResultFinalizer(store, 2)
+            .finalizeResult(
+                TOOL_NAME,
+                new ToolResult("call-2", List.of(new ResourceResultContent(upload)), false, "{}"));
+
+    assertEquals(
+        ToolResultFinalizer.INVALID_RESULT_KIND,
+        assertInstanceOf(ToolResultFinalizer.Outcome.Failed.class, textArtifact).error().kind());
+    assertEquals(
+        ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND,
+        assertInstanceOf(ToolResultFinalizer.Outcome.Failed.class, oversized).error().kind());
+    assertEquals(0, store.reads);
+    assertTrue(store.puts.isEmpty());
+  }
+
   private static final class RecordingResourceStore implements ResourceStore {
     record PutRecord(String mediaType, String name, byte[] content) {}
 
     final List<PutRecord> puts = new ArrayList<>();
     final Map<ResourceRef, byte[]> resources = new HashMap<>();
+    int reads;
 
     @Override
     public ResourceRef reference(String mediaType, String name, long size, String sha256) {
@@ -464,6 +532,7 @@ class ToolResultFinalizerTest {
 
     @Override
     public byte[] read(ResourceRef resource) {
+      reads++;
       byte[] content = resources.get(resource);
       if (content == null) {
         throw new IllegalArgumentException("unmanaged resource: " + resource.uri());

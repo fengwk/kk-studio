@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.harness.common.json;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,6 +43,18 @@ class BoundedJsonWriterTest {
     assertNull(BoundedJsonWriter.write(node, exactBytes - 1));
   }
 
+  /** 无保留判定与 write 使用完全相同的 UTF-8 边界，但不需要物化最终字符串。 */
+  @Test
+  void fitsUsesTheSameUtf8BoundaryWithoutRetainingOutput() {
+    ObjectNode node = OBJECT_MAPPER.createObjectNode();
+    node.put("text", "你好");
+    int exactBytes =
+        BoundedJsonWriter.write(node, Integer.MAX_VALUE).getBytes(StandardCharsets.UTF_8).length;
+
+    assertTrue(BoundedJsonWriter.fits(node, exactBytes));
+    assertFalse(BoundedJsonWriter.fits(node, exactBytes - 1));
+  }
+
   /** 验证超大 JSON 在输出流超限时提前中止，返回 null 而不耗尽内存。 */
   @Test
   void abortsEarlyOnHugeNode() {
@@ -58,5 +72,7 @@ class BoundedJsonWriterTest {
     assertThrows(IllegalArgumentException.class, () -> BoundedJsonWriter.write(node, 0));
     assertThrows(IllegalArgumentException.class, () -> BoundedJsonWriter.write(node, -1));
     assertThrows(NullPointerException.class, () -> BoundedJsonWriter.write(null, 1024));
+    assertThrows(IllegalArgumentException.class, () -> BoundedJsonWriter.fits(node, 0));
+    assertThrows(NullPointerException.class, () -> BoundedJsonWriter.fits(null, 1024));
   }
 }

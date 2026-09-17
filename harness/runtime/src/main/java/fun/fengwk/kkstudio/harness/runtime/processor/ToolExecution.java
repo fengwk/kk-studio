@@ -195,8 +195,9 @@ final class ToolExecution implements ToolGateway.Listener {
     synchronized (monitor) {
       gateOpen = true;
       applied = abandoned.get() ? Applied.LOST : drain(publishes);
+      // 与 {@link #deliver} 相同：发布的因果顺序必须在 monitor 内确定。
+      publishAll(publishes);
     }
-    publishAll(publishes);
     if (applied == Applied.LOST) {
       // 兜底：gate 打开前 abandon 竞态获胜时 handle 已由 abandon 取消，这里只补 deferred cancel。
       cancelHandle();
@@ -324,6 +325,7 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   private void deliver(Pending signal) {
+    // 乐观预检只是快速路径；真正的仲裁与发布都在 monitor 内完成，保证与 terminal 严格串行。
     if (terminal.get() || abandoned.get()) {
       return;
     }
@@ -332,10 +334,14 @@ final class ToolExecution implements ToolGateway.Listener {
       return;
     }
     List<Publish> publishes = new ArrayList<>();
-    Applied applied = Applied.LOST;
     RuntimeException failure = null;
+    Applied applied = Applied.LOST;
     synchronized (monitor) {
       if (abandoned.get()) {
+        return;
+      }
+      // 关键重检：乐观预检与进入 monitor 之间可能有并发 terminal 已经赢下仲裁。partial 绝不能在终态之后发布或进入缓冲。
+      if (terminal.get() && !terminalSignal) {
         return;
       }
       if (!gateOpen) {
@@ -344,6 +350,11 @@ final class ToolExecution implements ToolGateway.Listener {
       }
       try {
         applied = processLocked(signal, publishes);
+        if (applied != Applied.LOST) {
+          // partial 的发布必须在同一 monitor 临界区内完成：否则「partial 已通过裁决」与「实际发布」之间会出现
+          // 窗口，让先到的 partial 在并发 terminal 落地之后才发布，破坏实时流的因果顺序。
+          publishAll(publishes);
+        }
       } catch (RuntimeException error) {
         failure = error;
       }
@@ -362,7 +373,6 @@ final class ToolExecution implements ToolGateway.Listener {
       abandon();
       return;
     }
-    publishAll(publishes);
     if (applied != Applied.PROGRESSED) {
       // terminal / retry 落地后本地 execution 已结束（包括 partial 校验失败转 terminal 的路径）。
       abandon();

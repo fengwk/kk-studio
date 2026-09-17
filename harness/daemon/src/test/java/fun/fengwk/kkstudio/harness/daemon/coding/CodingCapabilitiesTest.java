@@ -14,6 +14,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -156,8 +157,7 @@ class CodingCapabilitiesTest {
   @Test
   void readReportsLspBridgeConfigurationStatus() throws Exception {
     Files.writeString(environmentRoot.resolve("lsp-status.txt"), "x\n");
-    CodingToolsConfig bridged =
-        TestCodingConfig.withBridge(environmentRoot, new InMemoryResourceStore());
+    CodingToolsConfig bridged = TestCodingConfig.withBridge(environmentRoot);
 
     EnvironmentCapabilityResult disabled =
         invoke(
@@ -188,8 +188,7 @@ class CodingCapabilitiesTest {
         """);
     assertTrue(bridge.toFile().setExecutable(true));
     CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(
-            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
+        TestCodingConfig.withBridgeCommand(environmentRoot, 2000, 50 * 1024, bridge.toString());
 
     EnvironmentCapabilityResult result =
         invoke(
@@ -342,7 +341,9 @@ class CodingCapabilitiesTest {
 
     assertTrue(text(window).contains("Showing lines 1-1 of 3"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
-    assertTrue(image.contents().stream().anyMatch(ResourceResultContent.class::isInstance));
+    // 图片不再产生本地 resource 引用：以内存字节进入终态，由 daemon 直传全局对象存储。
+    assertTrue(image.contents().stream().anyMatch(BinaryResultContent.class::isInstance));
+    assertEquals("image/png", ((BinaryResultContent) image.contents().getFirst()).mediaType());
     assertTrue(binary.error());
     assertTrue(text(binary).contains("binary"));
   }
@@ -455,7 +456,6 @@ class CodingCapabilitiesTest {
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
             "bash",
-            new InMemoryResourceStore(),
             smallBudget,
             null,
             CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
@@ -525,7 +525,6 @@ class CodingCapabilitiesTest {
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
             "bash",
-            new InMemoryResourceStore(),
             brokenStore,
             null,
             CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
@@ -570,8 +569,7 @@ class CodingCapabilitiesTest {
     Files.writeString(environmentRoot.resolve("App.java"), "class App {}\n");
 
     CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(
-            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
+        TestCodingConfig.withBridgeCommand(environmentRoot, 2000, 50 * 1024, bridge.toString());
 
     long started = System.nanoTime();
     RecordingListener listener =
@@ -609,8 +607,7 @@ class CodingCapabilitiesTest {
     Files.writeString(environmentRoot.resolve("App.java"), "class App {}\n");
 
     CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(
-            environmentRoot, 2000, 50 * 1024, new InMemoryResourceStore(), bridge.toString());
+        TestCodingConfig.withBridgeCommand(environmentRoot, 2000, 50 * 1024, bridge.toString());
 
     RecordingListener listener =
         invokeAsync(
@@ -778,7 +775,6 @@ class CodingCapabilitiesTest {
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
             "bash",
-            new InMemoryResourceStore(),
             smallBudget,
             null,
             CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
@@ -927,7 +923,7 @@ class CodingCapabilitiesTest {
   }
 
   private CodingToolsConfig config(int lines, int bytes) {
-    return TestCodingConfig.withLimits(environmentRoot, lines, bytes, new InMemoryResourceStore());
+    return TestCodingConfig.withLimits(environmentRoot, lines, bytes);
   }
 
   /** 以 JSON 字符串字面量表示任意本地路径，避免手工拼接转义。 */

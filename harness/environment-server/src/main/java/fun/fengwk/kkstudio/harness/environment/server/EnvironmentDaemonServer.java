@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -28,6 +31,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
 
 import java.time.Duration;
@@ -60,8 +64,12 @@ import java.util.function.Supplier;
  * <p><b>终态唯一：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation 的迟到
  * STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。
  *
+ * <p><b>资源上传控制面：</b>调用作用域的 {@code RESOURCE_UPLOAD_REQUEST}/{@code COMMIT} 只做协议校验与状态回执，真正的上传绑定与 对象存储
+ * I/O 由窄端口 {@link DaemonResourceTicketService} 承担并在核心锁之外执行。同一 transfer 的重复申请/提交是幂等的；
+ * FAILED/CANCELLED、实例接管与超时会幂等释放全部传输；COMPLETED 只释放未被结果引用的上传，被引用上传交给 history 物化事务转移 owner。
+ *
  * <p><b>锁边界：</b>每个连接一代的 {@code gate} 只串行化入站协议处理；{@code state} 只保护该连接的协议字段；{@code inventory} 保护环境 与
- * invocation 目录。锁顺序固定为 {@code gate > state > inventory}；租约存储访问、会话监听器回调与连接关闭都在这些锁之外执行。
+ * invocation 目录。锁顺序固定为 {@code gate > state > inventory}；租约存储访问、票据服务回调、会话监听器回调与连接关闭都在这些锁之外执行。
  *
  * <p>本类只依赖 JDK、Jackson、harness.common 与 harness.environment 契约，不含 Spring/JDBC/产品 DTO。
  */
@@ -70,15 +78,23 @@ public final class EnvironmentDaemonServer
 
   private static final int MAX_INVOCATION_TOMBSTONES = 1024;
 
+  /** 单次调用允许的并发资源传输数上限，防止恶意/失控 Daemon 无界创建上传行。 */
+  private static final int MAX_TRANSFERS_PER_INVOCATION = 16;
+
+  /** 票据服务异常时的固定失败说明：绝不复述异常原文，避免把存储内部事实泄漏到控制面。 */
+  private static final String TRANSFER_FAILURE_MESSAGE = "resource upload is unavailable";
+
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
   private final EnvironmentSessionListener sessionListener;
+  private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settings;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
+  private final DaemonResourceTransferCodec transferCodec = new DaemonResourceTransferCodec();
 
   /** 保护环境/连接目录与 invocation 目录；绝不在持有该锁时获取任何连接锁或访问外部端口。 */
   private final Object inventory = new Object();
@@ -94,11 +110,13 @@ public final class EnvironmentDaemonServer
       DaemonLeaseStore leaseStore,
       DaemonRegistrationDirectory registrationDirectory,
       EnvironmentSessionListener sessionListener,
+      DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settings) {
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.registrationDirectory =
         Objects.requireNonNull(registrationDirectory, "registrationDirectory");
     this.sessionListener = Objects.requireNonNull(sessionListener, "sessionListener");
+    this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settings = Objects.requireNonNull(settings, "settings");
   }
 
@@ -129,22 +147,31 @@ public final class EnvironmentDaemonServer
     if (state == null) {
       return;
     }
+    PreparedTransfer prepared = null;
+    List<Runnable> deferred = new ArrayList<>();
+    RuntimeException protocolError = null;
+    EnvironmentId receivedEnvironmentId = null;
     synchronized (state.gate) {
-      List<Runnable> deferred = new ArrayList<>();
-      RuntimeException protocolError = null;
-      EnvironmentId receivedEnvironmentId = null;
       try {
         DaemonEnvelope envelope = envelopeCodec.decode(rawMessage);
         receivedEnvironmentId = envelope.environmentId();
-        handleInbound(state, envelope, deferred);
+        // 资源上传控制面只在此处完成协议与绑定校验；对象存储/数据库 I/O 在 gate 之外执行。
+        switch (envelope.messageType()) {
+          case RESOURCE_UPLOAD_REQUEST -> prepared = prepareUploadReserve(state, envelope);
+          case RESOURCE_UPLOAD_COMMIT -> prepared = prepareUploadCommit(state, envelope);
+          default -> handleInbound(state, envelope, deferred);
+        }
       } catch (RuntimeException error) {
         protocolError = error;
       }
-      if (protocolError != null) {
-        protocolFailure(state, protocolError, receivedEnvironmentId);
-        return;
-      }
-      runDeferred(deferred);
+    }
+    if (protocolError != null) {
+      protocolFailure(state, protocolError, receivedEnvironmentId);
+      return;
+    }
+    runDeferred(deferred);
+    if (prepared != null) {
+      executeTransfer(state, prepared);
     }
   }
 
@@ -326,6 +353,7 @@ public final class EnvironmentDaemonServer
     if (shouldCancel && state != null) {
       offer(state, DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
     }
+    releaseAllTransfers(active);
   }
 
   private void register(ActiveInvocation active) {
@@ -417,7 +445,9 @@ public final class EnvironmentDaemonServer
       case FAILED -> handleFailed(state, envelope, deferred);
       case CANCELLED -> handleCancelled(state, envelope, deferred);
       case ERROR -> handleError(state, envelope);
-      case WELCOME, INVOKE, CANCEL -> throw new DaemonProtocolException(
+      case RESOURCE_UPLOAD_REQUEST, RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
+          "resource upload control is handled by the connection gate");
+      case WELCOME, INVOKE, CANCEL, RESOURCE_UPLOAD_TICKET -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to server");
     }
   }
@@ -506,10 +536,13 @@ public final class EnvironmentDaemonServer
                         "Environment daemon instance changed for "
                             + environmentId
                             + "; capability invocation outcome is uncertain.")));
+        // 换进程接管后旧进程不可能再给出这些调用的终态：其名下上传按已绑定 uploadId 清理，绝不留给新进程消费。
+        deferred.add(() -> releaseAllTransfers(active));
       }
       ObjectNode welcomePayload = envelopeCodec.createPayload();
       welcomePayload.put("environmentId", environmentId.toString());
       welcomePayload.put("name", registration.displayName());
+      welcomePayload.put("maxResourceBytes", settings().maxResourceBytes());
       offer(state, DaemonMessageType.WELCOME, null, welcomePayload.toString());
     }
   }
@@ -541,6 +574,61 @@ public final class EnvironmentDaemonServer
       addTombstone(environmentId, active.invocationId);
     }
     return abandoned;
+  }
+
+  /** 幂等释放该调用名下的全部传输绑定：未消费的上传按已绑定 uploadId 请求全局清理。 */
+  private void releaseAllTransfers(ActiveInvocation active) {
+    List<TransferBinding> bindings;
+    synchronized (active) {
+      if (active.transfers.isEmpty()) {
+        return;
+      }
+      bindings = List.copyOf(active.transfers.values());
+      active.transfers.clear();
+    }
+    for (TransferBinding binding : bindings) {
+      releaseBinding(active, binding);
+    }
+  }
+
+  /**
+   * 幂等释放单个绑定：只释放已绑定到该传输的 uploadId（从未申请到 upload 的传输无需释放）。
+   *
+   * <p>释放前先把绑定标记为已释放，使并发在途的票据 I/O 结果不再回执，也不重复释放同一个 uploadId。
+   */
+  private void releaseBinding(ActiveInvocation active, TransferBinding binding) {
+    UUID uploadId;
+    synchronized (binding) {
+      if (binding.released) {
+        return;
+      }
+      binding.released = true;
+      uploadId = binding.currentUploadId;
+    }
+    if (uploadId == null) {
+      return;
+    }
+    try {
+      ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);
+    } catch (RuntimeException ignored) {
+      // 释放失败不影响会话核心状态；上传行本身仍受全局过期回收保护。
+    }
+  }
+
+  /** 在 I/O 完成后发现调用已终结/被接管时，立即释放本次产生的 uploadId 并标记绑定已释放。 */
+  private void markReleasedAndRelease(
+      ActiveInvocation active, TransferBinding binding, UUID uploadId) {
+    synchronized (binding) {
+      if (binding.released) {
+        return;
+      }
+      binding.released = true;
+    }
+    try {
+      ticketService.release(active.environmentId, active.invocationId.toString(), uploadId);
+    } catch (RuntimeException ignored) {
+      // 释放失败不影响会话核心状态；上传行本身仍受全局过期回收保护。
+    }
   }
 
   private ConnectionState otherConnectionOf(ConnectionState self, EnvironmentId environmentId) {
@@ -642,6 +730,181 @@ public final class EnvironmentDaemonServer
     requiredSingleText(envelopeCodec.readPayload(envelope), "message", "ERROR payload");
   }
 
+  /**
+   * 在 {@code gate} 内完成资源上传申请的协议与绑定校验。
+   *
+   * <p>只做无副作用判定：调用必须仍属于本连接、transfer 数量未超上限、同一 transfer 的重复申请必须完全一致。任何不满足都以协议错误 关闭连接（恶意/失控 Daemon
+   * 不能靠乱发控制帧影响其它调用）。
+   */
+  private PreparedTransfer prepareUploadReserve(ConnectionState state, DaemonEnvelope envelope) {
+    ActiveInvocation active = transferTarget(state, envelope);
+    DaemonResourceTransferCodec.UploadRequest request =
+        transferCodec.decodeRequest(envelope.payloadJson());
+    UUID transferId = request.transferId();
+    if (request.size() > settings().maxResourceBytes()) {
+      // 超出本节点资源预算的申请在任何存储副作用之前被拒绝；恶意/失控 Daemon 不能靠超大声明创建上传行。
+      throw new DaemonProtocolException(
+          "resource transfer size exceeds the environment limit: " + transferId);
+    }
+    DaemonResourceTicketService.TransferRequest serviceRequest =
+        new DaemonResourceTicketService.TransferRequest(
+            transferId, request.mediaType(), request.name(), request.size(), request.sha256());
+    synchronized (active) {
+      TransferBinding existing = active.transfers.get(transferId);
+      if (existing != null) {
+        if (!existing.request.equals(serviceRequest)) {
+          throw new DaemonProtocolException(
+              "resource transfer is already bound to a different request: " + transferId);
+        }
+        // 同一 transfer 的重复申请（含同实例重连后的重发）沿用既有绑定，绝不重复创建传输或上传行。
+        return new PreparedTransfer(state, active, transferId, existing.request, null);
+      }
+      if (active.transfers.size() >= MAX_TRANSFERS_PER_INVOCATION) {
+        throw new DaemonProtocolException(
+            "invocation "
+                + active.invocationId
+                + " exceeds "
+                + MAX_TRANSFERS_PER_INVOCATION
+                + " concurrent resource transfers");
+      }
+      active.transfers.put(transferId, new TransferBinding(serviceRequest));
+    }
+    return new PreparedTransfer(state, active, transferId, serviceRequest, null);
+  }
+
+  /** 在 {@code gate} 内完成资源上传提交的协议与绑定校验；提交必须指向本调用已申请且 uploadId 一致的 transfer。 */
+  private PreparedTransfer prepareUploadCommit(ConnectionState state, DaemonEnvelope envelope) {
+    ActiveInvocation active = transferTarget(state, envelope);
+    DaemonResourceTransferCodec.UploadCommit commit =
+        transferCodec.decodeCommit(envelope.payloadJson());
+    UUID transferId = commit.transferId();
+    synchronized (active) {
+      TransferBinding existing = active.transfers.get(transferId);
+      if (existing == null) {
+        throw new DaemonProtocolException(
+            "resource upload commit references an unrequested transfer: " + transferId);
+      }
+      synchronized (existing) {
+        if (existing.released) {
+          throw new DaemonProtocolException(
+              "resource upload commit references a released transfer: " + transferId);
+        }
+        UUID owned = existing.currentUploadId;
+        // 提交只能指向本 transfer 已由服务端签发的上传：从未签发（伪造/抢先提交）或指向其它上传都是协议违规。
+        if (owned == null || !owned.equals(commit.uploadId())) {
+          throw new DaemonProtocolException(
+              "resource upload commit uploadId does not match the issued ticket: " + transferId);
+        }
+      }
+    }
+    return new PreparedTransfer(state, active, transferId, null, commit.uploadId());
+  }
+
+  /** 上传控制面只允许指向本连接的、仍然活动的 invocation。 */
+  private ActiveInvocation transferTarget(ConnectionState state, DaemonEnvelope envelope) {
+    requireReady(state);
+    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
+    ActiveInvocation active = registeredInvocation(state.environmentId, invocationId);
+    if (active == null) {
+      throw new DaemonProtocolException(
+          "resource upload control does not own invocationId: " + envelope.invocationId());
+    }
+    return active;
+  }
+
+  /**
+   * 在核心锁之外执行票据服务 I/O，并按票据状态回执。
+   *
+   * <p>同一 transfer 的 I/O 由该绑定自身的锁串行化：同一申请/提交（含瞬时 FAILED 后的重试、同实例重连后的重发）永不产生第二个上传行，竞态下 也不会出现重复
+   * reserve。I/O 完成后重新判定调用是否仍然活动；若已完成终态或已被接管，则把本次得到的 uploadId 立即释放，绝不泄漏上传行。
+   */
+  private void executeTransfer(ConnectionState state, PreparedTransfer prepared) {
+    ActiveInvocation active = prepared.active();
+    if (!isActive(active)) {
+      return;
+    }
+    UUID transferId = prepared.transferId();
+    TransferBinding binding;
+    synchronized (active) {
+      binding = active.transfers.get(transferId);
+      if (binding == null) {
+        return;
+      }
+    }
+    boolean commit = prepared.commitUploadId() != null;
+    DaemonResourceTicketService.Ticket ticket;
+    UUID producedUploadId = null;
+    boolean replay;
+    synchronized (binding) {
+      if (binding.released) {
+        return;
+      }
+      ticket = commit ? binding.commitTicket() : binding.reserveTicket();
+      replay = ticket != null;
+      if (!replay) {
+        try {
+          ticket =
+              commit
+                  ? ticketService.commit(
+                      active.environmentId,
+                      active.invocationId.toString(),
+                      prepared.commitUploadId())
+                  : ticketService.reserve(
+                      active.environmentId, active.invocationId.toString(), binding.request);
+        } catch (RuntimeException error) {
+          // 绝不把异常原文回执给 Daemon：票据服务的异常可能携带存储细节，控制面只报告固定的有界说明。
+          ticket = new DaemonResourceTicketService.Ticket.Failed(TRANSFER_FAILURE_MESSAGE);
+        }
+        producedUploadId = ticket.uploadId();
+        if (producedUploadId != null) {
+          binding.currentUploadId = producedUploadId;
+        }
+        // FAILED 多为可重试的瞬时故障，因此不缓存：同一 transfer 的下一次重试必须再次触达票据服务。
+        if (ticket instanceof DaemonResourceTicketService.Ticket.Failed) {
+          binding.recordFailure(commit);
+        } else if (commit) {
+          binding.commitTicket = ticket;
+        } else {
+          binding.reserveTicket = ticket;
+        }
+      }
+    }
+    if (producedUploadId != null && !isActive(active)) {
+      // 调用在 I/O 期间终结或被接管：本次上传没有任何消费者，立即释放以免泄漏上传行。
+      markReleasedAndRelease(active, binding, producedUploadId);
+      return;
+    }
+    DaemonResourceTransferCodec.UploadTicket wire = toWireTicket(transferId, ticket);
+    // 票据只在调用仍然活动时回执；终态之后到达的票据不再发送。
+    if (isActive(active)) {
+      pushUploadTicket(state, active, wire);
+    }
+  }
+
+  private static DaemonResourceTransferCodec.UploadTicket toWireTicket(
+      UUID transferId, DaemonResourceTicketService.Ticket ticket) {
+    return switch (ticket) {
+      case DaemonResourceTicketService.Ticket.Pending pending -> DaemonResourceTransferCodec
+          .UploadTicket.pending(transferId, pending.uploadId(), pending.presignedPut());
+      case DaemonResourceTicketService.Ticket.Ready ready -> DaemonResourceTransferCodec
+          .UploadTicket.ready(transferId, ready.uploadId());
+      case DaemonResourceTicketService.Ticket.Failed failed -> DaemonResourceTransferCodec
+          .UploadTicket.failed(transferId, failed.message());
+    };
+  }
+
+  /** 递交一条票据帧：envelope 的 invocationId 是被调用的活动调用，transferId 只存在于 payload 中。 */
+  private void pushUploadTicket(
+      ConnectionState state,
+      ActiveInvocation active,
+      DaemonResourceTransferCodec.UploadTicket ticket) {
+    offer(
+        state,
+        DaemonMessageType.RESOURCE_UPLOAD_TICKET,
+        active.invocationId.toString(),
+        transferCodec.encodeTicket(ticket));
+  }
+
   private void handleStarted(ConnectionState state, DaemonEnvelope envelope) {
     callbackTarget(state, envelope);
     ObjectNode payload = envelopeCodec.readPayload(envelope);
@@ -659,7 +922,7 @@ public final class EnvironmentDaemonServer
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     ActiveInvocation active = callbackTarget(state, envelope);
     EnvironmentCapabilityResult result =
-        resultCodec.decodePartialForInvocation(
+        resultCodec.decodeProgressForInvocation(
             envelope.payloadJson(), envelope.invocationId(), settings().maxResourceBytes());
     if (active != null && isActive(active)) {
       deferred.add(() -> active.listener.onPartial(result));
@@ -672,9 +935,96 @@ public final class EnvironmentDaemonServer
     EnvironmentCapabilityResult result =
         resultCodec.decodeCompletedForInvocation(
             envelope.payloadJson(), envelope.invocationId(), settings().maxResourceBytes());
+    // 终态前先完成上传事实核对：未就绪、伪造、重复或与申请不符的上传一律是协议违规，绝不进入消费方。
+    Set<UUID> referenced = requireCompletedUploads(state, envelope, result);
     ActiveInvocation active = takeTerminalTarget(state, envelope);
     if (active != null) {
       deferred.add(() -> active.listener.onComplete(result));
+      // 结果引用的上传必须保留给消费方；其余未引用传输在终态后不再有消费者。
+      deferred.add(() -> releaseUnreferencedTransfers(active, referenced));
+    }
+  }
+
+  /**
+   * 核对终态结果声明的每一个上传：必须属于本调用、已就绪、且与申请事实逐字段一致。
+   *
+   * <p>任何不满足都是协议违规（关闭连接）：否则消费方会拿到无法转移的引用，或把别的调用的内容当成本次结果。
+   *
+   * @return 结果实际引用的全局上传 id 集合
+   */
+  private Set<UUID> requireCompletedUploads(
+      ConnectionState state, DaemonEnvelope envelope, EnvironmentCapabilityResult result) {
+    Set<UUID> referenced = new HashSet<>();
+    List<UUID> declared = new ArrayList<>();
+    for (ResultContent content : result.contents()) {
+      if (content instanceof ResourceResultContent resource) {
+        UUID uploadId = resource.resource().blobUploadId();
+        if (uploadId == null) {
+          throw new DaemonProtocolException(
+              "resource content must reference a global upload in a terminal result");
+        }
+        if (!referenced.add(uploadId)) {
+          throw new DaemonProtocolException(
+              "terminal result declares the same upload twice: " + uploadId);
+        }
+        declared.add(uploadId);
+      }
+    }
+    if (declared.isEmpty()) {
+      return referenced;
+    }
+    ActiveInvocation active =
+        registeredInvocation(
+            state.environmentId, parseUuid(envelope.invocationId(), "invocationId"));
+    if (active == null) {
+      // 已终结调用的终态重放：上传早已转移或释放，重放不再触发任何消费。
+      return referenced;
+    }
+    List<TransferBinding> bindings;
+    synchronized (active) {
+      bindings = List.copyOf(active.transfers.values());
+    }
+    Map<UUID, TransferBinding> byUploadId = new HashMap<>();
+    for (TransferBinding binding : bindings) {
+      synchronized (binding) {
+        if (binding.currentUploadId != null && !binding.released) {
+          byUploadId.put(binding.currentUploadId, binding);
+        }
+      }
+    }
+    Set<UUID> consumed = new HashSet<>();
+    for (ResultContent content : result.contents()) {
+      if (!(content instanceof ResourceResultContent resource)) {
+        continue;
+      }
+      ResourceRef ref = resource.resource();
+      UUID uploadId = ref.blobUploadId();
+      if (!consumed.add(uploadId)) {
+        continue;
+      }
+      TransferBinding binding = byUploadId.get(uploadId);
+      if (binding == null) {
+        throw new DaemonProtocolException(
+            "terminal result references an upload this invocation does not own: " + uploadId);
+      }
+      binding.requireReadyAndMatching(ref);
+    }
+    return referenced;
+  }
+
+  /** 释放终态结果未引用的传输绑定：被引用的上传由消费方（history 物化）负责原子转移。 */
+  private void releaseUnreferencedTransfers(ActiveInvocation active, Set<UUID> referenced) {
+    List<TransferBinding> abandoned = new ArrayList<>();
+    synchronized (active) {
+      for (TransferBinding binding : active.transfers.values()) {
+        if (binding.currentUploadId == null || !referenced.contains(binding.currentUploadId)) {
+          abandoned.add(binding);
+        }
+      }
+      abandoned.forEach(binding -> active.transfers.values().remove(binding));
+    }
+    for (TransferBinding binding : abandoned) {
+      releaseBinding(active, binding);
     }
   }
 
@@ -687,6 +1037,8 @@ public final class EnvironmentDaemonServer
     if (active != null) {
       deferred.add(
           () -> active.listener.onError(new EnvironmentCapabilityFailedException(message)));
+      // 失败终态不携带任何上传引用，未消费的传输在此之前已无消费者。
+      deferred.add(() -> releaseAllTransfers(active));
     }
   }
 
@@ -699,6 +1051,7 @@ public final class EnvironmentDaemonServer
     if (active != null) {
       deferred.add(
           () -> active.listener.onError(new EnvironmentCapabilityCancelledException(reason)));
+      deferred.add(() -> releaseAllTransfers(active));
     }
   }
 
@@ -938,6 +1291,7 @@ public final class EnvironmentDaemonServer
     }
   }
 
+  /** 协议错误说明：只描述 Daemon 自身的协议违规，绝不触及存储或票据服务内部事实。 */
   private static String errorMessage(Throwable error, String fallback) {
     String message = error.getMessage();
     return message == null || message.isBlank() ? fallback : message;
@@ -986,6 +1340,13 @@ public final class EnvironmentDaemonServer
      * invocationId 去重）。
      */
     private volatile long sentGeneration;
+
+    /**
+     * 本次调用名下的资源传输绑定（{@code transferId -> binding}），由 {@code this} 保护。
+     *
+     * <p>绑定只存在于进程内存：对象存储的权威事实始终是全局上传行，因此进程崩溃只会留下受全局过期回收保护的上传行，不会产生悬空引用。
+     */
+    private final Map<UUID, TransferBinding> transfers = new LinkedHashMap<>();
 
     private ActiveInvocation(
         EnvironmentId environmentId,
@@ -1108,8 +1469,97 @@ public final class EnvironmentDaemonServer
 
   /** Environment 级事实：当前 READY 连接与最近一次 accepted 的 daemon 进程身份；字段由 {@code inventory} 保护。 */
   private static final class EnvironmentState {
-
     private String daemonInstanceId;
     private ConnectionState connection;
+  }
+
+  /**
+   * 一次资源传输的进程内绑定：申请事实恒定；申请票据、提交票据与已消耗的 uploadId 在首次成功后固化。
+   *
+   * <p>字段由该绑定自身的监视器保护，因此同一 transfer 的票据 I/O 串行进行：重复申请/提交（含瞬时 FAILED 后的重试与同进程重连重发）永不产生第二个上传行。
+   * 绑定只在进程内存中存在，权威内容事实始终是全局上传行。
+   */
+  private static final class TransferBinding {
+
+    private final DaemonResourceTicketService.TransferRequest request;
+
+    /** 本次传输当前拥有的全局上传 id；申请或提交成功后固化，释放后不再回执。 */
+    private UUID currentUploadId;
+
+    /** 申请票据；只在非 FAILED 时缓存，FAILED 必须允许后续重试再次触达票据服务。 */
+    private DaemonResourceTicketService.Ticket reserveTicket;
+
+    /** 提交票据；只在非 FAILED 时缓存。 */
+    private DaemonResourceTicketService.Ticket commitTicket;
+
+    /** 已释放标记：置位后不再回执、不再重复释放。 */
+    private boolean released;
+
+    private TransferBinding(DaemonResourceTicketService.TransferRequest request) {
+      this.request = Objects.requireNonNull(request, "request");
+    }
+
+    private synchronized DaemonResourceTicketService.Ticket reserveTicket() {
+      return reserveTicket;
+    }
+
+    private synchronized DaemonResourceTicketService.Ticket commitTicket() {
+      return commitTicket;
+    }
+
+    /** 瞬时失败不缓存：同一 transfer 的下一次重试必须再次触达票据服务，而不是重放失败结论。 */
+    private synchronized void recordFailure(boolean commit) {
+      if (commit) {
+        this.commitTicket = null;
+      } else {
+        this.reserveTicket = null;
+      }
+    }
+
+    /**
+     * 核对终态结果对该上传的引用与申请事实逐字段一致，且内容已就绪。
+     *
+     * <p>「已就绪」= 申请去重命中或提交已成功；PENDING/FAILED 说明内容根本不可消费，属于终态早于就绪的协议违规。
+     */
+    private synchronized void requireReadyAndMatching(ResourceRef ref) {
+      if (released) {
+        throw new DaemonProtocolException(
+            "terminal result references an upload this invocation already released");
+      }
+      boolean ready =
+          (reserveTicket instanceof DaemonResourceTicketService.Ticket.Ready)
+              || (commitTicket instanceof DaemonResourceTicketService.Ticket.Ready);
+      if (!ready) {
+        throw new DaemonProtocolException(
+            "terminal result references an upload that is not ready: " + currentUploadId);
+      }
+      if (!Objects.equals(request.mediaType(), ref.mediaType())
+          || !Objects.equals(request.name(), ref.name())
+          || ref.size() == null
+          || ref.size() != request.size()
+          || !Objects.equals(request.sha256(), ref.sha256())) {
+        throw new DaemonProtocolException(
+            "terminal result upload metadata does not match its request: " + currentUploadId);
+      }
+    }
+  }
+
+  /**
+   * 已在 {@code gate} 内完成协议与绑定校验、待执行的服务端票据动作。
+   *
+   * <p>{@code commitUploadId} 非空表示提交；为空表示申请。绑定已存在时沿用其既有事实，因此同一 transfer 的重复帧不会再次创建传输。
+   */
+  private record PreparedTransfer(
+      ConnectionState state,
+      ActiveInvocation active,
+      UUID transferId,
+      DaemonResourceTicketService.TransferRequest request,
+      UUID commitUploadId) {
+
+    private PreparedTransfer {
+      if ((request == null) == (commitUploadId == null)) {
+        throw new IllegalArgumentException("exactly one of request or commitUploadId must be set");
+      }
+    }
   }
 }

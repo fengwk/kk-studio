@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,9 +26,7 @@ import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
-import fun.fengwk.kkstudio.harness.daemon.coding.InMemoryResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.ReadCapability;
-import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
@@ -58,8 +55,9 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.io.IOException;
@@ -72,11 +70,11 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -98,6 +96,10 @@ import java.util.concurrent.atomic.AtomicReference;
 class DaemonRuntimeTest {
 
   private static final long ASYNC_TEST_TIMEOUT_SECONDS = 5;
+
+  /** WELCOME 通告的资源字节预算；足够覆盖测试中的小资源。 */
+  private static final long MAX_RESOURCE_BYTES = 1024L * 1024L;
+
   private static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
@@ -107,6 +109,7 @@ class DaemonRuntimeTest {
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
+  private final DaemonResourceTransferCodec transferCodec = new DaemonResourceTransferCodec();
   private DaemonRuntime runtime;
   private FakeTransport handshakeTransport;
 
@@ -289,8 +292,7 @@ class DaemonRuntimeTest {
             null,
             ENVIRONMENT_ROOT,
             dataDir());
-    CodingToolsConfig toolsConfig =
-        TestCodingConfig.withBridge(ENVIRONMENT_ROOT, new InMemoryResourceStore());
+    CodingToolsConfig toolsConfig = TestCodingConfig.withBridge(ENVIRONMENT_ROOT);
 
     runtime = DaemonRuntime.create(config, toolsConfig, DaemonSkillTestSupport.open(dataDir()));
 
@@ -357,8 +359,7 @@ class DaemonRuntimeTest {
               new TestCapability(),
               skillRegistry,
               Duration.ofMinutes(1),
-              Duration.ofSeconds(10),
-              null);
+              Duration.ofSeconds(10));
 
       runtime.start();
       transport.awaitConnections(1);
@@ -471,11 +472,11 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * 测试意图：v2 INVOKE 外壳不携带目录，coding workdir 只存在于具体 arguments 中——携带已删除的 {@code workspacePath}
+   * 测试意图：v1 INVOKE 外壳不携带目录，coding workdir 只存在于具体 arguments 中——携带已删除的 {@code workspacePath}
    * 字段（文本或数字）必须在协议边界作为 unknown field 拒绝，且不触达 capability SPI。
    */
   @Test
-  void rejectsUnknownWorkspacePathFieldInV2InvokePayloadBeforeSideEffects()
+  void rejectsUnknownWorkspacePathFieldInV1InvokePayloadBeforeSideEffects()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
@@ -511,7 +512,7 @@ class DaemonRuntimeTest {
     assertMessageTypes(transport.takeMessages(1), ERROR);
     assertEquals(0, tool.executions.get());
 
-    // 去掉 workspacePath 的严格 v2 payload 正常执行，证明拒绝只针对该未知字段。
+    // 去掉 workspacePath 的严格 v1 payload 正常执行，证明拒绝只针对该未知字段。
     transport.receive(invoke("valid-after-rejected-workspace"));
     transport.takeMessages(1);
     assertEquals(1, tool.executions.get());
@@ -533,8 +534,7 @@ class DaemonRuntimeTest {
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
           new ReadCapability(
-              TestCodingConfig.withBridge(root, new InMemoryResourceStore()),
-              Executors.newVirtualThreadPerTaskExecutor()));
+              TestCodingConfig.withBridge(root), Executors.newVirtualThreadPerTaskExecutor()));
       runtime = runtime(transport, registry, root);
 
       runtime.start();
@@ -906,9 +906,7 @@ class DaemonRuntimeTest {
       assertTrue(blockerStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
       FakeTransport transport = new FakeTransport();
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-      registry.register(
-          new WriteCapability(
-              TestCodingConfig.withBridge(root, new InMemoryResourceStore()), taskExecutor));
+      registry.register(new WriteCapability(TestCodingConfig.withBridge(root), taskExecutor));
       runtime =
           new DaemonRuntime(
               new DaemonConfig(
@@ -1065,9 +1063,7 @@ class DaemonRuntimeTest {
   void partialSerializesTextAndJsonButRejectsResourceContents() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
-    InMemoryResourceStore store = new InMemoryResourceStore();
-    DaemonResourceRef stored = store.store(new byte[] {1, 2}, "application/json");
-    runtime = runtime(transport, tool, store);
+    runtime = runtime(transport, tool);
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1090,18 +1086,19 @@ class DaemonRuntimeTest {
     assertTrue(payload.contains("\"type\":\"text\""));
     assertTrue(payload.contains("\"text\":\"hi\""));
 
-    // PROGRESS 携带 resource → 编码在任何 store 访问前拒绝，收敛为 FAILED。
+    // PROGRESS 携带 resource → 编码在任何上传之前拒绝，收敛为 FAILED，绝不发出控制帧。
     transport.receive(invoke("structured-content-2"));
     transport.takeMessages(1);
-    ResourceRef storedRef =
-        new ResourceRef(
-            stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
     tool.partial(
         new EnvironmentCapabilityResult(
-            "structured-content-2", List.of(new ResourceResultContent(storedRef)), false, "{}"));
+            "structured-content-2",
+            List.of(new ResourceResultContent(uploadedRef(UUID.randomUUID(), "application/json"))),
+            false,
+            "{}"));
     List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
     assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
     assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
+    assertFalse(transport.hasMessages(), "PROGRESS 携带 resource 时绝不能发出任何上传控制帧");
   }
 
   /**
@@ -1137,7 +1134,6 @@ class DaemonRuntimeTest {
     }
     assertTrue(codec.readPayload(messages.get(0)).isEmpty());
 
-    DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
     List<EnvironmentCapabilityResult> results =
         messages.subList(1, 4).stream()
             .map(message -> resultCodec.decodeResult(message.payloadJson()))
@@ -1152,187 +1148,347 @@ class DaemonRuntimeTest {
             .toList());
   }
 
-  /** wire resource 必须包含 Base64 字节，使接收端可独立持久化；终端 payload 自包含，不依赖连接内映射。 */
+  /**
+   * 二进制/图片结果的完整数据面：REQUEST → 票据 → 直传 PUT → COMMIT → READY → 仅元数据 COMPLETED。
+   *
+   * <p>同时证明 wire 上没有任何字节表示（既非 Base64 也非二进制帧），且终端 resource 只承载全局 uploadId 与权威元数据。
+   */
   @Test
-  void resourcePayloadIsSelfContainedAndDecodesOnReceiver() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    TestCapability tool = new TestCapability();
-    InMemoryResourceStore store = new InMemoryResourceStore();
-    byte[] data = new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
-    DaemonResourceRef stored = store.store(data, "application/octet-stream");
-    runtime = runtime(transport, tool, store);
+  void binaryResultUploadsDirectlyAndEncodesMetadataOnly() throws Exception {
+    try (UploadEndpoint storage = UploadEndpoint.start()) {
+      FakeTransport transport = new FakeTransport();
+      TestCapability tool = new TestCapability();
+      byte[] data = new byte[] {(byte) 0xCA, (byte) 0xFE, (byte) 0xBA, (byte) 0xBE};
+      runtime = runtime(transport, tool);
 
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake();
-    transport.takeMessages(2);
-    transport.receive(invoke("resource-rewrite"));
-    transport.takeMessages(1);
-    ResourceRef ref =
-        new ResourceRef(
-            stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
-    tool.complete(
-        new EnvironmentCapabilityResult(
-            "resource-rewrite", List.of(new ResourceResultContent(ref)), false, "{}"));
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake();
+      transport.takeMessages(2);
+      // 最大 wire timeout 等价于实际上无 deadline；不能溢出 OkHttp 的 callTimeout 参数。
+      transport.receive(invoke("binary-upload", "test", "1.0.0", Long.MAX_VALUE));
+      assertMessageTypes(transport.takeMessages(1), STARTED);
+      Thread completion =
+          completeAsync(
+              tool,
+              new EnvironmentCapabilityResult(
+                  "binary-upload",
+                  List.of(new BinaryResultContent("application/octet-stream", data)),
+                  false,
+                  "{}"));
 
-    List<DaemonEnvelope> terminal = transport.takeMessages(1);
-    assertMessageTypes(terminal, COMPLETED);
-    String payload = terminal.get(0).payloadJson();
-    JsonNode resultNode = codec.readPayload(terminal.get(0)).get("result");
-    JsonNode content = resultNode.get("contents").get(0);
-    assertEquals("resource", content.get("type").asText());
-    assertEquals(stored.uri(), content.get("uri").asText());
-    assertEquals(stored.mediaType(), content.get("mediaType").asText());
-    assertEquals(stored.size(), content.get("size").asLong());
-    assertEquals(stored.sha256(), content.get("sha256").asText());
-    String base64 = content.get("contentBase64").asText();
-    assertEquals(Base64.getEncoder().encodeToString(data), base64);
+      // daemon 必须先申请票据：控制帧只承载 transfer 元数据，绝无二进制数据面。
+      DaemonEnvelope requestFrame = transport.takeNextMessage();
+      assertMessageTypes(List.of(requestFrame), DaemonMessageType.RESOURCE_UPLOAD_REQUEST);
+      assertEquals("binary-upload", requestFrame.invocationId());
+      DaemonResourceTransferCodec.UploadRequest request =
+          transferCodec.decodeRequest(requestFrame.payloadJson());
+      assertEquals("application/octet-stream", request.mediaType());
+      assertEquals(data.length, request.size());
+      assertEquals(storage.sha256Hex(data), request.sha256());
 
-    // 接收端直接保留已校验 bytes，不传播仅在 Daemon 本地可用的 URI。
-    DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
-    EnvironmentCapabilityResult decoded = resultCodec.decodeResult(payload);
-    assertEquals(1, decoded.contents().size());
-    BinaryResultContent binary = (BinaryResultContent) decoded.contents().get(0);
-    assertEquals(stored.mediaType(), binary.mediaType());
-    assertArrayEquals(data, binary.content());
-    assertNull(binary.textMetadata());
+      // 服务端签发 PENDING 票据：daemon 按精确方法/headers 直传，然后提交。
+      UUID uploadId = UUID.randomUUID();
+      storage.expectUpload(request.sha256());
+      transport.receive(
+          ticketEnvelope(
+              "binary-upload",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.pending(
+                      request.transferId(),
+                      uploadId,
+                      new DaemonPresignedPut(
+                          "PUT", storage.putUrl(), Map.of("If-None-Match", "*"))))));
+
+      DaemonEnvelope commitFrame = transport.takeNextMessage();
+      assertMessageTypes(List.of(commitFrame), DaemonMessageType.RESOURCE_UPLOAD_COMMIT);
+      assertEquals("binary-upload", commitFrame.invocationId());
+      DaemonResourceTransferCodec.UploadCommit commit =
+          transferCodec.decodeCommit(commitFrame.payloadJson());
+      assertEquals(request.transferId(), commit.transferId());
+      assertEquals(uploadId, commit.uploadId());
+      assertEquals("PUT", storage.lastMethod());
+      assertEquals(data.length, storage.lastBody().length);
+      assertArrayEquals(data, storage.lastBody());
+
+      // 提交回执 READY 后 daemon 才能发出唯一 COMPLETED，且只承载元数据。
+      transport.receive(
+          ticketEnvelope(
+              "binary-upload",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.ready(request.transferId(), uploadId))));
+
+      DaemonEnvelope terminal = transport.takeNextMessage();
+      assertMessageTypes(List.of(terminal), COMPLETED);
+      JsonNode content = codec.readPayload(terminal).get("result").get("contents").get(0);
+      assertEquals("resource", content.get("type").asText());
+      assertEquals(uploadId.toString(), content.get("uploadId").asText());
+      assertEquals("application/octet-stream", content.get("mediaType").asText());
+      assertEquals(data.length, content.get("size").asLong());
+      assertEquals(storage.sha256Hex(data), content.get("sha256").asText());
+      // 终态绝不承载本地地址或任何字节表示。
+      assertFalse(content.has("uri"));
+      assertFalse(terminal.payloadJson().contains("file://"));
+      assertEquals(1, storage.uploadCount());
+
+      // 接收端把 uploadId 还原为进程内瞬态 blob-upload 引用，而不是内存字节。
+      EnvironmentCapabilityResult decoded = resultCodec.decodeResult(terminal.payloadJson());
+      ResourceResultContent uploaded = (ResourceResultContent) decoded.contents().get(0);
+      assertEquals(uploadId, uploaded.resource().blobUploadId());
+      assertEquals(ResourceRef.blobUploadUri(uploadId), uploaded.resource().uri());
+
+      awaitCompletion(completion);
+    }
   }
 
-  /** BinaryResultContent 必须先经 resource store 落盘再编码为 wire resource，wire ref 可被 store 读回。 */
+  /** 票据等待期间断线后，同实例重连必须重放同一 transferId，且能力只执行一次、字节只上传一次。 */
   @Test
-  void storesBinaryResultContentBeforeEncoding() throws Exception {
-    FakeTransport transport = new FakeTransport();
-    TestCapability tool = new TestCapability();
-    InMemoryResourceStore store = new InMemoryResourceStore();
-    runtime = runtime(transport, tool, store);
-    byte[] data = new byte[] {1, 2, 3};
+  void inFlightUploadResumesWithTheSameTransferAfterReconnect() throws Exception {
+    try (UploadEndpoint storage = UploadEndpoint.start()) {
+      FakeTransport transport = new FakeTransport();
+      TestCapability tool = new TestCapability();
+      byte[] data = new byte[] {4, 5, 6};
+      runtime = runtime(transport, tool);
 
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake();
-    transport.takeMessages(2);
-    transport.receive(invoke("binary-content"));
-    transport.takeMessages(1);
-    tool.complete(
-        new EnvironmentCapabilityResult(
-            "binary-content",
-            List.of(new BinaryResultContent("application/octet-stream", data)),
-            false,
-            "{}"));
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake();
+      transport.takeMessages(2);
+      transport.receive(invoke("upload-reconnect", "test", "1.0.0", 10_000));
+      assertMessageTypes(transport.takeMessages(1), STARTED);
+      Thread completion =
+          completeAsync(
+              tool,
+              new EnvironmentCapabilityResult(
+                  "upload-reconnect",
+                  List.of(new BinaryResultContent("application/octet-stream", data)),
+                  false,
+                  "{}"));
 
-    List<DaemonEnvelope> terminal = transport.takeMessages(1);
-    assertMessageTypes(terminal, COMPLETED);
-    JsonNode content = codec.readPayload(terminal.get(0)).get("result").get("contents").get(0);
-    assertEquals("resource", content.get("type").asText());
-    assertEquals("application/octet-stream", content.get("mediaType").asText());
-    assertEquals(3, content.get("size").asLong());
-    assertEquals(Base64.getEncoder().encodeToString(data), content.get("contentBase64").asText());
-    DaemonResourceRef wireRef =
-        new DaemonResourceRef(
-            content.get("uri").asText(),
-            content.get("mediaType").asText(),
-            null,
-            content.get("size").asLong(),
-            content.get("sha256").asText());
-    assertArrayEquals(data, store.read(wireRef));
+      DaemonEnvelope firstRequestFrame = transport.takeNextMessage();
+      DaemonResourceTransferCodec.UploadRequest firstRequest =
+          transferCodec.decodeRequest(firstRequestFrame.payloadJson());
+      transport.disconnect();
+
+      transport.awaitConnections(1);
+      completeHandshake();
+      assertMessageTypes(transport.takeMessages(2), HELLO, READY);
+      // Server 在 READY 后以同一 invocationId 重放 INVOKE；Daemon journal 只回放 STARTED，不重复执行能力。
+      transport.receive(invoke("upload-reconnect", "test", "1.0.0", 10_000));
+      List<DaemonEnvelope> resumed = transport.takeMessages(2);
+      DaemonEnvelope retriedRequestFrame =
+          resumed.stream()
+              .filter(frame -> frame.messageType() == DaemonMessageType.RESOURCE_UPLOAD_REQUEST)
+              .findFirst()
+              .orElseThrow();
+      assertTrue(
+          resumed.stream().anyMatch(frame -> frame.messageType() == DaemonMessageType.STARTED));
+      DaemonResourceTransferCodec.UploadRequest retriedRequest =
+          transferCodec.decodeRequest(retriedRequestFrame.payloadJson());
+      assertEquals(firstRequest, retriedRequest);
+      assertEquals(1, tool.executions.get());
+
+      UUID uploadId = UUID.randomUUID();
+      storage.expectUpload(retriedRequest.sha256());
+      transport.receive(
+          ticketEnvelope(
+              "upload-reconnect",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.pending(
+                      retriedRequest.transferId(),
+                      uploadId,
+                      new DaemonPresignedPut(
+                          "PUT", storage.putUrl(), Map.of("If-None-Match", "*"))))));
+      DaemonEnvelope commitFrame = transport.takeNextMessage();
+      assertEquals(DaemonMessageType.RESOURCE_UPLOAD_COMMIT, commitFrame.messageType());
+      transport.receive(
+          ticketEnvelope(
+              "upload-reconnect",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.ready(
+                      retriedRequest.transferId(), uploadId))));
+      assertMessageTypes(transport.takeMessages(1), COMPLETED);
+      assertEquals(1, storage.uploadCount());
+      awaitCompletion(completion);
+    }
   }
 
-  /** resource reader / 编码失败必须让 PROGRESS/COMPLETED 收敛为 FAILED，callback 不会泄漏 local-only ref。 */
+  /** 同实例重连后终态重放：journal 直接重放已就绪的终态，绝不再次上传或重新执行能力。 */
   @Test
-  void convergesResourceFailuresToFailedTerminal() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    TestCapability tool = new TestCapability();
-    ResourceStore failingStore =
-        new ResourceStore() {
-          @Override
-          public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
-            throw new IOException("store down");
-          }
+  void terminalReplayAfterReconnectDoesNotUploadAgain() throws Exception {
+    try (UploadEndpoint storage = UploadEndpoint.start()) {
+      FakeTransport transport = new FakeTransport();
+      TestCapability tool = new TestCapability();
+      byte[] data = new byte[] {7, 8, 9};
+      runtime = runtime(transport, tool);
 
-          @Override
-          public byte[] read(DaemonResourceRef ref) throws IOException {
-            throw new IOException("missing resource: " + ref.uri());
-          }
-        };
-    runtime = runtime(transport, tool, failingStore);
-    DaemonResourceRef local =
-        new DaemonResourceRef(
-            "file:///export/local-1", "application/json", null, 3L, "0".repeat(64));
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake();
+      transport.takeMessages(2);
+      transport.receive(invoke("replayed-upload"));
+      transport.takeMessages(1);
+      Thread completion =
+          completeAsync(
+              tool,
+              new EnvironmentCapabilityResult(
+                  "replayed-upload",
+                  List.of(new BinaryResultContent("application/octet-stream", data)),
+                  false,
+                  "{}"));
 
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake();
-    transport.takeMessages(2);
-    transport.receive(invoke("resource-fail"));
-    transport.takeMessages(1);
+      DaemonEnvelope requestFrame = transport.takeNextMessage();
+      DaemonResourceTransferCodec.UploadRequest request =
+          transferCodec.decodeRequest(requestFrame.payloadJson());
+      UUID uploadId = UUID.randomUUID();
+      storage.expectUpload(request.sha256());
+      transport.receive(
+          ticketEnvelope(
+              "replayed-upload",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.pending(
+                      request.transferId(),
+                      uploadId,
+                      new DaemonPresignedPut(
+                          "PUT", storage.putUrl(), Map.of("If-None-Match", "*"))))));
+      transport.takeNextMessage();
+      transport.receive(
+          ticketEnvelope(
+              "replayed-upload",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.ready(request.transferId(), uploadId))));
+      DaemonEnvelope firstTerminal = transport.takeNextMessage();
+      assertMessageTypes(List.of(firstTerminal), COMPLETED);
+      assertEquals(1, storage.uploadCount());
 
-    ResourceRef localRef =
-        new ResourceRef(local.uri(), local.mediaType(), local.name(), local.size(), local.sha256());
-    // PROGRESS 失败必须收敛为 FAILED，且不再发出 PROGRESS 或 COMPLETED。
-    tool.partial(
-        new EnvironmentCapabilityResult(
-            "resource-fail", List.of(new ResourceResultContent(localRef)), false, "{}"));
-    List<DaemonEnvelope> partialFailure = transport.takeMessages(1);
-    assertMessageTypes(partialFailure, DaemonMessageType.FAILED);
-    assertTrue(partialFailure.get(0).payloadJson().contains("cannot partial"));
+      // 物理断线后同实例重连：同一 invocationId 重放终态，不再上传也不再执行。
+      transport.disconnect();
+      transport.awaitConnections(1);
+      String replayedTerminal = null;
+      transport.awaitNextMessageType(HELLO);
+      transport.takeMessages(1);
+      transport.receive(platformMessage(DaemonMessageType.WELCOME));
+      transport.takeMessages(1);
+      transport.receive(invoke("replayed-upload"));
+      for (DaemonEnvelope envelope : transport.takeMessages(1)) {
+        assertMessageTypes(List.of(envelope), COMPLETED);
+        replayedTerminal = envelope.payloadJson();
+      }
 
-    // FAILED 之后迟到的 COMPLETED 必须被忽略（由 journal 守卫）。
-    tool.complete(
-        new EnvironmentCapabilityResult(
-            "resource-fail", List.of(new ResourceResultContent(localRef)), false, "{}"));
-    assertFalse(transport.hasMessages());
-
-    // 现在一次带 COMPLETED 失败的独立 invocation 也必须收敛为 FAILED。
-    transport.receive(invoke("resource-fail-2"));
-    transport.takeMessages(1);
-    tool.complete(
-        new EnvironmentCapabilityResult(
-            "resource-fail-2",
-            List.of(
-                new ResourceResultContent(
-                    new ResourceRef(
-                        "file:///export/local-2", "text/plain", null, 1L, "0".repeat(64)))),
-            false,
-            "{}"));
-    List<DaemonEnvelope> completeFailure = transport.takeMessages(1);
-    assertMessageTypes(completeFailure, DaemonMessageType.FAILED);
-    assertTrue(completeFailure.get(0).payloadJson().contains("cannot complete"));
+      assertEquals(firstTerminal.payloadJson(), replayedTerminal);
+      assertEquals(1, storage.uploadCount(), "终态重放绝不重复上传字节");
+      assertEquals(1, tool.executions.get(), "终态重放绝不重复执行能力");
+      awaitCompletion(completion);
+    }
   }
 
-  /** 无 resource store 的 generic runtime 遇 resource 必须确定性 FAILED，不能发送不可解析的内容。 */
+  /**
+   * 服务端持续拒绝签发票据时 daemon 必须在 invocation deadline 有界收敛为 FAILED，且不泄漏预签名地址、不内联任何字节。
+   *
+   * <p>同时证明这是调用级故障：同一连接上的下一个调用仍能正常完成。
+   */
   @Test
-  void failsClosedWhenResourceStoreIsAbsent() throws InterruptedException {
+  void convergesToFailedTerminalWhenTicketRejectionsOutlastDeadline() throws Exception {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
-    runtime = runtime(transport, tool); // no resource store
+    runtime = runtime(transport, tool);
 
     runtime.start();
     transport.awaitConnections(1);
     completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("no-source"));
+    transport.receive(invoke("rejected-upload", "test", "1.0.0", 2_000));
     transport.takeMessages(1);
+    Thread completion =
+        completeAsync(
+            tool,
+            new EnvironmentCapabilityResult(
+                "rejected-upload",
+                List.of(new BinaryResultContent("image/png", new byte[] {1})),
+                false,
+                "{}"));
 
-    tool.complete(
-        new EnvironmentCapabilityResult(
-            "no-source",
-            List.of(
-                new ResourceResultContent(
-                    new ResourceRef(
-                        "file:///export/local-only",
-                        "application/json",
-                        null,
-                        0L,
-                        "0".repeat(64)))),
-            false,
-            "{}"));
+    // 服务端持续拒绝时，同一 transfer 在 invocation deadline 内重试，超时后确定性收敛。
+    int attempts = 0;
+    DaemonEnvelope terminal = null;
+    while (terminal == null) {
+      DaemonEnvelope frame = transport.takeNextMessage();
+      if (frame.messageType() == DaemonMessageType.RESOURCE_UPLOAD_REQUEST) {
+        attempts++;
+        DaemonResourceTransferCodec.UploadRequest request =
+            transferCodec.decodeRequest(frame.payloadJson());
+        transport.receive(
+            ticketEnvelope(
+                "rejected-upload",
+                transferCodec.encodeTicket(
+                    DaemonResourceTransferCodec.UploadTicket.failed(
+                        request.transferId(), "storage rejected the transfer"))));
+        continue;
+      }
+      terminal = frame;
+    }
 
-    List<DaemonEnvelope> terminal = transport.takeMessages(1);
-    assertMessageTypes(terminal, DaemonMessageType.FAILED);
-    String payload = terminal.get(0).payloadJson();
-    assertTrue(payload.contains("cannot complete"));
-    assertFalse(payload.contains("\"type\":\"resource\""));
-    assertFalse(payload.contains("\"contentBase64\""));
+    assertEquals(DaemonMessageType.FAILED, terminal.messageType());
+    assertFalse(terminal.payloadJson().contains("http://"));
+    assertFalse(terminal.payloadJson().contains("storage rejected the transfer"));
+    assertTrue(attempts > 1, "deadline 到达前应重试同一 transfer");
+    awaitCompletion(completion);
+
+    // 上传失败只终结该调用：同一连接上的后续调用仍然可用。
+    transport.receive(invoke("after-rejection"));
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    tool.complete(new EnvironmentCapabilityResult("after-rejection", List.of(), false, "{}"));
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+  }
+
+  /** 对象存储无响应时，PUT 总调用必须服从 invocation deadline，不能因 read/write timeout 为零而永久占住执行线程。 */
+  @Test
+  void directUploadPutCannotOutliveInvocationDeadline() throws Exception {
+    try (UploadEndpoint storage = UploadEndpoint.start()) {
+      FakeTransport transport = new FakeTransport();
+      TestCapability tool = new TestCapability();
+      byte[] data = new byte[] {1, 2, 3};
+      storage.delayResponse(5_000);
+      runtime = runtime(transport, tool);
+
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake();
+      transport.takeMessages(2);
+      transport.receive(invoke("put-deadline", "test", "1.0.0", 500));
+      transport.takeMessages(1);
+      long startedNanos = System.nanoTime();
+      Thread completion =
+          completeAsync(
+              tool,
+              new EnvironmentCapabilityResult(
+                  "put-deadline",
+                  List.of(new BinaryResultContent("application/octet-stream", data)),
+                  false,
+                  "{}"));
+
+      DaemonEnvelope requestFrame = transport.takeNextMessage();
+      DaemonResourceTransferCodec.UploadRequest request =
+          transferCodec.decodeRequest(requestFrame.payloadJson());
+      storage.expectUpload(request.sha256());
+      transport.receive(
+          ticketEnvelope(
+              "put-deadline",
+              transferCodec.encodeTicket(
+                  DaemonResourceTransferCodec.UploadTicket.pending(
+                      request.transferId(),
+                      UUID.randomUUID(),
+                      new DaemonPresignedPut(
+                          "PUT", storage.putUrl(), Map.of("If-None-Match", "*"))))));
+
+      DaemonEnvelope terminal = transport.takeNextMessage();
+      assertEquals(DaemonMessageType.FAILED, terminal.messageType());
+      assertFalse(terminal.payloadJson().contains(storage.putUrl()));
+      awaitCompletion(completion);
+      assertTrue(
+          System.nanoTime() - startedNanos < TimeUnit.SECONDS.toNanos(3),
+          "direct PUT must converge within the invocation deadline budget");
+    }
   }
 
   /** Tool error 和错误关联 ID 的完成回调都必须收敛为 FAILED。 */
@@ -1389,19 +1545,7 @@ class DaemonRuntimeTest {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
-    ResourceStore adversarialStore =
-        new ResourceStore() {
-          @Override
-          public DaemonResourceRef store(byte[] bytes, String mediaType) {
-            throw new ExplodingMessageException();
-          }
-
-          @Override
-          public byte[] read(DaemonResourceRef ref) {
-            throw new ExplodingMessageException();
-          }
-        };
-    runtime = runtime(transport, tool, journal, adversarialStore);
+    runtime = runtime(transport, tool, journal);
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1423,6 +1567,7 @@ class DaemonRuntimeTest {
 
     transport.receive(invoke("adversarial-result"));
     assertMessageTypes(transport.takeMessages(1), STARTED);
+    // 无法解析的 resource 引用（非 blob-upload scheme）在终态编码前被拒绝，绝不落到 wire 或存储。
     tool.complete(
         new EnvironmentCapabilityResult(
             "adversarial-result",
@@ -1438,9 +1583,8 @@ class DaemonRuntimeTest {
             "{}"));
     List<DaemonEnvelope> resultTerminal = transport.takeMessages(1);
     assertMessageTypes(resultTerminal, DaemonMessageType.FAILED);
-    assertEquals(
-        "{\"message\":\"cannot complete capability result: cannot read resource bytes\"}",
-        resultTerminal.get(0).payloadJson());
+    assertTrue(resultTerminal.get(0).payloadJson().contains("cannot complete"));
+    assertFalse(resultTerminal.get(0).payloadJson().contains("adversarial"));
     assertEquals(
         DaemonInvocationState.FAILED, journal.find("adversarial-result").orElseThrow().state());
 
@@ -1503,8 +1647,7 @@ class DaemonRuntimeTest {
               new TestCapability(),
               skills,
               Duration.ofMinutes(1),
-              Duration.ofSeconds(10),
-              null);
+              Duration.ofSeconds(10));
 
       runtime.start();
       transport.awaitConnections(1);
@@ -1854,8 +1997,7 @@ class DaemonRuntimeTest {
             new TestCapability(),
             DaemonSkillTestSupport.open(dataDir()),
             Duration.ofMinutes(1),
-            Duration.ofSeconds(10),
-            null);
+            Duration.ofSeconds(10));
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1976,8 +2118,7 @@ class DaemonRuntimeTest {
         DaemonSkillTestSupport.open(dataDir()),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        Executors.newVirtualThreadPerTaskExecutor(),
-        new InMemoryResourceStore());
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(
@@ -2001,42 +2142,7 @@ class DaemonRuntimeTest {
         skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        Executors.newVirtualThreadPerTaskExecutor(),
-        new InMemoryResourceStore());
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport, EnvironmentCapability capability, ResourceStore resourceStore) {
-    return runtime(
-        transport, capability, Duration.ofMinutes(1), Duration.ofSeconds(10), resourceStore);
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      InMemoryDaemonInvocationJournal journal,
-      ResourceStore resourceStore) {
-    handshakeTransport = transport;
-    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-    registry.register(capability);
-    return new DaemonRuntime(
-        new DaemonConfig(
-            URI.create("ws://localhost/gateway"),
-            registrationTokenFile(),
-            Duration.ofMinutes(1),
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
-            null,
-            ENVIRONMENT_ROOT,
-            dataDir()),
-        transport,
-        registry,
-        DaemonSkillTestSupport.open(dataDir()),
-        journal,
-        Executors.newSingleThreadScheduledExecutor(),
-        Executors.newVirtualThreadPerTaskExecutor(),
-        resourceStore);
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(
@@ -2096,22 +2202,12 @@ class DaemonRuntimeTest {
       EnvironmentCapability capability,
       Duration heartbeatInterval,
       Duration defaultToolTimeout) {
-    return runtime(transport, capability, heartbeatInterval, defaultToolTimeout, null);
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      Duration heartbeatInterval,
-      Duration defaultToolTimeout,
-      ResourceStore resourceStore) {
     return runtime(
         transport,
         capability,
         DaemonSkillTestSupport.open(dataDir()),
         heartbeatInterval,
-        defaultToolTimeout,
-        resourceStore);
+        defaultToolTimeout);
   }
 
   private DaemonRuntime runtime(
@@ -2119,7 +2215,7 @@ class DaemonRuntimeTest {
       EnvironmentCapability capability,
       DaemonSkillRegistry skillRegistry) {
     return runtime(
-        transport, capability, skillRegistry, Duration.ofMinutes(1), Duration.ofSeconds(10), null);
+        transport, capability, skillRegistry, Duration.ofMinutes(1), Duration.ofSeconds(10));
   }
 
   private DaemonRuntime runtime(
@@ -2127,8 +2223,7 @@ class DaemonRuntimeTest {
       EnvironmentCapability capability,
       DaemonSkillRegistry skillRegistry,
       Duration heartbeatInterval,
-      Duration defaultToolTimeout,
-      ResourceStore resourceStore) {
+      Duration defaultToolTimeout) {
     handshakeTransport = transport;
     DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
     registry.register(capability);
@@ -2148,8 +2243,7 @@ class DaemonRuntimeTest {
         skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
-        Executors.newVirtualThreadPerTaskExecutor(),
-        resourceStore);
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private void deleteRecursively(Path root) throws Exception {
@@ -2188,7 +2282,7 @@ class DaemonRuntimeTest {
     return invoke(invocationId, capabilityId, capabilityVersion, timeoutMillis, "{}");
   }
 
-  /** 严格 v2 INVOKE：外壳只有 capabilityId/capabilityVersion/arguments/timeoutMillis，目录只来自 arguments。 */
+  /** 严格 v1 INVOKE：外壳只有 capabilityId/capabilityVersion/arguments/timeoutMillis，目录只来自 arguments。 */
   private DaemonEnvelope invoke(
       String invocationId,
       String capabilityId,
@@ -2255,7 +2349,49 @@ class DaemonRuntimeTest {
   }
 
   private DaemonEnvelope platformMessage(DaemonMessageType messageType) {
+    // WELCOME 必须通告正的资源字节预算（协议要求）；其余平台消息只承载空 payload。
+    if (messageType == DaemonMessageType.WELCOME) {
+      return new DaemonEnvelope(
+          DaemonProtocol.VERSION,
+          messageType,
+          ENVIRONMENT_ID,
+          null,
+          "{\"maxResourceBytes\":" + MAX_RESOURCE_BYTES + "}");
+    }
     return new DaemonEnvelope(DaemonProtocol.VERSION, messageType, ENVIRONMENT_ID, null, "{}");
+  }
+
+  /**
+   * 在后台线程触发能力完成回调。
+   *
+   * <p>终态编码在完成回调内同步完成直传（申请票据 → PUT → 提交），因此完成回调必须与测试线程驱动协议帧并行执行，否则测试线程会先被回调阻塞。
+   */
+  private Thread completeAsync(TestCapability tool, EnvironmentCapabilityResult result) {
+    Thread thread = new Thread(() -> tool.complete(result), "complete-" + result.callId());
+    thread.setDaemon(true);
+    thread.start();
+    return thread;
+  }
+
+  private void awaitCompletion(Thread completion) throws InterruptedException {
+    completion.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
+    assertFalse(completion.isAlive(), "能力完成回调未在预算内收敛");
+  }
+
+  /** 上传票据帧：envelope 的 invocationId 是被调用的活动调用，transferId 只在 payload 中。 */
+  private DaemonEnvelope ticketEnvelope(String invocationId, String ticketPayload) {
+    return new DaemonEnvelope(
+        DaemonProtocol.VERSION,
+        DaemonMessageType.RESOURCE_UPLOAD_TICKET,
+        ENVIRONMENT_ID,
+        invocationId,
+        ticketPayload);
+  }
+
+  /** 一个已上传的瞬态引用：blob-upload scheme + 规范 size/sha，仅用于终态编码的输入检查。 */
+  private static ResourceRef uploadedRef(UUID uploadId, String mediaType) {
+    return new ResourceRef(
+        ResourceRef.blobUploadUri(uploadId), mediaType, null, 1L, "0".repeat(64));
   }
 
   private DaemonEnvelope cancel(String invocationId) {

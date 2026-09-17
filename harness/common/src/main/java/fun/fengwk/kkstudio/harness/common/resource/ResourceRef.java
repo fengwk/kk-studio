@@ -4,13 +4,19 @@ import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * 不可变的规范 Resource URI 引用。
  *
- * <p>只允许 {@code data} / {@code file} / {@code s3} / {@code https} / {@code http} 五种 scheme；构造时执行全部
- * 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec 反序列化与直接构造得到同样的严格结果。
+ * <p>只允许 {@code data} / {@code file} / {@code s3} / {@code https} / {@code http} / {@code
+ * blob-upload} 六种 scheme；构造时执行全部 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec 反序列化与直接构造得到同样的严格结果。
+ *
+ * <p>{@code blob-upload:<uploadId>} 是 Environment Daemon 上传的瞬时引用：字节已由 Daemon 直传对象存储，Platform 只持有 全局
+ * Blob 上传行 id。它必须携带非空 size/sha，并且只在一个 Tool 调用终态到 durable history 插入之间短暂存在。
  *
  * <p>非 base64 data 载荷使用 frozen 表示：percent 解码后按字节重新编码并精确相等——原始 ASCII 只能是 RFC unreserved 与原始 {@code
  * '/'}，其余任何可表示字节都必须是大写 {@code %XX}（原始逗号/分号/冒号/问号/井号被拒绝，其编码形式被接受； 编码 slash/NUL
@@ -36,6 +42,14 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
   private static final Pattern MEDIA_TYPE_PATTERN =
       Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
   private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
+
+  /** {@code blob-upload} scheme 名。 */
+  public static final String BLOB_UPLOAD_SCHEME = "blob-upload";
+
+  /** 完整 {@code blob-upload:<uploadId>} 形态：scheme + 规范小写 UUID，无任何其它成分。 */
+  private static final Pattern BLOB_UPLOAD_PATTERN =
+      Pattern.compile(
+          BLOB_UPLOAD_SCHEME + ":([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
 
   public ResourceRef {
     if (uri == null) {
@@ -69,6 +83,37 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
     }
     // URI 校验（含 data 解码与 size/sha 验证）；data URI 返回解码字节，其余返回 null。
     ResourceUriValidator.validate(uri, mediaType, size, sha256);
+  }
+
+  /** 构造规范 {@code blob-upload:<uploadId>} 瞬态引用 URI。 */
+  public static String blobUploadUri(UUID uploadId) {
+    return BLOB_UPLOAD_SCHEME + ":" + Objects.requireNonNull(uploadId, "uploadId");
+  }
+
+  /**
+   * 严格解析 {@code blob-upload:<uploadId>} 引用，返回其全局上传 id；不是该 scheme 时返回 {@code null}。
+   *
+   * <p>只有完整且规范的形态（scheme、单个冒号、规范小写 UUID、无其余字符）才被识别：任何近似但非法的形态（大写 UUID、多余成分、空上传 id）都在这里 返回 {@code
+   * null}，需要拒绝时由调用方按自己的协议语义报错，而不是被误判为有效引用。
+   */
+  public static UUID blobUploadId(String uri) {
+    if (uri == null) {
+      return null;
+    }
+    Matcher matcher = BLOB_UPLOAD_PATTERN.matcher(uri);
+    if (!matcher.matches()) {
+      return null;
+    }
+    try {
+      return UUID.fromString(matcher.group(1));
+    } catch (IllegalArgumentException error) {
+      return null;
+    }
+  }
+
+  /** 本引用是否为 {@code blob-upload} 瞬态引用。 */
+  public UUID blobUploadId() {
+    return blobUploadId(uri);
   }
 
   /** 严格计算 UTF-8 字节数；拒绝 Java String 中未配对的代理项，避免静默替换后突破协议边界。 */

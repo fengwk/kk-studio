@@ -29,7 +29,7 @@
 | harness-common | [modules/harness-common.md](modules/harness-common.md) | Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约 |
 | harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
 | harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
-| harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment 身份、Capability catalog 与 Daemon v2 wire |
+| harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment 身份、Capability catalog 与唯一 Daemon protocol v1 |
 | harness-environment-server | [modules/harness-environment-server.md](modules/harness-environment-server.md) | Environment daemon 会话、租约与调用协调核心 |
 | harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
 | harness-mcp | [modules/harness-mcp.md](modules/harness-mcp.md) | Remote/Local MCP client、总预算、取消与 stdio 进程生命周期 |

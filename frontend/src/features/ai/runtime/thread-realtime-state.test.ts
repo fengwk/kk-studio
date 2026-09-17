@@ -1466,6 +1466,290 @@ describe('thread realtime state', () => {
       expect(sFinal.processOutput?.endOffset).toBe(28)
     })
 
+    it('ignores a stale older SNAPSHOT that arrives after a newer SNAPSHOT', () => {
+      // 验证时间戳早于当前快照的历史 SNAPSHOT 被安全忽略，不覆盖较新的文本和 endOffset。
+      const newer = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('fresh tail', 'SNAPSHOT', 0, 11, 11, '2026-07-28T10:00:05Z'),
+      )
+      expect(newer.text).toBe('fresh tail')
+
+      // 乱序到达的旧快照（声明更小 endOffset 且时间戳更早）：必须被完整忽略。
+      const stale = reduceRealtimeToolStream(
+        newer,
+        processOutputPartial('stale tail', 'SNAPSHOT', 0, 4, 4, '2026-07-28T10:00:01Z'),
+      )
+      expect(stale).toBe(newer)
+      expect(stale.text).toBe('fresh tail')
+      expect(stale.processOutput?.endOffset).toBe(11)
+    })
+
+    it('ignores a stale older SNAPSHOT that arrives after a newer APPEND', () => {
+      // 验证当 APPEND 已推进流到较大偏移时，乱序到达的较早 SNAPSHOT 被正确识别为 STALE 并忽略。
+      const appended = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('abcdefghij', 'APPEND', 0, 10, 10, '2026-07-28T10:00:05Z'),
+      )
+      expect(appended.text).toBe('abcdefghij')
+
+      const stale = reduceRealtimeToolStream(
+        appended,
+        processOutputPartial('abc', 'SNAPSHOT', 0, 3, 3, '2026-07-28T10:00:02Z'),
+      )
+      expect(stale).toBe(appended)
+      expect(stale.text).toBe('abcdefghij')
+      expect(stale.processOutput?.endOffset).toBe(10)
+    })
+
+    it('keeps createdAt monotonic when an older APPEND advances offsets', () => {
+      // 偏移连续足以接受乱序到达的 APPEND，但它的旧时间戳不得回退 freshness 基线；
+      // 否则随后介于两者之间的旧 SNAPSHOT 会被误判为合法的新流 RESET。
+      const initial = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('abcdefghij', 'SNAPSHOT', 0, 10, 10, '2026-07-28T10:00:05Z'),
+      )
+      const advanced = reduceRealtimeToolStream(
+        initial,
+        processOutputPartial('klmnopqrst', 'APPEND', 10, 20, 20, '2026-07-28T10:00:01Z'),
+      )
+      expect(advanced.text).toBe('abcdefghijklmnopqrst')
+      expect(advanced.createdAt).toBe('2026-07-28T10:00:05Z')
+
+      const stale = reduceRealtimeToolStream(
+        advanced,
+        processOutputPartial('old', 'SNAPSHOT', 0, 3, 3, '2026-07-28T10:00:03Z'),
+      )
+      expect(stale).toBe(advanced)
+      expect(stale.text).toBe('abcdefghijklmnopqrst')
+      expect(stale.processOutput?.endOffset).toBe(20)
+    })
+
+    it('ignores a stale SNAPSHOT with the same timestamp but smaller endOffset', () => {
+      // 验证同时间戳（或无更晚时间戳保证）下偏移更小的 SNAPSHOT 属于流内历史乱序帧，按 STALE 丢弃，绝不误判为 RESET。
+      const newer = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('complete content', 'SNAPSHOT', 0, 16, 16, '2026-07-28T10:00:05Z'),
+      )
+      expect(newer.text).toBe('complete content')
+
+      const staleSameTime = reduceRealtimeToolStream(
+        newer,
+        processOutputPartial('prefix', 'SNAPSHOT', 0, 6, 6, '2026-07-28T10:00:05Z'),
+      )
+      expect(staleSameTime).toBe(newer)
+      expect(staleSameTime.text).toBe('complete content')
+      expect(staleSameTime.processOutput?.endOffset).toBe(16)
+    })
+
+    it('ignores duplicate SNAPSHOT at the same offset interval and observed bytes', () => {
+      // 验证同起止区间且 observedBytes 未增长的重复 SNAPSHOT 被识别为 STALE，不重复覆盖或计算。
+      const initial = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('snapshot content', 'SNAPSHOT', 0, 16, 16, '2026-07-28T10:00:05Z'),
+      )
+      const duplicate = reduceRealtimeToolStream(
+        initial,
+        processOutputPartial('snapshot content', 'SNAPSHOT', 0, 16, 16, '2026-07-28T10:00:06Z'),
+      )
+      expect(duplicate).toBe(initial)
+      expect(duplicate.text).toBe('snapshot content')
+    })
+
+    it('accepts truncation SNAPSHOT following APPEND at the same endOffset', () => {
+      // 验证 Bash LiveEmitter 截断语义：APPEND 流 flush 后同 endOffset 发出带有 preview 的 SNAPSHOT，
+      // 能合法替换 APPEND 累积文本并切换为 SNAPSHOT mode。
+      const appended = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('accumulated live output', 'APPEND', 0, 23, 23, '2026-07-28T10:00:00Z'),
+      )
+      expect(appended.text).toBe('accumulated live output')
+      expect(appended.processOutput?.mode).toBe('APPEND')
+
+      const truncatedPreview = reduceRealtimeToolStream(
+        appended,
+        processOutputPartial('... [output omitted] ...\ntruncated tail', 'SNAPSHOT', 23, 23, 23, '2026-07-28T10:00:01Z'),
+      )
+      expect(truncatedPreview.text).toBe('... [output omitted] ...\ntruncated tail')
+      expect(truncatedPreview.processOutput).toEqual({
+        mode: 'SNAPSHOT',
+        startOffset: 23,
+        endOffset: 23,
+        observedBytes: 23,
+        hasOmittedPrefix: true,
+        gapPending: false,
+      })
+    })
+
+    it('heals gapPending when an authoritative SNAPSHOT arrives at the same endOffset', () => {
+      // 验证处于 gapPending 状态时，同 offset 到达的权威 SNAPSHOT 能够消除 gapPending 标记并修复流状态，
+      // 使后续连续 APPEND 可以正常追加。
+      const first = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('hello', 'APPEND', 0, 5, 5, '2026-07-28T10:00:00Z'),
+      )
+      const gap = reduceRealtimeToolStream(
+        first,
+        processOutputPartial('future', 'APPEND', 50, 56, 56, '2026-07-28T10:00:01Z'),
+      )
+      expect(gap.processOutput?.gapPending).toBe(true)
+
+      const healed = reduceRealtimeToolStream(
+        gap,
+        processOutputPartial('hello', 'SNAPSHOT', 0, 5, 5, '2026-07-28T10:00:02Z'),
+      )
+      expect(healed.processOutput?.gapPending).toBe(false)
+      expect(healed.processOutput?.endOffset).toBe(5)
+
+      const continued = reduceRealtimeToolStream(
+        healed,
+        processOutputPartial(' world', 'APPEND', 5, 11, 11, '2026-07-28T10:00:03Z'),
+      )
+      expect(continued.text).toBe('hello world')
+      expect(continued.processOutput?.gapPending).toBe(false)
+      expect(continued.processOutput?.endOffset).toBe(11)
+    })
+
+    it('preserves newer state text and offsets while widening error on a stale SNAPSHOT with error', () => {
+      // 验证陈旧 SNAPSHOT 虽不覆盖 text 和 offsets，但当其携带 error=true 时允许单调加宽 overlay 的 error 状态。
+      const newer = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('fresh text', 'SNAPSHOT', 0, 10, 10, '2026-07-28T10:00:05Z'),
+      )
+      expect(newer.error).toBe(false)
+
+      const staleWithError = {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text: 'old text' }],
+          error: true,
+          details: {
+            kind: 'process.output',
+            mode: 'SNAPSHOT',
+            startOffset: 0,
+            endOffset: 3,
+            observedBytes: 3,
+          },
+        },
+        createdAt: '2026-07-28T10:00:01Z',
+      }
+      const merged = reduceRealtimeToolStream(newer, staleWithError)
+      expect(merged.text).toBe('fresh text')
+      expect(merged.processOutput?.endOffset).toBe(10)
+      expect(merged.error).toBe(true)
+      expect(merged.createdAt).toBe('2026-07-28T10:00:05Z')
+    })
+
+    it('resets text and offsets cleanly on a legitimate new-stream SNAPSHOT', () => {
+      // 先进入 gapPending 状态并携带旧流的更大 observedBytes。
+      const first = reduceRealtimeToolStream(
+        null,
+        processOutputPartial('first', 'APPEND', 0, 5, 5, '2026-07-28T10:00:00Z'),
+      )
+      const gap = reduceRealtimeToolStream(
+        first,
+        processOutputPartial('far', 'APPEND', 500, 503, 503, '2026-07-28T10:00:01Z'),
+      )
+      expect(gap.processOutput?.gapPending).toBe(true)
+      expect(gap.processOutput?.observedBytes).toBe(503)
+
+      // 新流基线：声明结束位置小于已应用偏移，且时间戳严格更新 → 必须整体重置，
+      // 绝不沿用旧流的 observedBytes、endOffset 与 gapPending。
+      const reset = reduceRealtimeToolStream(
+        gap,
+        processOutputPartial('new stream', 'SNAPSHOT', 0, 3, 3, '2026-07-28T10:00:09Z'),
+      )
+      expect(reset.text).toBe('new stream')
+      expect(reset.processOutput).toEqual({
+        mode: 'SNAPSHOT',
+        startOffset: 0,
+        endOffset: 3,
+        observedBytes: 3,
+        hasOmittedPrefix: false,
+        gapPending: false,
+      })
+
+      // 重置后的连续 APPEND 必须无缝续写，不产生 gap。
+      const continued = reduceRealtimeToolStream(
+        reset,
+        processOutputPartial('!', 'APPEND', 3, 4, 4, '2026-07-28T10:00:10Z'),
+      )
+      expect(continued.text).toBe('new stream!')
+      expect(continued.processOutput?.gapPending).toBe(false)
+      expect(continued.processOutput?.endOffset).toBe(4)
+      expect(continued.processOutput?.observedBytes).toBe(4)
+    })
+
+    it('keeps SNAPSHOT and following APPEND within the char and line bounds', () => {
+      // 4000 行 × 256 字符：同时超出 2000 行与 512 KiB 两个上界。
+      const line = 'x'.repeat(256)
+      const hugeText = Array.from({ length: 4000 }, () => line).join('\n')
+      const bounded = reduceRealtimeToolStream(
+        null,
+        processOutputPartial(
+          hugeText,
+          'SNAPSHOT',
+          0,
+          hugeText.length,
+          hugeText.length,
+          '2026-07-28T10:00:00Z',
+        ),
+      )
+      expect(bounded.processOutput?.hasOmittedPrefix).toBe(true)
+      expect(bounded.text.startsWith(PROCESS_OUTPUT_OMISSION_MARKER)).toBe(true)
+      const boundedBody = bounded.text.slice(PROCESS_OUTPUT_OMISSION_MARKER.length + 1)
+      expect(boundedBody.split('\n').length).toBeLessThanOrEqual(PROCESS_OUTPUT_MAX_LINES)
+      expect(boundedBody.length).toBeLessThanOrEqual(PROCESS_OUTPUT_MAX_CHARS)
+
+      const appended = reduceRealtimeToolStream(
+        bounded,
+        processOutputPartial(
+          'y'.repeat(600 * 1024),
+          'APPEND',
+          hugeText.length,
+          hugeText.length + 600 * 1024,
+          hugeText.length + 600 * 1024,
+          '2026-07-28T10:00:01Z',
+        ),
+      )
+      expect(appended.text.startsWith(PROCESS_OUTPUT_OMISSION_MARKER)).toBe(true)
+      expect(appended.text.length).toBeLessThanOrEqual(
+        PROCESS_OUTPUT_MAX_CHARS + PROCESS_OUTPUT_OMISSION_MARKER.length + 1,
+      )
+      expect(appended.processOutput?.gapPending).toBe(false)
+    })
+
+    /** 构造一条规范 process.output TOOL_PARTIAL。 */
+    function processOutputPartial(
+      text: string,
+      mode: 'APPEND' | 'SNAPSHOT',
+      startOffset: number,
+      endOffset: number,
+      observedBytes: number,
+      createdAt: string,
+    ) {
+      return {
+        threadId: '7',
+        invocationId: 'inv-proc',
+        attempt: 1,
+        payload: {
+          toolCallId: 'call-proc',
+          contents: [{ type: 'text', text }],
+          error: false,
+          details: {
+            kind: 'process.output',
+            mode,
+            startOffset,
+            endOffset,
+            observedBytes,
+          },
+        },
+        createdAt,
+      }
+    }
+
     it('resets progress overlay when attempt changes on retry', () => {
       const p1 = {
         threadId: '7',
