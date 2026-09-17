@@ -49,7 +49,7 @@ class FindGrepCapabilitiesTest {
   }
 
   private CodingToolsConfig config() {
-    return TestCodingConfig.withBridge(workdir, new InMemoryResourceStore());
+    return TestCodingConfig.withBridge(workdir);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String argumentsJson)

@@ -37,20 +37,17 @@ class DaemonDataDirectoryTest {
       Path resourcesDir = dataDir.resolve("resources");
       Path textDir = resourcesDir.resolve("text");
       Path stagingDir = resourcesDir.resolve("staging");
-      Path blobsDir = resourcesDir.resolve("blobs");
 
       assertEquals(dataDir.toAbsolutePath().normalize(), dir.root());
       assertEquals(resourcesDir, dir.resources());
       assertEquals(textDir, dir.text());
       assertEquals(stagingDir, dir.staging());
-      assertEquals(blobsDir, dir.blobs());
 
       assertTrue(Files.isRegularFile(lockFile, LinkOption.NOFOLLOW_LINKS), "daemon.lock 必须为普通文件");
       assertTrue(Files.isDirectory(dir.root(), LinkOption.NOFOLLOW_LINKS), "root 必须为目录");
       assertTrue(Files.isDirectory(dir.resources(), LinkOption.NOFOLLOW_LINKS), "resources 必须为目录");
       assertTrue(Files.isDirectory(dir.text(), LinkOption.NOFOLLOW_LINKS), "text 必须为目录");
       assertTrue(Files.isDirectory(dir.staging(), LinkOption.NOFOLLOW_LINKS), "staging 必须为目录");
-      assertTrue(Files.isDirectory(dir.blobs(), LinkOption.NOFOLLOW_LINKS), "blobs 必须为目录");
 
       if (isPosixSupported()) {
         Set<PosixFilePermission> ownerOnlyDirPerms =
@@ -58,13 +55,23 @@ class DaemonDataDirectoryTest {
                 PosixFilePermission.OWNER_READ,
                 PosixFilePermission.OWNER_WRITE,
                 PosixFilePermission.OWNER_EXECUTE);
+        Set<PosixFilePermission> ownerOnlyFilePerms =
+            Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.root()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.resources()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.text()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.staging()));
-        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.blobs()));
+        assertEquals(ownerOnlyFilePerms, Files.getPosixFilePermissions(lockFile));
       }
     }
+  }
+
+  /** 验证公开 open 边界与 CLI 契约一致：相对路径必须在产生任何磁盘副作用前拒绝。 */
+  @Test
+  void openRejectsRelativePath() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> DaemonDataDirectory.open(Path.of("relative-daemon-data")));
   }
 
   /** 验证同进程内对同一数据目录的二次 open 必定失败抛出 IllegalStateException，且在原句柄关闭后新 open 可以重新成功加锁。 */
@@ -120,23 +127,19 @@ class DaemonDataDirectoryTest {
     assertEquals(0, childAfterUnlock.exitValue(), "父进程释放锁后子进程必须成功获取锁退出 0");
   }
 
-  /** 验证 open 启动时仅清理 staging 目录下的残留 *.part 暂存文件，已发布的 text 日志与 blobs 数据内容完整保留。 */
+  /** 验证 open 启动时仅清理 staging 目录下的残留 *.part 暂存文件，已发布的 durable text 内容完整保留。 */
   @Test
   void staleStagingPartCleanupPreservesPublishedData() throws IOException {
     Path stagingDir = dataDir.resolve("resources").resolve("staging");
     Path textDir = dataDir.resolve("resources").resolve("text");
-    Path blobsDir = dataDir.resolve("resources").resolve("blobs");
     Files.createDirectories(stagingDir);
     Files.createDirectories(textDir);
-    Files.createDirectories(blobsDir);
 
     Path stalePartFile = stagingDir.resolve("leftover-abc123.part");
     Path publishedLogFile = textDir.resolve("existing.log");
-    Path publishedBlobFile = blobsDir.resolve("blob-hash-123456");
 
     Files.writeString(stalePartFile, "uncommitted partial stream data");
     Files.writeString(publishedLogFile, "durable published log line 1\nline 2\n");
-    Files.writeString(publishedBlobFile, "immutable blob binary payload");
 
     try (DaemonDataDirectory dir = DaemonDataDirectory.open(dataDir)) {
       assertFalse(Files.exists(stalePartFile), "未完成的 staging .part 文件必须在 open 时被清理");
@@ -145,11 +148,6 @@ class DaemonDataDirectoryTest {
           "durable published log line 1\nline 2\n",
           Files.readString(publishedLogFile),
           "已发布的 text 文件内容必须保持不变");
-      assertTrue(Files.exists(publishedBlobFile), "已发布的 blobs 数据不得被删除");
-      assertEquals(
-          "immutable blob binary payload",
-          Files.readString(publishedBlobFile),
-          "已发布的 blobs 数据内容必须保持不变");
     }
   }
 

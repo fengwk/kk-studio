@@ -7,6 +7,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -66,6 +67,10 @@ final class ResourceUriValidator {
       }
       case "s3" -> {
         validateS3(parsed, size, sha256);
+        yield null;
+      }
+      case "blob-upload" -> {
+        validateBlobUpload(parsed, size, sha256);
         yield null;
       }
       case "http", "https" -> {
@@ -217,6 +222,35 @@ final class ResourceUriValidator {
       if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
         throw new IllegalArgumentException("s3 uri key segments must not be empty, '.' or '..'");
       }
+    }
+  }
+
+  /**
+   * blob-upload URI：精确 {@code blob-upload:<canonical-uuid>} 的 opaque URI，无
+   * authority/query/fragment，必须携带 非空 size/sha。
+   *
+   * <p>该 scheme 只表示「字节已由 Daemon 直传对象存储、Platform 持有全局 Blob 上传行」这一瞬态引用；它不是可解引用的取数地址， 消费方只允许通过全局 Blob
+   * 上传契约把它原子转移为 Session 引用。
+   */
+  private static void validateBlobUpload(URI parsed, Long size, String sha256) {
+    requireSizeAndSha(size, sha256, "blob-upload");
+    if (!parsed.isOpaque()) {
+      throw new IllegalArgumentException("blob-upload uri must be opaque");
+    }
+    if (parsed.getRawAuthority() != null
+        || parsed.getRawQuery() != null
+        || parsed.getRawFragment() != null) {
+      throw new IllegalArgumentException("blob-upload uri must not carry authority/query/fragment");
+    }
+    String uploadId = parsed.getRawSchemeSpecificPart();
+    UUID parsedUploadId;
+    try {
+      parsedUploadId = UUID.fromString(uploadId);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("blob-upload uri must carry a canonical UUID", error);
+    }
+    if (!parsedUploadId.toString().equals(uploadId)) {
+      throw new IllegalArgumentException("blob-upload uri must carry a canonical UUID");
     }
   }
 

@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import okhttp3.OkHttpClient;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
-import fun.fengwk.kkstudio.harness.daemon.coding.ResourceStore;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
@@ -44,10 +44,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -100,7 +98,6 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
-  private final ResourceStore resourceStore;
   private final DaemonLocalMcpManager mcpManager;
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
@@ -108,6 +105,11 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
+  private final DaemonResourceTransferClient resourceTransferClient;
+  private final OkHttpClient resourceHttpClient;
+
+  /** 本连接 WELCOME 通告的单条/聚合资源字节预算；用于本地预检，避免注定被服务端拒绝的上传。 */
+  private final AtomicLong maxResourceBytes = new AtomicLong();
 
   /** 本 Daemon 进程的生命周期身份：构造期随机生成一次，所有重连复用，用于区分同实例恢复与换进程接管。 */
   private final String daemonInstanceId = UUID.randomUUID().toString();
@@ -140,7 +142,6 @@ public final class DaemonRuntime implements AutoCloseable {
     return create(
         config,
         skillRegistry,
-        toolsConfig.resourceStore(),
         mcpManager,
         boundEnvironmentId,
         (registry, executor, scheduler) -> {
@@ -163,27 +164,21 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   static DaemonRuntime create(
-      DaemonConfig config,
-      DaemonSkillRegistry skillRegistry,
-      ResourceStore resourceStore,
-      CapabilityRegistrar registrar) {
-    return create(config, skillRegistry, resourceStore, null, registrar);
+      DaemonConfig config, DaemonSkillRegistry skillRegistry, CapabilityRegistrar registrar) {
+    return create(config, skillRegistry, null, registrar);
   }
 
   static DaemonRuntime create(
       DaemonConfig config,
       DaemonSkillRegistry skillRegistry,
-      ResourceStore resourceStore,
       DaemonLocalMcpManager mcpManager,
       CapabilityRegistrar registrar) {
-    return create(
-        config, skillRegistry, resourceStore, mcpManager, new AtomicReference<>(), registrar);
+    return create(config, skillRegistry, mcpManager, new AtomicReference<>(), registrar);
   }
 
   static DaemonRuntime create(
       DaemonConfig config,
       DaemonSkillRegistry skillRegistry,
-      ResourceStore resourceStore,
       DaemonLocalMcpManager mcpManager,
       AtomicReference<EnvironmentId> boundEnvironmentId,
       CapabilityRegistrar registrar) {
@@ -208,7 +203,6 @@ public final class DaemonRuntime implements AutoCloseable {
               new InMemoryDaemonInvocationJournal(),
               scheduler,
               taskExecutor,
-              resourceStore,
               mcpManager,
               boundEnvironmentId,
               true);
@@ -247,31 +241,6 @@ public final class DaemonRuntime implements AutoCloseable {
         taskExecutor,
         null,
         null,
-        null,
-        false);
-  }
-
-  /** 全参数运行时；{@code resourceStore} 可为 {@code null} 以强制对 resource/binary 结果返回 FAILED。 */
-  DaemonRuntime(
-      DaemonConfig config,
-      DaemonTransport transport,
-      DaemonCapabilityRegistry capabilityRegistry,
-      DaemonSkillRegistry skillRegistry,
-      DaemonInvocationJournal journal,
-      ScheduledExecutorService scheduler,
-      ExecutorService taskExecutor,
-      ResourceStore resourceStore) {
-    this(
-        config,
-        transport,
-        capabilityRegistry,
-        skillRegistry,
-        journal,
-        scheduler,
-        taskExecutor,
-        resourceStore,
-        null,
-        null,
         false);
   }
 
@@ -283,7 +252,6 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
-      ResourceStore resourceStore,
       DaemonLocalMcpManager mcpManager) {
     this(
         config,
@@ -293,7 +261,6 @@ public final class DaemonRuntime implements AutoCloseable {
         journal,
         scheduler,
         taskExecutor,
-        resourceStore,
         mcpManager,
         null,
         false);
@@ -307,7 +274,6 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
-      ResourceStore resourceStore,
       DaemonLocalMcpManager mcpManager,
       AtomicReference<EnvironmentId> boundEnvironmentId,
       boolean requireFixedCapabilityCatalog) {
@@ -320,8 +286,15 @@ public final class DaemonRuntime implements AutoCloseable {
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
-    this.resourceStore = resourceStore;
     this.mcpManager = mcpManager;
+    this.resourceHttpClient =
+        new OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .writeTimeout(0, TimeUnit.MILLISECONDS)
+            .build();
+    this.resourceTransferClient =
+        new DaemonResourceTransferClient(resourceHttpClient, this::sendTransferControl);
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
     this.environmentInfo =
         new DaemonEnvironmentInfo(
@@ -508,7 +481,9 @@ public final class DaemonRuntime implements AutoCloseable {
     if (!started.get() || generation != connectionGeneration.get()) {
       return;
     }
-    // 连接失效不影响 Invocation journal；重置绑定并按指数退避安排重连。
+    // 连接失效不影响 Invocation journal；重置绑定与资源字节预算并清空等待中的上传票据。
+    resourceTransferClient.onConnectionLost();
+    maxResourceBytes.set(0L);
     this.boundEnvironmentId.set(null);
     state = DaemonRuntimeState.DISCONNECTED;
     Duration delay;
@@ -575,13 +550,17 @@ public final class DaemonRuntime implements AutoCloseable {
         }
         case WELCOME -> handleWelcome(connection, envelope);
         case ERROR -> handleError(connection, envelope);
+          // 上传票据是调用作用域的控制平面响应，绝不进入通用协议处理。
+        case RESOURCE_UPLOAD_TICKET -> requireInvocationIdAndDeliverTicket(envelope);
         case READY,
             HEARTBEAT,
             STARTED,
             PROGRESS,
             COMPLETED,
             FAILED,
-            CANCELLED -> throw new DaemonProtocolException(
+            CANCELLED,
+            RESOURCE_UPLOAD_REQUEST,
+            RESOURCE_UPLOAD_COMMIT -> throw new DaemonProtocolException(
             "daemon must not receive " + envelope.messageType() + " from server");
         default -> throw new DaemonProtocolException(
             "unexpected inbound messageType: " + envelope.messageType());
@@ -608,11 +587,37 @@ public final class DaemonRuntime implements AutoCloseable {
       }
       this.boundEnvironmentId.set(
           Objects.requireNonNull(envelope.environmentId(), "WELCOME environmentId"));
+      // 资源字节预算由服务端在 WELCOME 中通告；缺失或非正数时不接受任何 resource/binary 结果。
+      maxResourceBytes.set(
+          requiredPositiveLong(envelopeCodec.readPayload(envelope), "maxResourceBytes"));
       if (sendReady(connection) && activeConnection.get() == connection) {
         connection.markReady();
         state = DaemonRuntimeState.READY;
+        // 只有 READY 连接才能递交上传控制帧；放行在断连期间等待重连的上传继续重放同一 transfer。
+        resourceTransferClient.onConnectionReady();
       }
     }
+  }
+
+  /** 严格读取一个正 long 字段：缺失、非整数或非正都是协议错误。 */
+  private static long requiredPositiveLong(ObjectNode payload, String field) {
+    JsonNode value = payload.get(field);
+    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new DaemonProtocolException("WELCOME must declare integer '" + field + "'");
+    }
+    long parsed = value.longValue();
+    if (parsed <= 0) {
+      throw new DaemonProtocolException("WELCOME '" + field + "' must be positive");
+    }
+    return parsed;
+  }
+
+  /** 递交一条上传票据：调用与传输共同关联，错误调用的票据不能完成其它调用的上传。 */
+  private void requireInvocationIdAndDeliverTicket(DaemonEnvelope envelope) {
+    if (envelope.invocationId() == null || envelope.invocationId().isBlank()) {
+      throw new DaemonProtocolException("RESOURCE_UPLOAD_TICKET must declare invocationId");
+    }
+    resourceTransferClient.onTicket(envelope.invocationId(), envelope.payloadJson());
   }
 
   /**
@@ -782,10 +787,20 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
+  private static long deadlineNanos(Duration timeout) {
+    try {
+      return Math.addExact(System.nanoTime(), Math.multiplyExact(timeout.toMillis(), 1_000_000L));
+    } catch (ArithmeticException overflow) {
+      // wire 允许的超长 timeout 只表示「实际上无 deadline」；调用仍可由 CANCEL、连接停机或正常终态收敛。
+      return Long.MAX_VALUE;
+    }
+  }
+
   private void scheduleTimeout(RunningInvocation invocation, Duration timeout) {
     if (!isRunning(invocation.invocationId()) || invocation.isTerminal()) {
       return;
     }
+    invocation.setDeadlineNanos(deadlineNanos(timeout));
     try {
       ScheduledFuture<?> deadline =
           scheduler.schedule(
@@ -1066,12 +1081,23 @@ public final class DaemonRuntime implements AutoCloseable {
         new AtomicReference<>();
     private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
 
+    /** 本次调用的绝对超时时刻；用于让终态编码阶段的上传不超过调用预算。 */
+    private volatile long deadlineNanos = Long.MAX_VALUE;
+
     private RunningInvocation(String invocationId) {
       this.invocationId = invocationId;
     }
 
     private String invocationId() {
       return invocationId;
+    }
+
+    private long deadlineNanos() {
+      return deadlineNanos;
+    }
+
+    private void setDeadlineNanos(long deadlineNanos) {
+      this.deadlineNanos = deadlineNanos;
     }
 
     private boolean isTerminal() {
@@ -1136,25 +1162,45 @@ public final class DaemonRuntime implements AutoCloseable {
         false);
   }
 
-  private DaemonResourceStore resourceWriter() {
-    ResourceStore store = this.resourceStore;
-    return new DaemonResourceStore() {
-      @Override
-      public DaemonResourceRef store(byte[] bytes, String mediaType) throws IOException {
-        if (store == null) {
-          throw new IllegalStateException("resource store is not configured");
-        }
-        return store.store(bytes, mediaType);
-      }
+  /**
+   * 递交一条资源上传控制帧（{@code RESOURCE_UPLOAD_REQUEST}/{@code COMMIT}）。
+   *
+   * <p>控制帧只能由已 READY 的连接发出：连接尚未就绪时返回 false（帧确定未发送），上传客户端据此按同一 transfer 重试。
+   */
+  private boolean sendTransferControl(
+      DaemonMessageType messageType, String invocationId, String payloadJson) {
+    if (state != DaemonRuntimeState.READY || boundEnvironmentId.get() == null) {
+      return false;
+    }
+    return send(messageType, invocationId, payloadJson);
+  }
 
-      @Override
-      public byte[] read(DaemonResourceRef ref) throws IOException {
-        if (store == null) {
-          throw new IllegalStateException("resource store is not configured");
-        }
-        return store.read(ref);
-      }
-    };
+  /**
+   * 直传字节到全局对象存储的上传端口，绑定被调用的 invocation 的等待边界。
+   *
+   * <p>超时预算在终态编码开始时读取一次，因此上传的等待上限与该调用剩余的有效 deadline 一致；WELCOME 尚未通告预算或超出预算时确定性失败，绝不静默降级。
+   */
+  private DaemonResourceUploader resourceUploader(RunningInvocation invocation) {
+    boolean budgetAvailable = maxResourceBytes.get() > 0;
+    long deadlineNanos = invocation.deadlineNanos();
+    return resourceTransferClient.uploaderFor(
+        new DaemonResourceTransferClient.Deadline() {
+          @Override
+          public boolean canContinue() {
+            return budgetAvailable
+                && !invocation.isTerminal()
+                && isRunning(invocation.invocationId())
+                && System.nanoTime() < deadlineNanos;
+          }
+
+          @Override
+          public long remainingMillis() {
+            if (deadlineNanos == Long.MAX_VALUE) {
+              return Long.MAX_VALUE;
+            }
+            return Math.max(0L, (deadlineNanos - System.nanoTime()) / 1_000_000L);
+          }
+        });
   }
 
   private final class InvocationListener implements EnvironmentCapabilityExecutionListener {
@@ -1184,7 +1230,7 @@ public final class DaemonRuntime implements AutoCloseable {
         return;
       }
       try {
-        String payloadJson = resultCodec.encodePartial(partial, resourceWriter());
+        String payloadJson = resultCodec.encodeProgress(partial);
         send(DaemonMessageType.PROGRESS, invocation.invocationId(), payloadJson);
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "partial");
@@ -1203,7 +1249,9 @@ public final class DaemonRuntime implements AutoCloseable {
         return;
       }
       try {
-        String payloadJson = resultCodec.encodeCompleted(result, resourceWriter());
+        String payloadJson =
+            resultCodec.encodeCompleted(
+                result, maxResourceBytes.get(), resourceUploader(invocation));
         terminal(
             invocation.invocationId(),
             new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payloadJson),

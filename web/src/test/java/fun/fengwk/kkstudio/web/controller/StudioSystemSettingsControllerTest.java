@@ -45,7 +45,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.aiRuntime.retryBackoffStrategy").value("EXPONENTIAL"))
         .andExpect(jsonPath("$.data.aiRuntime.retryMaxRetries").value(3))
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
-        .andExpect(jsonPath("$.data.environment.maxResourceBytes").value("8388608"))
+        .andExpect(jsonPath("$.data.environment.maxResourceBytes").value("16777216"))
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
         .andExpect(jsonPath("$.data.integrations.openCliHub.baseUrl").doesNotExist())
         .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))

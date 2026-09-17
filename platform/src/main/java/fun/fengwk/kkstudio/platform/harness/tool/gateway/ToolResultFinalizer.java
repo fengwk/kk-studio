@@ -192,6 +192,15 @@ public final class ToolResultFinalizer {
                   + resourceMaxBytes
                   + " bytes of stored resource content");
         }
+        if (ref.blobUploadId() != null) {
+          // 已由 Daemon 直传对象存储的上传引用：本阶段只做形状校验并原样透传，绝不读取或写入宿主 ResourceStore。
+          if (res.textMetadata() != null) {
+            throw new IllegalArgumentException(
+                "canonical upload resource at index " + index + " must not declare text metadata");
+          }
+          resourcePieces.add(new ResourcePiece(index, res));
+          continue;
+        }
         byte[] bytes = readManagedResource(ref, index);
         if (bytes.length != ref.size() || !ref.sha256().equals(sha256(bytes))) {
           throw new ResourceStoreException();

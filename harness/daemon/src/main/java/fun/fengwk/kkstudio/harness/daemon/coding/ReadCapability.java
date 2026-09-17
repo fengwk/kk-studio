@@ -2,13 +2,11 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,8 +25,8 @@ import java.util.concurrent.ExecutorService;
  * <p>文本读取不按整文件分配内存：媒体类型只由文件前缀判定；文本以固定大小的字符块流式解码，并按 offset/limit 只保留所需窗口内、且每行与整体都各有字符上界的行内容。因此
  * Daemon 自己或外部工具生成的超大文本（包括 {@code process.exec} 落盘的全文）都可以被分页读取，不存在“文本文件超过 N MiB 就拒绝”的限制。
  *
- * <p>图片仍是 Resource 语义：探测到受支持的图片签名时，整文件字节交给 ResourceStore 成为不可变附件。二进制判定同样来自流式解码：非法 UTF-8 序列或 NUL
- * 字符立即以明确的“看似二进制文件”失败。
+ * <p>图片仍是 Resource 语义：探测到受支持的图片签名时，整文件字节作为内联 {@link BinaryResultContent} 返回，由终态编码阶段直传全局对象
+ * 存储。二进制判定同样来自流式解码：非法 UTF-8 序列或 NUL 字符立即以明确的“看似二进制文件”失败。
  *
  * <p>输出协议保持稳定：同样的 header 行、同样的 {@code "N|"} 行格式、同样的截断与分页 footer、同样的 48 KiB 响应上界。
  */
@@ -68,12 +66,8 @@ public final class ReadCapability extends AbstractCodingCapability {
         throw new IllegalArgumentException("column_offset is only supported for text files");
       }
       byte[] bytes = Files.readAllBytes(path);
-      DaemonResourceRef stored = config.resourceStore().store(bytes, imageMime);
-      ResourceRef ref =
-          new ResourceRef(
-              stored.uri(), stored.mediaType(), stored.name(), stored.size(), stored.sha256());
-      return new EnvironmentCapabilityResult(
-          request.call().id(), List.of(new ResourceResultContent(ref)), false, "{}");
+      // 图片字节不落本地：终态编码阶段直接上传全局对象存储，wire 上只出现上传引用。
+      return EnvironmentCapabilityResult.binary(request.call().id(), bytes, imageMime);
     }
 
     TextStreams.Encoding encoding = TextStreams.detectEncoding(probe);

@@ -257,7 +257,7 @@ class WorkdirPathSemanticsTest {
   }
 
   private CodingToolsConfig config() {
-    return TestCodingConfig.withoutBridge(environmentRoot, new InMemoryResourceStore());
+    return TestCodingConfig.withoutBridge(environmentRoot);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)

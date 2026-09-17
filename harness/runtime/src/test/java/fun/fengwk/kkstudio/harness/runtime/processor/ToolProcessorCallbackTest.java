@@ -33,7 +33,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * ToolProcessor callback 行为：RUNNING 后 partial 校验与 sink 隔离、success normalize（binary 拒绝 / toolCallId
@@ -598,6 +600,70 @@ class ToolProcessorCallbackTest {
     assertEquals(
         3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+  }
+
+  /**
+   * 并发竞态回归：partial 的实时发布与 terminal 的落地必须严格按因果顺序串行。
+   *
+   * <p>判别式：让 partial 停在它的发布点上，再并发投递 terminal。若 partial 的发布发生在 terminal 仲裁的 monitor 之外， terminal
+   * 就能越过它先提交 durable 终态（partial 的实时事件因此落后于终态）；若发布在 monitor 内完成，terminal 必须等 partial
+   * 发布结束才能提交。断言使用「等待 terminal 完成」这一非对称条件：修复后 terminal 确定无法推进，因此不会完成。
+   */
+  @Test
+  void partialPublishPrecedesConcurrentTerminalCommit() throws Exception {
+    ToolProcessorTestSupport.Fixture fixture = startedFixture();
+    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
+
+    CountDownLatch partialInsidePublish = new CountDownLatch(1);
+    CountDownLatch releasePartial = new CountDownLatch(1);
+    CountDownLatch terminalCommitted = new CountDownLatch(1);
+    fixture.store.beforeTransaction =
+        () -> {
+          if (terminalCommitted.getCount() > 0) {
+            terminalCommitted.countDown();
+          }
+        };
+    fixture.sink.beforeAppend =
+        () -> {
+          partialInsidePublish.countDown();
+          try {
+            releasePartial.await(5, TimeUnit.SECONDS);
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+          }
+        };
+
+    Thread partialThread =
+        new Thread(
+            () -> listener.onPartial(ToolProcessorTestSupport.partialResult("call-1")), "partial");
+    partialThread.start();
+    assertTrue(partialInsidePublish.await(5, TimeUnit.SECONDS), "partial 必须已进入发布阶段");
+
+    Thread terminalThread =
+        new Thread(
+            () ->
+                listener.onSucceeded(
+                    ToolProcessorTestSupport.successResult(
+                        "call-1", new TextResultContent("final"))),
+            "terminal");
+    terminalThread.start();
+
+    // 修复后 terminal 被 partial 的临界区挡住，不可能在 partial 发布完成前提交终态。
+    boolean committedWhilePartialPublishing = terminalCommitted.await(2, TimeUnit.SECONDS);
+    assertFalse(committedWhilePartialPublishing, "terminal 绝不能在 partial 发布尚未完成时抢先提交 durable 终态");
+
+    releasePartial.countDown();
+    partialThread.join(TimeUnit.SECONDS.toMillis(5));
+    terminalThread.join(TimeUnit.SECONDS.toMillis(5));
+    assertFalse(partialThread.isAlive());
+    assertFalse(terminalThread.isAlive());
+
+    // 事件顺序：partial 先、终态后；partial 事件确实存在且只有一条。
+    assertEquals(1, fixture.sink.events.size(), () -> "unexpected events: " + fixture.sink.events);
+    assertTrue(fixture.sink.events.get(0) instanceof RealtimeEvent.ToolPartial);
+    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, tool.status());
+    assertEquals("final", ((TextResultContent) tool.result().contents().get(0)).text());
   }
 
   /** Stop deleteWork 后到达的 late callback：ownership 校验失败，不写任何 durable 状态并关闭本地执行。 */

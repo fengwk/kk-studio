@@ -12,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -50,7 +50,7 @@ class ReadWriteEditCapabilitiesTest {
   }
 
   private CodingToolsConfig config() {
-    return TestCodingConfig.withBridge(workdir, new InMemoryResourceStore());
+    return TestCodingConfig.withBridge(workdir);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String argumentsJson)
@@ -902,10 +902,10 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult image =
         invoke(read, "{\"path\":\"pic.png\",\"workdir\":" + json(workdir.toString()) + "}");
     assertFalse(image.error());
-    assertTrue(image.contents().getFirst() instanceof ResourceResultContent);
+    assertTrue(image.contents().getFirst() instanceof BinaryResultContent);
   }
 
-  /** 验证 ReadCapability 识别支持的图片 MIME 并返回 ResourceResultContent。 */
+  /** 验证 ReadCapability 识别支持的图片 MIME 并以内联二进制内容返回。 */
   @Test
   void readDetectsSupportedImageMimes() throws Exception {
     ReadCapability read = new ReadCapability(config(), executor);
@@ -915,9 +915,8 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult rJpg =
         invoke(read, "{\"path\":\"test.jpg\",\"workdir\":" + json(workdir.toString()) + "}");
     assertFalse(rJpg.error());
-    assertTrue(rJpg.contents().getFirst() instanceof ResourceResultContent);
-    assertEquals(
-        "image/jpeg", ((ResourceResultContent) rJpg.contents().getFirst()).resource().mediaType());
+    assertTrue(rJpg.contents().getFirst() instanceof BinaryResultContent);
+    assertEquals("image/jpeg", ((BinaryResultContent) rJpg.contents().getFirst()).mediaType());
 
     // GIF
     Path gif = workdir.resolve("test.gif");
@@ -925,8 +924,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult rGif =
         invoke(read, "{\"path\":\"test.gif\",\"workdir\":" + json(workdir.toString()) + "}");
     assertFalse(rGif.error());
-    assertEquals(
-        "image/gif", ((ResourceResultContent) rGif.contents().getFirst()).resource().mediaType());
+    assertEquals("image/gif", ((BinaryResultContent) rGif.contents().getFirst()).mediaType());
 
     // WEBP
     Path webp = workdir.resolve("test.webp");
@@ -934,8 +932,7 @@ class ReadWriteEditCapabilitiesTest {
     EnvironmentCapabilityResult rWebp =
         invoke(read, "{\"path\":\"test.webp\",\"workdir\":" + json(workdir.toString()) + "}");
     assertFalse(rWebp.error());
-    assertEquals(
-        "image/webp", ((ResourceResultContent) rWebp.contents().getFirst()).resource().mediaType());
+    assertEquals("image/webp", ((BinaryResultContent) rWebp.contents().getFirst()).mediaType());
   }
 
   /** 验证 ReadCapability 针对各种语言后缀检测 LSP 语言。 */

@@ -252,14 +252,23 @@ Blob 行。
 同时以 fixed-delay poll 驱动 upload expire 和 DELETING blob sweep。它的所有 S3 I/O都在事务外；数据库清理事实是唯一
 可恢复依据。
 
-Tool terminal 结果由 `ToolResultFinalizer`先对完整投影做无副作用 plan 与 hard-limit 校验，再按引用逐个写入
-`ResourceStore`，返回引用必须与 plan 完全一致；已有 Resource 也必须经同一 Store 读取并复核 size/SHA-256。
-Daemon wire 内联传输受限的 Base64 bytes，Backend 校验后以瞬时 Binary 接收，不把 Daemon 本地 URI
-作为跨节点取数地址。`GlobalStorageToolResultHistoryMaterializer`在调用方 mandatory transaction
-中只通过同一 Store 读取已终态化 Resource，经完整性复核后摄入 `storage_blob`、关联
-`session_blob_ref`，并把 `blobId`、名称、文本总字节数/总行数与有界 preview 写入
-Harness history；任一步失败使调用方事务回滚。该端口未装配时，Runtime
-只保留资源名称、媒体类型与有界 preview，不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
+Tool terminal 结果由 `ToolResultFinalizer`先对完整投影做无副作用 plan 与 hard-limit 校验。普通 Backend
+Tool 的 Binary/Resource 仍按 plan 写入 `ResourceStore`，返回引用必须与 plan 完全一致；已有 Resource
+也必须经同一 Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocation-scoped
+`RESOURCE_UPLOAD_REQUEST/TICKET/COMMIT` 取得预签名 PUT 并由 Daemon 直传 S3；WebSocket 只携带
+`uploadId/mediaType/name/size/sha256/preview`，绝不携带 Base64、二进制帧、预签名 URL 或 Daemon 本地 URI。
+
+`GlobalStorageToolResultHistoryMaterializer` 在调用方 mandatory transaction 中分两条路径收敛：
+
+- 普通 managed Resource 从 `ResourceStore` 读取并复核完整性，再摄入 `storage_blob`。
+- `blob-upload:<uploadId>` 瞬时引用先 `lockReady`，以权威 `storage_blob` 复核媒体类型/大小/SHA-256，
+  再 `retain session_blob_ref -> delete upload owner` 原子转移引用；durable 名称取上传行，拒绝 Daemon
+  终态中的非权威名称。
+
+两条路径最终都只把 `blobId`、权威名称与有界 preview 写入 Harness history；只有由 Backend
+实际读取并复核过字节的外部化文本才保存总字节数/总行数，Daemon 上传不接受未经内容复核的文本工件元数据。
+任一步失败使调用方事务回滚。该端口未装配时，Runtime 只保留资源名称、媒体类型与有界 preview，
+不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
 
 ### Environment
 
@@ -275,7 +284,8 @@ HEARTBEAT 握手推进、在途 invocation 与终态所有权。Platform 通过 
 
 Platform 侧的产品适配器只做映射，不持有会话状态：`EnvironmentDaemonGateway` 暴露会话核心
 （`EnvironmentDaemonServer`）与租约实现（`EnvironmentRegistry`），供 Web 层 WebSocket transport 与产品查询复用；
-`EnvironmentServiceImpl` 在 Product CRUD 上执行 CAS 与引用校验。Platform 不提供目录浏览或 Skill 正文的旁路加载链：
+`StorageDaemonResourceTicketService` 把会话核心的窄票据端口映射到 `StorageUploadService.reserve/complete/delete`，
+只返回无敏感信息的失败说明；`EnvironmentServiceImpl` 在 Product CRUD 上执行 CAS 与引用校验。Platform 不提供目录浏览或 Skill 正文的旁路加载链：
 skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力取得。
 
 每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量的 capability 并发在途，不同能力之间没有共享槽位，
@@ -287,6 +297,8 @@ READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；
 Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PROGRESS/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
 `invocationId` 关联。物理连接失效不终结在途 invocation：同一 `daemonInstanceId` 重连时以相同 `invocationId` 重放在途 INVOKE；只有身份不同的
 Daemon 进程接管或调用方 deadline `expire` 才收敛为 uncertain，绝不重发可能已经产生副作用的请求。
+资源上传控制消息同样绑定 `invocationId`，并以 `transferId` 在调用内幂等关联；伪造/漂移 REQUEST、错配 COMMIT、未 READY、
+重复或跨调用的终态 upload 引用都会在进入 Tool 消费方前作为协议错误拒绝。票据服务 I/O 与 cleanup 全部在会话核心锁外执行。
 
 ### Provider adapters 与 PlatformModelGateway
 
@@ -376,6 +388,8 @@ unavailable/busy 变为 retryable failed terminal，远端 FAILED 为普通 fail
 `UNKNOWN(REMOTE_UNCERTAIN)`。统一 Tool SPI 不再按 backend 选择不同 admission 结果。
 
 `GatedToolExecutionListener` 与 Model gateway 同样是两阶段 activation、FIFO single drainer、256 signal bounded buffer 和 terminal-once。partial 必须非空、toolCallId 精确匹配、不能携带 Binary/Resource，且 canonical JSON 不得超过 256 KiB；terminal result 在 externalize 前校验，成功结果采用 all-or-nothing Resource externalization。第一个 terminal 后任何迟到信号、其余 Resource 写入和第二个 terminal 都被禁止。
+已带 canonical `blob-upload:` 的 Daemon Resource 在 `ToolResultFinalizer` 只做形状/预算校验并透传，不经宿主
+`ResourceStore` 二次复制，且禁止携带文本工件元数据。
 
 Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已注册 custom type 且存在声明的 WRITE access；否则判定为 contract violation 拒绝。冻结 binding 的完整 definition、provenance 或 state access 与当前 contribution 不同则 `TOOL_DEFINITION_MISMATCH`。
 
@@ -550,15 +564,18 @@ Function dispatcher claim + RUNNING lease
 9. Model/Tool 两阶段 activation 防止 `start()`返回后在 durable `RUNNING`标记前触碰第三方；cancel-before-activate 不启动
    Provider/Tool，等待线程可被唤醒且不泄漏。
 10. Tool terminal 成功先完成 descriptor、toolCallId、canonical size 和 externalization plan 校验，再写 ResourceStore；
-    partial 不允许 Binary/Resource，外部化失败不会伪造 durable success。
+    partial 不允许 Binary/Resource；Daemon upload 引用只在会话核心证明本调用已 READY 后透传，并在 history
+    事务内原子转移 upload owner，外部化失败不会伪造 durable success。
 11. Environment capability invocation 只按 `invocationId` 关联，同一 Environment 允许并发在途；发送 outcome 不确定时保守收敛
     `UNKNOWN`，不自动重发非幂等副作用。
-12. Canvas pin 不增加 Blob ref_count；Resource row、Session ref、upload owner 各自只维护一条明确引用边，任何 owner 删除
+12. Daemon Binary 只经预签名 PUT 进入对象存储；WebSocket 不承载字节。每个 transfer 绑定 invocation 与上传行，
+    COMPLETED 只保留实际引用的 READY 上传，其余上传幂等请求清理。
+13. Canvas pin 不增加 Blob ref_count；Resource row、Session ref、upload owner 各自只维护一条明确引用边，任何 owner 删除
     都必须经过对应 manager。
-13. Project、Issue、Run、依赖、输入与 Controller work 都以 PostgreSQL 为事实源；
+14. Project、Issue、Run、依赖、输入与 Controller work 都以 PostgreSQL 为事实源；
     `issue_controller_work_due` 和 Project 浏览器 invalidation 只负责唤醒/回读。Project
     与 IssueRun Session 继续服从 `session_owner` 全局单 owner 约束和统一深删除编排。
-14. Issue Controller claim/reconcile 由 lease token 与 claimed wake version 双重围栏；
+15. Issue Controller claim/reconcile 由 lease token 与 claimed wake version 双重围栏；
     每次 reconcile 只执行一个有界动作，worker 拒绝、处理失败、节点退出或通知丢失都由
     归还、延迟重试、lease 过期和 periodic poll 收敛。
 
@@ -570,7 +587,7 @@ Function dispatcher claim + RUNNING lease
 | --- | --- | --- |
 | `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`*` 为全局 wildcard，`defaultYolo=false`，Model Busy retry 5s、Tool RetryLater 5s、skill load 30s | admission/permission 读取点 live |
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s；compaction keep 20000；subagent depth 2、per-parent concurrency 10、maxTurns 50 | retry、resolver、subagent 配置读取点 |
-| `environment` | resource 8 MiB、heartbeat 60s | Environment gateway 资源上限与心跳超时读取点 |
+| `environment` | resource 16 MiB、heartbeat 60s | Environment gateway 单项/聚合上传资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
 | `integrations.openCliHub` | disabled、base URL 未配置；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
 | `integrations.seedance/gptImage2/minimaxH3` | 各自 enabled/paid 开关、workspace、prompt/ComfyUI timeout 和 polling 约束 | adapter 的启动快照与执行读取点 |
@@ -655,7 +672,7 @@ S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 thi
   `McpToolCatalogTest`、`McpExecutableToolTest`、
   `DefaultMcpDiscoveryResultPublisherTest` 与 `McpSchemaBusinessTest`。
 - Environment：`EnvironmentRegistryTest`、`PostgresEnvironmentRoutingIntegrationTest`、
-  `EnvironmentServiceImplTest`。
+  `EnvironmentServiceImplTest`、`StorageDaemonResourceTicketServiceTest`。
 - Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、
   `StorageUploadServiceIntegrationTest`、`StorageUploadCleanupLeaseIntegrationTest`、
   `PostgresqlStorageBlobManagerTest`、`StorageMaintenanceTest`、S3 service/presign tests。

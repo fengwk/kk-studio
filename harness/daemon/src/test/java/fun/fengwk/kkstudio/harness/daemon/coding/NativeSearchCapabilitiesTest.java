@@ -333,12 +333,11 @@ class NativeSearchCapabilitiesTest {
   /** 验证 limit 与 500 code-point 行截断保持有界内联文本，不附加无意义完整 resource。 */
   @Test
   void searchLimitsStayInlineAndTruncateLongLines() throws Exception {
-    InMemoryResourceStore store = new InMemoryResourceStore();
     String longLine = "😀".repeat(600);
     write("a.txt", longLine + "\n");
     write("b.txt", "needle\n");
     write("c.txt", "needle\n");
-    GrepCapability grep = grep(config(2000, 50 * 1024, store));
+    GrepCapability grep = grep(config(2000, 50 * 1024));
 
     EnvironmentCapabilityResult grepResult =
         invoke(
@@ -352,7 +351,7 @@ class NativeSearchCapabilitiesTest {
 
     EnvironmentCapabilityResult findResult =
         invoke(
-            find(config(2000, 50 * 1024, store)),
+            find(config(2000, 50 * 1024)),
             "{\"pattern\":\"*.txt\",\"path\":\".\",\"limit\":1,\"workdir\":"
                 + json(environmentRoot.toString())
                 + "}");
@@ -376,7 +375,7 @@ class NativeSearchCapabilitiesTest {
   }
 
   private CodingToolsConfig config() {
-    return config(2000, 50 * 1024, new InMemoryResourceStore());
+    return config(2000, 50 * 1024);
   }
 
   private GrepCapability grep(CodingToolsConfig config) {
@@ -387,8 +386,8 @@ class NativeSearchCapabilitiesTest {
     return new FindCapability(config, executor);
   }
 
-  private CodingToolsConfig config(int lines, int bytes, ResourceStore store) {
-    return TestCodingConfig.withLimits(environmentRoot, lines, bytes, store);
+  private CodingToolsConfig config(int lines, int bytes) {
+    return TestCodingConfig.withLimits(environmentRoot, lines, bytes);
   }
 
   private void write(String relative, String content) throws Exception {

@@ -823,6 +823,17 @@ export function reduceRealtimeToolStream(
 
   if (processDetails != null) {
     if (processDetails.mode === 'SNAPSHOT') {
+      const snapshot = classifySnapshot(current, partial.createdAt, processDetails)
+      if (snapshot === 'STALE') {
+        // 陈旧快照（乱序/重放或重复的截断快照）绝不覆盖更新的文本与偏移，只允许单调加宽 error。
+        if (nextError !== current.error) {
+          return {
+            ...current,
+            error: nextError,
+          }
+        }
+        return current
+      }
       const bounded = boundProcessOutputText(chunkText, processDetails.startOffset > 0)
       return {
         ...current,
@@ -832,14 +843,18 @@ export function reduceRealtimeToolStream(
           mode: 'SNAPSHOT',
           startOffset: processDetails.startOffset,
           endOffset: processDetails.endOffset,
-          observedBytes: Math.max(
-            current.processOutput?.observedBytes ?? 0,
-            processDetails.observedBytes,
-          ),
+          // 重置快照建立全新的流基线：绝不让旧流的 observedBytes 通过 Math.max 泄漏进新流。
+          observedBytes:
+            snapshot === 'RESET'
+              ? processDetails.observedBytes
+              : Math.max(
+                  current.processOutput?.observedBytes ?? 0,
+                  processDetails.observedBytes,
+                ),
           hasOmittedPrefix: bounded.hasOmittedPrefix,
           gapPending: false,
         },
-        createdAt: partial.createdAt,
+        createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
       }
     }
 
@@ -854,14 +869,21 @@ export function reduceRealtimeToolStream(
         return {
           ...current,
           error: nextError,
-          createdAt: partial.createdAt,
         }
       }
       return current
     }
 
     if (gapPending || processDetails.startOffset > currentEndOffset) {
-      if (current.processOutput?.gapPending && nextError === current.error) {
+      const nextObservedBytes = Math.max(
+        current.processOutput?.observedBytes ?? 0,
+        processDetails.observedBytes,
+      )
+      if (
+        current.processOutput?.gapPending
+        && nextError === current.error
+        && nextObservedBytes === current.processOutput.observedBytes
+      ) {
         return current
       }
       return {
@@ -871,14 +893,11 @@ export function reduceRealtimeToolStream(
           mode: 'APPEND',
           startOffset: current.processOutput?.startOffset ?? 0,
           endOffset: currentEndOffset,
-          observedBytes: Math.max(
-            current.processOutput?.observedBytes ?? 0,
-            processDetails.observedBytes,
-          ),
+          observedBytes: nextObservedBytes,
           hasOmittedPrefix: current.processOutput?.hasOmittedPrefix ?? false,
           gapPending: true,
         },
-        createdAt: partial.createdAt,
+        createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
       }
     }
 
@@ -902,7 +921,7 @@ export function reduceRealtimeToolStream(
         hasOmittedPrefix: bounded.hasOmittedPrefix,
         gapPending: false,
       },
-      createdAt: partial.createdAt,
+      createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
     }
   }
 
@@ -918,13 +937,90 @@ export function reduceRealtimeToolStream(
     ...current,
     text: replaceText ? chunkText : current.text + chunkText,
     error: nextError,
-    createdAt: partial.createdAt,
+    createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
   }
 }
 
 function isTaskStatusPartial(payload: Record<string, unknown>): boolean {
   const details = payload.details
   return isRecord(details) && details.kind === 'task.status'
+}
+
+/**
+ * 分类一次 SNAPSHOT 相对当前 overlay 的关系。
+ *
+ * <p>基于单调递增的 {@code observedBytes} 与字节偏移（{@code startOffset}/{@code endOffset}）
+ * 结合事件时间戳（{@code createdAt}）判定快照的新鲜度与重置语义：
+ *
+ * <ul>
+ *   <li>{@code STALE}：陈旧或重复快照。包括：
+ *     1) 时间戳严格早于当前状态（乱序/重放到达）；
+ *     2) 时间戳不晚于当前状态时声明了更小的结束偏移（流内乱序到达的历史帧）；
+ *     3) 与当前已应用的 SNAPSHOT 具有相同区间且未观测到更多字节（重复快照）。
+ *     陈旧快照绝不覆盖或回退已应用的文本与偏移，只允许单调加宽 {@code error}。
+ *   <li>{@code RESET}：合法的新流重置快照。
+ *     时间戳严格晚于当前状态，但声明了更小的结束偏移（例如新进程/命令从 0 开始）。
+ *     此时必须干净重置 text、offsets、observedBytes 与 gapPending，建立全新流基线。
+ *   <li>{@code FORWARD}：合法向前推进或修复 gap 的快照（偏移单调前进、APPEND 后的截断快照、或修复 pending gap）。
+ * </ul>
+ */
+function classifySnapshot(
+  current: RealtimeToolStream,
+  createdAt: string,
+  details: ProcessOutputDetails,
+): 'STALE' | 'RESET' | 'FORWARD' {
+  const applied = current.processOutput
+  if (applied == null) {
+    return 'FORWARD'
+  }
+  const currentMillis = toEpochMillis(current.createdAt)
+  const partialMillis = toEpochMillis(createdAt)
+
+  // 1. 时间戳严格早于当前状态：必为乱序/重放的历史快照。
+  if (partialMillis != null && currentMillis != null && partialMillis < currentMillis) {
+    return 'STALE'
+  }
+
+  // 2. 结束偏移回退：
+  if (details.endOffset < applied.endOffset) {
+    // 仅当时间戳严格晚于当前状态时，才视为新流合法重置（如新命令从 0 开始）；
+    // 否则（时间戳相同、更早或不可比较）属于流内乱序旧快照，必须作为 STALE 丢弃。
+    if (partialMillis != null && currentMillis != null && partialMillis > currentMillis) {
+      return 'RESET'
+    }
+    return 'STALE'
+  }
+
+  // 3. 结束偏移相同：
+  if (details.endOffset === applied.endOffset) {
+    // 当前已处于 SNAPSHOT 且起止区间与 observedBytes 均未推进，且无待修复的 gap：视为重复快照。
+    if (
+      applied.mode === 'SNAPSHOT'
+      && !applied.gapPending
+      && details.startOffset === applied.startOffset
+      && details.observedBytes <= applied.observedBytes
+    ) {
+      return 'STALE'
+    }
+    // 其余相同 endOffset 的情况（如 APPEND 后的截断快照、gapPending 修复、或更窄的 tail 预览）均属合法向前更新。
+    return 'FORWARD'
+  }
+
+  // 4. endOffset > applied.endOffset：正常推进或修复 gap。
+  return 'FORWARD'
+}
+
+/** 同一 attempt 的 process.output 时间戳只允许单调前进，避免乱序帧污染后续快照分类基线。 */
+function monotonicCreatedAt(current: string, candidate: string): string {
+  const currentMillis = toEpochMillis(current)
+  const candidateMillis = toEpochMillis(candidate)
+  if (candidateMillis == null) {
+    return current
+  }
+  if (currentMillis == null || candidateMillis > currentMillis) {
+    return candidate
+  }
+  return current
 }
 
 /** 当 tool partial overlay 属于同一 invocation attempt 且没有陈旧时返回 true。 */

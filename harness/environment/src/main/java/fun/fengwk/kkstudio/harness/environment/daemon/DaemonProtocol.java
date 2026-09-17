@@ -6,7 +6,7 @@ public final class DaemonProtocol {
   /**
    * 当前 Environment Daemon wire 协议版本。
    *
-   * <p>本版本只有固定的六个 envelope 字段（{@code protocolVersion}、{@code messageType}、nullable {@code
+   * <p>本版本只有固定的五个 envelope 字段（{@code protocolVersion}、{@code messageType}、nullable {@code
    * environmentId}、nullable {@code invocationId}、{@code payload}）、HELLO 携带的 {@code
    * daemonInstanceId} 与 强制协商的 {@code permessage-deflate}。其他版本帧一律拒绝，不做双协议 fallback。
    */

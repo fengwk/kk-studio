@@ -4,6 +4,11 @@ import type {
 } from '@/shared/api/contracts/system-settings'
 
 /**
+ * 平台环境与资源默认字节上限：16 MiB (16777216)。
+ */
+export const DEFAULT_MAX_RESOURCE_BYTES = '16777216'
+
+/**
  * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/settings} 响应形状。
  *
  * 仅用于前端测试验证「严格契约字段映射 / 聚合 hydration / 完整聚合 CAS PUT」，
@@ -37,7 +42,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       subagentMaxTurns: 50,
     },
     environment: {
-      maxResourceBytes: '8388608',
+      maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
       heartbeatTimeoutMillis: '60000',
     },
     integrations: {
@@ -94,7 +99,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       thumbnailQuality: 80,
     },
     advanced: {
-      resourceMaxBytes: '16777216',
+      resourceMaxBytes: DEFAULT_MAX_RESOURCE_BYTES,
       processorLeaseDurationMillis: '30000',
       processorHeartbeatIntervalMillis: '10000',
       threadResolveFailureDelayMillis: '1000',

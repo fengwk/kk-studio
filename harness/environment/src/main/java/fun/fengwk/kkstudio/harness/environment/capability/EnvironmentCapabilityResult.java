@@ -4,10 +4,8 @@ import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
 
 import java.util.List;
 import java.util.Objects;
@@ -82,26 +80,7 @@ public record EnvironmentCapabilityResult(
         callId, List.of(new JsonResultContent(json)), false, "{}");
   }
 
-  /** 创建包含文本预览与引用 Resource 的成功结果。 */
-  public static EnvironmentCapabilityResult resource(
-      String callId, String previewText, DaemonResourceRef resource) {
-    Objects.requireNonNull(resource, "resource");
-    return new EnvironmentCapabilityResult(
-        callId,
-        List.of(
-            new TextResultContent(previewText),
-            new ResourceResultContent(
-                new ResourceRef(
-                    resource.uri(),
-                    resource.mediaType(),
-                    resource.name(),
-                    resource.size(),
-                    resource.sha256()))),
-        false,
-        "{}");
-  }
-
-  /** 创建内联 Binary 成功结果。 */
+  /** 创建内联 Binary 成功结果：字节在编码前由 Daemon 直传对象存储，wire 上只出现元数据。 */
   public static EnvironmentCapabilityResult binary(String callId, byte[] bytes, String mediaType) {
     return new EnvironmentCapabilityResult(
         callId, List.of(new BinaryResultContent(mediaType, bytes)), false, "{}");

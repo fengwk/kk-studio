@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.environment.server;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -17,13 +20,13 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceRef;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceStore;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -61,6 +64,9 @@ final class EnvironmentDaemonServerTestSupport {
           0,
           List.of());
 
+  /** 测试用单条/聚合资源字节预算：与生产 16 MiB 业务上限一致。 */
+  static final long MAX_RESOURCE_BYTES = 16L * 1024 * 1024;
+
   private EnvironmentDaemonServerTestSupport() {}
 
   static String readyPayload() {
@@ -69,12 +75,29 @@ final class EnvironmentDaemonServerTestSupport {
 
   static String completedPayload(UUID invocationId, String text) {
     return RESULT_CODEC.encodeCompleted(
-        EnvironmentCapabilityResult.text(invocationId.toString(), text), inlineStore());
+        EnvironmentCapabilityResult.text(invocationId.toString(), text), MAX_RESOURCE_BYTES, null);
   }
 
   static String partialPayload(UUID invocationId, String text) {
-    return RESULT_CODEC.encodePartial(
-        EnvironmentCapabilityResult.text(invocationId.toString(), text), inlineStore());
+    return RESULT_CODEC.encodeProgress(
+        EnvironmentCapabilityResult.text(invocationId.toString(), text));
+  }
+
+  /** 终态 COMPLETED payload：携带一个已就绪的 resource 上传引用（由 FakeTicketService 预先发放）。 */
+  static String completedResourcePayload(UUID invocationId, ResourceRef uploaded, String preview) {
+    return completedResourcePayloads(invocationId, List.of(uploaded));
+  }
+
+  /** 终态 COMPLETED payload：携带多个 resource 引用，用于重复/聚合校验。 */
+  static String completedResourcePayloads(UUID invocationId, List<ResourceRef> uploads) {
+    List<ResultContent> contents = new ArrayList<>();
+    for (ResourceRef upload : uploads) {
+      contents.add(new ResourceResultContent(upload));
+    }
+    return RESULT_CODEC.encodeCompleted(
+        new EnvironmentCapabilityResult(invocationId.toString(), contents, false, "{}"),
+        MAX_RESOURCE_BYTES,
+        null);
   }
 
   static String helloPayload(String token) {
@@ -110,24 +133,11 @@ final class EnvironmentDaemonServerTestSupport {
         Duration.ofSeconds(5));
   }
 
-  private static DaemonResourceStore inlineStore() {
-    return new DaemonResourceStore() {
-      @Override
-      public DaemonResourceRef store(byte[] content, String mediaType) {
-        throw new UnsupportedOperationException();
-      }
-
-      @Override
-      public byte[] read(DaemonResourceRef ref) {
-        throw new UnsupportedOperationException();
-      }
-    };
-  }
-
   /** 测试夹具：一个核心实例 + 可控租约存储 + 会话监听记录。 */
   static final class Fixture {
 
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
+    final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
@@ -149,7 +159,8 @@ final class EnvironmentDaemonServerTestSupport {
                 return Optional.empty();
               },
               readyNotifications::add,
-              () -> new EnvironmentServerSettings(Duration.ofSeconds(60), 8L * 1024 * 1024));
+              ticketService,
+              () -> new EnvironmentServerSettings(Duration.ofSeconds(60), 16L * 1024 * 1024));
     }
 
     void failRegistrationDirectory() {
@@ -405,6 +416,54 @@ final class EnvironmentDaemonServerTestSupport {
 
     int closeAfterFlushCount() {
       return closeAfterFlushCount;
+    }
+  }
+
+  /**
+   * 可编程票据服务：默认「申请即 READY」（去重命中），因此测试无需字节上传即可让终态引用合法上传。
+   *
+   * <p>记录每次 reserve/commit/release 的调用事实，供幂等、竞态与清理断言使用。
+   */
+  static final class FakeTicketService implements DaemonResourceTicketService {
+
+    final List<TransferRequest> reserves = new ArrayList<>();
+    final List<UUID> commits = new ArrayList<>();
+    final List<UUID> releases = new ArrayList<>();
+    boolean failNextReserve;
+    boolean pendingReserve;
+    UUID pendingUploadId;
+
+    @Override
+    public Ticket reserve(
+        EnvironmentId environmentId, String invocationId, TransferRequest request) {
+      reserves.add(request);
+      if (failNextReserve) {
+        failNextReserve = false;
+        return new Ticket.Failed("storage is unavailable");
+      }
+      if (pendingReserve) {
+        UUID uploadId = pendingUploadId == null ? request.transferId() : pendingUploadId;
+        return new Ticket.Pending(
+            uploadId,
+            new DaemonPresignedPut(
+                "PUT",
+                "https://storage.invalid/uploads/" + uploadId,
+                Map.of("If-None-Match", "*")));
+      }
+      return new Ticket.Ready(request.transferId());
+    }
+
+    @Override
+    public Ticket commit(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+      commits.add(uploadId);
+      return new Ticket.Ready(uploadId);
+    }
+
+    @Override
+    public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+      if (uploadId != null) {
+        releases.add(uploadId);
+      }
     }
   }
 }
