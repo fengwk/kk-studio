@@ -687,9 +687,9 @@ const CORE_STATE_ENUMS = [
     constants: ['PARTIAL', 'COMPLETE', 'ERROR'],
   },
   {
-    path: 'harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonSendOutcome.java',
-    enumName: 'DaemonSendOutcome',
-    constants: ['SENT', 'NOT_SENT', 'UNCERTAIN'],
+    path: 'harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java',
+    enumName: 'DaemonOfferResult',
+    constants: ['ACCEPTED', 'BUSY', 'CLOSED'],
   },
 ]
 

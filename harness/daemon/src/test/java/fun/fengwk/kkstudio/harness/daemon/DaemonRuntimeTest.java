@@ -1385,7 +1385,8 @@ class DaemonRuntimeTest {
   /**
    * 服务端持续拒绝签发票据时 daemon 必须在 invocation deadline 有界收敛为 FAILED，且不泄漏预签名地址、不内联任何字节。
    *
-   * <p>同时证明这是调用级故障：同一连接上的下一个调用仍能正常完成。
+   * <p>同时证明这是调用级故障：同一连接上的下一个调用仍能正常完成。终态与资源上传控制帧的出站顺序是协议级不变量：完成回调收敛后，本调用绝不能再吐出任何 {@code
+   * RESOURCE_UPLOAD_REQUEST}/{@code COMMIT}，否则服务端会把迟到控制帧判定为协议违规并关闭本可复用的连接。
    */
   @Test
   void convergesToFailedTerminalWhenTicketRejectionsOutlastDeadline() throws Exception {
@@ -1433,12 +1434,16 @@ class DaemonRuntimeTest {
     assertFalse(terminal.payloadJson().contains("storage rejected the transfer"));
     assertTrue(attempts > 1, "deadline 到达前应重试同一 transfer");
     awaitCompletion(completion);
+    // 完成回调收敛后，终态之前（或期间）发出的控制帧必然已经排在终态之前；队列非空即证明存在越过终态的迟到控制帧。
+    assertFalse(
+        transport.hasMessages(), "FAILED 终态后不得再发出 RESOURCE_UPLOAD_REQUEST/RESOURCE_UPLOAD_COMMIT");
 
     // 上传失败只终结该调用：同一连接上的后续调用仍然可用。
     transport.receive(invoke("after-rejection"));
     assertMessageTypes(transport.takeMessages(1), STARTED);
     tool.complete(new EnvironmentCapabilityResult("after-rejection", List.of(), false, "{}"));
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
+    assertFalse(transport.hasMessages(), "调用完成后不得残留任何报文");
   }
 
   /** 对象存储无响应时，PUT 总调用必须服从 invocation deadline，不能因 read/write timeout 为零而永久占住执行线程。 */
