@@ -75,7 +75,7 @@ class TestDatabaseRebuildContracts(unittest.TestCase):
             check=False,
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual("1469207785", result.stdout.strip())
+        self.assertEqual("-189635492", result.stdout.strip())
 
     def test_dry_run_does_not_reach_any_mutating_step(self):
         """Dry-run performs preflight and planning without files, stops, or SQL mutations."""

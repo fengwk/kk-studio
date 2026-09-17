@@ -65,6 +65,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -1081,6 +1082,13 @@ public final class DaemonRuntime implements AutoCloseable {
         new AtomicReference<>();
     private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
 
+    /**
+     * 终态仲裁与资源上传控制帧出站的互斥门。
+     *
+     * <p>服务端只接受活动调用的上传控制帧，因此「检查调用仍活动 + 发送控制帧」必须与终态抢占互斥：控制帧要么完整发生在终态之前，要么确定不发送；终态绝不 会被之后的控制帧越过。
+     */
+    private final Object terminalGate = new Object();
+
     /** 本次调用的绝对超时时刻；用于让终态编码阶段的上传不超过调用预算。 */
     private volatile long deadlineNanos = Long.MAX_VALUE;
 
@@ -1107,18 +1115,37 @@ public final class DaemonRuntime implements AutoCloseable {
     /**
      * 尝试原子抢占终态仲裁权（terminal-once 互斥点）。
      *
+     * <p>抢占与资源上传控制帧出站共享 {@link #terminalGate}：终态一旦被抢占，该调用之后的控制帧一律确定不发送；已在临界区内入队的控制帧必然排在终态报文 之前。
+     *
      * @param cancelHandle 是否在抢占成功后同时取消底层执行句柄
      * @return 若当前线程首次将 terminal 标记置为 true 返回 true，否则返回 false（表明已有其它终态路径抢占）
      */
     private boolean claimTerminal(boolean cancelHandle) {
-      if (!terminal.compareAndSet(false, true)) {
-        return false;
+      synchronized (terminalGate) {
+        if (!terminal.compareAndSet(false, true)) {
+          return false;
+        }
       }
       cancelDeadline();
       if (cancelHandle) {
         cancel();
       }
       return true;
+    }
+
+    /**
+     * 在终态互斥门内执行一次资源上传控制帧的出站动作。
+     *
+     * @param sender 「检查调用仍活动并发送控制帧」的动作；返回 false 表示帧确定未发送
+     * @return 传送动作的结果；终态已被抢占时返回 false 且绝不执行动作
+     */
+    private boolean trySendControl(BooleanSupplier sender) {
+      synchronized (terminalGate) {
+        if (terminal.get()) {
+          return false;
+        }
+        return sender.getAsBoolean();
+      }
     }
 
     private boolean begin() {
@@ -1165,14 +1192,27 @@ public final class DaemonRuntime implements AutoCloseable {
   /**
    * 递交一条资源上传控制帧（{@code RESOURCE_UPLOAD_REQUEST}/{@code COMMIT}）。
    *
-   * <p>控制帧只能由已 READY 的连接发出：连接尚未就绪时返回 false（帧确定未发送），上传客户端据此按同一 transfer 重试。
+   * <p>控制帧的「检查调用仍活动」与「发送」必须对该 invocation 的终态抢占互斥：服务端只接受活动调用的上传控制帧，若上传控制帧排在终态之后发出， 连接会被判定为
+   * 协议违规而关闭。因此本方法在 {@link RunningInvocation#trySendControl} 的临界区内完成检查与发送，胜者顺序为：
+   *
+   * <ol>
+   *   <li>控制帧先取得临界区：发送/入队发生在终态可被抢占之前；
+   *   <li>终态先取得临界区：本调用之后的全部控制帧返回 false 且确定未发送。
+   * </ol>
+   *
+   * <p>控制帧也只能由已 READY 的连接发出：连接尚未就绪时返回 false（帧确定未发送），上传客户端据此按同一 transfer 重试。
    */
   private boolean sendTransferControl(
       DaemonMessageType messageType, String invocationId, String payloadJson) {
     if (state != DaemonRuntimeState.READY || boundEnvironmentId.get() == null) {
       return false;
     }
-    return send(messageType, invocationId, payloadJson);
+    RunningInvocation invocation = running.get(invocationId);
+    if (invocation == null) {
+      return false;
+    }
+    return invocation.trySendControl(
+        () -> isRunning(invocationId) && send(messageType, invocationId, payloadJson));
   }
 
   /**
