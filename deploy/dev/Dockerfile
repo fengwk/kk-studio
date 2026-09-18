@@ -10,7 +10,7 @@
 # 节点契约：Main 独占 Harness worker 与 Flyway；本镜像内的 Backend 关闭两者，Harness
 # 层只保留 control/query preview，Daemon 经内部 Docker 网络连接 Main 的 control-plane origin。
 #
-# builder：Maven 3.9.11 + Temurin 21 构建 Environment Daemon 及其 runtime 依赖。
+# builder：Maven 3.9.11 + Temurin 21 构建 Environment Daemon 的 shaded 单文件 JAR。
 # runtime：Temurin 21 JDK（含 javap）、Maven 3.9.11、Node 24.14.0/npm 11.9.0、
 #          git、openssh-client、GitHub CLI 2.100.0（linux/amd64）、curl、jq、lsof、
 #          python3、ffmpeg/ffprobe、CA certificates；以 uid/gid 10001 的非 root 用户运行。
@@ -29,13 +29,11 @@ WORKDIR /build
 # Copy the whole reactor; the tight `.dockerignore` keeps outputs and secrets out.
 COPY . .
 
+# The daemon module produces the standalone shaded JAR as its main artifact; no
+# runtime library directory is copied anywhere.
 RUN --mount=type=cache,id=kk-studio-dev-maven,target=/root/.m2/repository,sharing=locked \
     mvn -U -pl harness/daemon -am -DskipTests -B -ntp clean install \
-    && mvn -pl harness/daemon -DskipTests -B -ntp \
-       -DincludeScope=runtime \
-       -DoutputDirectory=/build/daemon-lib \
-       dependency:copy-dependencies \
-    && cp harness/daemon/target/kk-studio-harness-daemon-*.jar /build/daemon.jar
+    && cp harness/daemon/target/kk-studio-daemon.jar /build/daemon.jar
 
 # ---------- node distribution ----------
 # Fixed Node/npm distribution matching the `distribution` profile versions, without
@@ -89,7 +87,7 @@ RUN set -eux; \
             --shell /bin/bash \
             --comment "kk-studio dev node" \
             kkdaemon; \
-    mkdir -p /opt/kk-studio/lib /opt/kk-studio/source /workspace /var/kk-studio/dev \
+    mkdir -p /opt/kk-studio/source /workspace /var/kk-studio/dev \
              /home/kkdaemon/.m2 /home/kkdaemon/.npm /home/kkdaemon/.ssh \
              /home/kkdaemon/.config/gh; \
     chmod 0700 /home/kkdaemon/.ssh /home/kkdaemon/.config/gh; \
@@ -121,7 +119,6 @@ COPY --from=builder /usr/share/maven /opt/maven
 COPY --from=node-runtime /usr/local/ /usr/local/
 
 COPY --from=builder --chown=kkdaemon:kkdaemon /build/daemon.jar /opt/kk-studio/daemon.jar
-COPY --from=builder --chown=kkdaemon:kkdaemon /build/daemon-lib/ /opt/kk-studio/lib/
 
 # Immutable source snapshot (`dev` commit at image build time). It contains no
 # `.git`, credential or build report; normal NAS startup still requires a real Git

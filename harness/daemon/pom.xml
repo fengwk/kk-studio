@@ -49,4 +49,70 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <!-- 主产物是唯一可分发的单文件 Daemon：所有 runtime 依赖都内嵌其中。 -->
+        <finalName>kk-studio-daemon</finalName>
+
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>shade-standalone-daemon</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <!-- 不生成 dependency-reduced-pom：依赖声明保持与源码一致。 -->
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <!-- 签名与索引元数据在合并后必然失效，必须移除。 -->
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/INDEX.LIST</exclude>
+                                        <!-- 多份 module-info 合并会互相覆盖；Daemon 运行在 unnamed module 中。 -->
+                                        <exclude>module-info.class</exclude>
+                                        <exclude>META-INF/versions/**/module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <!-- 合并各依赖的 META-INF/services，保留 JDK 服务发现。 -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- 合并 Apache 组件的 NOTICE / NOTICE.txt，避免单文件打包覆盖声明。 -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
+                                    <projectName>kk-studio Environment Daemon</projectName>
+                                </transformer>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.IncludeResourceTransformer">
+                                    <resource>META-INF/THIRD_PARTY_NOTICES</resource>
+                                    <file>${project.basedir}/THIRD_PARTY_NOTICES</file>
+                                </transformer>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <manifestEntries>
+                                        <Main-Class>fun.fengwk.kkstudio.harness.daemon.DaemonMain</Main-Class>
+                                        <Implementation-Title>kk-studio-daemon</Implementation-Title>
+                                        <Implementation-Version>${project.version}</Implementation-Version>
+                                        <!-- 依赖携带 META-INF/versions 多版本类，必须声明。 -->
+                                        <Multi-Release>true</Multi-Release>
+                                    </manifestEntries>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

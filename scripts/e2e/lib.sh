@@ -6,7 +6,7 @@
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
 # - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
-# - daemon 不是 fat jar，必须用 -cp（daemon jar + 其自身 runtime 依赖 classpath）启动 DaemonMain，而非 harness-runtime 模块 classpath
+# - daemon 是 shaded 单文件 JAR（reactor 依赖已内嵌），只能用 `java -jar` 启动，不存在 lib/ 或 classpath 文件
 
 set -euo pipefail
 
@@ -30,9 +30,7 @@ DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 export DAEMON_ENV_ROOT
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.0.jar"}
-DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-harness-daemon-1.0.0.jar"}
-DAEMON_TOOL_JAR=${DAEMON_TOOL_JAR:-"$REPO_ROOT/harness/tool/target/kk-studio-harness-tool-1.0.0.jar"}
-DAEMON_CP_FILE=${DAEMON_CP_FILE:-"$WORK_DIR/daemon.classpath"}
+DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}
 
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -141,7 +139,8 @@ kill_port() {
 
 kill_daemon() {
   local pids
-  pids=$(pgrep -f 'fun.fengwk.kkstudio.harness.daemon.DaemonMain' || true)
+  # daemon 是 `java -jar <DAEMON_JAR>`：进程命令行里不再出现 main class，因此按配置的 JAR 路径匹配。
+  pids=$(pgrep -f -- "$DAEMON_JAR" || true)
   if [ -n "$pids" ]; then
     step "Stopping daemon ($pids)"
     # shellcheck disable=SC2086
@@ -162,15 +161,12 @@ package_backend() {
 package_daemon() {
   local java_home=$1
   mkdir -p "$WORK_DIR"
-  step "Clean packaging daemon and building runtime classpath (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
+  step "Clean packaging daemon (shaded single-file JAR, Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
   (
     cd "$REPO_ROOT"
-    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package \
-      dependency:build-classpath \
-      -DincludeScope=runtime \
-      -Dmdep.outputFile="$DAEMON_CP_FILE"
+    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package
   )
-  [ -s "$DAEMON_CP_FILE" ] || die "daemon classpath file empty: $DAEMON_CP_FILE"
+  [ -s "$DAEMON_JAR" ] || die "daemon jar missing: $DAEMON_JAR"
 }
 
 start_backend() {
@@ -253,10 +249,6 @@ start_daemon() {
   kill_daemon
   package_daemon "$java_home"
   : >"$WORK_DIR/daemon.log"
-  local cp
-  # dependency:build-classpath may resolve a previously installed local harness-tool;
-  # put the reactor-built jar first so clean-slate daemon/tool protocol changes are exercised.
-  cp="$DAEMON_JAR:$DAEMON_TOOL_JAR:$(cat "$DAEMON_CP_FILE")"
   step "Starting daemon env=$DAEMON_ENV_NAME"
   if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
     die "DAEMON_REGISTRATION_TOKEN is required to start the daemon"
@@ -273,7 +265,7 @@ start_daemon() {
     -u DAEMON_REGISTRATION_TOKEN \
     -u KK_STUDIO_DAEMON_REGISTRATION_TOKEN \
     JAVA_HOME="$java_home" "$java_home/bin/java" \
-    -cp "$cp" fun.fengwk.kkstudio.harness.daemon.DaemonMain \
+    -jar "$DAEMON_JAR" \
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \
     --registration-token-file "$token_file" \
     --note "$DAEMON_NOTE" \

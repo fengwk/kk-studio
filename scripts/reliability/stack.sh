@@ -445,14 +445,15 @@ smoke_tools() {
   local container_id
   container_id=$(daemon_container_id)
   step "running direct Java coding-tool smoke inside the Daemon image"
+  # Daemon 是 shaded 单文件 JAR：smoke 只用它作为编译与运行 classpath。
   docker exec --interactive --user 10001:10001 "$container_id" bash -c '
 set -euo pipefail
 tmp=$(mktemp -d)
 trap '"'"'rm -rf "$tmp"'"'"' EXIT
 source_file="$tmp/NativeToolSmoke.java"
 cat >"$source_file"
-javac -cp "/opt/kk-studio/daemon.jar:/opt/kk-studio/lib/*" -d "$tmp" "$source_file"
-java -cp "$tmp:/opt/kk-studio/daemon.jar:/opt/kk-studio/lib/*" \
+javac -cp /opt/kk-studio/daemon.jar -d "$tmp" "$source_file"
+java -cp "$tmp:/opt/kk-studio/daemon.jar" \
   fun.fengwk.kkstudio.harness.daemon.coding.NativeToolSmoke
 ' <"$REPO_ROOT/scripts/reliability/NativeToolSmoke.java"
 }

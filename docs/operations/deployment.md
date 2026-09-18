@@ -131,7 +131,7 @@ build，不复制进 runtime image。App runtime 不含 Maven、Node 或 source�
 
 | Stage | 当前内容 |
 | --- | --- |
-| builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven cache，构建 `harness/daemon` 并复制 runtime classpath |
+| builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven cache，构建 `harness/daemon` 的单文件 shaded JAR |
 | node-runtime | `node:24.14.0-bookworm-slim` + `npm@11.9.0`，只用于提供与 `distribution` profile 一致的 Node 分发 |
 | runtime | `eclipse-temurin:21.0.8_9-jdk-jammy`，apt 安装 `bash`/`ca-certificates`/`curl`/`ffmpeg`/`git`/`jq`/`lsof`/`openssh-client`/`python3`，从官方 release 安装经 SHA-256 校验的 GitHub CLI `2.100.0`（linux/amd64），并从上面两个 stage 复制 Maven 与 Node |
 | user | `kkdaemon:kkdaemon`，uid/gid `10001`，`HOME=/home/kkdaemon`，`USER 10001:10001`，预建 `.ssh`（`0700`）与 `.config/gh` |
@@ -159,7 +159,7 @@ entrypoint 将其派生为
 `ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`；不得填写公共 Gateway
 域名或附带路径的 URL。
 
-镜像内含 `/opt/kk-studio/daemon.jar` 与 `/opt/kk-studio/lib/`（Daemon runtime）以及
+镜像内含单文件 Daemon JAR `/opt/kk-studio/daemon.jar`（`java -jar` 直接运行）与
 `/opt/kk-studio/source`（构建时的源码快照，不含 `.git`、`.env*`、key/credential 文件、
 `target/`、`node_modules/`、`reports/` 和本地 `runtime/`）。工作区、cache 和配置是
 持久 volume，容器重建不覆盖：
@@ -447,12 +447,13 @@ argv，也不留在 `/proc/<pid>/environ`。
 [deploy/reliability/daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile)
 分三阶段：
 
-1. Maven JDK 21 builder 构建 `harness/daemon` 及 runtime dependencies；
+1. Maven JDK 21 builder 构建 `harness/daemon` 的单文件 shaded JAR；
 2. Node `22.19.0-bookworm-slim` stage 固定 npm `11.19.0`；
 3. `eclipse-temurin:21.0.8_9-jdk-jammy` runtime 安装 bash、ca-certificates、
    git，创建 `kkdaemon` uid/gid `10001`，并以
-   `/usr/local/bin/kk-studio-daemon-entrypoint` 作为 `ENTRYPOINT` 启动
-   `DaemonMain`（入口先把凭证物化为 owner-only 文件，再 `exec java`）。
+   `/usr/local/bin/kk-studio-daemon-entrypoint` 作为 `ENTRYPOINT` 用
+   `java -jar /opt/kk-studio/daemon.jar` 启动（入口先把凭证物化为 owner-only
+   文件，再 `exec java`，不存在 `lib/` 目录或自定义 classpath）。
 
 runtime 具备 JDK/`javap`、Node `22.19.x`、npm `11.19.0`、bash、git；不
 安装 `rg` 或 `fd`。Daemon 只挂载一个 `/workspace` named volume，无宿主

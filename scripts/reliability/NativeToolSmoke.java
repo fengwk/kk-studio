@@ -42,7 +42,6 @@ final class NativeToolSmoke {
               CodingToolsConfig.DEFAULT_PREVIEW_MAX_LINES,
               CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
               "bash",
-              new LocalFileResourceStore(root.resolve("resources/blobs")),
               TextOutputStore.open(root.resolve("resources/text"), root.resolve("resources/staging")),
               null,
               CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
