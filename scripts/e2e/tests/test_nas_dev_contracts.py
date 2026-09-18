@@ -270,7 +270,6 @@ class TestNasDevImageContracts(unittest.TestCase):
         self.assertIn("HOME=/home/kkdaemon", dockerfile)
         self.assertIn("USER 10001:10001", dockerfile)
         for writable in (
-            "/opt/kk-studio/lib",
             "/opt/kk-studio/source",
             "/workspace",
             "/var/kk-studio/dev",
@@ -293,17 +292,16 @@ class TestNasDevImageContracts(unittest.TestCase):
 
     def test_image_bakes_daemon_and_source_seed_without_secrets(self):
         # Intent: the Daemon runs from the immutable image, while the source snapshot is
-        # only a first-start fallback; neither may carry credentials or local state.
+        # only a first-start fallback; neither may carry credentials or local state. The
+        # Daemon is one self-contained shaded JAR, so no runtime library copy exists.
         dockerfile = DEV_DOCKERFILE.read_text()
         self.assertIn(
             "COPY --from=builder --chown=kkdaemon:kkdaemon /build/daemon.jar"
             " /opt/kk-studio/daemon.jar",
             dockerfile,
         )
-        self.assertIn(
-            "COPY --from=builder --chown=kkdaemon:kkdaemon /build/daemon-lib/ /opt/kk-studio/lib/",
-            dockerfile,
-        )
+        self.assertNotIn("daemon-lib", dockerfile)
+        self.assertNotIn("/opt/kk-studio/lib", dockerfile)
         self.assertIn("COPY --chown=kkdaemon:kkdaemon . /opt/kk-studio/source", dockerfile)
         self.assertIn("KK_STUDIO_SOURCE_SEED=/opt/kk-studio/source", dockerfile)
         self.assertIn("ENTRYPOINT [\"/usr/local/bin/kk-studio-dev-entrypoint\"]", dockerfile)
@@ -489,7 +487,13 @@ class TestNasDevImageContracts(unittest.TestCase):
         )
         self.assertIn('--data-dir "$DAEMON_DATA_DIR"', entrypoint)
         self.assertNotIn("--skill-dir", entrypoint)
-        self.assertIn("exec java", entrypoint)
+        # The Daemon is one self-contained shaded JAR: the container starts it only via
+        # `java -jar` and never assembles a runtime classpath or lib directory.
+        self.assertIn('exec java', entrypoint)
+        self.assertIn('-jar "$DAEMON_JAR"', entrypoint)
+        self.assertNotIn("-cp ", entrypoint)
+        self.assertNotIn("DaemonMain", entrypoint)
+        self.assertNotIn("DAEMON_LIB", entrypoint)
         # The Daemon binary always comes from the image, never from the mutable workspace.
         self.assertNotIn("$REPOSITORY_DIR/harness/daemon", entrypoint)
         # Top-level execution is wrapped in `main` so the file stays sourceable for the

@@ -55,7 +55,6 @@ DAEMON_GATEWAY_URI=
 DAEMON_NOTE=${KK_STUDIO_DAEMON_NOTE:-kk-studio dev node}
 DAEMON_DATA_DIR=${KK_STUDIO_DAEMON_DATA_DIR:-$WORKSPACE_ROOT/.kkstudio/daemon}
 DAEMON_JAR=/opt/kk-studio/daemon.jar
-DAEMON_LIB=/opt/kk-studio/lib
 
 step() {
   echo "==> $1"
@@ -300,8 +299,7 @@ run_daemon() {
   chmod 600 "$token_file"
   unset registration_token
   exec java -XX:MaxRAMPercentage=75.0 \
-    -cp "$DAEMON_JAR:$DAEMON_LIB/*" \
-    fun.fengwk.kkstudio.harness.daemon.DaemonMain \
+    -jar "$DAEMON_JAR" \
     --gateway-uri "$DAEMON_GATEWAY_URI" \
     --registration-token-file "$token_file" \
     --note "$DAEMON_NOTE" \

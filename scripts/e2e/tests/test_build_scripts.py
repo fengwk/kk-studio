@@ -23,6 +23,15 @@ def function_body(script_path, function_name):
     return re.sub(r"\\\s*\n\s*", " ", match.group("body"))
 
 
+def wait_for_exit(process, timeout_seconds):
+    """Wait for a terminated child without leaking a lingering process on timeout."""
+    try:
+        process.wait(timeout=timeout_seconds)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
 class TestBuildScripts(unittest.TestCase):
     """Deleted classes must not survive a script-requested backend or daemon rebuild."""
 
@@ -58,12 +67,94 @@ class TestBuildScripts(unittest.TestCase):
         self.assertIn("-pl web", default_calls[0])
         self.assertIn("-pl harness/daemon", default_calls[1])
         self.assertIn("-am", default_calls[1].split())
-        self.assertIn("dependency:build-classpath", default_calls[1])
 
         result, offline_calls = self.run_e2e_maven("true")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(2, len(offline_calls))
         self.assertTrue(all("-o" in call.split() for call in offline_calls))
+
+    def test_daemon_is_a_single_shaded_jar_without_lib_or_classpath_machinery(self):
+        """The daemon is one standalone JAR: no lib/ directory, no classpath file, no tool jar."""
+        lib_path = REPOSITORY_ROOT / "scripts/e2e/lib.sh"
+        lib = lib_path.read_text()
+
+        self.assertIn(
+            'DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}',
+            lib,
+        )
+        for removed in ("DAEMON_TOOL_JAR", "DAEMON_CP_FILE", "daemon.classpath"):
+            self.assertNotIn(removed, lib, removed)
+        for removed_machinery in ("dependency:build-classpath", "dependency:copy-dependencies"):
+            self.assertNotIn(removed_machinery, lib, removed_machinery)
+
+        start_daemon = function_body(lib_path, "start_daemon")
+        # Runtime classpath construction is gone: the daemon starts only via `java -jar <jar>`.
+        self.assertIn('-jar "$DAEMON_JAR"', start_daemon)
+        self.assertNotIn("-cp ", start_daemon)
+        self.assertNotIn("DaemonMain", start_daemon)
+
+        # `kill_daemon` can no longer match the main class, so it must match the configured JAR.
+        kill_daemon = function_body(lib_path, "kill_daemon")
+        self.assertIn("pgrep -f --", kill_daemon)
+        self.assertIn("$DAEMON_JAR", kill_daemon)
+        self.assertNotIn("DaemonMain", kill_daemon)
+
+    def test_daemon_pom_produces_a_shaded_main_artifact(self):
+        """Maven must publish the shaded standalone JAR as the ordinary main artifact."""
+        pom = (REPOSITORY_ROOT / "harness/daemon/pom.xml").read_text()
+
+        self.assertIn("<finalName>kk-studio-daemon</finalName>", pom)
+        self.assertIn("maven-shade-plugin", pom)
+        self.assertRegex(pom, r"<version>3\.6\.1</version>")
+        self.assertIn("<goal>shade</goal>", pom)
+        self.assertIn("<createDependencyReducedPom>false</createDependencyReducedPom>", pom)
+        # A classifier-only side artifact would leave the old non-standalone jar in place.
+        self.assertNotIn("shadedArtifactAttached", pom)
+        for manifest_entry in (
+            "<Main-Class>fun.fengwk.kkstudio.harness.daemon.DaemonMain</Main-Class>",
+            "<Implementation-Title>kk-studio-daemon</Implementation-Title>",
+            "<Implementation-Version>${project.version}</Implementation-Version>",
+            "<Multi-Release>true</Multi-Release>",
+        ):
+            self.assertIn(manifest_entry, pom, manifest_entry)
+        # Signature metadata is invalid once dependencies are merged.
+        for excluded in ("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"):
+            self.assertIn(f"<exclude>{excluded}</exclude>", pom, excluded)
+
+    def test_kill_daemon_terminates_the_configured_jar_process_only(self):
+        """`kill_daemon` must find the `java -jar <DAEMON_JAR>` process and leave others alive."""
+        with tempfile.TemporaryDirectory() as temporary:
+            jar = Path(temporary) / "kk-studio-daemon.jar"
+            # Stand-in for the daemon: any process whose argv carries the configured JAR path.
+            daemon = subprocess.Popen(["python3", "-c", "import time; time.sleep(120)", str(jar)])
+            bystander = subprocess.Popen(
+                ["python3", "-c", "import time; time.sleep(120)", str(Path(temporary) / "other.jar")]
+            )
+            try:
+                env = os.environ.copy()
+                env["DAEMON_JAR"] = str(jar)
+                result = subprocess.run(
+                    ["bash", "-c", "source scripts/e2e/lib.sh\nkill_daemon\n"],
+                    cwd=REPOSITORY_ROOT,
+                    env=env,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertTrue(
+                    wait_for_exit(daemon, 30),
+                    "the process holding the configured JAR path must be terminated",
+                )
+                self.assertIsNone(
+                    bystander.poll(),
+                    "a process that does not carry the configured JAR path must survive",
+                )
+            finally:
+                for process in (daemon, bystander):
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=30)
 
     def test_e2e_maven_rejects_ambiguous_offline_values(self):
         """An unsupported value must fail before a Maven child can run."""
@@ -273,17 +364,15 @@ class TestBuildScripts(unittest.TestCase):
             bin_dir = root / "bin"
             work_dir = root / "work"
             bin_dir.mkdir()
+            work_dir.mkdir()
             maven_log = root / "maven.log"
             fake_maven = bin_dir / "mvn"
+            # The daemon path asserts that the reactor produced its single shaded JAR.
             fake_maven.write_text(
                 """#!/usr/bin/env bash
 set -eu
 printf '%s\\n' "$*" >> "$MAVEN_LOG"
-for arg in "$@"; do
-  case "$arg" in
-    -Dmdep.outputFile=*) printf 'fixture-classpath\\n' > "${arg#*=}" ;;
-  esac
-done
+printf 'fixture-daemon-jar\\n' > "$DAEMON_JAR"
 """
             )
             fake_maven.chmod(0o755)
@@ -292,6 +381,7 @@ done
             env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
             env["MAVEN_LOG"] = str(maven_log)
             env["E2E_WORK_DIR"] = str(work_dir)
+            env["DAEMON_JAR"] = str(work_dir / "kk-studio-daemon.jar")
             if offline == "unset":
                 env.pop("E2E_MAVEN_OFFLINE", None)
             else:

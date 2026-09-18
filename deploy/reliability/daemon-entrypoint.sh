@@ -1,6 +1,8 @@
 #!/bin/bash
 # kk-studio reliability/distributed Daemon 容器入口。
 #
+# Daemon 是 shaded 单文件 JAR，只经 `java -jar` 启动，不存在 lib/ 目录或 classpath 文件。
+#
 # 注册凭证只经环境变量传入，在任何进程参数出现之前就被物化为 owner-only
 # 普通文件：daemon 只接收 `--registration-token-file <绝对路径>`，因此凭证
 # 文本既不出现在 argv（`ps` 可见），也不再留在环境变量中（`/proc/<pid>/environ`
@@ -24,7 +26,6 @@ chmod 700 "$token_dir"
 chmod 600 "$token_file"
 unset token
 
-exec java -cp /opt/kk-studio/daemon.jar:/opt/kk-studio/lib/* \
-  fun.fengwk.kkstudio.harness.daemon.DaemonMain \
+exec java -jar /opt/kk-studio/daemon.jar \
   --registration-token-file "$token_file" \
   "$@"

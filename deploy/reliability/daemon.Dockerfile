@@ -6,12 +6,9 @@ FROM maven:3.9.11-eclipse-temurin-21 AS builder
 WORKDIR /build
 COPY . .
 
+# The daemon module produces the standalone shaded JAR as its main artifact.
 RUN mvn -pl harness/daemon -am -DskipTests -B -ntp clean install \
-    && mvn -pl harness/daemon -DskipTests -B -ntp \
-       -DincludeScope=runtime \
-       -DoutputDirectory=/build/runtime/lib \
-       dependency:copy-dependencies \
-    && cp harness/daemon/target/kk-studio-harness-daemon-*.jar /build/runtime/daemon.jar
+    && cp harness/daemon/target/kk-studio-daemon.jar /build/daemon.jar
 
 # Supply a fixed Node/npm distribution without adding a package repository to
 # the runtime image. Refresh npm's bundled packages that have newer security
@@ -53,12 +50,11 @@ RUN set -eux; \
             --shell /bin/bash \
             --comment "kk-studio reliability daemon" \
             kkdaemon; \
-    mkdir -p /opt/kk-studio/lib /workspace; \
+    mkdir -p /opt/kk-studio /workspace; \
     chown -R kkdaemon:kkdaemon /opt/kk-studio /workspace /home/kkdaemon
 
 COPY --from=node-runtime /usr/local/ /usr/local/
-COPY --from=builder --chown=kkdaemon:kkdaemon /build/runtime/daemon.jar /opt/kk-studio/daemon.jar
-COPY --from=builder --chown=kkdaemon:kkdaemon /build/runtime/lib/ /opt/kk-studio/lib/
+COPY --from=builder --chown=kkdaemon:kkdaemon /build/daemon.jar /opt/kk-studio/daemon.jar
 COPY deploy/reliability/daemon-entrypoint.sh /usr/local/bin/kk-studio-daemon-entrypoint
 RUN chmod 0755 /usr/local/bin/kk-studio-daemon-entrypoint
 
