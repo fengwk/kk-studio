@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -45,7 +44,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -93,7 +91,6 @@ final class ToolGatewayTestSupport {
   static final UUID THREAD_ID = new UUID(0L, 7L);
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
   static final int PROPOSED_ATTEMPT = 3;
-  static final AgentToolId TEST_TOOL_ID = new AgentToolId("test.host-tool");
 
   /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -154,11 +151,7 @@ final class ToolGatewayTestSupport {
                 for (int i = 0; i < tools.length; i++) {
                   Tool tool = tools[i];
                   registrar.registerTool(
-                      "host-tool" + (i == 0 ? "" : "-" + i),
-                      i == 0 ? TEST_TOOL_ID : new AgentToolId(TEST_TOOL_ID.value() + "-" + i),
-                      tool,
-                      ToolVisibility.SELECTABLE,
-                      0);
+                      "host-tool" + (i == 0 ? "" : "-" + i), tool, ToolVisibility.SELECTABLE, 0);
                 }
               }));
     }
@@ -168,7 +161,6 @@ final class ToolGatewayTestSupport {
   static ToolDescriptor hostDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1",
         "description of " + name,
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -180,7 +172,7 @@ final class ToolGatewayTestSupport {
     return new ToolInvocationRequest(
         new ToolCall(callId, descriptor.name(), "{}"),
         new ToolBinding(
-            new AgentToolDefinition(TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE),
+            new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "host-tool", List.of()),
             false,
             null));
@@ -189,7 +181,7 @@ final class ToolGatewayTestSupport {
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
   static ToolInvocationRequest environmentRequest(String callId, EnvironmentId environmentId) {
     HarnessCatalog catalog = defaultCatalog();
-    ToolContribution bashContribution = catalog.findTool(BuiltinToolIds.BASH).orElseThrow();
+    ToolContribution bashContribution = catalog.findTool("bash").orElseThrow();
     ContributorBinding contributor =
         new ContributorBinding(
             bashContribution.id().contributorId().value(),

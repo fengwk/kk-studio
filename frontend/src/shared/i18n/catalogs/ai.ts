@@ -1669,14 +1669,6 @@ export const aiCatalog = {
     'en-US': 'Tool call ID',
     'zh-CN': '工具调用 ID',
   },
-  'ai.runtime.event.detail.toolId': {
-    'en-US': 'Tool ID',
-    'zh-CN': '工具 ID',
-  },
-  'ai.runtime.event.detail.toolVersion': {
-    'en-US': 'Tool version',
-    'zh-CN': '工具版本',
-  },
   'ai.runtime.event.detail.rendererKey': {
     'en-US': 'Renderer',
     'zh-CN': '渲染器',

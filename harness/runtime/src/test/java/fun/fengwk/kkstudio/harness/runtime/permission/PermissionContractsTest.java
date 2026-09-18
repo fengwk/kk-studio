@@ -8,15 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 class PermissionContractsTest {
-  private static final AgentToolId BASH = new AgentToolId("base.bash");
-  private static final AgentToolId WRITE = new AgentToolId("base.write");
+  private static final String BASH = "bash";
+  private static final String WRITE = "write";
 
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
@@ -28,7 +26,7 @@ class PermissionContractsTest {
   void validatesCanonicalToolSettingsShapes() {
     String canonical =
         codec.canonicalize(
-            "{\"other\":1,\"permission\":{\"base.bash\":[{\"pattern\":\"git"
+            "{\"other\":1,\"permission\":{\"bash\":[{\"pattern\":\"git"
                 + " ?\",\"action\":\"allow\"}]}}");
     assertTrue(canonical.contains("\"other\":1"));
     assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(0).action());
@@ -44,22 +42,22 @@ class PermissionContractsTest {
             "{\"permission\":\"ask\"}",
             "{\"permission\":\"deny\"}",
             "{\"permission\":[]}",
-            "{\"permission\":{\"base.bash\":1}}",
-            "{\"permission\":{\"base.bash\":\"allow\"}}",
-            "{\"permission\":{\"base.bash\":{\"*\":\"allow\"}}}",
-            "{\"permission\":{\"base.bash\":{\"*\":1}}}",
-            "{\"permission\":{\"base.bash\":[{}]}}",
-            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\"}]}}",
-            "{\"permission\":{\"base.bash\":[{\"action\":\"allow\"}]}}",
-            "{\"permission\":{\"base.bash\":[{\"pattern\":123,\"action\":\"allow\"}]}}",
-            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":true}]}}",
-            "{\"permission\":{\"base.bash\":[\"allow\"]}}",
-            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"allow\",\"extra\":1}]}}",
-            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"ALLOW\"}]}}",
-            "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"invalid\"}]}}",
-            "{\"permission\":{\"Base.bash\":[]}}",
-            "{\"permission\":{\" base.bash\":[]}}",
-            "{\"permission\":{\"base.bash \":[]}}")) {
+            "{\"permission\":{\"bash\":1}}",
+            "{\"permission\":{\"bash\":\"allow\"}}",
+            "{\"permission\":{\"bash\":{\"*\":\"allow\"}}}",
+            "{\"permission\":{\"bash\":{\"*\":1}}}",
+            "{\"permission\":{\"bash\":[{}]}}",
+            "{\"permission\":{\"bash\":[{\"pattern\":\"*\"}]}}",
+            "{\"permission\":{\"bash\":[{\"action\":\"allow\"}]}}",
+            "{\"permission\":{\"bash\":[{\"pattern\":123,\"action\":\"allow\"}]}}",
+            "{\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":true}]}}",
+            "{\"permission\":{\"bash\":[\"allow\"]}}",
+            "{\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":\"allow\",\"extra\":1}]}}",
+            "{\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":\"ALLOW\"}]}}",
+            "{\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":\"invalid\"}]}}",
+            "{\"permission\":{\"1bash\":[]}}",
+            "{\"permission\":{\" bash\":[]}}",
+            "{\"permission\":{\"bash \":[]}}")) {
       assertThrows(IllegalArgumentException.class, () -> codec.canonicalize(invalid), invalid);
     }
 
@@ -71,7 +69,7 @@ class PermissionContractsTest {
     IllegalArgumentException perToolShortcut =
         assertThrows(
             IllegalArgumentException.class,
-            () -> codec.canonicalize("{\"permission\":{\"base.bash\":\"allow\"}}"));
+            () -> codec.canonicalize("{\"permission\":{\"bash\":\"allow\"}}"));
     assertEquals("permission rules must be an array", perToolShortcut.getMessage());
 
     IllegalArgumentException extraField =
@@ -79,16 +77,16 @@ class PermissionContractsTest {
             IllegalArgumentException.class,
             () ->
                 codec.canonicalize(
-                    "{\"permission\":{\"base.bash\":[{\"pattern\":\"*\",\"action\":\"allow\",\"extra\":1}]}}"));
+                    "{\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":\"allow\",\"extra\":1}]}}"));
     assertEquals(
         "permission rule must be an object with exact string keys 'pattern' and 'action'",
         extraField.getMessage());
 
     IllegalArgumentException invalidKey =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> codec.decode("{\"permission\":{\" Base.bash\":1}}"));
-    assertEquals("permission key must be '*' or a canonical AgentToolId", invalidKey.getMessage());
+            IllegalArgumentException.class, () -> codec.decode("{\"permission\":{\" bash\":1}}"));
+    assertEquals(
+        "permission key must be '*' or a valid model-visible tool name", invalidKey.getMessage());
   }
 
   @Test
@@ -97,14 +95,14 @@ class PermissionContractsTest {
     List<PermissionRule> toolRules = List.of(new PermissionRule("*", PermissionAction.DENY));
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(PermissionKeyValidator.GLOBAL_KEY, globalRules);
-    permission.put(BASH.value(), toolRules);
+    permission.put(BASH, toolRules);
 
     ToolSettings settings = new ToolSettings(permission, false);
 
     assertEquals(globalRules, settings.globalRules());
     assertEquals(toolRules, settings.rulesFor(BASH));
 
-    for (String invalid : new String[] {null, "", " ", " Base.bash", "Base.bash", "base.bash "}) {
+    for (String invalid : new String[] {null, "", " ", " bash", "1bash", "bash ", "bash.x"}) {
       Map<String, List<PermissionRule>> invalidPermission = new LinkedHashMap<>();
       invalidPermission.put(invalid, toolRules);
       assertThrows(
@@ -119,7 +117,7 @@ class PermissionContractsTest {
   void evaluatesWildcardWorkdirRelativeAndEmptyTargets() {
     Map<String, List<PermissionRule>> rules = new LinkedHashMap<>();
     rules.put(
-        WRITE.value(),
+        WRITE,
         List.of(
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("file?.txt", PermissionAction.ALLOW),
@@ -138,12 +136,11 @@ class PermissionContractsTest {
                 BASH,
                 "{\"command\":\"\"}",
                 new ToolSettings(
-                    Map.of(BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK))),
-                    false))
+                    Map.of(BASH, List.of(new PermissionRule("*", PermissionAction.ASK))), false))
             .action());
   }
 
-  /** malformed arguments、null tool id 和 prompt bounds 必须在 preparation 前失败。 */
+  /** malformed arguments、null tool name 和 prompt bounds 必须在 preparation 前失败。 */
   @Test
   void rejectsInvalidPermissionContracts() {
     assertThrows(
@@ -210,15 +207,15 @@ class PermissionContractsTest {
             .action());
   }
 
-  private static ToolSettings settings(AgentToolId toolId, PermissionRule... rules) {
+  private static ToolSettings settings(String toolName, PermissionRule... rules) {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
-    permission.put(toolId.value(), List.of(rules));
+    permission.put(toolName, List.of(rules));
     return new ToolSettings(permission, false);
   }
 
   /** path 规则夹具：自动为 {@code {"path":...}} 形态注入固定 absolute workdir；其余形态原样评估。 */
   private PermissionEvaluator.Evaluation evaluate(
-      AgentToolId tool, String arguments, ToolSettings settings) {
+      String tool, String arguments, ToolSettings settings) {
     if (arguments.startsWith("{\"path\":")) {
       return evaluator.evaluate(
           new PermissionEvaluationContext(

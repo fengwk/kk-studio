@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -497,16 +496,12 @@ class HistoryPayloadMapperTest {
   }
 
   private static AgentToolDefinition definition(String name) {
-    return new AgentToolDefinition(
-        new AgentToolId("test." + name.replace('_', '-')),
-        descriptor(name),
-        ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(descriptor(name), ToolVisibility.SELECTABLE);
   }
 
   private static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1.0",
         "desc",
         name.equals("bash") ? "shell-command" : name,
         new InputSchema("arguments", Map.of(), Set.of(), false),

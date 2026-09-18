@@ -7,12 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.List;
@@ -30,20 +28,20 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
   void registersBuiltinContributorAndExposesToolsThroughCatalog() {
     assertTrue(contributors.contains(builtinContributor));
     assertEquals(BuiltinHarnessContributor.ID, builtinContributor.descriptor().id());
-    assertEquals("1", loadSkillTool.descriptor().version());
-    assertEquals("1", taskTool.descriptor().version());
+    assertEquals(LoadSkillTool.NAME, loadSkillTool.descriptor().name());
+    assertEquals(TaskTool.NAME, taskTool.descriptor().name());
 
-    assertTrue(harnessCatalog.findTool(BuiltinToolIds.LOAD_SKILL).isPresent());
-    assertTrue(harnessCatalog.findTool(BuiltinToolIds.TASK).isPresent());
-    assertTrue(harnessCatalog.findTool(BuiltinToolIds.READ).isPresent());
-    assertTrue(harnessCatalog.findTool(BuiltinToolIds.GOAL_CREATE).isPresent());
+    assertTrue(harnessCatalog.findTool(LoadSkillTool.NAME).isPresent());
+    assertTrue(harnessCatalog.findTool(TaskTool.NAME).isPresent());
+    assertTrue(harnessCatalog.findTool("read").isPresent());
+    assertTrue(harnessCatalog.findTool("create_goal").isPresent());
 
     assertEquals(
-        BuiltinToolIds.LOAD_SKILL,
-        harnessCatalog.findTool(BuiltinToolIds.LOAD_SKILL).orElseThrow().definition().id());
+        LoadSkillTool.NAME,
+        harnessCatalog.findTool(LoadSkillTool.NAME).orElseThrow().definition().descriptor().name());
     assertEquals(
-        BuiltinToolIds.TASK,
-        harnessCatalog.findTool(BuiltinToolIds.TASK).orElseThrow().definition().id());
-    assertTrue(harnessCatalog.findTool(new AgentToolId("test.missing-tool")).isEmpty());
+        TaskTool.NAME,
+        harnessCatalog.findTool(TaskTool.NAME).orElseThrow().definition().descriptor().name());
+    assertTrue(harnessCatalog.findTool("test_missing_tool").isEmpty());
   }
 }

@@ -46,7 +46,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
     AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(modelRef, name));
     assertEquals(modelRef, definition.getModel());
-    assertEquals(List.of(), definition.getConfig().getToolIds());
+    assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals(List.of(), definition.getConfig().getSubagents());
     assertEquals("0", definition.getVersion());
@@ -229,7 +229,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
   private AgentDefinitionCreateDTO agent(String model, String name) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();

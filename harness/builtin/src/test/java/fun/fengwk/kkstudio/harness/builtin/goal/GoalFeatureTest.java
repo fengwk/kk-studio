@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -71,15 +70,6 @@ class GoalFeatureTest {
     assertTrue(catalog.findTool("update_goal").isPresent());
 
     assertEquals(
-        BuiltinToolIds.GOAL_CREATE,
-        catalog.findTool("create_goal").orElseThrow().definition().id());
-    assertEquals(
-        BuiltinToolIds.GOAL_GET, catalog.findTool("get_goal").orElseThrow().definition().id());
-    assertEquals(
-        BuiltinToolIds.GOAL_UPDATE,
-        catalog.findTool("update_goal").orElseThrow().definition().id());
-
-    assertEquals(
         ToolVisibility.SELECTABLE,
         catalog.findTool("create_goal").orElseThrow().definition().visibility());
     assertEquals(
@@ -111,14 +101,13 @@ class GoalFeatureTest {
     assertEquals(1, catalog.contextProjectors().size());
   }
 
-  /** 三个 Goal Tool 的版本、副作用与 schema 符合稳定声明。 */
+  /** 三个 Goal Tool 的模型可见 name、副作用与 schema 符合稳定声明。 */
   @Test
   void exposesCanonicalGoalToolDescriptors() {
     ToolDescriptor create = new CreateGoalTool().descriptor();
     assertDescriptor(
         create,
         CreateGoalTool.NAME,
-        CreateGoalTool.VERSION,
         ToolSideEffect.IDEMPOTENT,
         Set.of("objective"),
         Set.of("objective", "tokenBudget"));
@@ -126,14 +115,12 @@ class GoalFeatureTest {
     assertInstanceOf(IntegerSchema.class, create.inputSchema().properties().get("tokenBudget"));
 
     ToolDescriptor get = new GetGoalTool().descriptor();
-    assertDescriptor(
-        get, GetGoalTool.NAME, GetGoalTool.VERSION, ToolSideEffect.READ_ONLY, Set.of(), Set.of());
+    assertDescriptor(get, GetGoalTool.NAME, ToolSideEffect.READ_ONLY, Set.of(), Set.of());
 
     ToolDescriptor update = new UpdateGoalTool().descriptor();
     assertDescriptor(
         update,
         UpdateGoalTool.NAME,
-        UpdateGoalTool.VERSION,
         ToolSideEffect.IDEMPOTENT,
         Set.of("status", "reason"),
         Set.of("status", "reason"));
@@ -396,12 +383,10 @@ class GoalFeatureTest {
   private static void assertDescriptor(
       ToolDescriptor descriptor,
       String expectedName,
-      String expectedVersion,
       ToolSideEffect expectedSideEffect,
       Set<String> requiredParams,
       Set<String> allParams) {
     assertEquals(expectedName, descriptor.name());
-    assertEquals(expectedVersion, descriptor.version());
     assertEquals(expectedName, descriptor.rendererKey());
     assertEquals(expectedSideEffect, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());
@@ -414,7 +399,6 @@ class GoalFeatureTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             name,
-            "1",
             name + " description",
             name,
             new InputSchema(null, Map.of(), Set.of(), false),

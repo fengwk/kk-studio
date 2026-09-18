@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
 import java.util.List;
 import java.util.Optional;
@@ -18,6 +17,6 @@ public interface RuntimeToolCatalog {
   /** 返回当前全部可选择工具贡献；顺序稳定。 */
   List<ToolContribution> selectableTools();
 
-  /** 按稳定 AgentToolId 查找工具贡献。 */
-  Optional<ToolContribution> findTool(AgentToolId id);
+  /** 按模型可见 tool name 查找工具贡献。 */
+  Optional<ToolContribution> findTool(String toolName);
 }

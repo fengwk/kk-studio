@@ -196,7 +196,7 @@ BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending 
 - `NEW_SESSION` 只发送 `USER_MESSAGE`，完整 BranchDraft 写进 `rootSettings`；
 - `NEW_THREAD_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
   `SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
-  `config.toolIds` 决定，不生成 branch tool command；
+  `config.tools` 决定，不生成 branch tool command；
 - `BOUND_THREAD` 的 target 携带 `expectedHeadEntryId` 和
   `expectedNextCommandSequence`；YOLO 是 `PUT /yolo` 的直接控制面，不进入 mailbox；
 - 每条 command 带 UUID `idempotencyKey`，与 raw command canonical SHA-256 一起构成
@@ -260,7 +260,7 @@ upload handle 只能按 upload id 删除，blob original/preview URL 只在资�
 
 [`features/ai`](../../frontend/src/features/ai) 分成 catalog、chat、composer、environment、
 mcp、runtime 六个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
-Agent 的 `toolIds`、`subagents` 用 catalog candidate 校验，`skills` 用显式
+Agent 的 `tools`、`subagents` 用 catalog candidate 校验（candidate 身份就是模型可见 name），`skills` 用显式
 `{sourceId, name}` 引用并从绑定 Environment 的持久 inventory 构建候选，切换或解绑
 Environment 会清空选择。Chat 只持久化 title、agentName 与 YOLO 开关，Environment
 归属完全由 Agent definition 的 `environmentId` 决定。

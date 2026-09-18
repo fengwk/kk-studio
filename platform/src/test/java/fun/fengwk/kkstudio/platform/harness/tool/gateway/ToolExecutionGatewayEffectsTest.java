@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -64,18 +63,16 @@ class ToolExecutionGatewayEffectsTest {
 
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
   private static final ContributorId CONTRIBUTOR_ID = new ContributorId("goal");
-  private static final AgentToolId AGENT_TOOL_ID = new AgentToolId("test.effects-tool");
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "effects_tool",
-          "1",
           "effects tool",
           "effects_tool",
           new InputSchema("args", Map.of(), Set.of(), false),
           ToolSideEffect.IDEMPOTENT,
           Duration.ZERO);
   private static final AgentToolDefinition DEFINITION =
-      new AgentToolDefinition(AGENT_TOOL_ID, DESCRIPTOR, ToolVisibility.SELECTABLE);
+      new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE);
 
   @Test
   void effectsToolPassesPermissionPreflightWithoutLocalToolRegistration() {
@@ -176,7 +173,6 @@ class ToolExecutionGatewayEffectsTest {
     liveDescriptor.set(
         new ToolDescriptor(
             "effects_tool",
-            "2",
             "mutated",
             "effects_tool",
             DESCRIPTOR.inputSchema(),
@@ -257,7 +253,7 @@ class ToolExecutionGatewayEffectsTest {
             new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
             registrar -> {
               registrar.registerCustomEntryType("state-type", "state", 0);
-              registrar.registerTool("write", AGENT_TOOL_ID, tool, ToolVisibility.SELECTABLE, 0);
+              registrar.registerTool("write", tool, ToolVisibility.SELECTABLE, 0);
             });
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     ToolGatewayTestSupport.DirectQueueExecutor executor =
@@ -346,7 +342,7 @@ class ToolExecutionGatewayEffectsTest {
             new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
             registrar -> {
               registrar.registerCustomEntryType("state-type", "state", 0);
-              registrar.registerTool("write", AGENT_TOOL_ID, tool, ToolVisibility.SELECTABLE, 0);
+              registrar.registerTool("write", tool, ToolVisibility.SELECTABLE, 0);
             });
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     ToolGatewayTestSupport.DirectQueueExecutor executor =
@@ -437,7 +433,7 @@ class ToolExecutionGatewayEffectsTest {
             new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
             registrar -> {
               registrar.registerCustomEntryType("state-type", "state", 0);
-              registrar.registerTool("write", AGENT_TOOL_ID, tool, ToolVisibility.SELECTABLE, 0);
+              registrar.registerTool("write", tool, ToolVisibility.SELECTABLE, 0);
             });
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     AtomicReference<UUID> loadedAssistantId = new AtomicReference<>();

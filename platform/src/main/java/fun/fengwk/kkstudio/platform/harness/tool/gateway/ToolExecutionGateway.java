@@ -153,22 +153,20 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   private ResolvedContribution validateContribution(ToolBinding binding) {
     AgentToolDefinition frozenDefinition = binding.definition();
-    ToolContribution contribution = toolCatalog.findTool(frozenDefinition.id()).orElse(null);
+    String toolName = frozenDefinition.descriptor().name();
+    ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
     if (contribution == null) {
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND,
-              "Frozen tool definition " + frozenDefinition.id() + " is not registered."));
+              TOOL_NOT_FOUND_KIND, "Frozen tool definition " + toolName + " is not registered."));
     }
     if (!contribution.definition().equals(frozenDefinition)) {
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
-              "Frozen tool definition "
-                  + frozenDefinition.id()
-                  + " does not match its catalog definition."));
+              "Frozen tool definition " + toolName + " does not match its catalog definition."));
     }
     ContributorBinding frozenContributor = binding.contributor();
     ContributionId expectedContributionId =
@@ -192,7 +190,7 @@ public final class ToolExecutionGateway implements ToolGateway {
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
               "Frozen tool environment requirement does not match catalog requirements: "
-                  + frozenDefinition.id()));
+                  + toolName));
     }
     if (requirements.requiredEnvironmentId() != null
         && !requirements.requiredEnvironmentId().equals(binding.environmentId())) {
@@ -211,7 +209,7 @@ public final class ToolExecutionGateway implements ToolGateway {
           new ToolInvocationError(
               TOOL_DEFINITION_MISMATCH_KIND,
               "Tool definition "
-                  + frozenDefinition.id()
+                  + toolName
                   + " no longer matches its frozen state access declaration."));
     }
     return new ResolvedContribution(contribution, null);
@@ -245,7 +243,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     PermissionEvaluator.Evaluation evaluation =
         permissionEvaluator.evaluate(
             new PermissionEvaluationContext(
-                resolved.contribution().definition().id(),
+                resolved.contribution().definition().descriptor().name(),
                 request.call().argumentsJson(),
                 settings));
     PermissionAction action = evaluation.action();
@@ -283,7 +281,7 @@ public final class ToolExecutionGateway implements ToolGateway {
             new ToolInvocationError(
                 TOOL_DEFINITION_MISMATCH_KIND,
                 "Registered tool descriptor does not match frozen descriptor: "
-                    + contribution.definition().id()));
+                    + contribution.definition().descriptor().name()));
       }
       if (execution.request().binding().environmentRequired()
           && execution.request().binding().environmentId() == null) {
@@ -292,7 +290,7 @@ public final class ToolExecutionGateway implements ToolGateway {
             new ToolInvocationError(
                 UNAVAILABLE_KIND,
                 "Environment tool "
-                    + contribution.definition().id()
+                    + contribution.definition().descriptor().name()
                     + " has no frozen environmentId."));
       }
 

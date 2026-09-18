@@ -129,8 +129,8 @@ export interface AgentSkillRefDTO {
 }
 
 export interface AgentDefinitionConfigDTO {
-  /** Stable AgentToolId values selected from the tool catalog. */
-  toolIds: string[]
+  /** 有序且唯一的模型可见 tool name 列表；候选来自离线 tool catalog。 */
+  tools: string[]
   skills: AgentSkillRefDTO[]
   /** 可通过 task 委派的 Agent 名称 allowlist；只接受短名。 */
   subagents: string[]
@@ -138,9 +138,8 @@ export interface AgentDefinitionConfigDTO {
 
 /** 可离线选择的统一运行时 tool catalog 条目。 */
 export interface ToolCatalogEntryDTO {
-  id: string
+  /** 模型可见工具名：全局唯一。 */
   name: string
-  version: string
   description: string
   environmentRequired: boolean
   environmentId: string | null

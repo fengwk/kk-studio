@@ -207,15 +207,25 @@ public interface McpServerMapper extends BaseMapper {
 
   @Select(
       """
-      select distinct tool_id
+      select id, mcp_server_id, source_name, model_name, description,
+             input_schema::text as input_schema_json, schema_revision, available
+      from mcp_tool
+      where model_name = #{modelName} and available = true
+      """)
+  @ResultMap("mcpToolResultMap")
+  McpToolDO getAvailableToolByModelName(@Param("modelName") String modelName);
+
+  @Select(
+      """
+      select distinct tool_name
       from agent_definition,
            lateral jsonb_array_elements_text(
-             case when jsonb_typeof(config -> 'toolIds') = 'array'
-                  then config -> 'toolIds'
+             case when jsonb_typeof(config -> 'tools') = 'array'
+                  then config -> 'tools'
                   else '[]'::jsonb
              end
-           ) as tool_id
-      where tool_id in (select 'mcp.' || replace(id::text, '-', '') from mcp_tool)
+           ) as tool_name
+      where tool_name in (select model_name from mcp_tool)
       """)
-  List<String> selectReferencedAgentToolIds();
+  List<String> selectReferencedToolNames();
 }

@@ -80,7 +80,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -3388,7 +3387,6 @@ class ModelProcessorTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "bash",
-            "1.0",
             "run bash commands",
             "bash",
             new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -3396,8 +3394,7 @@ class ModelProcessorTest {
             Duration.ofSeconds(30));
     ToolBinding binding =
         new ToolBinding(
-            new AgentToolDefinition(
-                new AgentToolId("test.bash"), descriptor, ToolVisibility.SELECTABLE),
+            new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
             false,
             null);

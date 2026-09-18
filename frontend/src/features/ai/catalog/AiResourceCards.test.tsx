@@ -47,7 +47,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     model: 'minimax/MiniMax',
     variant: 'quality',
     config: {
-      toolIds: ['base.read', 'base.bash', 'base.grep'],
+      tools: ['read', 'bash', 'grep'],
       skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['writer'],
     },
@@ -103,7 +103,7 @@ describe('AI resource cards', () => {
       <AgentResourceCard
         agent={agent({
           config: {
-            toolIds: [],
+            tools: [],
             skills: [
               { sourceId: 'src-1', name: 'skill-alpha' },
               { sourceId: 'src-2', name: 'skill-beta' },
@@ -129,7 +129,7 @@ describe('AI resource cards', () => {
       <AgentResourceCard
         agent={agent({
           config: {
-            toolIds: [],
+            tools: [],
             skills: [],
             subagents: ['helper', 'writer', 'architect'],
           },
@@ -152,7 +152,7 @@ describe('AI resource cards', () => {
     rerender(
       <AgentResourceCard
         agent={agent({
-          config: { toolIds: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [] },
         })}
         models={[]}
         onEdit={() => undefined}
@@ -172,7 +172,7 @@ describe('AI resource cards', () => {
           model: 'missing-model',
           variant: null,
           config: {
-            toolIds: [],
+            tools: [],
             skills: [],
             subagents: [],
           },

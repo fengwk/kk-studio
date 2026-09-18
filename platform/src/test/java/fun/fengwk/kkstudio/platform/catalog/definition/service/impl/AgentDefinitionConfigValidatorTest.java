@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -21,11 +20,9 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
@@ -47,22 +44,19 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 
-/** Agent 配置的校验：工具 ID 必须来自统一 RuntimeToolCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
+/** Agent 配置的校验：工具名必须来自统一 RuntimeToolCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
 
-  private static final AgentToolId CUSTOM_TOOL_ID = new AgentToolId("test.custom-tool");
-  private static final AgentToolId DUPLICATE_FIRST_TOOL_ID =
-      new AgentToolId("test.duplicate-first");
-  private static final AgentToolId DUPLICATE_SECOND_TOOL_ID =
-      new AgentToolId("test.duplicate-second");
+  private static final String CUSTOM_TOOL_NAME = "custom_tool";
+  private static final String ENVIRONMENT_TOOL_NAME = "read";
+  private static final String INTERNAL_TOOL_NAME = "load_skill";
 
   @Test
-  void acceptsEnvironmentAndHostToolIdsWhenEnvironmentIsBound() {
+  void acceptsEnvironmentAndHostToolNamesWhenEnvironmentIsBound() {
     // 验证任意已绑定 Environment 均可满足通用环境工具要求，且不影响同时选择宿主工具。
-    String environmentToolId = BuiltinToolIds.READ.toString();
-    try (Fixture fixture = new Fixture(List.of(hostTool("custom_tool", "1")))) {
+    try (Fixture fixture = new Fixture(List.of(hostTool(CUSTOM_TOOL_NAME)))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of(environmentToolId, CUSTOM_TOOL_ID.toString()));
+      config.setTools(List.of(ENVIRONMENT_TOOL_NAME, CUSTOM_TOOL_NAME));
       config.setSkills(
           List.of(
               new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "dev"),
@@ -77,7 +71,7 @@ class AgentDefinitionConfigValidatorTest {
     // 验证无 Environment 的 Agent 不能保存环境工具，避免将必然执行失败的配置持久化。
     try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of(BuiltinToolIds.READ.toString()));
+      config.setTools(List.of(ENVIRONMENT_TOOL_NAME));
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
@@ -93,11 +87,11 @@ class AgentDefinitionConfigValidatorTest {
     UUID requiredEnvironmentId = UUID.randomUUID();
     Tool tool =
         tool(
-            hostDescriptor("custom_tool", "1"),
+            hostDescriptor(CUSTOM_TOOL_NAME),
             ToolRequirements.environment(new EnvironmentId(requiredEnvironmentId)));
     try (Fixture fixture = new Fixture(List.of(tool))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of(CUSTOM_TOOL_ID.toString()));
+      config.setTools(List.of(CUSTOM_TOOL_NAME));
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
@@ -111,16 +105,16 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   @Test
-  void rejectsUnknownToolId() {
+  void rejectsUnknownToolName() {
     try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of("test.missing"));
+      config.setTools(List.of("missing_tool"));
       config.setSkills(List.of());
       config.setSubagents(List.of());
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
               .getMessage()
-              .contains("unknown agent tool id"));
+              .contains("unknown agent tool: missing_tool"));
     }
   }
 
@@ -129,7 +123,7 @@ class AgentDefinitionConfigValidatorTest {
     try (Fixture fixture = new Fixture(List.of())) {
       String tooLong = "x".repeat(129);
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of());
+      config.setTools(List.of());
       config.setSkills(
           List.of(new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", tooLong)));
       config.setSubagents(List.of());
@@ -144,7 +138,7 @@ class AgentDefinitionConfigValidatorTest {
   void rejectsInternalToolSelection() {
     try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of(BuiltinToolIds.LOAD_SKILL.toString()));
+      config.setTools(List.of(INTERNAL_TOOL_NAME));
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
@@ -158,7 +152,7 @@ class AgentDefinitionConfigValidatorTest {
   void rejectsSubagentNameExceeding64Characters() {
     try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setToolIds(List.of());
+      config.setTools(List.of());
       config.setSkills(List.of());
       config.setSubagents(List.of("x".repeat(65)));
 
@@ -172,27 +166,17 @@ class AgentDefinitionConfigValidatorTest {
   @Test
   void rejectsDuplicateHostToolRegistration() {
     // 两个不同 contributor 声明相同 model-visible name 会在统一 catalog 构造边界被拒绝。
-    ToolDescriptor descriptor = hostDescriptor("dup", "1");
+    ToolDescriptor descriptor = hostDescriptor("dup");
     HarnessContributor first =
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("first"), "First", "1", Set.of()),
             registrar ->
-                registrar.registerTool(
-                    "dup",
-                    DUPLICATE_FIRST_TOOL_ID,
-                    tool(descriptor),
-                    ToolVisibility.SELECTABLE,
-                    0));
+                registrar.registerTool("dup", tool(descriptor), ToolVisibility.SELECTABLE, 0));
     HarnessContributor second =
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("second"), "Second", "1", Set.of()),
             registrar ->
-                registrar.registerTool(
-                    "dup",
-                    DUPLICATE_SECOND_TOOL_ID,
-                    tool(descriptor),
-                    ToolVisibility.SELECTABLE,
-                    0));
+                registrar.registerTool("dup", tool(descriptor), ToolVisibility.SELECTABLE, 0));
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(first, second)));
@@ -200,8 +184,8 @@ class AgentDefinitionConfigValidatorTest {
   }
 
   @Test
-  void acceptsDynamicMcpToolId() {
-    // 意图：验证动态 MCP 工具在聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
+  void acceptsDynamicMcpToolName() {
+    // 意图：验证动态 MCP 工具按 mcp_tool.model_name 聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
@@ -229,10 +213,10 @@ class AgentDefinitionConfigValidatorTest {
     mcpTool.setAvailable(true);
     mcpTool.setSchemaRevision(1L);
 
-    when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
+    when(repo.getAvailableToolByModelName("mcp_test_server_echo")).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));
     when(repo.listAllServers()).thenReturn(List.of(server));
-    when(repo.listTools(serverId)).thenReturn(List.of(mcpTool));
+    when(repo.listAvailableTools(serverId)).thenReturn(List.of(mcpTool));
 
     HarnessToolCatalogAdapter staticAdapter =
         new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()));
@@ -241,21 +225,20 @@ class AgentDefinitionConfigValidatorTest {
     AgentDefinitionConfigValidator validator = new AgentDefinitionConfigValidator(composite);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of(McpStableIds.agentToolId(toolId).value()));
+    config.setTools(List.of("mcp_test_server_echo"));
     config.setSkills(List.of());
     config.setSubagents(List.of());
 
     assertDoesNotThrow(() -> validator.validate(config));
   }
 
-  private static Tool hostTool(String name, String version) {
-    return tool(hostDescriptor(name, version));
+  private static Tool hostTool(String name) {
+    return tool(hostDescriptor(name));
   }
 
-  private static ToolDescriptor hostDescriptor(String name, String version) {
+  private static ToolDescriptor hostDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        version,
         name + " tool",
         name,
         new InputSchema("", Map.of(), Set.of(), false),
@@ -294,10 +277,10 @@ class AgentDefinitionConfigValidatorTest {
     private Fixture(List<Tool> tools) {
       List<HarnessContributor> contributors = new ArrayList<>();
       Tool dummyLoadSkill = mock(Tool.class);
-      when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill", "1"));
+      when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
       when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
       Tool dummyTask = mock(Tool.class);
-      when(dummyTask.descriptor()).thenReturn(hostDescriptor("task", "1"));
+      when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
       when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
       contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
 
@@ -310,7 +293,6 @@ class AgentDefinitionConfigValidatorTest {
                     Tool tool = tools.get(i);
                     registrar.registerTool(
                         "custom-tool" + (i == 0 ? "" : "-" + i),
-                        i == 0 ? CUSTOM_TOOL_ID : new AgentToolId(CUSTOM_TOOL_ID.value() + "-" + i),
                         tool,
                         ToolVisibility.SELECTABLE,
                         0);

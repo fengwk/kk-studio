@@ -37,7 +37,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinition definition = factory.newAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
-    assertEquals(List.of("browser"), stored.getToolIds());
+    assertEquals(List.of("browser"), stored.getTools());
     assertEquals(
         List.of(new AgentSkillRefDTO(SOURCE_ID, "java"), new AgentSkillRefDTO(SOURCE_ID, "dev")),
         stored.getSkills());
@@ -78,7 +78,7 @@ public class AgentDefinitionMutationFactoryTest {
     create.setConfig(config(List.of(" read "), List.of()));
     error = assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
     assertEquals(
-        "agent definition config toolIds must contain canonical AgentToolIds:  read ",
+        "agent definition config tools must contain valid model-visible tool names:  read ",
         error.getMessage());
   }
 
@@ -151,9 +151,9 @@ public class AgentDefinitionMutationFactoryTest {
   }
 
   private static AgentDefinitionConfigDTO config(
-      List<String> toolIds, List<AgentSkillRefDTO> skills) {
+      List<String> tools, List<AgentSkillRefDTO> skills) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(toolIds);
+    config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(List.of());
     return config;

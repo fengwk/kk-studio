@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
@@ -226,7 +225,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
   @Test
   public void blocksServerDeleteWhenReferencedByAgentDefinition() {
-    // 意图：当任一 agent_definition 引用工具的 AgentToolId 时，Server 删除被 AiInUseException 拦截
+    // 意图：当任一 agent_definition.config.tools 引用工具的模型可见名时，Server 删除被 AiInUseException 拦截
     fakeServer.addTool("critical_tool", "Critical", "{}");
 
     String configJson =
@@ -248,10 +247,10 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
     UUID serverId = UUID.fromString(created.getId());
     McpTool tool = repository.listTools(serverId).get(0);
-    String agentToolId = McpStableIds.agentToolId(tool.getId()).value();
+    String modelName = tool.getModelName();
 
-    // 模拟存在 agent_definition 引用了该 agentToolId
-    insertFakeAgentDefinitionReferencingTool(agentToolId);
+    // 模拟存在 agent_definition.config.tools 引用了该模型可见名
+    insertFakeAgentDefinitionReferencingTool(modelName);
 
     // 1. 删除 Server 被拦截
     assertThrows(AiInUseException.class, () -> mcpServerService.deleteServer(created.getId(), "0"));
@@ -302,7 +301,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     assertTrue(page.getResults().stream().anyMatch(s -> s.getId().equals(created.getId())));
   }
 
-  private void insertFakeAgentDefinitionReferencingTool(String agentToolId) {
+  private void insertFakeAgentDefinitionReferencingTool(String modelName) {
     jdbc.update(
         "insert into agent_provider (name, provider_type, config, connection_generation_id) values ('test_p_mcp', 'openai', '{}'::jsonb, '00000000-0000-0000-0000-000000000099'::uuid) on conflict do nothing");
     jdbc.update(
@@ -312,8 +311,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     jdbc.update(
         "insert into agent_definition (name, model_provider_name, model_name, config) "
             + "values ('test_agent_mcp', 'test_p_mcp', 'm1', "
-            + "cast('{\"toolIds\": [\""
-            + agentToolId
+            + "cast('{\"tools\": [\""
+            + modelName
             + "\"]}' as jsonb))");
   }
 }

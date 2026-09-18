@@ -36,7 +36,7 @@ insert into agent_definition (
     'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.',
     'stub', 'acceptance-stub', 'default',
-    '{"toolIds":[],"skills":[],"subagents":[]}',
+    '{"tools":[],"skills":[],"subagents":[]}',
     current_timestamp, current_timestamp, 0
 );
 

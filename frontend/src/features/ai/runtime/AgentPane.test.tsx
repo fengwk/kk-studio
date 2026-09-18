@@ -80,7 +80,7 @@ const agents: AgentDefinitionDTO[] = [{
   model: 'minimax/MiniMax',
   variant: 'default',
   environmentId: 'env-local-1',
-  config: { toolIds: [], skills: [], subagents: [] },
+  config: { tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
   updateTime: null,

@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.util.Objects;
@@ -18,14 +17,14 @@ import java.util.Set;
 /**
  * 严格、deterministic 的 {@link AgentToolDefinition} JSON 编解码。
  *
- * <p>wire 形状固定为 {@code {id, descriptor, visibility}}。id 是 durable AgentToolId，descriptor 委派 {@link
- * ToolDescriptorJsonCodec}，枚举只接受精确的 Java enum name。解析器拒绝 duplicate field、trailing
- * token、unknown/missing/null field 和错误类型。
+ * <p>wire 形状固定为 {@code {descriptor, visibility}}。descriptor 委派 {@link ToolDescriptorJsonCodec}
+ * 并携带唯一身份 name，枚举只接受精确的 Java enum name。解析器拒绝 duplicate field、trailing token、unknown/missing/null
+ * field 和错误类型。
  */
 public final class AgentToolDefinitionJsonCodec {
 
   private static final String CONTEXT = "agentToolDefinition";
-  private static final Set<String> FIELDS = Set.of("id", "descriptor", "visibility");
+  private static final Set<String> FIELDS = Set.of("descriptor", "visibility");
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final ToolDescriptorJsonCodec DESCRIPTOR_CODEC = new ToolDescriptorJsonCodec();
@@ -45,7 +44,6 @@ public final class AgentToolDefinitionJsonCodec {
   public ObjectNode encodeNode(AgentToolDefinition definition) {
     Objects.requireNonNull(definition, "definition");
     ObjectNode node = NODES.objectNode();
-    node.put("id", definition.id().value());
     node.set("descriptor", DESCRIPTOR_CODEC.encodeNode(definition.descriptor()));
     node.put("visibility", definition.visibility().name());
     return node;
@@ -74,10 +72,9 @@ public final class AgentToolDefinitionJsonCodec {
     }
     ObjectNode node = (ObjectNode) value;
     requireFields(node);
-    AgentToolId id = new AgentToolId(text(node, "id"));
     ToolVisibility visibility = enumValue(node, "visibility", ToolVisibility.class);
     return new AgentToolDefinition(
-        id, DESCRIPTOR_CODEC.decodeNode(required(node, "descriptor")), visibility);
+        DESCRIPTOR_CODEC.decodeNode(required(node, "descriptor")), visibility);
   }
 
   private static void requireFields(ObjectNode node) {

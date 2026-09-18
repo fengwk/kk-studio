@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
 import java.util.List;
 import java.util.Objects;
@@ -23,7 +22,7 @@ public final class HarnessToolCatalogAdapter implements RuntimeToolCatalog {
   }
 
   @Override
-  public Optional<ToolContribution> findTool(AgentToolId id) {
-    return catalog.findTool(Objects.requireNonNull(id, "id"));
+  public Optional<ToolContribution> findTool(String toolName) {
+    return catalog.findTool(Objects.requireNonNull(toolName, "toolName"));
   }
 }

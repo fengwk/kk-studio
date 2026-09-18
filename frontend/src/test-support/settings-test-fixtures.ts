@@ -18,9 +18,9 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
   return {
     tool: {
       permission: {
-        'base.write': [{ pattern: '*', action: 'ask' }],
-        'base.edit': [{ pattern: '*', action: 'ask' }],
-        'base.bash': [{ pattern: '*', action: 'ask' }],
+        'write': [{ pattern: '*', action: 'ask' }],
+        'edit': [{ pattern: '*', action: 'ask' }],
+        'bash': [{ pattern: '*', action: 'ask' }],
       },
       defaultYolo: false,
       modelGatewayBusyRetryMillis: '5000',

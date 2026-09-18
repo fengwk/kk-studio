@@ -1,14 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** 以精确 {@code *} 或 canonical {@code AgentToolId} 为 key 的 ordered permission rules 与默认 YOLO。 */
+/** 以精确 {@code *} 或模型可见 tool name 为 key 的 ordered permission rules 与默认 YOLO。 */
 public record ToolSettings(Map<String, List<PermissionRule>> permission, boolean defaultYolo) {
 
   public static final ToolSettings DEFAULT = new ToolSettings(Map.of(), false);
@@ -28,7 +26,7 @@ public record ToolSettings(Map<String, List<PermissionRule>> permission, boolean
     return permission.getOrDefault(PermissionKeyValidator.GLOBAL_KEY, List.of());
   }
 
-  public List<PermissionRule> rulesFor(AgentToolId toolId) {
-    return permission.getOrDefault(Objects.requireNonNull(toolId, "toolId").value(), List.of());
+  public List<PermissionRule> rulesFor(String toolName) {
+    return permission.getOrDefault(Objects.requireNonNull(toolName, "toolName"), List.of());
   }
 }

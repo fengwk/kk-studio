@@ -53,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -436,8 +435,7 @@ final class ToolProcessorTestSupport {
 
   private static ToolBinding hostBinding(ToolSideEffect sideEffect) {
     return new ToolBinding(
-        new AgentToolDefinition(
-            new AgentToolId("test.bash"), toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
+        new AgentToolDefinition(toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
         false,
         null);
@@ -446,7 +444,6 @@ final class ToolProcessorTestSupport {
   private static ToolDescriptor toolDescriptor(ToolSideEffect sideEffect) {
     return new ToolDescriptor(
         "bash",
-        "1.0",
         "description of bash",
         "bash",
         new InputSchema("arguments", Map.of(), Set.of(), false),

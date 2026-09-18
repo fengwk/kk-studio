@@ -9,16 +9,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 import java.util.List;
 import java.util.Map;
 
 class PermissionEvaluatorTest {
-  private static final AgentToolId BROWSER = new AgentToolId("browser");
-  private static final AgentToolId WRITE = new AgentToolId("base.write");
-  private static final AgentToolId BASH = new AgentToolId("base.bash");
-  private static final AgentToolId CUSTOM_EXEC = new AgentToolId("custom.exec");
+  private static final String BROWSER = "browser";
+  private static final String WRITE = "write";
+  private static final String BASH = "bash";
+  private static final String CUSTOM_EXEC = "custom_exec";
 
   private final ObjectMapper objectMapper = new ObjectMapper();
   private final PermissionEvaluator evaluator =
@@ -32,7 +30,7 @@ class PermissionEvaluatorTest {
             Map.of(
                 "*",
                 List.of(new PermissionRule("*", PermissionAction.DENY)),
-                WRITE.value(),
+                WRITE,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/*.java", PermissionAction.ALLOW))));
@@ -49,7 +47,7 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                CUSTOM_EXEC.value(),
+                CUSTOM_EXEC,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("rm *", PermissionAction.DENY),
@@ -125,7 +123,7 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                WRITE.value(),
+                WRITE,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("a.txt", PermissionAction.DENY))));
@@ -150,7 +148,7 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                WRITE.value(),
+                WRITE,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/Main.java", PermissionAction.ALLOW),
@@ -178,11 +176,11 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                WRITE.value(),
+                WRITE,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/*.java", PermissionAction.ALLOW)),
-                BROWSER.value(),
+                BROWSER,
                 List.of(new PermissionRule("*", PermissionAction.DENY))));
 
     assertEquals(
@@ -203,7 +201,7 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                WRITE.value(),
+                WRITE,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("secret.txt", PermissionAction.DENY))));
@@ -231,9 +229,9 @@ class PermissionEvaluatorTest {
     ToolSettings settings =
         settings(
             Map.of(
-                WRITE.value(),
+                WRITE,
                 List.of(new PermissionRule("*", PermissionAction.ASK)),
-                BROWSER.value(),
+                BROWSER,
                 List.of(new PermissionRule("*", PermissionAction.ASK))));
 
     PermissionEvaluator.Evaluation generic =
@@ -252,8 +250,7 @@ class PermissionEvaluatorTest {
         evaluate(
             BROWSER,
             "{\"skill\":\"web-search\"}",
-            settings(
-                Map.of(BROWSER.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))));
+            settings(Map.of(BROWSER, List.of(new PermissionRule("*", PermissionAction.ASK)))));
 
     assertEquals(PermissionAction.ASK, evaluation.action());
     assertNull(evaluation.promptPreview().workdir());
@@ -304,7 +301,7 @@ class PermissionEvaluatorTest {
         evaluate(
             BASH,
             "{\"command\":\"" + command.replace("\n", "\\n") + "\"}",
-            settings(Map.of(BASH.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))));
+            settings(Map.of(BASH, List.of(new PermissionRule("*", PermissionAction.ASK)))));
 
     assertEquals(PermissionAction.ASK, evaluation.action());
     assertNull(evaluation.promptPreview().workdir());
@@ -316,8 +313,7 @@ class PermissionEvaluatorTest {
         evaluateRaw(
                 WRITE,
                 " { \"workdir\" : \"/srv/repo\" , \"path\" : \"README.md\" } ",
-                settings(
-                    Map.of(WRITE.value(), List.of(new PermissionRule("*", PermissionAction.ASK)))))
+                settings(Map.of(WRITE, List.of(new PermissionRule("*", PermissionAction.ASK)))))
             .promptPreview()
             .arguments());
   }
@@ -328,16 +324,15 @@ class PermissionEvaluatorTest {
     ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
     String canonical =
         codec.canonicalize(
-            "{\"permission\":{\"base.write\":[{\"pattern\":\"*\",\"action\":\"ask\"}],"
-                + "\"base.bash\":[{\"pattern\":\"*\",\"action\":\"ask\"},{\"pattern\":\"git *\",\"action\":\"allow\"}]},"
+            "{\"permission\":{\"write\":[{\"pattern\":\"*\",\"action\":\"ask\"}],"
+                + "\"bash\":[{\"pattern\":\"*\",\"action\":\"ask\"},{\"pattern\":\"git *\",\"action\":\"allow\"}]},"
                 + "\"defaultYolo\":true}");
     JsonNode root = objectMapper.readTree(canonical);
 
     assertTrue(root.path("defaultYolo").asBoolean());
-    assertTrue(root.path("permission").path("base.write").isArray());
-    assertEquals("*", root.path("permission").path("base.write").get(0).path("pattern").asText());
-    assertEquals(
-        "git *", root.path("permission").path("base.bash").get(1).path("pattern").asText());
+    assertTrue(root.path("permission").path("write").isArray());
+    assertEquals("*", root.path("permission").path("write").get(0).path("pattern").asText());
+    assertEquals("git *", root.path("permission").path("bash").get(1).path("pattern").asText());
     assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(1).action());
 
     JsonNode global =
@@ -351,7 +346,7 @@ class PermissionEvaluatorTest {
   private static ToolSettings deny(String deniedPattern) {
     return settings(
         Map.of(
-            WRITE.value(),
+            WRITE,
             List.of(
                 new PermissionRule("*", PermissionAction.ASK),
                 new PermissionRule(deniedPattern, PermissionAction.DENY))));
@@ -359,20 +354,20 @@ class PermissionEvaluatorTest {
 
   /** path 规则夹具：自动为 {@code {"path":...}} 形态注入固定 absolute workdir，让各用例只表达 pattern 关注点。 */
   private PermissionEvaluator.Evaluation evaluate(
-      AgentToolId toolId, String arguments, ToolSettings settings) {
+      String toolName, String arguments, ToolSettings settings) {
     if (arguments.startsWith("{\"path\":")) {
       return evaluateRaw(
-          toolId,
+          toolName,
           "{\"workdir\":\"/tmp/permission-environment\"," + arguments.substring(1),
           settings);
     }
-    return evaluateRaw(toolId, arguments, settings);
+    return evaluateRaw(toolName, arguments, settings);
   }
 
   /** 按原样评估：需要直接断言缺失/非法 workdir 的用例走这里。 */
   private PermissionEvaluator.Evaluation evaluateRaw(
-      AgentToolId toolId, String arguments, ToolSettings settings) {
-    return evaluator.evaluate(new PermissionEvaluationContext(toolId, arguments, settings));
+      String toolName, String arguments, ToolSettings settings) {
+    return evaluator.evaluate(new PermissionEvaluationContext(toolName, arguments, settings));
   }
 
   private static ToolSettings settings(Map<String, List<PermissionRule>> rules) {

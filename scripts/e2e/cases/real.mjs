@@ -639,7 +639,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           systemPrompt,
           model: `${resolved.providerName}/${resolved.modelName}`,
           variant: resolved.variant,
-          config: { toolIds: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [] },
         })
         agent = envelopeData(agentJson)
         chat = await createChat(ctx, {
@@ -868,7 +868,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
           'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
         model: `${resolved.providerName}/${resolved.modelName}`,
         variant,
-        config: { toolIds: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [] },
       })
       varAgent = envelopeData(varAgentJson)
       varChat = await createChat(ctx, {
@@ -1007,7 +1007,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           model: `${resolved.providerName}/${resolved.modelName}`,
           variant: strongestVariant,
           config: {
-            toolIds: ['base.goal.get'],
+            tools: ['get_goal'],
             skills: [],
             subagents: [],
           },
@@ -1255,7 +1255,7 @@ registerCase({
               'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
             model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
             variant: minimaxModel.variant,
-            config: { toolIds: [], skills: [], subagents: [] },
+            config: { tools: [], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -1269,7 +1269,7 @@ registerCase({
               + `Delegate the instruction "Return exactly ${marker}". After the task result, answer with the same marker.`,
             model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
             variant: minimaxModel.variant,
-            config: { toolIds: [], skills: [], subagents: [childAgent.name] },
+            config: { tools: [], skills: [], subagents: [childAgent.name] },
           })
         ).json,
       )
@@ -1383,7 +1383,7 @@ registerCase({
         systemPrompt: 'Follow instructions strictly.',
         model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
         variant: minimaxModel.variant,
-        config: { toolIds: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [] },
       })
       tempAgent = envelopeData(agentJson)
 
@@ -1604,7 +1604,7 @@ registerCase({
         systemPrompt: 'Follow user instructions strictly.',
         model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
         variant: minimaxModel.variant,
-        config: { toolIds: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [] },
       })
       agent = envelopeData(agentJson)
       chat = await createChat(ctx, {
@@ -1802,7 +1802,7 @@ registerCase({
       variant: minimaxModel.variant,
       environmentId: ctx.vars.daemonEnvironment.id,
       config: {
-        toolIds: ['base.read'],
+        tools: ['read'],
         skills: [],
         subagents: [],
       },
@@ -1815,11 +1815,11 @@ registerCase({
       const agentConfig = toolAgent.config
       assert(
         agentConfig
-          && Object.keys(agentConfig).sort().join(',') === 'skills,subagents,toolIds'
-          && JSON.stringify(agentConfig.toolIds) === JSON.stringify(['base.read'])
+          && Object.keys(agentConfig).sort().join(',') === 'skills,subagents,tools'
+          && JSON.stringify(agentConfig.tools) === JSON.stringify(['read'])
           && JSON.stringify(agentConfig.skills) === JSON.stringify([])
           && JSON.stringify(agentConfig.subagents) === JSON.stringify([]),
-        `temporary tool Agent config must be exactly toolIds=[base.read], skills=[], subagents=[]: ${safeDiagnosticJson(toolAgent)}`,
+        `temporary tool Agent config must be exactly tools=[read], skills=[], subagents=[]: ${safeDiagnosticJson(toolAgent)}`,
       )
       const envRoot = process.env.DAEMON_ENV_ROOT
       assert(envRoot, 'DAEMON_ENV_ROOT must be exported by scripts/e2e/lib.sh')
@@ -1902,8 +1902,16 @@ registerCase({
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${safeDiagnosticJson(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', safeDiagnosticJson(readInvocation))
       assert(
-        readInvocation.toolId === 'base.read',
-        `WAITING read invocation must identify base.read: ${safeDiagnosticJson(readInvocation)}`,
+        !Object.hasOwn(readInvocation, 'toolId'),
+        `ToolInvocationDTO must not expose toolId: ${safeDiagnosticJson(readInvocation)}`,
+      )
+      assert(
+        !Object.hasOwn(readInvocation, 'toolVersion'),
+        `ToolInvocationDTO must not expose toolVersion: ${safeDiagnosticJson(readInvocation)}`,
+      )
+      assert(
+        readInvocation.toolName === 'read',
+        `WAITING read invocation must identify the read tool by name: ${safeDiagnosticJson(readInvocation)}`,
       )
       assert(
         !Object.hasOwn(readInvocation, 'toolBackend'),

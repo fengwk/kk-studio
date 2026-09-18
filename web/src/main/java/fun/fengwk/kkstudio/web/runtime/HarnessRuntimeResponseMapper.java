@@ -177,8 +177,6 @@ public final class HarnessRuntimeResponseMapper {
     if (binding == null) {
       dto.setRendererKey(HistoryPayloadMapper.UNBOUND_RENDERER_KEY);
     } else {
-      dto.setToolId(binding.definition().id().value());
-      dto.setToolVersion(binding.descriptor().version());
       dto.setRendererKey(binding.descriptor().rendererKey());
       // 环境身份平铺为 nullable canonical UUID 文本；不保留单字段 wrapper。
       dto.setEnvironmentId(

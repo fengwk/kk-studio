@@ -463,7 +463,6 @@ class McpExecutableToolTest {
   private static ToolDescriptor sampleDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1",
         "Sample description",
         "tool",
         new InputSchema(null, Map.of(), Set.of(), true),

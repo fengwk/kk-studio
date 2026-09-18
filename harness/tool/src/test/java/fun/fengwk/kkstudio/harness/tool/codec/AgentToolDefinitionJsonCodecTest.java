@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -23,7 +22,6 @@ class AgentToolDefinitionJsonCodecTest {
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "read",
-          "1.0",
           "Read a file",
           "read",
           new InputSchema("Read input", Map.of(), Set.of(), false),
@@ -33,20 +31,18 @@ class AgentToolDefinitionJsonCodecTest {
   private final AgentToolDefinitionJsonCodec codec = new AgentToolDefinitionJsonCodec();
   private final ToolDescriptorJsonCodec descriptorCodec = new ToolDescriptorJsonCodec();
 
-  /** 两种 visibility 都必须保留完整值，且编码字段顺序固定为 id/descriptor/visibility。 */
+  /** 两种 visibility 都必须保留完整值，且编码字段顺序固定为 descriptor/visibility；身份即 descriptor.name。 */
   @Test
   void roundTripsEveryDefinitionCombination() {
     List<AgentToolDefinition> definitions =
         List.of(
-            definition("test.read-selectable", ToolVisibility.SELECTABLE),
-            definition("test.read-internal", ToolVisibility.INTERNAL));
+            new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE),
+            new AgentToolDefinition(DESCRIPTOR, ToolVisibility.INTERNAL));
 
     for (AgentToolDefinition original : definitions) {
       String encoded = codec.encode(original);
       String expected =
-          "{\"id\":\""
-              + original.id().value()
-              + "\",\"descriptor\":"
+          "{\"descriptor\":"
               + descriptorCodec.encode(DESCRIPTOR)
               + ",\"visibility\":\""
               + original.visibility().name()
@@ -54,15 +50,18 @@ class AgentToolDefinitionJsonCodecTest {
       assertEquals(expected, encoded);
       assertEquals(original, codec.decode(encoded));
       assertEquals(original, codec.decodeNode(codec.encodeNode(original)));
+      assertEquals("read", codec.decode(encoded).descriptor().name());
     }
   }
 
   /** 字符串边界必须拒绝 Java null、空文档、非对象、duplicate field 与 trailing token。 */
   @Test
   void rejectsMalformedDocuments() {
-    String valid = codec.encode(definition("test.host", ToolVisibility.SELECTABLE));
+    String valid = codec.encode(definition(ToolVisibility.SELECTABLE));
     String duplicate =
-        valid.replace("\"id\":\"test.host\"", "\"id\":\"test.host\",\"id\":\"test.other\"");
+        valid.replace(
+            "\"visibility\":\"SELECTABLE\"",
+            "\"visibility\":\"SELECTABLE\",\"visibility\":\"INTERNAL\"");
 
     assertThrows(NullPointerException.class, () -> codec.encode(null));
     assertThrows(NullPointerException.class, () -> codec.decode(null));
@@ -75,20 +74,23 @@ class AgentToolDefinitionJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 id/descriptor/visibility，所有缺失、unknown、null 和错误类型都失败。 */
+  /** 顶层字段必须恰好是 descriptor/visibility；旧 id 字段与所有缺失、unknown、null 和错误类型都必须失败。 */
   @Test
   void rejectsInvalidFieldsAndEnumValues() {
-    String valid = codec.encode(definition("test.host", ToolVisibility.SELECTABLE));
+    String valid = codec.encode(definition(ToolVisibility.SELECTABLE));
     String descriptor = descriptorCodec.encode(DESCRIPTOR);
+
+    // 旧 wire 的 id 字段（AgentToolId）必须被当作未知字段拒绝，绝不兼容。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(valid.replace("{\"descriptor\"", "{\"id\":\"base.read\",\"descriptor\"")));
 
     // 未知字段
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(valid.replace("}", ",\"extra\":true}")));
 
     // 缺少字段
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"id\":\"test.host\",", "")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"descriptor\":" + descriptor + ",", "")));
@@ -99,17 +101,12 @@ class AgentToolDefinitionJsonCodecTest {
     // null 字段
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"id\":\"test.host\"", "\"id\":null")));
-    assertThrows(
-        IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"descriptor\":" + descriptor, "\"descriptor\":null")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"visibility\":\"SELECTABLE\"", "\"visibility\":null")));
 
     // 类型错误
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(valid.replace("\"test.host\"", "1")));
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(valid.replace(descriptor, "[]")));
     assertThrows(
@@ -122,14 +119,9 @@ class AgentToolDefinitionJsonCodecTest {
         () ->
             codec.decode(
                 valid.replace("\"visibility\":\"SELECTABLE\"", "\"visibility\":\"OTHER\"")));
-
-    // 非法 AgentToolId 命名
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode(valid.replace("\"test.host\"", "\"Test.Host\"")));
   }
 
-  private static AgentToolDefinition definition(String id, ToolVisibility visibility) {
-    return new AgentToolDefinition(new AgentToolId(id), DESCRIPTOR, visibility);
+  private static AgentToolDefinition definition(ToolVisibility visibility) {
+    return new AgentToolDefinition(DESCRIPTOR, visibility);
   }
 }

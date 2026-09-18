@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.project.tool;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -15,11 +13,11 @@ public class ProjectRoleToolSelector {
     this.ownerResolver = Objects.requireNonNull(ownerResolver, "ownerResolver");
   }
 
-  public List<AgentToolId> select(UUID threadId) {
+  public List<String> select(UUID threadId) {
     return ownerResolver
         .resolve(threadId)
         .map(ProjectThreadOwnerContext::role)
-        .map(ProjectRoleToolIds::forRole)
+        .map(ProjectRoleToolType::namesForRole)
         .orElseGet(List::of);
   }
 }

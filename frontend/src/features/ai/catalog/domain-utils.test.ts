@@ -160,7 +160,7 @@ describe('AI domain utilities', () => {
         model: 'minimax/MiniMax-M2.7',
         variant: 'default',
         config: {
-          toolIds: ['base.search'],
+          tools: ['search'],
           skills: [],
           subagents: [],
         },
@@ -171,7 +171,7 @@ describe('AI domain utilities', () => {
     ).toMatchObject({
       name: 'assistant',
       model: 'minimax/MiniMax-M2.7',
-      toolIds: ['base.search'],
+      tools: ['search'],
       subagents: [],
     })
   })
@@ -246,7 +246,7 @@ describe('AI domain utilities', () => {
       model: ' minimax/MiniMax-M2.7 ',
       variant: ' default ',
       environmentId: ' env-uuid-1 ',
-      toolIds: [' base.search ', ''],
+      tools: [' search ', ''],
       skills: [],
       subagents: [' helper '],
     }
@@ -258,7 +258,7 @@ describe('AI domain utilities', () => {
       variant: 'default',
       environmentId: 'env-uuid-1',
       config: {
-        toolIds: ['base.search'],
+        tools: ['search'],
         skills: [],
         subagents: ['helper'],
       },
@@ -271,7 +271,7 @@ describe('AI domain utilities', () => {
       variant: 'default',
       environmentId: 'env-uuid-1',
       config: {
-        toolIds: ['base.search'],
+        tools: ['search'],
         skills: [],
         subagents: ['helper'],
       },
@@ -290,7 +290,7 @@ describe('AI domain utilities', () => {
         model: 'minimax/MiniMax-M2.7',
         variant: 'default',
         config: {
-          toolIds: [],
+          tools: [],
           skills: [],
           subagents: [],
         },
@@ -436,7 +436,7 @@ describe('AI domain utilities', () => {
         model: 'openai/gpt-5.4',
         variant: 'default',
         config: {
-          toolIds: [],
+          tools: [],
           skills: [],
           subagents: [],
         },
@@ -448,7 +448,7 @@ describe('AI domain utilities', () => {
       description: '',
       systemPrompt: '',
       variant: 'default',
-      toolIds: [],
+      tools: [],
       subagents: [],
     })
 

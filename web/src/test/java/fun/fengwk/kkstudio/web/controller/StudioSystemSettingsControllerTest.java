@@ -40,8 +40,8 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("0"))
         .andExpect(jsonPath("$.data.tool.defaultYolo").value(false))
-        .andExpect(jsonPath("$.data.tool.permission['base.bash'][0].pattern").value("*"))
-        .andExpect(jsonPath("$.data.tool.permission['base.bash'][0].action").value("ask"))
+        .andExpect(jsonPath("$.data.tool.permission['bash'][0].pattern").value("*"))
+        .andExpect(jsonPath("$.data.tool.permission['bash'][0].action").value("ask"))
         .andExpect(jsonPath("$.data.aiRuntime.retryBackoffStrategy").value("EXPONENTIAL"))
         .andExpect(jsonPath("$.data.aiRuntime.retryMaxRetries").value(3))
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。

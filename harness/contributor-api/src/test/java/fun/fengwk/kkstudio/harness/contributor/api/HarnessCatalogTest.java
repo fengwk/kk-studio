@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -37,7 +36,6 @@ class HarnessCatalogTest {
     assertTrue(catalog.findDescriptor(new ContributorId("core")).isEmpty());
     assertTrue(catalog.transitiveRequires(new ContributorId("core")).isEmpty());
     assertTrue(catalog.findTool("bash").isEmpty());
-    assertTrue(catalog.findTool(new AgentToolId("base.bash")).isEmpty());
     assertTrue(catalog.findTool(new ContributionId(new ContributorId("core"), "bash")).isEmpty());
   }
 
@@ -159,12 +157,9 @@ class HarnessCatalogTest {
             desc,
             reg -> {
               reg.registerCustomEntryType("state-entry", "state", 10);
-              reg.registerTool(
-                  "plain", new AgentToolId("base.plain"), plainTool, ToolVisibility.SELECTABLE, 5);
-              reg.registerTool(
-                  "state", new AgentToolId("base.state"), stateTool, ToolVisibility.INTERNAL, 3);
-              reg.registerTool(
-                  "env", new AgentToolId("base.env"), envTool, ToolVisibility.SELECTABLE, 1);
+              reg.registerTool("plain", plainTool, ToolVisibility.SELECTABLE, 5);
+              reg.registerTool("state", stateTool, ToolVisibility.INTERNAL, 3);
+              reg.registerTool("env", envTool, ToolVisibility.SELECTABLE, 1);
               reg.registerContextProjector("proj", projector, 2);
             });
 
@@ -193,13 +188,10 @@ class HarnessCatalogTest {
     assertEquals(envTool, envContrib.tool());
     assertTrue(envContrib.requirements().environmentRequired());
 
-    // 验证按 name 和 AgentToolId 查询
+    // 验证按模型可见 name 查询
     assertSame(plainContrib, catalog.findTool("plain_tool").orElseThrow());
-    assertSame(plainContrib, catalog.findTool(new AgentToolId("base.plain")).orElseThrow());
     assertSame(stateContrib, catalog.findTool("state_tool").orElseThrow());
-    assertSame(stateContrib, catalog.findTool(new AgentToolId("base.state")).orElseThrow());
     assertSame(envContrib, catalog.findTool("env_tool").orElseThrow());
-    assertSame(envContrib, catalog.findTool(new AgentToolId("base.env")).orElseThrow());
 
     // 验证 custom entry types
     assertEquals(1, catalog.customEntryTypes().size());
@@ -226,17 +218,9 @@ class HarnessCatalogTest {
             aDesc,
             reg -> {
               reg.registerTool(
-                  "t2",
-                  new AgentToolId("a.t2"),
-                  dummyTool("a_t2", ToolRequirements.none()),
-                  ToolVisibility.SELECTABLE,
-                  5);
+                  "t2", dummyTool("a_t2", ToolRequirements.none()), ToolVisibility.SELECTABLE, 5);
               reg.registerTool(
-                  "t1",
-                  new AgentToolId("a.t1"),
-                  dummyTool("a_t1", ToolRequirements.none()),
-                  ToolVisibility.SELECTABLE,
-                  10);
+                  "t1", dummyTool("a_t1", ToolRequirements.none()), ToolVisibility.SELECTABLE, 10);
             });
 
     HarnessContributor cb =
@@ -245,11 +229,7 @@ class HarnessCatalogTest {
             reg -> {
               // priority 100 但属于 b（依赖 a），必须排在 a 的工具之后
               reg.registerTool(
-                  "t1",
-                  new AgentToolId("b.t1"),
-                  dummyTool("b_t1", ToolRequirements.none()),
-                  ToolVisibility.SELECTABLE,
-                  100);
+                  "t1", dummyTool("b_t1", ToolRequirements.none()), ToolVisibility.SELECTABLE, 100);
             });
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(cb, ca));
@@ -267,10 +247,7 @@ class HarnessCatalogTest {
     Tool tool = dummyTool("default_tool", ToolRequirements.none());
     HarnessContributor contrib =
         HarnessContributor.of(
-            desc,
-            reg ->
-                reg.registerTool(
-                    "def", new AgentToolId("core.def"), tool, ToolVisibility.SELECTABLE));
+            desc, reg -> reg.registerTool("def", tool, ToolVisibility.SELECTABLE));
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contrib));
     assertEquals(0, catalog.tools().get(0).priority());
@@ -286,15 +263,9 @@ class HarnessCatalogTest {
             desc,
             reg -> {
               reg.registerTool(
-                  "same",
-                  new AgentToolId("core.t1"),
-                  dummyTool("tool1", ToolRequirements.none()),
-                  ToolVisibility.SELECTABLE);
+                  "same", dummyTool("tool1", ToolRequirements.none()), ToolVisibility.SELECTABLE);
               reg.registerTool(
-                  "same",
-                  new AgentToolId("core.t2"),
-                  dummyTool("tool2", ToolRequirements.none()),
-                  ToolVisibility.SELECTABLE);
+                  "same", dummyTool("tool2", ToolRequirements.none()), ToolVisibility.SELECTABLE);
             });
 
     assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(contrib)));
@@ -314,7 +285,6 @@ class HarnessCatalogTest {
             reg ->
                 reg.registerTool(
                     "t1",
-                    new AgentToolId("c1.t1"),
                     dummyTool("same_name", ToolRequirements.none()),
                     ToolVisibility.SELECTABLE));
 
@@ -324,39 +294,7 @@ class HarnessCatalogTest {
             reg ->
                 reg.registerTool(
                     "t2",
-                    new AgentToolId("c2.t2"),
                     dummyTool("same_name", ToolRequirements.none()),
-                    ToolVisibility.SELECTABLE));
-
-    assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(c1, c2)));
-  }
-
-  /** 验证跨 contributor 注册相同 AgentToolId 时抛出异常。 */
-  @Test
-  void rejectsDuplicateAgentToolIdAcrossContributors() {
-    ContributorDescriptor desc1 =
-        new ContributorDescriptor(new ContributorId("c1"), "C1", "1.0", Set.of());
-    ContributorDescriptor desc2 =
-        new ContributorDescriptor(new ContributorId("c2"), "C2", "1.0", Set.of());
-
-    HarnessContributor c1 =
-        HarnessContributor.of(
-            desc1,
-            reg ->
-                reg.registerTool(
-                    "t1",
-                    new AgentToolId("shared.id"),
-                    dummyTool("name1", ToolRequirements.none()),
-                    ToolVisibility.SELECTABLE));
-
-    HarnessContributor c2 =
-        HarnessContributor.of(
-            desc2,
-            reg ->
-                reg.registerTool(
-                    "t2",
-                    new AgentToolId("shared.id"),
-                    dummyTool("name2", ToolRequirements.none()),
                     ToolVisibility.SELECTABLE));
 
     assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(c1, c2)));
@@ -390,11 +328,7 @@ class HarnessCatalogTest {
                 false, List.of(new StateDeclaration("unregistered-state", StateMode.READ))));
 
     HarnessContributor contrib =
-        HarnessContributor.of(
-            desc,
-            reg ->
-                reg.registerTool(
-                    "t", new AgentToolId("core.state"), tool, ToolVisibility.SELECTABLE));
+        HarnessContributor.of(desc, reg -> reg.registerTool("t", tool, ToolVisibility.SELECTABLE));
 
     assertThrows(IllegalArgumentException.class, () -> HarnessCatalog.from(List.of(contrib)));
   }
@@ -414,10 +348,7 @@ class HarnessCatalogTest {
         IllegalStateException.class,
         () ->
             registrar.registerTool(
-                "late",
-                new AgentToolId("core.late"),
-                dummyTool("late", ToolRequirements.none()),
-                ToolVisibility.SELECTABLE));
+                "late", dummyTool("late", ToolRequirements.none()), ToolVisibility.SELECTABLE));
   }
 
   private static Tool dummyTool(String name, ToolRequirements requirements) {
@@ -442,7 +373,6 @@ class HarnessCatalogTest {
   }
 
   private static ToolDescriptor descriptor(String name, Duration timeout) {
-    return new ToolDescriptor(
-        name, "1.0", "Description", name, SCHEMA, ToolSideEffect.READ_ONLY, timeout);
+    return new ToolDescriptor(name, "Description", name, SCHEMA, ToolSideEffect.READ_ONLY, timeout);
   }
 }

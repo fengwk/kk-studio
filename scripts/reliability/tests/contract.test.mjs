@@ -7,26 +7,18 @@ import {
   chatOwner,
   userMessageCommand,
 } from '../../e2e/lib/harness.mjs'
-import { AGENT_TOOL_IDS, MODEL_TOOL_NAMES, VARIANT } from '../matrix.mjs'
+import { TOOL_NAMES, VARIANT } from '../matrix.mjs'
 import { assertThreadSettings, buildNewSessionRequest } from '../run-agent-matrix.mjs'
 
 const DAEMON_ENV = 'docker-reliability'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-test('reliability contract keeps selectable AgentToolIds separate from model tool names', () => {
-  // Test intent: freeze the wire IDs and the Provider-facing names independently,
-  // while ensuring internal resolver tools cannot become selectable by configuration.
-  assert.deepEqual(AGENT_TOOL_IDS, [
-    'base.read',
-    'base.write',
-    'base.edit',
-    'base.bash',
-    'base.grep',
-    'base.find',
-  ])
-  assert.deepEqual(MODEL_TOOL_NAMES, ['read', 'write', 'edit', 'bash', 'grep', 'find'])
-  assert.equal(AGENT_TOOL_IDS.includes('base.load-skill'), false)
-  assert.equal(AGENT_TOOL_IDS.includes('base.task'), false)
+test('reliability contract freezes model-visible tool names as the only selectable identity', () => {
+  // Test intent: the model-visible name is the single Agent-facing tool identity used by
+  // Agent config, permission keys and the catalog; internal resolver tools stay unselectable.
+  assert.deepEqual(TOOL_NAMES, ['read', 'write', 'edit', 'bash', 'grep', 'find'])
+  assert.equal(TOOL_NAMES.includes('load_skill'), false)
+  assert.equal(TOOL_NAMES.includes('task'), false)
 })
 
 test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {

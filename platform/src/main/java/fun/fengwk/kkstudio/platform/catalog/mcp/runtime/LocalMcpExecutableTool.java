@@ -162,7 +162,6 @@ public final class LocalMcpExecutableTool implements Tool {
     ToolDescriptor capabilityToolDescriptor =
         new ToolDescriptor(
             CAPABILITY_TOOL_NAME,
-            capabilityDesc.version(),
             "MCP local call capability",
             "capability",
             capabilityDesc.inputSchema(),

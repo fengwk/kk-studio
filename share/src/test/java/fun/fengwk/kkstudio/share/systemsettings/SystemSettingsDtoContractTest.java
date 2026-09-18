@@ -162,7 +162,7 @@ class SystemSettingsDtoContractTest {
     SystemSettingsToolDTO.PermissionRuleDTO rule = new SystemSettingsToolDTO.PermissionRuleDTO();
     rule.setPattern("*");
     rule.setAction("ask");
-    tool.setPermission(Map.of("base.write", List.of(rule)));
+    tool.setPermission(Map.of("write", List.of(rule)));
     tool.setDefaultYolo(false);
     tool.setModelGatewayBusyRetryMillis(5000L);
     tool.setToolGatewayBusyRetryMillis(1000L);

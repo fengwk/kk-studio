@@ -20,7 +20,7 @@ function normalizeNames(items: string[] | null | undefined): string[] {
 
 function normalizeCapabilityValues(
   items: string[] | null | undefined,
-  kind: 'toolIds' | 'subagents',
+  kind: 'tools' | 'subagents',
 ): string[] {
   const values = normalizeNames(items)
   const seen = new Set<string>()
@@ -81,7 +81,7 @@ function normalizeSkillRefs(
 
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
-    toolIds: normalizeCapabilityValues(draft.toolIds, 'toolIds'),
+    tools: normalizeCapabilityValues(draft.tools, 'tools'),
     skills: normalizeSkillRefs(draft.skills),
     subagents: normalizeCapabilityValues(draft.subagents, 'subagents'),
   }
@@ -96,7 +96,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
     environmentId: '',
-    toolIds: [],
+    tools: [],
     skills: [],
     subagents: [],
   }
@@ -111,7 +111,7 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     model: agent.model,
     variant: agent.variant?.trim() || '',
     environmentId: agent.environmentId || '',
-    toolIds: normalizeNames(config.toolIds),
+    tools: normalizeNames(config.tools),
     skills: normalizeSkillRefs(config.skills),
     subagents: normalizeNames(config.subagents),
   }

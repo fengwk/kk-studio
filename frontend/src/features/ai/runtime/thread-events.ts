@@ -713,8 +713,6 @@ function projectActiveToolRecord(
     { label: translate('ai.runtime.event.detail.assistantEntryId'), value: invocation.assistantEntryId },
     { label: translate('ai.runtime.event.detail.toolName'), value: invocation.toolName || '' },
     { label: translate('ai.runtime.event.detail.toolCallId'), value: invocation.toolCallId || '' },
-    { label: translate('ai.runtime.event.detail.toolId'), value: invocation.toolId ?? '' },
-    { label: translate('ai.runtime.event.detail.toolVersion'), value: invocation.toolVersion ?? '' },
     { label: translate('ai.runtime.event.detail.rendererKey'), value: invocation.rendererKey || '' },
     { label: translate('ai.runtime.event.detail.callIndex'), value: String(invocation.callIndex) },
     { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },

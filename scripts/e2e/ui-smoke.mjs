@@ -942,7 +942,7 @@ async function main(argv) {
         model: REAL_UI_MODEL_ID,
         variant: REAL_UI_MODEL.variant,
         environmentId: card.id,
-        config: { toolIds: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [] },
       })
       assert(
         agentCreateRes.status === 201,
@@ -1029,7 +1029,7 @@ async function main(argv) {
         systemPrompt: 'Reply concisely and never call tools.',
         model: REAL_UI_MODEL_ID,
         variant: REAL_UI_MODEL.variant,
-        config: { toolIds: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [] },
       })
       assert(
         agentCreateRes.status === 201,

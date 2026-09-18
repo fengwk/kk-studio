@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -90,49 +89,26 @@ class ModelRequestSpecTest {
   }
 
   @Test
-  void rejectsDuplicateNamesAndIds() {
-    // 每类 binding 名称与工具 ID 都是其调用内身份，重复名称或重复 ID 必须在构造时失败。
+  void rejectsDuplicateBindingNames() {
+    // 每类 binding 名称都是其调用内身份，重复名称必须在构造时失败。
     assertThrows(
         IllegalArgumentException.class,
         () -> spec(List.of(host("bash"), environment("bash")), List.of(), List.of()));
-    // 同名不同 ID 同样拒绝
+    // 不同 contributor 提供的同名工具同样拒绝：模型可见 tool name 唯一。
     ToolBinding tool1 =
         new ToolBinding(
-            new AgentToolDefinition(
-                new AgentToolId("test.first"), toolDescriptor("bash"), ToolVisibility.SELECTABLE),
+            new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
             false,
             null);
     ToolBinding tool2 =
         new ToolBinding(
-            new AgentToolDefinition(
-                new AgentToolId("test.second"), toolDescriptor("bash"), ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
+            new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("other", "bash", List.of()),
             false,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> spec(List.of(tool1, tool2), List.of(), List.of()));
-    // 同 ID 不同名也必须拒绝
-    ToolBinding tool3 =
-        new ToolBinding(
-            new AgentToolDefinition(
-                new AgentToolId("test.same-id"),
-                toolDescriptor("bash-a"),
-                ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
-            false,
-            null);
-    ToolBinding tool4 =
-        new ToolBinding(
-            new AgentToolDefinition(
-                new AgentToolId("test.same-id"),
-                toolDescriptor("bash-b"),
-                ToolVisibility.SELECTABLE),
-            new ContributorBinding("core", "bash", List.of()),
-            false,
-            null);
-    assertThrows(
-        IllegalArgumentException.class, () -> spec(List.of(tool3, tool4), List.of(), List.of()));
 
     assertThrows(
         IllegalArgumentException.class,
@@ -261,7 +237,6 @@ class ModelRequestSpecTest {
   private static ToolDescriptor toolDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1.0",
         "desc",
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),

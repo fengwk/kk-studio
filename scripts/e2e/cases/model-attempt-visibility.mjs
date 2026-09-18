@@ -93,7 +93,7 @@ registerCase({
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
         model: `${model.providerName}/${model.name}`,
         variant: 'default',
-        config: { toolIds: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [] },
       })
       agent = envelopeData(agentResponse.json)
       assert(agent?.name && agent.model === `${model.providerName}/${model.name}`, JSON.stringify(agentResponse.json))

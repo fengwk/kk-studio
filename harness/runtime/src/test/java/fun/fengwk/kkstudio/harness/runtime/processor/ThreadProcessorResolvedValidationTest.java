@@ -40,7 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -132,10 +131,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
     ToolBinding environmentTool =
         new ToolBinding(
             new AgentToolDefinition(
-                new AgentToolId("test.fs"),
                 new ToolDescriptor(
                     "fs",
-                    "1.0",
                     "filesystem",
                     "fs",
                     new InputSchema("arguments", Map.of(), Set.of(), false),

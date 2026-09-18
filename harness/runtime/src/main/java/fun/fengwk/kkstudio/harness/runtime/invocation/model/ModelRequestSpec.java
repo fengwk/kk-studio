@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
 import java.util.HashSet;
 import java.util.List;
@@ -85,16 +84,11 @@ public record ModelRequestSpec(
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {
     Set<String> names = new HashSet<>();
-    Set<AgentToolId> ids = new HashSet<>();
     for (ToolBinding binding : toolBindings) {
       Objects.requireNonNull(binding, "toolBindings[]");
       String name = binding.descriptor().name();
       if (!names.add(name)) {
         throw new IllegalArgumentException("tool binding names must not repeat: " + name);
-      }
-      AgentToolId id = binding.definition().id();
-      if (!ids.add(id)) {
-        throw new IllegalArgumentException("tool binding ids must not repeat: " + id.value());
       }
     }
   }

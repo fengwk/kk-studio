@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -26,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -144,7 +142,6 @@ class ToolExecutionGatewayStartTest {
     ToolDescriptor drifted =
         new ToolDescriptor(
             DESCRIPTOR.name(),
-            DESCRIPTOR.version(),
             "drifted description",
             DESCRIPTOR.rendererKey(),
             new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -169,15 +166,13 @@ class ToolExecutionGatewayStartTest {
     ToolDescriptor unknown =
         new ToolDescriptor(
             "no_such_daemon_tool",
-            "1",
             "not in the daemon catalog",
             "no_such_daemon_tool",
             new InputSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
     AgentToolDefinition unknownDefinition =
-        new AgentToolDefinition(
-            new AgentToolId("test.no-such-daemon-tool"), unknown, ToolVisibility.SELECTABLE);
+        new AgentToolDefinition(unknown, ToolVisibility.SELECTABLE);
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "no_such_daemon_tool", "{}"),
@@ -205,19 +200,15 @@ class ToolExecutionGatewayStartTest {
     ToolDescriptor driftedBash =
         new ToolDescriptor(
             "bash",
-            "1",
             "drifted bash description",
             "bash",
             new InputSchema("arguments", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofMinutes(1));
     ToolContribution bashContribution =
-        ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.BASH).orElseThrow();
+        ToolGatewayTestSupport.defaultCatalog().findTool("bash").orElseThrow();
     AgentToolDefinition driftedDefinition =
-        new AgentToolDefinition(
-            bashContribution.definition().id(),
-            driftedBash,
-            bashContribution.definition().visibility());
+        new AgentToolDefinition(driftedBash, bashContribution.definition().visibility());
     ContributorBinding contributor =
         new ContributorBinding(
             bashContribution.id().contributorId().value(),
@@ -295,8 +286,7 @@ class ToolExecutionGatewayStartTest {
 
     ToolBinding mismatchedContributorBinding =
         new ToolBinding(
-            new AgentToolDefinition(
-                ToolGatewayTestSupport.TEST_TOOL_ID, DESCRIPTOR, ToolVisibility.SELECTABLE),
+            new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE),
             new ContributorBinding("wrong-contributor", "host-tool", List.of()),
             false,
             null);
@@ -321,7 +311,7 @@ class ToolExecutionGatewayStartTest {
             new ToolGatewayTestSupport.DirectQueueExecutor());
 
     ToolContribution bashContribution =
-        ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.BASH).orElseThrow();
+        ToolGatewayTestSupport.defaultCatalog().findTool("bash").orElseThrow();
     ToolBinding mismatchedBinding =
         new ToolBinding(
             bashContribution.definition(),
@@ -557,7 +547,6 @@ class ToolExecutionGatewayStartTest {
             registrar ->
                 registrar.registerTool(
                     "host-tool",
-                    ToolGatewayTestSupport.TEST_TOOL_ID,
                     new ToolGatewayTestSupport.FakeTool(drifted),
                     ToolVisibility.SELECTABLE,
                     0));
@@ -688,7 +677,6 @@ class ToolExecutionGatewayStartTest {
   private static ToolDescriptor hostDriftedDescriptor(String version) {
     return new ToolDescriptor(
         DESCRIPTOR.name(),
-        version,
         "drifted description",
         DESCRIPTOR.rendererKey(),
         new InputSchema("arguments", Map.of(), Set.of(), false),

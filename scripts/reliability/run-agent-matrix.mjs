@@ -7,11 +7,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseArgs, formatCaseList, selectCases, usage } from './cli.mjs'
 import { DockerCaseHarness, summarizeCommand } from './docker-case.mjs'
 import {
-  AGENT_TOOL_IDS,
   CASE_TIMEOUT_MS,
   ENVIRONMENT_CAPABILITY_IDS,
   MODELS,
-  MODEL_TOOL_NAMES,
+  TOOL_NAMES,
   VARIANT,
   WRITE_PROOF_META,
   WRITE_PROOF_PATH,
@@ -207,14 +206,12 @@ async function validatePreflight(ctx, daemonEnv) {
   const environmentCapabilities = new Set(
     (environment.capabilities ?? []).map((capability) => capability.id),
   )
-  const catalogById = new Map(toolCatalog.map((tool) => [tool.id, tool]))
-  for (let index = 0; index < AGENT_TOOL_IDS.length; index += 1) {
-    const agentToolId = AGENT_TOOL_IDS[index]
-    const modelToolName = MODEL_TOOL_NAMES[index]
-    const catalogEntry = catalogById.get(agentToolId)
+  const catalogByName = new Map(toolCatalog.map((tool) => [tool.name, tool]))
+  for (let index = 0; index < TOOL_NAMES.length; index += 1) {
+    const toolName = TOOL_NAMES[index]
     assert(
-      catalogEntry?.name === modelToolName,
-      `tool catalog mapping mismatch: ${agentToolId} != ${modelToolName}: ${JSON.stringify(catalogEntry)}`,
+      catalogByName.has(toolName),
+      `tool catalog is missing model-visible tool name: ${toolName}`,
     )
     assert(
       environmentCapabilities.has(ENVIRONMENT_CAPABILITY_IDS[index]),
@@ -225,8 +222,7 @@ async function validatePreflight(ctx, daemonEnv) {
     provider: { name: 'minimax', configured: true },
     models: checkedModels,
     environment: { id: environment.id, name: daemonEnv, status: 'READY', ready: true },
-    agentToolIds: [...AGENT_TOOL_IDS],
-    modelToolNames: [...MODEL_TOOL_NAMES],
+    toolNames: [...TOOL_NAMES],
   }
 }
 
@@ -240,7 +236,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
     model: model.ref,
     variant: VARIANT,
     environmentId,
-    config: { toolIds: [...AGENT_TOOL_IDS], skills: [], subagents: [] },
+    config: { tools: [...TOOL_NAMES], skills: [], subagents: [] },
   }
   const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
   assert(status === 201, `create Agent status ${status}`)

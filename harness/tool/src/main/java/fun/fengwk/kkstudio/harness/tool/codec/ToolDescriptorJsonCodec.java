@@ -73,7 +73,6 @@ public final class ToolDescriptorJsonCodec {
 
   private static void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
     target.put("name", descriptor.name());
-    target.put("version", descriptor.version());
     target.put("description", descriptor.description());
     target.put("rendererKey", descriptor.rendererKey());
     target.put("sideEffect", descriptor.sideEffect().name());
@@ -92,17 +91,9 @@ public final class ToolDescriptorJsonCodec {
   private static ToolDescriptor readDescriptor(JsonNode node) {
     ObjectNode obj = requiredObject(node, "descriptor");
     Set<String> allowed =
-        Set.of(
-            "name",
-            "version",
-            "description",
-            "rendererKey",
-            "sideEffect",
-            "timeoutMillis",
-            "inputSchema");
+        Set.of("name", "description", "rendererKey", "sideEffect", "timeoutMillis", "inputSchema");
     rejectUnknownFields(obj, allowed, "descriptor");
     String name = requiredText(obj, "name", "descriptor");
-    String version = requiredText(obj, "version", "descriptor");
     String description = requiredText(obj, "description", "descriptor");
     String rendererKey = requiredText(obj, "rendererKey", "descriptor");
     ToolSideEffect sideEffect = readSideEffect(obj);
@@ -110,30 +101,21 @@ public final class ToolDescriptorJsonCodec {
     JsonNode inputSchemaNode = requiredField(obj, "inputSchema", "descriptor");
     InputSchema inputSchema = SCHEMA_CODEC.decodeNode(inputSchemaNode, "descriptor inputSchema");
     return constructDescriptor(
-        name,
-        version,
-        description,
-        rendererKey,
-        inputSchema,
-        sideEffect,
-        Duration.ofMillis(timeoutMillis));
+        name, description, rendererKey, inputSchema, sideEffect, Duration.ofMillis(timeoutMillis));
   }
 
   private static ToolDescriptor constructDescriptor(
       String name,
-      String version,
       String description,
       String rendererKey,
       InputSchema inputSchema,
       ToolSideEffect sideEffect,
       Duration timeout) {
     try {
-      return new ToolDescriptor(
-          name, version, description, rendererKey, inputSchema, sideEffect, timeout);
+      return new ToolDescriptor(name, description, rendererKey, inputSchema, sideEffect, timeout);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
-          "descriptor validation failed for " + name + "@" + version + ": " + error.getMessage(),
-          error);
+          "descriptor validation failed for " + name + ": " + error.getMessage(), error);
     }
   }
 

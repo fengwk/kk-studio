@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.permission;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.Objects;
 
@@ -13,7 +13,7 @@ public final class PermissionKeyValidator {
   private PermissionKeyValidator() {}
 
   /**
-   * Requires an exact global key or a canonical {@link AgentToolId}.
+   * Requires an exact global key or a valid model-visible tool name.
    *
    * @param key permission map key
    * @param field field name used in the validation message
@@ -23,20 +23,8 @@ public final class PermissionKeyValidator {
     if (GLOBAL_KEY.equals(key)) {
       return;
     }
-    if (key == null || key.isBlank()) {
-      throw invalid(field, null);
+    if (!ToolDescriptor.isValidName(key)) {
+      throw new IllegalArgumentException(field + " must be '*' or a valid model-visible tool name");
     }
-    try {
-      new AgentToolId(key);
-    } catch (IllegalArgumentException error) {
-      throw invalid(field, error);
-    }
-  }
-
-  private static IllegalArgumentException invalid(String field, Throwable cause) {
-    String message = field + " must be '*' or a canonical AgentToolId";
-    return cause == null
-        ? new IllegalArgumentException(message)
-        : new IllegalArgumentException(message, cause);
   }
 }

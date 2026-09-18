@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJs
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -199,7 +198,6 @@ public final class HarnessRuntimeTestFixtures {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "web_search",
-            "1.0",
             "search the web",
             "web_search",
             new InputSchema("search the web", Map.of(), Set.of(), true),
@@ -209,8 +207,7 @@ public final class HarnessRuntimeTestFixtures {
         new ToolInvocationRequest(
             new ToolCall("call-1", "web_search", "{}"),
             new ToolBinding(
-                new AgentToolDefinition(
-                    new AgentToolId("test.web-search"), descriptor, ToolVisibility.SELECTABLE),
+                new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("test", "web-search", List.of()),
                 false,
                 null));

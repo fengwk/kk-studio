@@ -12,7 +12,7 @@ const EMPTY_AGENT_DRAFT = {
   systemPrompt: '',
   model: '',
   variant: '',
-  toolIds: [],
+  tools: [],
   skills: [],
   subagents: [],
 }

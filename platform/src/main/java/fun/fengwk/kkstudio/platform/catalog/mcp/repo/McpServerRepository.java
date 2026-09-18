@@ -40,6 +40,9 @@ public interface McpServerRepository {
 
   Optional<McpTool> getToolById(UUID toolId);
 
+  /** 按模型可见 name 返回可用工具行。 */
+  Optional<McpTool> getAvailableToolByModelName(String modelName);
+
   /** 列出该 server 下所有工具（含 tombstone）。 */
   List<McpTool> listTools(UUID serverId);
 
@@ -63,6 +66,6 @@ public interface McpServerRepository {
   /** model_name 是否已被占用；refresh 时用 {@code excludingToolId} 排除本行。 */
   boolean isModelNameTaken(String modelName, UUID excludingToolId);
 
-  /** 返回任一 agent_definition.config.toolIds 引用的 MCP AgentToolId 集合。 */
-  List<String> selectReferencedAgentToolIds();
+  /** 返回任一 agent_definition.config.tools 引用的 MCP 模型可见工具名集合。 */
+  List<String> selectReferencedToolNames();
 }

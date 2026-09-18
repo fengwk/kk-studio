@@ -47,7 +47,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -963,10 +962,8 @@ class ModelAttemptMaterializationTest {
     ToolBinding binding =
         new ToolBinding(
             new AgentToolDefinition(
-                new AgentToolId("test.bash"),
                 new ToolDescriptor(
                     "bash",
-                    "1.0",
                     "description of bash",
                     "bash",
                     new InputSchema("arguments", Map.of(), Set.of(), false),

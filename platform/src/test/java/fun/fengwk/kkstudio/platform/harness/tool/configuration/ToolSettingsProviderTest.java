@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
@@ -21,25 +20,20 @@ import java.util.Map;
 
 class ToolSettingsProviderTest {
 
-  /** 默认 permission 规则：base.write/base.edit/base.bash 各 {@code * -> ask}（read 保持不限制）。 */
+  /** 默认 permission 规则：write/edit/bash 各 {@code * -> ask}（read 保持不限制）。 */
   private static final List<PermissionRule> ASK_ALL =
       List.of(new PermissionRule("*", PermissionAction.ASK));
 
-  /**
-   * 数据库默认聚合的 permission 为 base.write/base.edit/base.bash 的 {@code * -> ask}，read 不受限，且
-   * defaultYolo=false。
-   */
+  /** 数据库默认聚合的 permission 为 write/edit/bash 的 {@code * -> ask}，read 不受限，且 defaultYolo=false。 */
   @Test
   void convertsDatabaseToolSectionAndSafeDefaults() {
     ToolSettingsProvider provider = providerFor(SystemSettings.Tool.DEFAULT);
 
     ToolSettings settings = provider.get();
-    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.WRITE));
-    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.EDIT));
-    assertEquals(ASK_ALL, settings.rulesFor(BuiltinToolIds.BASH));
-    assertTrue(
-        settings.rulesFor(BuiltinToolIds.READ).isEmpty(),
-        "production default must not restrict read");
+    assertEquals(ASK_ALL, settings.rulesFor("write"));
+    assertEquals(ASK_ALL, settings.rulesFor("edit"));
+    assertEquals(ASK_ALL, settings.rulesFor("bash"));
+    assertTrue(settings.rulesFor("read").isEmpty(), "production default must not restrict read");
     assertFalse(settings.defaultYolo());
   }
 
@@ -53,25 +47,21 @@ class ToolSettingsProviderTest {
         .thenReturn(
             systemSettingsWithTool(
                 new SystemSettings.Tool(
-                    Map.of(
-                        BuiltinToolIds.WRITE.value(),
-                        List.of(new PermissionRule("*", PermissionAction.DENY))),
+                    Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))),
                     true,
                     5_000L,
                     1_000L,
                     5_000L,
                     30_000L)));
     assertTrue(provider.get().defaultYolo());
-    assertEquals(
-        PermissionAction.DENY, provider.get().rulesFor(BuiltinToolIds.WRITE).getFirst().action());
+    assertEquals(PermissionAction.DENY, provider.get().rulesFor("write").getFirst().action());
 
     // 同一 provider 在数据库快照更新后无需重建即可读到新值。
     when(systemSettingsProvider.get())
         .thenReturn(systemSettingsWithTool(SystemSettings.Tool.DEFAULT));
     assertFalse(provider.get().defaultYolo());
-    assertEquals(
-        PermissionAction.ASK, provider.get().rulesFor(BuiltinToolIds.BASH).getFirst().action());
-    assertTrue(provider.get().rulesFor(BuiltinToolIds.READ).isEmpty());
+    assertEquals(PermissionAction.ASK, provider.get().rulesFor("bash").getFirst().action());
+    assertTrue(provider.get().rulesFor("read").isEmpty());
   }
 
   /** ACCEPTANCE: 转换直接复用数据库已校验的 permission 规则类型，不引入第二套解码/默认。 */
@@ -81,8 +71,8 @@ class ToolSettingsProviderTest {
 
     // SystemSettings.Tool.permission 与 ToolSettings.permission 是同一规则模型；转换后规则完全等价。
     assertEquals(
-        SystemSettings.Tool.DEFAULT.permission().get(BuiltinToolIds.BASH.value()),
-        settings.rulesFor(BuiltinToolIds.BASH),
+        SystemSettings.Tool.DEFAULT.permission().get("bash"),
+        settings.rulesFor("bash"),
         "permission rules must come from the DB aggregate, no second permission source");
   }
 

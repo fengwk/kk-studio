@@ -24,7 +24,7 @@ class AgentDefinitionConfigCodecTest {
   @Test
   void roundTripsCompleteConfigAndPreservesOrder() {
     AgentDefinitionConfigDTO config = config();
-    config.setToolIds(List.of("base.read"));
+    config.setTools(List.of("read"));
     config.setSkills(
         List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "ops")));
     config.setSubagents(List.of("reviewer"));
@@ -32,7 +32,7 @@ class AgentDefinitionConfigCodecTest {
     String encoded = codec.encode(config);
     AgentDefinitionConfigDTO decoded = codec.decode(encoded);
 
-    assertEquals(List.of("base.read"), decoded.getToolIds());
+    assertEquals(List.of("read"), decoded.getTools());
     assertEquals(
         List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "ops")),
         decoded.getSkills());
@@ -44,9 +44,9 @@ class AgentDefinitionConfigCodecTest {
   void rejectsIncompleteAndNonCanonicalTypedConfigs() {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(null));
 
-    AgentDefinitionConfigDTO missingToolIds = config();
-    missingToolIds.setToolIds(null);
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(missingToolIds));
+    AgentDefinitionConfigDTO missingTools = config();
+    missingTools.setTools(null);
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(missingTools));
 
     AgentDefinitionConfigDTO missingSkills = config();
     missingSkills.setSkills(null);
@@ -57,7 +57,7 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.encode(missingSubagents));
 
     AgentDefinitionConfigDTO whitespace = config();
-    whitespace.setToolIds(List.of(" base.read "));
+    whitespace.setTools(List.of(" read "));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(whitespace));
   }
 
@@ -143,7 +143,14 @@ class AgentDefinitionConfigCodecTest {
   /** 测试意图：验证严格拒绝旧的字符串数组 skills 格式（无容错旧字符串解码）。 */
   @Test
   void rejectsLegacyStringArraySkills() {
-    String legacy = "{\"toolIds\":[],\"skills\":[\"dev\"],\"subagents\":[]}";
+    String legacy = "{\"tools\":[],\"skills\":[\"dev\"],\"subagents\":[]}";
+    assertThrows(IllegalStateException.class, () -> codec.decode(legacy));
+  }
+
+  /** 测试意图：验证工具列表的旧 wire 字段 toolIds 被严格拒绝，不存在任何兼容读取路径。 */
+  @Test
+  void rejectsLegacyToolIdsField() {
+    String legacy = "{\"toolIds\":[\"read\"],\"skills\":[],\"subagents\":[]}";
     assertThrows(IllegalStateException.class, () -> codec.decode(legacy));
   }
 
@@ -152,13 +159,13 @@ class AgentDefinitionConfigCodecTest {
   void rejectsDuplicateKnownTopLevelFields() {
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"toolIds\":[],\"toolIds\":[],\"skills\":[],\"subagents\":[]}"));
+        () -> codec.decode("{\"tools\":[],\"tools\":[],\"skills\":[],\"subagents\":[]}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"skills\":[],\"subagents\":[]}"));
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"skills\":[],\"subagents\":[]}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"subagents\":[],\"subagents\":[]}"));
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[],\"subagents\":[]}"));
   }
 
   @Test
@@ -169,21 +176,21 @@ class AgentDefinitionConfigCodecTest {
     assertThrows(IllegalStateException.class, () -> codec.decode("{}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"subagents\":[],\"unknown\":true}"));
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[],\"unknown\":true}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]}"));
+        () -> codec.decode("{\"tools\":[\"read\"],\"skills\":[],\"subagents\":[42]}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"toolIds\":[42],\"skills\":[],\"subagents\":[]}"));
+        () -> codec.decode("{\"tools\":[42],\"skills\":[],\"subagents\":[]}"));
     assertThrows(
         IllegalStateException.class,
-        () -> codec.decode("{\"toolIds\":[],\"skills\":[],\"subagents\":[]} {}"));
+        () -> codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]} {}"));
   }
 
   private static AgentDefinitionConfigDTO config() {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     return config;

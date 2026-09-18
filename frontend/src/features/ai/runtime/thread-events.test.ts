@@ -89,9 +89,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     attempt: 1,
     toolCallId: 'call-1',
     toolName: 'bash',
-    toolVersion: '1',
     rendererKey: 'bash',
-    toolId: 'base.bash',
     environmentId: null,
     argumentsJson: '{"command":"ls"}',
     approvalJson: null,
@@ -793,7 +791,6 @@ describe('buildThreadEventTimeline', () => {
     const invocation = toolInvocation({
       id: 'inv-custom',
       toolName: 'create_goal',
-      toolId: 'base.goal.create',
       rendererKey: 'tool',
       status: 'RUNNING',
     })
@@ -823,9 +820,7 @@ describe('buildThreadEventTimeline', () => {
       attempt: 1,
       toolCallId: 'call-full',
       toolName: 'bash',
-      toolVersion: '2.0',
       rendererKey: 'bash-renderer',
-      toolId: 'tools.bash',
       environmentId: 'env-1',
       argumentsJson: '{"command":"echo hello","timeout":30}',
       approvalJson: '{"approved":true,"approver":"admin"}',
@@ -868,8 +863,6 @@ describe('buildThreadEventTimeline', () => {
     expect(detailMap.get('助手 Entry ID')).toBe('assistant-1')
     expect(detailMap.get('工具')).toBe('bash')
     expect(detailMap.get('工具调用 ID')).toBe('call-full')
-    expect(detailMap.get('工具 ID')).toBe('tools.bash')
-    expect(detailMap.get('工具版本')).toBe('2.0')
     expect(detailMap.get('渲染器')).toBe('bash-renderer')
     expect(detailMap.get('调用索引')).toBe('2')
     expect(detailMap.get('尝试次数')).toBe('1')

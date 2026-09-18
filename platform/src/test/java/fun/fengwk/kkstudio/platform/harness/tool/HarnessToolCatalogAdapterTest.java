@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
 import java.util.List;
 import java.util.Optional;
@@ -25,24 +24,23 @@ class HarnessToolCatalogAdapterTest {
     // 意图：验证适配器忠实转发 selectableTools 与 findTool 到 underlying HarnessCatalog
     HarnessCatalog mockCatalog = mock(HarnessCatalog.class);
     ToolContribution mockContribution = mock(ToolContribution.class);
-    AgentToolId toolId = new AgentToolId("test.tool");
+    String toolName = "test_tool";
 
     when(mockCatalog.selectableTools()).thenReturn(List.of(mockContribution));
-    when(mockCatalog.findTool(toolId)).thenReturn(Optional.of(mockContribution));
+    when(mockCatalog.findTool(toolName)).thenReturn(Optional.of(mockContribution));
 
     HarnessToolCatalogAdapter adapter = new HarnessToolCatalogAdapter(mockCatalog);
 
     assertEquals(List.of(mockContribution), adapter.selectableTools());
     verify(mockCatalog).selectableTools();
 
-    Optional<ToolContribution> found = adapter.findTool(toolId);
+    Optional<ToolContribution> found = adapter.findTool(toolName);
     assertTrue(found.isPresent());
     assertEquals(mockContribution, found.get());
-    verify(mockCatalog).findTool(toolId);
+    verify(mockCatalog).findTool(toolName);
 
-    AgentToolId unknownId = new AgentToolId("unknown.tool");
-    when(mockCatalog.findTool(unknownId)).thenReturn(Optional.empty());
-    assertFalse(adapter.findTool(unknownId).isPresent());
+    when(mockCatalog.findTool("unknown_tool")).thenReturn(Optional.empty());
+    assertFalse(adapter.findTool("unknown_tool").isPresent());
   }
 
   @Test

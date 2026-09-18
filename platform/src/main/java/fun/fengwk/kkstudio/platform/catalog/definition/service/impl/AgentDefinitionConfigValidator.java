@@ -4,7 +4,6 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -30,37 +29,32 @@ public final class AgentDefinitionConfigValidator {
 
   public void validate(AgentDefinitionConfigDTO config, UUID environmentId) {
     Objects.requireNonNull(config, "config");
-    validateToolIds(config.getToolIds(), environmentId);
+    validateToolNames(config.getTools(), environmentId);
     validateSkills(config.getSkills());
     validateSubagents(config.getSubagents());
   }
 
-  private void validateToolIds(List<String> values, UUID environmentId) {
-    for (String value : values) {
-      AgentToolId id;
-      try {
-        id = new AgentToolId(value);
-      } catch (RuntimeException error) {
-        throw new IllegalArgumentException("invalid agent tool id: " + value, error);
-      }
-      ToolContribution contribution = toolCatalog.findTool(id).orElse(null);
+  private void validateToolNames(List<String> values, UUID environmentId) {
+    for (String toolName : values) {
+      ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
       if (contribution == null) {
-        throw new IllegalArgumentException("unknown agent tool id: " + id);
+        throw new IllegalArgumentException("unknown agent tool: " + toolName);
       }
       if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
-        throw new IllegalArgumentException("internal tool cannot be selected by an Agent: " + id);
+        throw new IllegalArgumentException(
+            "internal tool cannot be selected by an Agent: " + toolName);
       }
       ToolRequirements requirements = contribution.requirements();
       if (requirements != null && requirements.environmentRequired() && environmentId == null) {
         throw new IllegalArgumentException(
-            "tool " + id + " requires an environment but agent has no environment");
+            "tool " + toolName + " requires an environment but agent has no environment");
       }
       if (requirements != null && requirements.requiredEnvironmentId() != null) {
         UUID requiredEnvironmentId = requirements.requiredEnvironmentId().value();
         if (!requiredEnvironmentId.equals(environmentId)) {
           throw new IllegalArgumentException(
               "tool "
-                  + id
+                  + toolName
                   + " requires environment "
                   + requiredEnvironmentId
                   + " but agent has environment "

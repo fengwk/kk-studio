@@ -71,7 +71,7 @@ function agent(id: string, model: string): AgentDefinitionDTO {
     model,
     variant: 'default',
     config: {
-      toolIds: [],
+      tools: [],
       skills: [],
       subagents: [],
     },

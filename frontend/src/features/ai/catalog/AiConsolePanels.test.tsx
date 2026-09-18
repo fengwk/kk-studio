@@ -73,7 +73,7 @@ describe('AiConsolePanels', () => {
               model: 'm1',
               variant: 'default',
               config: {
-                toolIds: ['base.bash'],
+                tools: ['bash'],
                 skills: [],
                 subagents: [],
               },

@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -47,7 +46,6 @@ class HarnessContractTest {
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "test_tool",
-          "1.0",
           "A test tool",
           "test_tool",
           SCHEMA,
@@ -326,9 +324,7 @@ class HarnessContractTest {
   @Test
   void toolContributionValidatesDescriptorAndRequirements() {
     ContributionId id = new ContributionId(CID, "my-tool");
-    AgentToolDefinition definition =
-        new AgentToolDefinition(
-            new AgentToolId("base.tool"), DESCRIPTOR, ToolVisibility.SELECTABLE);
+    AgentToolDefinition definition = new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE);
     ToolRequirements requirements = ToolRequirements.none();
 
     Tool matchingTool =
@@ -364,13 +360,7 @@ class HarnessContractTest {
           @Override
           public ToolDescriptor descriptor() {
             return new ToolDescriptor(
-                "other",
-                "1.0",
-                "other tool",
-                "other",
-                SCHEMA,
-                ToolSideEffect.READ_ONLY,
-                Duration.ZERO);
+                "other", "other tool", "other", SCHEMA, ToolSideEffect.READ_ONLY, Duration.ZERO);
           }
 
           @Override

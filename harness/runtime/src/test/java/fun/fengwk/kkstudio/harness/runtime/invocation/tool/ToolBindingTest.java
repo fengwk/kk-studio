@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
@@ -124,10 +123,7 @@ class ToolBindingTest {
   }
 
   private static AgentToolDefinition definition(String name) {
-    return new AgentToolDefinition(
-        new AgentToolId("test." + name.replace('_', '-').toLowerCase()),
-        descriptor(name),
-        ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(descriptor(name), ToolVisibility.SELECTABLE);
   }
 
   private static ContributorBinding contributorProvenance(

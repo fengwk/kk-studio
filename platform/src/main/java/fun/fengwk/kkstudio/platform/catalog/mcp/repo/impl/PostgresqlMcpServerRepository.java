@@ -83,6 +83,11 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   }
 
   @Override
+  public Optional<McpTool> getAvailableToolByModelName(String modelName) {
+    return Optional.ofNullable(convertTool(mapper.getAvailableToolByModelName(modelName)));
+  }
+
+  @Override
   public List<McpTool> listTools(UUID serverId) {
     return mapper.listTools(serverId).stream().map(this::convertTool).toList();
   }
@@ -127,8 +132,8 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   }
 
   @Override
-  public List<String> selectReferencedAgentToolIds() {
-    return mapper.selectReferencedAgentToolIds();
+  public List<String> selectReferencedToolNames() {
+    return mapper.selectReferencedToolNames();
   }
 
   private McpServerDO convertServer(McpServer server) {

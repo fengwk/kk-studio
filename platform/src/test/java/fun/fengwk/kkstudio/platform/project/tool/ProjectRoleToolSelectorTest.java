@@ -9,20 +9,18 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * {@link ProjectRoleToolSelector} 及 {@link ProjectRoleToolIds} 单元测试。
+ * {@link ProjectRoleToolSelector} 与 {@link ProjectRoleToolType#namesForRole} 单元测试。
  *
  * <p>测试意图：
  *
  * <ul>
- *   <li>验证 Coordinator(9)、Executor(2)、Reviewer(1) 角色工具 ID 的精确数量与声明顺序；
- *   <li>验证角色工具集合及其返回结果在任何情况下均为严格不可变列表；
+ *   <li>验证 Coordinator(9)、Executor(2)、Reviewer(1) 角色模型可见工具名的精确数量与声明顺序；
+ *   <li>验证角色工具名集合在任何情况下均为严格不可变列表；
  *   <li>验证 null 角色防护与构造参数防御性校验；
  *   <li>验证根据反查的所有权上下文正确投影出相应的工具集合；
  *   <li>验证未解析或不存在的所有权返回空不可变列表。
@@ -45,70 +43,50 @@ class ProjectRoleToolSelectorTest {
   }
 
   @Test
-  void exactRoleToolIdsAndOrder() {
+  void exactRoleToolNamesAndOrder() {
     // 验证 Coordinator 精确包含 9 个内部工具且顺序严格对齐设计
-    List<AgentToolId> expectedCoordinator =
+    assertEquals(
         List.of(
-            new AgentToolId("project.read"),
-            new AgentToolId("issue.read"),
-            new AgentToolId("issue.list"),
-            new AgentToolId("issue.create"),
-            new AgentToolId("issue.update"),
-            new AgentToolId("issue.add-dependency"),
-            new AgentToolId("issue.remove-dependency"),
-            new AgentToolId("issue.set-status"),
-            new AgentToolId("issue.cancel"));
-    assertEquals(9, ProjectRoleToolIds.COORDINATOR.size());
-    assertEquals(expectedCoordinator, ProjectRoleToolIds.COORDINATOR);
+            "project_read",
+            "issue_read",
+            "issue_list",
+            "issue_create",
+            "issue_update",
+            "issue_add_dependency",
+            "issue_remove_dependency",
+            "issue_set_status",
+            "issue_cancel"),
+        ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR));
 
     // 验证 Executor 精确包含 2 个内部工具且顺序严格对齐设计
-    List<AgentToolId> expectedExecutor =
-        List.of(new AgentToolId("issue.submit"), new AgentToolId("issue.request-input"));
-    assertEquals(2, ProjectRoleToolIds.EXECUTOR.size());
-    assertEquals(expectedExecutor, ProjectRoleToolIds.EXECUTOR);
+    assertEquals(
+        List.of("issue_submit", "issue_request_input"),
+        ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
 
     // 验证 Reviewer 精确包含 1 个内部工具且顺序严格对齐设计
-    List<AgentToolId> expectedReviewer = List.of(new AgentToolId("issue.review"));
-    assertEquals(1, ProjectRoleToolIds.REVIEWER.size());
-    assertEquals(expectedReviewer, ProjectRoleToolIds.REVIEWER);
+    assertEquals(List.of("issue_review"), ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
   }
 
   @Test
-  void forRole_success() {
-    // 验证 forRole 工具方法对所有角色枚举映射的正确性
-    assertEquals(
-        ProjectRoleToolIds.COORDINATOR, ProjectRoleToolIds.forRole(ProjectRole.COORDINATOR));
-    assertEquals(ProjectRoleToolIds.EXECUTOR, ProjectRoleToolIds.forRole(ProjectRole.EXECUTOR));
-    assertEquals(ProjectRoleToolIds.REVIEWER, ProjectRoleToolIds.forRole(ProjectRole.REVIEWER));
-  }
-
-  @Test
-  void forRole_null_throwsNpe() {
-    // 验证 forRole 传入 null 时抛出明确的 NullPointerException
+  void namesForRole_null_throwsNpe() {
+    // 验证 namesForRole 传入 null 时抛出明确的 NullPointerException
     NullPointerException ex =
-        assertThrows(NullPointerException.class, () -> ProjectRoleToolIds.forRole(null));
+        assertThrows(NullPointerException.class, () -> ProjectRoleToolType.namesForRole(null));
     assertTrue(ex.getMessage().contains("role"));
   }
 
   @Test
-  void roleToolListsAreImmutable() {
-    // 验证常量角色工具列表的不可变性
-    AgentToolId extraTool = new AgentToolId("extra.tool");
+  void roleToolNamesAreImmutable() {
+    // 验证角色工具名列表的不可变性
     assertThrows(
-        UnsupportedOperationException.class, () -> ProjectRoleToolIds.COORDINATOR.add(extraTool));
+        UnsupportedOperationException.class,
+        () -> ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR).add("extra_tool"));
     assertThrows(
-        UnsupportedOperationException.class, () -> ProjectRoleToolIds.COORDINATOR.remove(0));
-    assertThrows(UnsupportedOperationException.class, ProjectRoleToolIds.COORDINATOR::clear);
-
+        UnsupportedOperationException.class,
+        () -> ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR).remove(0));
     assertThrows(
-        UnsupportedOperationException.class, () -> ProjectRoleToolIds.EXECUTOR.add(extraTool));
-    assertThrows(UnsupportedOperationException.class, () -> ProjectRoleToolIds.EXECUTOR.remove(0));
-    assertThrows(UnsupportedOperationException.class, ProjectRoleToolIds.EXECUTOR::clear);
-
-    assertThrows(
-        UnsupportedOperationException.class, () -> ProjectRoleToolIds.REVIEWER.add(extraTool));
-    assertThrows(UnsupportedOperationException.class, () -> ProjectRoleToolIds.REVIEWER.remove(0));
-    assertThrows(UnsupportedOperationException.class, ProjectRoleToolIds.REVIEWER::clear);
+        UnsupportedOperationException.class,
+        () -> ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER).clear());
   }
 
   @Test
@@ -120,12 +98,11 @@ class ProjectRoleToolSelectorTest {
                 new ProjectThreadOwnerContext(
                     ProjectRole.COORDINATOR, PROJECT_ID, null, null, "coordinator-agent")));
 
-    List<AgentToolId> tools = selector.select(THREAD_ID);
+    List<String> tools = selector.select(THREAD_ID);
 
     assertEquals(9, tools.size());
-    assertEquals(ProjectRoleToolIds.COORDINATOR, tools);
-    assertThrows(
-        UnsupportedOperationException.class, () -> tools.add(new AgentToolId("unsupported")));
+    assertEquals(ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR), tools);
+    assertThrows(UnsupportedOperationException.class, () -> tools.add("extra_tool"));
   }
 
   @Test
@@ -137,12 +114,11 @@ class ProjectRoleToolSelectorTest {
                 new ProjectThreadOwnerContext(
                     ProjectRole.EXECUTOR, PROJECT_ID, ISSUE_ID, RUN_ID, "coder-agent")));
 
-    List<AgentToolId> tools = selector.select(THREAD_ID);
+    List<String> tools = selector.select(THREAD_ID);
 
     assertEquals(2, tools.size());
-    assertEquals(ProjectRoleToolIds.EXECUTOR, tools);
-    assertThrows(
-        UnsupportedOperationException.class, () -> tools.add(new AgentToolId("unsupported")));
+    assertEquals(ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR), tools);
+    assertThrows(UnsupportedOperationException.class, () -> tools.add("extra_tool"));
   }
 
   @Test
@@ -154,12 +130,11 @@ class ProjectRoleToolSelectorTest {
                 new ProjectThreadOwnerContext(
                     ProjectRole.REVIEWER, PROJECT_ID, ISSUE_ID, RUN_ID, "reviewer-agent")));
 
-    List<AgentToolId> tools = selector.select(THREAD_ID);
+    List<String> tools = selector.select(THREAD_ID);
 
     assertEquals(1, tools.size());
-    assertEquals(ProjectRoleToolIds.REVIEWER, tools);
-    assertThrows(
-        UnsupportedOperationException.class, () -> tools.add(new AgentToolId("unsupported")));
+    assertEquals(ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER), tools);
+    assertThrows(UnsupportedOperationException.class, () -> tools.add("extra_tool"));
   }
 
   @Test
@@ -167,11 +142,10 @@ class ProjectRoleToolSelectorTest {
     // 验证未解析或不存在所有权的线程返回空不可变列表
     when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.empty());
 
-    List<AgentToolId> tools = selector.select(THREAD_ID);
+    List<String> tools = selector.select(THREAD_ID);
 
     assertTrue(tools.isEmpty());
-    assertThrows(
-        UnsupportedOperationException.class, () -> tools.add(new AgentToolId("unsupported")));
+    assertThrows(UnsupportedOperationException.class, () -> tools.add("extra_tool"));
   }
 
   @Test

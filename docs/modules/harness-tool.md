@@ -1,6 +1,6 @@
 # Harness Tool
 
-模型说「调用 read」，Runtime 要用同一句话定位到持久化配置里的工具、做权限判定、把参数交给实现、把结果写回会话树，而 Provider 只认识工具名与 JSON Schema。这些环节必须共享同一份工具身份与数据契约，否则模型可见的名称、配置里的 ID 与 durable 记录会各说各话。本模块就是这份契约：与执行位置无关的工具身份、定义、调用与结果值对象，以及它们的严格 JSON 编解码器。
+模型说「调用 read」，Runtime 要用同一句话定位到持久化配置里的工具、做权限判定、把参数交给实现、把结果写回会话树，而 Provider 只认识工具名与 JSON Schema。这些环节必须共享同一份工具身份与数据契约，否则模型可见的名称、持久化配置与 durable 记录会各说各话。本模块就是这份契约：与执行位置无关的工具身份、定义、调用与结果值对象，以及它们的严格 JSON 编解码器。
 
 模块是纯 Java 值契约，不依赖 Environment、Contributor、Session、Runtime、Spring 或持久化框架；生产依赖只有 [`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/tool/pom.xml)），[`ToolModuleArchitectureTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolModuleArchitectureTest.java) 扫描主源码 import 守卫该方向。工具执行 SPI、权限、调度与 durable 状态由 [`harness-contributor-api`](harness-contributor-api.md) 与 [`harness-runtime`](harness-runtime.md) 承担。
 
@@ -8,16 +8,14 @@
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.tool` | route-neutral 的工具身份 `AgentToolId`、模型可见描述 `ToolDescriptor`、顶层定义 `AgentToolDefinition`、调用 `ToolCall` 与结果 `ToolResult` | 纯值模型；执行接口、权限拦截与调度状态机由 Contributor 与 Runtime 承接，系统配置由调用方传入 |
+| `fun.fengwk.kkstudio.harness.tool` | 工具身份与模型可见描述 `ToolDescriptor`、顶层定义 `AgentToolDefinition`、调用 `ToolCall` 与结果 `ToolResult` | 纯值模型；执行接口、权限拦截与调度状态机由 Contributor 与 Runtime 承接，系统配置由调用方传入 |
 | `fun.fengwk.kkstudio.harness.tool.codec` | `AgentToolDefinition`、`ToolDescriptor` 与 `ToolResult` 的严格确定性 JSON 编解码 | 未知字段、重复键、尾随 token 直接拒绝；属性按字典序确定性排序，列表外部顺序由调用方组织 |
 
-## 两种身份，不能混用
+## 唯一身份：模型可见 name
 
-[`AgentToolId`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolId.java) 是系统内部的稳定身份，形如 `[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。它出现在 catalog、系统配置、权限设置、日志与 durable binding 中，重启前后必须是同一个值。
+[`ToolDescriptor`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java) 的 `name` 是工具的唯一 Agent 侧身份：模型调用、Agent 配置、权限规则键、catalog 条目与 durable binding 全部使用同一个名字。`ToolDescriptor.isValidName` 要求它字母开头、只含字母数字与 `_`、`-`，且不超过 64 字符（`NAME_MAX_LENGTH`）；该规则在所有持久化与配置边界共享，因此不存在第二套内部 ID 或工具版本。`description`、`rendererKey` 不得空白，`inputSchema` 复用 `harness-common` 的 `InputSchema`，`timeout` 不得为负。[`ToolSideEffect`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolSideEffect.java) 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT` 三档，供重试与未知结果处理判定；超时拦截与截止时间计算在执行层，本模块只承载声明。
 
-[`ToolDescriptor`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java) 的 `name` 是模型看到的调用名，必须字母开头、只含字母数字与 `_`、`-`；`version`、`description`、`rendererKey` 不得空白，`inputSchema` 复用 `harness-common` 的 `InputSchema`，`timeout` 不得为负。[`ToolSideEffect`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolSideEffect.java) 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT` 三档，供重试与未知结果处理判定；超时拦截与截止时间计算在执行层，本模块只承载声明。
-
-[`AgentToolDefinition`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java) 把 `AgentToolId`、`ToolDescriptor` 与 [`ToolVisibility`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolVisibility.java)（`SELECTABLE` / `INTERNAL`）组合为模型契约，但不含任何环境或实现字段：具体 `Tool` 实例与环境需求由 Contributor 目录解析并在冻结时绑定。
+[`AgentToolDefinition`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java) 把 `ToolDescriptor` 与 [`ToolVisibility`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolVisibility.java)（`SELECTABLE` / `INTERNAL`）组合为模型契约，但不含任何环境或实现字段：具体 `Tool` 实例与环境需求由 Contributor 目录解析并在冻结时绑定。Contributor 侧的 scoped `ContributionId`（`(contributorId, localName)`）只用于定位贡献归属，不是 Agent 可见身份。
 
 ## 从模型输出到可执行参数
 
@@ -46,13 +44,13 @@ ToolCall normalized = call.validateFor(descriptor);
 
 [`codec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/) 包是这三类值模型与 wire 之间唯一的转换层，三者都启用 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`，遇到未知字段、类型错误或领域不变量违反即抛异常：
 
-- [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 处理 `id` / `descriptor` / `visibility` 三个顶层字段，用于 durable 工具定义；
-- [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 按固定顺序输出 `name`、`version`、`description`、`rendererKey`、`sideEffect`、`timeoutMillis`、`inputSchema`，其中 schema 字段委派给 `harness-common` 的 `SchemaJsonCodec`，保证 Provider tool schema 与内部 schema 只有一份序列化实现；
+- [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 处理 `descriptor` / `visibility` 两个顶层字段，用于 durable 工具定义；任何旧 wire 的 `id` 字段都按未知字段拒绝，没有兼容读取路径；
+- [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 按固定顺序输出 `name`、`description`、`rendererKey`、`sideEffect`、`timeoutMillis`、`inputSchema`，其中 schema 字段委派给 `harness-common` 的 `SchemaJsonCodec`，保证 Provider tool schema 与内部 schema 只有一份序列化实现；
 - `ToolResultJsonCodec` 提供静态的 `encode` / `decode` 与 `exceedsEncodedUtf8Bytes(result, maxBytes)`，后者按与 `encode` 完全相同的字段顺序流式计数，超限即停，不物化完整 JSON，因此执行层可以在真正序列化之前判定 partial 与终态的字节预算。
 
 ## 源码与测试
 
-- 身份与定义：[`AgentToolId.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolId.java)、[`ToolDescriptor.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java)、[`AgentToolDefinition.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java)
+- 身份与定义：[`ToolDescriptor.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java)、[`AgentToolDefinition.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java)
 - 调用与归一化：[`ToolCall.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java)、[`ToolArgumentAliasNormalizer.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolArgumentAliasNormalizer.java)
 - 结果容器：[`ToolResult.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolResult.java)
 - 编解码：[`codec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/)

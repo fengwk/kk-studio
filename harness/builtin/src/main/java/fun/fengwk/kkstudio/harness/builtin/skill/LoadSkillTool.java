@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -17,7 +16,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -41,8 +39,6 @@ import java.util.function.Supplier;
 public final class LoadSkillTool implements Tool {
 
   public static final String NAME = "load_skill";
-  public static final String VERSION = "1";
-  public static final AgentToolId AGENT_TOOL_ID = BuiltinToolIds.LOAD_SKILL;
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final EnvironmentCapabilityDescriptor CAPABILITY =
@@ -50,7 +46,6 @@ public final class LoadSkillTool implements Tool {
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           NAME,
-          VERSION,
           SkillToolPrompts.load("load_skill.md"),
           NAME,
           SkillToolPrompts.schema("load_skill.schema.json"),
@@ -61,7 +56,6 @@ public final class LoadSkillTool implements Tool {
   private static final ToolDescriptor SKILL_LOAD_TOOL_DESCRIPTOR =
       new ToolDescriptor(
           NAME,
-          VERSION,
           SkillToolPrompts.load("load_skill.md"),
           NAME,
           CAPABILITY.inputSchema(),

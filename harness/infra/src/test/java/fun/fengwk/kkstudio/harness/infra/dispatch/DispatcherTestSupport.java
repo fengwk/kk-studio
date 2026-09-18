@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -696,10 +695,8 @@ final class DispatcherTestSupport {
         new ToolCall("call-1", "bash", "{}"),
         new ToolBinding(
             new AgentToolDefinition(
-                new AgentToolId("test.bash"),
                 new ToolDescriptor(
                     "bash",
-                    "1.0",
                     "description of bash",
                     "bash",
                     new InputSchema("arguments", Map.of(), Set.of(), false),
