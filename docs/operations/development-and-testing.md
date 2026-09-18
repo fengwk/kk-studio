@@ -12,7 +12,7 @@
 | Maven | 通过 `mvn` 可用；[`scripts/dev.sh`](../../scripts/dev.sh)、[`scripts/e2e/lib.sh`](../../scripts/e2e/lib.sh)、[`regression.sh`](../../scripts/reliability/regression.sh)、[`scripts/supply-chain.sh`](../../scripts/supply-chain.sh) 都会校验 JDK 21 |
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
-| `curl`、`jq`、`lsof` | `scripts/dev.sh` 启动前后检查端口与健康状态 |
+| `curl`、`jq`、`lsof` | [scripts/dev.sh](../../scripts/dev.sh) 启动前后检查端口与健康状态 |
 | Python 3 | E2E 与测试栈的 smoke 脚本 |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
@@ -74,7 +74,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
 | 隔离栈端到端 smoke | `./deploy/test/run.sh --with-app` |
-| 免费 API 契约矩阵 | `./scripts/e2e.sh` |
+| 免费 API 契约矩阵 | [`./scripts/e2e.sh`](../../scripts/e2e.sh) |
 | 确认矩阵有哪些 case | `./scripts/e2e.sh --list`、`./scripts/e2e.sh --docs` |
 | 文档与敏感数据门禁 | `node scripts/docs/check.mjs`、`python3 scripts/security/check-sensitive-data.py` |
 | 可靠性确定性回归 | `./scripts/reliability/regression.sh --iterations 1` |
@@ -91,7 +91,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | Java 与 Frontend 单测、覆盖率 | `mvn test`、`mvn verify`、`npm --prefix frontend run test\|coverage` |
 | 免费端到端契约 | `./scripts/e2e.sh`、`./deploy/test/run.sh --with-app` |
 | 真实 Provider、Tool、UI、分布式栈 | `./scripts/e2e.sh --real`、`--with-tools`、`--ui`、`--distributed` |
-| 可靠性、性能、供应链 | `scripts/reliability/`、`./scripts/performance.sh`、`./scripts/supply-chain.sh` |
+| 可靠性、性能、供应链 | [`scripts/reliability`](../../scripts/reliability/)、`./scripts/performance.sh`、`./scripts/supply-chain.sh` |
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -130,7 +130,8 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 [`harness/runtime`](../../harness/runtime/pom.xml)、
 [`harness/contributor-api`](../../harness/contributor-api/pom.xml)、
 [`harness/builtin`](../../harness/builtin/pom.xml)、
-[`harness/provider`](../../harness/provider/pom.xml)、`platform` 和 `web`
+[`harness/provider`](../../harness/provider/pom.xml)、[`platform`](../../platform/pom.xml) 和
+[`web`](../../web/pom.xml)
 在各自 POM 中把 JaCoCo `check` 绑定到
 `verify`，按 `CLASS` include 只检查当前关键类，line coverage 下限为 `0.90`，个别类要求 `1.00`：
 
@@ -145,15 +146,17 @@ branch coverage 作为参考指标，具体数字以对应模块的 `target/site
 
 ### Fat JAR
 
-根 POM 的 reactor 当前是 `share`、`schema`、`canvas`、`harness`、`platform`、`web`。需要可运行产物时：
+根 POM 的 reactor 当前是 [`share`](../../share)、[`schema`](../../schema)、[`canvas`](../../canvas)、
+[`harness`](../../harness)、[`platform`](../../platform)、[`web`](../../web)。需要可运行产物时：
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -Pdistribution -pl web -am clean package
 "$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.0.jar
 ```
 
-`distribution` profile 在 `prepare-package` 安装 Node 与 npm、对 `frontend/` 执行 `npm ci` 与
-`npm run build`，并把产物打进 `BOOT-INF/classes/static`；普通 `mvn test` / `mvn package` 不激活它。
+`distribution` profile 在 `prepare-package` 安装 Node 与 npm、对 [`frontend/`](../../frontend/) 执行
+`npm ci` 与 `npm run build`，并把产物打进 `BOOT-INF/classes/static`；普通 `mvn test` /
+`mvn package` 不激活它。
 
 ## Frontend 检查
 
@@ -243,7 +246,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob contract，backend 必须有 S3 配置 |
 | `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true` |
-| `--distributed` | 启停 `deploy/distributed` 双节点 mock topology，不与 `--real`、`--with-tools`、`--ui`、`--with-canvas-*` 组合 |
+| `--distributed` | 启停 [deploy/distributed](../../deploy/distributed) 双节点 mock topology，不与 `--real`、`--with-tools`、`--ui`、`--with-canvas-*` 组合 |
 | `--ui` | 在 API 矩阵后执行 Playwright UI 矩阵，截图并入同一 run |
 | `--only CASE_ID` | 只运行指定 case，可重复 |
 | `--level L1\|L2\|L3\|L4\|L5` | 过滤 API level，可重复；UI 不受此过滤器影响 |
@@ -258,7 +261,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `--rebuild` 默认允许 Maven 在线解析依赖，只有 `E2E_MAVEN_OFFLINE=true` 时才加 `-o`；
 `E2E_WORK_DIR` 默认 `runtime/e2e`，Daemon environment root 默认是其下的 `environment`，可由
 `DAEMON_ENV_ROOT` 覆盖。执行 `--ui` 前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
-`frontend/package.json` 加载。
+[frontend/package.json](../../frontend/package.json) 加载。
 
 ### 真实 Provider 与付费边界
 
@@ -280,19 +283,13 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 矩阵运行，因此复用曾执行真实 E2E 的 database 会失败，需要改用全新未配置的 E2E database。
 
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
-database 中的 `minimax` Responses Provider。真实 Seedance prepare-only 也只能显式执行：
+database 中的 `minimax` Responses Provider。
 
-```bash
-RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
-SEEDANCE_WORKSPACE_ID=... \
-OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
-  ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
-```
-
-它固定 `seedance2.0fast`、`duration=4`、`submit=0`、`retry=0`，不创建 Canvas FunctionRun、不生成
-或导入视频；`OPENCLI_HUB_BASE_URL` 没有默认值，必须是无 userinfo、path、query 和 fragment 的
-HTTP(S) origin。任何正式 Seedance/GPT Image 提交都可能产生费用，只能由人工通过应用的独立真实
-提交开关启用。
+隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
+不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、
+`duration=4`、`submit=0`、`retry=0`，`OPENCLI_HUB_BASE_URL` 没有默认值。完整命令、参数约束与失败
+边界见 [deploy/test 的真实 Seedance prepare-only 边界](../../deploy/test/README.md#真实-seedance-prepare-only-边界)；
+任何正式 Seedance/GPT Image 提交都可能产生费用，只能由人工通过应用的独立真实提交开关启用。
 
 ### 分布式双节点栈
 
@@ -332,8 +329,8 @@ invalid XML、Maven `[ERROR]`、`Surefire is going to kill` 或非零退出都�
 ```
 
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 把 `NativeToolSmoke.java` 经 stdin 送入 Daemon 容器编译并运行 find/grep/bash
-assertions，不经过 Agent、Provider 或 App command batch。
+`tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/reliability/NativeToolSmoke.java) 经 stdin 送入
+Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provider 或 App command batch。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
@@ -356,8 +353,8 @@ node scripts/reliability/reassess-agent-run.mjs <runId>
 case 集合、模型/变体组合与 tool policy 由 [scripts/reliability/matrix.mjs](../../scripts/reliability/matrix.mjs)
 和 [policy.mjs](../../scripts/reliability/policy.mjs) 定义。真实执行前 runner 要求 provider、
 model、variant、Tool catalog 和 Environment `READY` 全部匹配；未知 cost、超过上限、测试或工作区
-隔离证据缺失都 fail closed。`--real`/`--with-tools` 等 flag 只属于 `scripts/e2e.sh`，不适用于该
-runner。
+隔离证据缺失都 fail closed。`--real`/`--with-tools` 等 flag 只属于
+[`scripts/e2e.sh`](../../scripts/e2e.sh)，不适用于该 runner。
 
 ## 性能基线
 
@@ -441,14 +438,17 @@ App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`
 NAS 自迭代使用共享数据面的两个 App 节点。它们属于同一个 KK Studio 集群，不是数据隔离的测试
 环境：
 
-| 节点 | Git branch | Human 入口 | 运行形态 |
-| --- | --- | --- | --- |
-| `vps-kk-studio` | `main` | `https://studio.kk1.fun` | 不含源码和构建工具的不可变 Fat JAR 镜像；唯一 Harness worker 与 Flyway owner |
-| `vps-kk-studio-dev` | `dev` | `https://studio-dev.kk1.fun` | 持久源码工作区、JDK/Maven、Node/Vite、关闭 Harness worker/Flyway 的 Backend 和 Environment Daemon |
+| 节点 | Git branch | Human 入口 |
+| --- | --- | --- |
+| `vps-kk-studio` | `main` | `https://studio.kk1.fun` |
+| `vps-kk-studio-dev` | `dev` | `https://studio-dev.kk1.fun` |
 
-Main 是共享 schema 的唯一 Flyway owner。Dev 使用与 Main 相同的生产 profile，但必须设置
-`SPRING_FLYWAY_ENABLED=false` 与 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`，且不得加载
-dev/e2e seed。异步 Harness 执行只有 Main 一个执行者，因此 Dev 入口是同步 preview 面：
+Main 是共享 schema 的唯一 Flyway owner；Dev 使用与 Main 相同的生产 profile，但关闭 Flyway 与
+进程内 Harness worker，且不加载 dev/e2e seed。容器、镜像、挂载、控制面 origin、网络地址与
+环境变量契约的完整定义见[部署与运行](deployment.md#nas-maindev-外部部署边界)，本文只保留操作者
+在 Dev 节点上直接执行的动作与自迭代约束。
+
+异步 Harness 执行只有 Main 一个执行者，因此 Dev 入口是同步 preview 面：
 
 | 面 | 节点 |
 | --- | --- |
@@ -474,11 +474,11 @@ preview 只覆盖前端、同步 API 和查询行为。
 ./scripts/operations/rebuild-database.sh
 ```
 
-脚本仓库只保留完整声明当前结构的 `V1__schema.sql`，不维护增量 migration 链；修改 V1 必须先停止
-两个 App 节点，并在 Human 明确批准的维护窗口内重建空库。普通自迭代不得重置共享 database 或删除
-共享 bucket。执行前必须让 Main 容器指向由当前仓库 revision 构建的镜像但保持停止；脚本会把仓库
-`V1__schema.sql` 的 Flyway checksum 与 Main 实际写入的 checksum 对比，不一致就停止回灌并保持 App
-关闭。流程固定为：
+脚本仓库只保留完整声明当前结构的 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)，
+不维护增量 migration 链；修改 V1 必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内重建空库。
+普通自迭代不得重置共享 database 或删除共享 bucket。执行前必须让 Main 容器指向由当前仓库 revision
+构建的镜像但保持停止；脚本会把仓库 V1 的 Flyway checksum 与 Main 实际写入的 checksum 对比，不一致
+就停止回灌并保持 App 关闭。流程固定为：
 
 ```text
 停止 Main/Dev
@@ -493,12 +493,10 @@ preview 只覆盖前端、同步 API 和查询行为。
   -> 等待 healthcheck 与 Environment Daemon 重连
 ```
 
-保留集合仅为 `environment`、`environment_skill_source`、`environment_inventory`、
-`environment_skill`、`agent_provider`、`agent_model`、`agent_definition`；`environment_connection`
-是重连后重新生成的租约，`system_setting` 来自 V1 默认聚合，会话、Harness、Canvas、Project、
-Issue 与 Storage 运行数据不回灌。除 `--dry-run` 外还可用 `--yes` 跳过确认、`--skip-snapshot`
-放弃保留旧库快照（完整备份仍然必须）、`--work-dir PATH` 指定输出目录；不提供 `--skip-snapshot`
-时脚本把旧库改名为带时间戳的快照并冻结。默认输出目录在仓库外的
+哪些表属于 durable 保留集合、哪些运行数据在重建后由 V1 或重连重新生成，由
+[Schema 模块](../modules/schema.md#修改-v1-的代价)持有。除 `--dry-run` 外还可用 `--yes` 跳过确认、
+`--skip-snapshot` 放弃保留旧库快照（完整备份仍然必须）、`--work-dir PATH` 指定输出目录；不提供
+`--skip-snapshot` 时脚本把旧库改名为带时间戳的快照并冻结。默认输出目录在仓库外的
 `~/.local/state/kk-studio/database-rebuild`（目录 `0700`、文件 `0600`），脚本拒绝把输出目录设到
 仓库内。
 
@@ -506,18 +504,11 @@ Issue 与 Storage 运行数据不回灌。除 `--dry-run` 外还可用 `--yes` �
 把它们提交到 Git、写入文档、粘贴到日志或工单、上传到公共存储；维护完成并确认冻结快照的保留策略
 后，由 Human 按部署侧备份策略安全处置。
 
-### 容器与连接
+### gh 首次登录
 
-Dev 容器以 uid/gid `10001` 运行；挂载点、属主与 entrypoint 可写性校验是外部 Compose 的部署
-边界，完整契约见[部署与运行](deployment.md#nas-maindev-外部部署边界)。本文只重复操作者在 Dev
-节点上直接接触的部分：`/workspace`、`/home/kkdaemon/.m2`、`/home/kkdaemon/.npm`、
-`/home/kkdaemon/.config/gh` 是四个必须持久化的 volume，backend/frontend log 与 PID 在
-`/var/kk-studio/dev`（`DEV_WORK_DIR`）。
-
-SSH 私钥由外部以只读 volume 挂载到 `/run/kk-studio/ssh`（`KK_STUDIO_SSH_CREDENTIALS_DIR`），
-entrypoint 在启动时才把 `id_*` 复制进 `/home/kkdaemon/.ssh`；github.com 的 host key 固化在镜像内的
-`/etc/ssh/ssh_known_hosts`。`gh` 使用默认配置目录 `/home/kkdaemon/.config/gh`，首次在 NAS 上执行
-一次交互式登录即可：
+`gh` 使用持久 volume 内的默认配置目录 `/home/kkdaemon/.config/gh`，在 NAS 上执行一次交互式登录
+即可；host key 校验与 SSH key 安装由 entrypoint 完成，契约见
+[部署与运行](deployment.md#挂载与持久化)。
 
 ```bash
 docker exec -it vps-kk-studio-dev gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key --scopes repo,workflow,read:org,gist
@@ -527,39 +518,7 @@ docker exec vps-kk-studio-dev gh auth status
 token 只保存在容器的 `/home/kkdaemon/.config/gh/hosts.yml`，不进入本仓库、镜像、环境变量或日志。
 SSH key 只让 Git 能读写仓库，`gh` 的 API 权限继承登录账号自身的权限和上面请求的 scope。
 
-容器内 Daemon 经内部 Docker 网络连接 Main App，既不连接 Dev Backend，也不经过公共 Gateway。
-Main 的 HTTP(S) origin 统一保存在外部 Compose 项目的 `.env`，`docker-compose.yml` 只把同名变量
-显式传入 Dev，entrypoint 再派生 WebSocket 地址：
-
-```dotenv
-# .env
-KK_STUDIO_CONTROL_PLANE_BASE_URL=http://vps-kk-studio:8080
-```
-
-```yaml
-# docker-compose.yml
-environment:
-  KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}
-```
-
-上面的值最终派生为 `ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`；origin 的合法性
-约束由[部署与运行](deployment.md#nas-maindev-外部部署边界)约定，非法值在准备 workspace 和启动
-服务之前就让容器启动失败，且错误信息不回显输入值。
-
-Git fail-closed 同步、SSH key 安装与冷启动边界的完整说明见
-[部署与运行](deployment.md#nas-maindev-外部部署边界)。两个容器内的服务端访问都不得绕到公网域名：
-
-```text
-PostgreSQL -> vps-postgres:5432
-S3 API     -> http://vps-s3:9000
-OpenCLI    -> 同一 vps 网络的 Hub 容器 HTTP origin
-Daemon     -> http://vps-kk-studio:8080（entrypoint 派生 ws://vps-kk-studio:8080/api/harness/environment-daemon/v1）
-```
-
-OpenCLI 的 `baseUrl` 由 System Settings 配置，上传、执行轮询和产物下载都从该 origin 构造并拒绝
-跨源产物 URL，因此 NAS 配置必须填写 Hub 的容器内地址而不是公网域名。S3 的 public endpoint 只
-用于返回给浏览器的预签名直传/直下 URL，服务端 `PUT`/`GET`/`HEAD`/`COPY`/`DELETE` 始终使用
-`vps-s3:9000`。
+### Dev 重载
 
 普通迭代只运行稳定命令 `kk-studio-dev-reload`：它做增量 package 后重启受管 Backend/Vite，
 Daemon 与容器保持存活，Main 与 Daemon 的连接不中断，并等待两端 readiness。容器内等价手写路径：
@@ -579,29 +538,10 @@ env SPRING_PROFILES_ACTIVE=prod \
   ./scripts/dev.sh restart
 ```
 
-`kk-studio-dev-reload` 与 entrypoint 使用同一组默认值和 fail-closed 校验：即使 ad hoc 覆盖
+`kk-studio-dev-reload` 与 entrypoint 使用同一组 fail-closed 默认值：即使 ad hoc 覆盖
 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED`，reload 也会拒绝执行，不会让 Dev Backend 变成第二个
-Harness worker。镜像默认值为 `SPRING_PROFILES_ACTIVE=prod`、
-`SPRING_FLYWAY_ENABLED=false`、`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`、
-`KK_STUDIO_DAEMON_REGISTRATION_TOKEN`（注册后立即 `unset`）；`DEV_READY_TIMEOUT_SECONDS` 在容器内
-默认 `600`。
-
-Dev 容器运行环境变量（外部 Compose 只引用名称，真实值由 NAS 私密环境文件注入）：
-
-| 变量 | 职责 |
-| --- | --- |
-| `KK_STUDIO_WORKSPACE_ROOT` | Daemon environment-root 与持久工作区根，默认 `/workspace` |
-| `KK_STUDIO_REPOSITORY_DIR` | 源码 checkout，默认 `/workspace/kk-studio` |
-| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 SSH remote 与每次启动 fetch/快进的目标分支，默认不带 remote / `dev` |
-| `KK_STUDIO_SSH_CREDENTIALS_DIR` | 只读 SSH key 挂载目录，默认 `/run/kk-studio/ssh`；`id_*` 在启动时复制到 `/home/kkdaemon/.ssh` |
-| `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
-| `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |
-| `SPRING_PROFILES_ACTIVE` / `SPRING_FLYWAY_ENABLED` | Backend profile 与 Flyway 开关，必须为 `prod` / `false` |
-| `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` | Dev Backend 的 Harness worker 开关，必须为 `false` |
-| `KK_STUDIO_CONTROL_PLANE_BASE_URL` | Main App 的 HTTP(S) origin，必填；entrypoint 派生 Daemon 的 ws(s) gateway 地址 |
-| `BACKEND_HOST` / `BACKEND_PORT` / `FRONTEND_HOST` / `FRONTEND_PORT` / `DEV_WORK_DIR` | `scripts/dev.sh` 的监听地址、端口与 log/PID 目录 |
-| `DEV_READY_TIMEOUT_SECONDS` | Backend/Vite readiness 预算，容器内默认 `600`（仓库默认 `90`） |
-| `KK_STUDIO_DAEMON_REGISTRATION_TOKEN` / `KK_STUDIO_DAEMON_NOTE` | Daemon 注册 token 与 Environment note |
+Harness worker。各项默认值与全部 Dev 环境变量的完整契约见
+[部署与运行](deployment.md#dev-运行环境变量契约)。
 
 ### Agent 闭环
 
@@ -685,13 +625,14 @@ Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、smo
 ## 清理与故障排查
 
 开发循环自己的清理是 `./scripts/dev.sh stop`；本地与测试栈、分布式栈和可靠性栈的清理命令、
-保留与删除语义见[部署与运行](deployment.md#清理)。`deploy/test` 与 performance 入口每次运行都会
-自行清理 PostgreSQL/MinIO/test network，`--distributed` 入口在退出时清理双节点栈。
+保留与删除语义见[部署与运行](deployment.md#清理)。[deploy/test](../../deploy/test/README.md) 与
+performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network，`--distributed` 入口在退出时
+清理双节点栈。
 
 | 现象 | 先执行 | 边界 |
 | --- | --- | --- |
 | JDK/compile/checkstyle 失败 | `"$JAVA_HOME_21/bin/java" -version`；`env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp validate` | 必须是 JDK 21；先修复 Spotless/Checkstyle |
-| Frontend 找不到依赖或 Playwright | `npm --prefix frontend ci`；`npm --prefix frontend run test` | 依赖由 `package-lock.json` 固定 |
+| Frontend 找不到依赖或 Playwright | `npm --prefix frontend ci`；`npm --prefix frontend run test` | 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定 |
 | dev 端口占用 | `./scripts/dev.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 用 `DEV_KILL_PORTS=true` 或换端口 |
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |

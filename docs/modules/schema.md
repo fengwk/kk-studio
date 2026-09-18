@@ -1,6 +1,6 @@
 # Schema 模块
 
-PostgreSQL 里到底有哪些表、哪些列在什么情况下可以为空、版本与租约怎么配对，是这套系统里被引用最多、也最难追溯的一类事实：应用代码可以用 try/catch 兜底，数据库约束一旦缺失就会长期积累脏数据。`schema` 模块把这份事实收敛成一个文件——`V1__schema.sql` 就是**当前全部结构**的完整声明，没有增量迁移链，没有第二份镜像。生产 Web 与各集成测试用同一份 Flyway 资源，因此「测试通过」和「生产建库」走的是同一段 DDL。
+PostgreSQL 里到底有哪些表、哪些列在什么情况下可以为空、版本与租约怎么配对，是这套系统里被引用最多、也最难追溯的一类事实：应用代码可以用 try/catch 兜底，数据库约束一旦缺失就会长期积累脏数据。`schema` 模块把这份事实收敛成一个文件——[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 就是**当前全部结构**的完整声明，没有增量迁移链，没有第二份镜像。生产 Web 与各集成测试用同一份 Flyway 资源，因此「测试通过」和「生产建库」走的是同一段 DDL。
 
 模块本身没有 Java 源码、没有运行时依赖（见 [`schema/pom.xml`](../../schema/pom.xml)），资源入口只有四个文件：
 
@@ -121,9 +121,8 @@ erDiagram
 `V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的两个 App 节点（Main 与 Dev）同时使用，所以这条路径有硬性安全要求：
 
 - 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。Dev 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 Main 集成。
-- 需要重建时，必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。标准入口是 [`scripts/operations/rebuild-database.sh`](../../scripts/operations/rebuild-database.sh)：先用 `--dry-run` 做只读预检，确认后再正式执行。脚本会对比仓库 V1 的 Flyway checksum 与 Main 实际写入的 checksum，不一致就停止回灌并保持 App 关闭。
-- 重建会全库 custom-format 备份、按原 owner/locale 建空库、由 Main 执行 V1，然后单事务回灌并逐表校验内容指纹。保留集合仅 `environment`、`environment_skill_source`、`environment_inventory`、`environment_skill`、`agent_provider`、`agent_model`、`agent_definition`；`environment_connection` 是重连后重新生成的租约，`system_setting` 取 V1 默认，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不回灌。
-- 备份 archive 含 Provider credential 与 Environment registration token，必须按敏感数据处理：默认写到仓库外的 `~/.local/state/kk-studio/database-rebuild`（目录 `0700`、文件 `0600`），禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储。
+- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`environment_skill_source`、`environment_inventory`、`environment_skill`、`agent_provider`、`agent_model`、`agent_definition` 会回灌；`environment_connection` 是重连后重新生成的租约，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 备份 archive 含 Provider credential 与 Environment registration token，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储。
 
 就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 Main 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
 
