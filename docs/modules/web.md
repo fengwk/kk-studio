@@ -1,20 +1,18 @@
 # Web 模块
 
-## 定位
+## 组合根与唯一生产入口
 
 `web` 是 kk-studio 唯一的生产 Spring Boot composition root：它把 Platform application
 services、Canvas/Harness infra、纯 Java `harness-runtime`、第一方
 `BuiltinHarnessContributor` 和受信任 Contributor JAR 快照组合成一个可运行的
-HTTP/WebSocket 进程，并提供浏览器 REST、静态 SPA、浏览器 Application Event WebSocket
-与 Environment Daemon WebSocket。
+HTTP/WebSocket 进程，并把浏览器 REST、静态 SPA、浏览器 Application Event WebSocket
+与 Environment Daemon WebSocket 一起暴露给外部；领域规则由被组合的模块持有，
+Controller 只做 DTO 解析、调用 application service 和结果投影。
 
 生产入口只有 [WebApplication](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)：
 `SpringApplication.run(WebApplication.class, args)`。
 [WebTestApplication](../../web/src/test/java/fun/fengwk/kkstudio/web/WebTestApplication.java)
-只用于 Spring integration test，不是第二个生产 root。Web 不实现 Catalog、Project、
-Canvas、Harness、Storage 或 Environment 的领域规则；Controller 只做 DTO 解析、调用
-application service 和结果投影，不在 Controller 内实现事务、owner authorization、
-Blob 引用计数、Provider admission 或 Harness reducer。
+只用于 Spring integration test，不是第二个生产 root。
 
 ## 依赖边界与组合结构
 
@@ -86,10 +84,9 @@ Contributor 是启动期静态扩展，不提供运行时安装或热刷新。
 `canvas_function_work` notification 接到 Canvas dispatcher；这不是 Platform 对 Canvas
 Infra implementation 的反向依赖。
 
-数据库是唯一 durable database，Web 不在当前 context 内实现 HTTP 认证；HTTP 认证/TLS
-的部署边界在应用外。Environment Daemon 的连接身份由 PostgreSQL 中的 Environment
-`registration_token` 在 gateway HELLO 协议中校验，trusted contributor directory 是
-另一个显式部署信任边界。
+数据库是唯一 durable database；HTTP 认证/TLS 由部署边界承担，Environment Daemon
+的连接身份由 PostgreSQL 中的 Environment `registration_token` 在 gateway HELLO 协议中
+校验，trusted contributor directory 是另一个显式部署信任边界。
 
 ## Controller、DTO 与错误边界
 
@@ -121,8 +118,9 @@ result status 对齐。
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
-`StudioHarnessCommandBatchController` 返回 `202 Accepted` 只表示 durable acceptance 已
-提交；Provider/Tool 执行和 Thread progression 由 Work dispatcher 异步完成。Canvas
+[StudioHarnessCommandBatchController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchController.java)
+返回 `202 Accepted` 只表示 durable acceptance 已提交；Provider/Tool 执行和 Thread
+progression 由 Work dispatcher 异步完成。Canvas
 command 返回带 `baseVersion/version` 的 Patch，实时收敛另走 `/api/events/v1`。
 Session/Thread `name` 是独立控制面：`PUT .../name` 只更新命名元数据（可含规范化同名
 no-op），不产生 Command、Entry 或 Work。
@@ -160,10 +158,10 @@ error envelope：
 
 | advice | controller 范围 | HTTP 映射 |
 | --- | --- | --- |
-| `StudioDomainErrorAdvice` | Catalog、Chat、MCP、Environment | validation 400、not found 404、version conflict/duplicate/in-use 409 |
-| `StudioResponseStatusErrorAdvice` | Canvas、Chat、ComfyUI、Harness | `ResponseStatusException` 按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
-| `StudioStorageErrorAdvice` | Storage | validation 400、not found 404、verification/conflict 409 |
-| `StudioSystemSettingsErrorAdvice` | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
+| [StudioDomainErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioDomainErrorAdvice.java) | Catalog、Chat、MCP、Environment | validation 400、not found 404、version conflict/duplicate/in-use 409 |
+| [StudioResponseStatusErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioResponseStatusErrorAdvice.java) | Canvas、Chat、ComfyUI、Harness | `ResponseStatusException` 按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
+| [StudioStorageErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioStorageErrorAdvice.java) | Storage | validation 400、not found 404、verification/conflict 409 |
+| [StudioSystemSettingsErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioSystemSettingsErrorAdvice.java) | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
 | [StudioProjectErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdvice.java) | Project、Issue | validation 400、not found 404、version/runtime conflict 409、`IllegalStateException` 500；不回显 Issue input、幂等键或认证数据 |
 
 用户可见 message 由 [StudioMessageService](../../web/src/main/java/fun/fengwk/kkstudio/web/i18n/StudioMessageService.java)
@@ -396,51 +394,32 @@ controller、storage、canvas、comfyui、opencli-hub）由 Platform 与 Canvas 
     disabled 返回 503，enabled workflow 不存在返回 404，参数/selector/binding 错误返回
     400。
 
-## 测试与源码入口
+## 测试入口
 
 组合、架构与 bootstrap：
 
 - [`WebModuleArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java)、
   [`FlywayBootstrapArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java)、
-  `NoRedisArchitectureTest`、`StudioApiRouteTopologyTest`。
+  [`NoRedisArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/NoRedisArchitectureTest.java)、
+  [`StudioApiRouteTopologyTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/StudioApiRouteTopologyTest.java)。
 - [`WebTestApplication.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/WebTestApplication.java)、
   [`WebPostgresTestSupport.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/WebPostgresTestSupport.java)、
-  `PostgresqlDataSourceConfigurationTest`、`FlywayAutoConfigurationIntegrationTest`。
-- [`SpaFallbackTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java)、`StrictJacksonConfigurationTest`。
+  [`PostgresqlDataSourceConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/PostgresqlDataSourceConfigurationTest.java)、
+  [`FlywayAutoConfigurationIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java)、
+  [`SpaFallbackTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/SpaFallbackTest.java)、
+  [`StrictJacksonConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/StrictJacksonConfigurationTest.java)。
 
-Controller、DTO 与 i18n：
+HTTP boundary 按目录定位：
 
-- [`web/controller` tests](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/) 下的逐 Controller 测试，以及
-  `StudioMcpRuntimeToolIntegrationTest`、`StudioEnvironmentOfflineIntegrationTest`。
-- [`web/advice` tests](../../web/src/test/java/fun/fengwk/kkstudio/web/advice/)、
-  [`StudioI18nIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/StudioI18nIntegrationTest.java)、
-  `StudioMessageServiceTest`。
-- [`web/project` tests](../../web/src/test/java/fun/fengwk/kkstudio/web/project/)：`ProjectDtoMapperTest`、
-  `ProjectSnapshotAssemblerTest`、`StudioIssueControllerTest`、`StudioProjectControllerTest`、
-  `StudioProjectErrorAdviceTest`。
-
-Runtime、通知与事件：
-
-- [`HarnessRuntimeConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfigurationTest.java)、
-  `HarnessRuntimeLifecycleTest`、`HarnessRuntimePostgresqlLifecycleIntegrationTest`、
-  `HarnessRuntimeRequestMapperTest`、`HarnessRuntimeResponseMapperTest`、
-  `IssueControllerRuntimeConfigurationTest`、`EnvironmentOperationDispatcherLifecycleTest`、
-  `CompositeEnvironmentSessionListenerTest`、`EnvironmentOperationPostgresCompositionIntegrationTest`。
-- [`TrustedJarContributorLoaderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoaderTest.java)、
-  `ContributorCatalogWiringTest`。
-- [`PostgresqlNotificationLoopTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoopTest.java)、
-  `PostgresqlNotificationLoopPostgresqlIntegrationTest`、
-  [`ApplicationEventHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventHubTest.java)、
-  `ThreadVersionHubTest`、`CanvasVersionHubTest`、`EventFrameCodecTest`、
-  `ApplicationEventWebSocketEndpointIntegrationTest`、`ApplicationEventWebSocketHandlerTest`。
-
-WebSocket、async 与 Environment：
-
-- [`AsyncTextSenderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/AsyncTextSenderTest.java)、
-  `DaemonOutboundSenderTest`、`EnvironmentDaemonWebSocketHandlerTest`、
-  `EnvironmentDaemonWebSocketEndpointTest`、`EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest`。
-- `orchestration/`：`HarnessCommandAcceptanceOrchestratorIntegrationTest`、
-  `ProjectHarnessSessionBootstrapIntegrationTest`、`SessionDeletionOrchestratorIntegrationTest`。
+| 范围 | 测试目录 | 代表测试 |
+| --- | --- | --- |
+| Controller 与 DTO 解析 | [controller/](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/) | [`StudioHarnessCommandBatchControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchControllerTest.java)、[`StudioMcpRuntimeToolIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioMcpRuntimeToolIntegrationTest.java) |
+| Error advice 与 i18n | [advice/](../../web/src/test/java/fun/fengwk/kkstudio/web/advice/)、[i18n/](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/) | [`StudioProjectErrorAdviceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdviceTest.java)、[`StudioMessageServiceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/StudioMessageServiceTest.java) |
+| Project snapshot 与 invalidation | [project/](../../web/src/test/java/fun/fengwk/kkstudio/web/project/) | [`ProjectSnapshotAssemblerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssemblerTest.java)、[`ProjectInvalidationHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectInvalidationHubTest.java) |
+| Harness/Issue 组合与 mapper | [runtime/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/) | [`HarnessRuntimeConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfigurationTest.java)、[`HarnessRuntimeRequestMapperTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapperTest.java) |
+| Trusted JAR 与 Contributor 装配 | [runtime/contributor/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/) | [`TrustedJarContributorLoaderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoaderTest.java)、[`ContributorCatalogWiringTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogWiringTest.java) |
+| 通知、Application Event 与 Daemon WebSocket | [events/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/)、[events/postgresql/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/)、[environment/](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/) | [`PostgresqlNotificationLoopTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoopTest.java)、[`ApplicationEventHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventHubTest.java)、[`DaemonOutboundSenderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonOutboundSenderTest.java) |
+| 跨 owner 事务 orchestration | [orchestration/](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/) | [`HarnessCommandAcceptanceOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/HarnessCommandAcceptanceOrchestratorIntegrationTest.java)、[`SessionDeletionOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/SessionDeletionOrchestratorIntegrationTest.java) |
 
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single
 baseline、PostgreSQL notification reconnect/resync、Harness/Issue worker NOTIFY+poll

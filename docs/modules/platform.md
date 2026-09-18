@@ -1,23 +1,27 @@
 # Platform 模块
 
-## 定位
+## 应用层边界与装配入口
 
 `platform` 是 kk-studio 的 application layer：它把 `canvas-core`、`harness-runtime`、
 `harness-tool` 和 `harness-contributor-api` 的窄 port 组合成可执行的产品用例，并把
 PostgreSQL、S3、Model Provider、Environment Daemon、MCP、ComfyUI 与 OpenCLI Hub 等
-外部事实适配到这些 port。
+外部事实适配到这些 port，向上为 [web](web.md) 提供 Catalog、Chat、Project、Issue、
+Canvas、Storage、Environment、Settings 与 Harness command 的 application service。
 
-Platform 不提供 `@SpringBootApplication`、HTTP Controller 或 WebSocket transport；
-生产启动由 [web 模块](web.md)完成，`harness-runtime` 负责 Session/Entry/Thread/
-Invocation/Work 的纯 Java 状态机，`canvas-core` 负责 Canvas domain 与 repository
-port。Platform 承载的是它们之间的业务事务、实时资源解析、第三方调用边界和应用级
-失败分类。
+Platform 承载这些窄 port 之间的业务事务、实时资源解析、第三方调用边界和应用级失败
+分类：Session/Entry/Thread/Invocation/Work 的纯 Java 状态机由
+[harness-runtime](harness-runtime.md) 拥有，Canvas domain 与 repository port 由
+[canvas-core](canvas-core.md) 拥有，生产 `@SpringBootApplication`、HTTP Controller 与
+WebSocket transport 由 [web](web.md) 拥有。
 
 生产装配入口是 [PlatformAutoConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java)：
 它只做 `BaseMapperScan` 与 `ComponentScan`，并通过
 [AutoConfiguration.imports](../../platform/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports)
-作为 Spring Boot auto-configuration 被 web 引入。Platform 不实现 Harness reducer、
-processor 或 claim/lease 状态机，也不扫描插件目录或创建 classloader。
+作为 Spring Boot auto-configuration 被 web 引入、装载全部 application service 与适配器。
+Harness reducer、processor 与 claim/lease 状态机留在 harness-runtime，插件目录扫描与
+classloader 由 web 的
+[TrustedJarContributorLoader](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java)
+承担。
 
 ## 子域地图
 
@@ -267,9 +271,8 @@ Platform 侧的产品适配器只做映射，不持有会话状态：[Environmen
 [EnvironmentServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImpl.java)
 在 Product CRUD 上执行 CAS 与引用校验；
 [EnvironmentOperationDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/operation/EnvironmentOperationDispatcher.java)
-按 `environment_operation_pending` 通知与 SQL owner-node 租约隔离排空持久操作。Platform
-不提供目录浏览或 Skill 正文的旁路加载链：skill 正文由内部工具 `load_skill` 经
-`BoundEnvironment` 调用 `skill.load` 能力取得。
+按 `environment_operation_pending` 通知与 SQL owner-node 租约隔离排空持久操作。Skill
+正文的唯一加载链是内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力。
 
 每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量
 capability 并发在途，不同能力之间没有共享槽位，也不存在环境级容量或排队，唯一拒绝
@@ -562,7 +565,7 @@ third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错�
 和 frozen binding，不会把 bucket、对象 key、credential 或完整上游异常作为产品协议的
 一部分。
 
-## 测试与源码入口
+## 测试入口
 
 先看架构守卫，再按子域定位 integration test：
 
@@ -578,20 +581,20 @@ third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错�
   [`PostgresSchemaSupport.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresSchemaSupport.java)、
   [`StorageS3TestConfiguration.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageS3TestConfiguration.java)。
 
-按子域的主要 integration test：
+按子域定位测试，每个目录都按上面的子域地图组织：
 
-- Catalog：`CatalogParentLockIntegrationTest`、`AgentDefinitionConfigCodecTest`、`AgentModelRuntimeConfigParserTest`、`AgentProviderConfigurationCodecTest` 与各 `*ServiceImplTest`。
-- MCP：[`McpServerServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerServiceTest.java)、`McpToolCatalogTest`、`McpExecutableToolTest`、`DefaultMcpDiscoveryResultPublisherTest`。
-- Chat/事务：[`ChatServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/ChatServiceIntegrationTest.java)、`HarnessCommandAcceptanceOrchestratorTest`、`SessionDeletionOrchestratorTest`、`ChatSessionRepositoryIntegrationTest`、`CanvasSessionRepositoryIntegrationTest`。
-- Project/Issue：`ProjectServiceIntegrationTest`、`IssueServiceIntegrationTest`、`IssueRunServiceIntegrationTest`、`ProjectHarnessSessionBootstrapServiceTest`、`IssueReconcilerTest`、`IssueControllerDispatcherTest`、`IssueControllerConcurrencyIntegrationTest`、Project 角色工具与 `ProjectChangeNotificationIntegrationTest`。
-- Model：[`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、`GatewayExecutorSafetyTest`、`DatabaseProviderResolutionServiceIntegrationTest`、`ProviderInlineBlobReaderTest`、`ProviderResourceMaterializerTest`。
-- Tool：[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java)、`ToolExecutionGatewayAdmissionTest`、`ToolExecutionGatewayCallbackTest`、`ToolExecutionGatewayEffectsTest`、`ToolExecutionGatewayStartTest`、`CompositeRuntimeToolCatalogTest`、`ToolResultFinalizerTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
-- Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、`AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`HarnessOneShotServiceTest`。
-- Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、`PlatformCanvasFunctionBlobAccessTest`、`OpenCliCanvasFunctionAdaptersTest`、`MiniMaxH3CanvasFunctionAdapterTest`、`ComfyuiRuntimeServiceTest`、`ComfyuiWorkflowApiBindingsParserTest`。
-- Environment：[`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、`PostgresEnvironmentRoutingIntegrationTest`、`EnvironmentServiceImplTest`、`StorageDaemonResourceTicketServiceTest`、`EnvironmentOperationResultPublisherIntegrationTest`、`SkillSourceCrudIntegrationTest`。
-- Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、`StorageUploadServiceIntegrationTest`、`StorageUploadCleanupLeaseIntegrationTest`、`StorageMaintenanceTest`、`PostgresqlStorageBlobManagerTest`。
-- Settings：[`SystemSettingsServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImplTest.java)、`SystemSettingsCodecTest`、`SystemSettingsSnapshotTest`、`SystemSettingsSchemaProviderTest`、`SystemSettingsServiceIntegrationTest`。
-- Schema：`PostgresqlSchemaStructureTest`、`PostgresqlBusinessSchemaTest`、`PostgresqlSchemaSeedTest`、`PostgresqlStorageSchemaTest`、`ProjectSchemaPostgresTest`。
+| 子域 | 测试目录 | 代表测试 |
+| --- | --- | --- |
+| Catalog、MCP | [catalog/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/)、[catalog/mcp/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/) | [`McpServerServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerServiceTest.java)、[`AgentDefinitionConfigCodecTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/definition/configuration/AgentDefinitionConfigCodecTest.java) |
+| Chat、跨 owner 事务 | [chat/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/)、[orchestration/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/orchestration/) | [`ChatServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/ChatServiceIntegrationTest.java)、[`HarnessCommandAcceptanceOrchestratorTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestratorTest.java) |
+| Project、Issue | [project/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)、[project/controller/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/controller/)、[project/session/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/session/) | [`IssueReconcilerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconcilerTest.java)、[`ProjectHarnessSessionBootstrapServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/session/ProjectHarnessSessionBootstrapServiceTest.java) |
+| Model、Tool 执行 | [harness/model/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/)、[harness/tool/gateway/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/) | [`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java) |
+| turn 解析与 prompt 物化 | [harness/thread/command/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/)、[harness/task/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/)、[harness/skill/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/skill/) | [`DatabaseTurnResolverTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolverTest.java)、[`AgentPromptComposerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposerTest.java) |
+| Environment | [environment/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/)、[environment/registry/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/)、[environment/operation/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/operation/) | [`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、[`EnvironmentOperationResultPublisherIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/operation/EnvironmentOperationResultPublisherIntegrationTest.java) |
+| Canvas 与 ComfyUI 适配 | [canvas/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/)、[canvas/function/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/)、[comfyui/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/comfyui/) | [`PlatformCanvasResourceLifecycleTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycleTest.java)、[`ComfyuiRuntimeServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/comfyui/ComfyuiRuntimeServiceTest.java) |
+| Storage、Blob | [storage/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/)、[storage/service/impl/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/service/impl/) | [`StorageUploadServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadServiceIntegrationTest.java)、[`StorageUploadCleanupLeaseIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadCleanupLeaseIntegrationTest.java) |
+| Settings | [settings/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/) | [`SystemSettingsServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImplTest.java)、[`SystemSettingsServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceIntegrationTest.java) |
+| PostgreSQL schema | [harness/persistence/postgresql/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/) | [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)、[`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java) |
 
 这些测试覆盖的是当前 application layer 的可观察 contract：CAS、owner lock order、
 Project/Issue 调谐、Blob ref 对账、S3 cleanup lease、Provider/Tool admission、

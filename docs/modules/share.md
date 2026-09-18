@@ -2,7 +2,7 @@
 
 前端、Electron 客户端或任何脚本都要在后端 API 的 JSON 上读写；一旦字段名、可空性或 `version` 的类型由某个 Controller 临时决定，客户端就会在版本升级后静默错位。`share` 把这些对外的 JSON 形状集中成一份可独立编译、可独立测试的契约：请求体、响应体、枚举、sealed union 与它们的 Jackson 注解。它只有 `jackson-annotations` 一个生产依赖（见 [`share/pom.xml`](../../share/pom.xml)），不依赖 Spring、PostgreSQL、Flyway，也不认识 `canvas-core`、`platform` 或 `harness-*`——因此契约测试可以在毫秒级跑完，wire 改动也不会牵动领域代码。
 
-它只描述传输契约，不承载领域行为：DTO 不代表领域状态，也不决定持久化结构。领域到 DTO 的映射在 [web](web.md) 的 `WebDtoMapper`，业务语义（version CAS、幂等键、引用计数、调度）在 [platform](platform.md)、[canvas-core](canvas-core.md) 与 [canvas-infra](canvas-infra.md)。
+它只描述传输契约，不承载领域行为：DTO 不代表领域状态，也不决定持久化结构。领域到 DTO 的映射在 [web](web.md) 的 [`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)，业务语义（version CAS、幂等键、引用计数、调度）在 [platform](platform.md)、[canvas-core](canvas-core.md) 与 [canvas-infra](canvas-infra.md)。
 
 ## 严格 JSON 边界
 
@@ -14,7 +14,7 @@
 
 [`CanvasCommandDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasCommandDTO.java) 的 15 个子类型与 [canvas-core](canvas-core.md) 的 `CanvasCommand` 一一对应：`CREATE_TEXT_NODE`、`UPDATE_TEXT_NODE`、`CREATE_RESOURCE_NODE`、`CREATE_FUNCTION_NODE`、`UPDATE_FUNCTION`、`RENAME_NODE`、`UPDATE_NODE_TRANSFORMS`、`DELETE_NODE`、`CREATE_LINK`、`DELETE_LINK`、`CREATE_GROUP`、`MOVE_GROUP`、`UNGROUP`、`DELETE_GROUP`、`RENAME_GROUP`。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，三类实体各自独立。
 
-`share` 不负责把字符串解析成 UUID 或数字：[`WebDtoMapper.parseUuid`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 要求 canonical UUID 文本（`UUID.toString()` 的往返必须一致），[`StudioCanvasController.parseVersion`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioCanvasController.java) 要求 `0|[1-9]\d*` 且能放进 `long`。整数形态的实体 id 在共享层永远不出现。
+字符串到 UUID 与数字的解析属于 HTTP 边界：[`WebDtoMapper.parseUuid`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 要求 canonical UUID 文本（`UUID.toString()` 的往返必须一致），[`StudioCanvasController.parseVersion`](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioCanvasController.java) 要求 `0|[1-9]\d*` 且能放进 `long`；共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
 
 长的 durable 游标在 wire 上保持十进字符串：Canvas document/patch/version event 的 `version` 与 `baseVersion`、`expectedVersion`、Harness Thread 的 `sequence`、Project/Issue 的 version 都是 `String`，[`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java) 用反射断言这些字段的 Java 类型就是 `String`，避免有人图方便改回 `long` 让 JS 丢精度。
 
@@ -39,16 +39,16 @@
 
 | 包 | 当前 wire |
 | --- | --- |
-| `ai.catalog` | Provider、Model、Agent、ModelRef、Tool catalog |
-| `ai.mcp` | MCP Server 安全 DTO、全量配置 DTO、创建/更新与统一发现 DTO |
-| `ai.chat` | Chat 与 Chat defaults |
-| `ai.environment` | Environment Card CRUD、registration token、live capability 投影、Skill 来源与通用管理操作 DTO |
-| `ai.runtime` | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
-| `canvas` | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
-| `comfyui` | Workflow API 与运行请求/结果 |
-| `project` | Project/Issue Snapshot、Issue 详情、Run 与各类操作请求 |
-| `storage` | Upload、Blob signed URL、S3 presign |
-| `systemsettings` | 六个 settings section、schema 与 update request |
+| [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、Model、Agent、ModelRef、Tool catalog |
+| [ai.mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/mcp/) | MCP Server 安全 DTO、全量配置 DTO、创建/更新与统一发现 DTO |
+| [ai.chat](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/chat/) | Chat 与 Chat defaults |
+| [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、live capability 投影、Skill 来源与通用管理操作 DTO |
+| [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
+| [canvas](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/) | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
+| [comfyui](../../share/src/main/java/fun/fengwk/kkstudio/share/comfyui/) | Workflow API 与运行请求/结果 |
+| [project](../../share/src/main/java/fun/fengwk/kkstudio/share/project/) | Project/Issue Snapshot、Issue 详情、Run 与各类操作请求 |
+| [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
+| [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 六个 settings section、schema 与 update request |
 
 只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document version、实体 UPSERT/REMOVE 与 Function Run 投影组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
@@ -64,18 +64,21 @@
 
 ## 从哪里改
 
-- 改 Canvas wire：[`share/src/main/java/fun/fengwk/kkstudio/share/canvas/`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/)，同时改 [core 的 `CanvasCommand`](canvas-core.md)（若命令集合变化）、[`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 的映射 switch（编译器会强制穷尽）与 [frontend](frontend.md) 的 `shared/api/contracts` 类型。
+- 改 Canvas wire：[share/canvas/](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/)，同时改 [core 的 `CanvasCommand`](canvas-core.md)（若命令集合变化）、[`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 的映射 switch（编译器会强制穷尽）与 [frontend](frontend.md) 的 [shared/api/contracts](../../frontend/src/shared/api/contracts) 类型。
 - 改某个领域的输出去敏或字段可见性：先在对应 DTO 上加注解，再补该领域的 `*DtoContractTest`；`SystemSettingsDtoContractTest` 与 `CanvasDtoContractTest` 的字段清单是这类改动的直接守卫。
 - 判断一个字段该不该进 share：它是否出现在 HTTP 请求/响应上。领域内部的值、数据库列、S3 key 一律不进。
 
-测试入口（全部是纯 Jackson/反射单元测试，不需要 Spring 或 PostgreSQL）：
+测试入口（全部是纯 Jackson/反射单元测试，不需要 Spring 或 PostgreSQL），测试目录与上面的 DTO 包一一对应：
 
-- [`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java)：version 字段类型必须是十进字符串、required-nullable 字段必须显式发 null、`CanvasDocumentDTO` 不得出现 `threadId`。
-- [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessRuntimeDtoContractTest.java)、[`ProjectDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/project/ProjectDtoContractTest.java)：Harness 与 Project wire 的严格字段、字符串游标与 nullable 发射。
-- [`ModelRefTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ModelRefTest.java)：canonical 身份解析。
-- [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型。
-- [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描。
-- 其余领域：`ChatDtoContractTest`、`McpServerDtoContractTest`、`EnvironmentDtoContractTest`、`EnvironmentOperationDtoContractTest`、`EnvironmentSkillSourceDtoContractTest`、`AgentSkillRefDTOTest`。
+| 领域 | 测试目录 | 代表测试 |
+| --- | --- | --- |
+| Canvas | [canvas/](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/) | [`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java)：version 字段类型必须是十进字符串、required-nullable 字段必须显式发 null、`CanvasDocumentDTO` 不得出现 `threadId` |
+| Harness Runtime | [ai/runtime/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/) | [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessRuntimeDtoContractTest.java)：严格字段、字符串游标与 nullable 发射 |
+| Project | [project/](../../share/src/test/java/fun/fengwk/kkstudio/share/project/) | [`ProjectDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/project/ProjectDtoContractTest.java)：Project/Issue wire 的严格字段与 decimal version |
+| Catalog | [ai/catalog/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/) | [`ModelRefTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ModelRefTest.java)：canonical 身份解析 |
+| Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |
+| Settings | [systemsettings/](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/) | [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
+| Chat、MCP、Environment | [ai/chat/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/chat/)、[ai/mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/)、[ai/environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/) | [`ChatDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/chat/ChatDtoContractTest.java)、[`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentDtoContractTest.java) |
 
 ---
 

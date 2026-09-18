@@ -1,12 +1,12 @@
 # Frontend 模块
 
-`frontend/` 是独立的 React/Vite/TypeScript 工程：它把后端 durable Snapshot 与有损
-realtime 事件还原成可恢复的浏览器工作台。开发期由 Vite 提供页面并把 `/api` 代理到
-后端；发布期由 Maven `distribution` profile 构建后嵌入 Web Fat JAR。入口、脚本和
-工具链见 [frontend/package.json](../../frontend/package.json) 和
+[`frontend/`](../../frontend) 是独立的 React/Vite/TypeScript 工程：它把后端 durable
+Snapshot 与有损 realtime 事件还原成可恢复的浏览器工作台。开发期由 Vite 提供页面并把
+`/api` 代理到后端；发布期由 Maven `distribution` profile 构建后嵌入 Web Fat JAR。
+入口、脚本和工具链见 [frontend/package.json](../../frontend/package.json) 和
 [vite.config.ts](../../frontend/vite.config.ts)。
 
-## 定位与边界
+## 浏览器侧事实与同步契约
 
 浏览器侧只有两类事实：来自 REST 的权威 Snapshot，以及浏览器本地 draft（Pane 布局、
 未发送输入、上传进度）。WebSocket 事件只负责唤醒对账，或提供可丢失的显示 overlay。
@@ -69,8 +69,8 @@ registry 渲染到 slot，`OverlayHost` 统一渲染 dialogs 和 overlays。`too
 的 `id` 必须与后端冻结的 `rendererKey` 一致；`task` renderer 缺失时 MessageList
 使用默认 renderer。
 
-`src/shared` 不得依赖 `@/features`（ESLint 强制），feature 之间只通过 ExtensionHost
-和 shared 协作。Thread panel 是可移植 presentation：只依赖
+[`src/shared`](../../frontend/src/shared) 不得依赖 `@/features`（ESLint 强制），feature
+之间只通过 ExtensionHost 和 shared 协作。Thread panel 是可移植 presentation：只依赖
 [thread-timeline-types](../../frontend/src/features/ai/runtime/thread-timeline-types.ts)
 和 panel 内部组件，API、React Query、realtime、Canvas 与 controller 都留在宿主层。
 
@@ -296,15 +296,18 @@ Project feature 不复制 Harness durable state。
 管理 query、Snapshot、controller、viewport、selection、upload 与 Thread dock。
 [CanvasStage](../../frontend/src/features/canvas/CanvasStage.tsx) 承载 React Flow 与图
 投影，[CanvasToolRail](../../frontend/src/features/canvas/CanvasToolRail.tsx) 与
-`CanvasContextMenu` 负责 node、link、group、Function 编辑，
+[CanvasContextMenu](../../frontend/src/features/canvas/CanvasContextMenu.tsx) 负责
+node、link、group、Function 编辑，
 [CanvasGenerationPanel](../../frontend/src/features/canvas/CanvasGenerationPanel.tsx) 负责
-Function 参数与 run/cancel，`nodes/` 渲染 Text/Image/Video/Audio Resource node。
-Agent dock 复用 Bound Thread Pane 语义，不把 Thread 写进 Canvas graph。
+Function 参数与 run/cancel，[nodes/](../../frontend/src/features/canvas/nodes/) 渲染
+Text/Image/Video/Audio Resource node。Agent dock 复用 Bound Thread Pane 语义，不把
+Thread 写进 Canvas graph。
 
 ### ComfyUI 与 Settings
 
-[ComfyuiPage](../../frontend/src/features/comfyui/ComfyuiPage.tsx) 通过 `ComfyuiRuntime`
-提供 workflow list/edit 与 input binding 校验；run 有 `submit`、`refresh`、`cancel` 三种
+[ComfyuiPage](../../frontend/src/features/comfyui/ComfyuiPage.tsx) 通过
+[ComfyuiRuntime](../../frontend/src/features/comfyui/ComfyuiRuntime.tsx) 提供 workflow
+list/edit 与 input binding 校验；run 有 `submit`、`refresh`、`cancel` 三种
 pending operation，poll interval `1500ms`，polling 集合是 `pending`/`in_progress`/
 `running`，terminal 集合覆盖 `succeeded`/`failed`/`cancelled`/`interrupted` 等写法；
 文件输入先走 Storage reserve/直传/complete，再以 `blobId + filename` 提交。workflow
@@ -328,8 +331,9 @@ Canvas 专属样式由 [canvas.css](../../frontend/src/features/canvas/canvas.cs
 组件边界按职责划分：`AppShell` 只拥有 topbar、主导航、immersive route 与 Escape
 优先级；Workbench 只拥有 route/slot/contribution composition；feature page 拥有
 自己的 controller、query key、domain projection、业务 mutation 和 feature CSS，并通过
-shared UI 传入数据与 callback；`shared/ui/console`、`shared/ui/markdown`、
-`shared/ui/media` 只提供通用 primitive 与内容渲染。
+shared UI 传入数据与 callback；[shared/ui/console](../../frontend/src/shared/ui/console)、
+[shared/ui/markdown](../../frontend/src/shared/ui/markdown)、
+[shared/ui/media](../../frontend/src/shared/ui/media) 只提供通用 primitive 与内容渲染。
 
 - [i18n](../../frontend/src/shared/i18n/index.ts) 支持 `zh-CN` 与 `en-US`，locale
   存在 `kk-studio.locale`，默认 `en-US`，`setLocale` 同步 `document.documentElement.lang`；
@@ -347,13 +351,13 @@ shared UI 传入数据与 callback；`shared/ui/console`、`shared/ui/markdown`�
 
 | 层级 | 覆盖 |
 | --- | --- |
-| Bootstrap/platform | App redirect、AppShell immersive route 与 Escape、ExtensionHost registry、Workbench slot |
-| AI | catalog form/normalizer、Pane target/layout、Composer 与附件上传、command batch、Thread timeline、snapshot/realtime、stop/approval/task |
-| Projects | list/detail、CAS、Issue Board/actions、Coordinator conversation、全局 invalidation |
-| Canvas | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run |
-| ComfyUI | workflow 校验、page/card/panel/editor、run lifecycle、modal |
-| Settings | schema renderer/validation、draft、permission、browser preference、server CAS |
-| Shared | API client/service/codec、application-event protocol/manager、i18n、conflict、shortcuts、blocking overlay、Markdown/media |
+| [Bootstrap](../../frontend/src/app/)、[platform](../../frontend/src/platform/) | App redirect、AppShell immersive route 与 Escape、ExtensionHost registry、Workbench slot |
+| [AI](../../frontend/src/features/ai/) | catalog form/normalizer、Pane target/layout、Composer 与附件上传、command batch、Thread timeline、snapshot/realtime、stop/approval/task |
+| [Projects](../../frontend/src/features/projects/) | list/detail、CAS、Issue Board/actions、Coordinator conversation、全局 invalidation |
+| [Canvas](../../frontend/src/features/canvas/__tests__/) | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run |
+| [ComfyUI](../../frontend/src/features/comfyui/) | workflow 校验、page/card/panel/editor、run lifecycle、modal |
+| [Settings](../../frontend/src/features/settings/) | schema renderer/validation、draft、permission、browser preference、server CAS |
+| [Shared](../../frontend/src/shared/) | API client/service/codec、application-event protocol/manager、i18n、conflict、shortcuts、blocking overlay、Markdown/media |
 | E2E support | [test-support/](../../frontend/src/test-support/)、[test-setup.ts](../../frontend/src/test-setup.ts) |
 
 Vitest 使用 jsdom，[test-setup.ts](../../frontend/src/test-setup.ts) 在每个测试前清理
