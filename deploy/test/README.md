@@ -144,7 +144,12 @@ OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
   ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
 ```
 
-脚本硬编码 `seedance2.0fast`、`duration=4`、`submit=0`、`retry=0`，只验证页面准备与 checkpoint，
-不点击真实生成、不创建 FunctionRun、不下载或导入视频。`OPENCLI_HUB_BASE_URL` 没有默认值，必须
-是无 userinfo、path、query 和 fragment 的 HTTP(S) origin。任何正式 Seedance/GPT Image 提交都
-可能产生费用，只能通过应用的独立真实提交开关人工启用。
+[scripts/seedance-prepare-smoke.sh](../../scripts/seedance-prepare-smoke.sh) 硬编码 `seedance2.0fast`、
+`duration=4`、`submit=0`、`retry=0`，只验证页面准备与 checkpoint，不点击真实生成、不创建
+FunctionRun、不下载或导入视频。`RUN_REAL_SEEDANCE_PREPARE_SMOKE=1` 与 `--confirm-prepare-only`
+必须同时给出，否则脚本在发起任何外部请求前退出；`SEEDANCE_WORKSPACE_ID` 必须指向真实可访问的
+workspace。`OPENCLI_HUB_BASE_URL` 没有默认值，必须是无 userinfo、path、query 和 fragment 的
+HTTP(S) origin，脚本会先校验 origin 再去访问 Hub。
+
+任何正式 Seedance/GPT Image 提交都可能产生费用，只能通过应用的独立真实提交开关人工启用；本
+smoke 不替代那条路径。失败时脚本以非零状态退出并保留诊断，不要通过降低校验重试。

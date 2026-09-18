@@ -79,7 +79,8 @@ curl -fsS http://127.0.0.1:8080/actuator/health
   返回给浏览器的预签名直传/直下地址，必须是浏览器可访问的 origin，服务端 `PUT`/`GET`/
   `HEAD`/`COPY`/`DELETE` 始终使用前者。
 - `prod` profile 不做 `dev`/`e2e` seed；空库的 schema 由 Flyway 的
-  `V1__schema.sql` 建立，migration 只由唯一 Flyway owner 执行。
+  [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 建立，migration
+  只由唯一 Flyway owner 执行。
 - `prod` profile 的数据源只来自 `KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD`，
   没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与全部
   `KK_STUDIO_STORAGE_S3_*` 同样必须显式提供。
@@ -108,9 +109,10 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 ## 隔离栈与可靠性栈
 
 以下栈都使用各自的 Compose project name、network 和 named volume，清理命令只影响本 project。
-它们使用固定的 disposable 凭据，只用于本机验证，不代表生产配置。
+它们使用固定的 disposable 凭据，只用于本机验证，不代表生产配置。栈的完整契约与手工命令由本文
+持有，开发文档只保留运行入口与自迭代约束。
 
-### `deploy/test`：Canvas/Storage 离线栈
+### [`deploy/test`](../../deploy/test/README.md)：Canvas/Storage 离线栈
 
 `kk-studio-canvas-test` project 提供 PostgreSQL、MinIO、HTTP mock 与可选的 App，用于 Canvas
 Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke：
@@ -125,9 +127,10 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke：
 
 ### [`deploy/distributed`](../../deploy/distributed)：双节点零 App-to-App 网络栈
 
-`kk-studio-distributed` project 是免费 mock 拓扑：App 镜像复用 `deploy/local/Dockerfile`，
-Daemon 镜像复用 [deploy/reliability/daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile)，
-HTTP mock 直接挂载 [`deploy/test/mock`](../../deploy/test/mock)。
+`kk-studio-distributed` project 是免费 mock 拓扑：App 镜像复用
+[deploy/local/Dockerfile](../../deploy/local/Dockerfile)，Daemon 镜像复用
+[deploy/reliability/daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile)，HTTP mock 直接
+挂载 [`deploy/test/mock`](../../deploy/test/mock)。
 
 ```bash
 ./deploy/distributed/run.sh up [--skip-build]
@@ -155,7 +158,7 @@ DISTRIBUTED_APP_B_PORT=18083
 [`scripts/e2e.sh`](../../scripts/e2e.sh) 的 `--distributed` 通过该入口启停栈
 并在退出时清理。
 
-### `deploy/reliability`：App + Environment Daemon
+### [`deploy/reliability`](../../deploy/reliability)：App + Environment Daemon
 
 `kk-studio-reliability` project 运行 `e2e` profile 的 App 与容器内 Daemon，用于 Environment
 工具隔离、S3 和显式可靠性矩阵。`reliability` network 是 `internal: true`，App 另加入
@@ -209,7 +212,8 @@ PI_BASE_ANCHOR=/path/to/pi-base \
   ./scripts/reliability/stack.sh snapshot
 ```
 
-可靠性与 Agent 矩阵的运行入口见[开发与测试](development-and-testing.md)。
+可靠性栈与 Agent 矩阵的运行入口见
+[开发与测试](development-and-testing.md#隔离栈与真实-agent-矩阵)。
 
 ## 运行配置与凭据
 
@@ -225,7 +229,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | supply-chain | reports/images/cache | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`TRIVY_SKIP_DB_UPDATE` |
 | 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_*`、`TEST_ANTHROPIC_*`、`TEST_DEEPSEEK_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
-| 显式 Seedance prepare-only | 外部 Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` |
+| 显式 Seedance prepare-only | 外部 Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
 Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 SystemSettings editor 修改。
 `KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY`、Canvas Function runtime 变量和
@@ -286,12 +290,25 @@ NAS 自迭代拓扑横跨三个职责边界，本仓库只提供前者的产物�
 | NAS Compose 仓库 | `vps-kk-studio`、`vps-kk-studio-dev`、共享 PostgreSQL/S3 连接、持久 workspace/cache/`gh` 配置、SSH key 只读挂载、私密环境变量注入 |
 | Gateway 仓库 | `studio.kk1.fun`、`studio-dev.kk1.fun` 的 HTTP/WebSocket 路由和访问控制 |
 
+### 镜像与运行职责
+
 Main runtime image 不含源码、Maven、Node 或 credential，是唯一 Flyway owner 与唯一 Harness
 worker。Dev 节点镜像由 [deploy/dev/Dockerfile](../../deploy/dev/Dockerfile) 构建：Maven
 3.9.11/JDK 21 与 Node 24.14.0/npm 11.9.0 工具链、`git`/`curl`/`jq`/`lsof`/`python3`/`ffmpeg`/
 `ffprobe`、`openssh-client` 与 GitHub CLI `2.100.0`，并以同一源码构建的 Environment Daemon
-作为容器主进程。容器以 uid/gid `10001` 运行，工作区、cache 和配置必须由外部 Compose 以
-`10001:10001` 属主挂载：
+作为容器主进程。
+
+Dev Backend 关闭 Flyway 与进程内 Harness dispatcher（`SPRING_FLYWAY_ENABLED=false`、
+`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`），Harness Thread/Model/Tool Work 只由 Main
+执行；这两个开关在镜像、entrypoint 和 `kk-studio-dev-reload` 中都是 fail-closed 默认值，ad hoc
+覆盖 worker 开关会让 reload 直接拒绝执行。Main 与 Dev 共享逻辑 database 和 bucket，因此 Dev
+中改动 processor/runtime 等异步执行路径必须依靠自动化测试或显式隔离环境验证，不能以 Dev
+preview 的行为作为验收依据。
+
+### 挂载与持久化
+
+容器以 uid/gid `10001` 运行，工作区、cache 和配置必须由外部 Compose 以 `10001:10001` 属主
+挂载：
 
 ```text
 /workspace                     # Daemon environment-root 与 Git checkout 根
@@ -308,15 +325,14 @@ worker。Dev 节点镜像由 [deploy/dev/Dockerfile](../../deploy/dev/Dockerfile
 （`KK_STUDIO_SSH_CREDENTIALS_DIR`），entrypoint 启动时才把 `id_*` 复制进 `/home/kkdaemon/.ssh`；
 github.com 的 host key 固化在镜像内的 `/etc/ssh/ssh_known_hosts`，镜像级 SSH 配置使用
 `BatchMode`、`IdentitiesOnly`、严格 host key 校验和 `ConnectTimeout 10`，认证异常直接失败而不是
-挂起等待输入。`gh` 使用默认配置目录 `/home/kkdaemon/.config/gh`，首次登录步骤见
-[开发与测试](development-and-testing.md)。
+挂起等待输入。`gh` 使用默认配置目录 `/home/kkdaemon/.config/gh`，该目录持久化后只需首次交互式
+登录一次，登录命令见[开发与测试](development-and-testing.md#gh-首次登录)。
 
-Dev Backend 关闭 Flyway 与进程内 Harness dispatcher（`SPRING_FLYWAY_ENABLED=false`、
-`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`），Harness Thread/Model/Tool Work 只由 Main
-执行；这两个开关在镜像与 entrypoint 中都是 fail-closed 默认值。Dev Daemon 经内部 Docker 网络
-连接 Main 的 origin，而不是本容器的 Backend：Main 的 HTTP(S) origin 统一保存在外部 Compose
-项目的 `.env`，`docker-compose.yml` 只把同名变量显式传入 Dev，entrypoint 再派生出 WebSocket
-地址：
+### 控制面 origin 与网络地址
+
+Dev Daemon 经内部 Docker 网络连接 Main 的 origin，而不是本容器的 Backend：Main 的 HTTP(S)
+origin 统一保存在外部 Compose 项目的 `.env`，`docker-compose.yml` 只把同名变量显式传入 Dev，
+entrypoint 再派生出 WebSocket 地址：
 
 ```dotenv
 # .env
@@ -331,9 +347,24 @@ environment:
 
 origin 必须是使用 DNS/IPv4 host 与可选端口的裸 HTTP(S) origin，可选一个结尾 `/`；`https`
 派生 `wss`。不得填写公共 Gateway 域名、`ws`/`wss` scheme、路径、query、fragment、userinfo
-或非法端口，非法值在启动服务之前就让容器失败且不回显输入值。上面的值最终派生为
-`ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`。Dev 的环境变量、Dev 关闭
-worker 的开关与 `gh` 登录契约见[开发与测试](development-and-testing.md)。
+或非法端口，非法值在准备 workspace 和启动服务之前就让容器启动失败且不回显输入值。上面的值
+最终派生为 `ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`。
+
+两个容器内的服务端访问都不得绕到公网域名：
+
+```text
+PostgreSQL -> vps-postgres:5432
+S3 API     -> http://vps-s3:9000
+OpenCLI    -> 同一 vps 网络的 Hub 容器 HTTP origin
+Daemon     -> http://vps-kk-studio:8080（entrypoint 派生 ws://vps-kk-studio:8080/api/harness/environment-daemon/v1）
+```
+
+OpenCLI 的 `baseUrl` 由 System Settings 配置，上传、执行轮询和产物下载都从该 origin 构造并拒绝
+跨源产物 URL，因此 NAS 配置必须填写 Hub 的容器内地址而不是公网域名。S3 的 public endpoint 只
+用于返回给浏览器的预签名直传/直下 URL，服务端 `PUT`/`GET`/`HEAD`/`COPY`/`DELETE` 始终使用
+`vps-s3:9000`。
+
+### entrypoint 启动同步与冷启动预算
 
 每次启动 entrypoint 都把持久工作区无损快进到 `origin/$KK_STUDIO_GIT_BRANCH`，只允许
 `merge --ff-only`，永不 reset/rebase/stash/checkout：
@@ -342,7 +373,7 @@ worker 的开关与 `gh` 登录契约见[开发与测试](development-and-testin
   或本地历史与远端互不包含时，容器直接启动失败，节点不会静默运行未验证的修订；
 - 存在未 push 的本地提交（本地领先）时按原样启动并提示 ahead；
 - 同步后按修订 stamp 决定重建量：后端 JAR 记录在 `web/target/.kk-studio-revision`，前端依赖
-  记录在 `frontend` 下的 `node_modules/.kk-studio-package-lock.sha`。
+  记录在 [`frontend`](../../frontend) 下的 `node_modules/.kk-studio-package-lock.sha`。
 
 冷 cache 首次启动要完整构建 Backend 并安装前端依赖，实测约 29 分钟（20 核 x86_64），因此镜像
 healthcheck 的 start period 取 `--start-period=2700s`，覆盖冷启动并留约 50% 余量。真正的引导
@@ -350,19 +381,37 @@ healthcheck 的 start period 取 `--start-period=2700s`，覆盖冷启动并留�
 `600s`），超时直接以非零状态退出。外部 Compose 应继承镜像 healthcheck，不要用更短的
 `start_period` 覆盖这条边界。
 
-`.github/workflows/docker-publish.yml` 在推送 `main` 时构建并发布 `<namespace>/kk-studio:main`，
-在推送 `dev` 时构建并发布 `<namespace>/kk-studio-dev:dev`，两者都附带 immutable commit SHA
-tag、`linux/amd64` 平台和 Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，不作为
-build arg 或 image layer。
+### Dev 运行环境变量契约
+
+外部 Compose 只引用变量名，真实值由 NAS 私密环境文件注入：
+
+| 变量 | 职责 |
+| --- | --- |
+| `KK_STUDIO_WORKSPACE_ROOT` | Daemon environment-root 与持久工作区根，默认 `/workspace` |
+| `KK_STUDIO_REPOSITORY_DIR` | 源码 checkout，默认 `/workspace/kk-studio` |
+| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 SSH remote 与每次启动 fetch/快进的目标分支，默认不带 remote / `dev` |
+| `KK_STUDIO_SSH_CREDENTIALS_DIR` | 只读 SSH key 挂载目录，默认 `/run/kk-studio/ssh`；`id_*` 在启动时复制到 `/home/kkdaemon/.ssh` |
+| `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
+| `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |
+| `SPRING_PROFILES_ACTIVE` / `SPRING_FLYWAY_ENABLED` | Backend profile 与 Flyway 开关，必须为 `prod` / `false` |
+| `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` | Dev Backend 的 Harness worker 开关，必须为 `false` |
+| `KK_STUDIO_CONTROL_PLANE_BASE_URL` | Main App 的 HTTP(S) origin，必填；entrypoint 派生 Daemon 的 ws(s) gateway 地址 |
+| `BACKEND_HOST` / `BACKEND_PORT` / `FRONTEND_HOST` / `FRONTEND_PORT` / `DEV_WORK_DIR` | [scripts/dev.sh](../../scripts/dev.sh) 的监听地址、端口与 log/PID 目录 |
+| `DEV_READY_TIMEOUT_SECONDS` | Backend/Vite readiness 预算，容器内默认 `600`（仓库默认 `90`） |
+| `KK_STUDIO_DAEMON_REGISTRATION_TOKEN` / `KK_STUDIO_DAEMON_NOTE` / `KK_STUDIO_DAEMON_DATA_DIR` | Daemon 注册 token、Environment note（默认 `kk-studio dev node`）与 Daemon 数据目录（默认 `/workspace/.kkstudio/daemon`）；token 在注册后立即 `unset` |
+
+### 发布产物与凭据边界
+
+[`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送 `main`
+时构建并发布 `<namespace>/kk-studio:main`，在推送 `dev` 时构建并发布
+`<namespace>/kk-studio-dev:dev`，两者都附带 immutable commit SHA tag、`linux/amd64` 平台和
+Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，不作为 build arg 或 image layer。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、Gateway、
 registration credential 和 SSH 私钥不进入本仓库、Docker build context、image layer、日志或
 报告；registration token 经 owner-only 凭证文件传递（`--registration-token-file`），不出现在
-Daemon argv 或环境变量中。Main 与 Dev 共享逻辑 database 和 bucket，但只有 Main 执行 Flyway 与
-Harness 异步工作：Dev 关闭这两者，Harness 层只提供 control/query preview。因此 Dev 中改动
-processor/runtime 等异步执行路径必须依靠自动化测试或显式隔离环境验证，不能以 Dev preview 的
-行为作为验收依据。Agent 停止边界、共享数据库重建等自迭代约束见
-[开发与测试](development-and-testing.md)。
+Daemon argv 或环境变量中。Agent 停止边界、共享数据库重建等自迭代约束见
+[开发与测试](development-and-testing.md#nas-maindev-自迭代运行规范)。
 
 ---
 

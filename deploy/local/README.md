@@ -68,34 +68,20 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 | --- | --- | --- |
 | `KK_STUDIO_APP_HOST` | `127.0.0.1` | app 宿主绑定地址 |
 | `KK_STUDIO_APP_PORT` | `8080` | app 宿主端口（映射到容器内 `8080`；改它不会影响镜像 HEALTHCHECK） |
-| `KK_STUDIO_PG_HOST` | `127.0.0.1` | PostgreSQL 宿主绑定地址 |
-| `KK_STUDIO_PG_PORT` | `5432` | PostgreSQL 宿主端口 |
-| `KK_STUDIO_PG_DATABASE` | `kk_studio` | 初始数据库名 |
-| `KK_STUDIO_PG_USER` | `kk_studio` | 初始用户名 |
-| `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始密码；disposable 本地值 |
-| `KK_STUDIO_S3_HOST` | `127.0.0.1` | MinIO 宿主绑定地址 |
-| `KK_STUDIO_S3_PORT` | `9000` | MinIO 宿主端口 |
+| `KK_STUDIO_PG_HOST` / `KK_STUDIO_PG_PORT` | `127.0.0.1` / `5432` | PostgreSQL 宿主绑定地址与端口 |
+| `KK_STUDIO_PG_DATABASE` / `KK_STUDIO_PG_USER` / `KK_STUDIO_PG_PASSWORD` | `kk_studio` | 初始数据库名、用户名与密码；disposable 本地值 |
+| `KK_STUDIO_S3_HOST` / `KK_STUDIO_S3_PORT` | `127.0.0.1` / `9000` | MinIO 宿主绑定地址与端口 |
 | `KK_STUDIO_S3_PUBLIC_HOST` | `127.0.0.1` | 预签名 URL 发布给浏览器的主机名或 IP |
 | `KK_STUDIO_S3_BUCKET` | `kk-studio` | 初始 bucket |
-| `KK_STUDIO_S3_ACCESS_KEY` | `kk-studio` | MinIO access key；disposable 本地值 |
-| `KK_STUDIO_S3_SECRET_KEY` | `kk-studio` | MinIO secret key；disposable 本地值 |
+| `KK_STUDIO_S3_ACCESS_KEY` / `KK_STUDIO_S3_SECRET_KEY` | `kk-studio` | MinIO 凭据；disposable 本地值 |
 | `KK_STUDIO_S3_REGION` | `us-east-1` | S3 region |
 | `KK_STUDIO_SPRING_PROFILES_ACTIVE` | `dev` | 传给 `SPRING_PROFILES_ACTIVE` |
-| `KK_STUDIO_HARNESS_DISPATCHER_MAX_DISPATCH_TASKS` | `64` | queued/running Processor handoff 总量上限 |
-| `KK_STUDIO_HARNESS_DISPATCHER_LEASE_DURATION` | `30s` | Work 初始 claim 租约时长 |
-| `KK_STUDIO_HARNESS_DISPATCHER_POLL_INTERVAL` | `1s` | 丢失通知时的兜底轮询间隔 |
-| `KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY` | `1s` | worker executor 拒绝 handoff 后的重排延迟 |
-| `KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY` | `16` | bounded worker executor 平台线程并发数 |
-| `KK_STUDIO_HARNESS_DISPATCHER_WORKER_QUEUE_CAPACITY` | `64` | bounded worker executor 队列容量 |
-| `KK_STUDIO_MODEL_MAX_CONCURRENCY` | `16` | 单进程 Model invocation admission 上限 |
-| `KK_STUDIO_TOOL_MAX_CONCURRENCY` | `64` | 单进程 Tool invocation admission 上限 |
-| `KK_STUDIO_SUBAGENT_MAX_CONCURRENCY` | `10` | Subagent 执行器容量 |
-| `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES` | `16777216` | Daemon WebSocket 单帧上限（字节） |
-| `KK_STUDIO_ENVIRONMENT_GATEWAY_QUEUE_CAPACITY` | `256` | 每个 Daemon 连接的出站待发送帧数上限 |
-| `KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_BYTES` | `16777216` | 每个 Daemon 连接的出站待发送 UTF-8 总字节上限 |
-| `KK_STUDIO_ENVIRONMENT_GATEWAY_SEND_TIMEOUT` | `10s` | 单帧发送超时，超时后关闭连接 |
 
-Dispatcher、Admission 和 gateway frame/queue 上限属于启动配置，不进入 SystemSettings。
+[compose.yaml](compose.yaml) 还接受进程级的容量与调度参数，本地启动通常不需要覆盖：dispatcher、
+admission 与 subagent 上限的默认值和语义由
+[Platform 配置](../../docs/modules/platform.md#部署级-configurationproperties)持有，
+`KK_STUDIO_ENVIRONMENT_GATEWAY_*` 的 Daemon WebSocket 边界由
+[Web 配置](../../docs/modules/web.md#生命周期与配置)持有。
 
 把宿主绑定改成 `0.0.0.0` 等非 loopback 地址时，必须同时覆盖上面所有 PostgreSQL 与 MinIO
 凭据，并把 `KK_STUDIO_S3_PUBLIC_HOST` 设为浏览器实际可访问的主机名或 IP：预签名 URL 不会
