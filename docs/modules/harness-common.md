@@ -1,158 +1,74 @@
 # Harness Common
 
-## 定位
+Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量齐了吗、这段 JSON 能不能信、这个 Resource 引用是否规范、工具产出的内容能不能存、模型给的参数是否符合 schema。若这些问题在 Runtime、Tool、MCP、Daemon 与 Platform 各写一遍，宽松度必然分叉——一处容忍重复键，另一处不容忍；一处按字符数限长，另一处按字节。本模块把这些判断收敛成一组无状态值对象与严格校验工具，供各上层模块直接引用。
 
-`harness-common` 是 Harness 各子域及上层模块共享的基础契约与工具库，专注于无状态值对象、数据校验与通用编解码工具。模块提供：
-
-- classpath prompt 模板解析、缓存与精确变量渲染（`common.prompt`）；
-- 严格 JSON 树解析、顶层 object 校验与有界 UTF-8 流式编码（`common.json`）；
-- 不可变规范 Resource URI 引用模型与格式校验（`common.resource`）；
-- sealed 结果内容模型 `ResultContent`（Text、Json、Binary、Resource）（`common.result`）；
-- 输入参数模式 `InputSchema` / `SchemaElement` 体系、参数校验器、别名与类型归一化器及确定性 JSON 编解码器（`common.schema`）。
-
-工具与环境的具体身份模型由 [`harness-tool`](harness-tool.md) 与 [`harness-environment`](harness-environment.md) 定义，执行调度与外部存储由运行时和基础设施模块承接；`harness-common` 保持为纯 Java 底层值契约。
-
-## 职责
-
-### 核心职责
-
-- 提供无状态、不可变且语义确定的基础值对象与严格校验工具。
-- 为 `harness-tool` 与 `harness-environment` 等上层模块提供共享的 `ResultContent`、`InputSchema`、`ResourceRef` 与 JSON 边界校验能力。
-- 生产依赖限定在 JDK 与 Jackson。
-- 在 Unicode 编码、UTF-8 字节上限、JSON 语法、Schema 结构与 URI 格式上执行严格的 fail-closed 校验，遇非法输入立即失败。
-
-### 协作边界
-
-- `AgentToolId`、`AgentToolDefinition`、`ToolCall` 与 `ToolResult` 等工具契约归入 [`harness-tool`](harness-tool.md)。
-- `EnvironmentId`、Capability catalog 与 Daemon 通信协议归入 [`harness-environment`](harness-environment.md)。
-- 执行 SPI（`Tool` / `EnvironmentCapability`）与网关路由由执行与编排模块提供。
-- Spring 容器装配、JDBC 持久化与模型 Provider SDK 均由外部容器与上层应用承接。
-
-## 依赖边界
-
-```text
-JDK + Jackson
-      │
-      ▼
-harness-common
-  ├─ common.prompt    (PromptTemplate / PromptTemplateLoader)
-  ├─ common.json      (JsonValues / BoundedJsonWriter)
-  ├─ common.resource  (ResourceRef / ResourceUriValidator)
-  ├─ common.result    (ResultContent / Text / Json / Binary / Resource)
-  └─ common.schema    (InputSchema / SchemaElement / InputValidator / InputNormalizer / SchemaJsonCodec)
-
-依赖约束：仅允许依赖 JDK 与 Jackson；框架装配、持久化与 Provider SDK 均置于外层模块。
-```
-
-生产依赖见 [`pom.xml`](../../harness/common/pom.xml)。[`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 守卫主源码 import 与 POM 依赖。
+这里没有 I/O、生命周期、持久化与容器装配，约束全部在构造期以 `IllegalArgumentException` 表达。生产依赖只有 JDK 与 Jackson（见 [`pom.xml`](../../harness/common/pom.xml)），由 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 扫描主源码 import 与 POM 守卫；工具身份、环境标识、执行 SPI、存储与装配分别归 [`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、[`harness-runtime`](harness-runtime.md) 与外部容器。
 
 ## 包架构
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.common.prompt` | 提供严格 classpath prompt 模板解析、缓存与精确变量渲染原语 | 仅支持 `${name}` 占位符且要求变量全集精确匹配；表达式求值与业务编排由调用方承接 |
-| `fun.fengwk.kkstudio.harness.common.json` | 提供严格重复键与尾随拦截的 JSON 校验器，以及流式有界 UTF-8 编码器 | 聚焦底层语法与体积边界校验，业务数据建模由各领域模块自行组织；超限时立即中止流式写入 |
-| `fun.fengwk.kkstudio.harness.common.resource` | 定义不可变规范 Resource URI 引用 `ResourceRef` 与严格 URI / 载荷校验器 | 限定五类 scheme 与严格字节上限；网络下载、传输协议与持久化存储由外部能力承接 |
-| `fun.fengwk.kkstudio.harness.common.result` | 定义 sealed `ResultContent` 内容单元层次（Text、Json、Binary、Resource） | 纯不可变值模型；执行生命周期、权限控制与持久化调度由运行时承接 |
-| `fun.fengwk.kkstudio.harness.common.schema` | 定义输入参数 Schema 结构、参数校验器、静默归一化器与确定性 JSON 编解码器 | 采用属性字典序的确定性编解码；执行路由适配与 Provider 转换由上层模块处理 |
+| `fun.fengwk.kkstudio.harness.common.prompt` | classpath prompt 模板的严格解析、缓存与精确变量渲染 | 只支持 `${name}`，要求变量集合精确相等；表达式求值与业务编排由调用方承接 |
+| `fun.fengwk.kkstudio.harness.common.json` | 严格 JSON 门禁与有界 UTF-8 编码器 | 只管语法与体积边界，不做业务数据建模；超限时中止编码而不物化完整输出 |
+| `fun.fengwk.kkstudio.harness.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 六类 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
+| `fun.fengwk.kkstudio.harness.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
+| `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
 
-## 核心模型 / API
+## Prompt 模板
 
-### Prompt 模板与 Loader
+[`PromptTemplate`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java) 只识别 `${name}`，变量名必须匹配 `[A-Za-z_][A-Za-z0-9_]*`；构造时拒绝未闭合的 `${` 与非法变量名。`render(Map)` 要求传入集合与模板声明的变量集合精确一致：缺一个报 unresolved，多一个报 unexpected，值为 `null` 等同于未提供；变量值按字面量写入，值里出现的 `${...}` 不会被二次解析。
 
-[`PromptTemplate`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java) 仅支持 `${name}` 形式的变量占位符，变量名需匹配 `[A-Za-z_][A-Za-z0-9_]*`：
+[`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java) 按 classpath 资源路径读取 UTF-8 文本，并在 `ConcurrentHashMap` 中缓存解析结果；资源缺失或读取失败抛确定性的 `IllegalArgumentException`。因此 prompt 装配错误在启动或首次使用时立刻暴露，而不是退化成空模板。
 
-- 构造时扫描变量并校验占位符闭合与变量名合法性；
-- `render(Map<String, String> values)` 要求传入的变量集合与模板声明的变量集合精确一致，存在未提供或多余变量时抛出异常；
-- 变量值按字面量写入，其中出现的 `${...}` 保持原文。
+## JSON 边界
 
-[`PromptTemplateLoader`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java) 从 classpath 读取 UTF-8 文本资源并缓存解析后的 `PromptTemplate` 实例，资源缺失或读取失败时抛出确定性异常。
+[`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 是全仓共享的 JSON 门禁，使用的 `ObjectMapper` 开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`：
 
-### JSON 边界工具
+- `requireValidJson(json)` 要求非空白且严格合法；
+- `requireJsonObject(json)` / `requireJsonObject(json, name)` 额外要求顶层为 object，并把 `null` 或空白规范化为 `"{}"`，第二个参数用于定制异常里的字段名；
+- `readTree` / `write` 提供同一套严格性的树读写。
 
-[`JsonValues`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java) 开启 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`：
+[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。
 
-- `requireValidJson(String json)`：校验非空白严格合法 JSON；
-- `requireJsonObject(String json)`：校验顶层必须为 JSON object，null 或空白文本规范化为 `"{}"`；
-- `readTree(String json)` / `write(JsonNode node)`：提供严格的树解析与紧凑序列化能力。
+## Resource 引用与 URI 校验
 
-[`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 将 `JsonNode` 序列化为 UTF-8 JSON 文本：
+[`ResourceRef`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java) 是 `uri / mediaType / name? / size? / sha256?` 的不可变记录，允许 `data`、`file`、`s3`、`https`、`http`、`blob-upload` 六类 scheme。构造时先做全局约束，再按 scheme 校验；直接构造与 JSON 反序列化走同一入口，因此不会出现两种宽松度：
 
-- 在流式写入过程中累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，避免在内存中物化超限内容；
-- 未超限时返回完整 JSON 文本。
+- URI 必须是不超过 128 KiB 的 canonical ASCII：非 ASCII、控制字符、反斜杠、相对 URI、大写 scheme 一律拒绝，且 `URI.create(uri).toASCIIString()` 必须与原串相等；百分号转义必须是大写 hex，且不得编码 NUL、`/`、`\` 与 unreserved 字符。
+- `mediaType` 必须是小写 `type/subtype`、不带参数、不超过 255 ASCII 字节；`name` 不得为空白、不得含控制字符、不超过 512 UTF-8 字节；`sha256` 必须是 64 位小写 hex；`size` 不得为负。
+- `data` / `file` / `s3` / `blob-upload` 必须携带非空 `size` 与 `sha256`，`http` / `https` 不要求。`data` 的 header 必须精确等于 `<mediaType>,` 或 `<mediaType>;base64,`，解码载荷不超过 64 KiB，且 `size` 必须等于解码长度、`sha256` 必须等于解码摘要；base64 载荷拒绝非规范 pad bits，非 base64 载荷必须使用 frozen 表示（原始 ASCII 仅限 unreserved 与 `/`，其余字节用大写 `%XX`）。
+- `file` 必须精确为 `file:///…` 空 authority、单前导斜杠、无 dot 或空 segment；`s3` bucket 为 3–63 字符小写字母数字、不得形如 IP，key 不得使用百分号编码；`http` / `https` 要求小写 host、不携带 userinfo/query/fragment、不显式声明默认端口。
+- `blob-upload:<uploadId>` 是 Environment Daemon 已把字节直传对象存储后的瞬时引用，不是可解引用地址：`blobUploadUri(UUID)` 构造、`blobUploadId()` 解析，消费方只能通过全局 Blob 上传契约把它转移为会话引用。
 
-### Resource 引用与 URI 校验
+[`ResourceUriValidator`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java) 是承载逐 scheme 规则的包私有实现，也是新增 scheme 时唯一需要改动的地方。
 
-[`ResourceRef`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java) 表示不可变的规范 Resource URI 引用：
+## 结果内容模型
 
-```text
-uri / mediaType / name? / size? / sha256?
-```
+[`ResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java) 是 sealed 接口，四类内容单元覆盖「可保存或流式传输」的全部形态：
 
-- 允许的 scheme：`data`、`file`、`s3`、`https`、`http`；
-- [`ResourceUriValidator`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java) 在构造时校验 URI 规范性、media type、Unicode 编码、UTF-8 长度、size 与 sha256 校验和；
-- 核心字节上限：
-  - `MAX_URI_UTF8_BYTES = 131072`（128 KiB）
-  - `MAX_DATA_DECODED_BYTES = 65536`（64 KiB）
-  - `MAX_MEDIA_TYPE_ASCII_BYTES = 255`
-  - `MAX_NAME_UTF8_BYTES = 512`
-  - `MAX_PREVIEW_UTF8_BYTES = 16384`（16 KiB）
-- 提供 `utf8Length(String, String)` 与非分配式有界扫描 `utf8LengthUpTo(String, String, int)` 工具方法。
+- [`TextResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextResultContent.java)：纯文本，`text` 不得为 `null`；
+- [`JsonResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/JsonResultContent.java)：严格 JSON，且在解析前先按 UTF-8 字节数限制在 1 MiB 内，保证任何树优先解析只面对有界输入；
+- [`BinaryResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/BinaryResultContent.java)：内存中的瞬时字节载荷，构造与读取都做防御性复制，可选 [`TextArtifactMetadata`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextArtifactMetadata.java)，其 `totalBytes` 必须与字节长度一致；
+- [`ResourceResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResourceResultContent.java)：指向 `ResourceRef` 的引用，可选不超过 16 KiB 的 `preview` 与可选 `TextArtifactMetadata`。
 
-### ResultContent 体系
+`TextArtifactMetadata(totalBytes, totalLines)` 让大文本工件在不读取正文的前提下就能被展示与分页，两个字段都不得为负。本模块只定义「内容长什么样」，内容何时外部化为 Resource、何时允许出现在 partial 阶段，由执行边界决定。
 
-[`ResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java) 是 sealed 接口，作为结果中可保存或流式传输的通用内容单元：
+## 输入 Schema、校验与归一化
 
-- [`TextResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextResultContent.java)：纯文本内容，要求 `text != null`；
-- [`JsonResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/JsonResultContent.java)：严格 JSON 文本，原始 UTF-8 字节数不超过 `MAX_JSON_UTF8_BYTES = 1048576`（1 MiB）；
-- [`BinaryResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/BinaryResultContent.java)：内存中的二进制内容单元，包含 `mediaType` 与防御性复制的 `byte[] content`；
-- [`ResourceResultContent`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResourceResultContent.java)：指向规范 `ResourceRef` 的引用内容，支持可选的有界 `preview` 文本。
+[`InputSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java) 描述顶层参数对象：`description`、`properties`、`required` 与 `additionalProperties`；构造期要求属性名非空白且 `required ⊆ properties`。[`SchemaElement`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaElement.java) 是 sealed 层次，只允许 String、Integer、Number、Boolean、Enum、Array、Object 七类节点，Enum 取值不得为空或空白。
 
-### InputSchema 与校验/归一化
+- [`InputValidator`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java) 按 schema 递归严格校验类型、必填项与未声明属性（`additionalProperties=false` 时拒绝未知键）。失败时抛出的消息格式固定为 `argumentsJson does not match inputSchema: $.path <reason>`，调用方可以据此把错误定位到具体字段。
+- [`InputNormalizer`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java) 在严格校验前做静默容错：`IntegerSchema` 字段接受 `-?\d+` 形式的数字字符串并改写为 JSON 整数，`NumberSchema` 字段接受含小数或指数的十进制文本并改写为 JSON number；非数字文本以及超出 long / double 表示范围的文本保持原样，其它类型不做转换。显式 `null` 只对 schema 已声明且未列入 `required` 的属性删除，语义等同于缺省；required 属性与未声明属性上的 `null` 原样留给校验器拒绝。
+- [`SchemaJsonCodec`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java) 是 schema 的确定性编解码器：编码时 `properties` 与 `required` 按字典序输出，解码时拒绝未知字段、缺失 `type` / `properties` / `required` / `additionalProperties`、`required` 中出现未声明属性、重复键与尾随 token。Provider tool schema 与 harness 内部 schema 都以它为唯一序列化实现。
 
-[`InputSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java) 描述顶层参数对象 schema，组合 `description`、`properties`、`required` 与 `additionalProperties` 策略。
+## 源码与测试
 
-[`SchemaElement`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaElement.java) 包含以下元素类型：
-
-- [`ObjectSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/ObjectSchema.java)：嵌套对象 schema；
-- [`ArraySchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/ArraySchema.java)：数组 schema 与元素 schema；
-- [`StringSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/StringSchema.java)：字符串描述与类型；
-- [`IntegerSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/IntegerSchema.java)：整数类型；
-- [`NumberSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/NumberSchema.java)：浮点/数字类型；
-- [`BooleanSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/BooleanSchema.java)：布尔类型；
-- [`EnumSchema`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/EnumSchema.java)：字符串枚举取值列表。
-
-配套工具：
-
-- [`InputValidator`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)：严格校验顶层 JSON object 参数是否满足 `InputSchema`；
-- [`InputNormalizer`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)：在 schema 校验前执行模型输入容错的静默归一化（数字字符串转为 JSON 整数/数字；schema 已声明但未列入 `required` 的属性若显式为 `null`，则等价为缺省）；required null 与未知属性仍保留给严格校验器拒绝；
-- [`SchemaJsonCodec`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)：严格且确定性的 `InputSchema` JSON 编解码器，编码时属性按字典序排序，解码时拒绝未知字段与语法错误。
-
-## 不变量、failure / recovery
-
-- 基础值对象均在构造时进行不变量断言，非法输入立即抛出 `IllegalArgumentException`。
-- 所有 JSON 操作启用重复键检查与尾随 token 拦截，遇到语法瑕疵立即抛出解析异常。
-- 文本长度使用 Unicode 编码校验与 UTF-8 字节计数，遇到未配对代理项时明确报错。
-- `ResultContent` 与 `InputSchema` 保持为纯 Java 数据模型，生命周期与持久化交由运行时和存储层驱动。
-
-## 测试与源码入口
-
-### 源码入口
-
-- [`PromptTemplate.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java)、[`PromptTemplateLoader.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java)
-- [`JsonValues.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java)、[`BoundedJsonWriter.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java)
-- [`ResourceRef.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java)
-- [`ResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java)、[`TextResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextResultContent.java)、[`JsonResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/JsonResultContent.java)、[`BinaryResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/BinaryResultContent.java)、[`ResourceResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResourceResultContent.java)
-- [`InputSchema.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java)、[`InputValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)
-
-### 关键测试守卫
-
-- [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java)：模块仅依赖 JDK 与 Jackson 生产依赖。
-- [`PromptTemplateTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateTest.java)：模板解析、占位符校验与严格渲染。
-- [`BoundedJsonWriterTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriterTest.java)、[`JsonValuesTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/json/JsonValuesTest.java)：JSON 边界与截断校验。
-- [`ResourceRefTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRefTest.java)：URI scheme、data URI 解码与 size/sha 校验。
-- [`ResultContentTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/result/ResultContentTest.java)：各 ResultContent 变体的不可变性与约束。
-- [`InputValidatorTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputValidatorTest.java)、[`InputNormalizerTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizerTest.java)、[`SchemaJsonCodecTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodecTest.java)：模式编解码、归一化与校验。
+- Prompt：[`PromptTemplate.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java)、[`PromptTemplateLoader.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java)
+- JSON：[`JsonValues.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java)、[`BoundedJsonWriter.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java)
+- Resource：[`ResourceRef.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java)
+- Result：[`ResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextArtifactMetadata.java)
+- Schema：[`InputSchema.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java)、[`InputValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)
+- 改动前先跑 [`CommonModuleArchitectureTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/CommonModuleArchitectureTest.java) 确认依赖方向未破；[`ResourceRefTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRefTest.java) 覆盖六类 scheme 与 data URI 解码，[`InputNormalizerTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizerTest.java) 锁定容错与拒绝的边界，[`SchemaJsonCodecTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodecTest.java) 锁定确定性编码，[`PromptTemplateTest.java`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateTest.java) 锁定精确变量匹配。
 
 ---
 
