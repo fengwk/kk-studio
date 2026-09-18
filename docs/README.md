@@ -8,7 +8,8 @@
 1. [系统设计](system-design.md)：先了解 Maven reactor、逻辑模块、全局不变量
    和跨域主链路。
 2. [模块文档](#模块)：按职责阅读相关模块的边界、API、恢复语义和测试入口。
-3. [运行文档](#operations)：需要构建、测试、部署或运行 E2E 时阅读 operations。
+3. [运行文档](#operations)：需要构建、测试、部署、安装 Daemon 或运行 E2E 时阅读
+   operations。
 
 ## 系统
 
@@ -45,6 +46,7 @@
 | --- | --- |
 | [development-and-testing.md](operations/development-and-testing.md) | 开发、质量、NAS 自迭代、E2E、可靠性、性能和供应链入口 |
 | [deployment.md](operations/deployment.md) | Fat JAR、Compose stacks、NAS 外部部署边界、运行配置和清理 |
+| [environment-daemon.md](operations/environment-daemon.md) | Environment Daemon 发布物下载校验、registration token、`java -jar` 运行、systemd 常驻、升级和清理 |
 
 ## 仓库策略
 

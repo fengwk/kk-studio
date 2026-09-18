@@ -47,6 +47,7 @@ const documentPaths = [
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
   'docs/operations/development-and-testing.md',
+  'docs/operations/environment-daemon.md',
 ]
 
 const navigationTargets = documentPaths.filter((relativePath) => relativePath !== 'docs/README.md')

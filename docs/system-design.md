@@ -474,6 +474,7 @@ version 门控，低 version 回读不能覆盖高 version 快照；回读失败
 - [web 模块](modules/web.md)：唯一 Spring Boot composition root 与 transport。
 - [开发与测试](operations/development-and-testing.md)：质量、E2E、可靠性和报告入口。
 - [部署与运行](operations/deployment.md)：Fat JAR、Compose stacks、配置和清理。
+- [Environment Daemon 安装与运行](operations/environment-daemon.md)：发布物下载校验、registration token、运行、systemd 常驻和清理。
 
 模块文档负责模块内 API、实现入口和测试边界；本页只保留跨模块的事实、
 依赖方向、事务边界和恢复规则，避免复制模块细节。
