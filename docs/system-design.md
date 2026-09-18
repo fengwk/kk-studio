@@ -26,7 +26,7 @@ gap 都只能产生 no-op、resync 或可恢复的内部失败，不能覆盖新
 flowchart LR
     Browser[Browser]
     Frontend[frontend<br/>React AI + Canvas]
-    Web[web app node(s)<br/>composition root]
+    Web["web app node(s)<br/>composition root"]
     Share[share<br/>public DTO / wire]
     Platform[platform<br/>application services]
     Schema[schema<br/>Flyway resources]
