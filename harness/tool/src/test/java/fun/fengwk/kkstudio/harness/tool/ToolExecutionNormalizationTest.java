@@ -23,7 +23,6 @@ class ToolExecutionNormalizationTest {
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           "read",
-          "1.0.0",
           "Read a file",
           "read",
           new InputSchema(
@@ -109,7 +108,6 @@ class ToolExecutionNormalizationTest {
   private static final ToolDescriptor NON_ALLOWLIST_DESCRIPTOR =
       new ToolDescriptor(
           "search",
-          "1.0.0",
           "Search repository",
           "search",
           new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of("path"), false),
@@ -236,7 +234,6 @@ class ToolExecutionNormalizationTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             toolName,
-            "1.0.0",
             "Tool " + toolName,
             toolName,
             new InputSchema(null, Map.of("path", new StringSchema(null)), Set.of("path"), false),

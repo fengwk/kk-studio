@@ -35,19 +35,19 @@ registerContextProjector(localName, projector, priority)
   -> 拒绝重复 contributor id、缺失 requires、requires 成环
   -> requires 拓扑 + ContributorId 字典序 排序
   -> 按该顺序逐个调用 contribute 一次
-    （注册时校验 localName / 模型可见 name / AgentToolId / customType ownership）
+    （注册时校验 localName / 模型可见 name / customType ownership）
   -> 冻结时校验 stateAccesses 命中所属 Contributor 已注册的 customType
   -> 各扩展点按 requires 偏序、priority 降序、ContributionId 字典序冻结
 ```
 
-依赖图的完整性在调用任何 `contribute` 之前就已判定：缺失依赖或环路直接终止装配，不会先执行一半再失败。跨 Contributor 的全局唯一性在这里被强制——模型可见的工具调用名与 `AgentToolId` 各自全局唯一，且冲突在注册当时抛出。`registerTool` 会立刻读取 `tool.descriptor()` 与 `tool.requirements()`，因此 [`ToolContribution`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolContribution.java) 构造时还能复查两者与其声明一致。
+依赖图的完整性在调用任何 `contribute` 之前就已判定：缺失依赖或环路直接终止装配，不会先执行一半再失败。跨 Contributor 的全局唯一性在这里被强制——模型可见的工具 name 是唯一 Agent 侧身份，全局唯一且冲突在注册当时抛出；`ContributionId` 只在所属 contributor 内唯一。`registerTool` 会立刻读取 `tool.descriptor()` 与 `tool.requirements()`，因此 [`ToolContribution`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolContribution.java) 构造时还能复查两者与其声明一致。
 
 自定义状态的所有权键是 `(contributorId, customType)`：不同 Contributor 可以各自拥有同名 `customType`，同一 Contributor 内不得重复。冻结阶段还要求每个 `ToolRequirements.stateAccesses` 都能命中本 Contributor 自己注册过的 Custom Entry Type——工具无法声明访问别人的状态，也无法访问一个从未注册的类型。
 
 排序规则是 `requires` 的传递偏序优先，其次 priority 降序，最后 `ContributionId` 字典序。因此 priority 只在彼此无依赖的项之间决定次序，输入集合的原始顺序对结果没有任何影响。冻结完成后 `descriptors`、`tools`、`selectableTools`、`customEntryTypes`、`contextProjectors` 与 `transitiveRequires` 都是不可变集合，查找入口有：
 
 ```text
-findTool(model-visible name) / findTool(AgentToolId) / findTool(ContributionId)
+findTool(model-visible name) / findTool(ContributionId)
 findDescriptor / findCustomEntryType(contributorId, customType) / findContextProjector
 ```
 

@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
@@ -72,10 +71,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
   public void concurrentCasAllowsExactlyOneWinner() throws Exception {
     SystemSettings first = withYolo(true);
     SystemSettings second =
-        withPermission(
-            Map.of(
-                BuiltinToolIds.WRITE.value(),
-                List.of(new PermissionRule("*", PermissionAction.DENY))));
+        withPermission(Map.of("write", List.of(new PermissionRule("*", PermissionAction.DENY))));
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
@@ -105,13 +101,7 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
       assertTrue(
           reread.settings().tool().defaultYolo()
               || PermissionAction.DENY
-                  == reread
-                      .settings()
-                      .tool()
-                      .permission()
-                      .get(BuiltinToolIds.WRITE.value())
-                      .get(0)
-                      .action(),
+                  == reread.settings().tool().permission().get("write").get(0).action(),
           "winner's config must be persisted");
     } finally {
       executor.shutdownNow();

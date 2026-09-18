@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -48,16 +47,15 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
     return repository.listAllServers().stream()
         .filter(this::isServerSelectable)
         .flatMap(server -> serverTools(server).stream())
-        .sorted(Comparator.comparing(contribution -> contribution.definition().id().value()))
+        .sorted(Comparator.comparing(contribution -> contribution.definition().descriptor().name()))
         .toList();
   }
 
   @Override
-  public Optional<ToolContribution> findTool(AgentToolId id) {
-    Objects.requireNonNull(id, "id");
-    return McpStableIds.parseAgentToolId(id.value())
-        .flatMap(repository::getToolById)
-        .filter(McpTool::isAvailable)
+  public Optional<ToolContribution> findTool(String toolName) {
+    Objects.requireNonNull(toolName, "toolName");
+    return repository
+        .getAvailableToolByModelName(toolName)
         .flatMap(
             tool ->
                 repository
@@ -80,19 +78,15 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   }
 
   private ToolContribution contribution(McpServer server, McpTool tool) {
-    String descriptorVersion = server.getVersion() + "." + tool.getSchemaRevision();
     ToolDescriptor descriptor =
         new ToolDescriptor(
             tool.getModelName(),
-            descriptorVersion,
             tool.getDescription(),
             RENDERER_KEY,
             decodeSchema(tool),
             ToolSideEffect.NON_IDEMPOTENT,
             Duration.ofMillis(server.getTimeoutMillis()));
-    AgentToolDefinition definition =
-        new AgentToolDefinition(
-            McpStableIds.agentToolId(tool.getId()), descriptor, ToolVisibility.SELECTABLE);
+    AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
 
     Tool executable;
     if (server.getConnectionType() == McpConnectionType.REMOTE) {

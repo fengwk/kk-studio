@@ -28,25 +28,19 @@ vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listTools: vi.fn(async () => [
       {
-        id: 'base.bash',
         name: 'bash',
-        version: '1',
         description: 'shell command tool',
         environmentRequired: false,
         environmentId: null,
       },
       {
-        id: 'base.write',
         name: 'write',
-        version: '1',
         description: 'file write tool',
         environmentRequired: false,
         environmentId: null,
       },
       {
-        id: 'base.edit',
         name: 'edit',
-        version: '1',
         description: 'file edit tool',
         environmentRequired: false,
         environmentId: null,
@@ -339,9 +333,9 @@ describe('system settings server editor', () => {
   it('merges a newly added tool group onto an existing catalog tool instead of duplicating it', async () => {
     const initial = makeSettingsDto()
     initial.tool.permission = {
-      'base.write': [{ pattern: '*', action: 'ask' }],
-      'base.edit': [{ pattern: '*', action: 'ask' }],
-      'base.bash': [{ pattern: '*', action: 'ask' }],
+      'write': [{ pattern: '*', action: 'ask' }],
+      'edit': [{ pattern: '*', action: 'ask' }],
+      'bash': [{ pattern: '*', action: 'ask' }],
     }
     const backend = createBackend(initial)
     mocks.get.mockImplementation(backend.get)
@@ -352,8 +346,8 @@ describe('system settings server editor', () => {
     await userEvent.click(screen.getByRole('button', { name: '添加工具' }))
     const groups = screen.getAllByLabelText(/^权限分组/)
     expect(groups).toHaveLength(4)
-    await chooseSelectOption(userEvent.setup(), '工具', 'base.write', within(groups[3]!))
+    await chooseSelectOption(userEvent.setup(), '工具', 'write', within(groups[3]!))
     expect(screen.getAllByLabelText(/^权限分组/)).toHaveLength(3)
-    expect(screen.getByLabelText('权限分组 base.write')).toBeInTheDocument()
+    expect(screen.getByLabelText('权限分组 write')).toBeInTheDocument()
   })
 })

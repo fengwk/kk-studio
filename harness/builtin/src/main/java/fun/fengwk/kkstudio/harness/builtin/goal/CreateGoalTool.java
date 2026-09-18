@@ -23,12 +23,10 @@ import java.util.Objects;
 public final class CreateGoalTool implements Tool {
 
   public static final String NAME = "create_goal";
-  public static final String VERSION = "2";
 
   private static final ToolDescriptor DESCRIPTOR =
       new ToolDescriptor(
           NAME,
-          VERSION,
           GoalPrompts.text("create-goal.md"),
           NAME,
           GoalPrompts.schema("create-goal.schema.json"),

@@ -46,7 +46,7 @@ export function AgentResourceCard({
   const { t } = useI18n()
   const model = models.find((item) => modelRef(item) === agent.model)
   const effectiveModel = formatEffectiveModel(model, agent)
-  const toolIds = agent.config.toolIds
+  const tools = agent.config.tools
   const skills = (agent.config.skills ?? []).map((skill) => skill.name)
   const subagents = agent.config.subagents
 
@@ -57,7 +57,7 @@ export function AgentResourceCard({
       subtitle={agent.description || agent.systemPrompt || agent.name}
       rows={[
         [t('ai.catalog.card.effectiveModel'), effectiveModel],
-        { label: t('ai.catalog.card.tools'), tags: toolIds, limit: 2 },
+        { label: t('ai.catalog.card.tools'), tags: tools, limit: 2 },
         { label: t('ai.catalog.card.skills'), tags: skills, limit: 2 },
         { label: t('ai.catalog.card.subagents'), tags: subagents, limit: 2 },
       ]}

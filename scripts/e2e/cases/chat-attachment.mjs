@@ -267,7 +267,7 @@ registerCase({
   level: 'L1',
   requires: ['canvas-storage'],
   title: '本地 Blob 图片内联且现有 Thread 使用最新 Agent 工具',
-  docs: '本地 OpenAI Responses mock：使用无需 Environment 的 Goal tools，首轮建立并静止 Thread 后更新同名 Agent 的 toolIds，第二轮必须发送最新工具；第二轮本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
+  docs: '本地 OpenAI Responses mock：使用无需 Environment 的 Goal tools，首轮建立并静止 Thread 后更新同名 Agent 的 tools，第二轮必须发送最新工具；第二轮本地 MinIO 图片必须转换为 data:image/...;base64 source，Provider 请求不得包含 127.0.0.1/localhost 预签名 URL',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const mock = await startResponsesProbe()
@@ -319,7 +319,7 @@ registerCase({
             systemPrompt: 'Complete without calling tools.',
             model: `${model.providerName}/${model.name}`,
             variant: 'default',
-            config: { toolIds: ['base.goal.get'], skills: [], subagents: [] },
+            config: { tools: ['get_goal'], skills: [], subagents: [] },
           })
         ).json,
       )
@@ -376,7 +376,7 @@ registerCase({
         JSON.stringify(mock.requests[0].body),
       )
 
-      // 既有 Thread 的第二轮必须读取最新 Agent config.toolIds。
+      // 既有 Thread 的第二轮必须读取最新 Agent config.tools。
       // Goal tools 是无需 Environment 的真实可选工具，避免把本 Canvas-only case 错绑到 live daemon。
       agent = envelopeData(
         (
@@ -386,7 +386,7 @@ registerCase({
             model: agent.model,
             variant: 'default',
             config: {
-              toolIds: ['base.goal.get', 'base.goal.create'],
+              tools: ['get_goal', 'create_goal'],
               skills: [],
               subagents: [],
             },

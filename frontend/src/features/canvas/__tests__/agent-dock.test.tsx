@@ -67,7 +67,7 @@ const assistantAgent = {
   systemPrompt: null,
   model: 'minimax/MiniMax',
   variant: 'default',
-  config: { toolIds: [], skills: [], subagents: [] },
+  config: { tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
   updateTime: null,

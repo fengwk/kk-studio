@@ -44,23 +44,27 @@ class ToolContractTest {
                 .validateFor(descriptor));
   }
 
-  /** 工具版本与 rendererKey 必须显式稳定。 */
+  /** 工具 name 与 rendererKey 必须显式稳定；name 是唯一模型可见身份且语法受限。 */
   @Test
-  void definesStableVersionAndRendererIdentity() {
+  void definesStableNameAndRendererIdentity() {
     ToolDescriptor defaultRenderer = descriptor();
     ToolDescriptor customRenderer = descriptor("repository-search");
 
-    assertEquals("1.0.0", defaultRenderer.version());
+    assertEquals("search", defaultRenderer.name());
     assertEquals("search", defaultRenderer.rendererKey());
     assertEquals("repository-search", customRenderer.rendererKey());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolDescriptor(
-                "search",
-                "1.0.0",
+                "1search", "Search", "search", schema(), ToolSideEffect.READ_ONLY, Duration.ZERO));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolDescriptor(
+                "search.read",
                 "Search",
-                null,
+                "search",
                 schema(),
                 ToolSideEffect.READ_ONLY,
                 Duration.ZERO));
@@ -68,18 +72,7 @@ class ToolContractTest {
         IllegalArgumentException.class,
         () ->
             new ToolDescriptor(
-                "search",
-                "1.0.0",
-                "Search",
-                " ",
-                schema(),
-                ToolSideEffect.READ_ONLY,
-                Duration.ZERO));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolDescriptor(
-                "search", "", "Search", null, schema(), ToolSideEffect.READ_ONLY, Duration.ZERO));
+                "search", "Search", " ", schema(), ToolSideEffect.READ_ONLY, Duration.ZERO));
   }
 
   /** 反射契约锁定 descriptor 只暴露模型字段及其稳定顺序，不得重新引入路由字段。 */
@@ -88,18 +81,10 @@ class ToolContractTest {
     RecordComponent[] components = ToolDescriptor.class.getRecordComponents();
 
     assertEquals(
-        List.of(
-            "name",
-            "version",
-            "description",
-            "rendererKey",
-            "inputSchema",
-            "sideEffect",
-            "timeout"),
+        List.of("name", "description", "rendererKey", "inputSchema", "sideEffect", "timeout"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(
         List.of(
-            String.class,
             String.class,
             String.class,
             String.class,
@@ -128,7 +113,6 @@ class ToolContractTest {
   private ToolDescriptor descriptor(String rendererKey) {
     return new ToolDescriptor(
         "search",
-        "1.0.0",
         "Search the repository",
         rendererKey,
         schema(),

@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -297,10 +296,8 @@ class ModelResponsePlannerTest {
   private static ToolBinding toolBinding(String name, InputSchema schema) {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test." + name.replace('_', '-')),
             new ToolDescriptor(
                 name,
-                "1.0",
                 "description of " + name,
                 name,
                 schema,

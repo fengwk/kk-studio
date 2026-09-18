@@ -2,8 +2,9 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
+import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
+import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
@@ -44,7 +45,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -86,9 +86,9 @@ import java.util.UUID;
  * {@link ModelRequestSpec}、contextWindow 与 outputTokens。
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection}）；实现按这些精确引用读取
- * 最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的 toolIds/skills/subagents 每个新 turn 都从最新
- * Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 由 AgentDefinition.environmentId 在每轮 turn
- * 开始时 按引用解析出当时事实（{@link EnvironmentId}）：要求环境的工具一律按最新解析出的环境绑定（未选定环境时确定性拒绝规划）； Agent skills
+ * 最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的 tools/skills/subagents 每个新 turn 都从最新 Agent
+ * 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 由 AgentDefinition.environmentId 在每轮 turn 开始时
+ * 按引用解析出当时事实（{@link EnvironmentId}）：要求环境的工具一律按最新解析出的环境绑定（未选定环境时确定性拒绝规划）； Agent skills
  * 解析自持久化的可用库存（{@link
  * fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService#listUsableSkills(EnvironmentId)}），
  * 规划成功时冻结 SkillBinding 的完整事实，不依赖 live daemon 连接或 READY 租约。当 live daemon
@@ -234,8 +234,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     CurrentEnvironmentContext currentEnvironment = resolveCurrentEnvironment(environmentId, now);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), environmentId);
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
-    List<AgentToolId> toolIds = resolveToolIds(agentConfig, path, threadId);
-    List<ToolBinding> toolBindings = resolveTools(environmentId, toolIds);
+    List<String> toolNames = resolveToolNames(agentConfig, path, threadId);
+    List<ToolBinding> toolBindings = resolveTools(environmentId, toolNames);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -435,53 +435,48 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  /** 从最新 Agent 配置派生本 turn 的稳定工具身份；随后注入 Project 角色工具。 */
-  private List<AgentToolId> resolveToolIds(
+  /** 从最新 Agent 配置派生本 turn 的模型可见工具名；随后注入 Project 角色工具。 */
+  private List<String> resolveToolNames(
       AgentDefinitionConfigDTO config, EntryPath path, UUID threadId) {
-    LinkedHashSet<AgentToolId> toolIds = new LinkedHashSet<>();
-    for (String value : config.getToolIds()) {
-      AgentToolId id;
-      try {
-        id = new AgentToolId(value);
-      } catch (RuntimeException error) {
-        throw rejection("invalid agent tool id: " + value);
+    LinkedHashSet<String> toolNames = new LinkedHashSet<>();
+    for (String toolName : config.getTools()) {
+      if (toolName == null || toolName.isBlank()) {
+        throw rejection("invalid agent tool name: " + toolName);
       }
-      ToolContribution contribution = toolCatalog.findTool(id).orElse(null);
+      ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
       if (contribution == null) {
-        throw rejection("tool not found: " + id);
+        throw rejection("tool not found: " + toolName);
       }
       if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
-        throw rejection("internal tool cannot be selected by an Agent: " + id);
+        throw rejection("internal tool cannot be selected by an Agent: " + toolName);
       }
-      if (!toolIds.add(id)) {
-        throw rejection("duplicate agent tool id: " + id);
+      if (!toolNames.add(toolName)) {
+        throw rejection("duplicate agent tool name: " + toolName);
       }
     }
     if (!config.getSkills().isEmpty()) {
-      toolIds.add(BuiltinToolIds.LOAD_SKILL);
+      toolNames.add(LoadSkillTool.NAME);
     }
     if (!config.getSubagents().isEmpty()
         && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()) {
-      toolIds.add(BuiltinToolIds.TASK);
+      toolNames.add(TaskTool.NAME);
     }
-    List<AgentToolId> roleTools =
+    List<String> roleTools =
         Objects.requireNonNull(roleToolSelector.select(threadId), "role tools");
-    for (AgentToolId roleToolId : roleTools) {
-      toolIds.add(roleToolId);
-    }
-    return List.copyOf(toolIds);
+    toolNames.addAll(roleTools);
+    return List.copyOf(toolNames);
   }
 
   /**
    * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具一律绑定 Agent 选择的 {@code environmentId} （Agent
    * 未选择环境时确定性拒绝规划）；所有工具冻结 ContributorBinding 与 state accesses。缺失能力仍立即拒绝，绝不静默跳过。
    */
-  private List<ToolBinding> resolveTools(EnvironmentId environmentId, List<AgentToolId> toolIds) {
-    List<ToolBinding> bindings = new ArrayList<>(toolIds.size());
-    for (AgentToolId id : toolIds) {
-      ToolContribution contribution = toolCatalog.findTool(id).orElse(null);
+  private List<ToolBinding> resolveTools(EnvironmentId environmentId, List<String> toolNames) {
+    List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
+    for (String toolName : toolNames) {
+      ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
       if (contribution == null) {
-        throw rejection("tool not found: " + id);
+        throw rejection("tool not found: " + toolName);
       }
       List<ContributorStateAccess> stateAccesses =
           contribution.requirements().stateAccesses().stream()
@@ -502,13 +497,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (environmentRequired && requiredEnvironmentId == null) {
         throw rejection(
             "environment tool "
-                + id
+                + toolName
                 + " requires an environment binding but the agent has no environment");
       }
       if (toolRequiredEnv != null && !toolRequiredEnv.equals(environmentId)) {
         throw rejection(
             "tool "
-                + id
+                + toolName
                 + " requires environment "
                 + toolRequiredEnv
                 + " but agent has environment "

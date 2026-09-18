@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 /**
@@ -13,20 +12,14 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 public interface HarnessRegistrar {
 
   /**
-   * 注册一个 Tool 贡献。{@code localName} 是该贡献在本 contributor 内的稳定标识；model-visible Tool name
-   * 在全局唯一，descriptor 在冻结时读取并校验；{@code agentToolId} 是全局稳定的模型工具身份。
+   * 注册一个 Tool 贡献。{@code localName} 是该贡献在本 contributor 内的稳定标识；descriptor 的 model-visible name
+   * 在全局唯一，descriptor 在冻结时读取并校验。
    */
-  void registerTool(
-      String localName,
-      AgentToolId agentToolId,
-      Tool tool,
-      ToolVisibility visibility,
-      int priority);
+  void registerTool(String localName, Tool tool, ToolVisibility visibility, int priority);
 
   /** 注册 priority 为 0 的 Tool 贡献。 */
-  default void registerTool(
-      String localName, AgentToolId agentToolId, Tool tool, ToolVisibility visibility) {
-    registerTool(localName, agentToolId, tool, visibility, 0);
+  default void registerTool(String localName, Tool tool, ToolVisibility visibility) {
+    registerTool(localName, tool, visibility, 0);
   }
 
   /**

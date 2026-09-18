@@ -61,7 +61,7 @@ class SystemPromptPreviewServiceTest {
     agent.setConfigJson("agent-config");
     when(agents.getByName("assistant")).thenReturn(agent);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -108,7 +108,7 @@ class SystemPromptPreviewServiceTest {
     agent.setConfigJson("agent-config");
     when(agents.getByName("assistant")).thenReturn(agent);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -161,7 +161,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of(new AgentSkillRefDTO(SOURCE_ID, "dev")));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -205,7 +205,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(
         List.of(
             new AgentSkillRefDTO(SOURCE_ID, "dev"), new AgentSkillRefDTO(SOURCE_ID, "missing")));
@@ -249,7 +249,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -288,7 +288,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -346,7 +346,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of(new AgentSkillRefDTO(SOURCE_ID, "code_search")));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
@@ -391,7 +391,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of("coder"));
     when(codec.decode("agent-config")).thenReturn(config);

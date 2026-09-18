@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -42,7 +41,7 @@ import java.util.stream.Collectors;
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
  * <p>验证 exact inventory (14 tools: 9 environment + 2 internal + 3 goal),
- * visibility/requirements/capability 映射, stable IDs, goal state ownership/projector, 和全局唯一性。
+ * visibility/requirements/capability 映射, 稳定模型可见 name, goal state ownership/projector, 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
 
@@ -124,7 +123,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "read",
-        BuiltinToolIds.READ,
         "environment.read",
         EnvironmentCapabilityIds.FS_READ,
         ToolSideEffect.READ_ONLY,
@@ -132,7 +130,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "write",
-        BuiltinToolIds.WRITE,
         "environment.write",
         EnvironmentCapabilityIds.FS_WRITE,
         ToolSideEffect.IDEMPOTENT,
@@ -140,7 +137,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "edit",
-        BuiltinToolIds.EDIT,
         "environment.edit",
         EnvironmentCapabilityIds.FS_EDIT,
         ToolSideEffect.NON_IDEMPOTENT,
@@ -148,7 +144,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "bash",
-        BuiltinToolIds.BASH,
         "environment.bash",
         EnvironmentCapabilityIds.PROCESS_EXEC,
         ToolSideEffect.NON_IDEMPOTENT,
@@ -156,7 +151,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "grep",
-        BuiltinToolIds.GREP,
         "environment.grep",
         EnvironmentCapabilityIds.FS_GREP,
         ToolSideEffect.READ_ONLY,
@@ -164,7 +158,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "find",
-        BuiltinToolIds.FIND,
         "environment.find",
         EnvironmentCapabilityIds.FS_FIND,
         ToolSideEffect.READ_ONLY,
@@ -172,7 +165,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "lsp_goto_definition",
-        BuiltinToolIds.LSP_GOTO_DEFINITION,
         "environment.lsp-goto-definition",
         EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
         ToolSideEffect.READ_ONLY,
@@ -180,7 +172,6 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "lsp_workspace_symbols",
-        BuiltinToolIds.LSP_WORKSPACE_SYMBOLS,
         "environment.lsp-workspace-symbols",
         EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
         ToolSideEffect.READ_ONLY,
@@ -188,44 +179,21 @@ class BuiltinHarnessContributorTest {
     assertEnvironmentTool(
         catalog,
         "lsp_java_decompile",
-        BuiltinToolIds.LSP_JAVA_DECOMPILE,
         "environment.lsp-java-decompile",
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(2));
 
     // 2 Internal tools (INTERNAL visibility)
-    assertInternalTool(
-        catalog,
-        "load_skill",
-        BuiltinToolIds.LOAD_SKILL,
-        "runtime.load-skill",
-        ToolRequirements.environment());
-    assertInternalTool(
-        catalog, "task", BuiltinToolIds.TASK, "runtime.task", ToolRequirements.none());
+    assertInternalTool(catalog, "load_skill", "runtime.load-skill", ToolRequirements.environment());
+    assertInternalTool(catalog, "task", "runtime.task", ToolRequirements.none());
 
     // 3 Goal tools (SELECTABLE visibility)
     assertGoalTool(
-        catalog,
-        "create_goal",
-        BuiltinToolIds.GOAL_CREATE,
-        "goal.create",
-        ToolSideEffect.IDEMPOTENT,
-        StateMode.WRITE);
+        catalog, "create_goal", "goal.create", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
+    assertGoalTool(catalog, "get_goal", "goal.get", ToolSideEffect.READ_ONLY, StateMode.READ);
     assertGoalTool(
-        catalog,
-        "get_goal",
-        BuiltinToolIds.GOAL_GET,
-        "goal.get",
-        ToolSideEffect.READ_ONLY,
-        StateMode.READ);
-    assertGoalTool(
-        catalog,
-        "update_goal",
-        BuiltinToolIds.GOAL_UPDATE,
-        "goal.update",
-        ToolSideEffect.IDEMPOTENT,
-        StateMode.WRITE);
+        catalog, "update_goal", "goal.update", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
 
     // Custom entry types: exactly goal.state ownership
     assertEquals(1, catalog.customEntryTypes().size());
@@ -243,13 +211,11 @@ class BuiltinHarnessContributorTest {
     ContributionId projectorId = new ContributionId(new ContributorId("builtin"), "goal.context");
     assertTrue(catalog.findContextProjector(projectorId).isPresent());
 
-    // Ensure all tool names, AgentToolIds and ContributionIds are unique
+    // Ensure all model-visible tool names and ContributionIds are unique
     Set<String> names = new HashSet<>();
-    Set<AgentToolId> agentToolIds = new HashSet<>();
     Set<ContributionId> contributionIds = new HashSet<>();
     for (ToolContribution toolContribution : tools) {
       assertTrue(names.add(toolContribution.definition().descriptor().name()));
-      assertTrue(agentToolIds.add(toolContribution.definition().id()));
       assertTrue(contributionIds.add(toolContribution.id()));
     }
   }
@@ -337,38 +303,36 @@ class BuiltinHarnessContributorTest {
     assertFalse(registeredCapabilityIds.contains(EnvironmentCapabilityIds.MCP_LOCAL_CALL));
     assertFalse(registeredCapabilityIds.contains(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER));
 
-    // 4. 断言已注册的环境工具 AgentToolId 集合恰好等于固定的 9 个内置环境工具 ID
-    Set<AgentToolId> expectedAgentToolIds =
+    // 4. 断言已注册的环境工具模型可见 name 集合恰好等于固定的 9 个内置环境工具名
+    Set<String> expectedToolNames =
         Set.of(
-            BuiltinToolIds.READ,
-            BuiltinToolIds.WRITE,
-            BuiltinToolIds.EDIT,
-            BuiltinToolIds.BASH,
-            BuiltinToolIds.GREP,
-            BuiltinToolIds.FIND,
-            BuiltinToolIds.LSP_GOTO_DEFINITION,
-            BuiltinToolIds.LSP_WORKSPACE_SYMBOLS,
-            BuiltinToolIds.LSP_JAVA_DECOMPILE);
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "grep",
+            "find",
+            "lsp_goto_definition",
+            "lsp_workspace_symbols",
+            "lsp_java_decompile");
 
-    Set<AgentToolId> registeredAgentToolIds =
+    Set<String> registeredToolNames =
         catalog.tools().stream()
             .filter(t -> t.tool() instanceof EnvironmentCapabilityTool)
-            .map(t -> t.definition().id())
+            .map(t -> t.definition().descriptor().name())
             .collect(Collectors.toSet());
 
-    assertEquals(expectedAgentToolIds, registeredAgentToolIds);
+    assertEquals(expectedToolNames, registeredToolNames);
   }
 
   private static void assertEnvironmentTool(
       HarnessCatalog catalog,
       String toolName,
-      AgentToolId agentToolId,
       String localName,
       EnvironmentCapabilityId capabilityId,
       ToolSideEffect sideEffect,
       Duration timeout) {
     ToolContribution tool = catalog.findTool(toolName).orElseThrow();
-    assertEquals(agentToolId, tool.definition().id());
     assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
     assertEquals(ToolRequirements.environment(), tool.requirements());
@@ -378,9 +342,7 @@ class BuiltinHarnessContributorTest {
 
     ToolDescriptor descriptor = tool.definition().descriptor();
     assertEquals(toolName, descriptor.name());
-    // environment tool 的 model contract 版本跟随 capability descriptor 版本。
     EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
-    assertEquals(capability.version(), descriptor.version());
     assertEquals(toolName, descriptor.rendererKey());
     assertEquals(sideEffect, descriptor.sideEffect());
     assertEquals(timeout, descriptor.timeout());
@@ -396,36 +358,30 @@ class BuiltinHarnessContributorTest {
     assertEquals(capability.timeout(), descriptor.timeout());
     assertEquals(capability, envCapabilityTool.capability());
 
-    // Lookup by AgentToolId and ContributionId
-    assertEquals(tool, catalog.findTool(agentToolId).orElseThrow());
+    // Lookup by model-visible name and ContributionId
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
   private static void assertInternalTool(
       HarnessCatalog catalog,
       String toolName,
-      AgentToolId agentToolId,
       String localName,
       ToolRequirements expectedRequirements) {
     ToolContribution tool = catalog.findTool(toolName).orElseThrow();
-    assertEquals(agentToolId, tool.definition().id());
     assertEquals(ToolVisibility.INTERNAL, tool.definition().visibility());
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
     assertEquals(expectedRequirements, tool.requirements());
 
-    assertEquals(tool, catalog.findTool(agentToolId).orElseThrow());
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
   private static void assertGoalTool(
       HarnessCatalog catalog,
       String toolName,
-      AgentToolId agentToolId,
       String localName,
       ToolSideEffect sideEffect,
       StateMode mode) {
     ToolContribution tool = catalog.findTool(toolName).orElseThrow();
-    assertEquals(agentToolId, tool.definition().id());
     assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
     assertEquals(
@@ -435,13 +391,11 @@ class BuiltinHarnessContributorTest {
 
     ToolDescriptor descriptor = tool.definition().descriptor();
     assertEquals(toolName, descriptor.name());
-    assertEquals("2", descriptor.version());
     assertEquals(toolName, descriptor.rendererKey());
     assertEquals(sideEffect, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());
     assertFalse(descriptor.description().isBlank());
 
-    assertEquals(tool, catalog.findTool(agentToolId).orElseThrow());
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
@@ -449,7 +403,6 @@ class BuiltinHarnessContributorTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             name,
-            "1",
             name + " description",
             name,
             new InputSchema(null, Map.of(), Set.of(), false),

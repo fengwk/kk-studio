@@ -54,7 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -369,10 +368,8 @@ class ModelRequestMaterializerTest {
   private static ToolBinding bashBinding() {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test.bash"),
             new ToolDescriptor(
                 "bash",
-                "1.0",
                 "run bash",
                 "bash",
                 new InputSchema("arguments", Map.of(), Set.of(), false),

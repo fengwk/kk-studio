@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -16,46 +15,18 @@ import java.util.UUID;
 /**
  * MCP 工具稳定全局身份测试。
  *
- * <p>验证 AgentToolId = {@code mcp.<32hex>}，ContributionId = {@code platform.mcp} + {@code
- * tool.<32hex>}，以及双向转换的准确性。
+ * <p>验证 ContributionId = {@code platform.mcp} + {@code tool.<32hex>}；模型可见身份是 mcp_tool.model_name，
+ * 不在此派生。
  */
 class McpStableIdsTest {
 
   @Test
-  void derivesStableAgentToolIdAndLocalName() {
-    // 意图：验证稳定 UUID 派生为符合规范的 AgentToolId 与 ContributionId localName
+  void derivesStableLocalName() {
+    // 意图：验证稳定 UUID 派生为 ContributionId localName
     UUID toolId = UUID.fromString("12345678-1234-5678-1234-567812345678");
-    AgentToolId agentToolId = McpStableIds.agentToolId(toolId);
-    assertEquals("mcp.12345678123456781234567812345678", agentToolId.value());
-
-    String localName = McpStableIds.localName(toolId);
-    assertEquals("tool.12345678123456781234567812345678", localName);
-
+    assertEquals("tool.12345678123456781234567812345678", McpStableIds.localName(toolId));
+    assertEquals("tool.", McpStableIds.LOCAL_NAME_PREFIX);
     assertEquals(new ContributorId("platform.mcp"), McpStableIds.CONTRIBUTOR_ID);
-  }
-
-  @Test
-  void parsesValidAgentToolId() {
-    // 意图：验证从合法的 canonical AgentToolId 文本反解回原始 UUID
-    UUID expected = UUID.fromString("abcdef01-2345-6789-abcd-ef0123456789");
-    String canonical = "mcp.abcdef0123456789abcdef0123456789";
-
-    Optional<UUID> parsed = McpStableIds.parseAgentToolId(canonical);
-    assertTrue(parsed.isPresent());
-    assertEquals(expected, parsed.get());
-  }
-
-  @Test
-  void rejectsInvalidAgentToolIds() {
-    // 意图：验证非法前缀、长度错误或非 hex 字符均返回 Optional.empty()
-    assertFalse(McpStableIds.parseAgentToolId(null).isPresent());
-    assertFalse(McpStableIds.parseAgentToolId("").isPresent());
-    assertFalse(
-        McpStableIds.parseAgentToolId("other.abcdef0123456789abcdef0123456789").isPresent());
-    assertFalse(McpStableIds.parseAgentToolId("mcp.short").isPresent());
-    assertFalse(
-        McpStableIds.parseAgentToolId("mcp.abcdef0123456789abcdef0123456789extra").isPresent());
-    assertFalse(McpStableIds.parseAgentToolId("mcp.gggggggggggggggggggggggggggggggg").isPresent());
   }
 
   @Test
@@ -81,7 +52,6 @@ class McpStableIdsTest {
   @Test
   void nullChecks() {
     // 意图：验证公共方法的非空检查
-    assertThrows(NullPointerException.class, () -> McpStableIds.agentToolId(null));
     assertThrows(NullPointerException.class, () -> McpStableIds.localName(null));
     assertThrows(NullPointerException.class, () -> McpStableIds.canonicalUuid(null));
   }

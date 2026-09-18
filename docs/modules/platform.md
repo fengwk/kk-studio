@@ -55,7 +55,7 @@ Catalog 是名称寻址的全局资源集合，所有变更 service 都使用 `e
 | --- | --- | --- |
 | Provider | `agent_provider.name` | `ProviderType`、base URL、credential、内部 timeout config |
 | Model | `(provider_name, name)` | context/output limit、abilities、variants、pricing、default variant |
-| Agent | `agent_definition.name` | system prompt、Model 引用、variant 覆盖、toolIds/skills/subagents |
+| Agent | `agent_definition.name` | system prompt、Model 引用、variant 覆盖、tools/skills/subagents |
 
 三类资源的 `description` 都是无长度上限的自由文本（PostgreSQL `text`），与
 `system_prompt` 同属展示事实，不参与名称、可见性、CAS 或路由判定，空值按 `trimToNull`
@@ -77,8 +77,9 @@ Model 引用、再删除旧行；任一步不满足预期即抛错并整体回�
   严格解析 `limit`、`abilities`、`variants`、`defaultVariant`、`pricing`；context/output、
   variant id、temperature、reasoning effort 不满足约束即拒绝。
 - [AgentDefinitionConfigCodec](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/configuration/AgentDefinitionConfigCodec.java)
-  严格解析去重的 `toolIds`、skill 与 subagent 配置；`toolIds` 必须是 canonical
-  `AgentToolId` 且只能引用运行时目录中的 selectable entry；`skills` 使用强类型
+  严格解析去重的 `tools`、skill 与 subagent 配置；`tools` 必须是合法模型可见
+  tool name（旧 wire 字段 `toolIds` 被严格拒绝）且只能引用运行时目录中的 selectable
+  entry；`skills` 使用强类型
   `AgentSkillRefDTO`（小写 canonical UUID `sourceId` + 短名 `name`），并在 Environment
   持久可用 inventory 锁保护下校验。
 
@@ -103,15 +104,16 @@ Remote/Local 配置 JSON 并把状态置为 `UNVERIFIED`；标准列表和详情
   操作终态提交在同一事务中。
 
 [MCP 工具身份](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/McpStableIds.java)
-由工具 UUID 派生稳定 `AgentToolId=mcp.<32hex>`；工具消失时保留稳定身份并置
-`available=false`，schema 改变或工具重新出现时推进 `schemaRevision`，descriptor
-version 是 `<serverVersion>.<schemaRevision>`。
+分两层：scoped `ContributionId` 是 contributor `platform.mcp` + localName
+`tool.<32hex>`，仍由 mcp_tool 行的稳定 UUID 派生并用于归属与持久定位；Agent 侧唯一
+身份是 `mcp_tool.model_name`。工具消失时保留稳定行并置 `available=false`，schema
+改变或工具重新出现时推进 `schemaRevision`；身份与漂移判定都不依赖任何工具版本字段。
 
 [RuntimeToolCatalogConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
 装配三个 bean：包装静态 `HarnessCatalog` 的 `HarnessToolCatalogAdapter`、读库的
 动态 `McpToolCatalog`，以及唯一 `@Primary` 的 `CompositeRuntimeToolCatalog`。复合
-目录不缓存动态工具，按静态在前、动态在后的固定顺序返回可选项，任何重复
-`AgentToolId` 或模型可见名称都 fail closed；`ToolCatalogQueryService`、
+目录不缓存动态工具，按静态在前、动态在后的固定顺序返回可选项，任何重复模型可见
+name（无论 `ContributionId` 是否一致）都 fail closed；`ToolCatalogQueryService`、
 `AgentDefinitionConfigValidator`、`DatabaseTurnResolver` 和 `ToolExecutionGateway`
 只通过它列出或查找工具。
 
@@ -342,11 +344,11 @@ inline executor、`CallerRunsPolicy` 和静默丢弃 policy。Model 与 Tool gat
 transport 异常或非 terminal listener 异常统一以一次 `UNKNOWN` 收敛。
 
 [ToolExecutionGateway](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
-的 `preflight` 先用 frozen `AgentToolDefinition.id` 从 `RuntimeToolCatalog` 恢复
+的 `preflight` 先用 frozen definition 的模型可见 `name` 从 `RuntimeToolCatalog` 恢复
 ToolContribution，再要求目录中的完整 definition、contributor provenance 与
 requirements 相等；贡献缺失或 definition/requirements 漂移直接生成确定性的
 `TOOL_NOT_FOUND` / `TOOL_DEFINITION_MISMATCH` Deny，不进入 permission evaluator。
-正常路径按 AgentToolId、arguments 与单次调用的 `arguments.workdir` 生成 `ALLOW`、
+正常路径按模型可见 tool name、arguments 与单次调用的 `arguments.workdir` 生成 `ALLOW`、
 `ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start` 先获取 tool
 admission（默认 `kk-studio.harness.execution-admission.tool=64`），再经单一执行路径
 校验冻结定义与 requirements、构建隔离所属 Contributor 的只读 `BranchView` 与可选
@@ -530,7 +532,7 @@ Function dispatcher claim + RUNNING lease
 
 | section | 主要字段与默认值 | 应用时点 |
 | --- | --- | --- |
-| `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`defaultYolo=false`，Model Busy retry 5s、Tool Busy retry 1s、Tool overload retry 5s、skill load 30s | admission/permission 读取点 live |
+| `tool` | permission 默认 `write`/`edit`/`bash` 各 `* -> ask`，`defaultYolo=false`，Model Busy retry 5s、Tool Busy retry 1s、Tool overload retry 5s、skill load 30s | admission/permission 读取点 live |
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s、compaction keep 20000 tokens、subagent depth 2 / per-parent concurrency 10 / maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 16 MiB、heartbeat 60s | Environment 单项/聚合上传资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |

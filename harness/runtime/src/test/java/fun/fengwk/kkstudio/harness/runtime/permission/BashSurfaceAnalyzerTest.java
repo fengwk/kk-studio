@@ -7,14 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
-
 import java.util.List;
 import java.util.Map;
 
 class BashSurfaceAnalyzerTest {
-  private static final AgentToolId BASH = new AgentToolId("base.bash");
-  private static final AgentToolId CUSTOM_BASH = new AgentToolId("custom.bash");
+  private static final String BASH = "bash";
+  private static final String CUSTOM_BASH = "custom_exec";
 
   private final BashSurfaceAnalyzer analyzer = new BashSurfaceAnalyzer();
   private final PermissionEvaluator evaluator =
@@ -107,18 +105,18 @@ class BashSurfaceAnalyzerTest {
     assertEquals(PermissionAction.DENY, evaluate("sleep 1 & rm -rf tmp", settings));
   }
 
-  /** 只要参数包含 textual command 字段，无论具体 toolId 为何均应用 command surface 分析。 */
+  /** 只要参数包含 textual command 字段，无论具体 tool name 为何均应用 command surface 分析。 */
   @Test
   void appliesCommandSurfaceAnalysisWheneverCommandFieldIsTextual() {
     ToolSettings settings =
         new ToolSettings(
             Map.of(
-                CUSTOM_BASH.value(),
+                CUSTOM_BASH,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("echo *", PermissionAction.ALLOW),
                     new PermissionRule("rm *", PermissionAction.DENY)),
-                BASH.value(),
+                BASH,
                 List.of(
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("echo *", PermissionAction.ALLOW),
@@ -168,6 +166,6 @@ class BashSurfaceAnalyzerTest {
   }
 
   private static ToolSettings settings(List<PermissionRule> bashRules) {
-    return new ToolSettings(Map.of(BASH.value(), bashRules), false);
+    return new ToolSettings(Map.of(BASH, bashRules), false);
   }
 }

@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
@@ -77,7 +77,7 @@ public class AgentDefinitionConfigCodec {
     if (config == null) {
       throw new IllegalArgumentException("agent definition config is required");
     }
-    validateToolIds(config.getToolIds());
+    validateToolNames(config.getTools());
     validateSkillRefs(config.getSkills());
     validateNames(config.getSubagents(), "subagents");
   }
@@ -139,21 +139,19 @@ public class AgentDefinitionConfigCodec {
     }
   }
 
-  private static void validateToolIds(List<String> values) {
+  private static void validateToolNames(List<String> values) {
     if (values == null) {
-      throw new IllegalArgumentException("agent definition config toolIds is required");
+      throw new IllegalArgumentException("agent definition config tools is required");
     }
     Set<String> seen = new HashSet<>();
     for (String value : values) {
-      try {
-        new AgentToolId(value);
-      } catch (RuntimeException error) {
+      if (!ToolDescriptor.isValidName(value)) {
         throw new IllegalArgumentException(
-            "agent definition config toolIds must contain canonical AgentToolIds: " + value, error);
+            "agent definition config tools must contain valid model-visible tool names: " + value);
       }
       if (!seen.add(value)) {
         throw new IllegalArgumentException(
-            "agent definition config toolIds must not contain duplicates: " + value);
+            "agent definition config tools must not contain duplicates: " + value);
       }
     }
   }

@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
@@ -63,131 +62,63 @@ class ProjectHarnessContributorTest {
     // 验证 12 个角色工具由 HarnessCatalog 统一解析，全部为 INTERNAL 可见，且副作用与声明一致
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
-    List<AgentToolId> expectedToolIds =
-        List.of(
-            ProjectRoleToolIds.PROJECT_READ,
-            ProjectRoleToolIds.ISSUE_READ,
-            ProjectRoleToolIds.ISSUE_LIST,
-            ProjectRoleToolIds.ISSUE_CREATE,
-            ProjectRoleToolIds.ISSUE_UPDATE,
-            ProjectRoleToolIds.ISSUE_ADD_DEPENDENCY,
-            ProjectRoleToolIds.ISSUE_REMOVE_DEPENDENCY,
-            ProjectRoleToolIds.ISSUE_SET_STATUS,
-            ProjectRoleToolIds.ISSUE_CANCEL,
-            ProjectRoleToolIds.ISSUE_SUBMIT,
-            ProjectRoleToolIds.ISSUE_REQUEST_INPUT,
-            ProjectRoleToolIds.ISSUE_REVIEW);
+    List<String> expectedToolNames = ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR);
+    List<String> executorAndReviewer =
+        new ArrayList<>(ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
+    executorAndReviewer.addAll(ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
+    List<String> allToolNames = new ArrayList<>(expectedToolNames);
+    allToolNames.addAll(executorAndReviewer);
+    assertEquals(12, allToolNames.size());
 
-    for (AgentToolId toolId : expectedToolIds) {
-      Optional<ToolContribution> found = catalog.findTool(toolId);
-      assertTrue(found.isPresent(), "Tool must be present in catalog: " + toolId);
+    for (String toolName : allToolNames) {
+      Optional<ToolContribution> found = catalog.findTool(toolName);
+      assertTrue(found.isPresent(), "Tool must be present in catalog: " + toolName);
 
-      ProjectRoleToolType type = ProjectRoleToolType.findByAgentToolId(toolId).orElseThrow();
+      ProjectRoleToolType type = ProjectRoleToolType.findByModelName(toolName).orElseThrow();
       ToolContribution contribution = found.get();
       assertEquals(ToolVisibility.INTERNAL, contribution.definition().visibility());
       assertEquals(type.modelName(), contribution.tool().descriptor().name());
       assertEquals(type.sideEffect(), contribution.tool().descriptor().sideEffect());
-      assertEquals("1", contribution.tool().descriptor().version());
       assertNotNull(contribution.tool().descriptor().inputSchema());
     }
 
     // 验证副作用精确分类
     assertEquals(
         ToolSideEffect.READ_ONLY,
-        catalog
-            .findTool(ProjectRoleToolIds.PROJECT_READ)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("project_read").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.READ_ONLY,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_READ)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_read").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.READ_ONLY,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_LIST)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_list").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_CREATE)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_create").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_UPDATE)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_update").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_ADD_DEPENDENCY)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_add_dependency").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_REMOVE_DEPENDENCY)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_remove_dependency").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_SET_STATUS)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_set_status").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_CANCEL)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_cancel").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_SUBMIT)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_submit").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_REQUEST_INPUT)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_request_input").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.IDEMPOTENT,
-        catalog
-            .findTool(ProjectRoleToolIds.ISSUE_REVIEW)
-            .orElseThrow()
-            .tool()
-            .descriptor()
-            .sideEffect());
+        catalog.findTool("issue_review").orElseThrow().tool().descriptor().sideEffect());
   }
 
   @Test

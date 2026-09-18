@@ -220,7 +220,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
   private AgentDefinitionCreateDTO agent(String model, String name) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
@@ -233,7 +233,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
   private AgentDefinitionUpdateDTO update(AgentDefinitionDTO current, List<String> subagentNames) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(current.getConfig().getToolIds());
+    config.setTools(current.getConfig().getTools());
     config.setSkills(current.getConfig().getSkills());
     config.setSubagents(subagentNames);
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();

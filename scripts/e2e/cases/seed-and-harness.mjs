@@ -177,22 +177,19 @@ registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
   title: '内部 HOST Tool 不进入 Agent 可选目录',
-  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.toolIds',
+  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools',
   async run(ctx) {
     const tools = envelopeData((await ctx.call('GET', '/api/ai/catalog/tools')).json)
     assert(Array.isArray(tools), JSON.stringify(tools))
     const names = tools.map((tool) => String(tool.name))
-    const ids = tools.map((tool) => String(tool.id))
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
     assert(!names.includes('task'), `task must be internal: ${JSON.stringify(names)}`)
-    assert(!ids.includes('base.load-skill'), `base.load-skill must be internal: ${JSON.stringify(ids)}`)
-    assert(!ids.includes('base.task'), `base.task must be internal: ${JSON.stringify(ids)}`)
     assert(
-      [
-        ['base.goal.create', 'create_goal'],
-        ['base.goal.get', 'get_goal'],
-        ['base.goal.update', 'update_goal'],
-      ].every(([id, name]) => ids.includes(id) && names.includes(name)),
+      tools.every((tool) => !Object.hasOwn(tool, 'id') && !Object.hasOwn(tool, 'version')),
+      `Tool catalog entries must not expose id/version: ${JSON.stringify(tools)}`,
+    )
+    assert(
+      ['create_goal', 'get_goal', 'update_goal'].every((name) => names.includes(name)),
       `Goal contributor tools must remain selectable: ${JSON.stringify(tools)}`,
     )
   },

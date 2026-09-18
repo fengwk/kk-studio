@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -29,16 +28,16 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * {@link CompositeRuntimeToolCatalog} 的完整单元测试： 验证聚合顺序、查找、空值检查、重复源实例拒绝、AgentToolId/模型名称冲突
- * fail-closed、未知 ID 遇到无关冲突同样 fail-closed、 静态 internal 工具回退与无缓存动态性。
+ * {@link CompositeRuntimeToolCatalog} 的完整单元测试： 验证聚合顺序、按模型可见 name 查找、空值检查、重复源实例拒绝、同名冲突
+ * fail-closed（无论 ContributionId 是否一致）、未知名称遇到无关冲突同样 fail-closed、 静态 internal 工具回退与无缓存动态性。
  */
 class CompositeRuntimeToolCatalogTest {
 
   @Test
   void selectableToolsPreservesDeterministicDelegateOrder() {
     // 意图：验证 selectableTools 严格按照构造时传入的 delegate 顺序聚合工具（例如静态优先、动态在后）
-    ToolContribution t1 = dummyContribution("static.t1", "tool_one", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("dynamic.t2", "tool_two", ToolVisibility.SELECTABLE);
+    ToolContribution t1 = dummyContribution("tool_one", ToolVisibility.SELECTABLE);
+    ToolContribution t2 = dummyContribution("tool_two", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
@@ -56,9 +55,9 @@ class CompositeRuntimeToolCatalogTest {
 
   @Test
   void findToolFindsSelectableToolsAcrossDelegates() {
-    // 意图：验证 findTool 能跨委托目录按 AgentToolId 正确查找到可选工具
-    ToolContribution t1 = dummyContribution("tool.1", "t1", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("tool.2", "t2", ToolVisibility.SELECTABLE);
+    // 意图：验证 findTool 跨委托目录按模型可见 tool name 精确查找到可选工具
+    ToolContribution t1 = dummyContribution("t1", ToolVisibility.SELECTABLE);
+    ToolContribution t2 = dummyContribution("t2", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
@@ -68,16 +67,15 @@ class CompositeRuntimeToolCatalogTest {
 
     CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
 
-    Optional<ToolContribution> found1 = composite.findTool(new AgentToolId("tool.1"));
+    Optional<ToolContribution> found1 = composite.findTool("t1");
     assertTrue(found1.isPresent());
     assertEquals(t1, found1.get());
 
-    Optional<ToolContribution> found2 = composite.findTool(new AgentToolId("tool.2"));
+    Optional<ToolContribution> found2 = composite.findTool("t2");
     assertTrue(found2.isPresent());
     assertEquals(t2, found2.get());
 
-    Optional<ToolContribution> missing = composite.findTool(new AgentToolId("tool.unknown"));
-    assertFalse(missing.isPresent());
+    assertFalse(composite.findTool("tool_unknown").isPresent());
   }
 
   @Test
@@ -106,10 +104,10 @@ class CompositeRuntimeToolCatalogTest {
   }
 
   @Test
-  void selectableToolsFailsClosedOnDuplicateAgentToolIdAcrossSources() {
-    // 意图：验证跨源存在重复 AgentToolId 时，selectableTools 立即抛出异常 fail-closed
-    ToolContribution t1 = dummyContribution("dup.id", "tool_a", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("dup.id", "tool_b", ToolVisibility.SELECTABLE);
+  void selectableToolsFailsClosedOnDuplicateNameAcrossSources() {
+    // 意图：验证跨源存在重复模型可见 name 时，selectableTools 立即 fail-closed 抛出异常
+    ToolContribution t1 = dummyContribution("dup_name", ToolVisibility.SELECTABLE);
+    ToolContribution t2 = dummyContribution("dup_name", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
@@ -120,15 +118,14 @@ class CompositeRuntimeToolCatalogTest {
     CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
     IllegalStateException error =
         assertThrows(IllegalStateException.class, composite::selectableTools);
-    assertTrue(error.getMessage().contains("duplicate AgentToolId"));
-    assertTrue(error.getMessage().contains("dup.id"));
+    assertEquals("duplicate tool name across catalogs: dup_name", error.getMessage());
   }
 
   @Test
-  void selectableToolsFailsClosedOnDuplicateModelNameAcrossSources() {
-    // 意图：验证跨源存在重复模型可见名称时，selectableTools 立即抛出异常 fail-closed
-    ToolContribution t1 = dummyContribution("id.1", "dup_name", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("id.2", "dup_name", ToolVisibility.SELECTABLE);
+  void findToolFailsClosedOnDuplicateNameAcrossSources() {
+    // 意图：验证通过 findTool 查找工具时，若存在重复的模型可见 name，立即 fail-closed 抛出异常
+    ToolContribution t1 = dummyContribution("dup_name", ToolVisibility.SELECTABLE);
+    ToolContribution t2 = dummyContribution("dup_name", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
@@ -138,16 +135,15 @@ class CompositeRuntimeToolCatalogTest {
 
     CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
     IllegalStateException error =
-        assertThrows(IllegalStateException.class, composite::selectableTools);
-    assertTrue(error.getMessage().contains("duplicate tool model name"));
-    assertTrue(error.getMessage().contains("dup_name"));
+        assertThrows(IllegalStateException.class, () -> composite.findTool("dup_name"));
+    assertEquals("duplicate tool name across catalogs: dup_name", error.getMessage());
   }
 
   @Test
-  void findToolFailsClosedOnDuplicateAgentToolIdAcrossSources() {
-    // 意图：验证通过 findTool 查找存在重复 AgentToolId 的工具时立即 fail-closed
-    ToolContribution t1 = dummyContribution("dup.id", "tool_a", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("dup.id", "tool_b", ToolVisibility.SELECTABLE);
+  void findToolFailsClosedForUnknownNameWhenUnrelatedConflictExists() {
+    // 意图：验证 catalog 内部存在无关工具的同名冲突时，即使查找未知名称也必须先校验快照并 fail-closed
+    ToolContribution t1 = dummyContribution("dup_model", ToolVisibility.SELECTABLE);
+    ToolContribution t2 = dummyContribution("dup_model", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
@@ -156,92 +152,27 @@ class CompositeRuntimeToolCatalogTest {
     when(d2.selectableTools()).thenReturn(List.of(t2));
 
     CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class, () -> composite.findTool(new AgentToolId("dup.id")));
-    assertTrue(error.getMessage().contains("duplicate AgentToolId"));
-  }
-
-  @Test
-  void findToolFailsClosedOnDuplicateModelNameAcrossSources() {
-    // 意图：验证通过 findTool 查找工具时，若存在重复的模型可见名称，立即 fail-closed 抛出异常
-    ToolContribution t1 = dummyContribution("id.1", "dup_name", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("id.2", "dup_name", ToolVisibility.SELECTABLE);
-
-    RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
-    RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
-
-    when(d1.selectableTools()).thenReturn(List.of(t1));
-    when(d2.selectableTools()).thenReturn(List.of(t2));
-
-    CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class, () -> composite.findTool(new AgentToolId("id.1")));
-    assertTrue(error.getMessage().contains("duplicate tool model name"));
-  }
-
-  @Test
-  void findToolFailsClosedForUnknownIdWhenUnrelatedConflictExists() {
-    // 意图：验证当 catalog 内部存在无关工具的模型名称或 AgentToolId 冲突时，即使查找未知 ID 也必须校验快照并 fail-closed
-    ToolContribution t1 = dummyContribution("conflict.1", "dup_model", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("conflict.2", "dup_model", ToolVisibility.SELECTABLE);
-
-    RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
-    RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
-
-    when(d1.selectableTools()).thenReturn(List.of(t1));
-    when(d2.selectableTools()).thenReturn(List.of(t2));
-
-    CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
-    AgentToolId unrelatedId = new AgentToolId("completely.unrelated.id");
 
     IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> composite.findTool(unrelatedId));
-    assertTrue(error.getMessage().contains("duplicate tool model name"));
-  }
-
-  @Test
-  void findToolFailsClosedForUnknownIdWhenUnrelatedAgentToolIdConflictExists() {
-    // 意图：验证当存在无关的 AgentToolId 冲突时，查找未知 ID 同样执行完整快照校验并 fail-closed
-    ToolContribution t1 =
-        dummyContribution("conflict.same-id", "tool_one", ToolVisibility.SELECTABLE);
-    ToolContribution t2 =
-        dummyContribution("conflict.same-id", "tool_two", ToolVisibility.SELECTABLE);
-
-    RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
-    RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
-
-    when(d1.selectableTools()).thenReturn(List.of(t1));
-    when(d2.selectableTools()).thenReturn(List.of(t2));
-
-    CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
-    AgentToolId unrelatedId = new AgentToolId("other.id");
-
-    IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> composite.findTool(unrelatedId));
-    assertTrue(error.getMessage().contains("duplicate AgentToolId"));
+        assertThrows(IllegalStateException.class, () -> composite.findTool("unrelated_name"));
+    assertEquals("duplicate tool name across catalogs: dup_model", error.getMessage());
   }
 
   @Test
   void findToolFallsBackToDelegateForStaticInternalTools() {
-    // 意图：验证不在 selectableTools 列表中的静态 INTERNAL 工具（如 load_skill/task）能通过 delegate.findTool 正常回退查找
-    ToolContribution internal =
-        dummyContribution("builtin.load-skill", "load_skill", ToolVisibility.INTERNAL);
-    ToolContribution selectable =
-        dummyContribution("host.search", "search", ToolVisibility.SELECTABLE);
+    // 意图：不在 selectableTools 列表中的静态 INTERNAL 工具（如 load_skill/task）能通过 delegate.findTool 正常回退查找
+    ToolContribution internal = dummyContribution("load_skill", ToolVisibility.INTERNAL);
+    ToolContribution selectable = dummyContribution("search", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog staticCatalog = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog dynamicCatalog = mock(RuntimeToolCatalog.class);
 
     // internal 工具不在 selectableTools 中
     when(staticCatalog.selectableTools()).thenReturn(List.of());
-    when(staticCatalog.findTool(new AgentToolId("builtin.load-skill")))
-        .thenReturn(Optional.of(internal));
+    when(staticCatalog.findTool("load_skill")).thenReturn(Optional.of(internal));
 
     when(dynamicCatalog.selectableTools()).thenReturn(List.of(selectable));
-    when(dynamicCatalog.findTool(new AgentToolId("builtin.load-skill")))
-        .thenReturn(Optional.empty());
+    when(dynamicCatalog.findTool("load_skill")).thenReturn(Optional.empty());
 
     CompositeRuntimeToolCatalog composite =
         new CompositeRuntimeToolCatalog(List.of(staticCatalog, dynamicCatalog));
@@ -250,43 +181,38 @@ class CompositeRuntimeToolCatalogTest {
     assertEquals(List.of(selectable), composite.selectableTools());
 
     // findTool 能成功查找到 internal 工具
-    Optional<ToolContribution> found = composite.findTool(new AgentToolId("builtin.load-skill"));
+    Optional<ToolContribution> found = composite.findTool("load_skill");
     assertTrue(found.isPresent());
     assertEquals(internal, found.get());
   }
 
   @Test
-  void findToolFailsClosedWhenInternalToolConflictsWithSelectableToolModelName() {
-    // 意图：验证当静态 INTERNAL 工具的模型可见名称与某个可选工具的模型名称冲突时，findTool 抛出异常 fail-closed
-    ToolContribution internal =
-        dummyContribution("builtin.internal", "same_name", ToolVisibility.INTERNAL);
-    ToolContribution selectable =
-        dummyContribution("mcp.tool", "same_name", ToolVisibility.SELECTABLE);
+  void findToolFailsClosedWhenInternalToolConflictsWithSelectableToolName() {
+    // 意图：静态 INTERNAL 工具的模型可见 name 与另一个源的可选工具同名时，findTool 必须 fail-closed
+    ToolContribution internal = dummyContribution("same_name", ToolVisibility.INTERNAL);
+    ToolContribution selectable = dummyContribution("same_name", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
 
     when(d1.selectableTools()).thenReturn(List.of());
-    when(d1.findTool(new AgentToolId("builtin.internal"))).thenReturn(Optional.of(internal));
+    when(d1.findTool("same_name")).thenReturn(Optional.of(internal));
 
     when(d2.selectableTools()).thenReturn(List.of(selectable));
-    when(d2.findTool(new AgentToolId("builtin.internal"))).thenReturn(Optional.empty());
+    when(d2.findTool("same_name")).thenReturn(Optional.empty());
 
     CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
     IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () -> composite.findTool(new AgentToolId("builtin.internal")));
-    assertTrue(error.getMessage().contains("duplicate tool model name"));
+        assertThrows(IllegalStateException.class, () -> composite.findTool("same_name"));
+    assertEquals("duplicate tool name across catalogs: same_name", error.getMessage());
   }
 
   @Test
-  void findToolFailsClosedWhenDuplicateDelegatesMatchInternalToolId() {
-    // 意图：验证当两个 delegate 均匹配同一个非可选 internal 工具 ID 时，严禁静默选择其一，必须 fail-closed
-    ToolContribution internal1 =
-        dummyContribution("dup.internal", "name_one", ToolVisibility.INTERNAL);
+  void findToolFailsClosedWhenTwoDelegatesMatchTheSameInternalToolName() {
+    // 意图：非 selectable 工具被两个 delegate 同时匹配时，同名即冲突，即使 ContributionId 不同也必须 fail-closed
+    ToolContribution internal1 = dummyContribution("dup_internal", ToolVisibility.INTERNAL);
     ToolContribution internal2 =
-        dummyContribution("dup.internal", "name_two", ToolVisibility.INTERNAL);
+        duplicateOf(internal1, new ContributionId(new ContributorId("other"), "dup-internal"));
 
     RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
     RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
@@ -294,21 +220,55 @@ class CompositeRuntimeToolCatalogTest {
     when(d1.selectableTools()).thenReturn(List.of());
     when(d2.selectableTools()).thenReturn(List.of());
 
-    AgentToolId id = new AgentToolId("dup.internal");
-    when(d1.findTool(id)).thenReturn(Optional.of(internal1));
-    when(d2.findTool(id)).thenReturn(Optional.of(internal2));
+    when(d1.findTool("dup_internal")).thenReturn(Optional.of(internal1));
+    when(d2.findTool("dup_internal")).thenReturn(Optional.of(internal2));
 
     CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
     IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> composite.findTool(id));
-    assertTrue(error.getMessage().contains("duplicate AgentToolId across catalogs"));
+        assertThrows(IllegalStateException.class, () -> composite.findTool("dup_internal"));
+    assertEquals("duplicate tool name across catalogs: dup_internal", error.getMessage());
+  }
+
+  @Test
+  void findToolFailsClosedWhenTwoDelegatesMatchSameInternalToolWithEqualContributionId() {
+    // 意图：两个 delegate 返回同名且相同 ContributionId 的贡献也属于重复来源，禁止静默接受
+    ToolContribution internal = dummyContribution("dup_same_id", ToolVisibility.INTERNAL);
+
+    RuntimeToolCatalog d1 = mock(RuntimeToolCatalog.class);
+    RuntimeToolCatalog d2 = mock(RuntimeToolCatalog.class);
+
+    when(d1.selectableTools()).thenReturn(List.of());
+    when(d2.selectableTools()).thenReturn(List.of());
+
+    when(d1.findTool("dup_same_id")).thenReturn(Optional.of(internal));
+    when(d2.findTool("dup_same_id")).thenReturn(Optional.of(internal));
+
+    CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(d1, d2));
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> composite.findTool("dup_same_id"));
+    assertEquals("duplicate tool name across catalogs: dup_same_id", error.getMessage());
+  }
+
+  @Test
+  void findToolDoesNotTreatOneSourceAsDuplicateWithItself() {
+    // 意图：同一 delegate 同时声明 selectable 与 findTool 命中时只是一个来源，不得误判为跨源重复
+    ToolContribution selectable = dummyContribution("single_source", ToolVisibility.SELECTABLE);
+
+    RuntimeToolCatalog delegate = mock(RuntimeToolCatalog.class);
+    when(delegate.selectableTools()).thenReturn(List.of(selectable));
+    when(delegate.findTool("single_source")).thenReturn(Optional.of(selectable));
+
+    CompositeRuntimeToolCatalog composite = new CompositeRuntimeToolCatalog(List.of(delegate));
+
+    assertEquals(List.of(selectable), composite.selectableTools());
+    assertEquals(Optional.of(selectable), composite.findTool("single_source"));
   }
 
   @Test
   void queriesDelegatesDynamicallyWithoutCaching() {
     // 意图：验证复合目录每次调用都现读 delegate，不进行任何缓存
-    ToolContribution t1 = dummyContribution("id.1", "name1", ToolVisibility.SELECTABLE);
-    ToolContribution t2 = dummyContribution("id.2", "name2", ToolVisibility.SELECTABLE);
+    ToolContribution t1 = dummyContribution("name1", ToolVisibility.SELECTABLE);
+    ToolContribution t2 = dummyContribution("name2", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog delegate = mock(RuntimeToolCatalog.class);
     when(delegate.selectableTools()).thenReturn(List.of(t1)).thenReturn(List.of(t1, t2));
@@ -319,28 +279,36 @@ class CompositeRuntimeToolCatalogTest {
     assertEquals(2, composite.selectableTools().size());
   }
 
-  private static ToolContribution dummyContribution(
-      String toolIdValue, String modelName, ToolVisibility visibility) {
-    ToolDescriptor descriptor =
-        new ToolDescriptor(
-            modelName,
-            "1.0",
-            "description for " + modelName,
-            "renderer",
-            new InputSchema("{}", Map.of(), Set.of(), false),
-            ToolSideEffect.READ_ONLY,
-            Duration.ofSeconds(5));
-    AgentToolDefinition definition =
-        new AgentToolDefinition(new AgentToolId(toolIdValue), descriptor, visibility);
-    Tool executable = mock(Tool.class);
-    when(executable.descriptor()).thenReturn(descriptor);
-    when(executable.requirements()).thenReturn(ToolRequirements.none());
+  private static ToolContribution dummyContribution(String toolName, ToolVisibility visibility) {
+    Tool executableTool = mock(Tool.class);
+    ToolDescriptor descriptor = descriptor(toolName);
+    when(executableTool.descriptor()).thenReturn(descriptor);
+    when(executableTool.requirements()).thenReturn(ToolRequirements.none());
     return new ToolContribution(
-        new ContributionId(
-            new ContributorId("test-contributor"), "local-" + modelName.replace('_', '-')),
-        definition,
-        executable,
+        new ContributionId(new ContributorId("test-contributor"), localName(toolName)),
+        new AgentToolDefinition(descriptor, visibility),
+        executableTool,
         ToolRequirements.none(),
         0);
+  }
+
+  /** 复制一个贡献，仅替换 scoped contribution identity，用于表达“同名但来源不同”。 */
+  private static ToolContribution duplicateOf(ToolContribution origin, ContributionId id) {
+    return new ToolContribution(
+        id, origin.definition(), origin.tool(), origin.requirements(), origin.priority());
+  }
+
+  private static ToolDescriptor descriptor(String toolName) {
+    return new ToolDescriptor(
+        toolName,
+        "description for " + toolName,
+        "renderer",
+        new InputSchema("{}", Map.of(), Set.of(), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(5));
+  }
+
+  private static String localName(String toolName) {
+    return toolName.replace('_', '-');
   }
 }

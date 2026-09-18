@@ -18,13 +18,15 @@ class StudioToolCatalogControllerTest extends WebPostgresTestSupport {
   @Autowired private MockMvc mockMvc;
 
   @Test
-  void exposesOnlySelectableToolMetadata() throws Exception {
+  void exposesOnlySelectableToolMetadataByName() throws Exception {
+    // 工具条目的唯一身份是模型可见 name，不再暴露任何 id / version 等内部身份字段。
     mockMvc
         .perform(get("/api/ai/catalog/tools"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[?(@.name == 'read')].id").value("base.read"))
+        .andExpect(jsonPath("$.data[?(@.name == 'read')].name").value("read"))
+        .andExpect(jsonPath("$.data[?(@.name == 'read')].id").doesNotExist())
+        .andExpect(jsonPath("$.data[?(@.name == 'read')].version").doesNotExist())
         .andExpect(jsonPath("$.data[?(@.name == 'read')].backend").doesNotExist())
-        .andExpect(jsonPath("$.data[?(@.name == 'read')].version").value("1"))
         .andExpect(jsonPath("$.data[?(@.name == 'read')].description").isNotEmpty())
         .andExpect(jsonPath("$.data[?(@.name == 'read')].type").doesNotExist())
         .andExpect(jsonPath("$.data[?(@.name == 'load_skill')]").doesNotExist());

@@ -63,7 +63,7 @@ const modelWithoutCatalogEntry: AgentModelDTO = {
 }
 
 function agent(
-  toolIds: string[],
+  tools: string[],
   skills: AgentSkillRefDTO[],
   subagents: string[],
   environmentId: string | null = 'env-uuid-1',
@@ -75,7 +75,7 @@ function agent(
     model: 'provider/model',
     variant: null,
     environmentId,
-    config: { toolIds, skills, subagents },
+    config: { tools, skills, subagents },
     version: '1',
     createTime: '2026-08-09T00:00:00Z',
     updateTime: '2026-08-09T00:00:00Z',

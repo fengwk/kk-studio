@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.settings;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,7 +10,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
@@ -55,7 +55,7 @@ class SystemSettingsCodecTest {
     assertTrue(
         integrations > environment && storageMedia > integrations && tool > storageMedia,
         "sections must be sorted: " + canonical);
-    // 规则对象键与 AgentToolId key 也排序。
+    // 规则对象键与工具名 key 也排序。
     assertTrue(canonical.indexOf("\"action\":\"ask\",\"pattern\":\"*\"") >= 0, canonical);
     // null 可空字段省略。
     assertTrue(!canonical.contains("workspaceId"), canonical);
@@ -115,7 +115,7 @@ class SystemSettingsCodecTest {
   void preservesPermissionRuleOrderThroughJsonRoundTrip() {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put(
-        BuiltinToolIds.BASH.value(),
+        "bash",
         List.of(
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("git ?", PermissionAction.ALLOW),
@@ -128,15 +128,14 @@ class SystemSettingsCodecTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("git ?", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY)),
-        decoded.tool().permission().get(BuiltinToolIds.BASH.value()));
+        decoded.tool().permission().get("bash"));
   }
 
   @Test
-  void preservesGlobalAndAgentToolIdPermissionKeysThroughJsonAndDtoRoundTrips() {
+  void preservesGlobalAndToolNamePermissionKeysThroughJsonAndDtoRoundTrips() {
     Map<String, List<PermissionRule>> permission = new LinkedHashMap<>();
     permission.put("*", List.of(new PermissionRule("*", PermissionAction.ASK)));
-    permission.put(
-        BuiltinToolIds.BASH.value(), List.of(new PermissionRule("git *", PermissionAction.ALLOW)));
+    permission.put("bash", List.of(new PermissionRule("git *", PermissionAction.ALLOW)));
     SystemSettings settings = withToolPermission(permission);
 
     assertEquals(settings, codec.decode(codec.encode(settings)));
@@ -279,12 +278,7 @@ class SystemSettingsCodecTest {
     ObjectNode invalidPermission =
         (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
     ObjectNode firstRule =
-        (ObjectNode)
-            invalidPermission
-                .path("tool")
-                .path("permission")
-                .path(BuiltinToolIds.WRITE.value())
-                .get(0);
+        (ObjectNode) invalidPermission.path("tool").path("permission").path("write").get(0);
     firstRule.put("action", "ASK");
     assertThrows(
         IllegalStateException.class,
@@ -299,7 +293,7 @@ class SystemSettingsCodecTest {
         .getTool()
         .getPermission()
         .put(
-            BuiltinToolIds.WRITE.value(),
+            "write",
             List.of(
                 new SystemSettingsToolDTO.PermissionRuleDTO() {
                   {
@@ -311,9 +305,22 @@ class SystemSettingsCodecTest {
   }
 
   @Test
+  void acceptsExactWildcardAndValidToolNamesAtDtoBoundary() {
+    // DTO 允许精确 wildcard 与合法模型可见工具名（含大小写混合，与 ToolDescriptor.isValidName 完全一致）。
+    SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
+    for (String key : List.of("*", "read", "mcp_server_echo", "Write")) {
+      SystemSettingsToolDTO.PermissionRuleDTO rule = new SystemSettingsToolDTO.PermissionRuleDTO();
+      rule.setPattern("*");
+      rule.setAction("ask");
+      sections.getTool().getPermission().put(key, List.of(rule));
+    }
+    assertDoesNotThrow(() -> codec.fromDto(sections));
+  }
+
+  @Test
   void rejectsNonCanonicalPermissionKeysAtDtoBoundary() {
-    // DTO 仍使用 String key，但保存边界必须只接受精确 wildcard 或 canonical AgentToolId。
-    for (String key : List.of("Base.write", " base.write", "base.write ")) {
+    // DTO 仍使用 String key，但保存边界必须只接受精确 wildcard 或合法模型可见工具名。
+    for (String key : List.of("1write", "_write", " write", "write ")) {
       SystemSettingsSectionsDTO sections = codec.toSections(SystemSettings.DEFAULT);
       SystemSettingsToolDTO.PermissionRuleDTO rule = new SystemSettingsToolDTO.PermissionRuleDTO();
       rule.setPattern("*");
@@ -326,10 +333,11 @@ class SystemSettingsCodecTest {
     sections
         .getTool()
         .getPermission()
-        .put(" base.write", List.of(new SystemSettingsToolDTO.PermissionRuleDTO()));
+        .put(" write", List.of(new SystemSettingsToolDTO.PermissionRuleDTO()));
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
-    assertEquals("tool.permission key must be '*' or a canonical AgentToolId", error.getMessage());
+    assertEquals(
+        "tool.permission key must be '*' or a valid model-visible tool name", error.getMessage());
   }
 
   @Test

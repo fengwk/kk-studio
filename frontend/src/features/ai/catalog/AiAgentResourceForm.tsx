@@ -3,7 +3,7 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
-  filterToolIdsForEnvironment,
+  filterToolsForEnvironment,
   toggleSkillRef,
   withSelectedOrphans,
   withSelectedSkillOrphans,
@@ -113,11 +113,11 @@ export function AgentForm({
 
   const toolCandidates = withSelectedToolOrphans(
     buildToolCandidates(toolCatalog, draft.environmentId),
-    draft.toolIds,
+    draft.tools,
     toolCatalog,
   )
   const visibleToolValues = new Set(toolCandidates.map((option) => option.value))
-  const visibleSelectedToolIds = draft.toolIds.filter((id) => visibleToolValues.has(id.trim()))
+  const visibleSelectedTools = draft.tools.filter((id) => visibleToolValues.has(id.trim()))
 
   const skillCandidates = withSelectedSkillOrphans(
     buildSkillCandidates(inventorySkills),
@@ -206,7 +206,7 @@ export function AgentForm({
                 ...draft,
                 environmentId: newEnvironmentId,
                 skills: [],
-                toolIds: filterToolIdsForEnvironment(draft.toolIds, toolCatalog, newEnvironmentId),
+                tools: filterToolsForEnvironment(draft.tools, toolCatalog, newEnvironmentId),
               })
             }
           }}
@@ -222,17 +222,17 @@ export function AgentForm({
         />
       </label>
 
-      <fieldset className={`form-group capability-picker${fieldErrors.toolIds ? ' is-error' : ''}`}>
+      <fieldset className={`form-group capability-picker${fieldErrors.tools ? ' is-error' : ''}`}>
         <legend>{t('ai.catalog.form.tools')}</legend>
         <CapabilityChecklist
           options={toolCandidates}
-          selected={visibleSelectedToolIds}
+          selected={visibleSelectedTools}
           emptyText={t('ai.catalog.form.noCandidateTools')}
           onToggle={(value) =>
-            onChange({ ...draft, toolIds: toggleValue(visibleSelectedToolIds, value) })
+            onChange({ ...draft, tools: toggleValue(visibleSelectedTools, value) })
           }
         />
-        {fieldErrors.toolIds ? <span className="field-error">{fieldErrors.toolIds}</span> : null}
+        {fieldErrors.tools ? <span className="field-error">{fieldErrors.tools}</span> : null}
       </fieldset>
 
       <fieldset className={`form-group capability-picker${fieldErrors.skills ? ' is-error' : ''}`}>
@@ -408,9 +408,6 @@ function CapabilityChecklist({
             <span className="capability-option-body">
               <span className="capability-option-heading">
                 <code className="capability-name">{option.name}</code>
-                {option.version ? (
-                  <span className="capability-option-meta">{option.version}</span>
-                ) : null}
                 {option.missing ? (
                   <span className="capability-option-status">
                     {translate('ai.catalog.form.unavailable')}

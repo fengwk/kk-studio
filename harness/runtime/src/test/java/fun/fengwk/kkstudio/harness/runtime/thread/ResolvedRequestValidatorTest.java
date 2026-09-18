@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -370,10 +369,8 @@ class ResolvedRequestValidatorTest {
 
   private static AgentToolDefinition toolDefinition(String id) {
     return new AgentToolDefinition(
-        new AgentToolId(id),
         new ToolDescriptor(
             id.substring(id.indexOf('.') + 1),
-            "1.0",
             "test tool",
             "test",
             new InputSchema("arguments", Map.of(), Set.of(), false),

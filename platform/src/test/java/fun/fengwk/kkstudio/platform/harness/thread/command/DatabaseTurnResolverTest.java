@@ -16,7 +16,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -91,14 +90,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
@@ -121,9 +118,9 @@ import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectRole;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleTool;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolIds;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolType;
@@ -434,7 +431,7 @@ class DatabaseTurnResolverTest {
     fixture.agent.setEnvironmentId(null);
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(
-        "environment tool base.read requires an environment binding but the agent has no environment",
+        "environment tool read requires an environment binding but the agent has no environment",
         rejected.error().message());
 
     // Agent skills 要求 Agent 自身选择 Environment；没有选择时精确拒绝。
@@ -484,7 +481,7 @@ class DatabaseTurnResolverTest {
 
     TurnResolver.Rejected rejected = fixture.rejected(multiTurnPath(firstTurn, latestTurn));
     assertEquals(
-        "environment tool base.read requires an environment binding but the agent has no environment",
+        "environment tool read requires an environment binding but the agent has no environment",
         rejected.error().message());
 
     // Agent 指向缺失 Environment 时仍冻结该精确 id，不回看任何历史目录/环境状态。
@@ -767,7 +764,7 @@ class DatabaseTurnResolverTest {
             HarnessCatalog.from(List.of()));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
-        "tool not found: base.load-skill",
+        "tool not found: load_skill",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
@@ -890,7 +887,7 @@ class DatabaseTurnResolverTest {
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
     assertEquals(
-        "tool not found: base.task",
+        "tool not found: task",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
@@ -996,10 +993,10 @@ class DatabaseTurnResolverTest {
     mcpTool.setAvailable(true);
     mcpTool.setSchemaRevision(1L);
 
-    when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
+    when(repo.getAvailableToolByModelName("mcp_srv_echo")).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));
     when(repo.listAllServers()).thenReturn(List.of(server));
-    when(repo.listTools(serverId)).thenReturn(List.of(mcpTool));
+    when(repo.listAvailableTools(serverId)).thenReturn(List.of(mcpTool));
 
     HarnessContributor projectorContributor =
         HarnessContributor.of(
@@ -1015,10 +1012,9 @@ class DatabaseTurnResolverTest {
         new CompositeRuntimeToolCatalog(
             List.of(new HarnessToolCatalogAdapter(catalogWithProjector), mcpCatalog));
 
-    AgentToolId mcpAgentToolId = McpStableIds.agentToolId(toolId);
     Fixture fixture =
         new Fixture(
-            List.of(mcpAgentToolId.value()),
+            List.of("mcp_srv_echo"),
             List.of(),
             List.of(),
             Set.of(),
@@ -1039,7 +1035,6 @@ class DatabaseTurnResolverTest {
         List.of("mcp_srv_echo"),
         spec.toolBindings().stream().map(b -> b.descriptor().name()).toList());
     ToolBinding toolBinding = spec.toolBindings().get(0);
-    assertEquals(mcpAgentToolId, toolBinding.definition().id());
     assertEquals("mcp_srv_echo", toolBinding.definition().descriptor().name());
 
     // 验证 static context projector 依旧被 HarnessCatalog 正确投影进 preamble
@@ -1282,7 +1277,7 @@ class DatabaseTurnResolverTest {
     ProviderRequest before = new ModelRequestMaterializer().materialize(path, frozen);
 
     fixture.agent.setSystemPrompt("changed system prompt");
-    fixture.agentConfig.setToolIds(List.of());
+    fixture.agentConfig.setTools(List.of());
 
     // 二次 resolve 证明 mutation 真实生效：live spec 的 preamble 与 tools 都变了，而 frozen spec 不受影响。
     ModelRequestSpec live = fixture.resolved(path);
@@ -1543,32 +1538,11 @@ class DatabaseTurnResolverTest {
   private static ToolDescriptor hostDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1",
         name + " description",
         name,
         new InputSchema(null, Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(1));
-  }
-
-  private static AgentToolId toolId(String name) {
-    return switch (name) {
-      case "read" -> BuiltinToolIds.READ;
-      case "write" -> BuiltinToolIds.WRITE;
-      case "edit" -> BuiltinToolIds.EDIT;
-      case "bash" -> BuiltinToolIds.BASH;
-      case "grep" -> BuiltinToolIds.GREP;
-      case "find" -> BuiltinToolIds.FIND;
-      case "lsp_goto_definition" -> BuiltinToolIds.LSP_GOTO_DEFINITION;
-      case "lsp_workspace_symbols" -> BuiltinToolIds.LSP_WORKSPACE_SYMBOLS;
-      case "lsp_java_decompile" -> BuiltinToolIds.LSP_JAVA_DECOMPILE;
-      case "load_skill" -> BuiltinToolIds.LOAD_SKILL;
-      case TaskTool.NAME -> BuiltinToolIds.TASK;
-      case "create_goal" -> BuiltinToolIds.GOAL_CREATE;
-      case "get_goal" -> BuiltinToolIds.GOAL_GET;
-      case "update_goal" -> BuiltinToolIds.GOAL_UPDATE;
-      default -> new AgentToolId(name);
-    };
   }
 
   private static ModelPricing pricing() {
@@ -1887,7 +1861,7 @@ class DatabaseTurnResolverTest {
   void projectRoleThreadsInjectExactRoleTools() {
     // 1. Coordinator: 包含所有 Coordinator 工具
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.COORDINATOR);
+    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR));
 
     ModelRequestSpec coordinatorSpec = fixture.resolved(fixture.path(settings("default")));
     List<String> coordinatorTools =
@@ -1906,7 +1880,7 @@ class DatabaseTurnResolverTest {
     assertEquals(expectedCoordinatorTools, coordinatorTools);
 
     // 2. Executor: 仅 issue_submit 与 issue_request_input
-    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.EXECUTOR);
+    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
     ModelRequestSpec executorSpec = fixture.resolved(fixture.path(settings("default")));
     List<String> executorTools =
         executorSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
@@ -1914,7 +1888,7 @@ class DatabaseTurnResolverTest {
     assertEquals(expectedExecutorTools, executorTools);
 
     // 3. Reviewer: 仅 issue_review
-    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.REVIEWER);
+    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
     ModelRequestSpec reviewerSpec = fixture.resolved(fixture.path(settings("default")));
     List<String> reviewerTools =
         reviewerSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
@@ -1990,32 +1964,31 @@ class DatabaseTurnResolverTest {
         HarnessCatalog.from(List.of(defaultBuiltinContributor()));
     Fixture fixtureWithoutRoleTools =
         new Fixture(List.of(), List.of(), List.of(), catalogWithoutRoleTools);
-    fixtureWithoutRoleTools.roleTools(THREAD_ID, List.of(ProjectRoleToolIds.PROJECT_READ));
+    fixtureWithoutRoleTools.roleTools(THREAD_ID, List.of("project_read"));
     TurnResolver.Rejected rejectedRole =
         fixtureWithoutRoleTools.rejected(fixtureWithoutRoleTools.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedRole.error().code());
-    assertEquals("tool not found: project.read", rejectedRole.error().message());
+    assertEquals("tool not found: project_read", rejectedRole.error().message());
   }
 
   @Test
   void rejectsWhenAgentConfiguresInternalProjectTool() {
-    Fixture projectToolInConfig = new Fixture(List.of("project.read"), List.of(), List.of());
+    Fixture projectToolInConfig = new Fixture(List.of("project_read"), List.of(), List.of());
     TurnResolver.Rejected rejectedProject =
         projectToolInConfig.rejected(projectToolInConfig.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedProject.error().code());
     assertEquals(
-        "internal tool cannot be selected by an Agent: project.read",
+        "internal tool cannot be selected by an Agent: project_read",
         rejectedProject.error().message());
   }
 
   @Test
-  void rejectsDuplicateToolIdInAgentConfig() {
+  void rejectsDuplicateToolNameInAgentConfig() {
     Fixture fixture = new Fixture(List.of("bash"), List.of(), List.of());
-    fixture.agentConfig.setToolIds(
-        List.of(BuiltinToolIds.BASH.value(), BuiltinToolIds.BASH.value()));
+    fixture.agentConfig.setTools(List.of("bash", "bash"));
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
-    assertEquals("duplicate agent tool id: base.bash", rejected.error().message());
+    assertEquals("duplicate agent tool name: bash", rejected.error().message());
   }
 
   @Test
@@ -2046,7 +2019,7 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionDoesNotInvokeSelectorOrProjectorAndHasZeroTools() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.roleTools(THREAD_ID, ProjectRoleToolIds.COORDINATOR);
+    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR));
     fixture.roleContext(THREAD_ID, "role context");
 
     List<AgentMessage> messages =
@@ -2406,8 +2379,7 @@ class DatabaseTurnResolverTest {
       model.setConfigJson("model-config");
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
-      agentConfig.setToolIds(
-          tools.stream().map(DatabaseTurnResolverTest::toolId).map(AgentToolId::value).toList());
+      agentConfig.setTools(List.copyOf(tools));
       agentConfig.setSkills(
           skills.stream().map(s -> new AgentSkillRefDTO(SKILL_SOURCE_ID.toString(), s)).toList());
       agentConfig.setSubagents(List.of());
@@ -2460,7 +2432,6 @@ class DatabaseTurnResolverTest {
                       when(tool.requirements()).thenReturn(ToolRequirements.none());
                       registrar.registerTool(
                           descriptor.name(),
-                          toolId(descriptor.name()),
                           tool,
                           internalHostToolNames.contains(descriptor.name())
                               ? ToolVisibility.INTERNAL
@@ -2497,7 +2468,7 @@ class DatabaseTurnResolverTest {
               clock);
     }
 
-    private void roleTools(UUID threadId, List<AgentToolId> tools) {
+    private void roleTools(UUID threadId, List<String> tools) {
       when(roleToolSelector.select(threadId)).thenReturn(tools);
     }
 

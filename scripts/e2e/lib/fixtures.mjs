@@ -220,9 +220,9 @@ export function agentConfigMatrix() {
     {
       id: 'valid.empty_lists',
       ok: true,
-      title: '空 toolIds/skills/subagents',
+      title: '空 tools/skills/subagents',
       build: () => ({
-        toolIds: [],
+        tools: [],
         skills: [],
         subagents: [],
       }),
@@ -232,17 +232,17 @@ export function agentConfigMatrix() {
       ok: true,
       title: 'Goal contributor 工具已进入可选 ToolCatalog',
       build: () => ({
-        toolIds: ['base.goal.create', 'base.goal.get', 'base.goal.update'],
+        tools: ['create_goal', 'get_goal', 'update_goal'],
         skills: [],
         subagents: [],
       }),
     },
     {
-      id: 'invalid.missing_toolIds',
+      id: 'invalid.missing_tools',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /toolIds.*required/i,
-      title: 'toolIds 必填',
+      messageIncludes: /tools.*required/i,
+      title: 'tools 必填',
       build: () => ({
         skills: [],
         subagents: [],
@@ -255,7 +255,7 @@ export function agentConfigMatrix() {
       messageIncludes: /skills.*required/i,
       title: 'skills 必填',
       build: () => ({
-        toolIds: [],
+        tools: [],
         subagents: [],
       }),
     },
@@ -266,7 +266,7 @@ export function agentConfigMatrix() {
       messageIncludes: /subagents.*required/i,
       title: 'subagents 必填',
       build: () => ({
-        toolIds: [],
+        tools: [],
         skills: [],
       }),
     },
@@ -275,9 +275,9 @@ export function agentConfigMatrix() {
       ok: false,
       expectStatus: 400,
       messageIncludes: /unknown agent tool/i,
-      title: '未知 toolId',
+      title: '未知 tool name',
       build: () => ({
-        toolIds: ['definitely-not-a-real-tool'],
+        tools: ['definitely_not_a_real_tool'],
         skills: [],
         subagents: [],
       }),
@@ -289,7 +289,7 @@ export function agentConfigMatrix() {
       messageIncludes: /duplicate|skill/i,
       title: '复合 skill ref 重复',
       build: () => ({
-        toolIds: [],
+        tools: [],
         skills: [
           {
             sourceId: '11111111-1111-4111-8111-111111111111',
@@ -310,7 +310,7 @@ export function agentConfigMatrix() {
       messageIncludes: /duplicate|subagent/i,
       title: 'subagents 重复',
       build: () => ({
-        toolIds: [],
+        tools: [],
         skills: [],
         subagents: ['missing-agent', 'missing-agent'],
       }),
@@ -322,7 +322,7 @@ export function agentConfigMatrix() {
       messageIncludes: /agent_definition.*not found|not found/i,
       title: '未知 subagent 引用',
       build: () => ({
-        toolIds: [],
+        tools: [],
         skills: [],
         subagents: ['definitely-not-a-real-agent'],
       }),
@@ -334,7 +334,7 @@ export function agentConfigMatrix() {
       messageIncludes: /Failed to read request|Bad Request/i,
       title: '未知字段 rejected',
       build: () => ({
-        toolIds: [],
+        tools: [],
         skills: [],
         subagents: [],
         unexpected: true,

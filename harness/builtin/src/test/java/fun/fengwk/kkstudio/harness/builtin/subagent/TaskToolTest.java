@@ -41,14 +41,13 @@ class TaskToolTest {
   private static final UUID INVOCATION_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
   private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-000000000002");
 
-  /** descriptor 固定暴露 name/version/renderer/sideEffect/no-timeout 与必填 schema 及 requirements。 */
+  /** descriptor 固定暴露 name/renderer/sideEffect/no-timeout 与必填 schema 及 requirements。 */
   @Test
   void exposesCanonicalDescriptorContract() {
     TaskTool tool = new TaskTool((request, listener) -> mock(ToolExecutionHandle.class));
     ToolDescriptor descriptor = tool.descriptor();
 
     assertEquals(TaskTool.NAME, descriptor.name());
-    assertEquals(TaskTool.VERSION, descriptor.version());
     assertEquals(TaskTool.RENDERER_KEY, descriptor.rendererKey());
     assertEquals(ToolSideEffect.NON_IDEMPOTENT, descriptor.sideEffect());
     assertEquals(Duration.ZERO, descriptor.timeout());

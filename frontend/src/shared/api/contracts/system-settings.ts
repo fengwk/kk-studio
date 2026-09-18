@@ -19,7 +19,7 @@ export interface PermissionRuleDTO {
 export type PermissionAction = 'allow' | 'ask' | 'deny'
 
 export interface SystemSettingsToolDTO {
-  /** permission key 为全局通配符 `*` 或 canonical AgentToolId；键与数组顺序都由后端返回并原样回写。 */
+  /** permission key 为全局通配符 `*` 或模型可见工具名；键与数组顺序都由后端返回并原样回写。 */
   permission: Record<string, PermissionRuleDTO[]>
   defaultYolo: boolean
   modelGatewayBusyRetryMillis: DecimalLong

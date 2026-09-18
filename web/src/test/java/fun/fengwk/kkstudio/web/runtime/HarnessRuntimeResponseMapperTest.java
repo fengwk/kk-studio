@@ -55,7 +55,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -229,9 +228,7 @@ class HarnessRuntimeResponseMapperTest {
     ToolInvocationDTO boundDto = HarnessRuntimeResponseMapper.toToolInvocationDto(bound);
 
     assertEquals("bash", boundDto.getToolName());
-    assertEquals("1.0", boundDto.getToolVersion());
     assertEquals("bash", boundDto.getRendererKey());
-    assertEquals("test.bash", boundDto.getToolId());
     assertEquals("11111111-1111-1111-1111-111111111111", boundDto.getEnvironmentId());
     assertEquals(approval, new ToolApprovalJsonCodec().decode(boundDto.getApprovalJson()));
     assertEquals(result, ToolResultJsonCodec.decode(boundDto.getResultJson()));
@@ -242,9 +239,7 @@ class HarnessRuntimeResponseMapperTest {
         toolInvocation(ToolInvocationStatus.FAILED, null, null, null, error, 0);
     ToolInvocationDTO unboundDto = HarnessRuntimeResponseMapper.toToolInvocationDto(unbound);
 
-    assertNull(unboundDto.getToolVersion());
     assertEquals("tool", unboundDto.getRendererKey());
-    assertNull(unboundDto.getToolId());
     assertNull(unboundDto.getEnvironmentId());
     assertNull(unboundDto.getApprovalJson());
     assertNull(unboundDto.getResultJson());
@@ -614,8 +609,7 @@ class HarnessRuntimeResponseMapperTest {
 
   private static ToolBinding environmentToolBinding() {
     return new ToolBinding(
-        new AgentToolDefinition(
-            new AgentToolId("test.bash"), descriptor(), ToolVisibility.SELECTABLE),
+        new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
         true,
         EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
@@ -623,8 +617,7 @@ class HarnessRuntimeResponseMapperTest {
 
   private static ToolBinding hostToolBinding() {
     return new ToolBinding(
-        new AgentToolDefinition(
-            new AgentToolId("test.bash"), descriptor(), ToolVisibility.SELECTABLE),
+        new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
         false,
         null);
@@ -633,7 +626,6 @@ class HarnessRuntimeResponseMapperTest {
   private static ToolDescriptor descriptor() {
     return new ToolDescriptor(
         "bash",
-        "1.0",
         "execute a command",
         "bash",
         new InputSchema("command arguments", Map.of(), Set.of(), true),

@@ -5,9 +5,8 @@ import path from 'node:path'
 import test from 'node:test'
 
 import {
-  AGENT_TOOL_IDS,
+  TOOL_NAMES,
   CASES,
-  MODEL_TOOL_NAMES,
   WRITE_PROOF,
   WRITE_PROOF_META,
   buildSystemPrompt,
@@ -99,13 +98,8 @@ test('report artifacts never repeat the 12KiB payload', () => {
       },
     })
     const summary = JSON.parse(readFileSync(path.join(runDir, 'summary.json'), 'utf8'))
-    assert.deepEqual(summary.configuration.agentToolIds, AGENT_TOOL_IDS)
-    assert.deepEqual(summary.configuration.modelToolNames, MODEL_TOOL_NAMES)
+    assert.deepEqual(summary.configuration.toolNames, TOOL_NAMES)
     const report = readFileSync(path.join(runDir, 'report.md'), 'utf8')
-    assert.match(
-      report,
-      /Agent tool IDs: `base\.read, base\.write, base\.edit, base\.bash, base\.grep, base\.find`/,
-    )
     assert.match(report, /Model-visible tool names: `read, write, edit, bash, grep, find`/)
     for (const file of [
       path.join(runDir, 'artifacts/m27-pi-repair/trace.json'),

@@ -168,7 +168,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       rebound.setModel("stub/acceptance-stub");
       rebound.setVariant("default");
       AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
-      reboundConfig.setToolIds(List.of());
+      reboundConfig.setTools(List.of());
       reboundConfig.setSkills(List.of());
       reboundConfig.setSubagents(List.of());
       rebound.setConfig(reboundConfig);

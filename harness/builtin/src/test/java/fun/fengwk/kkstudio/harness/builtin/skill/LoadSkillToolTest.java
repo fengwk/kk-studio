@@ -82,7 +82,7 @@ class LoadSkillToolTest {
         LOCAL_REVISION);
   }
 
-  /** descriptor 的 name/version/renderer/side-effect/timeout 与单参数 schema 声明及 environment 要求。 */
+  /** descriptor 的 name/renderer/side-effect/timeout 与单参数 schema 声明及 environment 要求。 */
   @Test
   void exposesCanonicalDescriptorContract() {
     LoadSkillTool tool =
@@ -91,7 +91,6 @@ class LoadSkillToolTest {
 
     ToolDescriptor descriptor = tool.descriptor();
     assertEquals(LoadSkillTool.NAME, descriptor.name());
-    assertEquals(LoadSkillTool.VERSION, descriptor.version());
     assertEquals(LoadSkillTool.NAME, descriptor.rendererKey());
     assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
     assertEquals(Duration.ofMinutes(1), descriptor.timeout());

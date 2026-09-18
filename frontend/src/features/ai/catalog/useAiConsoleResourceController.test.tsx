@@ -628,7 +628,7 @@ function agent() {
     variant: 'default',
     environmentId: null,
     config: {
-      toolIds: [],
+      tools: [],
       skills: [],
       subagents: [],
     },

@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -307,8 +306,7 @@ class ToolExecutionGatewayAdmissionTest {
         new ToolInvocationRequest(
             new ToolCall("effects", descriptor.name(), "{}"),
             new ToolBinding(
-                new AgentToolDefinition(
-                    new AgentToolId("test.effects-tool"), descriptor, ToolVisibility.SELECTABLE),
+                new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("goal", "tool", List.of()),
                 false,
                 null));

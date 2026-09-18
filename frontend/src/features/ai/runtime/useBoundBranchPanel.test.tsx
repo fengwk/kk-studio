@@ -136,7 +136,7 @@ const agents = [
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    config: { toolIds: [], skills: [], subagents: [] },
+    config: { tools: [], skills: [], subagents: [] },
     version: '0',
     createTime: null,
     updateTime: null,
@@ -148,7 +148,7 @@ const agents = [
     model: 'minimax/MiniMax',
     variant: 'default',
     config: {
-      toolIds: ['base.web-search'],
+      tools: ['web_search'],
       skills: [{ sourceId: 'src-1', name: 'skill-a' }],
       subagents: [],
     },

@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -11,7 +10,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,7 +24,6 @@ final class ToolInvocationTestData {
   static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1.0",
         "description of " + name,
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -45,10 +42,7 @@ final class ToolInvocationTestData {
   }
 
   private static AgentToolDefinition definition(String name) {
-    return new AgentToolDefinition(
-        new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
-        descriptor(name),
-        ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(descriptor(name), ToolVisibility.SELECTABLE);
   }
 
   static ToolCall call(String name, String argumentsJson) {

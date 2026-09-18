@@ -13,7 +13,7 @@ export interface PermissionRuleDraft {
   action: PermissionAction
 }
 
-/** 保序的 tool 权限分组：canonical AgentToolId 或全局通配符 `*` + 该 key 下的有序规则数组。 */
+/** 保序的 tool 权限分组：模型可见 tool name 或全局通配符 `*` + 该 key 下的有序规则数组。 */
 export interface PermissionGroupDraft {
   tool: string
   rules: PermissionRuleDraft[]

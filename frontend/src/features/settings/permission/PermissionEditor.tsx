@@ -39,7 +39,7 @@ export function PermissionEditor({
     queryFn: () => agentService.listTools(),
   })
   const permissionToolCandidates = buildPermissionToolCandidates(toolsQuery.data ?? [])
-  const catalogIds = permissionToolCandidates.map((tool) => tool.value)
+  const catalogNames = permissionToolCandidates.map((tool) => tool.value)
 
   return (
     <div className="permission-editor" data-permission-editor>
@@ -48,8 +48,8 @@ export function PermissionEditor({
       ) : null}
 
       {groups.map((group, groupIndex) => {
-        const toolIdBlank = group.tool.trim() === ''
-        const toolUnavailable = !toolIdBlank && !catalogIds.includes(group.tool)
+        const toolNameBlank = group.tool.trim() === ''
+        const toolUnavailable = !toolNameBlank && !catalogNames.includes(group.tool)
         const toolOptions = [
           ...(toolUnavailable
             ? [
@@ -80,11 +80,11 @@ export function PermissionEditor({
                   id={`perm-tool-${groupIndex}`}
                   value={group.tool}
                   placeholder={t('shared.selectPlaceholder')}
-                  aria-invalid={toolIdBlank}
+                  aria-invalid={toolNameBlank}
                   options={toolOptions}
                   onChange={(tool) => onChange(renameTool(groups, groupIndex, tool))}
                 />
-                {toolIdBlank ? (
+                {toolNameBlank ? (
                   <span className="permission-error" role="alert">
                     {t('settings.error.permissionToolNameRequired')}
                   </span>

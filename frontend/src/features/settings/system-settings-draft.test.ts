@@ -16,9 +16,9 @@ describe('system settings draft codec', () => {
   it('derives a string-value draft from the wire aggregate (Long stays string, Integer becomes string)', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
     expect(draft.tool.permission).toEqual([
-      { tool: 'base.write', rules: [{ pattern: '*', action: 'ask' }] },
-      { tool: 'base.edit', rules: [{ pattern: '*', action: 'ask' }] },
-      { tool: 'base.bash', rules: [{ pattern: '*', action: 'ask' }] },
+      { tool: 'write', rules: [{ pattern: '*', action: 'ask' }] },
+      { tool: 'edit', rules: [{ pattern: '*', action: 'ask' }] },
+      { tool: 'bash', rules: [{ pattern: '*', action: 'ask' }] },
     ])
     expect(draft.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
     expect(draft.aiRuntime.retryMaxRetries).toBe('3')
@@ -165,7 +165,7 @@ describe('system settings draft codec', () => {
 
     const blankPattern = settingsSectionsToDraft(makeSettingsDto())
     blankPattern.tool.permission = [
-      { tool: 'base.bash', rules: [{ pattern: '  ', action: 'ask' }] },
+      { tool: 'bash', rules: [{ pattern: '  ', action: 'ask' }] },
     ]
     expect(() => assembleSettingsUpdate(blankPattern, '0')).toThrowError(
       expect.objectContaining<DraftValidationError>({ reason: 'blankPattern' }),
@@ -182,8 +182,8 @@ describe('system settings draft codec', () => {
     const draft = settingsSectionsToDraft(makeSettingsDto())
     // 两个分组 canonical 名（trim 后）相同：JSON 对象键会覆盖前一个分组的规则造成数据丢失，必须拒绝。
     draft.tool.permission = [
-      { tool: 'base.write', rules: [{ pattern: 'secret/**', action: 'deny' }] },
-      { tool: '  base.write  ', rules: [{ pattern: '*', action: 'allow' }] },
+      { tool: 'write', rules: [{ pattern: 'secret/**', action: 'deny' }] },
+      { tool: '  write  ', rules: [{ pattern: '*', action: 'allow' }] },
     ]
     expect(() => assembleSettingsUpdate(draft, '0')).toThrowError(
       expect.objectContaining<DraftValidationError>({ reason: 'duplicateToolName' }),

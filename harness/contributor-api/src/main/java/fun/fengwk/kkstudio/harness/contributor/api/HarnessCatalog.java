@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.contributor.api;
 
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
@@ -24,9 +23,9 @@ import java.util.function.Function;
 /**
  * 冻结的不可变 Contributor 目录：从一个 Contributor 集合构建，先冻结并验证全部 descriptor，再按确定性拓扑顺序收集贡献。
  *
- * <p>唯一性维度：contributor id（全局）；贡献 localName（仅 contributor 内，跨全部贡献类型）；AgentToolId 与 Tool
- * name（均全局，model-visible 调用只携带 Tool name）；custom entry type ownership（结构化键 {@code (contributorId,
- * customType)}，不同 contributor 可各自拥有同名 customType）。允许空 contributor 列表。
+ * <p>唯一性维度：contributor id（全局）；贡献 localName（仅 contributor 内，跨全部贡献类型）；模型可见 Tool name （全局唯一）；custom
+ * entry type ownership（结构化键 {@code (contributorId, customType)}，不同 contributor 可各自拥有同名
+ * customType）。允许空 contributor 列表。
  */
 public final class HarnessCatalog {
 
@@ -35,7 +34,6 @@ public final class HarnessCatalog {
   private final List<ToolContribution> tools;
   private final List<ToolContribution> selectableTools;
   private final Map<String, ToolContribution> toolsByName;
-  private final Map<AgentToolId, ToolContribution> toolsByAgentToolId;
   private final Map<ContributionId, ToolContribution> toolsById;
   private final List<CustomEntryTypeContribution> customEntryTypes;
   private final List<ContextProjectorContribution> contextProjectors;
@@ -58,15 +56,11 @@ public final class HarnessCatalog {
     this.tools = List.copyOf(tools);
     List<ToolContribution> selectables = new ArrayList<>();
     Map<String, ToolContribution> byName = new LinkedHashMap<>();
-    Map<AgentToolId, ToolContribution> byAgentToolId = new LinkedHashMap<>();
     Map<ContributionId, ToolContribution> byId = new LinkedHashMap<>();
     for (ToolContribution tool : tools) {
       String name = tool.definition().descriptor().name();
       if (byName.putIfAbsent(name, tool) != null) {
         throw new IllegalStateException("duplicate frozen tool name: " + name);
-      }
-      if (byAgentToolId.putIfAbsent(tool.definition().id(), tool) != null) {
-        throw new IllegalStateException("duplicate frozen AgentToolId: " + tool.definition().id());
       }
       byId.put(tool.id(), tool);
       if (tool.definition().visibility() == ToolVisibility.SELECTABLE) {
@@ -75,7 +69,6 @@ public final class HarnessCatalog {
     }
     this.selectableTools = List.copyOf(selectables);
     this.toolsByName = Map.copyOf(byName);
-    this.toolsByAgentToolId = Map.copyOf(byAgentToolId);
     this.toolsById = Map.copyOf(byId);
     this.customEntryTypes = List.copyOf(customEntryTypes);
     Map<CustomTypeKey, CustomEntryTypeContribution> customEntryTypeIndex = new LinkedHashMap<>();
@@ -144,12 +137,6 @@ public final class HarnessCatalog {
     return Optional.ofNullable(toolsByName.get(modelName));
   }
 
-  /** 按 AgentToolId 查找 Tool 贡献。 */
-  public Optional<ToolContribution> findTool(AgentToolId id) {
-    Objects.requireNonNull(id, "id");
-    return Optional.ofNullable(toolsByAgentToolId.get(id));
-  }
-
   /** 按冻结 scoped contribution identity 查找 Tool 贡献。 */
   public Optional<ToolContribution> findTool(ContributionId id) {
     return Optional.ofNullable(toolsById.get(Objects.requireNonNull(id, "id")));
@@ -190,7 +177,6 @@ public final class HarnessCatalog {
     private final Set<ContributorId> contributorIds = new HashSet<>();
     private final Set<ContributionId> contributionIds = new HashSet<>();
     private final Map<String, ContributionId> toolOwners = new HashMap<>();
-    private final Map<AgentToolId, ContributionId> agentToolOwners = new HashMap<>();
     private ContributorId currentContributorId;
 
     void collect(HarnessContributor contributor) {
@@ -254,13 +240,7 @@ public final class HarnessCatalog {
     }
 
     @Override
-    public void registerTool(
-        String localName,
-        AgentToolId agentToolId,
-        Tool tool,
-        ToolVisibility visibility,
-        int priority) {
-      Objects.requireNonNull(agentToolId, "agentToolId");
+    public void registerTool(String localName, Tool tool, ToolVisibility visibility, int priority) {
       Objects.requireNonNull(tool, "tool");
       Objects.requireNonNull(visibility, "visibility");
       ContributionId id = requireNewContributionId(localName);
@@ -273,16 +253,7 @@ public final class HarnessCatalog {
         throw new IllegalArgumentException(
             "duplicate tool name " + name + " (already owned by " + previousTool + ")");
       }
-      ContributionId previousAgentTool = agentToolOwners.putIfAbsent(agentToolId, id);
-      if (previousAgentTool != null) {
-        throw new IllegalArgumentException(
-            "duplicate AgentToolId "
-                + agentToolId
-                + " (already owned by "
-                + previousAgentTool
-                + ")");
-      }
-      AgentToolDefinition definition = new AgentToolDefinition(agentToolId, descriptor, visibility);
+      AgentToolDefinition definition = new AgentToolDefinition(descriptor, visibility);
       tools.add(new ToolContribution(id, definition, tool, requirements, priority));
     }
 

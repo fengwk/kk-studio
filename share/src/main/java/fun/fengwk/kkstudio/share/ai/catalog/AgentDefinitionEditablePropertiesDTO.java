@@ -22,7 +22,7 @@ public class AgentDefinitionEditablePropertiesDTO {
   /** 可空绑定的 Environment UUID 字符串（null/空白表示清除环境绑定）。 */
   private String environmentId;
 
-  /** 必填结构化执行配置（toolIds/skills/subagents），经严格 codec 校验后持久化为 config JSONB。 */
+  /** 必填结构化执行配置（tools/skills/subagents），经严格 codec 校验后持久化为 config JSONB。 */
   private AgentDefinitionConfigDTO config;
 
   @JsonAnySetter

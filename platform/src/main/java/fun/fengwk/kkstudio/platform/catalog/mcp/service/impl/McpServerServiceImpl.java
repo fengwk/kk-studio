@@ -308,13 +308,13 @@ public class McpServerServiceImpl implements McpServerService {
                 RESOURCE, rawExpectedVersion, CatalogVersions.format(locked.getVersion()));
           }
 
-          List<String> referenced = repository.selectReferencedAgentToolIds();
+          List<String> referenced = repository.selectReferencedToolNames();
           List<McpTool> tools = repository.listTools(serverId);
           for (McpTool tool : tools) {
-            String agentToolId = McpStableIds.agentToolId(tool.getId()).value();
-            if (referenced.contains(agentToolId)) {
+            if (referenced.contains(tool.getModelName())) {
               throw new AiInUseException(
-                  RESOURCE, "mcp tool " + agentToolId + " is currently referenced by an agent");
+                  RESOURCE,
+                  "mcp tool " + tool.getModelName() + " is currently referenced by an agent");
             }
           }
 

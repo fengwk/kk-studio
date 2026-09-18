@@ -28,9 +28,7 @@ public class ToolCatalogQueryService {
     ToolDescriptor descriptor = contribution.definition().descriptor();
     ToolRequirements requirements = contribution.requirements();
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
-    dto.setId(contribution.definition().id().value());
     dto.setName(descriptor.name());
-    dto.setVersion(descriptor.version());
     dto.setDescription(descriptor.description());
     dto.setEnvironmentRequired(requirements != null && requirements.environmentRequired());
     dto.setEnvironmentId(

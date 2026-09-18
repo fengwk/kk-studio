@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.util.Objects;
@@ -11,8 +10,8 @@ import java.util.UUID;
 /**
  * MCP 工具与 Server 的稳定全局身份解析器。
  *
- * <p>身份由 mcp_tool 行的稳定 UUID 派生：AgentToolId = {@code mcp.<32 位小写 hex uuid>}；ContributionId =
- * contributor {@code platform.mcp} + localName {@code tool.<32 位小写 hex uuid>}。
+ * <p>ContributionId 由 mcp_tool 行的稳定 UUID 派生：contributor {@code platform.mcp} + localName {@code
+ * tool.<32 位小写 hex uuid>}。模型可见工具身份是 mcp_tool.model_name，不由本类派生。
  *
  * <p>所有 MCP 外部与路径 UUID 参数均在此严格校验规范的小写连字符格式（36 字符）。
  */
@@ -21,32 +20,15 @@ public final class McpStableIds {
   /** MCP 工具贡献的唯一 contributor 身份。 */
   public static final ContributorId CONTRIBUTOR_ID = new ContributorId("platform.mcp");
 
-  /** AgentToolId 前缀。 */
-  public static final String AGENT_TOOL_ID_PREFIX = "mcp.";
-
   /** ContributionId localName 前缀。 */
   public static final String LOCAL_NAME_PREFIX = "tool.";
 
   private McpStableIds() {}
 
-  /** 返回工具稳定 UUID 对应的 AgentToolId。 */
-  public static AgentToolId agentToolId(UUID toolId) {
-    Objects.requireNonNull(toolId, "toolId");
-    return new AgentToolId(AGENT_TOOL_ID_PREFIX + canonicalUuid(toolId));
-  }
-
   /** 返回工具稳定 UUID 对应的 ContributionId localName。 */
   public static String localName(UUID toolId) {
     Objects.requireNonNull(toolId, "toolId");
     return LOCAL_NAME_PREFIX + canonicalUuid(toolId);
-  }
-
-  /** 从 canonical AgentToolId 值解析工具 UUID；格式非法时返回 empty。 */
-  public static Optional<UUID> parseAgentToolId(String value) {
-    if (value == null || !value.startsWith(AGENT_TOOL_ID_PREFIX)) {
-      return Optional.empty();
-    }
-    return parseCanonicalUuid(value.substring(AGENT_TOOL_ID_PREFIX.length()));
   }
 
   /** 返回 canonical（小写、无连字符）的 32 位 hex UUID 文本。 */

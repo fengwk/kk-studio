@@ -56,8 +56,7 @@ public final class ProjectHarnessContributor implements HarnessContributor {
 
     for (ProjectRoleToolType type : ProjectRoleToolType.values()) {
       Tool tool = tools.get(type);
-      registrar.registerTool(
-          type.localName(), type.agentToolId(), tool, ToolVisibility.INTERNAL, 0);
+      registrar.registerTool(type.localName(), tool, ToolVisibility.INTERNAL, 0);
     }
   }
 }

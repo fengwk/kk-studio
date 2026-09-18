@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
@@ -29,13 +28,13 @@ class SystemSettingsTest {
 
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get(BuiltinToolIds.WRITE.value()));
+        defaults.tool().permission().get("write"));
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get(BuiltinToolIds.EDIT.value()));
+        defaults.tool().permission().get("edit"));
     assertEquals(
         List.of(new PermissionRule("*", PermissionAction.ASK)),
-        defaults.tool().permission().get(BuiltinToolIds.BASH.value()));
+        defaults.tool().permission().get("bash"));
     assertEquals(false, defaults.tool().defaultYolo());
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
@@ -116,40 +115,36 @@ class SystemSettingsTest {
     for (String invalid : List.of("!logs/", "#comment", " ", "[unclosed-class", "\\", "logs/\\")) {
       assertThrows(
           IllegalArgumentException.class,
-          () ->
-              toolWithRules(
-                  BuiltinToolIds.WRITE.value(), new PermissionRule(invalid, PermissionAction.DENY)),
+          () -> toolWithRules("write", new PermissionRule(invalid, PermissionAction.DENY)),
           invalid);
     }
     // 转义后的 literal pattern 放行（语义交给匹配器）。
-    toolWithRules(
-        BuiltinToolIds.WRITE.value(), new PermissionRule("\\!literal.txt", PermissionAction.DENY));
+    toolWithRules("write", new PermissionRule("\\!literal.txt", PermissionAction.DENY));
   }
 
-  /** AgentToolId 和 pattern 的首尾空白会制造不可见、不可命中的规则，持久化边界必须拒绝。 */
+  /** 工具名和 pattern 的首尾空白或非法字符会制造不可见、不可命中的规则，持久化边界必须拒绝。 */
   @Test
   void rejectsSurroundingWhitespaceInPermissionNamesAndPatterns() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> toolWithRules(" base.write", new PermissionRule("*", PermissionAction.ASK)));
+        () -> toolWithRules(" write", new PermissionRule("*", PermissionAction.ASK)));
     assertThrows(
         IllegalArgumentException.class,
-        () -> toolWithRules("Base.write", new PermissionRule("*", PermissionAction.ASK)));
+        () -> toolWithRules("1write", new PermissionRule("*", PermissionAction.ASK)));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            toolWithRules(
-                BuiltinToolIds.WRITE.value(),
-                new PermissionRule("git status * ", PermissionAction.ASK)));
-    toolWithRules(
-        BuiltinToolIds.BASH.value(), new PermissionRule("git status *", PermissionAction.ASK));
+        () -> toolWithRules("write ", new PermissionRule("*", PermissionAction.ASK)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> toolWithRules("write", new PermissionRule("git status * ", PermissionAction.ASK)));
+    toolWithRules("bash", new PermissionRule("git status *", PermissionAction.ASK));
   }
 
   @Test
   void preservesPermissionRuleOrder() {
     SystemSettings.Tool tool =
         toolWithRules(
-            BuiltinToolIds.WRITE.value(),
+            "write",
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("*.txt", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY));
@@ -158,7 +153,7 @@ class SystemSettingsTest {
             new PermissionRule("*", PermissionAction.ASK),
             new PermissionRule("*.txt", PermissionAction.ALLOW),
             new PermissionRule("secret/**", PermissionAction.DENY)),
-        tool.permission().get(BuiltinToolIds.WRITE.value()));
+        tool.permission().get("write"));
   }
 
   @Test

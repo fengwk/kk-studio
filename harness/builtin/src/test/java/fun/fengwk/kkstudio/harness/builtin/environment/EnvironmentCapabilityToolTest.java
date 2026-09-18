@@ -50,7 +50,6 @@ class EnvironmentCapabilityToolTest {
     ToolDescriptor validDescriptor =
         new ToolDescriptor(
             "read",
-            "1",
             "read file",
             "read",
             FS_READ.inputSchema(),
@@ -66,7 +65,6 @@ class EnvironmentCapabilityToolTest {
     ToolDescriptor badSchema =
         new ToolDescriptor(
             "read",
-            "1",
             "read file",
             "read",
             new InputSchema(null, Map.of(), Set.of(), false),
@@ -79,7 +77,6 @@ class EnvironmentCapabilityToolTest {
     ToolDescriptor badTimeout =
         new ToolDescriptor(
             "read",
-            "1",
             "read file",
             "read",
             FS_READ.inputSchema(),
@@ -95,7 +92,6 @@ class EnvironmentCapabilityToolTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "read",
-            "1",
             "read file",
             "read",
             FS_READ.inputSchema(),
@@ -140,7 +136,6 @@ class EnvironmentCapabilityToolTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "read",
-            "1",
             "read file",
             "read",
             FS_READ.inputSchema(),

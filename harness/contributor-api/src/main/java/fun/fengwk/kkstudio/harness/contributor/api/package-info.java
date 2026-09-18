@@ -29,9 +29,9 @@
  * <p>关键不变量：
  *
  * <ul>
- *   <li>全局唯一性：{@link fun.fengwk.kkstudio.harness.contributor.api.ContributorId}、{@link
- *       fun.fengwk.kkstudio.harness.tool.AgentToolId} 与模型调用名全局唯一； 贡献 {@code localName} 在所属
- *       Contributor 内唯一；Custom Entry ownership 键为 {@code (contributorId, customType)}；
+ *   <li>全局唯一性：{@link fun.fengwk.kkstudio.harness.contributor.api.ContributorId} 与模型可见 Tool name
+ *       全局唯一； 贡献 {@code localName} 在所属 Contributor 内唯一；Custom Entry ownership 键为 {@code
+ *       (contributorId, customType)}；
  *   <li>静态状态声明校验：Tool 声明的 {@link fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration} 涉及的
  *       customType 必须在该 Contributor 内显式注册；
  *   <li>执行与 effects：{@link fun.fengwk.kkstudio.harness.contributor.api.Tool#execute} 为快速返回的启动式异步

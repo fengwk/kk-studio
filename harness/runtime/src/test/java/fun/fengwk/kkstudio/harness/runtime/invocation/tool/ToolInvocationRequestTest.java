@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -39,7 +38,6 @@ class ToolInvocationRequestTest {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "read",
-            "1.0",
             "read",
             "read",
             new InputSchema(
@@ -51,8 +49,7 @@ class ToolInvocationRequestTest {
             Duration.ofSeconds(30));
     ToolBinding binding =
         new ToolBinding(
-            new AgentToolDefinition(
-                new AgentToolId("test.read"), descriptor, ToolVisibility.SELECTABLE),
+            new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "read", List.of()),
             false,
             null);

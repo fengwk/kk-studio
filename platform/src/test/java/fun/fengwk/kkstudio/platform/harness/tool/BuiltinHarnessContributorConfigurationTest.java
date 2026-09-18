@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
@@ -137,19 +136,18 @@ class BuiltinHarnessContributorConfigurationTest {
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     assertEquals(
         ToolVisibility.INTERNAL,
-        catalog.findTool(BuiltinToolIds.LOAD_SKILL).orElseThrow().definition().visibility());
+        catalog.findTool(LoadSkillTool.NAME).orElseThrow().definition().visibility());
     assertEquals(
         ToolVisibility.INTERNAL,
-        catalog.findTool(BuiltinToolIds.TASK).orElseThrow().definition().visibility());
+        catalog.findTool(TaskTool.NAME).orElseThrow().definition().visibility());
     assertEquals(
         ToolVisibility.SELECTABLE,
-        catalog.findTool(BuiltinToolIds.READ).orElseThrow().definition().visibility());
+        catalog.findTool("read").orElseThrow().definition().visibility());
   }
 
   private static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1",
         name + " description",
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),

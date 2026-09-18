@@ -26,7 +26,7 @@ public class AgentDefinitionDTO {
   /** 绑定的 Environment UUID 字符串（可空；null 表示未绑定环境）。 */
   private String environmentId;
 
-  /** 结构化执行配置（toolIds/skills/subagents），来自持久化的 config JSONB 列。 */
+  /** 结构化执行配置（tools/skills/subagents），来自持久化的 config JSONB 列。 */
   private AgentDefinitionConfigDTO config;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */

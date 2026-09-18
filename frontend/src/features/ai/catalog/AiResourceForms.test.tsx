@@ -320,7 +320,7 @@ describe('AiResourceForms', () => {
           model: '',
           variant: 'default',
           environmentId: '',
-          toolIds: [],
+          tools: [],
           skills: [],
           subagents: [],
         }}
@@ -412,7 +412,7 @@ function AgentFormHarness() {
     model: '',
     variant: 'default',
     environmentId: '',
-    toolIds: [],
+    tools: [],
     skills: [],
     subagents: [],
   })

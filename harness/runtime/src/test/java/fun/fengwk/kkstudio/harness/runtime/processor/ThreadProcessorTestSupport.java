@@ -71,7 +71,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -90,7 +89,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -1098,17 +1096,12 @@ final class ThreadProcessorTestSupport {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             name,
-            "1.0",
             "description of " + name,
             name,
             inputSchema,
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(30));
-    AgentToolDefinition definition =
-        new AgentToolDefinition(
-            new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
-            descriptor,
-            ToolVisibility.SELECTABLE);
+    AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     return new ToolBinding(
         definition, new ContributorBinding("core", name, List.of()), false, null);
   }
@@ -1125,7 +1118,6 @@ final class ThreadProcessorTestSupport {
   private static ToolDescriptor toolDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1.0",
         "description of " + name,
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -1134,10 +1126,7 @@ final class ThreadProcessorTestSupport {
   }
 
   private static AgentToolDefinition toolDefinition(String name) {
-    return new AgentToolDefinition(
-        new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
-        toolDescriptor(name),
-        ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(toolDescriptor(name), ToolVisibility.SELECTABLE);
   }
 
   // -----------------------------------------------------------------------------------------------

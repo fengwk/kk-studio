@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -72,96 +71,73 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
     registerEnvironment(
         registrar,
         "environment.read",
-        BuiltinToolIds.READ,
         "read",
         EnvironmentCapabilityIds.FS_READ,
         ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,
         "environment.write",
-        BuiltinToolIds.WRITE,
         "write",
         EnvironmentCapabilityIds.FS_WRITE,
         ToolSideEffect.IDEMPOTENT);
     registerEnvironment(
         registrar,
         "environment.edit",
-        BuiltinToolIds.EDIT,
         "edit",
         EnvironmentCapabilityIds.FS_EDIT,
         ToolSideEffect.NON_IDEMPOTENT);
     registerEnvironment(
         registrar,
         "environment.bash",
-        BuiltinToolIds.BASH,
         "bash",
         EnvironmentCapabilityIds.PROCESS_EXEC,
         ToolSideEffect.NON_IDEMPOTENT);
     registerEnvironment(
         registrar,
         "environment.grep",
-        BuiltinToolIds.GREP,
         "grep",
         EnvironmentCapabilityIds.FS_GREP,
         ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,
         "environment.find",
-        BuiltinToolIds.FIND,
         "find",
         EnvironmentCapabilityIds.FS_FIND,
         ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,
         "environment.lsp-goto-definition",
-        BuiltinToolIds.LSP_GOTO_DEFINITION,
         "lsp_goto_definition",
         EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
         ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,
         "environment.lsp-workspace-symbols",
-        BuiltinToolIds.LSP_WORKSPACE_SYMBOLS,
         "lsp_workspace_symbols",
         EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
         ToolSideEffect.READ_ONLY);
     registerEnvironment(
         registrar,
         "environment.lsp-java-decompile",
-        BuiltinToolIds.LSP_JAVA_DECOMPILE,
         "lsp_java_decompile",
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY);
 
     // Internal server-side tools
-    registrar.registerTool(
-        "runtime.load-skill", BuiltinToolIds.LOAD_SKILL, loadSkillTool, ToolVisibility.INTERNAL, 0);
-    registrar.registerTool(
-        "runtime.task", BuiltinToolIds.TASK, taskTool, ToolVisibility.INTERNAL, 0);
+    registrar.registerTool("runtime.load-skill", loadSkillTool, ToolVisibility.INTERNAL, 0);
+    registrar.registerTool("runtime.task", taskTool, ToolVisibility.INTERNAL, 0);
 
     // Goal tools & custom entry
     registrar.registerCustomEntryType("goal.state-type", GOAL_STATE_TYPE, 0);
-    registrar.registerTool(
-        "goal.create",
-        BuiltinToolIds.GOAL_CREATE,
-        new CreateGoalTool(),
-        ToolVisibility.SELECTABLE,
-        0);
-    registrar.registerTool(
-        "goal.get", BuiltinToolIds.GOAL_GET, new GetGoalTool(), ToolVisibility.SELECTABLE, 0);
-    registrar.registerTool(
-        "goal.update",
-        BuiltinToolIds.GOAL_UPDATE,
-        new UpdateGoalTool(),
-        ToolVisibility.SELECTABLE,
-        0);
+    registrar.registerTool("goal.create", new CreateGoalTool(), ToolVisibility.SELECTABLE, 0);
+    registrar.registerTool("goal.get", new GetGoalTool(), ToolVisibility.SELECTABLE, 0);
+    registrar.registerTool("goal.update", new UpdateGoalTool(), ToolVisibility.SELECTABLE, 0);
     registrar.registerContextProjector("goal.context", new GoalContextProjector(), 0);
   }
 
   private static void registerEnvironment(
       HarnessRegistrar registrar,
       String localName,
-      AgentToolId agentToolId,
       String toolName,
       EnvironmentCapabilityId capabilityId,
       ToolSideEffect sideEffect) {
@@ -169,14 +145,12 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             toolName,
-            // tool descriptor 版本与 capability 输入契约同步。
-            capability.version(),
             EnvironmentPrompts.load(toolName + ".md"),
             toolName,
             capability.inputSchema(),
             sideEffect,
             capability.timeout());
     Tool tool = new EnvironmentCapabilityTool(descriptor, capability);
-    registrar.registerTool(localName, agentToolId, tool, ToolVisibility.SELECTABLE, 0);
+    registrar.registerTool(localName, tool, ToolVisibility.SELECTABLE, 0);
   }
 }

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -28,7 +27,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -68,7 +66,6 @@ final class InvocationCodecTestFixtures {
   static ToolDescriptor descriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1.0",
         "Run " + name,
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -96,10 +93,7 @@ final class InvocationCodecTestFixtures {
   }
 
   private static AgentToolDefinition definition(String name) {
-    return new AgentToolDefinition(
-        new AgentToolId("test." + name.toLowerCase(Locale.ROOT).replace('_', '-')),
-        descriptor(name),
-        ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(descriptor(name), ToolVisibility.SELECTABLE);
   }
 
   static ProviderRequest providerRequest(ToolDescriptor... tools) {

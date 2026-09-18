@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.project.tool;
 
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
@@ -12,86 +11,33 @@ import java.util.Optional;
 
 /** 12 个 Project/Issue 角色工具的类型定义与描述符。 */
 public enum ProjectRoleToolType {
-  PROJECT_READ(
-      "project_read",
-      ProjectRoleToolIds.PROJECT_READ,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.READ_ONLY),
-  ISSUE_READ(
-      "issue_read",
-      ProjectRoleToolIds.ISSUE_READ,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.READ_ONLY),
-  ISSUE_LIST(
-      "issue_list",
-      ProjectRoleToolIds.ISSUE_LIST,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.READ_ONLY),
-  ISSUE_CREATE(
-      "issue_create",
-      ProjectRoleToolIds.ISSUE_CREATE,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_UPDATE(
-      "issue_update",
-      ProjectRoleToolIds.ISSUE_UPDATE,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.NON_IDEMPOTENT),
+  PROJECT_READ("project_read", ProjectRole.COORDINATOR, ToolSideEffect.READ_ONLY),
+  ISSUE_READ("issue_read", ProjectRole.COORDINATOR, ToolSideEffect.READ_ONLY),
+  ISSUE_LIST("issue_list", ProjectRole.COORDINATOR, ToolSideEffect.READ_ONLY),
+  ISSUE_CREATE("issue_create", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
+  ISSUE_UPDATE("issue_update", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
   ISSUE_ADD_DEPENDENCY(
-      "issue_add_dependency",
-      ProjectRoleToolIds.ISSUE_ADD_DEPENDENCY,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.NON_IDEMPOTENT),
+      "issue_add_dependency", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
   ISSUE_REMOVE_DEPENDENCY(
-      "issue_remove_dependency",
-      ProjectRoleToolIds.ISSUE_REMOVE_DEPENDENCY,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_SET_STATUS(
-      "issue_set_status",
-      ProjectRoleToolIds.ISSUE_SET_STATUS,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_CANCEL(
-      "issue_cancel",
-      ProjectRoleToolIds.ISSUE_CANCEL,
-      ProjectRole.COORDINATOR,
-      ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_SUBMIT(
-      "issue_submit",
-      ProjectRoleToolIds.ISSUE_SUBMIT,
-      ProjectRole.EXECUTOR,
-      ToolSideEffect.IDEMPOTENT),
-  ISSUE_REQUEST_INPUT(
-      "issue_request_input",
-      ProjectRoleToolIds.ISSUE_REQUEST_INPUT,
-      ProjectRole.EXECUTOR,
-      ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_REVIEW(
-      "issue_review",
-      ProjectRoleToolIds.ISSUE_REVIEW,
-      ProjectRole.REVIEWER,
-      ToolSideEffect.IDEMPOTENT);
+      "issue_remove_dependency", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
+  ISSUE_SET_STATUS("issue_set_status", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
+  ISSUE_CANCEL("issue_cancel", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
+  ISSUE_SUBMIT("issue_submit", ProjectRole.EXECUTOR, ToolSideEffect.IDEMPOTENT),
+  ISSUE_REQUEST_INPUT("issue_request_input", ProjectRole.EXECUTOR, ToolSideEffect.NON_IDEMPOTENT),
+  ISSUE_REVIEW("issue_review", ProjectRole.REVIEWER, ToolSideEffect.IDEMPOTENT);
 
   private final String modelName;
-  private final AgentToolId agentToolId;
   private final ProjectRole requiredRole;
   private final ToolSideEffect sideEffect;
   private final ToolDescriptor descriptor;
 
-  ProjectRoleToolType(
-      String modelName,
-      AgentToolId agentToolId,
-      ProjectRole requiredRole,
-      ToolSideEffect sideEffect) {
+  ProjectRoleToolType(String modelName, ProjectRole requiredRole, ToolSideEffect sideEffect) {
     this.modelName = Objects.requireNonNull(modelName, "modelName");
-    this.agentToolId = Objects.requireNonNull(agentToolId, "agentToolId");
     this.requiredRole = Objects.requireNonNull(requiredRole, "requiredRole");
     this.sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
     this.descriptor =
         new ToolDescriptor(
             modelName,
-            "1",
             ProjectToolPrompts.prompt(modelName),
             modelName,
             ProjectToolPrompts.schema(modelName),
@@ -104,11 +50,7 @@ public enum ProjectRoleToolType {
   }
 
   public String localName() {
-    return agentToolId.value();
-  }
-
-  public AgentToolId agentToolId() {
-    return agentToolId;
+    return modelName.replace('_', '.');
   }
 
   public ProjectRole requiredRole() {
@@ -123,15 +65,20 @@ public enum ProjectRoleToolType {
     return descriptor;
   }
 
-  public static Optional<ProjectRoleToolType> findByAgentToolId(AgentToolId agentToolId) {
-    if (agentToolId == null) {
+  public static Optional<ProjectRoleToolType> findByModelName(String modelName) {
+    if (modelName == null) {
       return Optional.empty();
     }
-    return Arrays.stream(values()).filter(t -> t.agentToolId.equals(agentToolId)).findFirst();
+    return Arrays.stream(values()).filter(t -> t.modelName.equals(modelName)).findFirst();
   }
 
   public static List<ProjectRoleToolType> forRole(ProjectRole role) {
     Objects.requireNonNull(role, "role");
     return Arrays.stream(values()).filter(t -> t.requiredRole == role).toList();
+  }
+
+  /** 返回该角色可用的模型可见工具名列表（声明顺序）。 */
+  public static List<String> namesForRole(ProjectRole role) {
+    return forRole(role).stream().map(ProjectRoleToolType::modelName).toList();
   }
 }

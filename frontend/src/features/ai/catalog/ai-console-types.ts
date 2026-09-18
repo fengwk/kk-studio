@@ -73,7 +73,7 @@ export interface AgentDraft {
   model: string
   variant: string
   environmentId: string
-  toolIds: string[]
+  tools: string[]
   skills: AgentSkillRefDTO[]
   subagents: string[]
 }

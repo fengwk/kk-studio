@@ -8,7 +8,6 @@ import type { EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 export interface CapabilityOption {
   value: string
   name: string
-  version?: string | null
   description: string | null
   offline?: boolean
   /** 已配置但不在当前候选中（仍展示，可取消勾选）。 */
@@ -49,27 +48,27 @@ export function isToolCompatibleWithEnvironment(
 }
 
 /**
- * 根据新选择的环境过滤已选工具 ID：
- * 1. 保留未知工具 ID（不在 catalog 中的 orphan）；
+ * 根据新选择的环境过滤已选模型可见工具名：
+ * 1. 保留未知工具名（不在 catalog 中的 orphan）；
  * 2. 保留非环境工具（host 工具）；
  * 3. 切换环境（非空到非空）时：保留通用环境工具，移除来自旧环境的精确环境工具；
  * 4. 解绑环境（切换到空/null）时：移除所有已知要求环境的工具（通用和精确均移除）。
  */
-export function filterToolIdsForEnvironment(
-  toolIds: string[],
+export function filterToolsForEnvironment(
+  tools: string[],
   catalog: ToolCatalogEntryDTO[],
   newEnvironmentId: string | null | undefined,
 ): string[] {
-  const catalogById = new Map<string, ToolCatalogEntryDTO>()
+  const catalogByName = new Map<string, ToolCatalogEntryDTO>()
   for (const tool of catalog) {
-    const id = tool.id?.trim()
-    if (id) {
-      catalogById.set(id, tool)
+    const name = tool.name?.trim()
+    if (name) {
+      catalogByName.set(name, tool)
     }
   }
-  return toolIds.filter((id) => {
-    const trimmedId = id.trim()
-    const tool = catalogById.get(trimmedId)
+  return tools.filter((name) => {
+    const trimmedName = name.trim()
+    const tool = catalogByName.get(trimmedName)
     if (!tool) {
       return true
     }
@@ -85,9 +84,8 @@ export function buildToolCandidates(
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
   for (const tool of tools) {
-    const value = tool.id?.trim()
     const name = tool.name?.trim()
-    if (!value || !name || seen.has(value)) {
+    if (!name || seen.has(name)) {
       continue
     }
     if (
@@ -96,35 +94,32 @@ export function buildToolCandidates(
     ) {
       continue
     }
-    seen.add(value)
+    seen.add(name)
     options.push({
-      value,
+      value: name,
       name,
-      version: tool.version,
-      description: tool.description,
+      description: tool.description?.trim() || null,
     })
   }
   return options
 }
 
-/** 构建供 permission 使用的稳定 tool ID 候选；模型可见名称仅作为补充描述。 */
+/** 构建供 permission 使用的模型可见 tool 候选。 */
 export function buildPermissionToolCandidates(
   tools: ToolCatalogEntryDTO[],
 ): CapabilityOption[] {
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
   for (const tool of tools) {
-    const id = tool.id?.trim()
-    if (!id || seen.has(id)) {
+    const name = tool.name?.trim()
+    if (!name || seen.has(name)) {
       continue
     }
-    seen.add(id)
+    seen.add(name)
     options.push({
-      value: id,
-      name: id,
-      version: tool.version,
-      description:
-        [tool.name?.trim(), tool.description?.trim()].filter(Boolean).join(' — ') || null,
+      value: name,
+      name,
+      description: tool.description?.trim() || null,
     })
   }
   return options
@@ -220,7 +215,7 @@ export function withSelectedOrphans(
 
 /**
  * 把已勾选但不在候选中的 tool 项并入列表（置灰展示）。
- * 仅保留真正未知的已选工具 ID（不在已知 toolCatalog 中）作为 orphan 候选；
+ * 仅保留真正未知的已选模型可见工具名（不在已知 toolCatalog 中）作为 orphan 候选；
  * 属于已知 toolCatalog 但与当前环境不兼容的环境工具不作为 orphan 重新展示。
  */
 export function withSelectedToolOrphans(
@@ -229,14 +224,14 @@ export function withSelectedToolOrphans(
   catalog: ToolCatalogEntryDTO[],
 ): CapabilityOption[] {
   const byValue = new Map(candidates.map((item) => [item.value, item]))
-  const knownCatalogIds = new Set(catalog.map((tool) => tool.id?.trim()).filter(Boolean))
+  const knownCatalogNames = new Set(catalog.map((tool) => tool.name?.trim()).filter(Boolean))
   const merged = [...candidates]
   for (const raw of selected) {
     const value = raw.trim()
     if (!value || byValue.has(value)) {
       continue
     }
-    if (knownCatalogIds.has(value)) {
+    if (knownCatalogNames.has(value)) {
       continue
     }
     const orphan: CapabilityOption = {

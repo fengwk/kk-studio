@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
@@ -62,15 +61,13 @@ public record SystemSettings(
       long toolGatewayOverloadRetryMillis,
       long skillLoadTimeoutMillis) {
 
-    /** 默认 permission：base.write/base.edit/base.bash 各自 {@code * -> ask}（read 保持不限制）。 */
+    /** 默认 permission：write/edit/bash 各自 {@code * -> ask}（read 保持不限制）。 */
     public static final Tool DEFAULT =
         new Tool(
             Map.of(
-                BuiltinToolIds.WRITE.value(),
-                    List.of(new PermissionRule("*", PermissionAction.ASK)),
-                BuiltinToolIds.EDIT.value(), List.of(new PermissionRule("*", PermissionAction.ASK)),
-                BuiltinToolIds.BASH.value(),
-                    List.of(new PermissionRule("*", PermissionAction.ASK))),
+                "write", List.of(new PermissionRule("*", PermissionAction.ASK)),
+                "edit", List.of(new PermissionRule("*", PermissionAction.ASK)),
+                "bash", List.of(new PermissionRule("*", PermissionAction.ASK))),
             false,
             5_000L,
             1_000L,

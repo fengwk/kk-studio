@@ -64,7 +64,6 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -80,7 +79,6 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -1071,7 +1069,6 @@ final class HarnessRuntimeTestSupport {
   private static ToolDescriptor toolDescriptor(String name) {
     return new ToolDescriptor(
         name,
-        "1.0",
         "description of " + name,
         name,
         new InputSchema("arguments", Map.of(), Set.of(), false),
@@ -1080,10 +1077,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   private static AgentToolDefinition toolDefinition(String name) {
-    return new AgentToolDefinition(
-        new AgentToolId("test." + name.replace('_', '-').toLowerCase(Locale.ROOT)),
-        toolDescriptor(name),
-        ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(toolDescriptor(name), ToolVisibility.SELECTABLE);
   }
 
   /** 在 in-memory store 上运行 void 事务体的辅助方法。 */

@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -34,8 +33,8 @@ class ToolCatalogQueryServiceTest {
   @Test
   void listToolsMapsSelectableToolsToDto() {
     // 意图：验证 listTools 从 RuntimeToolCatalog 获取可选工具并忠实转换为 ToolCatalogEntryDTO
-    ToolContribution t1 = dummyContribution("static.read", "read", "1.0", "read files");
-    ToolContribution t2 = dummyContribution("mcp.search", "search", "2.0", "search web");
+    ToolContribution t1 = dummyContribution("read", "read files");
+    ToolContribution t2 = dummyContribution("search", "search web");
 
     RuntimeToolCatalog catalog = mock(RuntimeToolCatalog.class);
     when(catalog.selectableTools()).thenReturn(List.of(t1, t2));
@@ -44,14 +43,10 @@ class ToolCatalogQueryServiceTest {
     List<ToolCatalogEntryDTO> dtos = service.listTools();
 
     assertEquals(2, dtos.size());
-    assertEquals("static.read", dtos.get(0).getId());
     assertEquals("read", dtos.get(0).getName());
-    assertEquals("1.0", dtos.get(0).getVersion());
     assertEquals("read files", dtos.get(0).getDescription());
 
-    assertEquals("mcp.search", dtos.get(1).getId());
     assertEquals("search", dtos.get(1).getName());
-    assertEquals("2.0", dtos.get(1).getVersion());
     assertEquals("search web", dtos.get(1).getDescription());
   }
 
@@ -61,20 +56,16 @@ class ToolCatalogQueryServiceTest {
     assertThrows(NullPointerException.class, () -> new ToolCatalogQueryService(null));
   }
 
-  private static ToolContribution dummyContribution(
-      String toolIdValue, String modelName, String version, String description) {
+  private static ToolContribution dummyContribution(String modelName, String description) {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             modelName,
-            version,
             description,
             "renderer",
             new InputSchema("{}", Map.of(), Set.of(), false),
             ToolSideEffect.READ_ONLY,
             Duration.ofSeconds(5));
-    AgentToolDefinition definition =
-        new AgentToolDefinition(
-            new AgentToolId(toolIdValue), descriptor, ToolVisibility.SELECTABLE);
+    AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     Tool executable = mock(Tool.class);
     when(executable.descriptor()).thenReturn(descriptor);
     when(executable.requirements()).thenReturn(ToolRequirements.none());

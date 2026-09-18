@@ -91,7 +91,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     model: 'minimax/MiniMax',
     variant: null,
     environmentId: null,
-    config: { toolIds: [], skills: [], subagents: [] },
+    config: { tools: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
     updateTime: null,
@@ -108,7 +108,7 @@ describe('AgentForm current contracts', () => {
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
-        toolIds: ['missing-tool'],
+        tools: ['missing-tool'],
       })
       const inventory = [
         inventorySkill('src-1', 'dev', 'dev skill'),
@@ -123,17 +123,13 @@ describe('AgentForm current contracts', () => {
           inventorySkills={draft.environmentId ? inventory : []}
           toolCatalog={[
             {
-              id: 'base.bash',
               name: 'bash',
-              version: '1',
               description: longDescription,
               environmentRequired: false,
               environmentId: null,
             },
             {
-              id: 'environment.lsp',
               name: 'lsp',
-              version: '1',
               description: 'lsp',
               environmentRequired: true,
               environmentId: null,
@@ -147,7 +143,7 @@ describe('AgentForm current contracts', () => {
     const missingTool = screen.getByLabelText(/missing-tool/)
     expect(missingTool).toBeChecked()
     const bashInput = screen.getByLabelText(/bash/)
-    expect(bashInput).toHaveAttribute('value', 'base.bash')
+    expect(bashInput).toHaveAttribute('value', 'bash')
     await user.click(missingTool)
     expect(missingTool).not.toBeChecked()
     await user.click(bashInput)
@@ -247,7 +243,7 @@ describe('AgentForm current contracts', () => {
         models={[modelWithVariants()]}
         fieldErrors={{
           variant: '请选择 Variant',
-          toolIds: 'Tools 冲突',
+          tools: 'Tools 冲突',
           skills: 'Skills 冲突',
         }}
         onChange={() => undefined}
@@ -488,33 +484,25 @@ describe('AgentForm current contracts', () => {
 
     const tools: ToolCatalogEntryDTO[] = [
       {
-        id: 'base.bash',
         name: 'bash',
-        version: '1',
         description: 'host shell tool',
         environmentRequired: false,
         environmentId: null,
       },
       {
-        id: 'env.generic',
         name: 'generic-tool',
-        version: '1',
         description: 'generic environment tool',
         environmentRequired: true,
         environmentId: null,
       },
       {
-        id: 'env.exact-a',
         name: 'exact-a-tool',
-        version: '1',
         description: 'exact environment A tool',
         environmentRequired: true,
         environmentId: 'env-a',
       },
       {
-        id: 'env.exact-b',
         name: 'exact-b-tool',
-        version: '1',
         description: 'exact environment B tool',
         environmentRequired: true,
         environmentId: 'env-b',
@@ -546,7 +534,7 @@ describe('AgentForm current contracts', () => {
         initialDraft={{
           ...emptyAgentDraft(modelWithVariants()),
           environmentId: '',
-          toolIds: ['base.bash', 'unknown.orphan'],
+          tools: ['bash', 'unknown.orphan'],
         }}
       />,
     )
@@ -571,18 +559,18 @@ describe('AgentForm current contracts', () => {
     // 勾选 generic-tool 和 exact-a-tool
     await user.click(screen.getByLabelText(/generic-tool/))
     await user.click(screen.getByLabelText(/exact-a-tool/))
-    expect(drafts.at(-1)?.toolIds).toEqual([
-      'base.bash',
+    expect(drafts.at(-1)?.tools).toEqual([
+      'bash',
       'unknown.orphan',
-      'env.generic',
-      'env.exact-a',
+      'generic-tool',
+      'exact-a-tool',
     ])
 
     // 阶段 3：切换 Environment A -> Environment B
     await chooseSelectOption(user, ENV_LABEL, 'Environment B')
     expect(drafts.at(-1)?.environmentId).toBe('env-b')
-    // exact-a-tool 被移除，保留 base.bash、unknown.orphan 与 env.generic
-    expect(drafts.at(-1)?.toolIds).toEqual(['base.bash', 'unknown.orphan', 'env.generic'])
+    // exact-a-tool 被移除，保留 bash、unknown.orphan 与 generic-tool
+    expect(drafts.at(-1)?.tools).toEqual(['bash', 'unknown.orphan', 'generic-tool'])
     // UI 上 exact-a-tool 消失，exact-b-tool 出现且未勾选
     expect(screen.queryByLabelText(/exact-a-tool/)).not.toBeInTheDocument()
     expect(screen.getByLabelText(/exact-b-tool/)).toBeInTheDocument()
@@ -592,7 +580,7 @@ describe('AgentForm current contracts', () => {
     await chooseSelectOption(user, ENV_LABEL, '（无）')
     expect(drafts.at(-1)?.environmentId).toBe('')
     // 所有已知环境工具均被移除，宿主工具与未知 orphan 工具保持勾选
-    expect(drafts.at(-1)?.toolIds).toEqual(['base.bash', 'unknown.orphan'])
+    expect(drafts.at(-1)?.tools).toEqual(['bash', 'unknown.orphan'])
     // UI 上所有环境工具均消失
     expect(screen.queryByLabelText(/generic-tool/)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/exact-a-tool/)).not.toBeInTheDocument()
@@ -611,25 +599,19 @@ describe('AgentForm current contracts', () => {
 
     const tools: ToolCatalogEntryDTO[] = [
       {
-        id: 'base.bash',
         name: 'bash',
-        version: '1',
         description: 'host tool',
         environmentRequired: false,
         environmentId: null,
       },
       {
-        id: 'env.generic',
         name: 'generic-tool',
-        version: '1',
         description: 'generic env tool',
         environmentRequired: true,
         environmentId: null,
       },
       {
-        id: 'env.exact-b',
         name: 'exact-b-tool',
-        version: '1',
         description: 'exact B tool',
         environmentRequired: true,
         environmentId: 'env-b',
@@ -640,7 +622,7 @@ describe('AgentForm current contracts', () => {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
         environmentId: 'env-a', // 当前在环境 A
-        toolIds: ['base.bash', 'env.exact-b'], // draft 中残留了环境 B 的专属工具
+        tools: ['bash', 'exact-b-tool'], // draft 中残留了环境 B 的专属工具
       })
       return (
         <AgentForm
@@ -667,7 +649,7 @@ describe('AgentForm current contracts', () => {
     // 勾选 generic-tool
     await user.click(screen.getByLabelText(/generic-tool/))
 
-    // 此时产出的 toolIds 不应再含有陈旧的 env.exact-b
-    expect(drafts.at(-1)?.toolIds).toEqual(['base.bash', 'env.generic'])
+    // 此时产出的 tools 不应再含有陈旧的 exact-b-tool
+    expect(drafts.at(-1)?.tools).toEqual(['bash', 'generic-tool'])
   })
 })

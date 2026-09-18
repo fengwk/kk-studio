@@ -408,7 +408,7 @@ class SkillSourceCrudIntegrationTest extends PostgresSpringTestSupport {
 
     // 在 env1 中创建 Agent，引用 sourceA 与 sourceB
     String configJson =
-        "{\"toolIds\":[],\"skills\":["
+        "{\"tools\":[],\"skills\":["
             + "{\"sourceId\":\""
             + sourceA
             + "\",\"name\":\"skill-a\"},"
@@ -429,7 +429,7 @@ class SkillSourceCrudIntegrationTest extends PostgresSpringTestSupport {
             + "values (?, 'test_p', 'test_m', ?, ?::jsonb)",
         "agent-in-env2",
         env2,
-        "{\"toolIds\":[],\"skills\":[],\"subagents\":[]}");
+        "{\"tools\":[],\"skills\":[],\"subagents\":[]}");
 
     // env1 应该精确命中 sourceA 与 sourceB，但不命中 sourceC
     assertTrue(agentDefinitionRepository.existsReferencingSkillSource(env1, sourceA));
@@ -451,7 +451,7 @@ class SkillSourceCrudIntegrationTest extends PostgresSpringTestSupport {
 
     // 插入引用该 sourceId 的 AgentDefinition
     String configJson =
-        "{\"toolIds\":[],\"skills\":[{\"sourceId\":\""
+        "{\"tools\":[],\"skills\":[{\"sourceId\":\""
             + sourceId
             + "\",\"name\":\"default-skill\"}],\"subagents\":[]}";
     jdbcTemplate.update(
@@ -509,7 +509,7 @@ class SkillSourceCrudIntegrationTest extends PostgresSpringTestSupport {
 
                       // 在事务中插入引用了 sourceId 的 Agent
                       String configJson =
-                          "{\"toolIds\":[],\"skills\":[{\"sourceId\":\""
+                          "{\"tools\":[],\"skills\":[{\"sourceId\":\""
                               + sourceId
                               + "\",\"name\":\"dev\"}],\"subagents\":[]}";
                       jdbcTemplate.update(

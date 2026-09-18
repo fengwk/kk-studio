@@ -8,7 +8,7 @@ Harness 需要一个可直接使用的工具集：读文件、执行命令、查
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor`、`BuiltinToolIds` 全局常量与完成态句柄 | 集中注册 14 个工具、Goal 自定义类型与投影器；网络传输与持久化调度在外层模块 |
+| `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor` 与完成态句柄 | 集中注册 14 个工具、Goal 自定义类型与投影器；网络传输与持久化调度在外层模块 |
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 环境能力工具实现 `EnvironmentCapabilityTool` 与 prompt 模板加载 | 委托执行期注入的 `BoundEnvironment`；传输协议与宿主进程管理由 Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | Goal 工具（`create_goal`、`get_goal`、`update_goal`）、投影器 `GoalContextProjector`、快照模型 `GoalState` 与确定性编解码器 `GoalStateCodec` | 状态依托通用 `harness_entry` 的 CUSTOM 载荷，通过 `AppendCustomEntry` 由 Runtime 原子追加 |
 | `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具 `LoadSkillTool`、选中 Skill 元数据 `SelectedSkill` 与查找契约 `ThreadSelectedSkillLookup` | 只加载当前 Thread Agent 已选中的 Skill；校验来源 Environment 一致后调用 `skill.load` 能力 |
@@ -18,26 +18,26 @@ Harness 需要一个可直接使用的工具集：读文件、执行命令、查
 
 `contribute` 的注册顺序和内容就是内置能力的定义。除 `load_skill` 与 `task` 由 Platform 装配注入（构造期校验 descriptor name 必须是 `load_skill` 与 `task`，防止传反）之外，其余工具都在这里直接实例化：
 
-| localName | AgentToolId | 模型名 | 依赖 | 可见性 | 说明 |
-| --- | --- | --- | --- | --- | --- |
-| `environment.read` | `base.read` | `read` | Environment | SELECTABLE | `fs.read`，READ_ONLY |
-| `environment.write` | `base.write` | `write` | Environment | SELECTABLE | `fs.write`，IDEMPOTENT |
-| `environment.edit` | `base.edit` | `edit` | Environment | SELECTABLE | `fs.edit`，NON_IDEMPOTENT |
-| `environment.bash` | `base.bash` | `bash` | Environment | SELECTABLE | `process.exec`，NON_IDEMPOTENT |
-| `environment.grep` | `base.grep` | `grep` | Environment | SELECTABLE | `fs.grep`，READ_ONLY |
-| `environment.find` | `base.find` | `find` | Environment | SELECTABLE | `fs.find`，READ_ONLY |
-| `environment.lsp-goto-definition` | `base.lsp-goto-definition` | `lsp_goto_definition` | Environment | SELECTABLE | `lsp.goto-definition`，READ_ONLY |
-| `environment.lsp-workspace-symbols` | `base.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | `lsp.workspace-symbols`，READ_ONLY |
-| `environment.lsp-java-decompile` | `base.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | `lsp.java-decompile`，READ_ONLY |
-| `runtime.load-skill` | `base.load-skill` | `load_skill` | Environment | INTERNAL | 按冻结身份加载 Skill 正文 |
-| `runtime.task` | `base.task` | `task` | 无 | INTERNAL | 委派 Subagent 任务 |
-| `goal.create` | `base.goal.create` | `create_goal` | WRITE(`goal.state`) | SELECTABLE | 创建 Goal 快照 |
-| `goal.get` | `base.goal.get` | `get_goal` | READ(`goal.state`) | SELECTABLE | 读取 Goal 快照 |
-| `goal.update` | `base.goal.update` | `update_goal` | WRITE(`goal.state`) | SELECTABLE | 结束 Goal |
+| localName | 模型可见 name | 依赖 | 可见性 | 说明 |
+| --- | --- | --- | --- | --- |
+| `environment.read` | `read` | Environment | SELECTABLE | `fs.read`，READ_ONLY |
+| `environment.write` | `write` | Environment | SELECTABLE | `fs.write`，IDEMPOTENT |
+| `environment.edit` | `edit` | Environment | SELECTABLE | `fs.edit`，NON_IDEMPOTENT |
+| `environment.bash` | `bash` | Environment | SELECTABLE | `process.exec`，NON_IDEMPOTENT |
+| `environment.grep` | `grep` | Environment | SELECTABLE | `fs.grep`，READ_ONLY |
+| `environment.find` | `find` | Environment | SELECTABLE | `fs.find`，READ_ONLY |
+| `environment.lsp-goto-definition` | `lsp_goto_definition` | Environment | SELECTABLE | `lsp.goto-definition`，READ_ONLY |
+| `environment.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | `lsp.workspace-symbols`，READ_ONLY |
+| `environment.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | `lsp.java-decompile`，READ_ONLY |
+| `runtime.load-skill` | `load_skill` | Environment | INTERNAL | 按冻结身份加载 Skill 正文 |
+| `runtime.task` | `task` | 无 | INTERNAL | 委派 Subagent 任务 |
+| `goal.create` | `create_goal` | WRITE(`goal.state`) | SELECTABLE | 创建 Goal 快照 |
+| `goal.get` | `get_goal` | READ(`goal.state`) | SELECTABLE | 读取 Goal 快照 |
+| `goal.update` | `update_goal` | WRITE(`goal.state`) | SELECTABLE | 结束 Goal |
 
-所有 ID 在 [`BuiltinToolIds`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIds.java) 中集中定义，`base.*` 前缀在全局唯一，由 [`BuiltinToolIdsTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIdsTest.java) 锁定字面值。此外注册 Custom Entry Type `goal.state-type`（customType 为 `goal.state`）与 Context Projector `goal.context`，priority 均为 0。
+`localName` 是 contributor 内的 scoped 贡献标识；Agent 侧的唯一身份是模型可见 name，配置、权限键与 catalog 条目都只用它。name 的字面值由 [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定。此外注册 Custom Entry Type `goal.state-type`（customType 为 `goal.state`）与 Context Projector `goal.context`，priority 均为 0。
 
-九个环境工具不由本模块实现能力，而是把 [`EnvironmentCapabilityTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个 catalog capability：descriptor 的 `inputSchema`、`timeout` 与 `version` 全部取自 capability descriptor，构造期还会复查 schema 与 timeout 完全一致。这样 capability 契约变化会立刻反映到模型可见的工具定义上，不会出现两处手写描述不同步。九份工具说明来自 [`environment/prompts/`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/)，入口是 [`EnvironmentPrompts`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentPrompts.java)；资源缺失即 `IllegalStateException`，不会退化成空描述。
+九个环境工具不由本模块实现能力，而是把 [`EnvironmentCapabilityTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java) 绑定到一个 catalog capability：descriptor 的 `inputSchema` 与 `timeout` 取自 capability descriptor，name 取模型可见工具名，构造期还会复查 schema 与 timeout 完全一致。这样 capability 契约变化会立刻反映到模型可见的工具定义上，不会出现两处手写描述不同步。九份工具说明来自 [`environment/prompts/`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/)，入口是 [`EnvironmentPrompts`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentPrompts.java)；资源缺失即 `IllegalStateException`，不会退化成空描述。
 
 ## Goal：快照、工具与投影
 
@@ -73,11 +73,11 @@ createdAt / updatedAt: 毫秒截断，updatedAt >= createdAt
 
 ## 源码与测试
 
-- 注册与身份：[`BuiltinHarnessContributor.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java)、[`BuiltinToolIds.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinToolIds.java)
+- 注册与身份：[`BuiltinHarnessContributor.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java)
 - Goal：[`GoalState.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalState.java)、[`GoalStateCodec.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodec.java)、[`GoalToolSupport.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalToolSupport.java)、[`GoalContextProjector.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java)、[`GoalPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalPrompts.java)
 - 环境工具：[`EnvironmentCapabilityTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java)、[`EnvironmentPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentPrompts.java)
 - Skill 与 Subagent：[`LoadSkillTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)、[`TaskTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)、[`SubagentConfig.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java)
-- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定完整的 14 工具清单、capability 映射与 descriptor 版本随 capability 同步，并断言 MCP 类能力不会被自动注册成模型工具；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java) 覆盖分支最新快照、fork/sibling 隔离、替换保留 `createdAt`、终态不可再更新与投影器静默；[`GoalStateCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodecTest.java)、[`LoadSkillToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillToolTest.java)、[`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java) 分别锁定严格 codec、来源环境不匹配拒绝与委派参数校验。
+- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定完整的 14 工具清单、capability 映射与 descriptor schema/timeout 随 capability 同步，并断言 MCP 类能力不会被自动注册成模型工具；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java) 覆盖分支最新快照、fork/sibling 隔离、替换保留 `createdAt`、终态不可再更新与投影器静默；[`GoalStateCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodecTest.java)、[`LoadSkillToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillToolTest.java)、[`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java) 分别锁定严格 codec、来源环境不匹配拒绝与委派参数校验。
 
 ---
 

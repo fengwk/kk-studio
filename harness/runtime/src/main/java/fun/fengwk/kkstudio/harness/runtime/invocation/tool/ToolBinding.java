@@ -10,9 +10,9 @@ import java.util.Objects;
  * 单次 Tool invocation 的冻结 binding：完整 Agent tool definition、Contributor provenance、环境需求标志与可选
  * Environment 路由身份。
  *
- * <p>{@link AgentToolDefinition#descriptor()} 是 model contract，{@link AgentToolDefinition#id()} 是
- * durable registry 与 permission identity。 Contributor 必须非空；当且仅当 {@code environmentRequired == true}
- * 时 {@code environmentId} 必须非空，目录不作为 binding 的一部分。
+ * <p>{@link AgentToolDefinition#descriptor()} 的 name 同时是 model contract、durable registry 与
+ * permission identity。 Contributor 必须非空；当且仅当 {@code environmentRequired == true} 时 {@code
+ * environmentId} 必须非空，目录不作为 binding 的一部分。
  */
 public record ToolBinding(
     AgentToolDefinition definition,

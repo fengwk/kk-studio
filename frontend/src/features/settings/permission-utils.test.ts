@@ -21,23 +21,23 @@ function groups(...entries: Array<[string, Array<[string, 'allow' | 'ask' | 'den
 
 describe('permission-utils', () => {
   it('renames a tool without collision by keeping its rules at the new name', () => {
-    const next = renameTool(groups(['base.bash', [['*', 'ask']]]), 0, 'base.read')
-    expect(next).toEqual([{ tool: 'base.read', rules: [{ pattern: '*', action: 'ask' }] }])
+    const next = renameTool(groups(['bash', [['*', 'ask']]]), 0, 'read')
+    expect(next).toEqual([{ tool: 'read', rules: [{ pattern: '*', action: 'ask' }] }])
   })
 
   it('merges deterministically when renaming collides with an existing tool (source rules appended after target)', () => {
     const next = renameTool(
       groups(
-        ['base.bash', [['scripts/*', 'deny']]],
-        ['base.write', [['*', 'ask'], ['node_modules/**', 'deny']]],
+        ['bash', [['scripts/*', 'deny']]],
+        ['write', [['*', 'ask'], ['node_modules/**', 'deny']]],
       ),
       0,
-      'base.write',
+      'write',
     )
-    // base.bash 的规则追加到 base.write 现有规则之后，且 base.bash 分组被移除。
+    // bash 的规则追加到 write 现有规则之后，且 bash 分组被移除。
     expect(next).toEqual([
       {
-        tool: 'base.write',
+        tool: 'write',
         rules: [
           { pattern: '*', action: 'ask' },
           { pattern: 'node_modules/**', action: 'deny' },
@@ -49,7 +49,7 @@ describe('permission-utils', () => {
 
   it('blank rename never merges and only clears the source name', () => {
     const next = renameTool(
-      groups(['base.bash', [['*', 'ask']]], ['base.write', [['*', 'ask']]]),
+      groups(['bash', [['*', 'ask']]], ['write', [['*', 'ask']]]),
       0,
       '  ',
     )

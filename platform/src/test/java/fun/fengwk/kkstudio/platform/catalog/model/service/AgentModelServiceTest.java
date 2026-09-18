@@ -286,7 +286,7 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     dto.setName(name);
     dto.setModel(model);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-    config.setToolIds(List.of());
+    config.setTools(List.of());
     config.setSkills(List.of());
     config.setSubagents(List.of());
     dto.setConfig(config);

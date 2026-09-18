@@ -11,7 +11,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.BuiltinToolIds;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
@@ -27,12 +26,10 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
@@ -61,7 +58,6 @@ class ToolExecutionGatewayPreflightTest {
   private static ToolDescriptor preflightDescriptor() {
     return new ToolDescriptor(
         "demo",
-        "1",
         "description of demo",
         "demo",
         new InputSchema(
@@ -84,9 +80,8 @@ class ToolExecutionGatewayPreflightTest {
     ToolGateway.PreflightResult result = preflight(PermissionAction.ASK);
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
     assertTrue(
-        ask.reason().startsWith(ToolGatewayTestSupport.TEST_TOOL_ID.value() + " requires approval"),
-        ask.reason());
-    assertTrue(ask.reason().contains(ToolGatewayTestSupport.TEST_TOOL_ID.value()), ask.reason());
+        ask.reason().startsWith(PREFLIGHT_DESCRIPTOR.name() + " requires approval"), ask.reason());
+    assertTrue(ask.reason().contains(PREFLIGHT_DESCRIPTOR.name()), ask.reason());
     assertTrue(ask.reason().contains("\"path\":\"/tmp/x\""), ask.reason());
     assertEquals(ask.reason(), ask.reason().strip());
     assertTrue(ask.reason().length() <= 1024);
@@ -101,41 +96,21 @@ class ToolExecutionGatewayPreflightTest {
   }
 
   @Test
-  void preflightUsesFrozenRegistryIdInsteadOfModelVisibleName() {
-    ToolGatewayTestSupport.FakeTool tool =
-        new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR);
+  void preflightIgnoresRulesKeyedByContributionLocalName() {
+    // 工具的唯一身份是模型可见 name；以 ContributionId localName 为 key 的规则不得影响该工具的求值结果。
     ToolSettings settings =
         new ToolSettings(
             Map.of(
-                "*",
-                List.of(new PermissionRule("*", PermissionAction.ASK)),
-                "demo",
-                List.of(new PermissionRule("*", PermissionAction.ALLOW)),
-                ToolGatewayTestSupport.TEST_TOOL_ID.value(),
-                List.of(new PermissionRule("*", PermissionAction.DENY))),
+                "*", List.of(new PermissionRule("*", PermissionAction.ASK)),
+                "host-tool", List.of(new PermissionRule("*", PermissionAction.DENY))),
             false);
-    ToolExecutionGateway gateway =
-        ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(tool),
-            new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
+    ToolGateway.PreflightResult result =
+        preflight(
+            new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR),
+            "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}",
             settings);
-
-    ToolGateway.Deny deny =
-        assertInstanceOf(
-            ToolGateway.Deny.class,
-            gateway.preflight(
-                new ToolInvocationRequest(
-                    new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}"),
-                    new ToolBinding(
-                        hostDefinition(PREFLIGHT_DESCRIPTOR),
-                        new ContributorBinding("test", "host-tool", List.of()),
-                        false,
-                        null))));
-
-    assertEquals(ToolExecutionGateway.PERMISSION_DENIED_KIND, deny.error().kind());
-    assertEquals("Tool permission was denied.", deny.error().message());
+    ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
+    assertTrue(ask.reason().startsWith(PREFLIGHT_DESCRIPTOR.name()), ask.reason());
   }
 
   @Test
@@ -168,14 +143,13 @@ class ToolExecutionGatewayPreflightTest {
                 new ToolInvocationRequest(
                     new ToolCall("unknown", "missing", "{}"),
                     new ToolBinding(
-                        new AgentToolDefinition(
-                            new AgentToolId("test.missing"), unknown, ToolVisibility.SELECTABLE),
+                        new AgentToolDefinition(unknown, ToolVisibility.SELECTABLE),
                         new ContributorBinding("test", "missing", List.of()),
                         false,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertEquals(
-        "Frozen tool definition test.missing is not registered.", unknownDeny.error().message());
+        "Frozen tool definition missing is not registered.", unknownDeny.error().message());
 
     ToolDescriptor mismatched = ToolGatewayTestSupport.hostDescriptor("demo");
     ToolGateway.Deny mismatchDeny =
@@ -191,7 +165,7 @@ class ToolExecutionGatewayPreflightTest {
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertEquals(
-        "Frozen tool definition test.host-tool does not match its catalog definition.",
+        "Frozen tool definition demo does not match its catalog definition.",
         mismatchDeny.error().message());
     verifyNoInteractions(evaluator);
   }
@@ -311,7 +285,7 @@ class ToolExecutionGatewayPreflightTest {
   private static ToolGateway.PreflightResult environmentPreflight(
       EnvironmentId environmentId, String argumentsJson, ToolSettings settings) {
     ToolContribution contribution =
-        ToolGatewayTestSupport.defaultCatalog().findTool(BuiltinToolIds.READ).orElseThrow();
+        ToolGatewayTestSupport.defaultCatalog().findTool("read").orElseThrow();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -330,17 +304,24 @@ class ToolExecutionGatewayPreflightTest {
   }
 
   private static ToolGateway.PreflightResult preflight(PermissionAction action) {
+    return preflight(
+        new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR),
+        "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}",
+        ToolGatewayTestSupport.settings(action));
+  }
+
+  private static ToolGateway.PreflightResult preflight(
+      ToolGatewayTestSupport.FakeTool tool, String argumentsJson, ToolSettings settings) {
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            ToolGatewayTestSupport.defaultCatalog(
-                new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
+            ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
-            ToolGatewayTestSupport.settings(action));
+            settings);
     ToolInvocationRequest request =
         new ToolInvocationRequest(
-            new ToolCall("call-1", "demo", "{\"path\":\"/tmp/x\",\"workdir\":\"/tmp\"}"),
+            new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
@@ -352,7 +333,6 @@ class ToolExecutionGatewayPreflightTest {
   private static ToolDescriptor truncationDescriptor() {
     return new ToolDescriptor(
         "x",
-        "1",
         "description of x",
         "x",
         new InputSchema(
@@ -415,10 +395,10 @@ class ToolExecutionGatewayPreflightTest {
     mcpTool.setAvailable(true);
     mcpTool.setSchemaRevision(1L);
 
-    when(repo.getToolById(toolId)).thenReturn(Optional.of(mcpTool));
+    when(repo.getAvailableToolByModelName("mcp_server_echo")).thenReturn(Optional.of(mcpTool));
     when(repo.getById(serverId)).thenReturn(Optional.of(server));
     when(repo.listAllServers()).thenReturn(List.of(server));
-    when(repo.listTools(serverId)).thenReturn(List.of(mcpTool));
+    when(repo.listAvailableTools(serverId)).thenReturn(List.of(mcpTool));
 
     HarnessCatalog harnessCatalog = HarnessCatalog.from(List.of());
     RuntimeToolCatalog toolCatalog =
@@ -436,8 +416,7 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             new ConcurrencyAdmission(Integer.MAX_VALUE));
 
-    ToolContribution contribution =
-        toolCatalog.findTool(McpStableIds.agentToolId(toolId)).orElseThrow();
+    ToolContribution contribution = toolCatalog.findTool("mcp_server_echo").orElseThrow();
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-mcp", "mcp_server_echo", "{}"),
@@ -455,8 +434,7 @@ class ToolExecutionGatewayPreflightTest {
   }
 
   private static AgentToolDefinition hostDefinition(ToolDescriptor descriptor) {
-    return new AgentToolDefinition(
-        ToolGatewayTestSupport.TEST_TOOL_ID, descriptor, ToolVisibility.SELECTABLE);
+    return new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
   }
 
   private static boolean hasLoneSurrogate(String value) {

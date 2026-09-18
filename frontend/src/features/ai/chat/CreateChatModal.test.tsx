@@ -13,7 +13,7 @@ const agentWithEnv: AgentDefinitionDTO = {
   variant: 'default',
   environmentId: 'env-dev-1',
   config: {
-    toolIds: [],
+    tools: [],
     skills: [],
     subagents: [],
   },

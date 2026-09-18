@@ -51,7 +51,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
-import fun.fengwk.kkstudio.harness.tool.AgentToolId;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -849,10 +848,8 @@ class ThreadContextClassifierTest {
   private static ToolBinding toolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(
-            new AgentToolId("test.bash"),
             new ToolDescriptor(
                 "bash",
-                "1.0",
                 "description of bash",
                 "bash",
                 new InputSchema("arguments", Map.of(), Set.of(), false),
