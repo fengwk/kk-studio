@@ -1,118 +1,29 @@
 # Frontend 模块
 
-本文是 `frontend/` 当前实现的运行与维护说明。Frontend 是独立的
-React/Vite/TypeScript 工程；开发时由 Vite 提供页面，发布时由 Maven
-`distribution` profile 构建并嵌入 Web Fat JAR。模块的入口、依赖和脚本以
-[frontend/package.json](../../frontend/package.json)、
-[vite.config.ts](../../frontend/vite.config.ts) 和源码为准。
+`frontend/` 是独立的 React/Vite/TypeScript 工程：它把后端 durable Snapshot 与有损
+realtime 事件还原成可恢复的浏览器工作台。开发期由 Vite 提供页面并把 `/api` 代理到
+后端；发布期由 Maven `distribution` profile 构建后嵌入 Web Fat JAR。入口、脚本和
+工具链见 [frontend/package.json](../../frontend/package.json) 和
+[vite.config.ts](../../frontend/vite.config.ts)。
 
-## 1. Goals
+## 定位与边界
 
-- 用统一的 Workbench 宿主承载 AI、Projects、Canvas、ComfyUI 和 Settings
-  五个内置 feature。
-- 让 durable snapshot、command batch 和 application-event WebSocket 的职责
-  清晰分离：snapshot 是事实，事件负责提示，realtime 只作为可丢失的显示
-  overlay。
-- 在 Chat 和 Canvas 中复用严格的 API contract、i18n、ConflictPresenter、
-  Composer、Storage 和基础 UI。
-- 保持 feature 之间通过 ExtensionHost 和 shared 层协作，shared 不反向依赖
-  feature。
-- 让单元测试、jsdom 测试、coverage 和 Playwright/API E2E 都能从仓库根目录
- 复现。
+浏览器侧只有两类事实：来自 REST 的权威 Snapshot，以及浏览器本地 draft（Pane 布局、
+未发送输入、上传进度）。WebSocket 事件只负责唤醒对账，或提供可丢失的显示 overlay。
 
-## 2. Non-goals
+- Extension 是编译期受信任的 React module：host 只接受 `TrustedReactExtension`，
+  运行时不会下载、执行或评估远端脚本。
+- UI 不把 PostgreSQL 行、S3 bucket/key、Daemon 本机绝对路径或 provider credential
+  变成持久事实；提交到 API 的只有 canonical id、cursor 和业务字段。
+- 旧 Snapshot、旧 Patch 和旧 version event 不能覆盖较新的本地状态；迟到 delta 不能
+  复活已终态的 invocation。
+- 网络结果不确定时保留 exact replay；明确的 `409` 交给 ConflictPresenter，不自动
+  重放具有业务语义的命令。
 
-- Frontend 不在运行时下载、执行或评估第三方 JavaScript；Extension 是编译
-  进来的受信任 React module。
-- Frontend 不把 PostgreSQL、S3 bucket/key、Daemon 本机绝对路径或 provider
-  credential 变成 UI 层的持久事实。
-- Frontend 不把 lossy realtime notification 当作 durable transcript、Canvas
-  graph 或 command cursor。
-- Frontend 文档不定义后端领域状态机；它只记录浏览器端的投影、请求和恢复
-  边界。
+## 应用组装与路由
 
-## Invariants 与 failure recovery
-
-- REST Snapshot 是浏览器事实源；Application Event WebSocket 只触发 invalidate、
-  version 对账或提供短暂的 streaming overlay。
-- Thread 和 Canvas version 只能前进。旧 Snapshot、旧 Patch 和旧 version event
-  不得覆盖较新的本地状态；Thread Snapshot 的 Invocation checkpoint 可在 version
-  相等时推进，因此同 version 的权威回读仍需参与 overlay 对账。gap、resync、重连和
-  非法事件统一回到完整 Snapshot。
-- 每个 mutation controller 冻结 request、target identity、cursor 和 generation。
-  不确定的网络结果保留 exact replay，明确的 conflict 交给 ConflictPresenter，
-  不自动重放具有业务语义的命令。
-- transient model/tool overlay 必须以 durable terminal/result fence 结束；迟到
-  delta、partial 和重复事件丢弃。
-- upload、signed URL 和 Canvas Function 的分阶段操作在 unmount、Canvas 切换、
-  timeout 或失败时清理本地 pending state；服务端以 handle、CAS 和过期策略继续
-  收敛。
-- shared 层不依赖 feature；feature controller 不把本地 draft、目录状态、
-  credential 或对象存储内部字段写入 durable API。
-
-## 3. 总体图
-
-```mermaid
-flowchart LR
-  Main["main.tsx<br/>StrictMode"] --> Providers["AppProviders"]
-  Providers --> Query["QueryClientProvider"]
-  Providers --> HostProvider["ExtensionHostProvider"]
-  Providers --> BrowserPrefs["BrowserPreferencesProvider"]
-  Providers --> Events["ApplicationEventProvider"]
-  Providers --> Router["BrowserRouter"]
-  Router --> AppRouter["AppRouter"]
-  AppRouter --> Workbench["WorkbenchShell"]
-  Workbench --> Shell["AppShell"]
-  Workbench --> Routes["StudioRoutes"]
-  Routes --> Host["ExtensionHost"]
-  Host --> AI["AI feature"]
-  Host --> Projects["Projects feature"]
-  Host --> Canvas["Canvas feature"]
-  Host --> Comfy["ComfyUI feature"]
-  Host --> Settings["Settings feature"]
-  AI --> API["shared/api + contracts"]
-  Projects --> API
-  Canvas --> API
-  Comfy --> API
-  Settings --> API
-  AI --> WS["/api/events/v1"]
-  Projects --> WS
-  Canvas --> WS
-  API --> Backend["HTTP API"]
-```
-
-## 4. 定位和依赖
-
-### 4.1 工程边界
-
-| 层 | 当前职责 | 关键入口 |
-| --- | --- | --- |
-| Bootstrap | 挂载 React、全局 CSS 和 provider | [main.tsx](../../frontend/src/main.tsx)、[App.tsx](../../frontend/src/app/App.tsx) |
-| App | 创建 Query、Extension、Browser preference、Application event 和 Router 上下文 | [providers.tsx](../../frontend/src/app/providers.tsx) |
-| Platform | AppShell、Workbench、贡献点注册和渲染 | [platform/](../../frontend/src/platform/) |
-| Feature | AI、Projects、Canvas、ComfyUI、Settings 的页面、controller、投影和 feature CSS | [features/](../../frontend/src/features/) |
-| Shared | API client、DTO contract、application events、i18n、冲突展示、基础 UI 和纯函数 | [shared/](../../frontend/src/shared/) |
-
-### 4.2 运行时依赖
-
-- Runtime：React `19`、React DOM、React Router `8`、TanStack React Query
-  `5`、Axios。
-- UI/内容：`lucide-react`、`@xyflow/react`、`react-markdown`、
-  `remark-gfm`、`remark-math`、`rehype-highlight`、`rehype-katex`、
-  `mermaid`、`katex`。
-- Toolchain：TypeScript `~5.7.3`、Vite `6`、Vitest `4`、jsdom、
-  ESLint `10`、Playwright、`@vitest/coverage-v8`。
-- Vite dev server 默认只监听 `127.0.0.1` 并保留默认 Host allowlist；容器或
-  远程开发必须显式覆盖 host。
-- TypeScript 使用 strict、`ES2022`、bundler module resolution、`@/*` 到
-  `src/*` 的 alias；应用代码禁止 unused locals/parameters 和未处理的
-  fall-through。
-
-## 5. AppProviders、Router 和 ExtensionHost
-
-### 5.1 Provider 顺序
-
-[AppProviders](../../frontend/src/app/providers.tsx) 的当前嵌套顺序是：
+[main.tsx](../../frontend/src/main.tsx) 在 `StrictMode` 下挂载
+[AppProviders](../../frontend/src/app/providers.tsx)，provider 顺序是：
 
 ```text
 QueryClientProvider
@@ -123,225 +34,96 @@ QueryClientProvider
             └─ AppRouter
 ```
 
-Query 默认 `retry: false`、`refetchOnWindowFocus: false`。ExtensionHost 在
-provider 生命周期内只创建一次；ApplicationEventProvider 持有共享的
-application-event manager；BrowserPreferencesProvider 保存浏览器级偏好。
+Query 默认 `retry: false`、`refetchOnWindowFocus: false`；ExtensionHost 在 provider
+生命周期内只创建一次，ApplicationEventProvider 持有共享的 application-event manager。
 
-### 5.2 路由和页面
+[AppRouter](../../frontend/src/app/router.tsx) 把 `/` replace 到 `/chats`，其余路径
+交给 [WorkbenchShell](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
+WorkbenchShell 的顺序是 `AppShell`、`header` slot、动态 `StudioRoutes` 和 `status`
+slot，每个 Page contribution 都包裹 `OverlayHost`。
 
-[AppRouter](../../frontend/src/app/router.tsx) 将 `/` replace 到 `/chats`，
-其余路径交给 [WorkbenchShell](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
-WorkbenchShell 的顺序是 `AppShell`、`header` slot、动态 `StudioRoutes` 和
-`status` slot；每一个 Page contribution 都包裹 `OverlayHost`。
+[AppShell](../../frontend/src/platform/shell/AppShell.tsx) 拥有 topbar、主导航
+（AI/Projects/Canvas/Tools/Settings）、locale 选择器和全局 Escape 优先级：合法
+`/chats/:chatId` 与 canonical UUID 的 `/canvas/:canvasId` 使用 immersive shell 并
+隐藏 topbar；Escape 只在没有 blocking modal、焦点不在可编辑控件、内层 menu 未展开
+时才关闭导航抽屉。
 
-当前内置页面：
+[createApplicationExtensionHost](../../frontend/src/app/extension-host.ts) 注册五个
+内置 extension：
 
-| Feature | 路径 | 页面职责 |
+| extension | 页面 | 其他 contribution |
 | --- | --- | --- |
-| AI | `/chats` | Chat 列表、创建 Chat、搜索 |
-| AI | `/chats/:chatId` | Chat Workspace 和 Pane |
-| AI | `/agents`、`/models`、`/providers` | Catalog CRUD |
-| AI | `/environments` | Environment 注册、live 状态、Skill 来源、持久 inventory 与异步管理操作 |
-| Projects | `/projects` | Project 搜索、创建、编辑、归档和删除 |
-| Projects | `/projects/:projectId` | Project Snapshot、六列 Issue Board、Issue 操作与 Coordinator 对话 |
-| Canvas | `/canvas` | Canvas Library |
-| Canvas | `/canvas/:canvasId` | canonical UUID Canvas Editor |
-| ComfyUI | `/comfyui` | Workflow 列表、编辑、运行 |
-| Settings | `/settings` | General 与 server schema tabs |
+| `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/environments`、`/mcp-servers` | AI navigation、创建/编辑/删除 dialog、`task` tool renderer |
+| `builtin.projects` | `/projects`、`/projects/:projectId` | 全局 Project invalidation overlay |
+| `builtin.canvas` | `/canvas`、`/canvas/:canvasId` | lazy 加载 Canvas feature |
+| `builtin.comfyui` | `/comfyui` | workflow editor/delete dialog |
+| `builtin.settings` | `/settings` | lazy 加载 Settings feature |
 
-Canvas 深链只接受 canonical UUID；其它 `canvasId` replace 回 `/canvas`。
-合法的 Chat Workspace 和 Canvas Editor 使用 immersive shell，隐藏全局
-topbar；列表和更深路径保留 topbar。
+[ExtensionHost](../../frontend/src/platform/extensions/ExtensionHost.ts) 提供 `pages`、
+`navigation`、`panels`、`widgets`、`inspectors`、`commands`、`statuses`、`dialogs`、
+`overlays` 和 `toolRenderers` 十个 registry。同一 contribution id 的候选按 `priority`
+降序、注册顺序升序选择，卸载高优先级候选后低优先级候选接管；重复 extension id、非法
+contribution id 和非法 page path 在注册时被拒绝。
+[WorkbenchSlots](../../frontend/src/platform/workbench/WorkbenchSlots.tsx) 只把
+registry 渲染到 slot，`OverlayHost` 统一渲染 dialogs 和 overlays。`toolRenderers`
+的 `id` 必须与后端冻结的 `rendererKey` 一致；`task` renderer 缺失时 MessageList
+使用默认 renderer。
 
-### 5.3 ExtensionHost
+`src/shared` 不得依赖 `@/features`（ESLint 强制），feature 之间只通过 ExtensionHost
+和 shared 协作。Thread panel 是可移植 presentation：只依赖
+[thread-timeline-types](../../frontend/src/features/ai/runtime/thread-timeline-types.ts)
+和 panel 内部组件，API、React Query、realtime、Canvas 与 controller 都留在宿主层。
 
-[createApplicationExtensionHost](../../frontend/src/app/extension-host.ts) 当前
-注册五个内置 extension：
+## API 与 contract 边界
 
-| id | 注册内容 |
-| --- | --- |
-| `builtin.ai` | Chat/Agent/Model/Provider/Environment pages、AI navigation、dialogs、`task` tool renderer |
-| `builtin.projects` | `/projects` 与 `/projects/:projectId` pages、全局 Project invalidation overlay |
-| `builtin.canvas` | `/canvas` 与 `/canvas/:canvasId` pages，lazy load Canvas |
-| `builtin.comfyui` | `/comfyui` page、workflow editor/delete dialogs |
-| `builtin.settings` | `/settings` page，lazy load Settings |
+[client.ts](../../frontend/src/shared/api/client.ts) 以 `/api` 为 base URL，Axios
+timeout 为 `60000ms`，请求注入当前 `Accept-Language`，成功时把 `ResultEnvelope`
+解包为 `data`。`ApiError` 保留 HTTP status、code 和 errors；`isConflictError` /
+`isNotFoundError` 只按 status 判定，`isConflictReason` 额外要求 `errors.reason`
+精确匹配，只有精确匹配时才允许按 reason 恢复。
 
-[ExtensionHost](../../frontend/src/platform/extensions/ExtensionHost.ts) 提供
-`pages`、`navigation`、`panels`、`widgets`、`inspectors`、`commands`、
-`statuses`、`dialogs`、`overlays` 和 `toolRenderers` 十个 registry。相同
-contribution id 的候选按 `priority` 降序、注册顺序升序选择活动项；卸载
-高优先级候选后，低优先级候选仍可回退。重复 extension id、非法 contribution
-id 和非法 page path 会在注册时拒绝。
+contract 按 HTTP 边界分组，全部是严格 wire 类型：
 
-[WorkbenchSlots](../../frontend/src/platform/workbench/WorkbenchSlots.tsx) 只
-负责把 registry 中的 contribution 渲染到 slot。`OverlayHost` 统一渲染
-dialogs 和 overlays。`ToolRendererContribution` 的 `id` 必须与后端稳定的
-`rendererKey` 一致；当前 `task` renderer 缺失时由 MessageList 使用默认
-renderer。
-
-Extension 合同是不可信输入之外的编译期边界：宿主只接收
-`TrustedReactExtension`，不会在运行时加载远端脚本。
-
-## 6. Shared API、contract 和跨 feature 层
-
-### 6.1 HTTP client 和 contract
-
-[shared/api/client.ts](../../frontend/src/shared/api/client.ts) 以 `/api` 为
-base URL，Axios timeout 为 `60000ms`，请求注入当前 `Accept-Language`，成功
-`ResultEnvelope` 解包为 `data`。`ApiError` 保留 HTTP status、code 和
-errors；`409` 由 `isConflictError` 识别，只有 `errors.reason` 精确匹配时才
-允许按 reason 恢复，`404` 由 `isNotFoundError` 识别。
-
-主要 contract：
-
-| Contract 文件 | 当前内容 |
+| 文件 | 内容 |
 | --- | --- |
 | [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasVersion` |
-| [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command、stop、approval、model/tool invocation、snapshot、command batch |
-| [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 config |
-| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card/live Capability、Skill 来源、持久 inventory 与异步操作 |
-| [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影、显式配置、JSON-only mutation 与统一发现响应 |
-| [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、snapshot、patch、version event、typed command |
+| [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command batch、stop/approval、model/tool invocation、Snapshot |
+| [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 structured config |
+| [ai-chat.ts](../../frontend/src/shared/api/contracts/ai-chat.ts) | Chat 资源 |
+| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card/live capability、Skill 来源、持久 inventory 与异步操作 |
+| [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影与显式配置 |
+| [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、Snapshot、Patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
-| [system-settings.ts](../../frontend/src/shared/api/contracts/system-settings.ts) | schema sections、field types、permission、model selection、apply timing |
+| [system-settings.ts](../../frontend/src/shared/api/contracts/system-settings.ts) | schema sections/field types、permission、model selection、apply timing |
 
-Project 的 DTO/codecs 当前由 feature 就近持有：
-[projects/types.ts](../../frontend/src/features/projects/types.ts)、
-[projects/codecs.ts](../../frontend/src/features/projects/codecs.ts)。它们同样严格校验
-canonical UUID、decimal long、枚举、nullability 与嵌套 shape，不把宽松 cast 当成
-wire contract。
+service 只做路由映射与严格解码：
 
-所有跨 HTTP 的 entity id 是 canonical UUID string；Java `long`/`bigint`
-游标在 wire 上保持 canonical non-negative decimal string，Canvas version 只
-比较字符串的长度和字典序，不转成 JavaScript number。
+| service | 路由范围 |
+| --- | --- |
+| [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools`，删除使用 `expectedVersion` CAS |
+| [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` 与 owner Session 查询 |
+| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` CRUD、显式配置查询与 discover |
+| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments` Card、token、Skill 来源、inventory 与 operation |
+| [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` |
+| [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases`、Canvas resource 与 Function Run；自带 `canvasRequest`、AbortSignal 与 strict envelope |
+| [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | upload 生命周期与 blob presigned URL |
+| [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run 与 `blobId` 文件输入 |
+| [system-settings-service.ts](../../frontend/src/shared/api/system-settings-service.ts) | `/settings` 聚合 GET/PUT 与 schema |
+| [projects-api.ts](../../frontend/src/features/projects/projects-api.ts) | `/projects`、`/issues`；Project 的 DTO 与 codec 就近放在 feature 内 |
 
-### 6.2 Service 边界
+所有跨 HTTP 的 entity id 都是 canonical UUID string；Java `long` 游标在 wire 上保持
+canonical 非负十进制 string，Canvas version 只比较字符串长度和字典序，不转成
+JavaScript number。codec 严格校验 canonical UUID、decimal、枚举、nullability 和嵌套
+shape，不把宽松 cast 当成 wire contract。
 
-| Service | 路由范围 | 规则 |
-| --- | --- | --- |
-| [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD，删除使用 `expectedVersion` CAS |
-| [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` | Chat list/create/get/update/delete 与 owner Session 查询 |
-| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` | MCP Server CRUD、显式完整配置查询、Remote/Local discover 与 `expectedVersion` CAS |
-| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments`、`/{id}/token`、`/{id}/skill-sources`、`/{id}/inventory`、`/{id}/operations` | Environment Card CRUD、token、Skill 来源、持久 inventory 与异步管理操作；无目录查询 |
-| [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` | Harness command、Session 查询、Thread 快照与运行控制 |
-| [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases` | Canvas CRUD/命令/资源/Function Run 与 owner Session 查询；自有 `canvasRequest`、strict envelope、AbortSignal、ApiError |
-| [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | `/storage/uploads`、blob presigned URL | upload handle 生命周期和浏览器安全 header |
-| [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run、blobId upload | path segment、header 和 upload 安全过滤 |
-| [system-settings-service.ts](../../frontend/src/shared/api/system-settings-service.ts) | `/settings`、`/settings/schema` | 聚合 GET/PUT、`expectedVersion` CAS |
-| [projects-api.ts](../../frontend/src/features/projects/projects-api.ts) | `/projects`、`/issues` | Project/Issue CRUD、Snapshot、Coordinator command、依赖、输入与人工 Run 操作 |
+## Snapshot、realtime 与恢复
 
-`src/shared` 的 ESLint 规则禁止 import `@/features`；Service、contract 和
-纯函数不依赖 React component。Thread panel 还禁止 Query、API、realtime、
-Canvas 等 feature 层依赖，只接收 `thread-timeline-types` 和本地 presentation
-props。
-
-### 6.3 i18n、conflict 和基础 UI
-
-- [shared/i18n](../../frontend/src/shared/i18n/) 支持 `zh-CN` 和 `en-US`；
-  locale 存在 `kk-studio.locale`，默认 `en-US`，`setLocale` 同步
-  `document.documentElement.lang`。Catalog 按 `platform`、`ai`、`canvas`、
-  `comfyui`、`settings`、`shared`、`shortcuts` 分区。
-- [ConflictPresenter](../../frontend/src/shared/conflict/ConflictPresenter.tsx)
-  统一展示 `409` 的 `errors.reason`/`code` 和 detail；Controller 成功后
-  invalidate 目标 query，冲突时保留可操作的 refresh/retry/close。
-- [shared/ui](../../frontend/src/shared/ui/) 提供 `StateBlock`、SearchField、
-  modal、form primitive、Markdown、media lightbox 和 blocking overlay。它们
-  不持有 feature controller；业务页面传入数据与回调。
-- [shared/shortcuts](../../frontend/src/shared/shortcuts/) 只列出已实现的
-  Application、Thread、Debug、Canvas 快捷键。Modal、alertdialog、lightbox
-  通过 blocking-overlay 守卫优先消费 Escape 和全局快捷键。
-
-## 7. AI feature
-
-### 7.1 Catalog、Chat、Environment 和 MCP
-
-AI feature 由 `CatalogRuntime`、`ChatRuntime` 和 `AgentPane` 组成：
-
-- Catalog 页面分别渲染 Provider、Model、Agent cards/forms；structured config
-  使用 Model variant、limits、modalities、pricing。Agent 的 `toolIds` 和
-  `subagents` 使用 catalog candidate 校验；`skills` 使用显式
-  `{sourceId, name}` 引用，并从绑定 Environment 的可用持久 inventory 构建候选，
-  Environment 离线时仍可选择。切换或解绑 Environment 会显式清空 Skill 选择，
-  inventory 中缺失的已保存引用保持可见且可移除。CRUD mutation 统一在成功后
-  失效对应 query，冲突沿用 ConflictPresenter。
-- Chat list 使用 `ChatRuntime` + `ChatCardsPanel`；Environment 归属完全由 Agent definition 的 `environmentId` 决定，
-  Chat 只持久化 title、agentName 与 YOLO 开关，不持有目录。
-- Environment 卡片读取 live 状态与原子 Capability，只展示 Capability 的
-  canonical `id`，不平铺 Skill，也不把 capability ID 当作 model Tool name。
-  管理弹窗提供 PATH/GIT 来源的 CAS CRUD、持久 inventory/诊断，以及带显式
-  `timeoutMillis` 的 refresh/install/update。操作只在 `PENDING/RUNNING` 时每
-  2 秒轮询，进入终态后停止并刷新来源与 inventory；只有 `PENDING` 操作可取消。
-  持久 inventory 不依赖 live 连接。不存在目录浏览器：工具调用的目标目录由模型
-  在 arguments 中显式给出，前端不注入默认目录。
-- MCP Server 卡片只消费不含连接细节的安全投影。创建和编辑共用严格 JSON editor，
-  支持 Remote/Local 模板、格式化、重复键拦截与目标 Environment 选择；完整配置只在
-  打开编辑弹窗时通过 `no-store` 端点读取，递增 generation fence 防止关闭、重开时的
-  迟到响应覆盖当前弹窗。更新或发现请求进行中时所有 JSON mutation 控件保持禁用。
-  Remote 与 Local discover 都按 202 响应处理；Local 返回的 operation 会显示状态，
-  仅在 `PENDING/RUNNING` 时轮询并在终态刷新 Server 列表。
-- `builtin.ai` 的 `task` renderer 只展示宿主投影的 message；approval 和
-  状态机操作仍由宿主 controller 负责。
-
-### 7.2 Chat Pane 的三态 target
-
-Chat Pane 有两个正交维度：布局状态和 target 状态。布局是
-`single`、`split-2`、`split-3`、`grid-4`、`grid-6`、`grid-8`，按 Chat id
-保存在 `kk-studio.chat-pane.<chatId>`；Pane target 的三态是：
-
-| Pane target | 入口 | 本地事实 | 发送后的结果 |
-| --- | --- | --- | --- |
-| `NEW_SESSION_DRAFT` | 新建 Pane/Chat，尚无 Session | `BranchDraft`、ordered Composer parts、未发送 settings | 原子 `NEW_SESSION` 初始创建，成功后绑定新 Thread；服务端派生 Session 默认名、root Thread 名固定 `main` |
-| `NEW_THREAD_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `NEW_THREAD` 初始创建，建立新 Thread 的分支，Thread 名固定 `branch-<threadId 前 8 位>` |
-| `BOUND_THREAD` | 已加载 Thread snapshot | Thread `branchSettings`、head、version、next command sequence | `THREAD` target 携带精确 cursor，batch 进入 mailbox |
-
-`PendingAcceptance` 按 owner 和 pane id 写入 localStorage，包含 frozen request、
-BranchDraft、Composer parts、generation 和 `unknownOutcome`。切换 target 在
-pending operation 存在时被拒绝；generation 和 target identity 防止旧请求完成
-后覆盖新 Pane。
-
-### 7.3 Command batch 和固定顺序
+Thread 与 Canvas 都先读取权威 Snapshot，再按 resource 订阅 `/api/events/v1`：
 
 ```mermaid
 sequenceDiagram
-  participant C as Composer
-  participant P as Pane controller
-  participant S as Snapshot query
-  participant A as /api/harness/command-batches
-  participant T as Thread mailbox
-
-  C->>P: ordered TEXT/ATTACHMENT/RESOURCE parts
-  P->>P: freeze target + BranchDraft + ids + local draft
-  P->>A: NEW_SESSION / NEW_THREAD / THREAD command batch
-  A-->>P: 202 accepted snapshot + acceptedCommands + replayed
-  A->>T: queue commands
-  T-->>S: durable version / snapshot
-  S-->>P: authoritative Thread projection
-```
-
-`buildAcceptanceRequest` 在网络请求前冻结整批数据：
-
-- `NEW_SESSION` 只发送 `USER_MESSAGE`；完整 BranchDraft 写进
-  `rootSettings`，避免再发送一组初始 `SET_*`。
-- `NEW_THREAD_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
-  `SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
-  `config.toolIds` 决定，不生成 branch tool command，也不发送目录状态。
-- `BOUND_THREAD` 的 target 是 `THREAD`，带
-  `expectedHeadEntryId` 和 `expectedNextCommandSequence`；YOLO 是
-  `PUT /yolo` 的直接控制面，不进入 mailbox。
-- 每条 command 有 UUID `idempotencyKey`，与 raw command canonical SHA-256
-  （64 位小写 hex）一起构成服务端 ordered replay 幂等键；响应 DTO 只回
-  `idempotencyKey` 与派生 `state`，不回内部 hash 与 applied/cancel marker。
-- 网络或其它不确定失败保留 exact replay（相同 id、payload、顺序和原始
-  cursor）；明确 4xx 恢复本地 Composer parts。只有
-  `STALE_COMMAND_CURSOR` 且仍是同一 branch 的纯 message batch 才读取最新
-  snapshot 并有限重试，最多两次；其它 `409` 先刷新，不自动重放语义命令。
-
-### 7.4 Snapshot、realtime overlay 和 event timeline
-
-```mermaid
-sequenceDiagram
-  participant Q as Thread snapshot
+  participant Q as Snapshot query
   participant M as ApplicationEventManager
   participant W as /api/events/v1
   participant O as Realtime overlay
@@ -357,282 +139,248 @@ sequenceDiagram
   M-->>O: strict parse + sequence reducer
   O-->>UI: transient streaming/task display
   Q-->>UI: durable entry arrives
-  UI->>O: durable terminal fence and overlay retirement
+  UI->>O: terminal fence and overlay retirement
 ```
 
-规则：
+- `subscribed`（首次与每次重连）、`version`、`resync` 和资源级 `error` 都触发
+  Snapshot 对账；`heartbeat` 只做连接保活。version/resync 触发的快照刷新不会丢弃
+  已在 refs 中累积的未决 delta。
+- Thread `version` 是结构/控制状态的 durable 提示，不是 Snapshot ETag：Model
+  checkpoint 可在同一 version 内推进，因此同 version 的权威回读仍参与对账。
+- `realtime` 没有 cursor，只承载 `MODEL_DELTA`/`TOOL_PARTIAL`。MODEL delta 只接受
+  `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；tool
+  partial 按 `thread:invocation:attempt` 做有界精确去重。
+- delta 即时归约进 refs，使 sequence 连续性、缺口检测和去重不依赖 React 刷新时机；
+  模型/工具 overlay 的发布合并到单个 `requestAnimationFrame`，每帧发布当前累积内容，
+  不做字符级缓动或打字机延时。
+- invocation 出现 `resultJson`、`errorJson` 或 `resultEntryId` 后建立 terminal fence，
+  迟到 delta/partial 丢弃；Snapshot 的 `modelAttemptFailures` 已记录同一
+  `modelInvocationId + attempt` 时，对应迟到 `MODEL_DELTA` 也丢弃并提前结束该 attempt
+  的 gap recovery。持久化终态与失败审计优先于任何较新的 transient overlay。
+- MODEL sequence 出现 gap 时启动单飞 recovery：重新读取 Snapshot，退避 `200ms` 到
+  `2000ms`，最多 `8` 次；即使 Thread version 未变化也读取并合并 durable checkpoint，
+  不用事件填补内容。
 
-- `useHarnessThreadRealtime` 先加载 snapshot，再按 thread resource 订阅
-  `/api/events/v1`。`subscribed`、`version`、`resync`、`error` 都会触发
-  snapshot 对账；`heartbeat` 只做连接保活。`version`/`resync` 触发快照刷新时
-  不会取消或丢弃已在 refs 中累积的未决 delta 帧。
-- Thread `version` 是结构/控制状态的 durable 提示，不是 Snapshot ETag；Model
-  checkpoint 可在同一 version 内推进。`realtime` 没有 cursor，是可丢失的
-  `MODEL_DELTA`/`TOOL_PARTIAL`。MODEL delta 只接受
-  `TEXT_DELTA`、`THINKING_DELTA`、`TOOL_CALL_DELTA`，按连续 sequence 追加；
-  tool partial 按 `thread:invocation:attempt` 做有界精确去重。
-- `useHarnessThreadRealtime` 即时消费并归约每条 delta 到 refs 中，使 sequence
-  连续性校验、缺口检测（gap recovery）与去重不依赖 React 刷新时机；React model/tool
-  overlay 发布合并至单个 `requestAnimationFrame` 执行，每帧发布当前累积的全部内容，
-  绝不进行字符级缓动或打字机延时。流式期间通过 cheap identity check 避免对每条 delta
-  重复解析快照 JSON。
-- invocation 的 `resultJson`、`errorJson` 或 `resultEntryId` 出现后建立 terminal
-  fence，迟到 delta/partial 丢弃。Snapshot 的 `modelAttemptFailures` 若已记录同一
-  `modelInvocationId + attempt`，对应迟到 `MODEL_DELTA` 也会被丢弃，并提前结束该
-  attempt 的 gap recovery。持久化终态与失败审计优先于任何较新的 transient overlay。
-  快照对账（snapshot reconciliation）、线程切换和卸载会取消未决帧，且 model 与 tool
-  终态互相独立取消，确保未来帧绝不会覆盖权威快照或复活已失败/冻结的 attempt。
-- MODEL sequence 出现 gap 时启动单飞 recovery：重新拉 snapshot，退避
-  `200ms` 到 `2000ms`，最多 `8` 次；即使 Thread version 未变化也读取并合并
-  durable checkpoint，不能通过填补事件猜测内容。恢复循环的定时器与帧合并调度保持解耦。
-- `ThinkingBlock` 通过 `MarkdownRenderer`（`tone="muted"`）渲染思考内容，保持始终展开
-  的外壳与流式状态。CSS 将思考文本块级空白设为 `normal`，段落间空行由 Markdown 本身折叠，
-  消除上游多换行输出（如 Gemini `A\n\n\nB\n\n\n`）造成的冗余空行，同时完整保留代码块（`pre`）、
-  列表、数学公式和无障碍结构；错误原始视图 `<pre className="thread-error-raw">` 保持
-  `pre-wrap` 不受影响。
-- `thread-events.ts` 把每个 durable Entry 投影为恰好一条记录，把 active
-  model/tool invocation 和 attempt failure 作为锚定其 Entry 后的 synthetic
-  record。状态为 `pending`、`running`、`completed`、`failed`、`stopped` 五态；
-  Provider token 不逐条生成 debug 行。
+[thread-events.ts](../../frontend/src/features/ai/runtime/thread-events.ts) 把每个
+durable Entry 投影为恰好一条记录，把 active model/tool invocation 和 attempt failure
+作为锚定其 Entry 之后的 synthetic record；状态为 `pending`、`running`、`completed`、
+`failed`、`stopped`。
 
-### 7.5 Stop、approval 和 task
+运行控制面同样以 Snapshot 为对账依据：
 
-- Stop 请求是 `{stopRequestId, expectedVersion}`。同一个
-  `stopRequestId` 用于不确定失败的 exact replay；pending stop sidecar 保存
-  thread、head 和 version basis。成功的 `STOPPED`/`REPLAYED` 结果把
-  `cancelledUserMessages` 按 sequence 前置回 Composer；`IDLE` 是 no-op。
-  snapshot 已前进时会退役旧 basis，下一次 stop 生成新 id。
-- Tool approval 使用 `{decision, decisionId, actor: "web", reason: null}`；
-  同一个 Thread、invocation、decision 的重试复用 decision id，ALLOW/DENY
-  切换生成新 id；子 task 的 approval 显式带子 Thread id。审批条在点击处理器内
-  同步进入本地 pending：两个决策同时禁用并显示 `role="status"` 指示，请求
-  settle 或权威 snapshot 替换该审批时释放，失败仍走既有错误通道。
-- `task.status` 是完整 heartbeat，不是 delta。Task state 为 `queued`、
-  `running_model`、`running_tool`、`waiting_approval`；TaskStatusWidget 按
-  `parentTaskLevel + depth` 聚合 status 和 descendants，同一子 Thread 的
-  heartbeat 替换旧帧，approval item 缺少 invocation/tool name 时丢弃。
-- Thread controller 的可见控制状态包括 disabled、pending、actionError、
-  conflict、working 和 replay pending；`/compact` 只在 snapshot
-  `manualCompaction.available` 时执行，并使用当前 version CAS。
+- Stop 请求是 `{stopRequestId, expectedVersion}`。同一个 `stopRequestId` 用于不确定
+  失败的 exact replay，成功结果把 `cancelledUserMessages` 按 sequence 前置回
+  Composer，`IDLE` 是 no-op。
+- Tool approval 使用 `{decision, decisionId, actor: "web", reason: null}`；同一
+  Thread、invocation、decision 的重试复用 decision id，ALLOW/DENY 切换生成新 id。
+- `task.status` 是完整 heartbeat 而不是 delta，状态为 `queued`、`running_model`、
+  `running_tool`、`waiting_approval`；同一子 Thread 的 heartbeat 替换旧帧。
 
-## 8. Projects feature
+## 变更提交与上传
 
-### 8.1 Project Snapshot 与 Issue Board
+Chat Pane 有两个正交维度。布局是 `single`、`split-2`、`split-3`、`grid-4`、
+`grid-6`、`grid-8`，按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；target 三态是：
 
-[ProjectsPage](../../frontend/src/features/projects/ProjectsPage.tsx) 读取 Project
-列表并承载 create/edit/archive/delete；Project route 使用 canonical Project id
-进入 [ProjectDetailPage](../../frontend/src/features/projects/ProjectDetailPage.tsx)。
-详情页只消费一个 `ProjectSnapshotDTO`，包括 Project、未归档 Issues、依赖关系、
-blocked 状态、当前/最近 Run 和 Coordinator Session/Thread：
+| Pane target | 入口 | 本地事实 | 发送结果 |
+| --- | --- | --- | --- |
+| `NEW_SESSION_DRAFT` | 新建 Pane/Chat，尚无 Session | `BranchDraft`、ordered Composer parts、未发送 settings | 原子 `NEW_SESSION`，成功后绑定新 Thread；Session 默认名由服务端从首条用户文本派生，root Thread 名固定 `main` |
+| `NEW_THREAD_DRAFT` | `/tree` 选择同一 Session 的历史 Entry | `sessionId + startEntryId`、BranchDraft、Composer parts | 原子 `NEW_THREAD` 建立分支，Thread 名固定 `branch-<threadId 前 8 位>` |
+| `BOUND_THREAD` | 已加载 Thread snapshot | Thread `branchSettings`、head、version、next command sequence | `THREAD` target 携带精确 cursor，batch 进入 mailbox |
 
-- `IssueBoard` 固定按 `IssueStatus` 定义的 backlog、待处理、执行中、评审、
-  完成和取消六列投影；
-- `IssueDetailModal` 负责 Issue 属性、依赖、输入、Run review/cancel/retry 和
-  archive 操作；所有 mutation 使用 snapshot 中的 decimal version 做 CAS，
-  成功后重新读取 Project Snapshot；
-- `CoordinatorConversation` 首次 command 可在尚无 Session/Thread 时发送；
-  后续 command 携带当前 Coordinator Thread id。会话历史来自 Harness Thread
-  Snapshot，不在 Project feature 复制 Harness durable state；
-- Project 归档不隐式删除，深度删除只在独立确认弹窗中执行。
+`PendingAcceptance` 按 owner 与 pane id 写入 localStorage，包含 frozen request、
+BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending operation 时
+拒绝切换 target，generation 与 target identity 防止旧请求覆盖新 Pane。
 
-### 8.2 全局 invalidation
+`buildAcceptanceRequest` 在网络请求前冻结整批数据：
 
-`ProjectsInvalidationBridge` 是 ExtensionHost overlay。它订阅
-`{kind: "projects"}`：
+- `NEW_SESSION` 只发送 `USER_MESSAGE`，完整 BranchDraft 写进 `rootSettings`；
+- `NEW_THREAD_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
+  `SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
+  `config.toolIds` 决定，不生成 branch tool command；
+- `BOUND_THREAD` 的 target 携带 `expectedHeadEntryId` 和
+  `expectedNextCommandSequence`；YOLO 是 `PUT /yolo` 的直接控制面，不进入 mailbox；
+- 每条 command 带 UUID `idempotencyKey`，与 raw command canonical SHA-256 一起构成
+  服务端 ordered replay 幂等键。
 
-- Project `changed` 将 canonical `projectId` 交给 feature-local hook；列表读取
-  全量 Project 列表，详情页只在 id 匹配时读取 Snapshot；
-- 首次连接与 reconnect 后的每个 `subscribed` ack 都触发一次全局 refresh，覆盖
-  初始读取/建连窗口与断线窗口；
-- 资源级 `error` 同样触发权威回读，使本地状态保持 fail-closed；
-- bridge 不维护 durable event log，也不在本地 mutation 后伪造 WebSocket
-  event；数据库提交事实经 WebSocket 触发跨节点/跨标签页对账。
+失败分类决定恢复方式：网络或其他不确定失败保留 exact replay（相同 id、payload、
+顺序和 cursor）；明确 `409` 表示 batch 未被接受，保留 command id 与 payload，
+只在 `STALE_COMMAND_CURSOR` 且仍是同一 branch 的纯 message batch 时读取最新 Snapshot
+并有限重试（最多两次）；其他情况保留本地 Composer parts，不自动重放语义命令。
 
-## 9. Canvas feature
-
-### 9.1 页面和组件边界
-
-Canvas 使用 `CanvasRuntimeProvider` 管理 query、snapshot、controller、viewport、
-selection、upload progress 和 Thread dock：
-
-| 组件 | 当前职责 |
-| --- | --- |
-| `CanvasLibraryView` | Canvas 列表、创建、删除和打开 Editor |
-| `CanvasEditor` | 标题、保存状态、decimal version、Thread 开关、Editor state |
-| `CanvasStage` | React Flow、nodes/edges projection、selection、viewport、context menu、upload 和 agent dock |
-| `CanvasToolRail` / `CanvasContextMenu` | 创建/编辑/删除 node、link、group 和 Function |
-| `CanvasGenerationPanel` | Function model、prompt reference、参数、run/cancel 状态 |
-| `CanvasOverlays` | toast、conflict banner、upload progress |
-| `nodes/` | Text、Image、Video、Audio resource node 的渲染和媒体预览 |
-
-Canvas document、resource node、group、link、Function run 的 UI projection
-来自 [domain.ts](../../frontend/src/features/canvas/domain.ts) 和
-[projection.ts](../../frontend/src/features/canvas/projection.ts)。Agent dock
-复用相同的 Bound Thread Pane 语义，不把 Thread 写入 Canvas graph。
-
-### 9.2 Command queue、Patch 和 version
-
-```mermaid
-sequenceDiagram
-  participant U as Canvas UI
-  participant Q as CanvasCommandQueue
-  participant H as Canvas HTTP API
-  participant R as ApplicationEventManager
-  participant S as Authoritative Snapshot
-
-  U->>Q: typed command batch
-  Q->>H: expectedVersion + idempotencyKey + commands
-  H-->>Q: baseVersion -> version patch
-  Q->>Q: applyEntityPatch
-  Q-->>U: local snapshot + query cache update
-  R-->>Q: canvas version / resync / error
-  Q->>S: refetch full snapshot
-  S-->>Q: replace if version not older
-```
-
-[CanvasCommandQueue](../../frontend/src/features/canvas/command-queue.ts) 串行化
-浏览器操作；每批以当前 snapshot 的 `expectedVersion` 和 UUID
-`idempotencyKey` 提交。响应是 graph patch：
+Canvas 侧由 [CanvasCommandQueue](../../frontend/src/features/canvas/command-queue.ts)
+串行化浏览器操作，每批以当前 Snapshot 的 `expectedVersion` 和 UUID `idempotencyKey`
+提交，响应是 graph patch：
 
 - `applyEntityPatch` 先要求 `patch.version > snapshot.version` 且
-  `patch.baseVersion === snapshot.version`，再分别 upsert/remove nodes、groups、
-  links。
-- `version <= current` 是 duplicate/stale patch，直接忽略；baseVersion 不
-  连续是 gap，读取全量 snapshot。
-- HTTP `409` 先读取最新 snapshot，再抛出 `CanvasCommandConflictError`；
-  queue 不自动重放具有业务语义的 command。
-- `replaceSnapshot` 拒绝同一 Canvas 的 version 回退。所有 Canvas version
-  继续使用 canonical decimal string。
-- 当前 typed commands 覆盖 Text/Resource/Function node、node transform、
-  rename/delete、link、group、move/ungroup/delete/rename group。
+  `patch.baseVersion === snapshot.version`，再分别 upsert/remove nodes、groups、links；
+- `version <= current` 是重复/过期 patch，直接忽略；baseVersion 不连续是 gap，读取
+  全量 Snapshot；
+- HTTP `409` 先读取最新 Snapshot，再抛出 `CanvasCommandConflictError`，queue 不自动
+  重放；`replaceSnapshot` 拒绝同一 Canvas 的 version 回退，Canvas version 全程使用
+  canonical decimal string；
+- 节点 transform 由 [transform-batch.ts](../../frontend/src/features/canvas/transform-batch.ts)
+  以 `180ms` debounce 聚合，并以 epoch 归属在途请求；
+- [canvas-version-events.ts](../../frontend/src/features/canvas/canvas-version-events.ts)
+  订阅 `{kind: "canvas", id}`，首次 `subscribed`、重连、`resync` 和 `error` 都读取
+  权威 Snapshot，`version` 只有严格大于本地版本时才触发读取。
 
-[useCanvasVersionEvents](../../frontend/src/features/canvas/canvas-version-events.ts)
-订阅 `{kind: "canvas", id}`。首次 `subscribed`、重连、`resync`、`error` 都
-读取权威 snapshot；`version` payload 只有严格大于本地版本时才触发读取。
-version event 本身不携带 graph patch。
-
-Transform 更新使用 [transform-batch.ts](../../frontend/src/features/canvas/transform-batch.ts)
-的 `180ms` debounce，并以 epoch 归属在途请求；失败时只恢复没有被后续操作
-覆盖的 draft。
-
-### 9.3 Storage upload
+上传走分阶段协议，任何中途切换都作废整批：
 
 ```mermaid
 sequenceDiagram
   participant F as File
   participant W as SHA-256 Worker
   participant API as Storage API
-  participant S3 as Presigned PUT
   participant C as Canvas command queue
 
   F->>W: hash + media descriptor
   W-->>API: reserve(filename, mediaType, sizeBytes, sha256)
   alt PENDING
-    API-->>S3: presigned PUT
-    F->>S3: upload bytes with filtered headers
+    API-->>F: presigned PUT with filtered headers
   else READY
-    API-->>API: content already exists
+    API-->>API: content already exists, skip upload
   end
   API-->>API: complete(uploadId)
   API-->>C: CREATE_RESOURCE_NODE(uploadId)
 ```
 
-[useCanvasUploadPipeline](../../frontend/src/features/canvas/canvas-upload.ts)
-逐文件执行：Web Worker SHA-256、`reserveUpload`、PENDING 直传或 READY 跳过、
-`completeUpload`、最后提交 `CREATE_RESOURCE_NODE`。每个 await 后检查
-batch epoch；切换 Canvas 或 unmount 会作废整批并清理 progress。alias 在
-`finally` 释放；完成的 upload handle 不按 blobId 删除，由服务端过期策略处理。
+[canvas-upload.ts](../../frontend/src/features/canvas/canvas-upload.ts) 与 Composer
+附件共用同一套顺序：Web Worker SHA-256、`reserveUpload`、PENDING 直传或 READY 跳过、
+`completeUpload`、最后提交消费 upload 的命令。每个 await 后校验 batch epoch；切换
+Canvas 或 unmount 会作废整批并清理 progress；alias 在 `finally` 释放；已 complete 的
+upload handle 不主动删除，由服务端过期策略回收。
 
-Storage contract 不暴露 bucket/key。直传只发送签名响应中允许的浏览器安全
-headers；upload handle 只能按 upload id 删除。Blob original/preview URL 只在
-资源实际渲染或下载时请求，并严格校验 `url`、mediaType 和 safe integer
-`sizeBytes`。
+Storage contract 不暴露 bucket/key：直传只发送签名响应允许的浏览器安全 headers，
+upload handle 只能按 upload id 删除，blob original/preview URL 只在资源实际渲染或下载
+时请求，并严格校验 `url`、mediaType 与 safe integer `sizeBytes`。
 
-## 10. ComfyUI feature
+## Feature 主线
 
-[ComfyuiPage](../../frontend/src/features/comfyui/ComfyuiPage.tsx) 通过
-`ComfyuiRuntime` 提供 page controller，当前包含：
+### AI
 
-- workflow list/search、create/update/delete editor；
-- input binding 的 `parameter`/`file` 校验和 string/integer/number/boolean/json
-  参数转换；
-- run modal 和 lifecycle controller：`submit`、`refresh`、`cancel` 三种
-  pending operation，poll interval `1500ms`；
-- run status 的 polling 集合为 `pending`、`in_progress`、`running`，terminal
-  集合为 `succeeded`、`success`、`complete`、`completed`、`failed`、
-  `error`、`cancelled`、`canceled`、`interrupted`；
-- file input 先走 Storage reserve/直传/complete，再以 `blobId + filename` 提交 workflow run；download payload
-  只投影 `downloadUrl` 和 filename/name。
+[`features/ai`](../../frontend/src/features/ai) 分成 catalog、chat、composer、environment、
+mcp、runtime 六个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
+Agent 的 `toolIds`、`subagents` 用 catalog candidate 校验，`skills` 用显式
+`{sourceId, name}` 引用并从绑定 Environment 的持久 inventory 构建候选，切换或解绑
+Environment 会清空选择。Chat 只持久化 title、agentName 与 YOLO 开关，Environment
+归属完全由 Agent definition 的 `environmentId` 决定。
 
-Workflow editor/delete 是 ExtensionHost dialog contribution；页面只负责
-loading、error、mutationError 和 panel composition。
+Environment 卡片只展示 capability 的 canonical `id`，管理弹窗提供 Skill 来源 CAS CRUD、
+持久 inventory 与带显式 `timeoutMillis` 的 refresh/install/update，操作只在
+`PENDING/RUNNING` 时每 2 秒轮询并在终态刷新；只有 `PENDING` 可取消。MCP 卡片只消费
+不含连接细节的安全投影，完整配置仅在打开编辑弹窗时经 `no-store` 端点读取，并用递增
+generation fence 防止关闭/重开时的迟到响应覆盖当前弹窗；更新或发现进行中时所有 JSON
+mutation 控件禁用。
 
-## 11. Settings feature
+### Projects
 
-[SettingsPage](../../frontend/src/features/settings/SettingsPage.tsx) 将
-`General` 浏览器偏好与 server schema tabs 分开：
+[ProjectsPage](../../frontend/src/features/projects/ProjectsPage.tsx) 承载 Project 列表
+与 create/edit/archive/delete；[ProjectDetailPage](../../frontend/src/features/projects/ProjectDetailPage.tsx)
+只消费一个 `ProjectSnapshotDTO`（Project、未归档 Issues、依赖、blocked、当前/最近 Run、
+Coordinator Session/Thread）。[IssueBoard](../../frontend/src/features/projects/components/IssueBoard.tsx)
+固定六列 backlog、待办、执行中、等待人类、审核、完成，已取消的 Issue 单独成道；
+IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot。
+[CoordinatorConversation](../../frontend/src/features/projects/components/CoordinatorConversation.tsx)
+的首条 command 可在尚无 Session/Thread 时发送，会话历史来自 Harness Thread Snapshot，
+Project feature 不复制 Harness durable state。
 
-- `General` 保存浏览器本地偏好，包括 locale、通知等，不写入
-  `/api/settings`。
-- server tabs 完全由 `GET /api/settings/schema` 的 sections、groups、fields
-  和 label keys 决定；当前 section key 是 `tool`、`aiRuntime`、`environment`、
-  `integrations`、`storageMedia`、`advanced`。
-- [SystemSettingsSchemaRenderer](../../frontend/src/features/settings/SystemSettingsSchemaRenderer.tsx)
-  依据 `BOOLEAN`、`INTEGER`、`LONG`、`TEXT`、`ENUM`、`PERMISSION`、
-  `MODEL_SELECTION` 选择控件；`permission` 有 `allow`、`ask`、`deny`，
-  apply timing 有 `NEXT_INVOCATION`、`NEXT_CHAT`、`RESTART`。
-- editor 以完整 settings aggregate + `expectedVersion` PUT；成功失效 schema/
-  settings query，`409` 交给 ConflictPresenter。保存、重置、重试和 reload
-  都是当前页面的明确操作。
-- tablist 支持 ArrowLeft/ArrowRight/Home/End；server schema 缺失或校验失败
-  显示可重试的 StateBlock。
+[useProjectsInvalidation](../../frontend/src/features/projects/useProjectsInvalidation.ts)
+由 ExtensionHost overlay 桥接：订阅 `{kind: "projects"}`，每个 `subscribed` ack（含首连
+与重连）和资源级 `error` 都触发权威回读；它不维护本地事件日志，也不在本地 mutation
+后伪造 WebSocket event。
 
-## 12. Design tokens ownership 与组件边界
+### Canvas
 
-[styles.css](../../frontend/src/styles.css) 的 `:root` 是全局 token 的唯一
-owner，Canvas feature 只拥有 Canvas 专属样式；新组件复用 token，不在 feature
-之间复制全局 token inventory。
+[CanvasPage](../../frontend/src/features/canvas/CanvasPage.tsx) 只接受 canonical UUID
+深链，其他 `canvasId` replace 回 `/canvas`；[CanvasRuntimeContext](../../frontend/src/features/canvas/CanvasRuntimeContext.tsx)
+管理 query、Snapshot、controller、viewport、selection、upload 与 Thread dock。
+[CanvasStage](../../frontend/src/features/canvas/CanvasStage.tsx) 承载 React Flow 与图
+投影，[CanvasToolRail](../../frontend/src/features/canvas/CanvasToolRail.tsx) 与
+`CanvasContextMenu` 负责 node、link、group、Function 编辑，
+[CanvasGenerationPanel](../../frontend/src/features/canvas/CanvasGenerationPanel.tsx) 负责
+Function 参数与 run/cancel，`nodes/` 渲染 Text/Image/Video/Audio Resource node。
+Agent dock 复用 Bound Thread Pane 语义，不把 Thread 写进 Canvas graph。
 
-组件边界：
+### ComfyUI 与 Settings
 
-1. `AppShell` 只拥有 topbar、主导航、immersive route 和全局 Escape 优先级；
-   Workbench 只拥有 route/slot/contribution composition。
-2. Feature page 拥有 feature controller、query key、domain projection、业务
-   mutation 和 feature CSS；它通过 shared UI 传入数据和 callback。
-3. `shared/ui/console` 只提供通用 card、form、state、modal primitive；
-   `shared/ui/markdown` 和 `shared/ui/media` 只处理内容渲染与展示。
-4. Thread panel 是 portable presentation：只依赖
-   `thread-timeline-types` 和 panel 内部组件；API、React Query、realtime、
-   Canvas 和 controller 都在宿主层。
-5. Canvas 的 React Flow node renderer、Canvas CSS 和 graph projection 留在
-   Canvas feature；Storage service、URL 解码和 upload header 过滤留在 shared
-   API 层。
-6. 全局 CSS 只承载 tokens、shell、通用 form/modal/typography；Canvas 专属样式
-   由 [canvas.css](../../frontend/src/features/canvas/canvas.css) 负责。
+[ComfyuiPage](../../frontend/src/features/comfyui/ComfyuiPage.tsx) 通过 `ComfyuiRuntime`
+提供 workflow list/edit 与 input binding 校验；run 有 `submit`、`refresh`、`cancel` 三种
+pending operation，poll interval `1500ms`，polling 集合是 `pending`/`in_progress`/
+`running`，terminal 集合覆盖 `succeeded`/`failed`/`cancelled`/`interrupted` 等写法；
+文件输入先走 Storage reserve/直传/complete，再以 `blobId + filename` 提交。workflow
+editor/delete 是 ExtensionHost dialog contribution。
 
-## 13. 测试边界
+[SettingsPage](../../frontend/src/features/settings/SettingsPage.tsx) 的 General tab
+只保存浏览器偏好（`kkstudio.browser-preferences.v1`），不写入 `/api/settings`；server
+tabs 完全由 `GET /api/settings/schema` 的 sections、groups、fields 和 label keys 决定。
+[SystemSettingsSchemaRenderer](../../frontend/src/features/settings/SystemSettingsSchemaRenderer.tsx)
+依据 `BOOLEAN`、`INTEGER`、`LONG`、`TEXT`、`ENUM`、`PERMISSION`、`MODEL_SELECTION` 选择
+控件，permission 有 `allow`/`ask`/`deny`，apply timing 有 `NEXT_INVOCATION`、
+`NEXT_CHAT`、`RESTART`；editor 以完整 aggregate + `expectedVersion` PUT，`409` 交给
+ConflictPresenter。tablist 支持 ArrowLeft/ArrowRight/Home/End。
 
-| 层级 | 当前覆盖 |
+## 设计系统与共享层
+
+[styles.css](../../frontend/src/styles.css) 的 `:root` 是全局 token 的唯一 owner，
+Canvas 专属样式由 [canvas.css](../../frontend/src/features/canvas/canvas.css) 拥有；
+新组件复用 token，不在 feature 之间复制全局 token inventory。
+
+组件边界按职责划分：`AppShell` 只拥有 topbar、主导航、immersive route 与 Escape
+优先级；Workbench 只拥有 route/slot/contribution composition；feature page 拥有
+自己的 controller、query key、domain projection、业务 mutation 和 feature CSS，并通过
+shared UI 传入数据与 callback；`shared/ui/console`、`shared/ui/markdown`、
+`shared/ui/media` 只提供通用 primitive 与内容渲染。
+
+- [i18n](../../frontend/src/shared/i18n/index.ts) 支持 `zh-CN` 与 `en-US`，locale
+  存在 `kk-studio.locale`，默认 `en-US`，`setLocale` 同步 `document.documentElement.lang`；
+  catalog 按 `platform`、`ai`、`canvas`、`comfyui`、`settings`、`shared`、`shortcuts`
+  分区。
+- [ConflictPresenter](../../frontend/src/shared/conflict/ConflictPresenter.tsx) 统一
+  展示 `409` 的 `errors.reason`/`code` 与 detail；controller 成功后 invalidate 目标
+  query，冲突时保留 refresh/retry/close。
+- [shortcuts](../../frontend/src/shared/shortcuts/shortcut-catalog.ts) 只列出已实现
+  的 Application、Thread、Debug、Canvas 快捷键；modal、alertdialog 和 lightbox 通过
+  [blocking-overlay.ts](../../frontend/src/shared/ui/blocking-overlay.ts) 优先消费
+  Escape 与全局快捷键。
+
+## 测试
+
+| 层级 | 覆盖 |
 | --- | --- |
-| Bootstrap/platform | App redirect、AppShell immersive route、Escape guard、ExtensionHost registry、Workbench slot |
-| AI | catalog form/normalizer、Chat pane target/layout、Composer、command batch、Thread timeline、snapshot/realtime、stop/approval/task、messages/tool renderer |
-| Projects | list/detail、Project CAS、Issue Board/detail/actions、Coordinator conversation、global invalidation |
-| Canvas | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run、viewport |
-| ComfyUI | workflow validation、page/card/panel/editor、run lifecycle、modal |
-| Settings | schema renderer/validation、draft、permission、browser preference、server CAS、extension |
+| Bootstrap/platform | App redirect、AppShell immersive route 与 Escape、ExtensionHost registry、Workbench slot |
+| AI | catalog form/normalizer、Pane target/layout、Composer 与附件上传、command batch、Thread timeline、snapshot/realtime、stop/approval/task |
+| Projects | list/detail、CAS、Issue Board/actions、Coordinator conversation、全局 invalidation |
+| Canvas | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run |
+| ComfyUI | workflow 校验、page/card/panel/editor、run lifecycle、modal |
+| Settings | schema renderer/validation、draft、permission、browser preference、server CAS |
 | Shared | API client/service/codec、application-event protocol/manager、i18n、conflict、shortcuts、blocking overlay、Markdown/media |
 | E2E support | [test-support/](../../frontend/src/test-support/)、[test-setup.ts](../../frontend/src/test-setup.ts) |
 
-Vitest 使用 jsdom。`test-setup.ts` 在每个测试前清理 localStorage、固定
-`zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、
-dialog、scrollIntoView 和 React Flow layout 提供确定性测试 stub。测试文件按
-feature 路径与实现同目录组织；Canvas 集成测试位于
-[features/canvas/\_\_tests\_\_](../../frontend/src/features/canvas/__tests__/)，
-shared/service 测试位于各自 source directory。
+Vitest 使用 jsdom，[test-setup.ts](../../frontend/src/test-setup.ts) 在每个测试前清理
+localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、
+dialog、scrollIntoView 与 React Flow layout 提供确定性 stub。测试文件按 feature 路径
+与实现同目录组织，Canvas 集成测试位于
+[features/canvas/\_\_tests\_\_](../../frontend/src/features/canvas/__tests__/)。
+coverage threshold 是 lines/functions/branches/statements 各 `80`。
 
-构建、lint、coverage、E2E 和 Java 报告入口统一见
-[开发与测试](../operations/development-and-testing.md)；本模块只定义浏览器
-测试覆盖的边界和测试基座。
+关键测试入口：
+
+- [`App.test.tsx`](../../frontend/src/app/App.test.tsx)、
+  [`platform-invalidation.integration.test.tsx`](../../frontend/src/app/platform-invalidation.integration.test.tsx)、
+  [`ExtensionHost.test.ts`](../../frontend/src/platform/extensions/ExtensionHost.test.ts)。
+- [`useHarnessThreadRealtime.test.tsx`](../../frontend/src/features/ai/runtime/useHarnessThreadRealtime.test.tsx)、
+  [`thread-notifications.test.ts`](../../frontend/src/features/ai/runtime/thread-notifications.test.ts)、
+  [`thread-events.test.ts`](../../frontend/src/features/ai/runtime/thread-events.test.ts)。
+- [`useCanvasController`](../../frontend/src/features/canvas/useCanvasController.ts) 所在的
+  [`features/canvas/__tests__`](../../frontend/src/features/canvas/__tests__/)、
+  [`useProjectsInvalidation.test.ts`](../../frontend/src/features/projects/useProjectsInvalidation.test.ts)、
+  [`system-settings-schema-renderer.test.tsx`](../../frontend/src/features/settings/system-settings-schema-renderer.test.tsx)。
+- [`client.test.ts`](../../frontend/src/shared/api/client.test.ts) 与
+  [`shared/app-events/__tests__`](../../frontend/src/shared/app-events/__tests__)。
+
+构建、lint、coverage 和 E2E 入口统一见
+[开发与测试](../operations/development-and-testing.md)；本模块只定义浏览器侧覆盖边界
+与测试基座。
 
 ---
 

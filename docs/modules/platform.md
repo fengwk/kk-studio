@@ -2,483 +2,456 @@
 
 ## 定位
 
-`platform` 是 kk-studio application layer。它把 `canvas-core`、`harness-runtime`、`harness-tool` 和
-`harness-contributor-api` 的窄 port 组合成可执行的产品用例，并把 PostgreSQL、S3、Model Provider、Environment
-Daemon、MCP、ComfyUI 和 OpenCLI Hub 等外部事实适配到这些 port。
+`platform` 是 kk-studio 的 application layer：它把 `canvas-core`、`harness-runtime`、
+`harness-tool` 和 `harness-contributor-api` 的窄 port 组合成可执行的产品用例，并把
+PostgreSQL、S3、Model Provider、Environment Daemon、MCP、ComfyUI 与 OpenCLI Hub 等
+外部事实适配到这些 port。
 
-Platform 不是 HTTP composition root，也不承载浏览器协议、Spring Boot 启动入口或 Harness 的状态机实现。生产启动由
-[web 模块](web.md)完成；`harness-runtime` 负责 Session/Entry/Thread/Invocation/Work 的纯 Java 状态机与 processor；
-`canvas-core` 负责 Canvas domain 和 repository port。Platform 负责它们之间的业务事务、实时资源解析、第三方调用边界和
-应用级失败分类。
+Platform 不提供 `@SpringBootApplication`、HTTP Controller 或 WebSocket transport；
+生产启动由 [web 模块](web.md)完成，`harness-runtime` 负责 Session/Entry/Thread/
+Invocation/Work 的纯 Java 状态机，`canvas-core` 负责 Canvas domain 与 repository
+port。Platform 承载的是它们之间的业务事务、实时资源解析、第三方调用边界和应用级
+失败分类。
 
-生产装配入口是 `platform/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java`。它只做
-`BaseMapperScan` 与 `ComponentScan`，并通过
-`platform/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
-作为 Spring Boot auto-configuration 被 web 引入。
+生产装配入口是 [PlatformAutoConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java)：
+它只做 `BaseMapperScan` 与 `ComponentScan`，并通过
+[AutoConfiguration.imports](../../platform/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports)
+作为 Spring Boot auto-configuration 被 web 引入。Platform 不实现 Harness reducer、
+processor 或 claim/lease 状态机，也不扫描插件目录或创建 classloader。
 
-## Goals / Non-goals
+## 子域地图
 
-### Goals
-
-- 为 Catalog、MCP、Chat、Project/Issue、SystemSettings、Storage、
-  Environment、Canvas 和 ComfyUI 提供稳定的 application service。
-- 在 Model/Tool 执行进入第三方 transport 前完成确定性 admission、冻结事实校验、权限判定和容量控制。
-- 把 Provider SDK、S3 SDK、ComfyUI client、OpenCLI Hub HTTP 和 Environment Daemon WebSocket 隔离在窄 adapter 内。
-- 维护 Chat/Canvas/Project/IssueRun/Harness/Blob 之间的 owner、引用计数、幂等键、
-  CAS version 和深删除不变量。
-- 将 Canvas Function 的外部执行、checkpoint、resource materialization 与通用 Canvas Resource lifecycle 接通。
-- 让第三方结果在 durable state 形成前完成安全分类、尺寸校验和 Resource externalization。
-
-### Non-goals
-
-- 不提供 `@SpringBootApplication`、`SpringApplication.run`、HTTP Controller、WebSocket transport 或前端 DTO。
-- 不实现 Harness reducer、processor、claim/lease 状态机；Harness 持久化只能经 Runtime/Store port 访问。
-- 不在 Platform 内扫描插件目录、创建插件 classloader 或提供运行时插件安装入口。
-- 不把 Provider SDK 类型、S3 bucket/object key、Daemon 连接句柄或第三方错误对象泄露到公共 application port。
-- 不把 S3 对象删除、预览生成和过期上传回收放进持有数据库行锁的长事务。
-
-## 依赖边界
-
-### Maven 与模块边界
-
-`platform/pom.xml` 的生产依赖是：
-
-| 方向 | 直接依赖 | 用途 |
+| 子域 | 主要入口 | 职责 |
 | --- | --- | --- |
-| Domain / Harness port | `kk-studio-canvas-core`、`kk-studio-harness-common`、`kk-studio-harness-runtime`、`kk-studio-harness-tool`、`kk-studio-harness-environment` | Canvas/Harness/Common 的纯 Java contract 与跨域基础值 |
-| Contributor port | `kk-studio-harness-contributor-api`、`kk-studio-harness-builtin` | `HarnessCatalog`、`ToolContribution`、`BranchView` 与 Builtin 贡献者 |
-| HTTP share | `kk-studio-share` | Platform service 使用的 DTO 与 JSON wire 类型 |
-| Persistence | MyBatis、PostgreSQL、`convention4j-spring-boot-starter` | Catalog、Chat、Settings、Storage 和 ComfyUI workflow API |
-| MCP / third-party | `kk-studio-harness-mcp`、`convention4j-comfyui`、AWS SDK S3、JsonPath | MCP、ComfyUI、S3 和 selector |
+| [catalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog) | `AgentProviderService`、`AgentModelService`、`AgentDefinitionService`、`McpServerService` | 名称寻址的全局 Catalog（Provider/Model/Agent）与 MCP server/tool |
+| [harness/model](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | `PlatformModelGateway`、`ModelExecutionConfiguration`、`DatabaseProviderResolutionService`、`ProviderResourceMaterializer`、`ProviderInlineBlobReader` | Provider 解析、admission、资源物化与 Model I/O |
+| [harness/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | `RuntimeToolCatalog`、`CompositeRuntimeToolCatalog`、`ToolCatalogQueryService`、`ToolExecutionGateway`、`ToolResultFinalizer` | 静态 + 动态工具目录聚合与 Tool 执行 |
+| [harness/thread/command](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` | 每个 live turn 的 Agent/Model/Environment/skill/subagent 解析 |
+| [harness/task](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | `AgentPromptComposer`、`AgentBranchSettingsMaterializer` | system prompt 拼接与分支设置物化 |
+| [harness/skill](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/skill) | `DatabaseThreadSelectedSkillLookup` | 冻结 skill binding 的正文解析 |
+| [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`SessionDeletionOrchestrator`、`PlatformCanvasCommandService`、`OwnerType` | 跨 owner 的 Harness 命令接受、深删除与 Canvas command |
+| [chat](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat) | `ChatServiceImpl` | Chat CRUD 与深删除 |
+| [project](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project) | `ProjectServiceImpl`、`IssueServiceImpl`、`IssueRunServiceImpl`、`IssueControllerDispatcher`、`IssueReconciler`、`ProjectHarnessContributor` | Project/Issue 生命周期与确定性 Coordinator |
+| [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
+| [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
+| [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration`、`EnvironmentOperationDispatcher`、`EnvironmentSkillSourceServiceImpl` | Environment Card、Daemon 会话装配、Skill 来源与异步操作 |
+| [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `PlatformCanvasResourceLifecycle`、`CanvasBlobResourceMaterializer`、Canvas Function adapters | Canvas Resource 生命周期与 Function adapter |
+| [comfyui](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui) | `ComfyuiWorkflowApiServiceImpl`、`ComfyuiRuntimeService` | Workflow 卡片与无状态运行 |
+| [error](../../platform/src/main/java/fun/fengwk/kkstudio/platform/error)、[persistence](../../platform/src/main/java/fun/fengwk/kkstudio/platform/persistence) | `DomainErrorCode`、`PostgresqlIntegrityViolationClassifier` | 领域错误分类与 FK/唯一约束到领域错误的映射 |
 
-`kk-studio-schema`、`kk-studio-canvas-infra`、Harness runtime `test-jar`、Flyway 和
-Testcontainers 都是 test scope；Platform main 不直接依赖 `harness-infra`、`web` 或 `harness-daemon`。这些边界由
-`platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java`、
-`platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformPackageArchitectureTest.java`、
-`platform/src/test/java/fun/fengwk/kkstudio/platform/ProviderTypeArchitectureTest.java` 和
-`platform/src/test/java/fun/fengwk/kkstudio/platform/harness/HarnessExecutionAdmissionArchitectureTest.java`守护。
+平台把 PostgreSQL 作为 Catalog、Chat、SystemSettings、Canvas graph、Harness durable
+fact、Blob owner edge 和 cleanup claim 的唯一事实源；NOTIFY、内存 registry、gateway
+handle 和 executor task 都只是可重建的 transport state。
 
-### 运行时拓扑
-
-```text
-web composition root
-  -> platform application services
-       -> PostgreSQL repositories / Canvas ports / Harness Store ports
-       -> harness-common / harness-mcp / harness-runtime / harness-tool / harness-environment / contributor-api / builtin
-       -> S3 / Model Provider / Environment Daemon / ComfyUI / OpenCLI Hub
-```
-
-Platform 只依赖 `canvas-core` 的 Canvas port；Canvas PostgreSQL implementation 位于
-`canvas-infra`，只在 Platform 测试基座或 web composition 中装配。Platform 的模型层全面使用
-`harness-provider` 的原生协议适配器，其公共签名统一遵循 `harness-runtime` 的 `model.provider` 类型。
-
-## 核心子域 / API
-
-### Catalog：Provider、Model、Agent Definition
+## Catalog
 
 Catalog 是名称寻址的全局资源集合，所有变更 service 都使用 `expectedVersion` CAS：
 
-| 资源 | durable 身份 | Platform 运行时作用 |
+| 资源 | durable 身份 | 运行时作用 |
 | --- | --- | --- |
-| Provider | `agent_provider.name` | 保存 `ProviderType`、base URL、credential 和内部 timeout config |
-| Model | `(provider_name, name)` | 保存 context/output limit、abilities、variants、pricing 和 default variant |
-| Agent | `agent_definition.name` | 保存 system prompt、Model 引用、variant 覆盖以及 toolIds/skills/subagents 配置 |
+| Provider | `agent_provider.name` | `ProviderType`、base URL、credential、内部 timeout config |
+| Model | `(provider_name, name)` | context/output limit、abilities、variants、pricing、default variant |
+| Agent | `agent_definition.name` | system prompt、Model 引用、variant 覆盖、toolIds/skills/subagents |
 
-三类资源的 `description` 都是无长度上限的自由文本（PostgreSQL `text`），与 `system_prompt`
-同属展示与规划事实，不参与名称、可见性、CAS 或路由判定；空值语义为 null（保存前按 `trimToNull` 归一化）。
+三类资源的 `description` 都是无长度上限的自由文本（PostgreSQL `text`），与
+`system_prompt` 同属展示事实，不参与名称、可见性、CAS 或路由判定，空值按 `trimToNull`
+归一化为 null。
 
-Model 的 `name` 支持编辑重命名，其 Provider 保持不可变；引用该 Model 的 Agent Definition 在同一数据库事务内由应用层原子同步更新其 Model 引用，并递增 Agent 版本号与单调推进更新时间；Provider 与 Agent 的名称在记录存续期间不可修改。Model 对 Provider、Agent 对 Model 具有非延迟外键约束；重命名时先锁定原模型行、复制创建时间并插入新模型行，随后更新所有引用 Agent 的模型字段，最后删除旧模型行，若发生冲突或并发异常则完整回滚以确保原子性与一致性。删除由
-`AgentProviderGuard`、`AgentModelReferenceResolver`、`AgentDefinitionReferenceResolver` 和对应 service
-拒绝仍被引用的资源，并通过 PostgreSQL integrity classifier 把 FK 约束映射为领域错误。
+Model 的 `name` 支持重命名，其 Provider 保持不可变；Provider 与 Agent 的名称在记录
+存续期间不可修改。重命名由 `AgentModelRepository.rename` 在一个事务内完成：以
+`expectedVersion` CAS 从旧行插入新行（沿用 `created_at`）、同步所有引用 Agent 的
+Model 引用、再删除旧行；任一步不满足预期即抛错并整体回滚。删除由 `AgentProviderGuard`、
+`AgentModelReferenceResolver`、`AgentDefinitionReferenceResolver` 拒绝仍被引用的资源，
+并通过 `PostgresqlIntegrityViolationClassifier` 把外键约束映射为领域错误。
 
-配置 JSON 使用 strict codec：
+配置 JSON 全部走 strict codec：
 
-- `AgentProviderConfigurationCodec`读取并合并 `modelCallTimeoutMillis` 与
-  `modelCallIdleTimeoutMillis`，未声明字段使用 `ModelCallTimeoutPolicy.DEFAULT`，未知 Provider 扩展字段保留。
-- `AgentModelRuntimeConfigParser`严格解析 `limit`、`abilities`、`variants`、`defaultVariant` 和 `pricing`；
-  context/output、variant id、temperature、reasoning effort 等不满足约束时拒绝。
-- `AgentDefinitionConfigCodec`严格解析去重的 `toolIds`、skill 和 subagent 配置；`toolIds` 必须是 canonical
-  `AgentToolId`，且只能引用运行时目录中的 selectable entry；`skills` 使用强类型 `AgentSkillRefDTO`（包含小写 canonical UUID `sourceId` 与短名 `name`），并在 Environment 持久可用 inventory 锁保护下校验；subagents 仍使用短名。
+- [AgentProviderConfigurationCodec](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/provider/configuration/AgentProviderConfigurationCodec.java)
+  合并 `modelCallTimeoutMillis` 与 `modelCallIdleTimeoutMillis`，未声明字段使用
+  `ModelCallTimeoutPolicy.DEFAULT`，未知 Provider 扩展字段保留。
+- [AgentModelRuntimeConfigParser](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/model/runtime/AgentModelRuntimeConfigParser.java)
+  严格解析 `limit`、`abilities`、`variants`、`defaultVariant`、`pricing`；context/output、
+  variant id、temperature、reasoning effort 不满足约束即拒绝。
+- [AgentDefinitionConfigCodec](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/configuration/AgentDefinitionConfigCodec.java)
+  严格解析去重的 `toolIds`、skill 与 subagent 配置；`toolIds` 必须是 canonical
+  `AgentToolId` 且只能引用运行时目录中的 selectable entry；`skills` 使用强类型
+  `AgentSkillRefDTO`（小写 canonical UUID `sourceId` + 短名 `name`），并在 Environment
+  持久可用 inventory 锁保护下校验。
 
-Provider type 的唯一 runtime enum 在
-`harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java`：
+Provider type 的唯一 runtime enum 是
+[ProviderType](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)，
+wire value 分别是 `openai`、`openai_response`、`anthropic`、`google`；`fromWireValue`
+不 trim、不折叠大小写，未支持的 wire value 直接失败。Catalog API 只暴露结构化 config、
+名称和版本，不暴露 credential。
 
-| enum | stable wire value | adapter |
-| --- | --- | --- |
-| `OPENAI` | `openai` | OpenAI Chat Completions 与 MiniMax endpoint adapter |
-| `OPENAI_RESPONSES` | `openai_response` | OpenAI official Responses adapter |
-| `ANTHROPIC` | `anthropic` | Anthropic adapter |
-| `GOOGLE` | `google` | Google Gemini adapter |
+## MCP server 与运行时工具目录
 
-`ProviderType.fromWireValue`不 trim、不折叠大小写；未支持的 wire value 直接失败。Catalog API 只暴露结构化
-config、名称和版本，不暴露 credential。
+MCP 配置与发现结果保存于 `mcp_server`、`mcp_tool`。创建和更新只严格解析一份
+Remote/Local 配置 JSON 并把状态置为 `UNVERIFIED`；标准列表和详情返回安全投影，完整
+`configJson` 只经显式配置查询返回。显式发现统一返回 `202 Accepted`：
 
-### MCP server 与运行时工具目录
-
-MCP server 配置与发现结果保存于 `mcp_server`、`mcp_tool`。创建和更新只严格解析一份
-Remote/Local 配置 JSON 并将状态置为 `UNVERIFIED`；标准列表和详情只返回安全投影，
-完整 `configJson` 仅经显式配置查询返回。显式发现统一返回 `202 Accepted`：
-
-- Remote 在请求线程的事务外通过 `harness-mcp` Streamable HTTP client 完成握手、
+- Remote 在请求线程事务外通过 `harness-mcp` Streamable HTTP client 完成握手、
   `tools/list` 与 schema/name 校验，再在短事务中锁 server、校验 CAS version 并原子
-  更新目录；失败时将当前版本标记为 `FAILED`。
+  更新目录；失败时把当前版本标记为 `FAILED`。
 - Local 创建持久 `MCP_SERVER_DISCOVER` Environment operation，由目标 Daemon 的
-  `mcp.local.discover` 执行。结果发布器按固定锁顺序验证 READY route lease、
-  Environment 归属、server/version 与严格结果 envelope，再把目录更新、Server
-  `AVAILABLE` 状态和操作终态提交在同一事务中。
+  `mcp.local.discover` 执行；结果发布器按固定锁顺序验证 READY route lease、Environment
+  归属、server/version 与严格结果 envelope，再把目录更新、Server `AVAILABLE` 状态与
+  操作终态提交在同一事务中。
 
-工具 UUID 派生稳定 `AgentToolId=mcp.<32hex>` 与 Contributor identity。工具消失时保留
-稳定身份并将 `available=false`；schema 改变或工具重新出现时推进
-`schemaRevision`。运行时 descriptor version 为 `<serverVersion>.<schemaRevision>`。
+[MCP 工具身份](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/McpStableIds.java)
+由工具 UUID 派生稳定 `AgentToolId=mcp.<32hex>`；工具消失时保留稳定身份并置
+`available=false`，schema 改变或工具重新出现时推进 `schemaRevision`，descriptor
+version 是 `<serverVersion>.<schemaRevision>`。
 
-`RuntimeToolCatalogConfiguration` 生产三个明确 bean：
+[RuntimeToolCatalogConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
+装配三个 bean：包装静态 `HarnessCatalog` 的 `HarnessToolCatalogAdapter`、读库的
+动态 `McpToolCatalog`，以及唯一 `@Primary` 的 `CompositeRuntimeToolCatalog`。复合
+目录不缓存动态工具，按静态在前、动态在后的固定顺序返回可选项，任何重复
+`AgentToolId` 或模型可见名称都 fail closed；`ToolCatalogQueryService`、
+`AgentDefinitionConfigValidator`、`DatabaseTurnResolver` 和 `ToolExecutionGateway`
+只通过它列出或查找工具。
 
-```text
-HarnessCatalog -> HarnessToolCatalogAdapter --\
-                                               -> CompositeRuntimeToolCatalog (@Primary)
-PostgreSQL ----> McpToolCatalog --------------/
-```
+[McpToolCatalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog.java)
+只选拔 `enabled=true`、`AVAILABLE`、`discoveredVersion==version` 且工具
+`available=true` 的记录。Remote Tool 要求为 none，在受管 `toolGatewayExecutor` 中以
+per-call client 执行；Local Tool 要求 Agent 精确绑定 Server 所属 Environment，并把
+冻结配置包装为 `mcp.local.call` capability。两条路径的 side effect 都是
+`NON_IDEMPOTENT`，发送前重新围栏 server version、tool schema revision 与可用状态，
+一次绝对 deadline 覆盖 client 初始化和调用，取消只作用于当前调用。连接、协议和执行
+失败只向 Tool result 暴露稳定通用文本，不泄漏 URL、headers、env、command 或 cwd。
 
-复合目录不缓存动态工具，按静态在前、动态在后的固定顺序返回可选项；任何重复
-`AgentToolId` 或模型可见名称都 fail closed。`ToolCatalogQueryService`、
-`AgentDefinitionConfigValidator`、`DatabaseTurnResolver` 和
-`ToolExecutionGateway` 只通过该统一目录列出或查找工具。`HarnessCatalog`
-仍单独保存 Contributor context projector 与 custom entry type 元数据。
+## Chat、Project 与 Issue
 
-`McpToolCatalog` 仅选拔 `enabled=true`、`AVAILABLE`、
-`discoveredVersion==version` 且工具 `available=true` 的记录。Remote Tool 的
-requirements 为 none，在受管 `toolGatewayExecutor` 中以 per-call client 执行；
-Local Tool 要求 Agent 精确绑定 Server 所属 Environment，并将冻结配置包装为
-`mcp.local.call` capability。两条路径的 side effect 都是 `NON_IDEMPOTENT`，发送前
-重新围栏 server version、tool schema revision 与可用状态；一次绝对 deadline 覆盖
-client 初始化和调用，取消只作用于当前调用。连接、协议和执行失败只向 Tool result
-暴露稳定通用文本，不泄漏 URL、headers、env、command 或 cwd。
+[ChatServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat/service/impl/ChatServiceImpl.java)
+提供 Chat CRUD，保存 title、agentName、`yoloEnabled`、version 和时间；
+Environment 身份来自 Agent definition 的可空 `environmentId`，Chat 本身不持有目录。
+`deleteChat` 先排他锁定 Chat，再调用
+`SessionDeletionOrchestrator.deleteSessionsByOwner(OwnerType.CHAT, chatId)` 深删除
+全部 Session，最后删除 Chat 行；`session_owner` 只表达 owner relation，不绕过 Session
+的 Harness/Blob 清理。
 
-### Chat 与 owner
-
-`ChatServiceImpl`提供 Chat CRUD。Chat 保存 title、agentName、
-`yoloEnabled`、version 和时间；Agent definition 的可空 `environmentId` 是 Environment 身份来源；`ChatMutationFactory`负责名称、标题和默认 YOLO 的规范化，`ChatGuard`负责存在性与
-Agent 引用校验。更新和删除都需要 CAS version。
-
-Chat 删除不是单行删除：`ChatServiceImpl.deleteChat`先排他锁定 Chat，再调用
-`SessionDeletionOrchestrator.deleteSessionsByOwner(OwnerType.CHAT, chatId)`深删除全部 Session，最后删除 Chat。
-`session_owner` 只表达 owner relation，不绕过 Session 的 Harness/Blob 清理。
-
-### Project、Issue 与确定性 Controller
-
-`ProjectServiceImpl` 与 `IssueServiceImpl` 提供 Project/Issue 的事务边界。Project
-持有必填 Coordinator Agent、项目内单调 Issue 编号、CAS `version` 与归档状态；
-Issue 持有六态生命周期、可空 assignee/reviewer Agent、`specRevision`、
-`inputSequence` 和归档状态。状态迁移白名单由 `IssueStatusTransition` 单点维护：
+[ProjectServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/ProjectServiceImpl.java)
+与 [IssueServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/IssueServiceImpl.java)
+提供 Project/Issue 的事务边界。Project 持有必填 Coordinator Agent、项目内单调 Issue
+编号、CAS `version` 与归档状态；Issue 持有六态生命周期、可空 assignee/reviewer
+Agent、`specRevision`、`inputSequence` 与归档状态。状态迁移白名单由
+[IssueStatusTransition](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueStatusTransition.java)
+单点维护，action 与状态的对应关系以该类为准：
 
 ```text
- 待规划 -> 待处理 -> 执行中 -> 评审中 -> 完成
-            ^                         |
-            +---- REQUEST_CHANGES ----+
- 非终态 -> 取消；完成/取消 -> 待处理
+需求池 --READY--> 待处理 --START_EXECUTION--> 执行中 --SUBMIT--> 评审中 --APPROVE--> 完成
+待处理 <--DEFER-- 需求池         评审中 --REQUEST_CHANGES--> 待处理
+非终态 --CANCEL--> 已取消         完成/已取消 --REOPEN--> 待处理
 ```
 
-依赖边只能连接同一 Project 的未归档 Issue，添加时在 Project 图锁下按 UUID
-顺序锁两端，并通过递归 CTE 拒绝环；增删依赖推进目标 Issue 的
-`specRevision/version`。`issue_input` 是每 Issue 单调追加流，可用
-`idempotencyKey` 精确重放；追加输入推进 `inputSequence/version` 并唤醒
-Controller。
+依赖边只能连接同一 Project 的未归档 Issue，添加时在 Project 图锁下按 UUID 顺序锁两端
+并通过递归 CTE 拒绝环；增删依赖推进目标 Issue 的 `specRevision/version`。
+`issue_input` 是每 Issue 单调追加流，可用 `idempotencyKey` 精确重放，追加输入推进
+`inputSequence/version` 并唤醒 Controller。
 
 Project Coordinator 和每个 Agent IssueRun 分别以 `OwnerType.PROJECT` 与
-`OwnerType.ISSUE_RUN` 拥有 Harness Session。`ProjectHarnessSessionBootstrapService`
+`OwnerType.ISSUE_RUN` 拥有 Harness Session。
+[ProjectHarnessSessionBootstrapService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/session/ProjectHarnessSessionBootstrapService.java)
 按 `Project -> Issue -> IssueRun` 锁序，在同一物理事务内原子创建 Session、ROOT、
-Thread、首条 Command、Work 与 owner relation；数据库
-`session_owner.session_id` 主键与排他弧 check 保证 Chat、Canvas、Project、IssueRun
-四类 owner 全局互斥。
+Thread、首条 Command、Work 与 owner relation；数据库 `session_owner.session_id`
+主键与排他弧 check 保证 Chat、Canvas、Project、IssueRun 四类 owner 全局互斥。
 
-`IssueControllerDispatcher` 只负责 `issue_controller_work` 的短事务 claim、
-bounded handoff、合并 wake 和 poll；`IssueReconciler` 在
-`Project(FOR SHARE) -> Issue(FOR UPDATE) -> IssueRun(FOR UPDATE) -> work lease`
-锁序与 fencing 下每次推进一个有界动作。它处理依赖阻塞、Agent
-executor/reviewer Run、Harness bootstrap/inspection、输入 continuation、人工等待、
-deadline、continuation budget、retry/cancel 和 Coordinator attention；通知/poll
-都只是唤醒，数据库 work 行是可恢复事实。
+[IssueControllerDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueControllerDispatcher.java)
+只负责 `issue_controller_work` 的短事务 claim、bounded handoff、合并 wake 与 poll；
+[IssueReconciler](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconciler.java)
+在 `Project(FOR SHARE) -> Issue(FOR UPDATE) -> IssueRun(FOR UPDATE) -> work lease`
+锁序与 fencing 下每次推进一个有界动作，处理依赖阻塞、Agent executor/reviewer Run、
+Harness bootstrap/inspection、输入 continuation、人工等待、deadline、continuation
+budget、retry/cancel 和 Coordinator attention。通知与 poll 都只是唤醒，数据库 work
+行才是可恢复事实；claim/reconcile 由 lease token 与 claimed wake version 双重围栏，
+worker 拒绝、处理失败、节点退出或通知丢失都由归还、延迟重试、lease 过期和 periodic
+poll 收敛。
 
-`ProjectHarnessContributor` 注册 12 个 INTERNAL 角色工具。Coordinator 只获得
-Project/Issue 查询与编排工具，Executor 只获得 submit/request-input，Reviewer
-只获得 review；`ProjectThreadOwnerResolver` 从 Thread 的唯一 owner relation
-解析角色，不依赖模型自报。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或
-UNKNOWN Run，再按 controller work -> Run Sessions -> reviewer/executor Runs ->
-inputs/dependencies/Issues -> Coordinator Session -> Project 的顺序清理，每个 CAS
-删除都检查受影响行数。
+[ProjectHarnessContributor](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHarnessContributor.java)
+注册 12 个 INTERNAL 角色工具，按 `ProjectRoleToolType` 划分归属：Coordinator 获得
+Project/Issue 查询与编排工具，Executor 只获得 submit/request-input，Reviewer 只获得
+review；`ProjectThreadOwnerResolver` 从 Thread 的唯一 owner relation 解析角色，不依赖
+模型自报。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或 UNKNOWN Run，再按
+controller work -> Run Sessions -> reviewer/executor Runs -> inputs/dependencies/
+Issues -> Coordinator Session -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
 
-### SystemSettings
+## SystemSettings
 
-`system_setting`恰好一行（`id=1`），`config`是六个必填 section 的 canonical JSON：
+`system_setting` 恰好一行（存在 `id = 1` 的 check 约束），`config` 是六个必填 section
+的 canonical JSON：`tool`、`aiRuntime`、`environment`、`integrations`、`storageMedia`、
+`advanced`。[SystemSettings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettings.java)
+的 canonical constructor 校验字段范围、跨字段关系与启用前提；
+`SystemSettingsCodec` 拒绝未知字段、尾随 token、错误类型和缺失 section；
+`SystemSettingsSchemaProvider` 是 HTTP 编辑 schema 的唯一 metadata 来源，字段路径与
+record component path 对齐。
 
-```text
-tool / aiRuntime / environment / integrations / storageMedia / advanced
-```
+[SystemSettingsServiceImpl.update](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImpl.java)
+的顺序是：解析 expected version → 严格解码并校验完整聚合 → 行 CAS update → 事务提交
+后通知 `SystemSettingsChangeHandler` 权威回读。`SystemSettingsSnapshot` 以 version CAS
+替换内存快照，较旧回读不能覆盖较新值，事务回滚不改变快照；数据库 trigger 通过
+`system_settings_changed` 通道广播给其它节点。
 
-`SystemSettings`的 canonical constructor 做字段范围、跨字段关系和启用前提校验；`SystemSettingsCodec`拒绝未知字段、
-尾随 token、错误 JSON 类型和缺失 section。`SystemSettingsSchemaProvider`是 HTTP 编辑 schema 的唯一 metadata
-来源，字段路径与 record component path 对齐。
-
-`SystemSettingsServiceImpl.update`的顺序是：解析 expected version → 严格解码并校验完整聚合 → `system_setting` 行
-CAS update → 事务提交后通知 `SystemSettingsChangeHandler`权威回读。`SystemSettingsSnapshot`以 version CAS 替换
-内存快照，较旧回读不能覆盖较新值，事务回滚不改变快照；数据库 trigger 通过 `system_settings_changed` 通道广播。
-
-### Storage、Blob 与 Resource
+## Storage、Blob 与 Resource
 
 Storage 把内容身份、owner 引用和对象物理存储分开：
 
-- `storage_blob`按 `(sha256, size_bytes)` 对 ACTIVE 内容去重，状态为 `ACTIVE` 或 `DELETING`，`ref_count`由
-  `StorageBlobManager`维护。
-- `session_blob_ref`是 Harness Session 对 Blob 的显式 owner edge；`canvas_resource`和 Tool history ingest
-  通过各自 owner/service 维护引用。
-- `storage_upload`记录 PENDING/READY 上传、candidate blob、过期时间和 cleanup lease。
-- 对象 key 由 `StorageObjectKeys`集中生成：`uploads/{id}/original`、`blobs/{id}/original`、
-  `blobs/{id}/preview.webp`；调用方不能选择 bucket。
+- `storage_blob` 按 `(sha256, size_bytes)` 对 ACTIVE 内容去重，状态为 `ACTIVE` 或
+  `DELETING`，`ref_count` 由 `StorageBlobManager` 维护；
+- `session_blob_ref` 是 Harness Session 对 Blob 的显式 owner edge，`canvas_resource`
+  和 Tool history ingest 通过各自的 owner/service 维护引用；
+- `storage_upload` 记录 PENDING/READY 上传、candidate blob、过期时间和 cleanup lease；
+- 对象 key 由 [StorageObjectKeys](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/StorageObjectKeys.java)
+  集中生成：`uploads/{id}/original`、`blobs/{id}/original`、`blobs/{id}/preview.webp`，
+  调用方不能选择 bucket。
 
-`StorageBlobManager.retain/release`和 `SessionBlobRefManager`均要求 `PROPAGATION_MANDATORY`。引用减到零时，数据库
-同一条条件 update 把 Blob 切为 `DELETING`；提交后只唤醒 maintenance，删除顺序是 preview → original → 条件删除
-Blob 行。
+`StorageBlobManager.retain/release` 与 `SessionBlobRefManager` 都要求
+`PROPAGATION_MANDATORY`，因此引用变更必须属于调用方已有事务。引用减到零时，数据库
+同一条条件 update 把 Blob 切为 `DELETING`；提交后只唤醒 maintenance，删除顺序是
+preview → original → 条件删除 Blob 行。
 
-上传协议由 `StorageUploadServiceImpl`执行：
+[StorageUploadServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/service/impl/StorageUploadServiceImpl.java)
+的上传协议是：
 
-1. `reserve`在短事务内按 hash/size 命中 ACTIVE 或创建 PENDING upload，未命中再生成 checksum PUT presign。
-2. `complete`在数据库事务外 HEAD、校验 size/SHA-256、probe 媒体事实并复制 candidate object；随后短事务锁 upload
-   行、做 ACTIVE dedup、设置 blobId。并发 complete 只有一个绑定成功。
-3. `delete`在短事务记录 cleanup request；READY upload 同时 release upload owner。
-4. `expireOnce`先用 `SKIP LOCKED` claim 有界批次，事务外幂等删除临时/candidate objects，再用 cleanup token
-   做 fenced finalize；对象删除或 finalize 失败时保留 lease，下一次 maintenance 可重试。
+1. `reserve` 在短事务内按 hash/size 命中 ACTIVE 或创建 PENDING upload，未命中再生成
+   checksum PUT presign；
+2. `complete` 在数据库事务外 HEAD、校验 size/SHA-256、probe 媒体事实并复制 candidate
+   object，随后短事务锁 upload 行、做 ACTIVE dedup、设置 blobId；并发 complete 只有
+   一个绑定成功；
+3. `delete` 在短事务记录 cleanup request，READY upload 同时 release upload owner；
+4. `expireOnce` 先用 `SKIP LOCKED` claim 有界批次，事务外幂等删除临时/candidate
+   object，再用 cleanup token 做 fenced finalize；删除或 finalize 失败时保留 lease，
+   下一次 maintenance 重试。
 
-`StorageMaintenance`是 `SmartLifecycle`，拥有单一 daemon scheduled executor，启动立即 wake、并合并并发 wake，
-同时以 fixed-delay poll 驱动 upload expire 和 DELETING blob sweep。它的所有 S3 I/O都在事务外；数据库清理事实是唯一
-可恢复依据。
+[StorageMaintenance](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/StorageMaintenance.java)
+是 `SmartLifecycle`，拥有单一 daemon scheduled executor，启动立即 wake 并合并并发
+wake，同时以 fixed-delay poll 驱动 upload expire 与 DELETING blob sweep；所有 S3 I/O
+都在事务外，数据库清理事实是唯一可恢复依据。
 
-Tool terminal 结果由 `ToolResultFinalizer`先对完整投影做无副作用 plan 与 hard-limit 校验。普通 Backend
-Tool 的 Binary/Resource 仍按 plan 写入 `ResourceStore`，返回引用必须与 plan 完全一致；已有 Resource
-也必须经同一 Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocation-scoped
-`RESOURCE_UPLOAD_REQUEST/TICKET/COMMIT` 取得预签名 PUT 并由 Daemon 直传 S3；WebSocket 只携带
-`uploadId/mediaType/name/size/sha256/preview`，绝不携带 Base64、二进制帧、预签名 URL 或 Daemon 本地 URI。
+Tool 终态结果由
+[ToolResultFinalizer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolResultFinalizer.java)
+先对完整投影做无副作用 plan 与 hard-limit 校验。普通 Backend Tool 的 Binary/Resource
+按 plan 写入 `ResourceStore`，返回引用必须与 plan 完全一致，已有 Resource 也必须经同一
+Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocation-scoped
+`RESOURCE_UPLOAD_REQUEST/TICKET/COMMIT` 取得预签名 PUT 并由 Daemon 直传 S3，WebSocket
+只携带 `uploadId/mediaType/name/size/sha256/preview`，绝不携带 Base64、二进制帧、
+预签名 URL 或 Daemon 本地 URI。
 
-`GlobalStorageToolResultHistoryMaterializer` 在调用方 mandatory transaction 中分两条路径收敛：
+[GlobalStorageToolResultHistoryMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/GlobalStorageToolResultHistoryMaterializer.java)
+在调用方 mandatory transaction 中分两条路径收敛：普通 managed Resource 从
+`ResourceStore` 读取并复核完整性后摄入 `storage_blob`；`blob-upload:<uploadId>` 瞬时
+引用先 `lockReady`，以权威 `storage_blob` 复核媒体类型/大小/SHA-256，再
+`retain session_blob_ref -> delete upload owner` 原子转移引用，durable 名称取上传行。
+两条路径最终都只把 `blobId`、权威名称与有界 preview 写入 Harness history；任何一步
+失败都使调用方事务回滚。
 
-- 普通 managed Resource 从 `ResourceStore` 读取并复核完整性，再摄入 `storage_blob`。
-- `blob-upload:<uploadId>` 瞬时引用先 `lockReady`，以权威 `storage_blob` 复核媒体类型/大小/SHA-256，
-  再 `retain session_blob_ref -> delete upload owner` 原子转移引用；durable 名称取上传行，拒绝 Daemon
-  终态中的非权威名称。
+## Environment
 
-两条路径最终都只把 `blobId`、权威名称与有界 preview 写入 Harness history；只有由 Backend
-实际读取并复核过字节的外部化文本才保存总字节数/总行数，Daemon 上传不接受未经内容复核的文本工件元数据。
-任一步失败使调用方事务回滚。该端口未装配时，Runtime 只保留资源名称、媒体类型与有界 preview，
-不自动序列化 `ResourceRef` 的瞬时 URI，也不阻塞 Thread 后续推进。
+Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由主键，`name` 为
+展示名）；跨节点 route ownership 由 `environment_connection` 租约保存。每个 JVM 共享
+一个 `nodeInstanceId`，[EnvironmentRegistry](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistry.java)
+以 `(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由，并实现会话核心
+的 `DaemonLeaseStore`。
 
-### Environment
-
-Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由主键，`name` 为展示名）；
-跨节点 route ownership 由 PostgreSQL `environment_connection` 租约保存。每个 JVM
-共享一个 `nodeInstanceId`，`EnvironmentRegistry` 以
-`(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由，并实现会话核心的 `DaemonLeaseStore`。
-
-`harness/environment-server` 的 `EnvironmentDaemonServer` 唯一拥有本节点 daemon 会话状态：连接代际、HELLO/WELCOME/READY/
-HEARTBEAT 握手推进、在途 invocation 与终态所有权。Platform 通过 `EnvironmentServerConfiguration` 装配它，并提供
-三个窄端口实现：`EnvironmentRegistry`（租约围栏）、`EnvironmentRepository` 解析的注册凭据（`DaemonRegistrationDirectory`）与
+`harness/environment-server` 的 `EnvironmentDaemonServer` 唯一拥有本节点 daemon 会话
+状态：连接代际、HELLO/WELCOME/READY/HEARTBEAT 握手推进、在途 invocation 与终态所有权。
+[EnvironmentServerConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/server/EnvironmentServerConfiguration.java)
+装配它并提供窄端口实现：`EnvironmentRegistry`（租约围栏）、`EnvironmentRepository`
+解析的注册凭据、`EnvironmentSessionListener`、`StorageDaemonResourceTicketService`
+（把会话核心的票据端口映射到 `StorageUploadService.reserve/complete/delete`）与
 `SystemSettingsSnapshot`（每次判定现读的心跳超时与资源上限）。
 
-Platform 侧的产品适配器只做映射，不持有会话状态：`EnvironmentDaemonGateway` 暴露会话核心
-（`EnvironmentDaemonServer`）与租约实现（`EnvironmentRegistry`），供 Web 层 WebSocket transport 与产品查询复用；
-`StorageDaemonResourceTicketService` 把会话核心的窄票据端口映射到 `StorageUploadService.reserve/complete/delete`，
-只返回无敏感信息的失败说明；`EnvironmentServiceImpl` 在 Product CRUD 上执行 CAS 与引用校验。Platform 不提供目录浏览或 Skill 正文的旁路加载链：
-skill 正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力取得。
+Platform 侧的产品适配器只做映射，不持有会话状态：[EnvironmentDaemonGateway](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway.java)
+暴露会话核心与租约实现，供 Web 层 WebSocket transport 与产品查询复用；
+[EnvironmentServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImpl.java)
+在 Product CRUD 上执行 CAS 与引用校验；
+[EnvironmentOperationDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/operation/EnvironmentOperationDispatcher.java)
+按 `environment_operation_pending` 通知与 SQL owner-node 租约隔离排空持久操作。Platform
+不提供目录浏览或 Skill 正文的旁路加载链：skill 正文由内部工具 `load_skill` 经
+`BoundEnvironment` 调用 `skill.load` 能力取得。
 
-每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量的 capability 并发在途，不同能力之间没有共享槽位，
-也不存在环境级容量或排队。唯一拒绝重复的规则是同一 Environment 内重用相同的活动 `invocationId`（调用方错误）。发送前按该连接
-READY 中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验；真实存在性、目录类型与可访问性由 Daemon 判定。
+每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量
+capability 并发在途，不同能力之间没有共享槽位，也不存在环境级容量或排队，唯一拒绝
+重复的规则是同一 Environment 内重用相同的活动 `invocationId`。发送前按该连接 READY
+中冻结的目标 Daemon OS 对 `arguments.workdir` 做纯词法校验，真实存在性、目录类型与
+可访问性由 Daemon 判定。物理连接失效不终结在途 invocation：同一 `daemonInstanceId`
+重连时以相同 `invocationId` 重放在途 INVOKE；只有身份不同的 Daemon 进程接管或调用方
+deadline 才收敛为 uncertain，绝不重发可能已产生副作用的请求。资源上传控制消息同样
+绑定 `invocationId`，并以 `transferId` 在调用内幂等关联。
 
-会话核心只接受 protocol v1 HELLO、capability catalog `"1"` 与 READY capabilities。INVOKE payload 使用
-`capabilityId`、`capabilityVersion`、`arguments`、`timeoutMillis`，不携带 model
-Tool name，也不携带第二份目录字段；所有结果通过通用 `STARTED/PROGRESS/COMPLETED/FAILED/CANCELLED` 回调并以 envelope
-`invocationId` 关联。物理连接失效不终结在途 invocation：同一 `daemonInstanceId` 重连时以相同 `invocationId` 重放在途 INVOKE；只有身份不同的
-Daemon 进程接管或调用方 deadline `expire` 才收敛为 uncertain，绝不重发可能已经产生副作用的请求。
-资源上传控制消息同样绑定 `invocationId`，并以 `transferId` 在调用内幂等关联；伪造/漂移 REQUEST、错配 COMMIT、未 READY、
-重复或跨调用的终态 upload 引用都会在进入 Tool 消费方前作为协议错误拒绝。票据服务 I/O 与 cleanup 全部在会话核心锁外执行。
+## Model 与 Tool 执行
 
-### Provider adapters 与 PlatformModelGateway
+### Provider 解析与 Model I/O
 
-`ModelExecutionConfiguration`为四个 `ProviderType`注册稳定命名的 `ProviderFactory`，Model I/O使用 Java 21
-virtual-thread-per-task executor，Model admission 默认容量来自 `kk-studio.harness.execution-admission.model`
-（默认 16）。
+[ModelExecutionConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/ModelExecutionConfiguration.java)
+为四个 `ProviderType` 注册稳定命名的 `ProviderFactory`，Model I/O 使用 Java 21
+virtual-thread-per-task executor。
 
-`DatabaseProviderResolutionService`在每次 Model attempt 按 frozen `providerName`读取当前 `agent_provider`：
+[DatabaseProviderResolutionService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/DatabaseProviderResolutionService.java)
+在每次 Model attempt 按 frozen `providerName` 读取当前 `agent_provider`：
 
-1. 当前 Provider 必须存在，且 `providerType`必须等于 durable request 中冻结的 type。
-2. 以当前 factory 读取 endpoint、credential、timeout policy 并创建 adapter。
-3. 根据当前 Provider cache capability 规范化 durable cache control。
-4. 通过 `ProviderResourceMaterializer` 物化当前 attempt 的 Resource：模型输入模态、adapter 用户/工具结果能力与
-   Blob MIME 同时匹配时，图片、音频、视频和 PDF 统一转换为 Base64 data URI。非 PDF 文档、缺失或非 ACTIVE
-   Blob、能力不匹配及 SYSTEM/ASSISTANT 资源使用确定性文本回退，不读取内容、不生成预签名 URL。
+1. 当前 Provider 必须存在，且 `providerType` 等于 durable request 中冻结的 type；
+2. 以当前 factory 读取 endpoint、credential、timeout policy 并创建 adapter；
+3. 根据当前 Provider cache capability 规范化 durable cache control；
+4. 通过 `ProviderResourceMaterializer` 物化当前 attempt 的 Resource：模型输入模态、
+   adapter 用户/工具结果能力与 Blob MIME 同时匹配时，图片、音频、视频和 PDF 统一转成
+   Base64 data URI；非 PDF 文档、缺失或非 ACTIVE Blob、能力不匹配及 SYSTEM/ASSISTANT
+   资源使用确定性文本回退，不读取内容、不生成预签名 URL。
 
-持久化只保存自己的 `ResourceMessageContent` / `ProviderResourceBlock`（Blob ID、名称、有界预览及外部化事实）。
-Base64 只存在于 attempt 的有效请求；durable codec 拒绝 Image/Audio/Video/Document 媒体块。物化保留
-assistant 的原生 `replayState`，不改写签名、加密回放数据、affinity 或源前缀 hash。
+持久化只保存自己的 `ResourceMessageContent` / `ProviderResourceBlock`（Blob ID、名称、
+有界预览与外部化事实），Base64 只存在于 attempt 的有效请求，durable codec 拒绝
+Image/Audio/Video/Document 媒体块。物化保留 assistant 的原生 `replayState`，不改写
+签名、加密回放数据、affinity 或源前缀 hash。
 
-`ProviderInlineBlobReader` 经 `StorageBlobContentService` 读取权威 Blob：短事务 retain/release，事务外通过内部
-S3 endpoint 下载原始字节；不使用面向浏览器的 public endpoint。读取后复核 Blob ID、MIME、声明长度及实际长度。
-应用安全上限为单文件原始 **100 MiB**、每请求累计 data URI **160 MiB ASCII 字符**，重复引用和嵌套工具结果
-均逐次计入预算；超限明确失败，不截断。最终协议请求还受各编码器的完整 UTF-8 字节限制。
+[ProviderInlineBlobReader](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/ProviderInlineBlobReader.java)
+经 `StorageBlobContentService` 读取权威 Blob：短事务 retain/release，事务外通过内部 S3
+endpoint 下载原始字节，不使用面向浏览器的 public endpoint。应用侧安全上限为单文件
+原始 **100 MiB**、每请求累计 data URI **160 MiB** ASCII 字符，重复引用与嵌套工具结果
+均逐次计入预算，超限明确失败而不截断。不可变 Blob 内容的 Base64 使用 Caffeine 缓存：
+TTL **5 分钟**、总记账上限 **64 MiB**、单条超过 **8 MiB** 不缓存，所有下载共享
+**2 个并发许可**；缓存命中前仍逐次检查 ACTIVE 状态，失败不缓存。以上是应用侧资源
+保护，不代表具体模型或供应商允许的附件大小。
 
-不可变 Blob 内容的 Base64 使用 Caffeine 缓存：key 为 Blob ID / MIME / 大小，TTL **5 分钟**，总记账上限
-**64 MiB**，单条记账超过 **8 MiB** 不缓存。String 按每字符 2 字节加固定开销保守记账；小对象并发 miss 合并，
-所有下载（包括不缓存的大对象）共享 **2 个并发许可**。缓存命中前仍逐次检查 ACTIVE 状态；失败不缓存。
-以上是应用侧资源保护，不代表具体模型或供应商允许的附件大小。
+四个 Provider（OpenAI Chat、OpenAI Responses、Anthropic、Google）都使用
+[`harness-provider`](harness-provider.md) 的原生协议适配器，共享基于 JDK 21
+`HttpClient` 的 `modelExecutionTransport`。
 
-四个 Provider（OpenAI Chat、OpenAI Responses、Anthropic、Google）均使用 [`harness-provider`](harness-provider.md)
-的原生协议适配器，共享 `modelExecutionTransport`（基于 JDK 21 `HttpClient`、受管虚拟线程 worker 与 Watchdog 调度器）。
-OpenAI Chat 与 OpenAI Responses 接入 Provider config-aware Prompt Cache capability 动态解析；Anthropic 固定声明
-SHORT/LONG 与 SYSTEM/TOOLS/CONVERSATION 能力（默认规划选择 SHORT，执行期基于完整历史重新求断点交集）；Google（Gemini）
-固定声明 AUTOMATIC 能力。
+### Gateway admission 与两阶段激活
 
-`PlatformModelGateway.start`的 admission 顺序和结果语义是：
+[PlatformModelGateway](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGateway.java)
+的 `start` 顺序与结果语义是：
 
 | 阶段 | 结果 |
 | --- | --- |
 | Provider resolution 抛确定性 `IllegalArgumentException` | `Rejected(INVALID_REQUEST)`，不提交、不重试 |
 | Model admission 无 permit | `Busy(busyRetryDelay)` |
 | executor 明确 `RejectedExecutionException` | `Busy`，释放 lease |
-| executor 抛其它提交异常 | `Indeterminate(TRANSIENT)`，因为无法证明 transport 是否启动 |
-| 成功提交 | `Started(handle)`，但 callback gate 仍关闭 |
+| executor 抛其它提交异常 | `Indeterminate(TRANSIENT)`，无法证明 transport 是否启动 |
+| 成功提交 | `Started(handle)`，callback gate 仍关闭 |
 
-`Handle.activate`只在 Runtime attach handle 且 durable invocation 已标记 `RUNNING`后打开 gate。激活前 cancel 会
-唤醒等待任务、释放 permit 且不触碰 Provider；Provider stream 延迟绑定后仍会收到一次 cancel。构造时拒绝 inline executor、
-`CallerRunsPolicy`和静默丢弃 policy，避免 gate 死锁或出现无执行的 `Started`。Model/Tool gateway 共用
-[`GatewayExecutorSafety`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/GatewayExecutorSafety.java)
-作为该构造约束的唯一实现。
+`Handle.activate` 只在 Runtime attach handle 且 durable invocation 已标记 `RUNNING`
+后打开 gate；激活前 cancel 会唤醒等待任务、释放 permit 且不触碰 Provider，构造时拒绝
+inline executor、`CallerRunsPolicy` 和静默丢弃 policy。Model 与 Tool gateway 共用
+[GatewayExecutorSafety](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/GatewayExecutorSafety.java)
+作为该构造约束的唯一实现。Provider callback 经单一 FIFO drainer 进入，队列上限
+`256`：第一个 terminal 胜出，terminal 后的迟到/重复信号全部丢弃，队列溢出、未知
+transport 异常或非 terminal listener 异常统一以一次 `UNKNOWN` 收敛。
 
-Provider callback 经 `BridgingHandler`进入单一 FIFO drainer，队列上限 256。第一个 terminal 胜出，terminal 后的
-迟到/重复信号全部丢弃；队列溢出、未知 transport 异常或非 terminal listener 异常统一以一次 `UNKNOWN`收敛；
-terminal listener 异常只记录日志，不发第二个 terminal。terminal、cancel 和提交失败共享幂等 permit release。
+[ToolExecutionGateway](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
+的 `preflight` 先用 frozen `AgentToolDefinition.id` 从 `RuntimeToolCatalog` 恢复
+ToolContribution，再要求目录中的完整 definition、contributor provenance 与
+requirements 相等；贡献缺失或 definition/requirements 漂移直接生成确定性的
+`TOOL_NOT_FOUND` / `TOOL_DEFINITION_MISMATCH` Deny，不进入 permission evaluator。
+正常路径按 AgentToolId、arguments 与单次调用的 `arguments.workdir` 生成 `ALLOW`、
+`ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start` 先获取 tool
+admission（默认 `kk-studio.harness.execution-admission.tool=64`），再经单一执行路径
+校验冻结定义与 requirements、构建隔离所属 Contributor 的只读 `BranchView` 与可选
+`BoundEnvironment`、提交异步执行并返回两阶段门控 Handle，最后在门控桥校验 effects
+归属与声明、完成 managed Resource 外部化并一次性投递。
 
-### ToolExecutionGateway、RuntimeToolCatalog 与 Contributor 路由
+Tool admission 无 permit 或 executor 明确拒绝时返回 `RetryLater`，其它无法证明是否
+提交的异常返回 `Indeterminate(EXECUTION_FAILED)`。`Started` 后的 partial 必须非空、
+toolCallId 精确匹配、不能携带 Binary/Resource，且 canonical JSON 不超过 `256 KiB`；
+terminal result 在 externalize 前校验，成功结果采用 all-or-nothing Resource
+externalization，第一个 terminal 后任何迟到信号、其余 Resource 写入和第二个 terminal
+都被禁止。`AppendCustomEntry` intent 必须属于自身 Contributor、命中已注册 custom type
+且存在声明的 WRITE access。
 
-Platform 接收由 Web 组合根冻结的不可变 `HarnessCatalog`，并将其工具与动态
-`McpToolCatalog` 聚合为唯一 `RuntimeToolCatalog`。Platform 不读取本地 Contributor
-目录，也不创建 classloader：
+### turn 解析与 prompt 物化
 
-- Platform 装配 `LoadSkillTool` 与 `TaskTool` 依赖，并暴露第一方唯一的 `BuiltinHarnessContributor` bean 供 Web 组合根收集；
-- Platform 通过 `ToolCatalogQueryService` 消费 `RuntimeToolCatalog.selectableTools()` 提供可选工具列表，向 Web 和前端暴露；
-- 冻结后的每个 `ToolContribution` 均携带所属 Contributor provenance（`ContributionId`）、优先级以及 `AgentToolDefinition`；
-- 静态目录在 `HarnessCatalog` 冻结时校验唯一性；复合目录再次校验静态与动态工具之间的 `AgentToolId` 和模型可见名称冲突；
-- `DatabaseTurnResolver` 与 `ToolExecutionGateway` 统一通过 `RuntimeToolCatalog` 按稳定 `AgentToolId` 查找工具。
+[DatabaseTurnResolver](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java)
+只以 candidate `EntryPath` 的最新 `BranchSettings` 为输入，在每个 live turn 解析：
 
-`ToolExecutionGateway` 的 `preflight` 先用 frozen `AgentToolDefinition.id` 从
-`RuntimeToolCatalog` 恢复 ToolContribution，再要求目录中的完整 definition、
-contributor provenance 与 requirements 相等；贡献缺失或
-definition/requirements 漂移直接生成确定性的 `TOOL_NOT_FOUND` /
-`TOOL_DEFINITION_MISMATCH` Deny，不进入 permission evaluator。正常路径按
-AgentToolId、arguments 与单次调用 `arguments.workdir` 生成
-`ALLOW`、`ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start`
-先获取 tool admission（默认 `kk-studio.harness.execution-admission.tool=64`），
-再通过单一执行路径执行：
-
-1. 完整校验冻结定义、Contributor 溯源与执行要求；
-2. 构建隔离所属 Contributor 的只读 `BranchView` 与可选 `BoundEnvironment` 适配器；
-3. 构造 `ToolExecutionContext` 与 `ToolExecutionRequest`，向底层 `Tool.execute` 提交异步执行并返回两阶段门控 Handle；
-4. 门控桥处理完成回调，校验 effects 归属、注册与 WRITE 声明，完成 managed Resource 外部化并一次性投递。
-
-Tool admission 无 permit 或 executor 明确拒绝时返回 `RetryLater`；其它无法证明是否提交的异常返回
-`Indeterminate(EXECUTION_FAILED)`。`Started` 后所有 Tool 都走同一个 listener bridge：Environment 发送前
-unavailable/busy 变为 retryable failed terminal，远端 FAILED 为普通 failed terminal，发送不确定变为
-`UNKNOWN(REMOTE_UNCERTAIN)`。统一 Tool SPI 不再按 backend 选择不同 admission 结果。
-
-`GatedToolExecutionListener` 与 Model gateway 同样是两阶段 activation、FIFO single drainer、256 signal bounded buffer 和 terminal-once。partial 必须非空、toolCallId 精确匹配、不能携带 Binary/Resource，且 canonical JSON 不得超过 256 KiB；terminal result 在 externalize 前校验，成功结果采用 all-or-nothing Resource externalization。第一个 terminal 后任何迟到信号、其余 Resource 写入和第二个 terminal 都被禁止。
-已带 canonical `blob-upload:` 的 Daemon Resource 在 `ToolResultFinalizer` 只做形状/预算校验并透传，不经宿主
-`ResourceStore` 二次复制，且禁止携带文本工件元数据。
-
-Tool 的 `AppendCustomEntry` intent 必须属于自身 Contributor、命中已注册 custom type 且存在声明的 WRITE access；否则判定为 contract violation 拒绝。冻结 binding 的完整 definition、provenance 或 state access 与当前 contribution 不同则 `TOOL_DEFINITION_MISMATCH`。
-
-### DatabaseTurnResolver、skill 与 task materialization
-
-`DatabaseTurnResolver` 只以 candidate `EntryPath` 的最新 `BranchSettings` 为输入，并在每个 live turn 解析：
-
-1. 当前 Agent、Model、Provider、Variant 和 ProviderFactory，并把 Variant 未显式声明的输出上限补齐为 Model 全局 `limit.output`（冻结的 `ModelRequestSpec` 中不再保留 null 上限）；
+1. 当前 Agent、Model、Provider、Variant 与 ProviderFactory，并把 Variant 未显式声明的
+   输出上限补齐为 Model 全局 `limit.output`；
 2. 当前 Environment context；
-3. Agent config 中的每个工具 ID 均通过 `RuntimeToolCatalog.findTool(id)` 查找并校验 `tool.definition().visibility() == ToolVisibility.SELECTABLE`；若 `tool.requirements().environmentRequired()` 为 true 但当前 Agent definition 无可用 Environment，则在 planning 阶段被确定性拒绝并返回 `AssistantError.code=PLANNING_FAILED`；
+3. Agent config 中的每个工具 ID 都通过 `RuntimeToolCatalog.findTool(id)` 查找并校验
+   `visibility() == ToolVisibility.SELECTABLE`；`environmentRequired()` 为 true 但当前
+   Agent 无可用 Environment 时在 planning 阶段确定性返回
+   `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
-5. Contributor context projector、system prompt、cache control、context window 和 output budget。
+5. Contributor context projector、system prompt、cache control、context window 与
+   output budget。
 
-Agent 配置有 skills 时按稳定 ID 追加 `LoadSkillTool`；subagents 非空且 Session depth 小于 `SubagentConfig.maxDepth` 时按稳定 ID 追加 `TaskTool`；随后按 Thread owner 追加精确的 Project 角色工具。每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Environment tool 使用当前 Agent definition 选定的 Environment。Skill 严格按 `(sourceId, name)` 从该 Environment 的持久可用 inventory 解析并冻结来源、描述、基目录与内容 revision；Daemon 离线不阻止规划，缺失或陈旧引用返回 `AssistantError.code=PLANNING_FAILED`。当前 Environment 的系统与时区信息优先使用 live READY，离线时回退到持久 inventory。Repository/catalog 基础设施异常向上抛出，由 ThreadProcessor 按 runtime policy reschedule。
+每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Skill 严格按
+`(sourceId, name)` 从绑定 Environment 的持久可用 inventory 解析并冻结来源、描述、
+基目录与内容 revision，Daemon 离线不阻止规划，缺失或陈旧引用返回 `PLANNING_FAILED`。
+[AgentPromptComposer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposer.java)
+拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}`
+placeholder，其余 `${...}` 与未闭合形式保持原文。
+[DatabaseThreadSelectedSkillLookup](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/skill/DatabaseThreadSelectedSkillLookup.java)
+从冻结的 ModelRequestSpec 读取 skill binding，正文由 `load_skill` 经 `BoundEnvironment`
+调用 `skill.load` 读取，不会用当前 Agent 配置扩张已冻结调用。
 
-system prompt 由 `AgentPromptComposer` 拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}` placeholder；其余 `${...}` 占位符与未闭合形式的原文保持不变。Contributor context projector 以 `BranchView` 追加 preamble。`DatabaseThreadSelectedSkillLookup` 从冻结 ModelRequestSpec 读取 skill binding，正文由内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力读取；不会用当前 Agent 配置扩张已冻结调用。
+[AgentBranchSettingsMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentBranchSettingsMaterializer.java)
+为新建/恢复的 subagent 按最新 Agent/Model catalog 物化只含 `agentName` 与 model 的
+`BranchSettings`；环境由 Agent definition 决定，工具、skill 和 subagent binding 在每个
+live turn 重新解析。Task 的 agent name、description、parent/root/depth 和 invocation
+归属在 durable binding 中冻结，执行期间不因 Catalog 变更扩权。Compaction resolver 是
+窄路径：只解析 `CompactionPreparation.executionModel`，返回零 tools/skills/subagents 的
+ModelRequestSpec。
 
-Compaction resolver 是窄路径：只解析 `CompactionPreparation.executionModel`，不查 Agent prompt、contributor、skill、Environment availability 或 prompt cache，只返回零 tools/skills/subagents 的 ModelRequestSpec。
+## Canvas 与 ComfyUI 适配
 
-`AgentBranchSettingsMaterializer`为新建/恢复的 subagent 按最新 Agent/Model catalog 物化只包含
-`agentName` 和 model 的 `BranchSettings`；环境由 Agent definition 决定，工具、skill 和 subagent binding 在每个 live turn 的
-`DatabaseTurnResolver` 中按最新 Agent definition 解析。Task 的 agent name、description、parent/root/depth 和
-task invocation 归属在 durable binding 中冻结，执行期间不依据运行时 Catalog 变更扩权。
+[PlatformCanvasCommandService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration/PlatformCanvasCommandService.java)
+实现 Canvas application command：`createCanvas/applyCommands/deleteCanvas` 都在事务内；
+`applyCommands` 先锁 `canvas_document` 行，再以 `(canvasId, idempotencyKey, requestHash)`
+做精确 replay/conflict 并以 `expectedVersion` 推进 graph version；
+`CREATE_RESOURCE_NODE` 在同一事务锁定 READY upload、retain Canvas Blob 引用、标记 upload
+cleanup 并创建 `canvas_resource`，上传对象由提交后的 Storage Maintenance 清理；Function
+run、node、group、link、resource 的状态变化通过 Canvas core port 写入并以 patch 返回。
 
-### Canvas adapters 与 Resource lifecycle
+[PlatformCanvasResourceLifecycle](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycle.java)
+的核心不变量是：Resource row 对其 Blob 贡献一个引用，Function pin 只保护无 owner
+Resource 而不增加 `ref_count`；run/node/canvas pin 释放后只回收不再被 pin 且无 owner 的
+Resource，Function success 用 target 替换 owner resource，失败/cancel/迟到结果只丢弃
+unowned target。这使 Resource row、Session ref 和 upload owner 各自只维护一条明确引用
+边，任何 owner 删除都必须经过对应 manager。
 
-`PlatformCanvasCommandService`实现 Canvas application command：
-
-- `createCanvas/applyCommands/deleteCanvas`均在事务内；
-- `applyCommands`先锁 `canvas_document`行，再以 `(canvasId, idempotencyKey, requestHash)`做精确 replay/conflict，
-  以 `expectedVersion`推进 graph version；
-- `CREATE_RESOURCE_NODE`在同一事务锁定 READY upload、retain Canvas Blob 引用、标记 upload cleanup 并创建
-  `canvas_resource`；上传对象由提交后的 Storage Maintenance 清理；
-- Function run、node、group、link、resource 的状态变化通过 Canvas core port 写入，并以 patch 返回；
-- 删除节点或 Canvas 时由 `PlatformCanvasResourceLifecycle`同步处理 pins、owned resource 和 Blob ref。
-
-`PlatformCanvasResourceLifecycle`的核心不变量是：Resource row 对其 Blob 贡献一个引用，Function pin 只保护无 owner
-Resource，不增加 `ref_count`。run/node/canvas pin 释放后，只回收不再被 pin 且无 owner 的 Resource；Function success 用
-target 替换 owner resource，失败/cancel/迟到结果只丢弃 unowned target。
-
-`CanvasBlobResourceMaterializer`把 Function 输出 spool 到临时目录（上限 512 MiB），在事务外写
-`blobs/{blobId}/original`并 probe 媒体事实，然后在事务内锁 Canvas、确认恰好一个 RUNNING output pin、做 Blob dedup 和
-`resourceId`幂等 insert。并发落败方释放自身刚创建的 Blob 引用；预览生成在提交后 best-effort 执行。
-`CanvasBlobPreviewService`通过不经 shell 的 `MediaProcessRunner`调用 ffmpeg 生成 webp，输入上限 512 MiB，超时和
+[CanvasBlobResourceMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobResourceMaterializer.java)
+把 Function 输出 spool 到临时目录（上限 512 MiB），在事务外写 `blobs/{blobId}/original`
+并 probe 媒体事实，然后在事务内锁 Canvas、确认恰好一个 RUNNING output pin、做 Blob
+dedup 和 `resourceId` 幂等 insert；并发落败方释放自身刚创建的 Blob 引用，预览生成在
+提交后 best-effort 执行。
+[CanvasBlobPreviewService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobPreviewService.java)
+通过不经 shell 的 `MediaProcessRunner` 调用 ffmpeg 生成 webp，输入上限 512 MiB，超时与
 缩略图参数来自 SystemSettings。
 
 Function adapter 只实现 `CanvasFunctionAdapter`：
 
 | adapter | 运行边界 |
 | --- | --- |
-| `FakeCanvasFunctionAdapter` | 读取 classpath 的 tiny image/video fixture，仍通过真实 materializer，受 `fake-enabled` property 控制 |
-| `GptImage2CanvasFunctionAdapter` | OpenCLI Hub + `chatgpt-agent`，image reference 每项最多 20 MiB，checkpoint 覆盖 upload/submit/poll/materialize |
-| `SeedanceCanvasFunctionAdapter` | OpenCLI Hub，冻结 reference policy、上传和有界 polling，checkpoint 恢复同一 execution |
-| `MiniMaxH3CanvasFunctionAdapter` | Platform one-shot Harness prompt + Environment + ComfyUI，状态阶段覆盖 prompt、Comfy upload/submit/poll 和 Blob ingest |
+| [FakeCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/fake/FakeCanvasFunctionAdapter.java) | 读取 classpath 的 tiny image/video fixture，仍通过真实 materializer，受 `fake-enabled` property 控制 |
+| [GptImage2CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/GptImage2CanvasFunctionAdapter.java) | OpenCLI Hub + `chatgpt-agent`，image reference 每项最多 20 MiB，checkpoint 覆盖 upload/submit/poll/materialize |
+| [SeedanceCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/SeedanceCanvasFunctionAdapter.java) | OpenCLI Hub，冻结 reference policy、上传和有界 polling，checkpoint 恢复同一 execution |
+| [MiniMaxH3CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/h3/MiniMaxH3CanvasFunctionAdapter.java) | Platform one-shot Harness prompt + Environment + ComfyUI，状态阶段覆盖 prompt、Comfy upload/submit/poll 和 Blob ingest |
 
-`PlatformCanvasFunctionBlobAccess`是 Function runtime 读取 Blob facts、打开 original stream 和获取 presign 的唯一
-Platform storage adapter。Canvas adapter 不直接拼 S3 key，也不直接管理 Canvas 引用计数。
+[PlatformCanvasFunctionBlobAccess](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/PlatformCanvasFunctionBlobAccess.java)
+是 Function runtime 读取 Blob facts、打开 original stream 和获取 presign 的唯一 Platform
+storage adapter；Canvas adapter 不直接拼 S3 key，也不直接管理 Canvas 引用计数。当前
+Function 扩展点是 `CanvasFunctionAdapter` + `CanvasFunctionCatalog`，Catalog 在启动装配
+时冻结能力快照。
 
-### ComfyUI
+[ComfyuiWorkflowApiServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/service/impl/ComfyuiWorkflowApiServiceImpl.java)
+管理 `comfyui_workflow_api` 卡片；bindings parser 严格验证 workflow JSON、
+parameter/file binding、node/input 存在性、value type 和 blobId，只有 enabled workflow
+才能进入运行服务。[ComfyuiRuntimeService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/ComfyuiRuntimeService.java)
+是无状态 runtime：读取 enabled binding 并复制 Workflow、校验并按 JsonPath selector 写入
+参数、对 file binding 从全局 Storage 按 blobId 受
+`integrations.comfyui.maxInputFileBytes` 限制地读取后上传 ComfyUI、submit 后以 202 返回
+`runId == prompt/job id`、get/cancel/download 直接查询 ComfyUI job 且运行状态不落本地表。
+ComfyUI client 是否装配由启动时的 `SystemSettings.integrations.comfyui.enabled` 决定。
 
-`ComfyuiWorkflowApiService`管理 `comfyui_workflow_api`卡片；`ComfyuiWorkflowApiBindingsParser`严格验证 workflow JSON、
-parameter/file binding、node/input 存在性、value type 和 blobId。只有 enabled workflow 才能进入运行服务。
-
-`ComfyuiRuntimeService`是无状态 runtime：
-
-1. 按 `workflowId`读取 enabled binding 并复制 Workflow；
-2. 校验 parameters/files，按 JsonPath selector 和 value type 写入参数；
-3. 对 file binding 从全局 Storage 按 blobId 受 `integrations.comfyui.maxInputFileBytes`限制地读取，再上传到 ComfyUI；
-4. submit 后以 202 返回 `runId == prompt/job id`；
-5. get/cancel/download 直接查询 ComfyUI job；输出文件按 node/media/index 精确解析，运行状态不落本地表。
-
-ComfyUI client 是否装配由启动时的 `SystemSettings.integrations.comfyui.enabled`决定。base URL、timeout、
-max input 等非敏感参数来自 SystemSettings；`kk-studio.comfyui.api-key`只在 deployment property 中，不能进入
-SystemSettings 或 HTTP DTO。
-
-## 关键流程 / 时序
+## 关键流程
 
 ### Model attempt
 
 ```text
 ThreadProcessor
-  -> DatabaseTurnResolver
-       -> frozen ModelRequestSpec
+  -> DatabaseTurnResolver -> frozen ModelRequestSpec
   -> DatabaseProviderResolutionService
        -> current agent_provider row + ProviderType adapter
        -> attempt-local Resource materialization
-  -> PlatformModelGateway.start
-       -> admission lease
-       -> Started(handle), gate closed
+  -> PlatformModelGateway.start -> admission lease -> Started(handle), gate closed
   -> Runtime markRunning + handle.activate
   -> virtual-thread Provider stream
   -> FIFO bridge: delta / thinking / tool call / terminal
@@ -489,8 +462,7 @@ ThreadProcessor
 
 ```text
 ToolProcessor
-  -> ToolExecutionGateway.preflight
-       -> PermissionEvaluator + arguments.workdir
+  -> ToolExecutionGateway.preflight -> PermissionEvaluator + arguments.workdir
   -> admission + exact catalog/binding route
   -> Started(handle), gate closed
   -> Runtime markRunning + handle.activate
@@ -500,20 +472,23 @@ ToolProcessor
   -> Runtime terminal CAS + owning Thread Work
 ```
 
-### Chat/Canvas first message with attachment
+### Chat/Canvas 首条带附件消息
 
 ```text
 HTTP command-batch
-  -> HarnessCommandAcceptanceOrchestrator
+  -> HarnessCommandAcceptanceOrchestrator.accept (single physical transaction)
        -> owner KEY SHARE authorization
        -> NEW_SESSION owner relation atomic insert
-       -> lock READY upload
-       -> retain SessionBlobRef
-       -> mark upload cleanup / release upload owner
+       -> lock READY upload + retain SessionBlobRef + mark upload cleanup
        -> HarnessRuntime.acceptCommands
-  -> 202 durable acceptance
-  -> Work dispatcher / ThreadProcessor
+  -> 202 durable acceptance -> Work dispatcher / ThreadProcessor
 ```
+
+owner authorization、Session relation、attachment materialization、Session blob ref 和
+Runtime command acceptance 属于同一物理事务，任一失败整体回滚；Runtime replay 不重复
+消费 upload，但仍执行 owner authorization。正常接受使用 owner `KEY SHARE`，删除使用
+owner 排他锁，深删除统一按 `Owner -> Session -> Thread` 锁序并对跨 Session 的 Thread
+按 UUID 排序，避免锁序回退。
 
 ### Project Issue 调谐
 
@@ -529,7 +504,7 @@ Project/Issue mutation or controller poll
        -> complete/reschedule work
 ```
 
-### Canvas Function output
+### Canvas Function 输出
 
 ```text
 Function dispatcher claim + RUNNING lease
@@ -537,155 +512,91 @@ Function dispatcher claim + RUNNING lease
   -> CanvasBlobResourceMaterializer
        -> spool + S3 put + media probe outside DB transaction
        -> Canvas row lock + Blob dedup + resource insert in transaction
-       -> commit
-  -> preview generation best-effort
-  -> Canvas version/patch notification
+  -> commit -> preview generation best-effort -> Canvas version/patch notification
 ```
-
-## 事务、并发、失败恢复不变量
-
-1. PostgreSQL 是 Catalog、Chat、SystemSettings、Canvas graph、Harness durable facts、Blob owner edge 和 cleanup
-   claim 的唯一事实源；NOTIFY、内存 registry、gateway handle 和 executor task 都是可重建的 transport state。
-2. Chat、Canvas、Project、IssueRun owner 对 Session 全局互斥。正常 acceptance 使用 owner `KEY SHARE`，删除使用 owner 排他锁；深删除统一按
-   `Owner -> Session -> Thread`锁序，并对跨 Session 的 Thread 按 UUID 排序，避免锁序回退。
-3. `HarnessCommandAcceptanceOrchestrator.accept`把 owner authorization、Session relation、attachment materialization、
-   Session blob ref 和 Runtime command acceptance 放在同一物理事务；任一失败整体回滚。Runtime replay 不重复消费 upload，
-   但仍执行 owner authorization。
-4. `PlatformCanvasCommandService.applyCommands`的 command dedup、document version、graph mutation 和 Blob ref 转移同一事务
-   成功或失败；相同 hash 精确 replay，不同 hash 是 idempotency conflict。
-5. `ChatServiceImpl.deleteChat`和 `PlatformCanvasCommandService.deleteCanvas`先深删除 relation、Entry、Thread、Invocation、
-   Work 和 Session Blob refs，再删 owner 行；不依赖数据库 cascade 绕过 Blob 引用计数。
-6. `StorageBlobManager.release`在引用归零时只写 `DELETING`事实；S3 删除和 Blob row 删除由 maintenance 在事务外按
-   preview → original → row 顺序执行，失败由下一次 wake/poll 恢复。
-7. `StorageUploadServiceImpl`保证数据库不先引用缺失的 final object：complete 先在事务外复制 candidate，再在短事务绑定；
-   expire 使用 cleanup token fencing，重复 complete/delete/cleanup 不重复 retain/release。
-8. Provider/Tool gateway 的 admission lease 覆盖从 `start` 到 terminal/cancel/ambiguous submission，lease close 幂等；
-   callback bridge 的第一个 terminal 胜出，overflow、迟到回调和 listener terminal exception 都不能产生第二个 terminal。
-9. Model/Tool 两阶段 activation 防止 `start()`返回后在 durable `RUNNING`标记前触碰第三方；cancel-before-activate 不启动
-   Provider/Tool，等待线程可被唤醒且不泄漏。
-10. Tool terminal 成功先完成 descriptor、toolCallId、canonical size 和 externalization plan 校验，再写 ResourceStore；
-    partial 不允许 Binary/Resource；Daemon upload 引用只在会话核心证明本调用已 READY 后透传，并在 history
-    事务内原子转移 upload owner，外部化失败不会伪造 durable success。
-11. Environment capability invocation 只按 `invocationId` 关联，同一 Environment 允许并发在途；发送 outcome 不确定时保守收敛
-    `UNKNOWN`，不自动重发非幂等副作用。
-12. Daemon Binary 只经预签名 PUT 进入对象存储；WebSocket 不承载字节。每个 transfer 绑定 invocation 与上传行，
-    COMPLETED 只保留实际引用的 READY 上传，其余上传幂等请求清理。
-13. Canvas pin 不增加 Blob ref_count；Resource row、Session ref、upload owner 各自只维护一条明确引用边，任何 owner 删除
-    都必须经过对应 manager。
-14. Project、Issue、Run、依赖、输入与 Controller work 都以 PostgreSQL 为事实源；
-    `issue_controller_work_due` 和 Project 浏览器 invalidation 只负责唤醒/回读。Project
-    与 IssueRun Session 继续服从 `session_owner` 全局单 owner 约束和统一深删除编排。
-15. Issue Controller claim/reconcile 由 lease token 与 claimed wake version 双重围栏；
-    每次 reconcile 只执行一个有界动作，worker 拒绝、处理失败、节点退出或通知丢失都由
-    归还、延迟重试、lease 过期和 periodic poll 收敛。
 
 ## 配置
 
-### SystemSettings（数据库单行，非敏感）
+配置分三层，边界不可混用：**SystemSettings（数据库单行，可在线修改）**、**部署级
+`@ConfigurationProperties`（进程启动边界，不进数据库/DTO/前端）**、**部署 secret
+（只在 deployment property）**。
 
-| section | 主要字段 / 默认值 | 应用时点 |
+### SystemSettings section
+
+| section | 主要字段与默认值 | 应用时点 |
 | --- | --- | --- |
-| `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`*` 为全局 wildcard，`defaultYolo=false`，Model Busy retry 5s、Tool RetryLater 5s、skill load 30s | admission/permission 读取点 live |
-| `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s；compaction keep 20000；subagent depth 2、per-parent concurrency 10、maxTurns 50 | retry、resolver、subagent 配置读取点 |
-| `environment` | resource 16 MiB、heartbeat 60s | Environment gateway 单项/聚合上传资源上限与心跳超时读取点 |
+| `tool` | permission 默认 `base.write`/`base.edit`/`base.bash` 各 `* -> ask`，`defaultYolo=false`，Model Busy retry 5s、Tool Busy retry 1s、Tool overload retry 5s、skill load 30s | admission/permission 读取点 live |
+| `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s、compaction keep 20000 tokens、subagent depth 2 / per-parent concurrency 10 / maxTurns 50 | retry、resolver、subagent 配置读取点 |
+| `environment` | resource 16 MiB、heartbeat 60s | Environment 单项/聚合上传资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
-| `integrations.openCliHub` | disabled、base URL 未配置；request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
-| `integrations.seedance/gptImage2/minimaxH3` | 各自 enabled/paid 开关、workspace、prompt/ComfyUI timeout 和 polling 约束 | adapter 的启动快照与执行读取点 |
-| `storageMedia` | upload 3600s；presign 600s/3600s；media process 30s；thumbnail 512/quality 80 | 上传与预签名生命周期、媒体处理预算 |
-| `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s、失败/回退 1s；event queue 512、2 MiB、10s、heartbeat 20s；notification poll/reconnect 5s/1s | 组合根装配的 restart-required 软策略 |
+| `integrations.openCliHub` | disabled、base URL 未配置；connect 5s、request 120s、long poll 130s、JSON 512 KiB、error 4 KiB | adapter 创建与执行参数 |
+| `integrations.seedance` / `gptImage2` / `minimaxH3` | 各自 enabled/paid 开关、workspace、prompt 与 ComfyUI timeout、polling 约束 | adapter 的启动快照与执行读取点 |
+| `storageMedia` | upload 3600s、presign 默认 600s / 上限 3600s、media process 30s、thumbnail 512 / quality 80 | 上传与预签名生命周期、媒体处理预算 |
+| `advanced` | resource 16 MiB；processor lease/heartbeat 30s/10s、失败与回退各 1s；event queue 512 / 2 MiB / 10s、heartbeat 20s；notification poll 5s、reconnect 1s | 组合根装配的 restart-required 软策略 |
 
-SystemSettings 永不承载 Dispatcher 容量与调度节奏、数据库连接、filesystem
-root/workdir/temp、ffmpeg binary、Daemon token/identity、Provider credential、ComfyUI API
-key、H3 bearer token 或 OpenCLI instance identity。S3 作为应用必配基础设施，启动时严格验证 properties
-与 bucket 可访问性；启用 ComfyUI 时，启动快照要求对应 endpoint 等 bootstrap property 完整，
-否则明确启动失败；禁用时对应 ComfyUI bean 不装配。
+SystemSettings 永不承载 Dispatcher 容量与调度节奏、数据库连接、filesystem root、
+ffmpeg binary、Daemon token/identity、Provider credential、ComfyUI API key、H3 bearer
+token 或 OpenCLI instance identity。
 
 ### 部署级 `@ConfigurationProperties`
 
-| key | 边界 |
-| --- | --- |
-| `kk-studio.harness.dispatcher.*` | Work claim/handoff 租约、轮询、拒绝退避和 bounded worker 容量；默认 `64/30s/1s/1s/16/64`；不进数据库、DTO 或 frontend |
-| `kk-studio.harness.execution-admission.{model,tool,subagent}` | 进程级容量，默认 `16/64/10`；不进数据库、DTO 或 frontend |
-| `kk-studio.harness.runtime.{workers-enabled,environment-root,workdir}` | worker 开关与本地工作目录；`workdir`必须位于 root 内 |
-| `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | WebSocket 安全边界；默认 `16MiB/256/16MiB/10s` |
-| `kk-studio.project.controller.*` | Issue Controller lease/poll/retry/blocked/run timeout、continuation 上限与 bounded worker；默认 lease 30s、poll 1s、run 30m、worker `8 + queue 64` |
-| `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | S3/MinIO 服务端和 presign endpoint；bucket 只能由服务端配置 |
-| `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | maintenance 唤醒轮询与 cleanup lease，默认 `30s/5m` |
-| `kk-studio.comfyui.api-key` | ComfyUI secret；非 SystemSettings |
-| `kk-studio.opencli-hub.instance-id` | OpenCLI Hub 部署身份 |
-| `kk-studio.canvas.resource.{ffprobe-binary,ffmpeg-binary,temp-dir}` | 媒体处理本地路径 |
-| `kk-studio.canvas.function.minimax-h3.comfy-bearer-token` | H3 ComfyUI bearer secret；启用/路由/timeout 仍由 SystemSettings |
+| key | owner | 边界 |
+| --- | --- | --- |
+| `kk-studio.harness.dispatcher.*` | platform | Work claim/handoff 租约、轮询、拒绝退避与 bounded worker 容量；默认 `64/30s/1s/1s/16/64`（maxDispatchTasks/lease/poll/rejection/worker/queue） |
+| `kk-studio.harness.execution-admission.{model,tool,subagent}` | platform | 进程级容量，默认 `16/64/10` |
+| `kk-studio.harness.runtime.{workers-enabled,resource-root}` | platform | worker 开关与内容寻址 Resource 存储根（默认 `<cwd>/.kkstudio/resources`） |
+| `kk-studio.project.controller.*` | platform | Issue Controller lease 30s、poll 1s、retry 5s、blocked 60s、run 30m、continuation 10、worker `8 + queue 64` |
+| `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | platform | S3/MinIO 服务端与 presign endpoint；bucket 只能由服务端配置 |
+| `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | platform | maintenance 轮询与 cleanup lease，默认 `30s/5m` |
+| `kk-studio.canvas.resource.{ffprobe-binary,ffmpeg-binary,temp-dir}` | platform | 媒体处理本地路径 |
+| `kk-studio.comfyui.api-key` | platform | ComfyUI secret，非 SystemSettings |
+| `kk-studio.opencli-hub.instance-id` | platform | OpenCLI Hub 部署身份 |
+| `kk-studio.canvas.function.minimax-h3.comfy-bearer-token` | platform | H3 ComfyUI bearer secret；启用/路由/timeout 仍由 SystemSettings |
+| `kk-studio.canvas.function.runtime.*` | canvas-infra | Canvas Function 调度容量、lease、heartbeat 与 poll |
+| `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | web | Daemon WebSocket 传输安全边界，默认 `16MiB/256/16MiB/10s`；不是 Environment 并发配额 |
 
-S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的 third-party/deployment boundary。Platform 对外只
-传 domain DTO、稳定错误 kind、signed URL 和 frozen binding；不会把 bucket、对象 key、credential 或完整上游异常作为
-产品协议的一部分。
+S3、Provider、ComfyUI、OpenCLI Hub 和 Environment Daemon 都是明确的
+third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错误 kind、签名 URL
+和 frozen binding，不会把 bucket、对象 key、credential 或完整上游异常作为产品协议的
+一部分。
 
 ## 测试与源码入口
 
-### 组合与 schema
+先看架构守卫，再按子域定位 integration test：
 
-- `platform/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java`
-- `platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/ToolCatalogQueryService.java`
-- `platform/pom.xml`
-- `schema/pom.xml`
-- `schema/src/main/resources/db/migration/V1__schema.sql`
-- `schema/src/main/resources/db/seed/dev/R__dev_seed.sql`
-- `schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql`
-- `schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql`
-- Schema 重点表：`agent_provider`、`agent_model`、`agent_definition`、
-  `comfyui_workflow_api`、`chat`、`system_setting`、Canvas graph/function/resource
-  相关表、Harness 执行表、`session_owner`、Storage 表，以及 Project/Issue
-  业务与调度表。
+- [`PlatformPackageArchitectureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformPackageArchitectureTest.java)、
+  [`PlatformArchitectureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java)：
+  包依赖方向，Platform 不得引用 `canvas-infra`、`harness-infra`、`web`、`harness-daemon`
+  的生产实现。
+- [`ProviderTypeArchitectureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/ProviderTypeArchitectureTest.java)、
+  [`HarnessExecutionAdmissionArchitectureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/HarnessExecutionAdmissionArchitectureTest.java)：
+  ProviderType 唯一来源与 admission 构造约束。
+- 测试基座：[`PlatformTestApplication.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformTestApplication.java)、
+  [`PostgresSpringTestSupport.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/persistence/test/PostgresSpringTestSupport.java)、
+  [`PostgresSchemaSupport.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresSchemaSupport.java)、
+  [`StorageS3TestConfiguration.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageS3TestConfiguration.java)。
 
-### Architecture tests 与测试基座
+按子域的主要 integration test：
 
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformPackageArchitectureTest.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/ProviderTypeArchitectureTest.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/HarnessExecutionAdmissionArchitectureTest.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/PlatformTestApplication.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/persistence/test/PostgresSpringTestSupport.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresSchemaSupport.java`
-- `platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageS3TestConfiguration.java`
-
-### 领域与 integration tests
-
-- Catalog：`CatalogParentLockIntegrationTest`及 definition/model/provider codec、mutation、service tests。
-- Chat/事务：`ChatServiceIntegrationTest`、`HarnessCommandAcceptanceOrchestratorTest`、
-  `SessionDeletionOrchestratorTest`、`ChatSessionRepositoryIntegrationTest`、`CanvasSessionRepositoryIntegrationTest`。
-- Project/Issue：`ProjectServiceIntegrationTest`、`IssueServiceIntegrationTest`、
-  `IssueRunServiceIntegrationTest`、`ProjectHarnessSessionBootstrapServiceTest`、
-  `IssueReconcilerTest`、`IssueControllerDispatcherTest`、Project role tool tests 与
-  `ProjectChangeNotificationIntegrationTest`。
-- Model/Provider：`GatewayExecutorSafetyTest`、`PlatformModelGatewayTest`、`DatabaseProviderResolutionServiceIntegrationTest`、
-  `ProviderAdapterContractTest`、Provider error/stop-reason/terminal normalization tests。
-- Tool/gateway：`ToolExecutionGatewayAdmissionTest`、`ToolExecutionGatewayCallbackTest`、
-  `ToolExecutionGatewayConstructionTest`、`ToolExecutionGatewayEffectsTest`、`ToolExecutionGatewayPreflightTest`、
-  `ToolExecutionGatewayStartTest`、`CompositeRuntimeToolCatalogTest`、
-  `RuntimeToolCatalogConfigurationTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
-- Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、
-  `AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`LoadSkillToolTest`。
-- Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、
-  `PlatformCanvasFunctionBlobAccessTest`、`OpenCliCanvasFunctionAdaptersTest`、
-  `MiniMaxH3CanvasFunctionAdapterTest`、`ComfyuiRuntimeServiceTest`、`ComfyuiWorkflowApiBindingsParserTest`。
-- MCP：`McpServerServiceTest`、`McpServerMutationValidatorTest`、
-  `McpToolCatalogTest`、`McpExecutableToolTest`、
-  `DefaultMcpDiscoveryResultPublisherTest` 与 `McpSchemaBusinessTest`。
-- Environment：`EnvironmentRegistryTest`、`PostgresEnvironmentRoutingIntegrationTest`、
-  `EnvironmentServiceImplTest`、`StorageDaemonResourceTicketServiceTest`。
-- Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、
-  `StorageUploadServiceIntegrationTest`、`StorageUploadCleanupLeaseIntegrationTest`、
-  `PostgresqlStorageBlobManagerTest`、`StorageMaintenanceTest`、S3 service/presign tests。
-- Schema：`PostgresqlSchemaStructureTest`、`PostgresqlBusinessSchemaTest`、
-  `PostgresqlSchemaSeedTest`、`PostgresqlStorageSchemaTest`、
-  `ProjectSchemaPostgresTest`。
+- Catalog：`CatalogParentLockIntegrationTest`、`AgentDefinitionConfigCodecTest`、`AgentModelRuntimeConfigParserTest`、`AgentProviderConfigurationCodecTest` 与各 `*ServiceImplTest`。
+- MCP：[`McpServerServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerServiceTest.java)、`McpToolCatalogTest`、`McpExecutableToolTest`、`DefaultMcpDiscoveryResultPublisherTest`。
+- Chat/事务：[`ChatServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/ChatServiceIntegrationTest.java)、`HarnessCommandAcceptanceOrchestratorTest`、`SessionDeletionOrchestratorTest`、`ChatSessionRepositoryIntegrationTest`、`CanvasSessionRepositoryIntegrationTest`。
+- Project/Issue：`ProjectServiceIntegrationTest`、`IssueServiceIntegrationTest`、`IssueRunServiceIntegrationTest`、`ProjectHarnessSessionBootstrapServiceTest`、`IssueReconcilerTest`、`IssueControllerDispatcherTest`、`IssueControllerConcurrencyIntegrationTest`、Project 角色工具与 `ProjectChangeNotificationIntegrationTest`。
+- Model：[`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、`GatewayExecutorSafetyTest`、`DatabaseProviderResolutionServiceIntegrationTest`、`ProviderInlineBlobReaderTest`、`ProviderResourceMaterializerTest`。
+- Tool：[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java)、`ToolExecutionGatewayAdmissionTest`、`ToolExecutionGatewayCallbackTest`、`ToolExecutionGatewayEffectsTest`、`ToolExecutionGatewayStartTest`、`CompositeRuntimeToolCatalogTest`、`ToolResultFinalizerTest`、`GlobalStorageToolResultHistoryMaterializerTest`。
+- Resolver/materialization：`DatabaseTurnResolverTest`、`AgentBranchSettingsMaterializerTest`、`AgentPromptComposerTest`、`DatabaseThreadSelectedSkillLookupTest`、`HarnessOneShotServiceTest`。
+- Canvas/ComfyUI：`PlatformCanvasCommandServiceTest`、`PlatformCanvasResourceLifecycleTest`、`PlatformCanvasFunctionBlobAccessTest`、`OpenCliCanvasFunctionAdaptersTest`、`MiniMaxH3CanvasFunctionAdapterTest`、`ComfyuiRuntimeServiceTest`、`ComfyuiWorkflowApiBindingsParserTest`。
+- Environment：[`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、`PostgresEnvironmentRoutingIntegrationTest`、`EnvironmentServiceImplTest`、`StorageDaemonResourceTicketServiceTest`、`EnvironmentOperationResultPublisherIntegrationTest`、`SkillSourceCrudIntegrationTest`。
+- Storage：`StorageBlobIngestServiceIntegrationTest`、`SessionBlobRefManagerIntegrationTest`、`StorageUploadServiceIntegrationTest`、`StorageUploadCleanupLeaseIntegrationTest`、`StorageMaintenanceTest`、`PostgresqlStorageBlobManagerTest`。
+- Settings：[`SystemSettingsServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImplTest.java)、`SystemSettingsCodecTest`、`SystemSettingsSnapshotTest`、`SystemSettingsSchemaProviderTest`、`SystemSettingsServiceIntegrationTest`。
+- Schema：`PostgresqlSchemaStructureTest`、`PostgresqlBusinessSchemaTest`、`PostgresqlSchemaSeedTest`、`PostgresqlStorageSchemaTest`、`ProjectSchemaPostgresTest`。
 
 这些测试覆盖的是当前 application layer 的可观察 contract：CAS、owner lock order、
-Project/Issue 调谐、Blob ref 对账、S3 cleanup lease、
-Provider/Tool admission、terminal-once、Environment 路由冻结、Canvas resource pin、
-strict codec 与 schema 约束。
+Project/Issue 调谐、Blob ref 对账、S3 cleanup lease、Provider/Tool admission、
+terminal-once、Environment 路由冻结、Canvas resource pin 与 strict codec。
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Runtime](harness-runtime.md)、
-[Canvas Core](canvas-core.md)、[Share](share.md)、[Web](web.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、
+[Harness Runtime](harness-runtime.md)、[Canvas Core](canvas-core.md)、
+[Share](share.md)、[Web](web.md)。
