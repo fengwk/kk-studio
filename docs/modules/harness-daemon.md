@@ -19,22 +19,7 @@ CLI -> DaemonConfig
 
 单个 `--help`/`-h` 或 `--version` 是纯信息命令，在打开数据目录之前输出并直接返回；混用或多余参数一律交给配置解析并失败关闭。注册被拒时进程进入 FAILED，向 stderr 输出原因并以非零状态码退出。
 
-[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 的选项与默认值：
-
-| 选项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `--gateway-uri` | 必填 | 只接受 `ws`/`wss` |
-| `--registration-token-file` | 必填 | 绝对路径的 owner-only 普通文件，只能出现一次 |
-| `--heartbeat` | `PT15S` | 心跳间隔 |
-| `--reconnect-initial` | `PT1S` | 首次重连退避 |
-| `--reconnect-max` | `PT30S` | 重连退避上限 |
-| `--tool-timeout` | `PT5M` | 能力调用默认超时 |
-| `--note` | 按操作系统生成 | READY 中的可信备注，单行且不超过 512 字符，只能出现一次 |
-| `--environment-root` | 启动用户 HOME 的 canonical 路径 | 只作 READY 展示元数据，只能出现一次 |
-| `--data-dir` | `~/.kk-studio` | 本地数据目录，显式给出时必须绝对，只能出现一次 |
-| `--bash-executable` | `bash` | `process.exec` 使用的 shell |
-| `--lsp-bridge-command` | 缺省禁用 | 启用 LSP 桥接所需的本机命令 |
-| `--javap-executable` | `javap` | class 反编译回退程序 |
+[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 的完整选项、默认值与安装方式只在 [Environment Daemon 安装与运行](../operations/environment-daemon.md) 维护；进程侧只需要知道三条约束：`--gateway-uri` 与 `--registration-token-file` 必填，`--reconnect-initial` / `--reconnect-max` / `--heartbeat` / `--tool-timeout` 决定重连、心跳与能力调用预算，`--environment-root` 只作 READY 展示元数据。
 
 注册凭证只以 owner-only 普通文件存在：CLI 只接收路径，配置对象不保存凭证文本，因此 `equals`/`hashCode`/`toString` 与日志都不会扩散秘密，凭证在每次 HELLO 前按需读取。[`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 要求绝对路径、现存普通文件（拒绝符号链接与目录）与 owner-only 权限，并忽略两端空白。未知选项（包括历史遗留的 `--registration-token`、`--skill-dir`）一律启动失败，没有兼容回退。
 
@@ -161,7 +146,7 @@ Local MCP 以 stdio 子进程形式在绑定的目标 Environment Daemon 内执�
 
 ## 二进制结果直传
 
-Daemon 不把字节编码进 WebSocket。消息与预算的权威定义见 [Harness Environment 的载荷编解码器](harness-environment.md#载荷编解码器)；宿主侧的流程是：`DaemonCapabilityResultCodec` 在终态编码前对全部内容完成条目数、单资源与聚合资源预算预检，并确认最终 wire JSON 不超过 16 MiB，全部通过后才由 [`DaemonResourceTransferClient`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonResourceTransferClient.java) 直传对象存储：
+Daemon 不把字节编码进 WebSocket。消息与预算的权威定义见 [Harness Environment 的载荷编解码器](harness-environment.md#载荷编解码器)；宿主侧的流程是：[`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 在终态编码前对全部内容完成条目数、单资源与聚合资源预算预检，并确认最终 wire JSON 不超过 16 MiB，全部通过后才由 [`DaemonResourceTransferClient`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonResourceTransferClient.java) 直传对象存储：
 
 ```text
 Daemon -> Gateway: RESOURCE_UPLOAD_REQUEST
@@ -191,7 +176,10 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 
 ## 源码与测试
 
-主要源码入口：[`DaemonMain.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java)、[`DaemonConfig.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java)、[`DaemonDataDirectory.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectory.java)、[`DaemonRuntime.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java)、[`DaemonCapabilityRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java)、[`CodingCapabilities.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java)、[`EnvironmentPaths.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java)、[`DaemonSkillRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java)、[`DaemonLocalMcpManager.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpManager.java)、[`DaemonResourceTransferClient.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonResourceTransferClient.java)。
+源码入口按包分组（包职责见上表）：
+
+- 进程与运行时：[`daemon/DaemonMain.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java)、[`DaemonConfig.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java)、[`DaemonDataDirectory.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectory.java)、[`DaemonRuntime.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java)、[`DaemonCapabilityRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java)、[`DaemonResourceTransferClient.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonResourceTransferClient.java)。
+- 能力实现与本地状态：[`CodingCapabilities.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java)、[`EnvironmentPaths.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java)、[`DaemonSkillRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java)、[`DaemonLocalMcpManager.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpManager.java)。
 
 测试守卫：
 
