@@ -252,7 +252,7 @@ flowchart TD
   L --> M[ToolProcessor: permission + gateway]
   M --> N[Tool terminal]
   N --> I
-  I --> O[Tool batch append + TURN_END(continueModel)]
+  I --> O["Tool batch append + TURN_END(continueModel)"]
   O --> B
 ```
 

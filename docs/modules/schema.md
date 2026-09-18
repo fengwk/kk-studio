@@ -10,7 +10,7 @@ Spring bean 或运行时 repository；生产 Web 与各集成测试通过 Flyway
 flowchart LR
     Schema[schema resources]
     V1[V1__schema.sql]
-    Seeds[db/seed/{dev,e2e,canvas-test}]
+    Seeds["db/seed/{dev,e2e,canvas-test}"]
     Flyway[Flyway]
     PG[(PostgreSQL)]
     Web[web runtime]
