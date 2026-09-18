@@ -1,480 +1,271 @@
 # 系统设计
 
-`kk-studio` 是一个由一个或多个 Web 应用节点承载的工作台。系统有两个并列产品域：
-Harness / AI 负责可恢复的 Agent Thread 执行，Studio / Canvas 负责图形、Resource
-与 Function 运行。节点共享 PostgreSQL 与全局 Blob Storage；App 节点之间没有
-IP/DNS 依赖，调度、租约、路由、查询信箱与通知均经 PostgreSQL 协调。两个产品域
-共享应用事件 WebSocket 和浏览器入口，但不共享领域状态机。
+理解 `kk-studio` 的关键，是先把“实时输出”与“可恢复事实”分开：一次用户操作先在
+PostgreSQL 中形成可认领的事实，Worker 再执行外部 I/O，最后凭租约和 token 写回结果。
+WebSocket 与 `NOTIFY` 只缩短等待时间；进程退出、连接中断或通知丢失后，系统仍从数据库
+和 REST Snapshot 恢复。
 
-## 核心概念与全局不变量
+```text
+用户操作
+  -> 短事务：写入 Command / Work / 引用
+  -> Worker：claim + lease
+  -> 事务外：Provider / Tool / Function / S3 I/O
+  -> 短事务：fenced checkpoint 或 terminal
+  -> REST Snapshot：权威读取
+       ^
+       +-- WebSocket / NOTIFY：低延迟提示，可丢失
+```
 
-| 概念 | 当前边界 |
+系统包含两个并列产品域：
+
+- **Harness / AI** 运行 Agent Thread，管理模型调用、工具调用、审批、压缩和子 Agent。
+- **Studio / Canvas** 管理图形、Resource 与 Function run。
+
+两者共享 PostgreSQL、Blob Storage、浏览器事件通道和 Web 入口，但各自维护独立的领域
+状态机与版本坐标。
+
+## 全局心智模型
+
+| 问题 | 设计答案 |
 | --- | --- |
-| Durable truth | PostgreSQL 保存会影响恢复、重试、查询、删除和版本对账的业务事实；进程内对象只保存执行期 reservation、连接和 live projection。 |
-| Snapshot | REST Snapshot 是 Thread 和 Canvas 的权威读取面；通知和 WebSocket 只负责低延迟唤醒或可丢失 overlay。 |
-| Work | Harness 与 Canvas 都把可调度事实放在 PostgreSQL，并以 claim、lease、token 和 poll 处理丢通知、断线和进程退出。 |
-| Node coordination | App 节点之间无网络边；PostgreSQL 是唯一协调介质。数据库不可达时 claim、lease、route 与 mailbox 判定全部 fail closed。 |
-| Version | Harness Thread version 与 Canvas document version 是独立单调坐标；Thread version 只跟踪结构/控制状态，不是 Snapshot ETag，Invocation checkpoint 可按有界批次在同一 version 内推进；HTTP mapper 使用 canonical UUID 和 decimal cursor。 |
-| Composition root | 每个 App 节点都由 `web` 作为唯一生产 Spring Boot root；`platform`、Core、Runtime 和 Contributor API 不创建第二个 root。 |
-| Byte boundary | Blob metadata 与引用在 PostgreSQL；对象字节在受控 Blob Storage；浏览器只取得短期签名 URL。 |
+| 哪些状态能用于恢复？ | PostgreSQL 保存所有影响恢复、重试、查询、删除和版本对账的业务事实。进程内对象只保存连接、reservation 和 live projection。 |
+| 浏览器相信谁？ | REST Snapshot 是 Thread 与 Canvas 的权威读取面；实时事件只提供唤醒和临时 overlay。 |
+| 后台任务如何接管？ | Work 先持久化，再通过 claim、lease 和 fencing token 竞争执行权；固定轮询覆盖丢通知和进程退出。 |
+| 多个 App 节点如何协调？ | 节点共享 PostgreSQL 与 Blob Storage，不建立 App-to-App 网络边。route、mailbox、Work 和通知都经 PostgreSQL 协调。 |
+| 大文件放在哪里？ | PostgreSQL 保存 Blob 元数据和引用，S3 保存附件与媒体字节；业务对象只持有 `blobId`。 |
+| Spring 应用从哪里启动？ | [`web`](modules/web.md) 是唯一生产 composition root，负责装配 HTTP、WebSocket、Worker 和生命周期。 |
 
-跨域写入必须在单个定义清晰的事务边界内完成，失败时不留下半成品事实；
-外部 I/O 不持有业务锁。任何 stale token、过期 lease、重复 callback 或版本
-gap 都只能产生 no-op、resync 或可恢复的内部失败，不能覆盖新 owner 的状态。
+跨域写入在一个明确的短事务内完成。Provider、Tool、Function 和对象存储 I/O 位于事务
+外；写回时重新校验版本、attempt、lease 与 token。迟到 callback 或旧 owner 最多触发
+no-op、resync 或内部重试，不能覆盖新 owner 的状态。
+
+## 系统组成
 
 ```mermaid
 flowchart LR
-    Browser[Browser]
-    Frontend[frontend<br/>React AI + Canvas]
-    Web["web app node(s)<br/>composition root"]
-    Share[share<br/>public DTO / wire]
-    Platform[platform<br/>application services]
-    Schema[schema<br/>Flyway resources]
-    CanvasCore[canvas-core<br/>JDK-only domain]
-    CanvasInfra[canvas-infra<br/>PostgreSQL / MyBatis / Function runtime]
-    HarnessCommon[Harness Common]
-    HarnessTool[Harness Tool]
-    HarnessEnvironment[Harness Environment]
-    HarnessRuntime[Harness Runtime]
-    HarnessContributorApi[Harness Contributor API]
-    HarnessInfra[Harness Infra]
-    HarnessDaemon[Harness Daemon]
-    HarnessBuiltin[Harness Builtin]
-    PG[(PostgreSQL<br/>durable truth)]
-    S3[(S3<br/>blob bytes)]
-    Env["/api/harness/environment-daemon/v1<br/>Environment Daemon"]
-    Trusted[Trusted contributor JARs]
+    Browser["Browser<br/>frontend"]
+    Web["web<br/>HTTP / WebSocket / lifecycle"]
+    Platform["platform<br/>application services / adapters"]
+    Harness["Harness<br/>Runtime / Provider / Contributor"]
+    HarnessInfra["Harness Infra<br/>Store / Work / Realtime"]
+    Canvas["Canvas<br/>Core / Infra / Function"]
+    PG[("PostgreSQL<br/>durable truth")]
+    S3[("S3<br/>attachment and media bytes")]
+    Provider["Model Provider"]
+    Daemon["Environment Daemon<br/>host capabilities"]
 
-    Browser --> Frontend
-    Frontend -->|REST + /api/events/v1| Web
-    Web --> Share
+    Browser -->|REST + events| Web
     Web --> Platform
-    Web --> CanvasInfra
+    Web --> Harness
     Web --> HarnessInfra
-    Web --> HarnessRuntime
-    Web --> HarnessContributorApi
-    Web --> HarnessEnvironment
-    CanvasInfra --> CanvasCore
-    HarnessInfra --> HarnessCommon
-    HarnessInfra --> HarnessRuntime
-    HarnessInfra --> HarnessTool
-    HarnessInfra --> HarnessEnvironment
-    HarnessTool --> HarnessCommon
-    HarnessEnvironment --> HarnessCommon
-    HarnessRuntime --> HarnessCommon
-    HarnessRuntime --> HarnessEnvironment
-    HarnessRuntime --> HarnessTool
-    HarnessContributorApi --> HarnessEnvironment
-    HarnessContributorApi --> HarnessTool
-    HarnessBuiltin --> HarnessCommon
-    HarnessBuiltin --> HarnessContributorApi
-    HarnessBuiltin --> HarnessEnvironment
-    HarnessBuiltin --> HarnessTool
-    HarnessDaemon --> HarnessEnvironment
-    Platform --> CanvasCore
-    Platform --> Share
-    Platform --> HarnessCommon
-    Platform --> HarnessRuntime
-    Platform --> HarnessEnvironment
-    Platform --> HarnessTool
-    Platform --> HarnessContributorApi
-    Platform --> HarnessBuiltin
-    Web -->|Flyway runtime dependency| Schema
-    Web -->|LISTEN / NOTIFY loop| PG
+    Web --> Canvas
+    Platform --> Harness
+    Platform --> Canvas
     Platform --> PG
     Platform --> S3
-    CanvasInfra --> PG
     HarnessInfra --> PG
-    Frontend -->|short-lived signed URL| S3
-    Web <-->|WebSocket| Env
-    Trusted -->|startup snapshot| Web
+    Canvas --> PG
+    Harness --> Provider
+    Web <-->|compressed WebSocket| Daemon
+    Daemon -->|presigned PUT| S3
+    Browser -->|short-lived signed URL| S3
 ```
 
-## Goals
+源码按“契约在内、适配在外”组织：
 
-- **Durable execution。** PostgreSQL 保存会影响恢复、重试、查询和删除的全部事实；
-  进程退出后，已提交的 Command、Entry、Invocation、Work 和 Blob 引用仍可继续处理。
-- **清晰的领域边界。** `canvas-core` 与 `harness-runtime` 保持 framework-free；
-  数据库、网络、Provider、Environment 和 Contributor 装配由外层适配。
-- **快照优先的客户端模型。** REST Snapshot 是权威投影，应用事件通道只传递
-  version 或 live overlay；客户端可在首次连接、重连或 gap 后重新对账。
-- **受约束的并发。** durable Work 使用 PostgreSQL claim/lease/fencing；Provider、
-  Tool 和 subagent 使用有界的进程内 admission，不以隐式线程队列代替容量控制。
-- **无 App-to-App 网络协调。** 多个 App 节点只共享 PostgreSQL 与 Blob Storage；
-  PostgreSQL route lease、mailbox、Work 和 NOTIFY 覆盖跨节点接管与唤醒。
-- **共享 Work 池。** 连接同一 PostgreSQL 的 Worker 节点竞争同一组
-  `harness_work`；节点身份只用于 claim/lease fencing 和 Environment route，
-  不是 branch、版本或部署隔离。只有绑定 Environment 的 Tool Work 具有节点亲和性。
-- **明确的字节边界。** PostgreSQL 保存 Blob 的 hash、媒体事实、引用和生命周期；
-  S3 保存 original/preview 字节，浏览器只获得短期签名 URL。
-- **单一组合根。** 每个 App 节点由 `web` 负责 Spring Bean、Notification loop、
-  dispatcher、Contributor snapshot、HTTP、WebSocket 与静态资源的生产装配。
-
-## Non-goals
-
-- PostgreSQL `NOTIFY` 不承担持久化、重放或审计职责；丢失通知必须可以由 poll 或
-  Snapshot 收敛。
-- App 节点不通过 HTTP、RPC、DNS 或共享内存彼此协调。
-- 系统不提供 branch/version Worker 分组；异版本节点混跑必须保持共享持久协议向后
-  兼容，或在不兼容变更生效前完成节点收敛。
-- `canvas-core` 不连接 PostgreSQL、S3、HTTP、Spring 或 Harness；Canvas Link 也
-  不是自动 DAG 调度器。
-- Realtime overlay 不替代 durable Snapshot；浏览器本地 Pane、布局和 draft 不写入
- 业务表。
-- S3 对象 key、bucket、长期 URL 和原始 URI 不进入 durable message、Command 或
-  Function state。
-- 系统不提供用户/管理员角色模型；`/api/settings` 属于受信任单用户部署边界。
-
-## 1. Durable truth 与字节边界
-
-### PostgreSQL-only durable truth
-
-唯一 Flyway baseline 是
-`schema/src/main/resources/db/migration/V1__schema.sql`。它定义 Catalog、Chat、
-Canvas、Project/Issue、Environment/Skill/MCP、Harness、owner relation、System
-Settings 和全局 Storage 的表、约束及 PostgreSQL trigger。
-`schema/src/main/resources/db/seed/**` 提供 dev、e2e、canvas-test profile seed。
-
-PostgreSQL 中的关键事实分为六组：
-
-| 事实组 | 代表内容 |
-| --- | --- |
-| 产品聚合 | `agent_*`、`mcp_*`、`chat`、`canvas_*`、`project`、`issue*`、`system_setting` |
-| Harness 协议 | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
-| Environment | `environment`、`environment_connection`、`environment_inventory`、`environment_skill*`、`environment_operation` |
-| 归属关系 | 单一排他弧 `session_owner` |
-| 调度信箱 | `issue_controller_work` |
-| Blob 元数据 | `storage_blob`、`storage_upload`，以及 Canvas Resource 对 Blob 的引用 |
-
-进程内对象只承担执行中的 reservation、连接、线程和 live projection。它们关闭后
-不能成为恢复依据：恢复始终重新读取 PostgreSQL。
-
-### S3 字节边界
-
-`storage_blob` 保存内容摘要、媒体事实、引用计数和生命周期；对象内容与预览字节
-保存在 S3。对象 key 只由服务端根据 Blob identity 派生，浏览器和业务 DTO 不接收
-bucket、key 或长期 URL。
-
-上传校验、对象复制和删除在数据库长事务外执行；短事务只负责 upload/Blob
-去重、引用和 cleanup 事实。durable message 与 Canvas Resource 只保存 `blobId`
-或内联文本，读取时再获取短期签名 URL。引用归零后，后台 maintenance 依据
-PostgreSQL 中的 token-fenced cleanup state 删除对象并收敛元数据。完整协议由
-[Platform 模块](modules/platform.md)负责。
-
-## 2. 模块与依赖边界
-
-### Maven reactor 与逻辑模块
-
-根 `pom.xml` 直接聚合六个 Maven module：`share`、`schema`、`canvas`、
-`harness`、`platform`、`web`。`canvas/pom.xml` 再聚合 `canvas/core` 和
-`canvas/infra`；`harness/pom.xml` 再聚合 `common`、`mcp`、`tool`、`environment`、`environment-server`、`runtime`、
-`provider`、`contributor-api`、`builtin`、`infra` 和 `daemon`。下表列出的是可维护的逻辑模块/目录，
-不是 root reactor 的直接 children。`frontend/` 是独立的 Node/Vite 工程，
-不属于 Maven reactor。
-
-| 模块 | 当前职责 | 直接边界 |
+| 层次 | 模块 | 维护时先关注什么 |
 | --- | --- | --- |
-| `frontend` | React 页面、AI/Canvas feature、API client、Pane 与本地状态 | 只经 Web REST/WebSocket 与短期 S3 URL |
-| `share` | public DTO 与 JSON/wire 形状 | 生产依赖只有 Jackson annotations |
-| `schema` | Flyway V1 baseline 与 profile seed 资源 | 无 Java、无生产依赖 |
-| `canvas/core` | Canvas 领域、typed command、ports、Function Catalog | JDK-only |
-| `canvas/infra` | Canvas PostgreSQL/MyBatis、Snapshot query、Function durable runtime | 依赖 `canvas-core`，不反向依赖 Platform/Harness/Web |
-| `harness/common` | Prompt template/loader、JSON 边界工具、ResourceRef、统一 ResultContent 与 InputSchema 体系 | 依赖 JDK/Jackson，无其它 Harness 依赖 |
-| `harness/mcp` | 可复用 MCP 传输与协议适配；LangChain4j 生产依赖收敛地，提供自定义 Stdio 传输、进程树清理与超时/取消管理 | 依赖 `harness-common`、`langchain4j-mcp` 与 Jackson |
-| `harness/tool` | Tool identity、descriptor、call/result 与 Tool JSON codecs（Result 组合 ResultContent） | 依赖 `harness-common` 与 Jackson |
-| `harness/environment` | Environment 身份、Capability SPI/catalog 与唯一 Daemon protocol v1（控制面与 Blob 数据面契约） | 依赖 `harness-common` 与 Jackson，绝不依赖 `harness-tool` |
-| `harness/environment-server` | Environment daemon 会话核心：连接代际、租约围栏与按 `invocationId` 的调用协调 | 依赖 `harness-common`、`harness-environment` 与 Jackson，绝不依赖 Spring/JDBC/web |
-| `harness/runtime` | Session/Entry/Thread/Command/Invocation/Work 状态机与 processors | 依赖 `harness-common`、`harness-tool`、`harness-environment`、Jackson、SLF4J、JGit |
-| `harness/provider` | JDK 21 HttpClient + SSE 传输、增量解析与原生 Anthropic Messages 协议 | 直接依赖仅 `harness-runtime` 与 Jackson，无 Spring/LangChain4j 依赖 |
-| `harness/contributor-api` | trusted Contributor 的 Catalog、BranchView、统一 Tool、effect 与 projector API | 生产依赖 `harness-tool`、`harness-environment`，不进生产 Common/Runtime |
-| `harness/builtin` | 第一方内置 14 工具、goal.state 与 context projector | 依赖 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`、Jackson |
-| `harness/infra` | PostgreSQL HarnessStore、Work dispatcher、realtime、Resource store | 依赖 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Spring JDBC、PostgreSQL |
-| `harness/daemon` | 独立 Environment 进程宿主与能力执行器 | 依赖 `harness-common`、`harness-environment`、`harness-mcp`、Jackson、JGit，绝不依赖 `harness-tool` |
-| `platform` | Catalog、MCP、Storage、Chat/Canvas application service、Resolver、Model/Tool/Environment Gateway | 适配 Share、Core/Runtime ports，不成为组合根 |
-| `web` | Spring Boot、HTTP、浏览器事件、daemon WebSocket、生产生命周期 | 唯一 composition root |
+| 浏览器 | [Frontend](modules/frontend.md) | 路由、Feature、Snapshot 与 realtime 合并、交互状态 |
+| 传输与装配 | [Web](modules/web.md) | Spring Boot、Controller、DTO mapping、WebSocket、进程生命周期 |
+| 应用编排 | [Platform](modules/platform.md)、[Share](modules/share.md) | Application service、外部适配、public wire contract |
+| Agent 契约 | [Harness Common](modules/harness-common.md)、[Tool](modules/harness-tool.md)、[Environment](modules/harness-environment.md)、[Contributor API](modules/harness-contributor-api.md) | 值对象、Tool 与 Environment 边界、扩展契约 |
+| Agent 执行 | [Harness Runtime](modules/harness-runtime.md)、[Provider](modules/harness-provider.md)、[Builtin](modules/harness-builtin.md) | 状态机、Processor、模型协议、内置能力 |
+| Agent 基础设施 | [Harness Infra](modules/harness-infra.md)、[Environment Server](modules/harness-environment-server.md)、[Daemon](modules/harness-daemon.md)、[MCP](modules/harness-mcp.md) | PostgreSQL Work、会话租约、主机执行与 MCP 生命周期 |
+| Canvas | [Canvas Core](modules/canvas-core.md)、[Canvas Infra](modules/canvas-infra.md) | 纯领域命令、Graph 版本、持久化与 Function runtime |
+| 数据库 | [Schema](modules/schema.md) | 唯一 Flyway baseline、约束与 profile seed |
 
-依赖方向保持为：
+根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`harness`、`platform`
+和 `web`；`canvas` 与 `harness` 再聚合各自子模块。`frontend` 是独立的 Node/Vite
+工程。核心依赖方向可以简化为：
 
 ```text
-frontend -> web API
-web -> platform
-platform -> share
+frontend -> web -> platform
 web -> canvas-infra -> canvas-core
-web -> harness-infra -> harness-runtime -> harness-tool / harness-environment -> harness-common
-web -> harness-runtime
-web -> harness-environment
-web -> harness-contributor-api
-platform -> canvas-core
-platform -> harness-common
-platform -> harness-tool -> harness-common
-platform -> harness-environment -> harness-common
-platform -> harness-environment-server -> harness-environment -> harness-common
-platform -> harness-builtin -> harness-contributor-api
-platform -> harness-runtime
-platform -> harness-provider -> harness-runtime
-platform -> harness-contributor-api
-platform -> harness-mcp -> harness-common
-harness-daemon -> harness-common
-harness-daemon -> harness-environment -> harness-common
-harness-daemon -> harness-mcp -> harness-common
-web -> harness-environment-server
+web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
+platform -> Canvas / Harness contracts
+harness-daemon -> harness-environment / harness-mcp
 ```
 
-`platform` 的架构测试禁止它引用 `canvas-infra`、`harness-infra`、`web` 和
-`harness-daemon` 的生产实现；`web` 的架构测试要求组合根直接声明 Platform、Canvas Infra、
-Harness Infra、Contributor API 与 Environment，保证组合根不会依赖未声明的传递实现；Platform 声明并依赖
-Common、Builtin、Environment Server 模块。
+Core、Runtime 与公共契约不创建 Spring Boot root，也不反向依赖外层实现。模块级
+架构测试守护 POM 和 import 方向；具体依赖及测试入口由上表中的模块文档说明。
 
-## 3. Web composition root
+## Agent 请求如何执行
 
-`web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java` 是每个 App
-节点唯一的 `@SpringBootApplication` 入口。它在 Web runtime 与 event package
-中完成以下装配：
-
-1. `HarnessRuntimeConfiguration` 注入 `UUID::randomUUID`、PostgreSQL
-   `HarnessStore`、Resource store、Model/Tool processor、dispatcher、
-   `PostgresqlRealtimeEventSink`，并为 Model checkpoint timer 配置独立的受管
-   虚拟线程 flush executor。
-2. Platform 提供 `BuiltinHarnessContributor` bean；`ContributorCatalogConfiguration`
-   收集 Spring `HarnessContributor` 与 `TrustedJarContributorLoader`
-   加载的受信任 JAR 贡献者，并在启动时冻结静态 `HarnessCatalog`。
-3. Platform 将 `HarnessCatalog` 的静态工具与 PostgreSQL 现读的 `McpToolCatalog`
-   聚合成唯一 `RuntimeToolCatalog`，供工具列出、Agent 校验、turn 规划与执行使用。
-4. `HarnessRuntimeLifecycle` 按 `workers-enabled` 启停 Harness dispatcher；
-   `ApplicationEventConfiguration` 装配唯一 PostgreSQL notification loop。
-5. HTTP Controller、DTO mapper、错误 advice、浏览器事件 WebSocket 和 SPA fallback
-   共享同一应用生命周期。
-
-`platform` 只提供应用服务和 port adapter，不声明 `@SpringBootApplication`，也不
-读取 Contributor 目录或管理 classloader。`canvas-infra` 通过
-`CanvasInfraAutoConfiguration` 暴露 PostgreSQL/MyBatis 与 Function runtime。
-
-## 4. 关键主链路
-
-### Harness：Command 到 Agent Loop
+### 从 Command 到 Agent Loop
 
 ```text
 POST /api/harness/command-batches
-  -> Web 严格解析 owner / target / UUID / decimal cursor
-  -> HarnessCommandAcceptanceOrchestrator
-       owner KEY SHARE + owner/session relation + attachment materialize
+  -> Web 校验 owner、target、UUID 与 cursor
+  -> Platform 在短事务中完成授权、附件物化和 owner relation
   -> HarnessRuntime.acceptCommands
-       Session -> Thread -> Command CAS
-       enqueue Commands + request THREAD Work
+       Session / Thread / Command CAS
+       写入 command mailbox + 请求 THREAD Work
   -> HarnessWorkDispatcher claim THREAD
-  -> ThreadProcessor（一 claim 一 durable action）
-  -> DatabaseTurnResolver
-       latest RuntimeToolCatalog / Environment -> frozen ModelRequestSpec
-  -> ModelProcessor + ModelGateway
-  -> ToolProcessor + ToolGateway / Environment
-  -> ThreadProcessor apply Entry/head、TURN_END、continuation
+  -> ThreadProcessor 选择下一项 durable action
+  -> ModelProcessor 或 ToolProcessor 执行外部 I/O
+  -> fenced checkpoint / terminal
+  -> ThreadProcessor 追加 Entry、推进 head 或结束 turn
 ```
 
-Session 只有一棵 append-only Entry Tree。Thread 保存 head、命令 cursor、version、
-YOLO 和 creation request hash（初始创建请求指纹）；Model/Tool 的完整请求与外部 I/O 不写入 Entry，
-而由 Invocation 及其 Work 承担执行事实。`task` 是内部 Tool，通过同一
-`HarnessRuntime.acceptCommands(NEW_SESSION, ...)` 创建子 Session、ROOT、Thread、
-Commands 与 Work，不增加表或调度协议。
+一个 Session 拥有一棵 append-only Entry Tree。Thread 指向当前 head，并保存命令
+cursor、控制状态和单调 version；Model 与 Tool 的请求、attempt、checkpoint 和终态由
+Invocation 与 Work 记录。这样的拆分让对话历史保持稳定，同时允许外部调用独立重试和
+恢复。
 
-Thread version 是 Thread 行结构与控制状态的 CAS / invalidation cursor，不是完整
-Snapshot 的 ETag。Model 流式 delta 先在单个 execution 内按默认 `200ms / 256 events /
-64KiB` 的时间与容量阈值聚合；delta 只做本地缓冲，ownership fence 延后到提交边界
-（flush / terminal / retry）在同一次短事务内重校验 `RUNNING` + attempt + claimed
-lease，并以一次 Invocation UPDATE 保存最新 text/thinking checkpoint。所有权丢失由
-下一围栏边界或 heartbeat 收敛，任何边界都拒绝提交并整体丢弃缓冲事件。事务提交后，
-单 drain owner 才在事务和状态 monitor 外按原 sequence 以有界分块批量发布 realtime，
-不构造无界列表或单次无界调用。纯工具批次不更新 checkpoint；terminal 在一次 UPDATE 中
-将未刷安全内容并入终态 checkpoint，retry 在一次 `RUNNING -> READY` UPDATE 中将其冻结
-到失败审计并清空活动 checkpoint。checkpoint 仍可在相同 Thread version 下推进，因此恢复
-与 gap 对账必须重新读取完整 Snapshot，不能仅凭 version 相等跳过响应内容。
+Thread version 用于结构与控制状态的 CAS，并不是完整 Snapshot 的 ETag。模型 checkpoint
+可以在同一 version 内继续提交，因此首次加载、重连和 resync 都重新读取完整 Snapshot，
+不能仅凭 version 相等跳过内容对账。
 
-### Canvas：Command 与 Function
+模型流式事件先在当前 execution 内有界聚合。每次 flush、retry 或 terminal 都在短事务
+中重校验 invocation attempt 和 Work ownership；事务提交后才发布 realtime。浏览器看到
+的 delta 是临时 overlay，已提交 checkpoint 和 terminal Snapshot 才能用于恢复。详细状态
+机见 [Harness Runtime](modules/harness-runtime.md)，Provider 请求与回放规则见
+[Harness Provider](modules/harness-provider.md)。
+
+### Canvas Command 与 Function
 
 ```text
 POST /api/canvases/{canvasId}/commands
-  -> Platform Canvas command service
-  -> canvas-core typed command + expectedVersion CAS
-  -> CanvasStore / command dedup
-  -> Canvas Patch + canvas_document.version
+  -> typed command + expectedVersion
+  -> Graph mutation + command dedup
+  -> Patch + canvas_document.version
 
 POST .../nodes/{nodeId}/function-run
-  -> CanvasFunctionRunTransactions.start
-  -> freeze config / reference facts / target resource IDs
-  -> canvas_function_run READY + pins + version
-  -> canvas_function_work NOTIFY / periodic poll
-  -> claim -> adapter preflight/execute -> heartbeat/checkpoint
-  -> success resource swap or fenced failure/cancel + version
-  -> GET /api/canvases/{canvasId} authoritative Snapshot
+  -> 冻结配置、引用与目标 Resource
+  -> READY run + durable work
+  -> claim + heartbeat + adapter execution
+  -> fenced success / failure / cancel
+  -> GET /api/canvases/{canvasId} 读取权威 Snapshot
 ```
 
-Canvas Graph version 与 Harness Thread version 独立。Canvas Function 的 start、
-checkpoint、cancel、success、failure 都由同一 `canvas_document.version` 坐标表示；
-Harness command acceptance 不推进 Canvas Graph version。
+Canvas Graph version 与 Harness Thread version 相互独立。Function 的 start、
+checkpoint 和 terminal 都由 Canvas document version 表达；Harness Command acceptance
+不会推进 Graph version。领域命令见 [Canvas Core](modules/canvas-core.md)，数据库映射和
+Function Worker 见 [Canvas Infra](modules/canvas-infra.md)。
 
-### Storage、Settings、Realtime、Environment、Contributor
+### 附件与媒体
 
-| 链路 | durable 边界 | live 边界 |
+上传先建立受控 upload，再将字节写入 S3，完成校验后生成全局 Blob。Chat、Canvas 和
+Tool 历史只保存 `blobId` 或内联文本；下载时由服务端签发短期 URL。数据库事务负责 Blob
+引用和 cleanup 状态，对象 PUT、copy、HEAD 与 delete 在事务外执行。
+
+Tool 或 Environment 返回的临时 `ResourceRef` 在写入历史前必须物化为全局 Blob；物化
+失败时终止提交，避免把 Daemon 本地路径或短期 URL写入 durable message。完整生命周期见
+[Platform 的 Storage、Blob 与 Resource](modules/platform.md#storageblob-与-resource)。
+
+## 并发与恢复
+
+### Work ownership
+
+Harness 与 Canvas 都使用 PostgreSQL durable Work：
+
+1. 短事务从到期 Work 中 `claim`，写入随机 token 和 `lease_until`。
+2. Worker 在事务外执行模型、工具或 Function。
+3. heartbeat 只续租当前 token。
+4. checkpoint、terminal 和 reschedule 再次验证 token、attempt 与当前状态。
+5. handoff 失败时立即 fenced reschedule；进程退出后由 lease 到期触发接管。
+
+Harness 的 `THREAD`、`MODEL`、`TOOL` Work 共享同一池。只有绑定 Environment 的
+`TOOL` Work 带节点亲和性：claim 同时要求目标 Environment 的 route lease 属于当前
+Dispatcher 节点。Canvas Function 使用独立 run/work 协议，但遵循同样的
+claim/lease/fencing 原则。
+
+Model、Tool 与 Subagent 还经过进程内有界 admission。容量不足会在打开 Provider 或发送
+Tool 请求前返回可重试结果，不以无界线程队列积压请求。Admission 控制当前节点容量，
+PostgreSQL Work 才是恢复依据。
+
+### 失败如何收敛
+
+| 失败或竞争 | 恢复依据 | 收敛方式 |
 | --- | --- | --- |
-| Storage | `storage_blob`、`storage_upload`、`session_blob_ref`、Canvas Resource 引用 | S3 stream、预签名 URL、`StorageMaintenance` |
-| Settings | `system_setting(id=1, config, version)` | `SystemSettingsSnapshot` 与 after-commit 回读 |
-| Realtime | Thread/Canvas version、聚合落盘的 Invocation checkpoint、Work 状态 | PostgreSQL `NOTIFY`、应用事件 WebSocket、Model/Tool live overlay |
-| Environment | Agent definition 的 `environmentId` 决定分支执行环境；ToolBinding 冻结 `environmentId`，目录只存在于每次工具调用的 `arguments.workdir`；`environment_connection` route lease | `harness/environment-server` 的 `EnvironmentDaemonServer` 持有本节点连接、invocation 与心跳投影；`EnvironmentRegistry` 提供租约围栏 |
-| Contributor / Tool | Entry 中的 `CUSTOM(contributorId, customType, schemaVersion, data)`；MCP server/tool 配置 | 启动期冻结 `HarnessCatalog` 元数据；`RuntimeToolCatalog` 聚合静态工具与 DB-backed MCP 工具 |
+| `NOTIFY` 丢失或监听连接重建 | PostgreSQL Work | fixed-delay poll 再次发现可执行行 |
+| Worker 退出 | Work lease | lease 到期后由任意合格节点重新 claim |
+| 旧 callback 晚到 | token、attempt、version | 写回变为 no-op 或内部取消 |
+| 浏览器漏帧、断线或 buffer overflow | REST Snapshot | 事件通道发出或折叠为 `resync` |
+| 重复 Command | idempotency key、cursor、CAS | 返回已有结果或拒绝冲突写入 |
+| Daemon 物理连接中断 | `daemonInstanceId`、invocation journal、route lease | 同实例重连重放；新实例接管后收敛旧调用 |
+| Blob 清理进程中断 | PostgreSQL cleanup state 与 token | 后台 maintenance 继续处理 |
 
-Settings 的写入使用完整 section + `expectedVersion` CAS。提交成功后回读
-`system_setting` 并原子替换进程快照；跨节点通过 `system_settings_changed` 通知
-触发同样的权威回读。Environment 的 durable identity 是 canonical UUID
-`environmentId`，name 是唯一展示与配置标识，同一环境允许任意数量的 capability invocation 并发在途（按
-`invocationId` 关联）。
+应用节点之间不通过 HTTP、RPC 或 DNS 协调。数据库不可达时，claim、route lease 与 mailbox
+判定 fail closed；已有实时连接不能替代 durable ownership。
 
-## 5. 事务边界与并发协议
+## Snapshot 与实时通道
 
-### 跨域事务
-
-- Harness acceptance 在一个 Spring physical transaction 内完成 owner 授权、
-  owner relation、Session/Thread/Command/Work durable acceptance 以及
-  `ATTACHMENT(uploadId)` 到 `ResourceMessageContent` 的物化。Owner 行先取
-  `KEY SHARE`，阻止删除而允许同 owner 并发接受；Chat/Canvas 的 Session
-  relation 由单条互斥插入保证一个 Session 只有一个 owner。
-- Harness Store 事务固定锁序：
-  `Session KEY SHARE -> Thread -> Commands -> Model -> Tool siblings -> Work`。
-  Processor 事务不等待 Provider、Tool 或 Environment；外部 I/O 位于事务外，
-  terminal 回调再次通过 claim 与 token 校验。
-- Canvas Function 写事务固定为 document -> node -> run，并以
-  `canvas_document.version` expected-version CAS 提交 graph、run、Resource
-  pin 和 Patch 所需事实。Function Resource 先在无 owner 状态物化，成功事务再
-  交换当前 owned Resource 与 target。
-- S3 PUT、HEAD、copy、delete 不在持有业务事务的线程内执行。数据库提交后的
-  cleanup 事实由独立短事务保存，后台维护线程完成对象删除。
-
-### claim、lease、fencing、admission
-
-Harness 与 Canvas 的 durable queue 都在 PostgreSQL：
-
-| 队列 | claim | lease/fencing |
-| --- | --- | --- |
-| Harness | `harness_work` 三种 target：`THREAD/MODEL/TOOL`；`FOR UPDATE SKIP LOCKED` 选 due 行 | `lease_token + lease_until`；`wake_version` 合并 wake 并防止丢失 |
-| Canvas Function | `canvas_function_run` 唯一一行表示 Node 的当前/最后 Run；READY 或过期 RUNNING 可 claim | token、过期时间、attempt 的 CAS；checkpoint/terminal/reschedule 都验证当前 ownership |
-
-Dispatcher 使用固定 round-robin 与 bounded handoff。worker executor 使用
-fail-fast rejection；claim 后若不能 handoff，立即 fenced reschedule。Heartbeat
-只续租当前 Work，续租失败表示 ownership 丢失，worker 停止继续写。
-
-Model/Tool Gateway 在确定性路由后尝试无等待 `ConcurrencyAdmission`。Model 容量耗尽返回
-`Busy`，Tool 容量耗尽返回 `RetryLater`；两者都不会打开 Provider、执行 Tool 或发送 Environment 请求。
-Subagent 使用 `SynchronousQueue + AbortPolicy` 的固定并发 executor。Admission
-是进程内容量，不是 durable 状态；`lease.close()` 幂等并恰好归还一个 permit。
-
-任何 stale token、过期 lease、attempt 不匹配、document/node 消失或 terminal
-竞争都只能产生 no-op、内部取消或 `UNKNOWN` 收敛，不能写回新 owner 的状态。
-
-## 6. Snapshot、NOTIFY 与恢复
-
-### Work 恢复
-
-Harness Work 的通知由同一物理事务中的
-`requestWork -> pg_notify('harness_runtime_work', ...)` 发出：Work upsert、
-wake version 和通知使用同一 JDBC transaction，只有提交后 listener 才能看见
-提示。Harness 没有依赖 Work trigger。
-
-Canvas Function Work 的通知由
-`schema/src/main/resources/db/migration/V1__schema.sql` 中的
-`canvas_function_work` DB trigger 发出；trigger 只提示当前已到期的 READY row，
-不改变 queue fact。两条路径都由
-`web/src/main/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoop.java`
-用单独 JDBC connection 执行 `LISTEN`，断线后重连；每个 channel handler 彼此
-隔离。Harness 和 Canvas dispatcher 都有 fixed-delay poll，因此通知丢失、连接
-重建或 worker 进程退出只会延迟 claim，不改变最终状态。Lease 到期后，任意可用
-worker 可重新 claim。
-
-### 浏览器 Snapshot 恢复
-
-浏览器先通过 REST 获取 Thread 或 Canvas Snapshot，再订阅
-`/api/events/v1`。订阅先注册上游再读取 durable cursor，并在发出
-`subscribed` ack 后激活事件投递：
+浏览器采用“先快照、后订阅”的读取顺序：
 
 ```text
 subscribe
-  -> register resource
-  -> read durable version cursor
+  -> 服务端先注册资源
+  -> 读取 durable cursor
   -> subscribed(cursor)
   -> version / realtime events
 ```
 
-Thread version 与 Canvas version 事件带 cursor；Thread 的 Model delta、Tool
-partial 是无 cursor 的 live overlay。事件丢失、payload 畸形、通知超出
-PostgreSQL payload 上限、重连、订阅 gap 或 buffer overflow 都折叠为
-`resync`，客户端重新读取完整 Snapshot。terminal durable result 不依赖 terminal
-notification。Thread checkpoint 的批次更新不单独推进 Thread version；首次订阅、
-重连、resync 与 realtime sequence gap 仍会回读 Snapshot，以同 version 下最近已提交
-的 checkpoint 恢复安全前缀。已记录在 `modelAttemptFailures` 中的
-invocation/attempt 拒绝迟到 `MODEL_DELTA`，避免旧 attempt 的已排队通知复活为活动
-overlay。
+Thread 与 Canvas version event 带 cursor；Model delta、Tool partial 和进程输出属于无
+cursor overlay。事件 gap、畸形 payload、PostgreSQL 通知降级或客户端缓冲溢出都会触发
+完整 Snapshot 回读。terminal 的正确性从不依赖 terminal notification。
 
-### Settings 恢复
+PostgreSQL `NOTIFY` 同样只承担低延迟唤醒。Harness 在 Work 写事务内主动通知，Canvas
+Function 由数据库 trigger 提示；两条路径都保留固定轮询。Web 节点用一条独立 JDBC
+连接监听多个 channel，各 handler 彼此隔离。浏览器侧合并策略见
+[Frontend](modules/frontend.md#snapshotrealtime-与恢复)，服务端通道见
+[Web](modules/web.md#通知事件与-websocket)。
 
-`SystemSettingsSnapshot` 启动时读取 `system_setting`。本地 PUT 的 after-commit
-回读和 `system_settings_changed` / listener reconnect 的 resync 都按数据库
-version 门控，低 version 回读不能覆盖高 version 快照；回读失败不回滚已提交的数据库事实。
+## Environment 的三条数据路径
 
-## 7. 安全边界
+Environment 把主机能力接入 Agent，但不同数据采用不同路径：
 
-- HTTP mapper 严格校验 canonical UUID、非负 decimal cursor、sealed union 和
-  owner discriminator；unknown field、错误 JSON 类型和重复字段拒绝。
-- `share` DTO 不承载部署 secret 的可读输出。Provider credential 使用
-  write-only 语义；System Settings DTO 的敏感字段名由 contract test 拦截。
-- 全局 Blob 的 durable 引用只使用 `blobId`。S3 bucket/key 由服务端配置和
-  `StorageObjectKeys` 派生，预签名服务校验 namespace、checksum、content type
-  和过期上限；`/api/storage` 不允许调用方选择对象 key。
-- Tool 与 Environment 边界的 `ResourceRef` 只属于瞬时执行。写入 Entry 前必须由
-  `GlobalStorageToolResultHistoryMaterializer` 摄入 Blob，无法摄入则 fail closed。
-- Environment HELLO 通过 registration token 解析 canonical `EnvironmentId`；
-  未过期 route lease 被占用时拒绝第二个持有者。
-- MCP Server 采用严格单份配置 JSON，支持 Remote 与 Local 两种模式：
-  - Remote MCP 仅支持 Streamable HTTP，在 Backend 进程中通过 per-call client 执行，Header 支持整值 `${VAR}` 由 Backend 解析；
-  - Local MCP 仅支持 stdio，在配置的目标 Environment Daemon 进程中通过通用 capability（`mcp.local.call` / `mcp.local.discover`）执行，固定目标操作系统词法绝对 `cwd` 与 argv `command`，`env` 支持整值 `${VAR}` 由目标 Daemon 解析。Daemon 子进程客户端按 `(serverId, configVersion)` 懒创建与共享，新版本 fencing 旧版本并在活动调用归零后关闭（drain），单调用取消不打断并发调用，同版本配置漂移 fail-closed，无环境级配额或路径白名单。
-  - 凭据与安全边界：标准 DTO、日志与错误信息绝不回显 URL、headers、env、command、cwd 或敏感凭据；仅显式 `GET /api/ai/mcp-servers/{id}/config` 返回完整配置并强制附带 `Cache-Control: no-store`，前端仅在编辑时拉取且不缓存。
-  - 工具发现统一返回 HTTP 202 Accepted：Remote 在当前请求内同步完成且 `operation=null`；Local 提交 `MCP_SERVER_DISCOVER` 的持久 `EnvironmentOperation` 异步下发。
-  - Agent 运行时严格冻结版本，Local 工具要求 Agent 绑定的 `environmentId` 与 Server 配置一致；工具描述符动态版本为 `<serverVersion>.<schemaRevision>`，副作用恒为 `NON_IDEMPOTENT`。
-- 通用 EnvironmentOperation 资源模型：以 `(resource_type, resource_id, resource_version)` 抽象管理目标（`SKILL_SOURCE` 对应 `SKILL_REFRESH/INSTALL/UPDATE`；`MCP_SERVER` 对应 `MCP_SERVER_DISCOVER`）；同一目标资源通过唯一索引 `uk_environment_operation_active` 限制至多一个活动操作，资源删除不级联删除操作历史。
-- Trusted contributor loader 只位于
-  `web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/`，从配置目录加载并在启动时
-  形成冻结 snapshot；Platform 和 Runtime 不直接接触 classloader。
-
-## 8. 测试分层与阅读导航
-
-### 测试分层
-
-| 层级 | 证明内容 | 入口 |
+| 路径 | 承载内容 | 恢复与容量语义 |
 | --- | --- | --- |
-| 纯领域/契约 | Canvas 不变量、Harness reducer/admission、DTO wire | `canvas/core/src/test/java/`、`harness/runtime/src/test/java/`、`share/src/test/java/` |
-| 架构守护 | 包、POM、自动配置、唯一 schema、composition root、admission | `canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java`、`canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraArchitectureTest.java`、`web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java`、`platform/src/test/java/fun/fengwk/kkstudio/platform/harness/PlatformArchitectureTest.java`、`web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java` |
-| PostgreSQL 集成 | schema、锁、CAS、claim/lease/fencing、NOTIFY、Snapshot 投影、Blob 引用 | `canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/`、`harness/infra/src/test/java/`、`platform/src/test/java/`、`web/src/test/java/` |
-| Spring/组合测试 | Controller、Flyway、Platform orchestration、实时通道与 Storage | `web/src/test/java/`、`platform/src/test/java/` |
-| E2E | REST/WS、Canvas Patch/Snapshot、Harness quiescent recovery、分布式 DB fail-closed | `scripts/e2e.sh`、`scripts/e2e/run-matrix.mjs`、`frontend/src/` |
+| WebSocket 控制面 | `INVOKE`、`CANCEL`、heartbeat、上传票据和有界 progress | 强制 `permessage-deflate`；invocation journal 处理同实例重连 |
+| Daemon 本地文本 | `process.exec` 的 stdout/stderr 与大文本结果 | 完整文本写入 `~/.kk-studio/resources/text/`，UI 只接收有界 tail；模型通过 `fs.read` / `fs.grep` 分页读取 |
+| Blob 数据面 | 用户附件和 Tool 产生的图片、音频、视频等二进制 | Backend 分配预签名 PUT，Daemon 直接流式上传 S3，二进制不经过 WebSocket |
 
-### 阅读导航
+协议契约由 [Harness Environment](modules/harness-environment.md) 定义，服务端租约与调用所有权
+见 [Environment Server](modules/harness-environment-server.md)，主机执行和本地存储见
+[Harness Daemon](modules/harness-daemon.md)。
 
-- [share 模块](modules/share.md)：public DTO 与 wire 约束。
-- [schema 模块](modules/schema.md)：V1 baseline、profile seed 与数据库边界。
-- [canvas-core 模块](modules/canvas-core.md)：JDK-only Canvas 领域与 ports。
-- [canvas-infra 模块](modules/canvas-infra.md)：PostgreSQL/MyBatis 与 Function durable runtime。
-- [frontend 模块](modules/frontend.md)：React 宿主、feature 边界与浏览器恢复。
-- [harness-builtin 模块](modules/harness-builtin.md)：第一方内置 14 工具与 Goal 契约。
-- [harness-common 模块](modules/harness-common.md)：Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约。
-- [harness-contributor-api 模块](modules/harness-contributor-api.md)：trusted Java Contributor SPI 与 catalog。
-- [harness-daemon 模块](modules/harness-daemon.md)：Environment Daemon 与 Daemon wire。
-- [harness-environment 模块](modules/harness-environment.md)：Environment 身份、Capability catalog 与唯一 Daemon protocol v1。
-- [harness-environment-server 模块](modules/harness-environment-server.md)：daemon 会话、租约围栏与 `invocationId` 调用协调核心。
-- [harness-infra 模块](modules/harness-infra.md)：Harness Store、Work、通知与 ResourceStore。
-- [harness-mcp 模块](modules/harness-mcp.md)：Remote/Local MCP client、总预算、取消与 stdio 进程生命周期。
-- [harness-runtime 模块](modules/harness-runtime.md)：Agent Runtime 状态机与 processors。
-- [harness-tool 模块](modules/harness-tool.md)：Tool identity、descriptor、call/result 与 Tool JSON codecs。
-- [platform 模块](modules/platform.md)：application service、gateway 与外部适配。
-- [web 模块](modules/web.md)：唯一 Spring Boot composition root 与 transport。
-- [开发与测试](operations/development-and-testing.md)：质量、E2E、可靠性和报告入口。
-- [部署与运行](operations/deployment.md)：Fat JAR、Compose stacks、配置和清理。
-- [Environment Daemon 安装与运行](operations/environment-daemon.md)：发布物下载校验、registration token、运行、systemd 常驻和清理。
+## 安全边界
 
-模块文档负责模块内 API、实现入口和测试边界；本页只保留跨模块的事实、
-依赖方向、事务边界和恢复规则，避免复制模块细节。
+`kk-studio` 面向可信单用户部署，当前应用本身没有登录鉴权。默认本地栈只监听
+`127.0.0.1`；局域网或公网入口需要由反向代理提供 TLS 和访问控制，具体要求见
+[部署与运行](operations/deployment.md#生产部署与反向代理)。
+
+系统在内部继续保持以下边界：
+
+- HTTP mapper 严格校验 UUID、cursor、sealed union 与 JSON 形状；重复字段、未知字段和
+  错误类型在边界拒绝。
+- Provider credential、MCP secret 和 registration token 使用受控写入路径，不进入普通
+  DTO、日志或错误信息。
+- S3 bucket、object key 与长期 URL 由服务端掌握；业务记录保存 `blobId`，浏览器只得到
+  短期签名 URL。
+- Environment Daemon 继承启动用户的主机权限。registration token 通过 owner-only 文件
+  读取，`environmentRoot` 仅用于展示，不构成沙箱。
+- Trusted Contributor JAR 只从显式目录在启动时加载，形成冻结 catalog；运行期间不刷新
+  classloader。
+
+漏洞报告渠道与支持范围见 [Security Policy](../SECURITY.md)。
+
+## 按任务继续阅读
+
+| 要解决的问题 | 下一篇文档 |
+| --- | --- |
+| 修改 public DTO 或 JSON wire | [Share 模块](modules/share.md) |
+| 修改 Agent 状态机、Processor 或恢复规则 | [Harness Runtime](modules/harness-runtime.md) 与 [Harness Infra](modules/harness-infra.md) |
+| 增加模型协议或排查 Provider 流式输出 | [Harness Provider](modules/harness-provider.md) |
+| 增加 Tool、Contributor、Skill 或 MCP 能力 | [Tool](modules/harness-tool.md)、[Contributor API](modules/harness-contributor-api.md)、[Builtin](modules/harness-builtin.md)、[MCP](modules/harness-mcp.md) |
+| 修改 Environment protocol 或 Daemon | [Environment](modules/harness-environment.md)、[Environment Server](modules/harness-environment-server.md)、[Daemon](modules/harness-daemon.md) |
+| 修改 Canvas 命令或 Function runtime | [Canvas Core](modules/canvas-core.md) 与 [Canvas Infra](modules/canvas-infra.md) |
+| 修改应用服务、HTTP 或前端交互 | [Platform](modules/platform.md)、[Web](modules/web.md)、[Frontend](modules/frontend.md) |
+| 修改数据库 baseline | [Schema 模块](modules/schema.md) |
+| 运行、测试或部署系统 | [开发与测试](operations/development-and-testing.md)、[部署与运行](operations/deployment.md)、[Environment Daemon 安装](operations/environment-daemon.md) |

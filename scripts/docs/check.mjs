@@ -83,6 +83,11 @@ const forbiddenDocumentationTerms = [
   [forbiddenDesignDocuments, new RegExp(forbiddenDesignDocuments, 'i')],
   [forbiddenCacheTerm, new RegExp(`\\b${forbiddenCacheTerm}\\b`, 'i')],
   [forbiddenGoalTable, new RegExp(`\\b${forbiddenGoalTable}\\b`, 'i')],
+  [
+    'Goals/Non-goals heading',
+    /^#{2,6}\s+(?:\d+\.\s*)?(?:Goals|Non-goals|Goals\s*\/\s*Non-goals)\s*$/imu,
+  ],
+  ['template responsibility heading', /^#{2,6}\s+(?:核心职责|协作边界)\s*$/mu],
   ['Workspace NOTES', /workspace\s+notes/i],
   ['本切片', /本切片/],
   ['路线图', /路线图/],
@@ -201,7 +206,8 @@ function fenceAndHeadingCount(source) {
 }
 
 function inlineCodeValues(source) {
-  return [...outsideFencedCode(source).matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim())
+  const withoutLinks = outsideFencedCode(source).replace(/!?\[[^\]]*]\([^)]+\)/g, '')
+  return [...withoutLinks.matchAll(/`([^`\n]+)`/g)].map((match) => match[1].trim())
 }
 
 function looksLikeCheckablePath(value) {
@@ -330,8 +336,15 @@ function checkLinks() {
 }
 
 function checkInlineSourcePaths() {
-  for (const relativePath of documentPaths) {
+  for (const relativePath of markdownSurfaces) {
     const source = read(relativePath)
+    const linkedTargets = new Set(
+      markdownLinks(source)
+        .map((destination) => localLinkPath(relativePath, destination))
+        .filter((target) => target !== null && target !== false)
+        .map((target) => path.resolve(target)),
+    )
+    const reportedUnlinkedPaths = new Set()
     for (const value of inlineCodeValues(source)) {
       if (!looksLikeCheckablePath(value)) {
         continue
@@ -339,6 +352,23 @@ function checkInlineSourcePaths() {
       const absolutePath = path.join(repositoryRoot, value)
       if (!existsSync(absolutePath)) {
         addError(`${relativePath}: missing inline repository path ${value}`)
+      } else if (
+        (value.includes('/') || value.includes('.')) &&
+        ![...linkedTargets].some((target) => {
+          const resolvedPath = path.resolve(absolutePath)
+          if (target === resolvedPath) {
+            return true
+          }
+          return (
+            statSync(resolvedPath).isDirectory() &&
+            path.relative(resolvedPath, target) !== '..' &&
+            !path.relative(resolvedPath, target).startsWith(`..${path.sep}`)
+          )
+        }) &&
+        !reportedUnlinkedPaths.has(value)
+      ) {
+        addError(`${relativePath}: inline repository path must also be linked ${value}`)
+        reportedUnlinkedPaths.add(value)
       }
     }
   }
@@ -362,7 +392,7 @@ function checkForbiddenReferencesAndTerms() {
     }
   }
   for (const relativePath of markdownSurfaces) {
-    const source = read(relativePath)
+    const source = outsideFencedCode(read(relativePath))
     for (const [label, pattern] of forbiddenDocumentationTerms) {
       if (pattern.test(source)) {
         addError(`${relativePath}: contains forbidden documentation term ${label}`)

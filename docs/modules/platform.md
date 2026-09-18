@@ -252,7 +252,9 @@ Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由�
 以 `(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由，并实现会话核心
 的 `DaemonLeaseStore`。
 
-`harness/environment-server` 的 `EnvironmentDaemonServer` 唯一拥有本节点 daemon 会话
+[Harness Environment Server](harness-environment-server.md) 的
+[EnvironmentDaemonServer](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java)
+唯一拥有本节点 daemon 会话
 状态：连接代际、HELLO/WELCOME/READY/HEARTBEAT 握手推进、在途 invocation 与终态所有权。
 [EnvironmentServerConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/server/EnvironmentServerConfiguration.java)
 装配它并提供窄端口实现：`EnvironmentRegistry`（租约围栏）、`EnvironmentRepository`

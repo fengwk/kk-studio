@@ -123,11 +123,11 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke：
 完整步骤、mock routes 与真实 Seedance prepare-only 边界见
 [deploy/test/README.md](../../deploy/test/README.md)。
 
-### `deploy/distributed`：双节点零 App-to-App 网络栈
+### [`deploy/distributed`](../../deploy/distributed)：双节点零 App-to-App 网络栈
 
 `kk-studio-distributed` project 是免费 mock 拓扑：App 镜像复用 `deploy/local/Dockerfile`，
 Daemon 镜像复用 [deploy/reliability/daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile)，
-HTTP mock 直接挂载 `deploy/test/mock`。
+HTTP mock 直接挂载 [`deploy/test/mock`](../../deploy/test/mock)。
 
 ```bash
 ./deploy/distributed/run.sh up [--skip-build]
@@ -151,7 +151,8 @@ DISTRIBUTED_APP_B_PORT=18083
 ```
 
 `run.sh disconnect-db-a` / `reconnect-db-a` 是按容器与网络精确操作的幂等故障注入，不会影响
-`daemon-a` 网络与 daemon workspace volume。`./scripts/e2e.sh --distributed` 通过该入口启停栈
+`daemon-a` 网络与 daemon workspace volume。
+[`scripts/e2e.sh`](../../scripts/e2e.sh) 的 `--distributed` 通过该入口启停栈
 并在退出时清理。
 
 ### `deploy/reliability`：App + Environment Daemon
@@ -185,7 +186,8 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-dae
 `/proc/<pid>/environ`。
 
 [daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 JDK 21 builder 构建
-`harness/daemon` 单文件 shaded JAR，runtime 使用 `eclipse-temurin:21.0.8_9-jdk-jammy`，预装
+[`harness/daemon`](../../harness/daemon) 单文件 shaded JAR，runtime 使用
+`eclipse-temurin:21.0.8_9-jdk-jammy`，预装
 Node `22.19.0`/npm `11.19.0`、bash、git，创建 `kkdaemon` uid/gid `10001`，入口先物化凭证再
 `exec java -jar /opt/kk-studio/daemon.jar`。Daemon 只挂载一个 `/workspace` named volume，
 `workspace-init` 完成 owner 初始化（`chown 10001:10001`）后 Daemon 才启动。
@@ -235,7 +237,7 @@ Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 Sy
   credential 文件、`credentials*`、service account JSON 和 `secrets/`。
 - local/test/reliability/distributed 的固定 PostgreSQL 与 MinIO 凭据只属于 disposable compose；
   宿主绑定地址一旦改为非 loopback，就必须显式覆盖这些默认值。
-- `scripts/e2e.sh` 只在显式 `--real` 时读取四组完整 credential pair，并经 HTTP 写入各自专用
+- [`scripts/e2e.sh`](../../scripts/e2e.sh) 只在显式 `--real` 时读取四组完整 credential pair，并经 HTTP 写入各自专用
   database；credential 不进入 Compose environment、Dockerfile、image layer、backend/Daemon
   command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
