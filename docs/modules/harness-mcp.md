@@ -2,13 +2,13 @@
 
 MCP 工具要接进 Harness，有两个地方会用到：Platform 在 Backend 进程内按调用直连 Remote Streamable HTTP 服务，Environment Daemon 在目标环境里长期持有一个 Local stdio 子进程。两者的失败面完全不同——前者怕把一次调用挂死，后者怕泄漏子进程、把取消丢掉、或者在重启子进程时污染上一代的在途请求。本模块把底层 LangChain4j MCP SDK 收敛在一处，对调用方只暴露稳定的配置、工具定义、调用结果、总预算与取消契约，因此两个场景可以共用同一份超时、取消与清理语义。
 
-本模块不持久化 MCP Server/Tool，不解析产品层 JSON 配置，不决定 Environment 路由，也不缓存跨调用 client：Remote 侧的 per-call 生命周期与 Local 侧的代际共享分别由 [`platform`](platform.md) 与 [`harness-daemon`](harness-daemon.md) 决定。
+本模块交付的是一份无状态的 MCP client 与 transport 能力：把配置收敛为不可变值对象、列举远端工具、执行单次调用并映射结果，并用一份覆盖初始化与执行的总预算与调用级取消约束每次调用。产品侧的 MCP Server/Tool 持久化与产品 JSON 配置由 [`platform`](platform.md) 拥有，Environment 路由决策与 Remote 侧的 per-call 生命周期同样归 Platform，Local 子进程的代际共享与回收归 [`harness-daemon`](harness-daemon.md)。
 
 ## 包架构
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.mcp` | MCP client/config/result 模型、LangChain4j 适配、deadline 与取消协调、自定义 stdio transport | 不持久化产品事实、不解析 Environment 路由、不缓存跨调用 client 与工具目录 |
+| `fun.fengwk.kkstudio.harness.mcp` | MCP client/config/result 模型、LangChain4j 适配、deadline 与取消协调、自定义 stdio transport | 无状态调用能力；产品事实持久化、Environment 路由与 Remote per-call 生命周期归 Platform，Local 子进程代际共享与回收归 Daemon |
 
 生产依赖只有 `langchain4j-mcp`、[`harness-common`](harness-common.md)、Jackson 与 JDK（见 [`pom.xml`](../../harness/mcp/pom.xml)）；不依赖 Spring、JDBC、[`harness-tool`](harness-tool.md)、[`harness-environment`](harness-environment.md)、Platform 或 Daemon。
 
