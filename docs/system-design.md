@@ -39,6 +39,43 @@ WebSocket 与 `NOTIFY` 只缩短等待时间；进程退出、连接中断或通
 外；写回时重新校验版本、attempt、lease 与 token。迟到 callback 或旧 owner 最多触发
 no-op、resync 或内部重试，不能覆盖新 owner 的状态。
 
+## Agent、Branch 与执行上下文
+
+Agent 是可复用的行为定义：它声明 system prompt、默认 Model、Tool、Skill 和可委派的
+其他 Agent，不绑定具体 Environment，也没有“主 Agent”或“Subagent”类型。一个 Agent
+是否作为子 Agent 使用，只取决于另一个 Agent 是否选择了它；委派关系可以递归，但运行时
+由统一深度上限终止无限递归。
+
+一次对话真正执行在哪里，由 Branch 的完整设置决定：
+
+```text
+BranchSettings
+├── agentName
+├── model = providerName + modelName + variant
+└── environmentName?
+```
+
+Root 保存初始设置，每个普通 TurnStart 冻结该回合设置；`SET_AGENT`、`SET_MODEL` 与
+`SET_ENVIRONMENT` 命令在下一轮开始时归约成新的完整快照。Thread fork 从目标 Entry 的
+路径重放出当时设置，Compaction Turn 不改变业务设置。Environment 使用全局唯一且不可变
+的 name 进入历史；Platform 在每个 Turn 将其解析为内部 UUID，UUID 只服务 Daemon 认证、
+连接租约和已开始 Tool invocation 的物理路由。
+
+Tool 的声明与当前可执行状态分离。Agent 选择的环境工具始终进入模型 Tool declarations：
+Branch 未选择 Environment 或引用已不存在时，调用返回明确 Tool error；Environment
+暂时离线时，已冻结路由的调用等待重连或正常 deadline；在线状态不会动态改变 system
+prompt、Tool surface 或 Prompt Cache affinity。这样用户仍可在无 Environment 的对话中
+正常使用模型和 Platform Tool，并能从错误直接知道需要选择或启动哪个 Environment。
+
+子 Agent 新建 Session 时使用自身默认 Model；其 `inheritParentEnvironment` 决定是否把
+父 Model invocation 已冻结的 `environmentName` 作为子 Branch 初始值。该选项只影响
+委派，不限制 Agent 作为普通 Chat 根 Agent 使用。
+
+Skill 是 Platform 全局名称资源，与 Environment inventory 解耦。Package 负责安装和原子
+升级，Agent 与 `load_skill` 只使用全局唯一 Skill name；一次 Model invocation 会冻结
+Package 版本和内容 revision。MCP 同样属于 Platform 全局 Tool catalog，Backend 只通过
+Streamable HTTP 连接 Server，不在 Environment Daemon 内启动 stdio 子进程。
+
 ## 系统组成
 
 ```mermaid
