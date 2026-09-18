@@ -1,67 +1,70 @@
 # 文档导航
 
-这里是仓库文档的唯一入口。文档只描述当前代码、协议、职责和运行方式；
-同一主题只保留一份事实源。
+从你要完成的任务出发选择文档。每个主题只有一份事实源；上级文档帮助建立心智模型，
+具体参数和实现细节留在对应模块或运行指南中。
 
-## 阅读顺序
+## 我现在要做什么
 
-1. [系统设计](system-design.md)：先了解 Maven reactor、逻辑模块、全局不变量
-   和跨域主链路。
-2. [模块文档](#模块)：按职责阅读相关模块的边界、API、恢复语义和测试入口。
-3. [运行文档](#operations)：需要构建、测试、部署、安装 Daemon 或运行 E2E 时阅读
-   operations。
-
-## 系统
-
-| 文档 | 内容 |
+| 任务 | 从这里开始 |
 | --- | --- |
-| [system-design.md](system-design.md) | 系统边界、依赖、耐久事实、并发、恢复和阅读导航 |
+| 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
+| 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
+| 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
+| 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
+| 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
+| 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
+| 报告安全漏洞 | [Security Policy](../SECURITY.md) |
 
-## 模块
+## 按代码区域理解系统
 
-| 模块 | 文档 | 内容 |
-| --- | --- | --- |
-| share | [modules/share.md](modules/share.md) | Public DTO 与 JSON wire |
-| schema | [modules/schema.md](modules/schema.md) | Flyway baseline、seed 与数据库约束 |
-| canvas-core | [modules/canvas-core.md](modules/canvas-core.md) | Canvas 领域模型、typed command 与 ports |
-| canvas-infra | [modules/canvas-infra.md](modules/canvas-infra.md) | Canvas PostgreSQL 适配与 Function runtime |
-| frontend | [modules/frontend.md](modules/frontend.md) | React 宿主、feature 边界与浏览器恢复 |
-| harness-builtin | [modules/harness-builtin.md](modules/harness-builtin.md) | 第一方内置 14 工具与 Goal 契约 |
-| harness-common | [modules/harness-common.md](modules/harness-common.md) | Prompt、JSON、ResourceRef、ResultContent 与 InputSchema 基础契约 |
-| harness-contributor-api | [modules/harness-contributor-api.md](modules/harness-contributor-api.md) | Trusted Java Contributor SPI 与 catalog |
-| harness-daemon | [modules/harness-daemon.md](modules/harness-daemon.md) | Environment Daemon 与本地工具执行 |
-| harness-environment | [modules/harness-environment.md](modules/harness-environment.md) | Environment 身份、Capability catalog 与唯一 Daemon protocol v1 |
-| harness-environment-server | [modules/harness-environment-server.md](modules/harness-environment-server.md) | Environment daemon 会话、租约与调用协调核心 |
-| harness-infra | [modules/harness-infra.md](modules/harness-infra.md) | Harness Store、Work、通知和 ResourceStore |
-| harness-mcp | [modules/harness-mcp.md](modules/harness-mcp.md) | Remote/Local MCP client、总预算、取消与 stdio 进程生命周期 |
-| harness-provider | [modules/harness-provider.md](modules/harness-provider.md) | JDK 21 HttpClient + SSE 传输与增量解析基础设施 |
-| harness-runtime | [modules/harness-runtime.md](modules/harness-runtime.md) | Agent Runtime 状态机与 processors |
-| harness-tool | [modules/harness-tool.md](modules/harness-tool.md) | Tool identity、descriptor、call/result 与 Tool JSON codecs |
-| platform | [modules/platform.md](modules/platform.md) | Application service、gateway 与外部适配 |
-| web | [modules/web.md](modules/web.md) | Spring Boot composition root 与 transport |
+先读[系统设计](system-design.md)，再进入正在修改的代码区域。
 
-## Operations
+### Agent 状态机与扩展
 
-| 文档 | 内容 |
+| 文档 | 回答的问题 |
 | --- | --- |
-| [development-and-testing.md](operations/development-and-testing.md) | 开发、质量、NAS 自迭代、E2E、可靠性、性能和供应链入口 |
-| [deployment.md](operations/deployment.md) | Fat JAR、Compose stacks、NAS 外部部署边界、运行配置和清理 |
-| [environment-daemon.md](operations/environment-daemon.md) | Environment Daemon 发布物下载校验、registration token、`java -jar` 运行、systemd 常驻、升级和清理 |
+| [Harness Runtime](modules/harness-runtime.md) | Session、Entry Tree、Thread、Invocation、Work 和 Processor 如何组成 Agent Loop？ |
+| [Harness Infra](modules/harness-infra.md) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
+| [Harness Provider](modules/harness-provider.md) | 模型请求、SSE、reasoning replay 和上游错误如何处理？ |
+| [Harness Tool](modules/harness-tool.md) | Tool 的身份、定义、调用、校验和结果采用什么统一契约？ |
+| [Harness Contributor API](modules/harness-contributor-api.md) | Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
+| [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
+| [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
+| [Harness MCP](modules/harness-mcp.md) | Remote/Local MCP client 如何处理预算、取消和 stdio 子进程？ |
 
-## 仓库策略
+### Environment 与主机能力
 
-| 文件 | 内容 |
+| 文档 | 回答的问题 |
 | --- | --- |
-| [LICENSE](../LICENSE) | Apache License 2.0 |
-| [SECURITY.md](../SECURITY.md) | 支持范围和私密漏洞报告入口 |
+| [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录和 protocol v1 如何定义？ |
+| [Environment Server](modules/harness-environment-server.md) | Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
+| [Harness Daemon](modules/harness-daemon.md) | 独立主机进程如何执行文件、命令、LSP、Skill、MCP 和二进制上传？ |
 
-## 维护规则
+### Canvas 与数据契约
 
-- 文档路径和源码路径必须与仓库当前布局一致；变更入口或协议时同步更新相关
-  模块和 operations 文档。
-- 每份文档只保留一个一级标题，并以系统设计为跨模块边界的上级事实源。
-- 精确的 E2E case inventory 由
-  `node scripts/e2e/run-matrix.mjs --list` 和 `--docs` 生成，不在文档中复制
-  case ID 清单。
-- 从仓库根目录运行 `node scripts/docs/check.mjs` 检查固定布局、模块拓扑、
-  链接、标题和禁止旧路径。
+| 文档 | 回答的问题 |
+| --- | --- |
+| [Canvas Core](modules/canvas-core.md) | Graph 聚合、typed command、版本和 Function ports 如何定义？ |
+| [Canvas Infra](modules/canvas-infra.md) | Graph 如何持久化，Function run 如何 claim、heartbeat 和终结？ |
+| [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
+| [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
+
+### 应用边界
+
+| 文档 | 回答的问题 |
+| --- | --- |
+| [Platform](modules/platform.md) | Catalog、Chat、Project、Storage、Environment 与外部系统如何编排？ |
+| [Web](modules/web.md) | Spring Boot composition root 如何装配 HTTP、WebSocket、Worker 和生命周期？ |
+| [Frontend](modules/frontend.md) | 浏览器如何把 durable Snapshot 与 lossy realtime 合并为可恢复体验？ |
+
+## 仓库与文档维护
+
+- [Apache License 2.0](../LICENSE) 说明代码许可。
+- 入口、协议或行为变化时，同步更新其唯一事实源和所有指向它的导航。
+- 本地源码、测试、脚本和配置在文档中使用可点击的相对链接；协议值、命令和配置键使用
+  反引号。
+- E2E case inventory 由
+  [`scripts/e2e/run-matrix.mjs`](../scripts/e2e/run-matrix.mjs) 的 `--list` / `--docs`
+  输出生成，文档只说明如何选择和运行矩阵。
+- 从仓库根目录执行 [`scripts/docs/check.mjs`](../scripts/docs/check.mjs) 检查固定布局、
+  标题、链接、模块拓扑和禁止的旧引用。

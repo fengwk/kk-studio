@@ -9,8 +9,8 @@
 | 工具 | 用途与约束 |
 | --- | --- |
 | JDK 21 | 所有 Maven 命令显式使用 `JAVA_HOME_21`；根 POM 的 `maven.compiler.release` 是 `21` |
-| Maven | 通过 `mvn` 可用；`scripts/dev.sh`、`scripts/e2e/lib.sh`、`scripts/reliability/regression.sh`、`scripts/supply-chain.sh` 都会校验 JDK 21 |
-| Node 与 npm | Frontend 依赖由 `frontend/package-lock.json` 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
+| Maven | 通过 `mvn` 可用；[`scripts/dev.sh`](../../scripts/dev.sh)、[`scripts/e2e/lib.sh`](../../scripts/e2e/lib.sh)、[`regression.sh`](../../scripts/reliability/regression.sh)、[`scripts/supply-chain.sh`](../../scripts/supply-chain.sh) 都会校验 JDK 21 |
+| Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
 | `curl`、`jq`、`lsof` | `scripts/dev.sh` 启动前后检查端口与健康状态 |
 | Python 3 | E2E 与测试栈的 smoke 脚本 |
@@ -123,9 +123,15 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 ### JaCoCo
 
 根 POM 提供 JaCoCo `0.8.11`：`prepare-agent` 注入 test JVM，`test` 阶段执行 `report`，报告位于各
-模块的 `target/site/jacoco/`。`harness/common`、`harness/mcp`、`harness/tool`、
-`harness/environment`、`harness/environment-server`、`harness/runtime`、`harness/contributor-api`、
-`harness/builtin`、`harness/provider`、`platform` 和 `web` 在各自 POM 中把 JaCoCo `check` 绑定到
+模块的 `target/site/jacoco/`。[`harness/common`](../../harness/common/pom.xml)、
+[`harness/mcp`](../../harness/mcp/pom.xml)、[`harness/tool`](../../harness/tool/pom.xml)、
+[`harness/environment`](../../harness/environment/pom.xml)、
+[`harness/environment-server`](../../harness/environment-server/pom.xml)、
+[`harness/runtime`](../../harness/runtime/pom.xml)、
+[`harness/contributor-api`](../../harness/contributor-api/pom.xml)、
+[`harness/builtin`](../../harness/builtin/pom.xml)、
+[`harness/provider`](../../harness/provider/pom.xml)、`platform` 和 `web`
+在各自 POM 中把 JaCoCo `check` 绑定到
 `verify`，按 `CLASS` include 只检查当前关键类，line coverage 下限为 `0.90`，个别类要求 `1.00`：
 
 ```bash
@@ -422,8 +428,8 @@ TERM 都执行 `down --volumes --remove-orphans`。
 
 | 镜像 | Dockerfile | 默认 tag | 覆盖变量 |
 | --- | --- | --- | --- |
-| App | `deploy/local/Dockerfile` | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
-| Daemon | `deploy/reliability/daemon.Dockerfile` | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
+| App | [`deploy/local/Dockerfile`](../../deploy/local/Dockerfile) | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
+| Daemon | [`deploy/reliability/daemon.Dockerfile`](../../deploy/reliability/daemon.Dockerfile) | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
 
 App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`；Daemon 额外检查 Node
 `v22.19.x`、npm `11.19.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。

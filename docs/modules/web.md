@@ -18,7 +18,7 @@ Blob 引用计数、Provider admission 或 Harness reducer。
 
 ## 依赖边界与组合结构
 
-`web/pom.xml` 直接声明：
+[`web/pom.xml`](../../web/pom.xml) 直接声明：
 
 | 方向 | 依赖 |
 | --- | --- |
@@ -172,9 +172,10 @@ domain error 不持有 locale 和 HTTP status。
 
 ## 启动、Flyway 与静态分发
 
-`web/src/main/resources/application.yml` 提供 application name `kk-studio`、默认 `dev`
-profile、PostgreSQL datasource placeholder、8080 port、gzip compression 与
-`health,prometheus,offline,online` actuator exposure；`application-prod.yml` 追加
+[`application.yml`](../../web/src/main/resources/application.yml) 提供 application name
+`kk-studio`、默认 `dev` profile、PostgreSQL datasource placeholder、8080 port、gzip
+compression 与 `health,prometheus,offline,online` actuator exposure；
+[`application-prod.yml`](../../web/src/main/resources/application-prod.yml) 追加
 `server.forward-headers-strategy: framework`，数据源三项全部来自
 `KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD` 且无默认值，缺失时启动
 失败而不是回退到开发数据库。数据源设置 Hikari `connection-timeout` 5 秒、JDBC
@@ -409,12 +410,12 @@ controller、storage、canvas、comfyui、opencli-hub）由 Platform 与 Canvas 
 
 Controller、DTO 与 i18n：
 
-- `web/src/test/java/fun/fengwk/kkstudio/web/controller/` 下的逐 Controller 测试，以及
+- [`web/controller` tests](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/) 下的逐 Controller 测试，以及
   `StudioMcpRuntimeToolIntegrationTest`、`StudioEnvironmentOfflineIntegrationTest`。
-- `web/src/test/java/fun/fengwk/kkstudio/web/advice/`、
+- [`web/advice` tests](../../web/src/test/java/fun/fengwk/kkstudio/web/advice/)、
   [`StudioI18nIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/StudioI18nIntegrationTest.java)、
   `StudioMessageServiceTest`。
-- `web/src/test/java/fun/fengwk/kkstudio/web/project/`：`ProjectDtoMapperTest`、
+- [`web/project` tests](../../web/src/test/java/fun/fengwk/kkstudio/web/project/)：`ProjectDtoMapperTest`、
   `ProjectSnapshotAssemblerTest`、`StudioIssueControllerTest`、`StudioProjectControllerTest`、
   `StudioProjectErrorAdviceTest`。
 

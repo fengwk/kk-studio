@@ -11,7 +11,10 @@ schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql
 schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
 ```
 
-`V1__schema.sql` 是唯一的 versioned migration；`db/seed/**` 下只有三份受控 repeatable migration。Web 以 runtime scope 依赖 `kk-studio-schema`，Platform、Harness Infra 与 Canvas Infra 只在 test scope 使用它；schema 不反向依赖任何模块。Flyway 的装配位置：`web/src/main/resources/application-prod.yml` 只加载 `classpath:db/migration`，dev/e2e/canvas-test profile 在此基础上追加各自的 seed（见 [Web](web.md) 的配置表）。
+`V1__schema.sql` 是唯一的 versioned migration；`db/seed/**` 下只有三份受控 repeatable migration。Web 以 runtime scope 依赖 `kk-studio-schema`，Platform、Harness Infra 与 Canvas Infra 只在 test scope 使用它；schema 不反向依赖任何模块。Flyway 的装配位置：
+[`application-prod.yml`](../../web/src/main/resources/application-prod.yml) 只加载
+`classpath:db/migration`，dev/e2e/canvas-test profile 在此基础上追加各自的 seed
+（见 [Web](web.md) 的配置表）。
 
 ## 一张图看表之间怎么连
 
