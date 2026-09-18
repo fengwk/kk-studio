@@ -91,8 +91,8 @@ public record SystemSettings(
       Objects.requireNonNull(source, "tool.permission");
       Map<String, List<PermissionRule>> copy = new LinkedHashMap<>();
       source.forEach(
-          (toolId, rules) -> {
-            PermissionKeyValidator.requireValid(toolId, "tool.permission key");
+          (toolName, rules) -> {
+            PermissionKeyValidator.requireValid(toolName, "tool.permission key");
             List<PermissionRule> copiedRules = new ArrayList<>();
             for (PermissionRule rule : Objects.requireNonNull(rules, "tool.permission rules")) {
               if (rule == null) {
@@ -101,7 +101,7 @@ public record SystemSettings(
               SystemSettingsValidation.requireValidPattern(rule.pattern());
               copiedRules.add(rule);
             }
-            copy.put(toolId, List.copyOf(copiedRules));
+            copy.put(toolName, List.copyOf(copiedRules));
           });
       return Collections.unmodifiableMap(copy);
     }

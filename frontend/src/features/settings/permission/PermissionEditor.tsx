@@ -17,12 +17,12 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { Select } from '@/shared/ui/console/Select'
 
 /**
- * 保序 permission 规则编辑器（tool ID + 该 tool 下有序规则数组）。
+ * 保序 permission 规则编辑器（模型可见 tool name + 该 tool 下有序规则数组）。
  *
  * - 规则数组顺序即求值顺序，只能在同 tool 内上移/下移，禁止跨 tool 重排；
- * - 重命名 tool ID 时目标 ID 冲突会确定性合并（源规则追加到目标之后）而不是丢规则；
- * - 空 tool ID / 空 pattern 呈现可修复的内联错误态，保存会被 codec 阻止；
- * - tool ID 从运行时 catalog 选择；catalog 缺失的已保存 ID 保留为可改选项。
+ * - 重命名 tool name 时目标 name 冲突会确定性合并（源规则追加到目标之后）而不是丢规则；
+ * - 空 tool name / 空 pattern 呈现可修复的内联错误态，保存会被 codec 阻止；
+ * - tool name 从运行时 catalog 选择；catalog 缺失的已保存 name 保留为可改选项。
  */
 export function PermissionEditor({
   groups,
