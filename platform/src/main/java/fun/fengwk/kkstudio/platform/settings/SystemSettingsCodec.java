@@ -383,24 +383,25 @@ public class SystemSettingsCodec {
     }
     Map<String, List<PermissionRule>> result = new LinkedHashMap<>();
     dto.forEach(
-        (toolId, rules) -> {
-          PermissionKeyValidator.requireValid(toolId, "tool.permission key");
+        (toolName, rules) -> {
+          PermissionKeyValidator.requireValid(toolName, "tool.permission key");
           if (rules == null) {
-            throw new IllegalArgumentException("tool.permission." + toolId + " is required");
+            throw new IllegalArgumentException("tool.permission." + toolName + " is required");
           }
           List<PermissionRule> converted = new ArrayList<>();
           for (SystemSettingsToolDTO.PermissionRuleDTO rule : rules) {
             if (rule == null) {
               throw new IllegalArgumentException(
-                  "tool.permission." + toolId + " rule must not be null");
+                  "tool.permission." + toolName + " rule must not be null");
             }
             converted.add(
                 new PermissionRule(
-                    requiredText(rule.getPattern(), "tool.permission." + toolId + " pattern"),
+                    requiredText(rule.getPattern(), "tool.permission." + toolName + " pattern"),
                     PermissionAction.fromValue(
-                        requiredText(rule.getAction(), "tool.permission." + toolId + " action"))));
+                        requiredText(
+                            rule.getAction(), "tool.permission." + toolName + " action"))));
           }
-          result.put(toolId, converted);
+          result.put(toolName, converted);
         });
     return result;
   }
@@ -410,7 +411,7 @@ public class SystemSettingsCodec {
     Map<String, List<SystemSettingsToolDTO.PermissionRuleDTO>> permission = new LinkedHashMap<>();
     tool.permission()
         .forEach(
-            (toolId, rules) -> {
+            (toolName, rules) -> {
               List<SystemSettingsToolDTO.PermissionRuleDTO> ruleDtos = new ArrayList<>();
               for (PermissionRule rule : rules) {
                 SystemSettingsToolDTO.PermissionRuleDTO ruleDto =
@@ -419,7 +420,7 @@ public class SystemSettingsCodec {
                 ruleDto.setAction(rule.action().value());
                 ruleDtos.add(ruleDto);
               }
-              permission.put(toolId, ruleDtos);
+              permission.put(toolName, ruleDtos);
             });
     dto.setPermission(permission);
     dto.setDefaultYolo(tool.defaultYolo());
