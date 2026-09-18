@@ -63,8 +63,11 @@ E2E、覆盖率、可靠性、性能和供应链命令以
 
 ## 文档
 
-[文档唯一导航](docs/README.md) 汇总系统设计、15 个逻辑模块和两个运行
+[文档唯一导航](docs/README.md) 汇总系统设计、18 个逻辑模块和三个运行
 operations 文档；建议先读[系统设计](docs/system-design.md)。
+
+在自有主机上安装并常驻 Environment Daemon：
+[Environment Daemon 安装与运行](docs/operations/environment-daemon.md)。
 
 ## 安全边界
 

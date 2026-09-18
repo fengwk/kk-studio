@@ -1,0 +1,139 @@
+# kk-studio Daemon GitHub Release.
+#
+# 推送 `v*` tag 时发布 Environment Daemon 的可执行单文件 JAR 及其校验和、确定性元数据与
+# 法律文件。发布前必须通过仓库质量门禁，且 tag 必须落在 `main` 的历史上，确保发布物
+# 对应已经合入主分支、可精确追溯的提交。
+#
+# 上传只使用 workflow 自带的 `github.token`（`contents: write`），不使用 PAT，也不读取
+# 任何其它 secret；发布物本身不含凭证。资产集合由
+# `scripts/release/prepare-daemon-release.sh` 唯一定义，本工作流只负责把它产出的文件
+# 原样上传：多一个或少一个都直接失败。
+name: daemon-release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 发布不可并发：取消正在上传的 workflow 会留下半套资产。同一 ref 的重跑排队执行，
+# 后一次以 `--clobber` 覆盖同名资产。
+concurrency:
+  group: daemon-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: '21'
+  NODE_VERSION: '24.14.0'
+  # 暂存产物的唯一来源；工作流的资产校验与上传都只读这个目录。
+  RELEASE_DIR: harness/daemon/target/release
+
+jobs:
+  publish:
+    name: build, stage and publish daemon release
+    runs-on: ubuntu-latest
+    steps:
+      # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # tag 名会进入资产文件名，因此只接受只含安全字符的版本 tag；tag 提交必须是
+      # origin/main 的祖先，未合入 main 的 tag 不能发布。
+      - name: Require a safe version tag on a main commit
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if ! [[ "${tag}" =~ ^v[0-9A-Za-z._-]+$ ]]; then
+            echo "unsupported release tag (expected ^v[0-9A-Za-z._-]+$): ${tag}" >&2
+            exit 1
+          fi
+          commit=$(git rev-parse --verify 'HEAD^{commit}')
+          git show-ref --verify --quiet refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${commit}" refs/remotes/origin/main; then
+            echo "release tag ${tag} (${commit}) is not an ancestor of origin/main" >&2
+            exit 1
+          fi
+          source_date_epoch=$(git show -s --format=%ct "${commit}")
+          echo "commit=${commit}" >>"${GITHUB_OUTPUT}"
+          echo "source_date_epoch=${source_date_epoch}" >>"${GITHUB_OUTPUT}"
+
+      # 通过门禁的提交才可能进入构建与发布步骤；任一门禁失败都会终止 workflow。
+      - name: Scan for sensitive data
+        run: python3 scripts/security/check-sensitive-data.py
+      - name: Check documentation layout
+        run: node scripts/docs/check.mjs
+      - name: Run repository script contracts
+        run: |
+          python3 -m unittest discover -s scripts/e2e/tests
+          node --test scripts/e2e/tests/*.test.mjs
+          node --test scripts/supply-chain/tests/*.test.mjs
+      - name: Verify the daemon module
+        run: >-
+          env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am
+          -Dproject.build.outputTimestamp="${{ steps.tag.outputs.source_date_epoch }}"
+          clean verify
+
+      # 唯一资产暂存实现：校验可执行单文件 JAR 后，把资产写进 RELEASE_DIR。
+      - name: Stage release assets
+        run: scripts/release/prepare-daemon-release.sh "${GITHUB_REF_NAME}"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 暂存目录刚被整体重建，因此这里列出的就是待上传的完整资产集合；集合必须与
+          # 发布契约逐字相同，多一个或少一个都直接失败，绝不静默上传一部分。
+          shopt -s nullglob
+          expected_names=(
+            LICENSE
+            THIRD_PARTY_NOTICES
+            "kk-studio-daemon-${GITHUB_REF_NAME}.jar"
+            "kk-studio-daemon-${GITHUB_REF_NAME}.jar.sha256"
+            "kk-studio-daemon-${GITHUB_REF_NAME}.json"
+          )
+          actual=()
+          for path in "${RELEASE_DIR}"/*; do
+            if [ -f "${path}" ]; then
+              actual+=("${path##*/}")
+            fi
+          done
+          actual=$(printf '%s\n' "${actual[@]}" | LC_ALL=C sort)
+          expected=$(printf '%s\n' "${expected_names[@]}" | LC_ALL=C sort)
+          if [ "${actual}" != "${expected}" ]; then
+            echo "staged assets do not match the release contract" >&2
+            printf 'actual:\n%s\n' "${actual}" >&2
+            printf 'expected:\n%s\n' "${expected}" >&2
+            exit 1
+          fi
+          assets=()
+          for name in "${expected_names[@]}"; do
+            assets+=("${RELEASE_DIR}/${name}")
+          done
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            # 重跑：只覆盖同名资产，保留已生成的 notes，并把上次未发布的草稿重新发布。
+            gh release upload "${GITHUB_REF_NAME}" --clobber "${assets[@]}"
+            gh release edit "${GITHUB_REF_NAME}" --draft=false
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --verify-tag \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              "${assets[@]}"
+          fi
