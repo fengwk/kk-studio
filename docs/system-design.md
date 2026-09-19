@@ -74,10 +74,11 @@ prompt、Tool surface 或 Prompt Cache affinity。这样用户仍可在无 Envir
 委派，不限制 Agent 作为普通 Chat 根 Agent 使用；恢复既有子 Session 时同样按该规则把
 Agent、Model 与 Environment 收敛到当前目标设置。
 
-Skill 是 Platform 全局名称资源，与 Environment inventory 解耦。Package 负责安装和原子
+Skill 是 Platform 全局名称资源，与 Environment 解耦。Package 负责安装和原子
 升级，Agent 与 `load_skill` 只使用全局唯一 Skill name；一次 Model invocation 会冻结
-`(packageName, packageVersion, name)` 三元组身份。MCP 同样属于 Platform 全局 Tool catalog，Backend 只通过
-Streamable HTTP 连接 Server，不在 Environment Daemon 内启动 stdio 子进程。
+`(packageName, packageVersion, name)` 三元组身份。MCP 同样属于 Platform 全局 Tool catalog：
+配置与发现结果按不可变的 server name 键控，Backend 在自身进程内通过 Streamable HTTP
+完成同步发现与 per-call 执行，不在 Environment Daemon 内启动任何子进程。
 
 ## 系统组成
 
@@ -120,7 +121,7 @@ flowchart LR
 | 应用编排 | [Platform](modules/platform.md)、[Share](modules/share.md) | Application service、外部适配、public wire contract |
 | Agent 契约 | [Harness Common](modules/harness-common.md)、[Tool](modules/harness-tool.md)、[Environment](modules/harness-environment.md)、[Contributor API](modules/harness-contributor-api.md) | 值对象、Tool 与 Environment 边界、扩展契约 |
 | Agent 执行 | [Harness Runtime](modules/harness-runtime.md)、[Provider](modules/harness-provider.md)、[Builtin](modules/harness-builtin.md) | 状态机、Processor、模型协议、内置能力 |
-| Agent 基础设施 | [Harness Infra](modules/harness-infra.md)、[Environment Server](modules/harness-environment-server.md)、[Daemon](modules/harness-daemon.md)、[MCP](modules/harness-mcp.md) | PostgreSQL Work、会话租约、主机执行与 MCP 生命周期 |
+| Agent 基础设施 | [Harness Infra](modules/harness-infra.md)、[Environment Server](modules/harness-environment-server.md)、[Daemon](modules/harness-daemon.md)、[MCP](modules/harness-mcp.md) | PostgreSQL Work、会话租约、主机执行与 MCP 调用契约 |
 | Canvas | [Canvas Core](modules/canvas-core.md)、[Canvas Infra](modules/canvas-infra.md) | 纯领域命令、Graph 版本、持久化与 Function runtime |
 | 数据库 | [Schema](modules/schema.md) | 唯一 Flyway baseline、约束与 profile seed |
 
@@ -132,8 +133,8 @@ flowchart LR
 frontend -> web -> platform
 web -> canvas-infra -> canvas-core
 web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
-platform -> Canvas / Harness contracts
-harness-daemon -> harness-environment / harness-mcp
+platform -> Canvas / Harness contracts / harness-mcp
+harness-daemon -> harness-environment
 ```
 
 Core、Runtime 与公共契约不创建 Spring Boot root，也不反向依赖外层实现。模块级

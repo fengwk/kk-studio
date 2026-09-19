@@ -53,7 +53,7 @@ slot，每个 Page contribution 都包裹 `OverlayHost`。
 
 | extension | 页面 | 其他 contribution |
 | --- | --- | --- |
-| `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/environments`、`/mcp-servers` | AI navigation、创建/编辑/删除 dialog、`task` tool renderer |
+| `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/skill-packages`、`/environments`、`/mcp-servers` | AI navigation、创建/编辑/删除 dialog、`task` tool renderer |
 | `builtin.projects` | `/projects`、`/projects/:projectId` | 全局 Project invalidation overlay |
 | `builtin.canvas` | `/canvas`、`/canvas/:canvasId` | lazy 加载 Canvas feature |
 | `builtin.comfyui` | `/comfyui` | workflow editor/delete dialog |
@@ -90,8 +90,8 @@ contract 按 HTTP 边界分组，全部是严格 wire 类型：
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command batch、stop/approval、model/tool invocation、Snapshot |
 | [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 structured config |
 | [ai-chat.ts](../../frontend/src/shared/api/contracts/ai-chat.ts) | Chat 资源 |
-| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card/live capability、Skill 来源、持久 inventory 与异步操作 |
-| [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影与显式配置 |
+| [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card 与 live capability 投影 |
+| [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影、显式配置与显式 HTTP 创建/更新请求 |
 | [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、Snapshot、Patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
 | [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
@@ -103,8 +103,8 @@ service 只做路由映射与严格解码：
 | --- | --- |
 | [agent-service.ts](../../frontend/src/shared/api/agent-service.ts) | `/ai/catalog/providers|models|agents|tools`，删除使用 `expectedVersion` CAS |
 | [chat-service.ts](../../frontend/src/shared/api/chat-service.ts) | `/ai/chats` 与 owner Session 查询 |
-| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` CRUD、显式配置查询与 discover |
-| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments` Card、token、Skill 来源、inventory 与 operation |
+| [mcp-server-service.ts](../../frontend/src/shared/api/mcp-server-service.ts) | `/ai/mcp-servers` name-keyed CRUD、显式配置查询与 discover |
+| [environment-service.ts](../../frontend/src/shared/api/environment-service.ts) | `/harness/environments` Card 与 token |
 | [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` |
 | [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases`、Canvas resource 与 Function Run；自带 `canvasRequest`、AbortSignal 与 strict envelope |
 | [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | upload 生命周期与 blob presigned URL |
@@ -188,7 +188,7 @@ Chat Pane 有两个正交维度。布局是 `single`、`split-2`、`split-3`、`
 | `BOUND_THREAD` | 已加载 Thread snapshot | Thread `branchSettings`、head、version、next command sequence | `THREAD` target 携带精确 cursor，batch 进入 mailbox |
 
 `PendingAcceptance` 按 owner 与 pane id 写入 localStorage，包含 frozen request、
-BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending operation 时
+BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending acceptance 时
 拒绝切换 target，generation 与 target identity 防止旧请求覆盖新 Pane。
 
 `buildAcceptanceRequest` 在网络请求前冻结整批数据：
@@ -260,21 +260,21 @@ upload handle 只能按 upload id 删除，blob original/preview URL 只在资�
 ### AI
 
 [`features/ai`](../../frontend/src/features/ai) 分成 catalog、chat、composer、environment、
-mcp、runtime 六个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
+mcp、runtime、skills 七个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
 Agent 的 `tools`、`subagents` 用 catalog candidate 校验（candidate 身份就是模型可见
-name），`skills` 用显式 `{sourceId, name}` 引用并从绑定 Environment 的持久 inventory
-构建候选，切换或解绑 Environment 会清空选择。Agent 表单还显式编辑
+name），`skills` 用 Platform 全局 canonical Skill name 引用候选。Agent 表单还显式编辑
 `inheritParentEnvironment`（新建默认开启），决定该 Agent 被 `task` 委派时是否继承父
 会话当前 Environment。Chat 只持久化 title、agentName 与 YOLO 开关，Environment
 是可空的分支选择（`BranchSettings.environmentName`），随每个分支的 branchSettings 独立
 保存并逐字段投影。
 
-Environment 卡片只展示 capability 的 canonical `id`，管理弹窗提供 Skill 来源 CAS CRUD、
-持久 inventory 与带显式 `timeoutMillis` 的 refresh/install/update，操作只在
-`PENDING/RUNNING` 时每 2 秒轮询并在终态刷新；只有 `PENDING` 可取消。MCP 卡片只消费
-不含连接细节的安全投影，完整配置仅在打开编辑弹窗时经 `no-store` 端点读取，并用递增
-generation fence 防止关闭/重开时的迟到响应覆盖当前弹窗；更新或发现进行中时所有 JSON
-mutation 控件禁用。
+Environment 卡片只展示 capability 的 canonical `id`，管理弹窗只投影宿主事实
+（`EnvironmentHostSection`：OS、时区、备注、root path 与最后活跃时间），不提供任何
+环境侧写入或异步任务视图。MCP 卡片只消费不含连接细节的安全投影（name、enabled、
+timeout、发现状态与工具数），完整配置（URL 与 headers）仅在打开编辑弹窗时经 `no-store`
+端点读取，并用递增 generation fence 防止关闭/重开时的迟到响应覆盖当前弹窗；更新或发现
+进行中时所有 mutation 控件禁用。Platform 全局 Skill package 的 CRUD 与当前 Skill 候选
+独立在 [`features/ai/skills`](../../frontend/src/features/ai/skills)。
 
 ### Projects
 

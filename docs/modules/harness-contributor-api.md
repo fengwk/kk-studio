@@ -79,7 +79,7 @@ requiredEnvironmentId    精确要求的目标 Environment；非空时 environme
 stateAccesses[]          该工具访问的 branch custom state 集合（同一 customType 不得重复）
 ```
 
-工厂方法 `none()` / `environment()` / `environment(EnvironmentId)` 覆盖三种常见形态，其中第三项用于绑定到指定 Environment 的工具（如本地 MCP 工具）。
+工厂方法 `none()` / `environment()` / `environment(EnvironmentId)` 覆盖三种常见形态，其中第三项用于把工具绑定到指定 Environment 执行（如编码工具）。Platform 侧的 MCP 工具使用 `none()`：它们通过 Backend 的 Streamable HTTP 调用执行，与宿主 Environment 无关。
 
 需要环境的工具在 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 中拿到 `invocationId`、`threadId`、`executedAt`、`branch` 与可选的 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 是刻意窄的接口——只有 `environmentId()` 与 `execute(capability, request, listener)`，工具据此执行一个 `EnvironmentCapabilityDescriptor`，而连接注册、路由与协议细节由 Platform 的适配器承担。
 
