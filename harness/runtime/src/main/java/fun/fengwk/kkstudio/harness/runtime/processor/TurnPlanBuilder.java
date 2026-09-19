@@ -115,7 +115,8 @@ final class TurnPlanBuilder {
             now));
     parentId = turnStartEntryId;
     if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
-      // SET_* 变更提醒采用固定前缀顺序，紧邻本 turn 的 user-like 消息之前。
+      // SET_* 变更提醒采用固定前缀顺序，紧邻本 turn 的 user-like 消息之前。CONTINUATION 同样需要这条 durable
+      // USER 提醒：设置只有进入对话，模型才知道自己已经在新的 agent/model/environment 下工作。
       for (CommandHarvestResult.SettingsChange change : harvest.changes()) {
         UUID entryId = idAllocator.get();
         candidateEntries.add(

@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -254,6 +256,50 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         command(fixture.store, baseline.threadId(), configCommand).state());
   }
 
+  /**
+   * 测试意图：CONTINUATION 消费 SET_* 后，TURN_START.settings 与一条 durable USER {@code <system-reminder>}
+   * CUSTOM_MESSAGE 必须同时存在——模型只有看到这条提醒，才知道自己已经在新的 model 下工作。提醒是 core 元数据 + 精确定界符， 因此它虽然位于
+   * continuation turn 内也仍是合法路径。
+   */
+  @Test
+  void continuationAppliesSettingsAndEmitsTheDurableReminder() {
+    Fixture fixture = fixture();
+    var baseline = seedClosedTurn(fixture.store, true);
+    UUID modelCommand =
+        seedCommand(
+            fixture.store,
+            baseline.threadId(),
+            new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    // 关闭的原 turn 5 条 Entry + TURN_START(CONTINUATION) + SET_MODEL 提醒：turn 内恰有一条提醒 message。
+    assertEquals(7, path.entries().size());
+    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(5).payload();
+    assertEquals(TurnStartReason.CONTINUATION, turnStart.reason());
+    assertEquals("model-b", turnStart.settings().model().modelName());
+    assertEquals("v2", turnStart.settings().model().variant());
+    CustomMessagePayload reminder = (CustomMessagePayload) path.entries().get(6).payload();
+    assertEquals(CustomMessagePayload.CORE_CONTRIBUTOR_ID, reminder.contributorId());
+    assertEquals(CustomMessagePayload.CORE_CUSTOM_TYPE, reminder.customType());
+    assertEquals(CustomMessagePayload.CORE_RENDERER_KEY, reminder.rendererKey());
+    assertEquals(
+        SystemReminder.wrap("The model for this branch is now `provider/model-b` (variant `v2`)."),
+        ((TextMessageContent) reminder.message().contents().get(0)).text());
+    assertTrue(SystemReminder.isReminder(reminder.message()));
+    assertEquals(reminder, path.head().payload());
+    // SET_MODEL 已被 continuation 消费并记录在其 TURN_START 上；无 deferred user demand。
+    assertEquals(
+        ThreadCommandState.APPLIED,
+        command(fixture.store, baseline.threadId(), modelCommand).state());
+    assertEquals(
+        path.entries().get(5).id(),
+        command(fixture.store, baseline.threadId(), modelCommand).appliedTurnStartEntryId());
+  }
+
   @Test
   void inputTurnAppliesSettingsAndMessagesInOneAtomicTurn() {
     Fixture fixture = fixture();
@@ -273,11 +319,16 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(3, path.entries().size());
+    // ROOT + TURN_START(INPUT) + SET_MODEL 提醒 CUSTOM_MESSAGE + USER message：提醒紧邻 user-like 消息之前。
+    assertEquals(4, path.entries().size());
     TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(1).payload();
     assertEquals(TurnStartReason.INPUT, turnStart.reason());
     assertEquals("model-b", turnStart.settings().model().modelName());
-    MessagePayload userPayload = (MessagePayload) path.entries().get(2).payload();
+    CustomMessagePayload reminder = (CustomMessagePayload) path.entries().get(2).payload();
+    assertEquals(
+        SystemReminder.wrap("The model for this branch is now `provider/model-b` (variant `v2`)."),
+        ((TextMessageContent) reminder.message().contents().get(0)).text());
+    MessagePayload userPayload = (MessagePayload) path.entries().get(3).payload();
     assertEquals(AgentMessageRole.USER, userPayload.message().role());
     assertEquals("hi", ((TextMessageContent) userPayload.message().contents().get(0)).text());
     assertEquals(
@@ -287,14 +338,14 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
-        path.entries().get(2).id(), thread(fixture.store, baseline.threadId()).headEntryId());
+        path.entries().get(3).id(), thread(fixture.store, baseline.threadId()).headEntryId());
     // ModelInvocation：requestHead == candidate head，turnStart 指向新 TURN_START，MODEL Work 已请求。
     ModelInvocation invocation =
         inTx(
                 fixture,
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), path.entries().get(1).id()))
             .orElseThrow();
-    assertEquals(path.entries().get(2).id(), invocation.requestHeadEntryId());
+    assertEquals(path.entries().get(3).id(), invocation.requestHeadEntryId());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, invocation.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);

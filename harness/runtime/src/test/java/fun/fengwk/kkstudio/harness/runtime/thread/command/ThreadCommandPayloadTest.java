@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
 import java.util.List;
 
@@ -32,7 +33,7 @@ class ThreadCommandPayloadTest {
             ThreadCommandType.SET_ENVIRONMENT),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
-                new CustomMessageCommandPayload(system("system")),
+                new CustomMessageCommandPayload(user("custom")),
                 new SetAgentCommandPayload("coding"),
                 new SetModelCommandPayload(MODEL),
                 new SetEnvironmentCommandPayload(null))
@@ -46,15 +47,14 @@ class ThreadCommandPayloadTest {
     assertEquals(
         AgentMessageRole.USER, new UserMessageCommandPayload(user("hello")).message().role());
     assertEquals(
-        AgentMessageRole.SYSTEM,
-        new CustomMessageCommandPayload(system("system")).message().role());
-    assertEquals(
         AgentMessageRole.USER,
         new CustomMessageCommandPayload(user("custom-user")).message().role());
     assertThrows(
         IllegalArgumentException.class, () -> new UserMessageCommandPayload(assistant("answer")));
     assertThrows(
         IllegalArgumentException.class, () -> new CustomMessageCommandPayload(assistant("answer")));
+    assertThrows(
+        IllegalArgumentException.class, () -> new CustomMessageCommandPayload(tool("call-1")));
     assertThrows(NullPointerException.class, () -> new UserMessageCommandPayload(null));
   }
 
@@ -93,12 +93,16 @@ class ThreadCommandPayloadTest {
     return message(AgentMessageRole.USER, text);
   }
 
-  private static AgentMessage system(String text) {
-    return message(AgentMessageRole.SYSTEM, text);
-  }
-
   private static AgentMessage assistant(String text) {
     return message(AgentMessageRole.ASSISTANT, text);
+  }
+
+  private static AgentMessage tool(String text) {
+    return new AgentMessage(
+        AgentMessageRole.TOOL,
+        List.of(
+            new ToolResultMessageContent(
+                "call-1", "test", "test", List.of(new TextMessageContent(text)), false, "{}")));
   }
 
   private static AgentMessage message(AgentMessageRole role, String text) {

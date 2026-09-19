@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -229,7 +231,8 @@ class HarnessRuntimeManualCompactionTest {
 
   @Test
   void resolverRejectionWakesThreadOnlyForDeferredUserDemand() {
-    // USER message 保留 INPUT obligation；SYSTEM steering 自身不构成 user demand。
+    // 任何 queued 消息命令（USER_MESSAGE 或 USER CUSTOM_MESSAGE，含运行时 reminder）都保留 INPUT obligation；
+    // SET_* 配置命令不构成 user demand。
     Fixture userFixture = fixture();
     ClosedTurnBaseline userBaseline = seedCompactionReadyClosedTurn(userFixture.store);
     seedCommand(
@@ -243,19 +246,19 @@ class HarnessRuntimeManualCompactionTest {
     assertNotNull(
         work(userFixture.store, new WorkTarget(WorkTargetType.THREAD, userBaseline.threadId())));
 
-    Fixture systemFixture = fixture();
-    ClosedTurnBaseline systemBaseline = seedCompactionReadyClosedTurn(systemFixture.store);
+    Fixture configFixture = fixture();
+    ClosedTurnBaseline configBaseline = seedCompactionReadyClosedTurn(configFixture.store);
     seedCommand(
-        systemFixture.store,
-        systemBaseline.threadId(),
-        new CustomMessageCommandPayload(systemMessage("deferred steering")));
-    systemFixture.resolver.results.add(rejection());
-    long systemVersion = thread(systemFixture.store, systemBaseline.threadId()).version();
-    systemFixture.runtime.compactThread(
-        new CompactThreadCommand(systemBaseline.threadId(), systemVersion));
+        configFixture.store,
+        configBaseline.threadId(),
+        new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+    configFixture.resolver.results.add(rejection());
+    long configVersion = thread(configFixture.store, configBaseline.threadId()).version();
+    configFixture.runtime.compactThread(
+        new CompactThreadCommand(configBaseline.threadId(), configVersion));
     assertNull(
         work(
-            systemFixture.store, new WorkTarget(WorkTargetType.THREAD, systemBaseline.threadId())));
+            configFixture.store, new WorkTarget(WorkTargetType.THREAD, configBaseline.threadId())));
   }
 
   private static Fixture fixture() {
@@ -415,10 +418,6 @@ class HarnessRuntimeManualCompactionTest {
 
   private static AgentMessage userMessage(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
-  }
-
-  private static AgentMessage systemMessage(String text) {
-    return new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)));
   }
 
   private static AgentMessage assistantMessage(String text) {

@@ -84,6 +84,8 @@ class ProviderRequestJsonCodecTest {
     assertEquals("gpt-5-mini", canonicalNode().path("model").path("modelName").asText());
     // catalog 逻辑名与上游 wire modelId 相互独立，两侧都必须被 canonical fixture 覆盖。
     assertEquals("gpt-5-mini-2025-08-07", canonicalNode().path("model").path("modelId").asText());
+    assertEquals("Test system instruction.", canonicalNode().path("systemInstruction").asText());
+    assertEquals("Test system instruction.", decoded.systemInstruction());
     assertEquals(
         Set.of(
             ProviderTextBlock.class,
@@ -98,16 +100,16 @@ class ProviderRequestJsonCodecTest {
             .collect(Collectors.toSet()));
     assertEquals(
         JSON_BLOCK,
-        assertInstanceOf(ProviderJsonBlock.class, decoded.messages().get(1).contents().get(3))
+        assertInstanceOf(ProviderJsonBlock.class, decoded.messages().get(0).contents().get(3))
             .json());
     assertEquals(
         ARGUMENTS_JSON,
-        assertInstanceOf(ProviderToolCallBlock.class, decoded.messages().get(2).contents().get(0))
+        assertInstanceOf(ProviderToolCallBlock.class, decoded.messages().get(1).contents().get(0))
             .toolCall()
             .argumentsJson());
     assertEquals(
         DETAILS_JSON,
-        assertInstanceOf(ProviderToolResultBlock.class, decoded.messages().get(3).contents().get(0))
+        assertInstanceOf(ProviderToolResultBlock.class, decoded.messages().get(2).contents().get(0))
             .detailsJson());
     assertEquals(INPUT_SCHEMA_JSON, decoded.tools().get(0).inputSchemaJson());
     assertEquals(
@@ -189,7 +191,7 @@ class ProviderRequestJsonCodecTest {
     ObjectNode duplicateArguments = canonicalNode();
     ObjectNode toolCall =
         (ObjectNode)
-            duplicateArguments.path("messages").get(2).path("contents").get(0).path("toolCall");
+            duplicateArguments.path("messages").get(1).path("contents").get(0).path("toolCall");
     toolCall.put("argumentsJson", "{\"q\":\"paris\",\"q\":\"lyon\"}");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicateArguments.toString()));
 
@@ -284,6 +286,48 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> content(root, 0, 0).remove("type"));
   }
 
+  /**
+   * 旧 wire 协议形态必须被严格拒绝：会话消息中的 SYSTEM 角色已废弃，且顶层必须包含单一的 systemInstruction，缺失或使用旧 preambleMessages
+   * 字段均不被接受。
+   */
+  @Test
+  void rejectsLegacyWireShapesWithSystemMessageRoleOrMissingSystemInstruction() {
+    // 会话消息中包含 role 为 SYSTEM 的消息必须抛出 IllegalArgumentException
+    assertRejected(root -> message(root, 0).put("role", "SYSTEM"));
+    assertRejected(
+        root -> {
+          ObjectNode systemMessage = NODES.objectNode();
+          systemMessage.put("role", "SYSTEM");
+          ArrayNode contents = systemMessage.putArray("contents");
+          ObjectNode textBlock = contents.addObject();
+          textBlock.put("type", "text");
+          textBlock.put("text", "legacy system instruction");
+          ((ArrayNode) root.path("messages")).insert(0, systemMessage);
+        });
+
+    // 顶层缺失 systemInstruction 字段必须抛出 IllegalArgumentException
+    assertRejected(root -> root.remove("systemInstruction"));
+    assertRejected(root -> root.put("systemInstruction", "   "));
+
+    // 包含旧 preambleMessages 字段必须抛出 IllegalArgumentException
+    assertRejected(root -> root.putArray("preambleMessages"));
+    assertRejected(
+        root -> {
+          root.remove("systemInstruction");
+          root.putArray("preambleMessages");
+        });
+
+    // 针对完整 JSON 文本解码同样验证旧 wire 形态的拒绝行为
+    ObjectNode legacySystemNode = canonicalNode();
+    message(legacySystemNode, 0).put("role", "SYSTEM");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(legacySystemNode.toString()));
+
+    ObjectNode missingInstructionNode = canonicalNode();
+    missingInstructionNode.remove("systemInstruction");
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.decode(missingInstructionNode.toString()));
+  }
+
   /** Malformed 根节点、集合、数字以及 raw JSON 字符串必须在进入持久化 request snapshot 前被拒绝。 */
   @Test
   void rejectsMalformedRootsCollectionsNumbersAndRawJson() {
@@ -332,8 +376,8 @@ class ProviderRequestJsonCodecTest {
     assertRejected(root -> toolResult(root).put("detailsJson", "[]"));
     assertRejected(root -> toolResult(root).put("detailsJson", "{"));
     assertRejected(root -> toolResult(root).put("detailsJson", " "));
-    assertRejected(root -> content(root, 1, 3).put("json", "not-json"));
-    assertRejected(root -> content(root, 1, 3).put("json", " "));
+    assertRejected(root -> content(root, 0, 3).put("json", "not-json"));
+    assertRejected(root -> content(root, 0, 3).put("json", " "));
   }
 
   private void assertStrictLayer(
@@ -373,7 +417,7 @@ class ProviderRequestJsonCodecTest {
       ObjectNode mediaJson = canonicalNode();
       ArrayNode contents = NODES.arrayNode();
       contents.add(mediaBlockNode(media));
-      ((ObjectNode) mediaJson.path("messages").get(1)).set("contents", contents);
+      ((ObjectNode) mediaJson.path("messages").get(0)).set("contents", contents);
       assertThrows(
           IllegalArgumentException.class,
           () -> codec.decode(mediaJson.toString()),
@@ -417,7 +461,6 @@ class ProviderRequestJsonCodecTest {
   }
 
   private static ProviderRequest canonicalRequest() {
-    ModelVariant defaultVariant = new ModelVariant("default");
     ModelVariant selectedVariant = new ModelVariant("balanced", "medium");
     ModelDescriptor model =
         new ModelDescriptor(
@@ -435,9 +478,6 @@ class ProviderRequestJsonCodecTest {
         1024,
         "Test system instruction.",
         List.of(
-            new ProviderMessage(
-                ProviderMessageRole.SYSTEM,
-                List.of(new ProviderTextBlock("You are a careful assistant."))),
             new ProviderMessage(
                 ProviderMessageRole.USER,
                 List.of(
@@ -550,11 +590,11 @@ class ProviderRequestJsonCodecTest {
   }
 
   private static ObjectNode toolCall(ObjectNode root) {
-    return (ObjectNode) content(root, 2, 0).path("toolCall");
+    return (ObjectNode) content(root, 1, 0).path("toolCall");
   }
 
   private static ObjectNode toolResult(ObjectNode root) {
-    return content(root, 3, 0);
+    return content(root, 2, 0);
   }
 
   private record CacheCase(PromptCacheCapability capability, ProviderCacheControl control) {}
