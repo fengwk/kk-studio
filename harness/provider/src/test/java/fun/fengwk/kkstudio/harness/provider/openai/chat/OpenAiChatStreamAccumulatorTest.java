@@ -160,6 +160,37 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals("Hello world!", completion.replayState().payload().path("content").asText());
   }
 
+  /** 验证 refusal 是正常完成的可见助手文本，并以原生字段进入 replay。 */
+  @Test
+  @DisplayName("refusal delta 进入可见文本通道并保留原生 replay")
+  void testRefusalDeltaIsVisibleCompletedText() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request,
+            descriptor,
+            OpenAiChatConfiguration.defaults(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleData(
+        "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I cannot\"}}]}");
+    accumulator.handleData(
+        "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\" help with that.\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("I cannot help with that.", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(2, recordedEvents.size());
+    assertEquals("I cannot", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
+    assertEquals(
+        " help with that.", ((ProviderStreamEvent.TextDelta) recordedEvents.get(1)).text());
+    assertNotNull(completion.replayState());
+    assertFalse(completion.replayState().payload().has("content"));
+    assertEquals(
+        "I cannot help with that.", completion.replayState().payload().path("refusal").asText());
+  }
+
   @Test
   @DisplayName("reasoning_content 派发 ThinkingDelta，reasoning_details 仅存 native replay")
   void testReasoningContentAndDetails() {

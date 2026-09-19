@@ -56,7 +56,8 @@ final class GeminiStreamAccumulator {
           "IMAGE_SAFETY",
           "IMAGE_RECITATION",
           "IMAGE_PROHIBITED_CONTENT",
-          "LANGUAGE");
+          "LANGUAGE",
+          "ESCALATION");
 
   private static final Set<String> MALFORMED_OR_ERROR_FINISH_REASONS =
       Set.of(
@@ -67,8 +68,7 @@ final class GeminiStreamAccumulator {
           "TOO_MANY_TOOL_CALLS",
           "OTHER",
           "IMAGE_OTHER",
-          "NO_IMAGE",
-          "ESCALATION");
+          "NO_IMAGE");
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;

@@ -377,6 +377,41 @@ class GeminiStreamAccumulatorTest {
     assertNull(completion.replayState());
   }
 
+  /**
+   * 意图：ESCALATION 表示请求被升级规则过滤，属于过滤终态而非协议错误，必须映射为 FILTERED， 同时忽略 tool call 且不生成
+   * replayState，避免把被过滤的输出当作可回放上下文。
+   */
+  @Test
+  void handlesEscalationFinishReason_resultsInFilteredStopReasonWithoutToolsOrReplay()
+      throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    String chunk =
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "Escalated..." },
+              { "functionCall": { "name": "do_something", "args": { "k": "v" } } }
+            ] },
+            "finishReason": "ESCALATION"
+          }]
+        }
+        """;
+
+    accumulator.handleEvent("message", chunk);
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
+    assertTrue(completion.response().toolCalls().isEmpty());
+    assertNull(completion.replayState());
+  }
+
   /** 验证 promptFeedback blockReason（输入提示词被拒绝且无 candidate）映射为 FILTERED。 */
   @Test
   void handlesPromptFeedbackBlockReason_resultsInFilteredStopReason() throws Exception {

@@ -69,7 +69,8 @@ final class OpenAiResponsesRequestEncoder {
       Set.of("message", "reasoning", "function_call");
   private static final Set<String> ALLOWED_MESSAGE_FIELDS =
       Set.of("type", "role", "content", "id", "phase");
-  private static final Set<String> ALLOWED_MESSAGE_CONTENT_FIELDS = Set.of("type", "text");
+  private static final Set<String> ALLOWED_OUTPUT_TEXT_FIELDS = Set.of("type", "text");
+  private static final Set<String> ALLOWED_REFUSAL_FIELDS = Set.of("type", "refusal");
   private static final Set<String> ALLOWED_REASONING_FIELDS =
       Set.of("type", "summary", "encrypted_content", "id");
   private static final Set<String> ALLOWED_SUMMARY_FIELDS = Set.of("type", "text");
@@ -539,20 +540,34 @@ final class OpenAiResponsesRequestEncoder {
                   ProviderErrorKind.INVALID_REQUEST,
                   "replay message content block must be an object");
             }
-            validateAllowedFields(block, ALLOWED_MESSAGE_CONTENT_FIELDS, "message content block");
-            if (!block.has("type")
-                || !block.get("type").isTextual()
-                || !"output_text".equals(block.get("type").textValue())) {
+            if (!block.has("type") || !block.get("type").isTextual()) {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
-                  "replay message content block type must be 'output_text'");
+                  "replay message content block must have string type");
             }
-            if (!block.has("text") || !block.get("text").isTextual()) {
-              throw new ProviderException(
+            switch (block.get("type").textValue()) {
+              case "output_text" -> {
+                validateAllowedFields(block, ALLOWED_OUTPUT_TEXT_FIELDS, "output_text block");
+                if (!block.has("text") || !block.get("text").isTextual()) {
+                  throw new ProviderException(
+                      ProviderErrorKind.INVALID_REQUEST,
+                      "replay output_text block must have string text");
+                }
+                replayText.append(block.get("text").textValue());
+              }
+              case "refusal" -> {
+                validateAllowedFields(block, ALLOWED_REFUSAL_FIELDS, "refusal block");
+                if (!block.has("refusal") || !block.get("refusal").isTextual()) {
+                  throw new ProviderException(
+                      ProviderErrorKind.INVALID_REQUEST,
+                      "replay refusal block must have string refusal");
+                }
+                replayText.append(block.get("refusal").textValue());
+              }
+              default -> throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST,
-                  "replay message content block must have string text");
+                  "replay message content block type must be 'output_text' or 'refusal'");
             }
-            replayText.append(block.get("text").textValue());
           }
         }
         case "reasoning" -> {
