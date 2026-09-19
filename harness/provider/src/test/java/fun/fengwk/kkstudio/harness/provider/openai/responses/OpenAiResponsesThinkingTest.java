@@ -81,6 +81,7 @@ class OpenAiResponsesThinkingTest {
         createModel(),
         DEFAULT_VARIANT,
         1024,
+        "Test system instruction.",
         messages != null ? messages : List.of(),
         List.of(),
         ProviderCacheControl.none());

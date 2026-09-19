@@ -25,10 +25,6 @@ public record AgentMessage(AgentMessageRole role, List<AgentMessageContent> cont
     }
   }
 
-  public static AgentMessage system(String text) {
-    return new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)));
-  }
-
   public static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
   }

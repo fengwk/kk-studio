@@ -45,8 +45,7 @@ public final class ResolvedRequestValidator {
         throw new IllegalStateException(
             "a compaction candidate TURN_START must carry the exact frozen preparation metadata");
       }
-      if (!spec.preambleMessages().isEmpty()
-          || !spec.toolBindings().isEmpty()
+      if (!spec.toolBindings().isEmpty()
           || !spec.skillBindings().isEmpty()
           || !spec.subagentBindings().isEmpty()
           || !spec.cacheControl().equals(ProviderCacheControl.none())) {

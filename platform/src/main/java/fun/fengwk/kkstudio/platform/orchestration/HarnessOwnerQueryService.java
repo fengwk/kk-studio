@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
@@ -239,7 +240,11 @@ public class HarnessOwnerQueryService {
     return null;
   }
 
-  /** head 用户可读消息/资源预览：非 SYSTEM 消息 text 优先、其次资源名；无则 null。 */
+  /**
+   * head 用户可读消息/资源预览：用户可读消息 text 优先、其次资源名；无则 null。
+   *
+   * <p>运行时注入的 {@link SystemReminder} 是内部上下文提醒，不是用户发言，因此绝不作为用户可见预览。
+   */
   private static String messagePreview(Entry entry) {
     AgentMessage message =
         switch (entry.payload()) {
@@ -247,7 +252,7 @@ public class HarnessOwnerQueryService {
           case CustomMessagePayload value -> value.message();
           default -> null;
         };
-    if (message == null || message.role() == AgentMessageRole.SYSTEM) {
+    if (message == null || SystemReminder.isReminder(message)) {
       return null;
     }
     String text = firstText(message);

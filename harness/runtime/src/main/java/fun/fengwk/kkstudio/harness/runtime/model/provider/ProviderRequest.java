@@ -10,13 +10,16 @@ import java.util.Objects;
 /**
  * 一次 Provider 流请求。
  *
- * <p>{@code outputTokens} 是本次请求唯一的输出预算：由 Model 级 {@code limit.output} 与当前剩余上下文计算，压缩调用则使用压缩阶段预算。
- * 预算随请求显式传递，绝不回写到 variant 或请求体的自定义字段。
+ * <p>{@code systemInstruction} 是本次请求唯一的模型系统指令：各协议把它编码到各自的顶层位置（Anthropic {@code system}、Gemini
+ * {@code systemInstruction}、OpenAI Chat 唯一的前导 system message、OpenAI Responses {@code
+ * instructions}），会话消息中绝不出现 SYSTEM 角色。{@code outputTokens} 是本次请求唯一的输出预算：由 Model 级 {@code
+ * limit.output} 与当前剩余上下文计算，压缩调用则使用压缩阶段预算。预算随请求显式传递，绝不回写到 variant 或请求体的自定义字段。
  */
 public record ProviderRequest(
     ModelDescriptor model,
     ModelVariant variant,
     int outputTokens,
+    String systemInstruction,
     List<ProviderMessage> messages,
     List<ProviderToolDefinition> tools,
     ProviderCacheControl cacheControl) {
@@ -26,6 +29,9 @@ public record ProviderRequest(
     variant = Objects.requireNonNull(variant, "variant");
     if (outputTokens <= 0) {
       throw new IllegalArgumentException("outputTokens must be positive");
+    }
+    if (systemInstruction == null || systemInstruction.isBlank()) {
+      throw new IllegalArgumentException("systemInstruction must not be blank");
     }
     messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
     tools = List.copyOf(Objects.requireNonNull(tools, "tools"));

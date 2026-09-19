@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemCustomMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemReminderCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -254,7 +254,9 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(Reason.THREAD_ID_REUSED, error.reason());
   }
 
-  /** 初始 batch shape：恰一条 user-like message 结尾；允许固定顺序 SET_* 前缀；SYSTEM CUSTOM_MESSAGE 只允许在前缀。 */
+  /**
+   * 初始 batch shape：恰一条末尾 USER 消息（USER_MESSAGE 或 USER CUSTOM_MESSAGE，含运行时 reminder）；允许固定顺序 SET_* 前缀。
+   */
   @Test
   void initialBatchShapeRulesAreEnforced() {
     // 合法：SET_AGENT 前缀 + 单条 user message。
@@ -284,17 +286,28 @@ class HarnessRuntimeAcceptInitialTest {
                     List.of(userMessageCommand(TestIds.id(4), "hello"), setAgent(TestIds.id(5)))),
                 AcceptancePreflight.IDENTITY));
 
-    // 合法：前缀 SYSTEM steering + 单条 user message。
-    AcceptedCommands withSystem =
+    // 合法：单条运行时 reminder（USER CUSTOM_MESSAGE）本身就是合法的末尾 USER 消息。
+    AcceptedCommands reminderOnly =
         runtime.acceptCommands(
             newSession(
                 TestIds.id(116),
                 TestIds.id(117),
-                List.of(
-                    systemCustomMessageCommand(TestIds.id(6), "steer"),
-                    userMessageCommand(TestIds.id(7), "hello"))),
+                List.of(systemReminderCommand(TestIds.id(6), "steer"))),
             AcceptancePreflight.IDENTITY);
-    assertFalse(withSystem.replayed());
+    assertFalse(reminderOnly.replayed());
+
+    // 非法（IAE）：reminder + user message 是两条 user-like，违反「恰一条末尾 USER 消息」。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(118),
+                    TestIds.id(119),
+                    List.of(
+                        systemReminderCommand(TestIds.id(7), "steer"),
+                        userMessageCommand(TestIds.id(8), "hello"))),
+                AcceptancePreflight.IDENTITY));
   }
 
   /** SET_* 前缀固定顺序必须是 SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT：用正反请求证明该顺序（正向通过 / 反向 IAE）。 */

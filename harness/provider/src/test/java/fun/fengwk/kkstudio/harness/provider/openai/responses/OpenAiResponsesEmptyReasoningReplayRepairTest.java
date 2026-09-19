@@ -104,7 +104,13 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
             true,
             pricing);
     return new ProviderRequest(
-        model, DEFAULT_VARIANT, 1024, messages, List.of(TOOL), ProviderCacheControl.none());
+        model,
+        DEFAULT_VARIANT,
+        1024,
+        "Test system instruction.",
+        messages,
+        List.of(TOOL),
+        ProviderCacheControl.none());
   }
 
   /** 按 SSE fixture 逐行喂入事件，复现真实网关的 `reasoning.summary: []` 终态。 */
@@ -193,7 +199,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertEquals(historicalReplay, durableReplay);
 
     List<ProviderMessage> projected =
-        new ProviderMessageProjector()
+        new ProviderMessageProjector(Set.of())
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(

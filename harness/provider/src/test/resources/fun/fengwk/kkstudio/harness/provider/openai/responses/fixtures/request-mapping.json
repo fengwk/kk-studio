@@ -25,17 +25,8 @@
         "strict": false
       }
     ],
+    "instructions": "You are a helpful assistant.",
     "input": [
-      {
-        "type": "message",
-        "role": "system",
-        "content": [
-          {
-            "type": "input_text",
-            "text": "You are a helpful assistant."
-          }
-        ]
-      },
       {
         "type": "message",
         "role": "user",

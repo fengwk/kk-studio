@@ -18,7 +18,8 @@ import java.util.Set;
 /**
  * 负责计算 OpenAI Responses 的版本化 canonical prefix hash（SHA-256 小写十六进制）。
  *
- * <p>保证稳定字典序对象键、确定性 JSON 序列化，且完全排除 prompt cache 相关控制字段。
+ * <p>保证稳定字典序对象键、确定性 JSON 序列化，且完全排除 prompt cache 相关控制字段。顶层 {@code instructions} 只参与一次计算，不随 input
+ * items 重复。
  */
 final class OpenAiResponsesPrefixHasher {
 
@@ -32,9 +33,10 @@ final class OpenAiResponsesPrefixHasher {
 
   private OpenAiResponsesPrefixHasher() {}
 
-  static String calculateHash(ArrayNode tools, ArrayNode inputItems) {
+  static String calculateHash(String instructions, ArrayNode tools, ArrayNode inputItems) {
     ObjectNode root = NODES.objectNode();
     root.put("version", 1);
+    root.put("instructions", instructions);
     root.set("tools", tools != null ? tools : NODES.arrayNode());
     root.set("input", inputItems != null ? inputItems : NODES.arrayNode());
 

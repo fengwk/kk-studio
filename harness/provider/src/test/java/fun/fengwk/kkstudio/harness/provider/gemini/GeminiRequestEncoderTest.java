@@ -99,6 +99,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello Gemini")))),
@@ -125,6 +126,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("First message"))),
@@ -148,19 +150,16 @@ class GeminiRequestEncoderTest {
     assertEquals("Second message", contents.get(2).path("parts").get(0).path("text").asText());
   }
 
-  /** 验证开头的连续 SYSTEM 消息被合并为顶层的 systemInstruction.parts，且仅支持文本。 */
+  /** 验证请求的系统指令映射为顶层 systemInstruction 的唯一个 parts[0].text，且不进入 contents。 */
   @Test
-  void mergesLeadingSystemMessagesIntoSystemInstructionTextOnly() throws Exception {
+  void encodesSingleSystemInstructionPartFromRequestInstruction() throws Exception {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "System rule 1.",
             List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("System rule 1."))),
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("System rule 2."))),
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("User query.")))),
             List.of(),
@@ -171,50 +170,14 @@ class GeminiRequestEncoderTest {
 
     assertTrue(json.has("systemInstruction"));
     ArrayNode sysParts = (ArrayNode) json.get("systemInstruction").get("parts");
-    assertEquals(2, sysParts.size());
+    assertEquals(1, sysParts.size());
     assertEquals("System rule 1.", sysParts.get(0).get("text").asText());
-    assertEquals("System rule 2.", sysParts.get(1).get("text").asText());
 
     ArrayNode contents = (ArrayNode) json.get("contents");
     assertEquals(1, contents.size());
     assertEquals("user", contents.get(0).get("role").asText());
-  }
-
-  /** 验证会话中间出现 SYSTEM 消息被明确拒绝，防止语义错乱。 */
-  @Test
-  void rejectsMidConversationSystemMessages() {
-    ProviderRequest request =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello"))),
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Late system")))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
-  }
-
-  /** 验证 systemInstruction 包含非文本 Block（如图片）时被拒绝。 */
-  @Test
-  void rejectsNonTextInSystemInstruction() {
-    ProviderRequest request =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderImageBlock("image/png", "https://example.com/sys.png")))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+    assertEquals("User query.", contents.get(0).path("parts").get(0).path("text").asText());
+    assertFalse(contents.toString().contains("SYSTEM"));
   }
 
   /** 验证 generationConfig 只包含请求输出预算：采样/惩罚/停止序列已从契约移除，使用协议默认。 */
@@ -225,6 +188,7 @@ class GeminiRequestEncoderTest {
             model(false),
             new ModelVariant("v1"),
             4321,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -254,6 +218,7 @@ class GeminiRequestEncoderTest {
               model(true),
               variant,
               1024,
+              "Test system instruction.",
               List.of(
                   new ProviderMessage(
                       ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
@@ -277,6 +242,7 @@ class GeminiRequestEncoderTest {
             model(true),
             new ModelVariant("v1", "off"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve")))),
@@ -301,6 +267,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -324,6 +291,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -355,6 +323,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather?")))),
@@ -383,6 +352,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -402,6 +372,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -430,6 +401,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -473,6 +445,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(new ProviderMessage(ProviderMessageRole.USER, media)),
             List.of(),
             ProviderCacheControl.none());
@@ -507,6 +480,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -539,6 +513,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -557,6 +532,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Call tools"))),
@@ -605,6 +581,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -638,6 +615,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1")))),
@@ -669,6 +647,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1"))),
                 new ProviderMessage(
@@ -699,6 +678,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1")))),
@@ -723,6 +703,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1"))),
                 new ProviderMessage(
@@ -750,6 +731,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -786,6 +768,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -811,6 +794,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -832,6 +816,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
             List.of(),
@@ -855,6 +840,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -885,6 +871,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -906,6 +893,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -923,7 +911,13 @@ class GeminiRequestEncoderTest {
   void rejectsEmptyMessages() {
     ProviderRequest request =
         new ProviderRequest(
-            model(false), DEFAULT_VARIANT, 1024, List.of(), List.of(), ProviderCacheControl.none());
+            model(false),
+            DEFAULT_VARIANT,
+            1024,
+            "Test system instruction.",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
 
     assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
   }
@@ -936,6 +930,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -971,6 +966,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1007,6 +1003,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1049,6 +1046,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1091,6 +1089,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1146,6 +1145,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1192,6 +1192,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1227,6 +1228,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1256,6 +1258,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
@@ -1289,6 +1292,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Initial prompt"))),
@@ -1329,8 +1333,9 @@ class GeminiRequestEncoderTest {
     assertEquals("toolB", parts.get(2).get("functionResponse").get("name").asText());
     assertEquals("Follow-up text", parts.get(3).get("text").asText());
 
-    // 验证 sourcePrefixHash 与对该 wire contents 计算出的 hash 100% 一致
-    String expectedHash = GeminiPrefixHasher.calculateHash(null, null, contents);
+    // 验证 sourcePrefixHash 与对该 wire systemInstruction/tools/contents 计算出的 hash 100% 一致
+    String expectedHash =
+        GeminiPrefixHasher.calculateHash(json.get("systemInstruction"), null, contents);
     assertEquals(expectedHash, encoded.sourcePrefixHash());
   }
 
@@ -1366,6 +1371,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(userMsg, assistantCallMsg, tool1Msg, tool2Msg),
             List.of(),
             ProviderCacheControl.none());
@@ -1405,6 +1411,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 userMsg,
                 assistantCallMsg,
@@ -1428,6 +1435,7 @@ class GeminiRequestEncoderTest {
             model(true),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 userMsg,
                 assistantCallMsg,
@@ -1469,6 +1477,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1498,6 +1507,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1527,6 +1537,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1548,6 +1559,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
             List.of(),
@@ -1573,6 +1585,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1607,6 +1620,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1631,6 +1645,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
             List.of(arrayTool),
@@ -1649,6 +1664,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1675,6 +1691,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1695,6 +1712,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1715,6 +1733,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1735,6 +1754,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1758,6 +1778,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1790,6 +1811,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1812,6 +1834,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1835,6 +1858,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -1874,6 +1898,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -1890,6 +1915,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -2085,6 +2111,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(ProviderMessageRole.ASSISTANT, durable, replayState)),
@@ -2113,6 +2140,7 @@ class GeminiRequestEncoderTest {
               model(false),
               DEFAULT_VARIANT,
               1024,
+              "Test system instruction.",
               List.of(
                   new ProviderMessage(
                       ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
@@ -2146,6 +2174,7 @@ class GeminiRequestEncoderTest {
               model(false),
               DEFAULT_VARIANT,
               1024,
+              "Test system instruction.",
               List.of(
                   new ProviderMessage(
                       ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
@@ -2182,6 +2211,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -2214,6 +2244,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q"))),
                 new ProviderMessage(
@@ -2237,6 +2268,7 @@ class GeminiRequestEncoderTest {
             model(false),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q")))),
             List.of(),

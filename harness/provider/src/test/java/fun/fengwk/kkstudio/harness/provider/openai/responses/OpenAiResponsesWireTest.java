@@ -93,6 +93,7 @@ class OpenAiResponsesWireTest {
         createModel(),
         variant != null ? variant : DEFAULT_VARIANT,
         1024,
+        "Test system instruction.",
         messages != null ? messages : List.of(),
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());
@@ -192,9 +193,8 @@ class OpenAiResponsesWireTest {
             createModel(),
             new ModelVariant("v1", "medium"),
             100,
+            "You are helpful.",
             List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("You are helpful."))),
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Tell me a story.")))),
             List.of(),
@@ -212,12 +212,12 @@ class OpenAiResponsesWireTest {
     assertEquals("auto", root.path("reasoning").path("summary").asText());
     assertEquals("reasoning.encrypted_content", root.path("include").get(0).asText());
 
+    // 系统指令是本协议唯一的顶层 instructions 字符串，绝不作为 input 中的 system/developer item。
+    assertEquals("You are helpful.", root.path("instructions").asText());
     JsonNode input = root.get("input");
-    assertEquals(2, input.size());
-    assertEquals("developer", input.get(0).path("role").asText());
-    assertEquals("You are helpful.", input.get(0).path("content").get(0).path("text").asText());
-    assertEquals("user", input.get(1).path("role").asText());
-    assertEquals("Tell me a story.", input.get(1).path("content").get(0).path("text").asText());
+    assertEquals(1, input.size());
+    assertEquals("user", input.get(0).path("role").asText());
+    assertEquals("Tell me a story.", input.get(0).path("content").get(0).path("text").asText());
   }
 
   /** 对应 upstream PDF 文档支持与多模态输入验证。 */
@@ -347,8 +347,8 @@ class OpenAiResponsesWireTest {
   }
 
   /**
-   * 验证推理请求的完整 wire parity：developer 角色、runtime 派生且稳定的 prompt_cache_key、max_output_tokens 下限与 strict
-   * 工具 schema 同时出现在实际编码 JSON 中。
+   * 验证推理请求的完整 wire parity：顶层 instructions、runtime 派生且稳定的 prompt_cache_key、max_output_tokens 下限与
+   * strict 工具 schema 同时出现在实际编码 JSON 中。
    */
   @Test
   void test_reasoningWireParityPayload() throws Exception {
@@ -362,8 +362,6 @@ class OpenAiResponsesWireTest {
             """);
     List<ProviderMessage> messages =
         List.of(
-            new ProviderMessage(
-                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("You are helpful."))),
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather in Paris?"))));
     ProviderRequest base =
@@ -380,7 +378,13 @@ class OpenAiResponsesWireTest {
             .cacheControl();
     ProviderRequest req =
         new ProviderRequest(
-            base.model(), base.variant(), 16, base.messages(), base.tools(), cacheControl);
+            base.model(),
+            base.variant(),
+            16,
+            "Test system instruction.",
+            base.messages(),
+            base.tools(),
+            cacheControl);
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
     JsonNode root =
@@ -394,7 +398,8 @@ class OpenAiResponsesWireTest {
 
     // OpenAI Responses 只接受 >= 16 的输出上限，合法冻结预算必须原样编码。
     assertEquals(16, root.path("max_output_tokens").asInt());
-    assertEquals("developer", root.get("input").get(0).path("role").asText());
+    assertEquals("Test system instruction.", root.path("instructions").asText());
+    assertEquals("user", root.get("input").get(0).path("role").asText());
     assertEquals(cacheControl.affinityKey(), root.path("prompt_cache_key").asText());
     assertEquals("in_memory", root.path("prompt_cache_retention").asText());
     assertEquals("medium", root.path("reasoning").path("effort").asText());

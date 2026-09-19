@@ -44,7 +44,7 @@ import java.util.UUID;
 
 /**
  * {@link ProviderRequest} 的严格、确定性 JSON codec。顶层严格字段为 {@code model}、{@code variant}、{@code
- * outputTokens}、{@code messages}、{@code tools}、{@code
+ * outputTokens}、{@code systemInstruction}、{@code messages}、{@code tools}、{@code
  * cacheControl}；每个嵌套层同样要求精确字段集合，并拒绝未知/缺失/类型错误的值。
  *
  * <p>原始 JSON 字符串（{@code json}、{@code argumentsJson}、{@code detailsJson}、{@code
@@ -64,7 +64,14 @@ public final class ProviderRequestJsonCodec {
   private static final ModelDescriptorJsonCodec SHARED_MODEL_CODEC = new ModelDescriptorJsonCodec();
 
   private static final Set<String> REQUEST_FIELDS =
-      orderedSet("model", "variant", "outputTokens", "messages", "tools", "cacheControl");
+      orderedSet(
+          "model",
+          "variant",
+          "outputTokens",
+          "systemInstruction",
+          "messages",
+          "tools",
+          "cacheControl");
   private static final Set<String> CACHE_CONTROL_FIELDS =
       orderedSet("retention", "affinityKey", "breakpoints");
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
@@ -103,6 +110,7 @@ public final class ProviderRequestJsonCodec {
     node.set("model", SHARED_MODEL_CODEC.encodeDescriptorNode(request.model()));
     node.set("variant", SHARED_MODEL_CODEC.encodeVariantNode(request.variant()));
     node.put("outputTokens", request.outputTokens());
+    node.put("systemInstruction", request.systemInstruction());
     ArrayNode messages = node.putArray("messages");
     for (ProviderMessage message : request.messages()) {
       messages.add(encodeMessage(message));
@@ -131,6 +139,7 @@ public final class ProviderRequestJsonCodec {
     ModelDescriptor model = SHARED_MODEL_CODEC.decodeDescriptorNode(node.get("model"));
     ModelVariant variant = SHARED_MODEL_CODEC.decodeVariantNode(node.get("variant"));
     int outputTokens = positiveInt(node, "outputTokens");
+    String systemInstruction = text(node, "systemInstruction");
     ArrayNode messages = array(node.get("messages"), "messages");
     List<ProviderMessage> messageList = new ArrayList<>(messages.size());
     for (JsonNode item : messages) {
@@ -142,7 +151,8 @@ public final class ProviderRequestJsonCodec {
       toolList.add(decodeToolDefinition(item));
     }
     ProviderCacheControl cacheControl = decodeCacheControlNode(node.get("cacheControl"));
-    return new ProviderRequest(model, variant, outputTokens, messageList, toolList, cacheControl);
+    return new ProviderRequest(
+        model, variant, outputTokens, systemInstruction, messageList, toolList, cacheControl);
   }
 
   /** 编码 {@link ProviderCacheControl} 子树，供紧凑 {@code ModelRequestSpec} 复用同一 wire。 */

@@ -67,6 +67,7 @@ class AnthropicRequestEncoderTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+  private static final String SYSTEM_INSTRUCTION = "Test system instruction.";
 
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
   private final ProviderDescriptor descriptor =
@@ -118,6 +119,7 @@ class AnthropicRequestEncoderTest {
             logicalModel,
             new ModelVariant("default"),
             4096,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -171,39 +173,6 @@ class AnthropicRequestEncoderTest {
             List.of(arrayTool),
             ProviderCacheControl.none());
     assertThrows(ProviderException.class, () -> encoder.encode(reqArr, descriptor));
-  }
-
-  @Test
-  void extractsLeadingSystemAndRejectsMidConversationSystem() throws IOException {
-    // leading system
-    ProviderRequest validSys =
-        request(
-            defaultVariant(),
-            List.of(
-                sysMsg(new ProviderTextBlock("You are helpful")),
-                userMsg(new ProviderTextBlock("hello"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    AnthropicEncodedRequest enc = encoder.encode(validSys, descriptor);
-    JsonNode root = MAPPER.readTree(enc.bodyUtf8Bytes());
-    assertEquals(1, root.path("system").size());
-    assertEquals("You are helpful", root.path("system").get(0).path("text").asText());
-    assertEquals(1, root.path("messages").size());
-
-    // mid-conversation system
-    ProviderRequest midSys =
-        request(
-            defaultVariant(),
-            List.of(
-                userMsg(new ProviderTextBlock("hello")),
-                sysMsg(new ProviderTextBlock("late system"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(midSys, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
   @Test
@@ -270,30 +239,29 @@ class AnthropicRequestEncoderTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
+  /** 系统指令是唯一的顶层 system 单块文本，请求正文（含文档）只来自会话消息。 */
   @Test
-  void encodesSystemMessageWithTextAndPdfDocument() throws IOException {
-    String base64Pdf = "data:application/pdf;base64,JVBERi0xLjUK";
+  void encodesSystemInstructionAsSingleTopLevelTextBlock() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(
-                        new ProviderTextBlock("system prompt"),
-                        new ProviderDocumentBlock("application/pdf", base64Pdf))),
-                userMsg(new ProviderTextBlock("user message"))),
+            List.of(userMsg(new ProviderTextBlock("user message"))),
             List.of(),
             ProviderCacheControl.none());
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     JsonNode systemNode = root.path("system");
-    assertEquals(2, systemNode.size());
+    assertEquals(1, systemNode.size());
     assertEquals("text", systemNode.get(0).path("type").asText());
-    assertEquals("system prompt", systemNode.get(0).path("text").asText());
-    assertEquals("document", systemNode.get(1).path("type").asText());
-    assertEquals("base64", systemNode.get(1).path("source").path("type").asText());
+    assertEquals("Test system instruction.", systemNode.get(0).path("text").asText());
+
+    // 会话数组中绝无 SYSTEM，且系统指令未重复为任何会话消息。
+    JsonNode messagesNode = root.path("messages");
+    assertEquals(1, messagesNode.size());
+    assertEquals("user", messagesNode.get(0).path("role").asText());
+    assertEquals("user message", messagesNode.get(0).path("content").get(0).path("text").asText());
+    assertFalse(root.toString().contains("SYSTEM"));
   }
 
   @Test
@@ -363,7 +331,7 @@ class AnthropicRequestEncoderTest {
     // 预计算当时的 prefix hash
     String expectedHash =
         AnthropicPrefixHasher.calculateHash(
-            NODES.arrayNode(),
+            systemBlocks(),
             NODES.arrayNode(),
             NODES
                 .arrayNode()
@@ -481,7 +449,6 @@ class AnthropicRequestEncoderTest {
         request(
             defaultVariant(),
             List.of(
-                sysMsg(new ProviderTextBlock("Sys 1"), new ProviderTextBlock("Sys 2")),
                 userMsg(new ProviderTextBlock("User 1")),
                 asstMsg(List.of(new ProviderTextBlock("Asst 1")), null),
                 userMsg(new ProviderTextBlock("User 2"))),
@@ -502,10 +469,10 @@ class AnthropicRequestEncoderTest {
         "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asText());
     assertEquals("1h", root.path("tools").get(0).path("cache_control").path("ttl").asText());
 
-    // SYSTEM: 标记在最后一个 system block
-    assertFalse(root.path("system").get(0).has("cache_control"));
+    // SYSTEM: 唯一的系统指令块被标记（之前的 system 数组只有这一块）
+    assertEquals(1, root.path("system").size());
     assertEquals(
-        "ephemeral", root.path("system").get(1).path("cache_control").path("type").asText());
+        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
 
     // CONVERSATION: 标记在最新的合格 block (User 2 的 text)
     JsonNode lastMsgBlock = root.path("messages").get(2).path("content").get(0);
@@ -549,6 +516,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             variantWithReasoning,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -591,6 +559,7 @@ class AnthropicRequestEncoderTest {
               reasoningModel,
               new ModelVariant("v", effort),
               outputTokens,
+              "Test system instruction.",
               List.of(userMsg(new ProviderTextBlock("hi"))),
               List.of(),
               ProviderCacheControl.none());
@@ -629,6 +598,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "high"),
             4096,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -659,6 +629,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "low"),
             1,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -689,6 +660,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "off"),
             65536,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -705,6 +677,7 @@ class AnthropicRequestEncoderTest {
               reasoningModel,
               new ModelVariant("v", unsupportedEffort),
               65536,
+              "Test system instruction.",
               List.of(userMsg(new ProviderTextBlock("hi"))),
               List.of(),
               ProviderCacheControl.none());
@@ -736,6 +709,7 @@ class AnthropicRequestEncoderTest {
             nonReasoningModel,
             variantWithEffort,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -761,6 +735,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             variantNullEffort,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -776,6 +751,7 @@ class AnthropicRequestEncoderTest {
             nonReasoningModel,
             variantNullEffort,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -791,6 +767,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "off"),
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -823,6 +800,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "off"),
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -856,6 +834,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "high"),
             512,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -940,7 +919,7 @@ class AnthropicRequestEncoderTest {
 
     String expectedHash =
         AnthropicPrefixHasher.calculateHash(
-            NODES.arrayNode(),
+            systemBlocks(),
             NODES.arrayNode(),
             NODES
                 .arrayNode()
@@ -1000,15 +979,6 @@ class AnthropicRequestEncoderTest {
 
   @Test
   void rejectsUnsupportedBlocksAcrossRoles() {
-    // SYSTEM 包含非 TextBlock
-    ProviderRequest badSys =
-        request(
-            defaultVariant(),
-            List.of(sysMsg(new ProviderImageBlock("image/png", "https://ex.com/a.png"))),
-            List.of(),
-            ProviderCacheControl.none());
-    assertThrows(ProviderException.class, () -> encoder.encode(badSys, descriptor));
-
     // USER 包含 ThinkingBlock
     ProviderRequest badUser =
         request(
@@ -1047,7 +1017,7 @@ class AnthropicRequestEncoderTest {
   void skipsThinkingBlocksWhenApplyingConversationCacheMarker() throws IOException {
     String hash =
         AnthropicPrefixHasher.calculateHash(
-            NODES.arrayNode(),
+            systemBlocks(),
             NODES.arrayNode(),
             NODES
                 .arrayNode()
@@ -1109,7 +1079,7 @@ class AnthropicRequestEncoderTest {
 
     String expectedHash =
         AnthropicPrefixHasher.calculateHash(
-            NODES.arrayNode(),
+            systemBlocks(),
             NODES.arrayNode(),
             NODES
                 .arrayNode()
@@ -1221,7 +1191,7 @@ class AnthropicRequestEncoderTest {
 
     String expectedHash =
         AnthropicPrefixHasher.calculateHash(
-            NODES.arrayNode(),
+            systemBlocks(),
             NODES.arrayNode(),
             NODES
                 .arrayNode()
@@ -1303,7 +1273,7 @@ class AnthropicRequestEncoderTest {
     ProviderMessage user = userMsg(new ProviderTextBlock("hi"));
     String expectedHash =
         AnthropicPrefixHasher.calculateHash(
-            NODES.arrayNode(),
+            systemBlocks(),
             NODES.arrayNode(),
             NODES
                 .arrayNode()
@@ -1440,7 +1410,7 @@ class AnthropicRequestEncoderTest {
     AgentMessage userAgentMsg =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent("What is the weather?")));
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
     List<ProviderMessage> projectedMessages =
         projector.project(List.of(userAgentMsg, asstAgentMsg));
 
@@ -1488,15 +1458,19 @@ class AnthropicRequestEncoderTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl);
   }
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
   }
 
-  private static ProviderMessage sysMsg(ProviderContentBlock... blocks) {
-    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(blocks));
+  /** 与编码器冻结前缀哈希时一致的唯一系统指令块（未打 cache 标记）。 */
+  private static ArrayNode systemBlocks() {
+    ArrayNode system = NODES.arrayNode();
+    system.addObject().put("type", "text").put("text", SYSTEM_INSTRUCTION);
+    return system;
   }
 
   private static ProviderMessage asstMsg(
@@ -1729,7 +1703,7 @@ class AnthropicRequestEncoderTest {
     userWire.put("role", "user");
     userWire.putArray("content").addObject().put("type", "text").put("text", "question 1");
     priorMessages.add(userWire);
-    String prefixHash = AnthropicPrefixHasher.calculateHash(null, null, priorMessages);
+    String prefixHash = AnthropicPrefixHasher.calculateHash(systemBlocks(), null, priorMessages);
 
     // Assistant 携带针对 wire modelId 的亲和性与有效 payload（包含 thinking 块与签名）
     ObjectNode anthropicPayload = NODES.objectNode();
@@ -1842,7 +1816,8 @@ class AnthropicRequestEncoderTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl);
   }
 
   private static ProviderRequest requestWithModel(
@@ -1860,6 +1835,7 @@ class AnthropicRequestEncoderTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl);
   }
 }

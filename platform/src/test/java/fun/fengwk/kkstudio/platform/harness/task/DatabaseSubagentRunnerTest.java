@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentPrompts;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -60,7 +61,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
@@ -90,6 +93,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -121,6 +125,7 @@ class DatabaseSubagentRunnerTest {
   private AgentModelRepository modelRepository;
   private HarnessRuntime runtime;
   private DatabaseSubagentRunner runner;
+  private TestThreadChangeSource changeSource;
 
   private final AtomicReference<AcceptCommandsCommand> accepted = new AtomicReference<>();
 
@@ -129,6 +134,11 @@ class DatabaseSubagentRunnerTest {
     agentRepository = mock(AgentDefinitionRepository.class);
     modelRepository = mock(AgentModelRepository.class);
     runtime = mock(HarnessRuntime.class);
+    changeSource = new TestThreadChangeSource();
+    runner = newRunner(directExecutor());
+  }
+
+  private DatabaseSubagentRunner newRunner(ExecutorService executor) {
     AgentBranchSettingsMaterializer materializer =
         new AgentBranchSettingsMaterializer(
             agentRepository,
@@ -136,15 +146,14 @@ class DatabaseSubagentRunnerTest {
             new AgentModelRuntimeConfigParser(new ObjectMapper()),
             new AgentDefinitionConfigCodec(new ObjectMapper()));
     SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
-    runner =
-        new DatabaseSubagentRunner(
-            () -> runtime,
-            materializer,
-            () -> subagentConfig,
-            new SubagentRunRegistry(),
-            new TestThreadChangeSource(),
-            directExecutor(),
-            new ObjectMapper());
+    return new DatabaseSubagentRunner(
+        () -> runtime,
+        materializer,
+        () -> subagentConfig,
+        new SubagentRunRegistry(),
+        changeSource,
+        executor,
+        new ObjectMapper());
   }
 
   /** 缺省开关（true）的新建子会话继承调用方 Model invocation 冻结的环境。 */
@@ -271,6 +280,79 @@ class DatabaseSubagentRunnerTest {
             childCompleted(currentAgentName, currentModel, currentEnvironmentName),
             childCompletedThenAnotherTurn(currentAgentName, currentModel, currentEnvironmentName));
     return run(CHILD_THREAD_ID);
+  }
+
+  /**
+   * 达到 {@code maxTurns} 软预算时必须注入一条 USER system-reminder。
+   *
+   * <p>测试意图：观察循环在子会话累计到 maxTurns 个 turn 且仍非终态时，恰好投递一条 {@link CustomMessageCommandPayload}，其消息为 USER
+   * 角色且正文精确定界符包裹 {@link SubagentPrompts#maxTurnsReminder()}； 这里的 maxTurns=1
+   * 由请求显式给出，覆盖「请求覆盖配置」的取值路径。
+   */
+  @Test
+  void maxTurnsReminderIsQueuedAsSingleUserSystemReminder() throws Exception {
+    stubSubagent(true);
+    stubParent(ENV_B, 1);
+    // 恢复既有子会话，使 acceptCommands 的第一次调用是配置收敛批次；其后的一次是提醒批次。
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(
+            childCompleted(SUBAGENT, MODEL, ENV_B),
+            childWithRunningSecondTurn(),
+            childCompletedThenAnotherTurn(SUBAGENT, MODEL, ENV_B));
+    runner = newRunner(asyncExecutor());
+
+    RecordingListener listener = new RecordingListener();
+    runner.run(
+        new SubagentTaskRequest(
+            TASK_INVOCATION_ID,
+            PARENT_THREAD_ID,
+            "Investigate the failure.",
+            SUBAGENT,
+            1,
+            CHILD_THREAD_ID),
+        listener);
+
+    // 循环第一次唤醒即在 model 运行中读到已累计的 turn，从而注入提醒；等待该批次落定。
+    awaitAcceptedReminder();
+    // 之后子会话到达终态，让观察循环收敛，避免测试线程悬挂。
+    changeSource.signal(CHILD_THREAD_ID);
+    listener.awaitCompleted();
+
+    List<NewThreadCommand> reminderBatch =
+        accepted.get().commands().stream()
+            .filter(command -> command.payload() instanceof CustomMessageCommandPayload)
+            .toList();
+    assertEquals(1, reminderBatch.size(), "maxTurns 提醒恰好注入一次");
+    CustomMessageCommandPayload payload =
+        (CustomMessageCommandPayload) reminderBatch.getFirst().payload();
+    assertEquals(AgentMessageRole.USER, payload.message().role());
+    assertEquals(
+        SystemReminder.wrap(SubagentPrompts.maxTurnsReminder()),
+        ((TextMessageContent) payload.message().contents().getFirst()).text());
+  }
+
+  /** 等待提醒批次被接受：配置收敛批次在前，提醒批次只含 CustomMessage。 */
+  private void awaitAcceptedReminder() {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (System.nanoTime() < deadline) {
+      AcceptCommandsCommand command = accepted.get();
+      if (command != null
+          && command.commands().stream()
+              .anyMatch(item -> item.payload() instanceof CustomMessageCommandPayload)) {
+        return;
+      }
+      sleepBriefly();
+    }
+    throw new AssertionError("max turns reminder was not queued in time");
+  }
+
+  private static void sleepBriefly() {
+    try {
+      Thread.sleep(5L);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while awaiting subagent progress", interrupted);
+    }
   }
 
   private RecordingListener run(UUID resumeSessionId) {
@@ -405,7 +487,7 @@ class DatabaseSubagentRunnerTest {
             modelDescriptor(),
             new ModelVariant("default"),
             1024,
-            List.of(),
+            "Task delegation parent instruction.",
             List.of(),
             List.of(),
             List.of(new SubagentBinding(SUBAGENT, "Review the change.")),
@@ -511,14 +593,69 @@ class DatabaseSubagentRunnerTest {
   }
 
   private ThreadSnapshot snapshot(List<Entry> entries) {
+    return snapshot(entries, null);
+  }
+
+  private ThreadSnapshot snapshot(List<Entry> entries, ModelInvocation model) {
     Entry head = entries.get(entries.size() - 1);
     return new ThreadSnapshot(
         thread(CHILD_THREAD_ID, CHILD_SESSION_ID, head.id()),
         new EntryPath(List.copyOf(entries)),
         List.of(),
-        null,
+        model,
         List.of(),
         List.of());
+  }
+
+  /** 子会话已关闭一个 turn，且第二个 turn 的 Model 仍在运行：非终态但已累计 2 个非压缩 turn。 */
+  private ThreadSnapshot childWithRunningSecondTurn() {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(childRoot(SUBAGENT, MODEL, ENV_B));
+    addCompletedTurn(entries, SUBAGENT, MODEL, ENV_B, entries.getFirst().id(), 31L);
+    Entry secondTurnStart =
+        new Entry(
+            id(35),
+            CHILD_SESSION_ID,
+            entries.getLast().id(),
+            new TurnStartPayload(
+                TurnStartReason.INPUT, new BranchSettings(SUBAGENT, MODEL, ENV_B), CHILD_THREAD_ID),
+            NOW.plusSeconds(50));
+    entries.add(secondTurnStart);
+    return snapshot(entries, runningModel(id(36), secondTurnStart.id()));
+  }
+
+  private ModelInvocation runningModel(UUID modelId, UUID turnStartEntryId) {
+    return new ModelInvocation(
+        modelId,
+        CHILD_THREAD_ID,
+        turnStartEntryId,
+        turnStartEntryId,
+        requestSpec(id(37)),
+        ModelInvocationStatus.RUNNING,
+        1,
+        null,
+        null,
+        null,
+        null,
+        List.of(),
+        NOW,
+        NOW,
+        null);
+  }
+
+  /** 父调用冻结的 request：只有 subagent bindings 参与 task 归属校验，其余字段仅为构造完整 spec。 */
+  private static ModelRequestSpec requestSpec(UUID modelId) {
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        modelId,
+        modelDescriptor(),
+        new ModelVariant("default"),
+        1024,
+        "Task delegation parent instruction.",
+        List.of(),
+        List.of(),
+        List.of(new SubagentBinding(SUBAGENT, "Review the change.")),
+        ProviderCacheControl.none());
   }
 
   private static ThreadState thread(UUID threadId, UUID sessionId, UUID headEntryId) {
@@ -621,6 +758,41 @@ class DatabaseSubagentRunnerTest {
     };
   }
 
+  /** 每个任务一个 daemon 线程：观察循环会阻塞等待 change source 信号，不能占用测试线程。 */
+  private static ExecutorService asyncExecutor() {
+    return new AbstractExecutorService() {
+      @Override
+      public void execute(Runnable command) {
+        Thread worker = new Thread(command, "subagent-test-worker");
+        worker.setDaemon(true);
+        worker.start();
+      }
+
+      @Override
+      public void shutdown() {}
+
+      @Override
+      public List<Runnable> shutdownNow() {
+        return List.of();
+      }
+
+      @Override
+      public boolean isShutdown() {
+        return false;
+      }
+
+      @Override
+      public boolean isTerminated() {
+        return false;
+      }
+
+      @Override
+      public boolean awaitTermination(long timeout, TimeUnit unit) {
+        return true;
+      }
+    };
+  }
+
   private static UUID id(long value) {
     return new UUID(0L, value);
   }
@@ -643,6 +815,7 @@ class DatabaseSubagentRunnerTest {
   /** 收集 task 终态结果与 acceptCommands 入参。 */
   private final class RecordingListener implements ToolExecutionListener {
 
+    private final CountDownLatch completed = new CountDownLatch(1);
     private ToolResult result;
 
     @Override
@@ -653,16 +826,31 @@ class DatabaseSubagentRunnerTest {
     @Override
     public void onComplete(ToolOutcome outcome) {
       this.result = outcome.result();
+      completed.countDown();
     }
 
     @Override
     public void onError(Throwable error) {
+      completed.countDown();
       throw new AssertionError("task execution failed unexpectedly", error);
     }
 
     private ToolResult completed() {
       assertNotNull(result, "task must reach a terminal result");
       return result;
+    }
+
+    /** 等待观察循环收敛到终态：等待循环本身在另一个线程，不能同步断言结果已就绪。 */
+    private ToolResult awaitCompleted() {
+      try {
+        if (!completed.await(10, TimeUnit.SECONDS)) {
+          throw new AssertionError("task did not reach a terminal result in time");
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("interrupted while awaiting task completion", interrupted);
+      }
+      return completed();
     }
 
     private AcceptCommandsTarget.NewSession newSession() {

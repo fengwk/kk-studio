@@ -12,20 +12,17 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -35,7 +32,7 @@ import java.util.UUID;
 
 /**
  * 关注：固定 pc2- 前缀、43 字符 Base64URL 无 padding 输出；动态 USER/ASSISTANT/TOOL history 不影响 key；资源标识、 provider
- * 连接代际或 stable prefix 一旦变化即切换 key；任意 typed content 块都能进入 digest 且字段边界不碰撞。
+ * 连接代际或 stable prefix 一旦变化即切换 key；systemInstruction 与 tools 字段独立成帧且边界不碰撞。
  */
 class PromptCacheAffinityKeyFactoryTest {
 
@@ -91,153 +88,52 @@ class PromptCacheAffinityKeyFactoryTest {
     assertEquals(baseKey, factory.create(SESSION_ID, dynamicThinking));
   }
 
-  /**
-   * 即便让 image block 出现在 leading SYSTEM 也必须有 coverage；对应 sealed 分支。 这里覆盖 sealed ProviderContentBlock
-   * 全部分支，让 key 工厂对各类 leading SYSTEM 内容都能稳定派生。
-   */
+  /** systemInstruction 内容改变必须派生不同的 affinity key。 */
   @Test
-  void leadingSystemSealedBlocksAllBranchesRender() {
+  void systemInstructionChangeChangesKey() {
+    ProviderRequest a = baseRequestWithSystemInstruction("You are a helpful assistant.");
+    ProviderRequest b = baseRequestWithSystemInstruction("You are a precise assistant.");
+    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
+  }
+
+  /** 任意对话历史消息内容变化（角色/文本/多轮）均不进入 digest，不影响 affinity key。 */
+  @Test
+  void arbitraryDynamicHistoryChangesDoNotAffectKey() {
     ProviderRequest template = baseRequest();
-    String base = factory.create(SESSION_ID, template);
+    String baseKey = factory.create(SESSION_ID, template);
 
-    ProviderRequest withText =
+    ProviderRequest msgA = withMessages(template, List.of(userText("hello")));
+    ProviderRequest msgB = withMessages(template, List.of(userText("world")));
+    ProviderRequest multiMsg =
         withMessages(
-            template,
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("S1")))));
-    ProviderRequest withThinking =
-        withMessages(
-            template,
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderThinkingBlock("S1-thinking")))));
-    ProviderRequest withJson =
-        withMessages(
-            template,
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderJsonBlock("{\"s\":1}")))));
-    ProviderRequest withMixed =
-        withMessages(
-            template,
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(
-                        new ProviderTextBlock("S1"), new ProviderImageBlock("image/png", "u:a")))));
-    String baseText = factory.create(SESSION_ID, withText);
-    String baseThinking = factory.create(SESSION_ID, withThinking);
-    String baseJson = factory.create(SESSION_ID, withJson);
-    String baseMixed = factory.create(SESSION_ID, withMixed);
+            template, List.of(userText("hello"), assistantThinking("hmm"), userText("bye")));
 
-    assertTrue(baseText.startsWith("pc2-"));
-    assertTrue(baseThinking.startsWith("pc2-"));
-    assertTrue(baseJson.startsWith("pc2-"));
-    assertTrue(baseMixed.startsWith("pc2-"));
-    // 任何分支之间必须互不相同。
-    assertNotEquals(baseText, baseThinking);
-    assertNotEquals(baseText, baseJson);
-    assertNotEquals(baseText, baseMixed);
-    assertNotEquals(baseThinking, baseJson);
-
-    // 文本以外其它分支必须改变 key。
-    assertNotEquals(base, baseText);
-    assertNotEquals(base, baseThinking);
-    assertNotEquals(base, baseJson);
-    assertNotEquals(base, baseMixed);
+    assertEquals(baseKey, factory.create(SESSION_ID, msgA));
+    assertEquals(baseKey, factory.create(SESSION_ID, msgB));
+    assertEquals(baseKey, factory.create(SESSION_ID, multiMsg));
+    assertEquals(factory.create(SESSION_ID, msgA), factory.create(SESSION_ID, msgB));
   }
 
+  /** 动态历史中包含非文本块（thinking、json、resource 等）均不进入 digest，不影响 key。 */
   @Test
-  void addingAnotherLeadingSystemMessageChangesKey() {
-    ProviderRequest original = withMessages(baseRequest(), List.of(systemText("S1")));
-    String originalKey = factory.create(SESSION_ID, original);
+  void dynamicHistoryNonTextBlocksDoNotAffectKey() {
+    ProviderRequest template = baseRequest();
+    String baseKey = factory.create(SESSION_ID, template);
 
-    ProviderRequest extended =
-        withMessages(baseRequest(), List.of(systemText("S1"), systemText("S2")));
-    assertNotEquals(originalKey, factory.create(SESSION_ID, extended));
-  }
+    ProviderMessage thinkingMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderThinkingBlock("internal thinking")));
+    ProviderMessage jsonMsg =
+        new ProviderMessage(
+            ProviderMessageRole.USER, List.of(new ProviderJsonBlock("{\"key\":\"value\"}")));
+    ProviderMessage resourceMsg =
+        new ProviderMessage(
+            ProviderMessageRole.USER,
+            List.of(new ProviderResourceBlock(UUID.randomUUID(), "res.txt", 100L, 10L, "preview")));
 
-  @Test
-  void systemTextChangeChangesKey() {
-    ProviderRequest a = withMessages(baseRequest(), List.of(systemText("S1")));
-    ProviderRequest b = withMessages(baseRequest(), List.of(systemText("S2")));
-    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
-  }
-
-  @Test
-  void systemImageBlockChangesKey() {
-    ProviderRequest a =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderImageBlock("image/png", "data:image/png;base64,AAA")))));
-    ProviderRequest b =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderImageBlock("image/png", "data:image/png;base64,BBB")))));
-    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
-  }
-
-  @Test
-  void systemAudioBlockChangesKey() {
-    ProviderRequest a =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderAudioBlock("audio/mpeg", "uri:a")))));
-    ProviderRequest b =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderAudioBlock("audio/mpeg", "uri:b")))));
-    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
-  }
-
-  @Test
-  void systemVideoBlockChangesKey() {
-    ProviderRequest a =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderVideoBlock("video/mp4", "uri:a")))));
-    ProviderRequest b =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(new ProviderVideoBlock("video/mp4", "uri:b")))));
-    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
-  }
-
-  @Test
-  void systemJsonBlockChangesKey() {
-    ProviderRequest a =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderJsonBlock("{\"a\":1}")))));
-    ProviderRequest b =
-        withMessages(
-            baseRequest(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderJsonBlock("{\"a\":2}")))));
-    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
+    assertEquals(baseKey, factory.create(SESSION_ID, withMessages(template, List.of(thinkingMsg))));
+    assertEquals(baseKey, factory.create(SESSION_ID, withMessages(template, List.of(jsonMsg))));
+    assertEquals(baseKey, factory.create(SESSION_ID, withMessages(template, List.of(resourceMsg))));
   }
 
   @Test
@@ -363,28 +259,31 @@ class PromptCacheAffinityKeyFactoryTest {
         factory.create(SESSION_ID, baseRequestWithModel(model("provider-long", "m1"))));
   }
 
-  /**
-   * NUL 字段边界回归：image 的 mediaType 与 source 必须以独立 length-prefixed frame 写入，不能用任何形式的 NUL
-   * 拼接。两个对象的拼接后字节序列完全相同，但 key 不得相同。
-   */
+  /** NUL 字段边界回归：systemInstruction 与 tool 各字段采用独立 length-prefixed frame 写入， 跨字段 NUL 伪造或重排不能产生碰撞。 */
   @Test
-  void nulBoundaryCollisionImageMediaTypeAndSource() {
-    ProviderRequest a = requestWithLeadingImage("a\0b", "c");
-    ProviderRequest b = requestWithLeadingImage("a", "b\0c");
+  void nulBoundaryCollisionSystemInstructionAndTool() {
+    ProviderRequest a =
+        baseRequestWithSystemInstructionAndTools("a\0b", List.of(tool("c", "desc", "{}")));
+    ProviderRequest b =
+        baseRequestWithSystemInstructionAndTools("a", List.of(tool("b\0c", "desc", "{}")));
     assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
+
+    // systemInstruction 尾部追加 NUL 仍必须切 key。
+    ProviderRequest c = baseRequestWithSystemInstruction("sys\0");
+    ProviderRequest d = baseRequestWithSystemInstruction("sys");
+    assertNotEquals(factory.create(SESSION_ID, c), factory.create(SESSION_ID, d));
   }
 
-  /** 同等的 audio / video 复合块也必须避免 NUL 拼接碰撞。 */
+  /** Tool description 与 inputSchemaJson 跨字段 NUL 重排及尾部追加 NUL 仍必须切 key。 */
   @Test
-  void nulBoundaryCollisionAudioVideo() {
-    ProviderRequest audioA = requestWithLeadingAudio("a\0b", "c");
-    ProviderRequest audioB = requestWithLeadingAudio("a", "b\0c");
-    assertNotEquals(factory.create(SESSION_ID, audioA), factory.create(SESSION_ID, audioB));
+  void nulBoundaryCollisionToolDescriptionAndSchema() {
+    ProviderRequest a = baseRequest(tool("t1", "a\0b", "c"));
+    ProviderRequest b = baseRequest(tool("t1", "a", "b\0c"));
+    assertNotEquals(factory.create(SESSION_ID, a), factory.create(SESSION_ID, b));
 
-    ProviderRequest videoA = requestWithLeadingVideo("video/mp4", "a\0b");
-    ProviderRequest videoB = requestWithLeadingVideo("video/mp4", "a\0b\0");
-    // 仅在尾部追加 NUL 看似不影响媒体，但 length-prefixed 框架下仍必须切 key。
-    assertNotEquals(factory.create(SESSION_ID, videoA), factory.create(SESSION_ID, videoB));
+    ProviderRequest c = baseRequest(tool("t1", "desc", "schema\0"));
+    ProviderRequest d = baseRequest(tool("t1", "desc", "schema"));
+    assertNotEquals(factory.create(SESSION_ID, c), factory.create(SESSION_ID, d));
   }
 
   /** tool definition 各字段必须独立成帧：name / description / inputSchemaJson 的 NUL 重排或追加都必须切 key。 */
@@ -399,44 +298,6 @@ class PromptCacheAffinityKeyFactoryTest {
     assertNotEquals(factory.create(SESSION_ID, c), factory.create(SESSION_ID, d));
   }
 
-  /** 合法 SYSTEM nested 类型（Text/Image/Audio/Video/Thinking/Json）通过真实 {@code create} 路径覆盖。 */
-  @Test
-  void legalSystemNestedTypesAreAllCoveredViaCreate() {
-    String textKey =
-        factory.create(SESSION_ID, baseRequestWithSystemMessage(new ProviderTextBlock("S-text")));
-    String imageKey =
-        factory.create(
-            SESSION_ID, baseRequestWithSystemMessage(new ProviderImageBlock("image/png", "u:img")));
-    String audioKey =
-        factory.create(
-            SESSION_ID, baseRequestWithSystemMessage(new ProviderAudioBlock("audio/mp3", "u:aud")));
-    String videoKey =
-        factory.create(
-            SESSION_ID, baseRequestWithSystemMessage(new ProviderVideoBlock("video/mp4", "u:vid")));
-    String thinkingKey =
-        factory.create(
-            SESSION_ID, baseRequestWithSystemMessage(new ProviderThinkingBlock("think")));
-    String jsonKey =
-        factory.create(
-            SESSION_ID, baseRequestWithSystemMessage(new ProviderJsonBlock("{\"k\":1}")));
-
-    assertTrue(textKey.startsWith("pc2-"));
-    assertTrue(imageKey.startsWith("pc2-"));
-    assertTrue(audioKey.startsWith("pc2-"));
-    assertTrue(videoKey.startsWith("pc2-"));
-    assertTrue(thinkingKey.startsWith("pc2-"));
-    assertTrue(jsonKey.startsWith("pc2-"));
-    // 不同类型之间互不相同，证明每条分支都进入 digest。
-    assertNotEquals(textKey, imageKey);
-    assertNotEquals(textKey, audioKey);
-    assertNotEquals(textKey, videoKey);
-    assertNotEquals(textKey, thinkingKey);
-    assertNotEquals(textKey, jsonKey);
-    assertNotEquals(imageKey, audioKey);
-    assertNotEquals(imageKey, videoKey);
-    assertNotEquals(thinkingKey, jsonKey);
-  }
-
   private static ProviderRequest baseRequest() {
     return baseRequestWithModel(model("provider", "m1"));
   }
@@ -445,13 +306,40 @@ class PromptCacheAffinityKeyFactoryTest {
     ModelDescriptor m = model("provider", "m1");
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
-        m, variant, 1024, List.of(), List.of(tools), ProviderCacheControl.none());
+        m,
+        variant,
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(tools),
+        ProviderCacheControl.none());
   }
 
   private static ProviderRequest baseRequestWithModel(ModelDescriptor descriptor) {
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
-        descriptor, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
+        descriptor,
+        variant,
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none());
+  }
+
+  private static ProviderRequest baseRequestWithSystemInstruction(String systemInstruction) {
+    ModelDescriptor m = model("provider", "m1");
+    ModelVariant variant = new ModelVariant("default");
+    return new ProviderRequest(
+        m, variant, 1024, systemInstruction, List.of(), List.of(), ProviderCacheControl.none());
+  }
+
+  private static ProviderRequest baseRequestWithSystemInstructionAndTools(
+      String systemInstruction, List<ProviderToolDefinition> tools) {
+    ModelDescriptor m = model("provider", "m1");
+    ModelVariant variant = new ModelVariant("default");
+    return new ProviderRequest(
+        m, variant, 1024, systemInstruction, List.of(), tools, ProviderCacheControl.none());
   }
 
   private static ProviderRequest withMessages(
@@ -460,13 +348,10 @@ class PromptCacheAffinityKeyFactoryTest {
         template.model(),
         template.variant(),
         1024,
+        template.systemInstruction(),
         messages,
         template.tools(),
         template.cacheControl());
-  }
-
-  private static ProviderMessage systemText(String text) {
-    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock(text)));
   }
 
   private static ProviderMessage userText(String text) {
@@ -493,34 +378,6 @@ class PromptCacheAffinityKeyFactoryTest {
 
   private static ProviderToolDefinition tool(String name, String description, String schema) {
     return new ProviderToolDefinition(name, description, schema);
-  }
-
-  private static ProviderRequest baseRequestWithSystemMessage(ProviderContentBlock block) {
-    return baseRequestWithSystemMessages(List.of(block));
-  }
-
-  private static ProviderRequest baseRequestWithSystemMessages(
-      List<ProviderContentBlock> leadingSystemContents) {
-    ProviderRequest template = baseRequest();
-    return new ProviderRequest(
-        template.model(),
-        template.variant(),
-        1024,
-        List.of(new ProviderMessage(ProviderMessageRole.SYSTEM, leadingSystemContents)),
-        template.tools(),
-        template.cacheControl());
-  }
-
-  private static ProviderRequest requestWithLeadingImage(String mediaType, String source) {
-    return baseRequestWithSystemMessage(new ProviderImageBlock(mediaType, source));
-  }
-
-  private static ProviderRequest requestWithLeadingAudio(String mediaType, String source) {
-    return baseRequestWithSystemMessage(new ProviderAudioBlock(mediaType, source));
-  }
-
-  private static ProviderRequest requestWithLeadingVideo(String mediaType, String source) {
-    return baseRequestWithSystemMessage(new ProviderVideoBlock(mediaType, source));
   }
 
   private static List<ProviderMessage> appendDynamic(

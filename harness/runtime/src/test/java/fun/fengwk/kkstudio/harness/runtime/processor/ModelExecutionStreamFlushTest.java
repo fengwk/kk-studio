@@ -2384,7 +2384,7 @@ class ModelExecutionStreamFlushTest {
         modelDescriptor(),
         new ModelVariant("v1"),
         1024,
-        List.of(),
+        "Test system instruction.",
         bindings,
         List.of(),
         List.of(),

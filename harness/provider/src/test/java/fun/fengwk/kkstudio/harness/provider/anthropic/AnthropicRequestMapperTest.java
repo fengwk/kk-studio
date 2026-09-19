@@ -52,8 +52,8 @@ import java.util.stream.Stream;
 /**
  * 适配 LangChain4j Anthropic Mapper、Schema 与 Cache 测试到 kk-studio 原生请求编码器的端到端映射套件。
  *
- * <p>直接针对 {@link AnthropicRequestEncoder} 进行断言，覆盖消息矩阵、工具定义映射、 JSON Schema 透传、缓存断点注入、诊断隔离、会话中 SYSTEM
- * 拦截与非法结构拒绝。
+ * <p>直接针对 {@link AnthropicRequestEncoder} 进行断言，覆盖消息矩阵、工具定义映射、 JSON Schema 透传、缓存断点注入、诊断隔离、系统指令单一承载
+ * 与非法结构拒绝。
  */
 class AnthropicRequestMapperTest {
 
@@ -81,8 +81,8 @@ class AnthropicRequestMapperTest {
   // =========================================================================================
 
   /**
-   * 测试意图：覆盖 14 种运行时可表达的消息组合，验证文本、系统提示词、多轮会话、 工具调用、思考块降级、Base64/URL 图片、Base64 PDF 的正确线缆映射，并对不支持的 URL
-   * PDF 和非法会话中 SYSTEM 显式验证确定性失败。
+   * 测试意图：覆盖 13 种运行时可表达的消息组合，验证文本、顶层系统指令、多轮会话、 工具调用、思考块降级、Base64/URL 图片、Base64 PDF 的正确线缆映射，并对不支持的
+   * URL PDF 显式验证确定性失败。
    */
   @ParameterizedTest(name = "{0}")
   @MethodSource
@@ -111,12 +111,11 @@ class AnthropicRequestMapperTest {
     JsonNode expectedMessagesNode = MAPPER.readTree(testCase.expectedMessagesJson());
     assertEquals(expectedMessagesNode, root.path("messages"));
 
-    if (testCase.expectedSystemJson() != null) {
-      JsonNode expectedSystemNode = MAPPER.readTree(testCase.expectedSystemJson());
-      assertEquals(expectedSystemNode, root.path("system"));
-    } else {
-      assertFalse(root.has("system"));
-    }
+    // 系统指令始终是唯一的顶层 system 文本块，绝不进入 messages。
+    JsonNode systemNode = root.path("system");
+    assertEquals(1, systemNode.size());
+    assertEquals("text", systemNode.get(0).path("type").asText());
+    assertEquals(request.systemInstruction(), systemNode.get(0).path("text").asText());
   }
 
   static Stream<Arguments> test_toAnthropicMessages() {
@@ -133,16 +132,13 @@ class AnthropicRequestMapperTest {
                     "content": [{"type": "text", "text": "Hello"}]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 2: 前置系统消息提取至顶层 system 字段，不进入 messages 数组
+        // Case 2: 在 Case 1 基础上验证 messages 与顶层 system 同时存在时各自独立成形
         Arguments.of(
             MessageMappingCase.success(
-                "case2_leading_system_extracted_to_top_level",
-                List.of(
-                    sysMsg(new ProviderTextBlock("Ignored")),
-                    userMsg(new ProviderTextBlock("Hello"))),
+                "case2_top_level_system_not_duplicated_into_messages",
+                List.of(userMsg(new ProviderTextBlock("Hello"))),
                 """
                 [
                   {
@@ -150,27 +146,12 @@ class AnthropicRequestMapperTest {
                     "content": [{"type": "text", "text": "Hello"}]
                   }
                 ]
-                """,
-                """
-                [
-                  {"type": "text", "text": "Ignored"}
-                ]
                 """)),
 
-        // Case 3: 会话中间的系统消息（非前置）必须在发起网络请求前被确定性拦截
-        Arguments.of(
-            MessageMappingCase.failure(
-                "case3_mid_conversation_system_rejected",
-                List.of(
-                    userMsg(new ProviderTextBlock("Hello")),
-                    sysMsg(new ProviderTextBlock("Ignored"))),
-                ProviderErrorKind.INVALID_REQUEST,
-                "Anthropic does not allow mid-conversation SYSTEM messages")),
-
-        // Case 4: 多轮 User -> Assistant -> User 文本会话映射
+        // Case 3: 多轮 User -> Assistant -> User 文本会话映射
         Arguments.of(
             MessageMappingCase.success(
-                "case4_multi_turn_conversation",
+                "case3_multi_turn_conversation",
                 List.of(
                     userMsg(new ProviderTextBlock("Hello")),
                     asstMsg(new ProviderTextBlock("Hi")),
@@ -190,13 +171,12 @@ class AnthropicRequestMapperTest {
                     "content": [{"type": "text", "text": "How are you?"}]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 5: 单次工具调用（assistant tool_use）与工具响应（user role tool_result）
+        // Case 4: 单次工具调用（assistant tool_use）与工具响应（user role tool_result）
         Arguments.of(
             MessageMappingCase.success(
-                "case5_tool_use_and_tool_result",
+                "case4_tool_use_and_tool_result",
                 List.of(
                     userMsg(new ProviderTextBlock("How much is 2+2?")),
                     asstToolMsg(
@@ -231,13 +211,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 6: 带有 thinking 块的 assistant 工具调用降级为普通 text 块后紧随 tool_use
+        // Case 5: 带有 thinking 块的 assistant 工具调用降级为普通 text 块后紧随 tool_use
         Arguments.of(
             MessageMappingCase.success(
-                "case6_assistant_thinking_fallback_with_tool_use",
+                "case5_assistant_thinking_fallback_with_tool_use",
                 List.of(
                     userMsg(new ProviderTextBlock("How much is 2+2?")),
                     asstMsg(
@@ -279,13 +258,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 7: 同一轮次多个并行工具调用与其对应的多个工具返回
+        // Case 6: 同一轮次多个并行工具调用与其对应的多个工具返回
         Arguments.of(
             MessageMappingCase.success(
-                "case7_parallel_tool_use_and_results",
+                "case6_parallel_tool_use_and_results",
                 List.of(
                     userMsg(new ProviderTextBlock("How much is 2+2 and 3+3?")),
                     asstToolMsg(
@@ -339,13 +317,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 8: 跨轮次顺序工具调用与返回
+        // Case 7: 跨轮次顺序工具调用与返回
         Arguments.of(
             MessageMappingCase.success(
-                "case8_sequential_tool_use_across_turns",
+                "case7_sequential_tool_use_across_turns",
                 List.of(
                     userMsg(new ProviderTextBlock("How much is 2+2 and 3+3?")),
                     asstToolMsg(
@@ -405,13 +382,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 9: URL 图片块
+        // Case 8: URL 图片块
         Arguments.of(
             MessageMappingCase.success(
-                "case9_url_image_block",
+                "case8_url_image_block",
                 List.of(userMsg(new ProviderImageBlock("image/png", DICE_IMAGE_URL))),
                 """
                 [
@@ -428,13 +404,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 10: Base64 图片块（从 data URI 提取）
+        // Case 9: Base64 图片块（从 data URI 提取）
         Arguments.of(
             MessageMappingCase.success(
-                "case10_base64_image_block",
+                "case9_base64_image_block",
                 List.of(
                     userMsg(
                         new ProviderImageBlock(
@@ -455,13 +430,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 11: 文本与 URL 图片混合内容
+        // Case 10: 文本与 URL 图片混合内容
         Arguments.of(
             MessageMappingCase.success(
-                "case11_text_and_url_image",
+                "case10_text_and_url_image",
                 List.of(
                     userMsg(
                         new ProviderTextBlock("Describe this image"),
@@ -485,13 +459,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 12: URL PDF 文档（Anthropic 仅支持 Base64 文档，URL PDF 必须显式拒绝而非假装支持）
+        // Case 11: URL PDF 文档（Anthropic 仅支持 Base64 文档，URL PDF 必须显式拒绝而非假装支持）
         Arguments.of(
             MessageMappingCase.failure(
-                "case12_url_pdf_unsupported_must_reject",
+                "case11_url_pdf_unsupported_must_reject",
                 List.of(
                     userMsg(
                         new ProviderDocumentBlock(
@@ -499,10 +472,10 @@ class AnthropicRequestMapperTest {
                 ProviderErrorKind.INVALID_REQUEST,
                 "document source must be a valid base64 data URI matching mediaType")),
 
-        // Case 13: Base64 PDF 文档（从 data URI 提取）
+        // Case 12: Base64 PDF 文档（从 data URI 提取）
         Arguments.of(
             MessageMappingCase.success(
-                "case13_base64_pdf_block",
+                "case12_base64_pdf_block",
                 List.of(
                     userMsg(
                         new ProviderDocumentBlock(
@@ -523,13 +496,12 @@ class AnthropicRequestMapperTest {
                     ]
                   }
                 ]
-                """,
-                null)),
+                """)),
 
-        // Case 14: 文本与 URL PDF 混合内容（同样由于不支持 URL PDF 而确定性失败）
+        // Case 13: 文本与 URL PDF 混合内容（同样由于不支持 URL PDF 而确定性失败）
         Arguments.of(
             MessageMappingCase.failure(
-                "case14_text_and_url_pdf_unsupported_must_reject",
+                "case13_text_and_url_pdf_unsupported_must_reject",
                 List.of(
                     userMsg(
                         new ProviderTextBlock("Analyze this document"),
@@ -1241,16 +1213,13 @@ class AnthropicRequestMapperTest {
     assertFalse(markerShort.has("ttl"));
   }
 
-  /** 测试意图：当指定 SYSTEM 断点时，缓存标记必须打在最后一个系统块上，前面的系统块不带标记。 */
+  /** 测试意图：当指定 SYSTEM 断点时，缓存标记打在请求唯一的顶层系统指令块上。 */
   @Test
-  void should_mark_last_system_block_when_system_breakpoint_is_enabled() throws IOException {
+  void should_mark_system_instruction_block_when_system_breakpoint_is_enabled() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(
-                sysMsg(new ProviderTextBlock("Leading instruction 1")),
-                sysMsg(new ProviderTextBlock("Leading instruction 2")),
-                userMsg(new ProviderTextBlock("Hi"))),
+            List.of(userMsg(new ProviderTextBlock("Hi"))),
             List.of(),
             ProviderCacheControl.breakpoints(
                 PromptCacheRetention.SHORT, "affinity-sys", Set.of(PromptCacheBreakpoint.SYSTEM)));
@@ -1259,25 +1228,23 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode systemArray = root.path("system");
-    assertEquals(2, systemArray.size());
-    assertFalse(systemArray.get(0).has("cache_control"));
+    assertEquals(1, systemArray.size());
+    assertEquals("Test system instruction.", systemArray.get(0).path("text").asText());
 
-    JsonNode lastSystem = systemArray.get(1);
-    assertEquals("ephemeral", lastSystem.path("cache_control").path("type").asText());
+    JsonNode systemBlock = systemArray.get(0);
+    assertEquals("ephemeral", systemBlock.path("cache_control").path("type").asText());
 
     // messages 数组无标记
     assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
   }
 
-  /** 测试意图：当断点集合中未包含 SYSTEM 时，即使存在前置系统消息也不注入缓存标记。 */
+  /** 测试意图：当断点集合中未包含 SYSTEM 时，顶层系统指令块不注入缓存标记。 */
   @Test
   void should_leave_system_blocks_unmarked_without_system_breakpoint() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(
-                sysMsg(new ProviderTextBlock("Leading instruction")),
-                userMsg(new ProviderTextBlock("Hi"))),
+            List.of(userMsg(new ProviderTextBlock("Hi"))),
             List.of(),
             ProviderCacheControl.breakpoints(
                 PromptCacheRetention.SHORT,
@@ -1355,9 +1322,7 @@ class AnthropicRequestMapperTest {
     ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(
-                sysMsg(new ProviderTextBlock("You are helpful")),
-                userMsg(new ProviderTextBlock("Hi"))),
+            List.of(userMsg(new ProviderTextBlock("Hi"))),
             List.of(tool),
             ProviderCacheControl.none());
 
@@ -1435,19 +1400,17 @@ class AnthropicRequestMapperTest {
   }
 
   // =========================================================================================
-  // 7. 会话中 SYSTEM 拦截机制验证
+  // 7. 系统指令单一承载验证
   // =========================================================================================
 
-  /** 测试意图：连续的前置系统消息均被聚合到顶层 system 数组中，messages 数组中不包含任何 SYSTEM 消息。 */
+  /** 测试意图：请求的系统指令是唯一的顶层 system 单块文本，会话消息中绝无 SYSTEM 角色， 也不存在任何"会话中系统消息"的兼容外壳。 */
   @Test
-  void should_encode_leading_system_messages_in_top_level_system_prompt() throws IOException {
+  void should_encode_request_system_instruction_as_only_top_level_system_block()
+      throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(
-                sysMsg(new ProviderTextBlock("leading-1")),
-                sysMsg(new ProviderTextBlock("leading-2")),
-                userMsg(new ProviderTextBlock("hi"))),
+            List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
 
@@ -1455,73 +1418,14 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode systemArray = root.path("system");
-    assertEquals(2, systemArray.size());
-    assertEquals("leading-1", systemArray.get(0).path("text").asText());
-    assertEquals("leading-2", systemArray.get(1).path("text").asText());
+    assertEquals(1, systemArray.size());
+    assertEquals("text", systemArray.get(0).path("type").asText());
+    assertEquals("Test system instruction.", systemArray.get(0).path("text").asText());
 
     JsonNode messagesArray = root.path("messages");
     assertEquals(1, messagesArray.size());
     assertEquals("user", messagesArray.get(0).path("role").asText());
-  }
-
-  /** 测试意图：会话中间出现的 SYSTEM 消息在发起 I/O 前被确定性拦截并抛出 INVALID_REQUEST，不提供内联外壳。 */
-  @Test
-  void should_reject_mid_conversation_system_message_before_io() {
-    ProviderRequest request =
-        request(
-            defaultVariant(),
-            List.of(
-                sysMsg(new ProviderTextBlock("leading")),
-                userMsg(new ProviderTextBlock("hi")),
-                sysMsg(new ProviderTextBlock("mid-conversation")),
-                userMsg(new ProviderTextBlock("bye"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertEquals(
-        "Anthropic does not allow mid-conversation SYSTEM messages", exception.getMessage());
-  }
-
-  /** 测试意图：紧跟在工具执行结果（tool_result）之后的会话中 SYSTEM 消息同样被确定性拦截。 */
-  @Test
-  void should_reject_mid_conversation_system_message_after_tool_result() {
-    ProviderRequest request =
-        request(
-            defaultVariant(),
-            List.of(
-                userMsg(new ProviderTextBlock("calc 2+2")),
-                asstToolMsg(new ProviderToolCall("1", "calculator", "{}")),
-                toolResultMsg("1", "calculator", false, new ProviderTextBlock("4")),
-                sysMsg(new ProviderTextBlock("be concise")),
-                userMsg(new ProviderTextBlock("thanks"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertEquals(
-        "Anthropic does not allow mid-conversation SYSTEM messages", exception.getMessage());
-  }
-
-  /** 测试意图：验证 kk-studio 默认且唯一行为是不支持会话中 SYSTEM 消息，坚决不虚构内联开关外壳。 */
-  @Test
-  void should_reject_mid_conversation_system_messages_by_default() {
-    ProviderRequest request =
-        request(
-            defaultVariant(),
-            List.of(
-                userMsg(new ProviderTextBlock("User prompt")),
-                sysMsg(new ProviderTextBlock("Mid instruction"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
+    assertFalse(root.toString().contains("SYSTEM"));
   }
 
   // =========================================================================================
@@ -1577,25 +1481,7 @@ class AnthropicRequestMapperTest {
     assertEquals("tool input_schema must be a JSON object", ex2.getMessage());
   }
 
-  /** 测试意图：系统消息中出现非 text 且非 document 的不支持块（如图片）时抛出 INVALID_REQUEST。 */
-  @Test
-  void should_reject_unsupported_system_content_block() {
-    ProviderRequest request =
-        request(
-            defaultVariant(),
-            List.of(
-                sysMsg(new ProviderImageBlock("image/png", DICE_IMAGE_URL)),
-                userMsg(new ProviderTextBlock("hi"))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    ProviderException exception =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
-    assertEquals("unsupported system content block type", exception.getMessage());
-  }
-
-  /** 测试意图：用户消息中出现不支持的内容块（如 thinking 块或 tool call 块）时抛出 INVALID_REQUEST。 */
+  /** 测试意图：会话消息中出现不支持的内容块（如 thinking 块或 tool call 块）时抛出 INVALID_REQUEST。 */
   @Test
   void should_reject_unsupported_user_content_block() {
     ProviderRequest request =
@@ -1770,17 +1656,12 @@ class AnthropicRequestMapperTest {
       String description,
       List<ProviderMessage> messages,
       String expectedMessagesJson,
-      String expectedSystemJson,
       ProviderErrorKind expectedErrorKind,
       String expectedErrorMessageSubstring) {
 
     static MessageMappingCase success(
-        String description,
-        List<ProviderMessage> messages,
-        String expectedMessagesJson,
-        String expectedSystemJson) {
-      return new MessageMappingCase(
-          description, messages, expectedMessagesJson, expectedSystemJson, null, null);
+        String description, List<ProviderMessage> messages, String expectedMessagesJson) {
+      return new MessageMappingCase(description, messages, expectedMessagesJson, null, null);
     }
 
     static MessageMappingCase failure(
@@ -1789,7 +1670,7 @@ class AnthropicRequestMapperTest {
         ProviderErrorKind expectedErrorKind,
         String expectedErrorMessageSubstring) {
       return new MessageMappingCase(
-          description, messages, null, null, expectedErrorKind, expectedErrorMessageSubstring);
+          description, messages, null, expectedErrorKind, expectedErrorMessageSubstring);
     }
 
     @Override
@@ -1828,7 +1709,8 @@ class AnthropicRequestMapperTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, "Test system instruction.", messages, tools, cacheControl);
   }
 
   private static ModelPricing pricing() {
@@ -1848,10 +1730,6 @@ class AnthropicRequestMapperTest {
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
-  }
-
-  private static ProviderMessage sysMsg(ProviderContentBlock... blocks) {
-    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(blocks));
   }
 
   private static ProviderMessage asstMsg(ProviderContentBlock... blocks) {

@@ -81,8 +81,6 @@ class HistoryEntryPayloadTest {
                 null,
                 new ToolResultMetadata(
                     id(2L), "call-9", 0, ToolResultStatus.SUCCEEDED, false, null)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new MessagePayload(system("system"), null, null));
     assertThrows(NullPointerException.class, () -> new MessagePayload(null, null, null));
   }
 
@@ -136,15 +134,14 @@ class HistoryEntryPayloadTest {
 
   @Test
   void customMessagePayloadRestrictsRolesAndRequiresCoreMetadataShape() {
-    AgentMessage system = system("s");
     AgentMessage user = user("u");
     assertEquals(
-        system,
+        user,
         new CustomMessagePayload(
                 CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
-                system,
+                user,
                 CustomMessagePayload.CORE_DETAILS_JSON)
             .message());
     assertEquals(
@@ -231,19 +228,19 @@ class HistoryEntryPayloadTest {
   void customMessagePayloadRejectsNonCanonicalDetailsJson() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomMessagePayload("core", "message", "message", system("s"), "{\"a\": 1}"));
+        () -> new CustomMessagePayload("core", "message", "message", user("s"), "{\"a\": 1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomMessagePayload("core", "message", "message", system("s"), "[]"));
+        () -> new CustomMessagePayload("core", "message", "message", user("s"), "[]"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomMessagePayload("core", "message", "message", system("s"), ""));
+        () -> new CustomMessagePayload("core", "message", "message", user("s"), ""));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomMessagePayload("Core", "message", "message", system("s"), "{}"));
+        () -> new CustomMessagePayload("Core", "message", "message", user("s"), "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CustomMessagePayload("core", "message", "Message", system("s"), "{}"));
+        () -> new CustomMessagePayload("core", "message", "Message", user("s"), "{}"));
   }
 
   @Test
@@ -534,10 +531,6 @@ class HistoryEntryPayloadTest {
 
   private static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
-  }
-
-  private static AgentMessage system(String text) {
-    return new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)));
   }
 
   private static AgentMessage assistant(String text) {

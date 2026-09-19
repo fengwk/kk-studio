@@ -166,7 +166,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                 BigDecimal.ZERO)),
         new ModelVariant(settings.model().variant()),
         1024,
-        List.of(),
+        "Test system instruction.",
         List.of(environmentTool),
         List.of(),
         List.of(),

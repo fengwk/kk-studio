@@ -208,13 +208,16 @@ class ProviderReplayMaterializationTransportTest {
                     ProviderMediaCapabilities.NONE))));
 
     JsonNode messages = MAPPER.readTree(requestBodies.get(1)).get("messages");
-    assertEquals(2, messages.size(), requestBodies.get(1));
-    assertEquals("user", messages.get(0).path("role").asText());
-    assertEquals("assistant", messages.get(1).path("role").asText());
-    assertEquals(ANSWER, messages.get(1).path("content").asText());
+    // systemInstruction 恒由请求级 system 消息承载，不占用会话消息位置。
+    assertEquals(3, messages.size(), requestBodies.get(1));
+    assertEquals("system", messages.get(0).path("role").asText());
+    assertEquals("Test system instruction.", messages.get(0).path("content").asText());
+    assertEquals("user", messages.get(1).path("role").asText());
+    assertEquals("assistant", messages.get(2).path("role").asText());
+    assertEquals(ANSWER, messages.get(2).path("content").asText());
     assertEquals(
         THINKING,
-        messages.get(1).path("reasoning_content").asText(),
+        messages.get(2).path("reasoning_content").asText(),
         "物化边界丢弃 replay 会退化为语义回退并丢失 reasoning_content");
   }
 
@@ -253,7 +256,7 @@ class ProviderReplayMaterializationTransportTest {
     assertTrue(durableUserJson.contains(BLOB_ID.toString()));
     assertFalse(durableUserJson.contains("base64"));
     AgentMessage durableUser = messages.decode(durableUserJson);
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
     Set<ModelInputModality> modalities =
         Set.of(ModelInputModality.TEXT, ModelInputModality.DOCUMENT);
     ProviderRequest firstRequest =
@@ -308,11 +311,15 @@ class ProviderReplayMaterializationTransportTest {
     }
     switch (type) {
       case OPENAI -> {
+        // 系统指令合成为唯一前导 system message，会话消息整体后移一位。
+        assertEquals("system", firstWire.at("/messages/0/role").asText());
+        assertEquals("Test system instruction.", firstWire.at("/messages/0/content").asText());
         assertEquals(
             "data:application/pdf;base64," + base64,
-            firstWire.at("/messages/0/content/0/file/file_data").asText());
-        assertEquals(firstWire.at("/messages/0"), secondWire.at("/messages/0"));
-        assertEquals(THINKING, secondWire.at("/messages/1/reasoning_content").asText());
+            firstWire.at("/messages/1/content/0/file/file_data").asText());
+        assertEquals(firstWire.at("/messages/1"), secondWire.at("/messages/1"));
+        assertEquals(THINKING, secondWire.at("/messages/2/reasoning_content").asText());
+        assertEquals("continue", secondWire.at("/messages/3/content").asText());
       }
       case OPENAI_RESPONSES -> {
         assertEquals(
@@ -428,7 +435,13 @@ class ProviderReplayMaterializationTransportTest {
         new ModelDescriptor(
             "test-provider", "test-model", "test-model", modalities, false, true, pricing);
     return new ProviderRequest(
-        model, new ModelVariant("default"), 1024, messages, List.of(), ProviderCacheControl.none());
+        model,
+        new ModelVariant("default"),
+        1024,
+        "Test system instruction.",
+        messages,
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   private static StorageBlob activeTextBlob() {

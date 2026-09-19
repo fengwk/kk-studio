@@ -156,6 +156,7 @@ class OpenAiChatStreamingDecoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -228,6 +229,7 @@ class OpenAiChatStreamingDecoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -292,6 +294,7 @@ class OpenAiChatStreamingDecoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

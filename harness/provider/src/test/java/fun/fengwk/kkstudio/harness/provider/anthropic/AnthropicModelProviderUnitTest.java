@@ -95,6 +95,7 @@ class AnthropicModelProviderUnitTest {
             model,
             new ModelVariant("default"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -615,6 +616,7 @@ class AnthropicModelProviderUnitTest {
             reasoningModel,
             new ModelVariant("default", "low"),
             1,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),

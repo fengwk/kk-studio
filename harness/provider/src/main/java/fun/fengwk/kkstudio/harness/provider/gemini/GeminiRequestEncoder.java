@@ -81,40 +81,11 @@ final class GeminiRequestEncoder {
 
     ObjectNode root = NODES.objectNode();
 
-    // 1. leading SYSTEM 合并到 systemInstruction.parts（文本限定）
-    List<ProviderMessage> messages = request.messages();
-    List<ProviderContentBlock> leadingSystemBlocks = new ArrayList<>();
-    List<ProviderMessage> conversationMessages = new ArrayList<>();
-    boolean seenNonSystem = false;
-
-    for (ProviderMessage msg : messages) {
-      if (msg.role() == ProviderMessageRole.SYSTEM) {
-        if (seenNonSystem) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "Gemini does not allow mid-conversation SYSTEM messages");
-        }
-        leadingSystemBlocks.addAll(msg.contents());
-      } else {
-        seenNonSystem = true;
-        conversationMessages.add(msg);
-      }
-    }
-
-    ObjectNode systemInstruction = null;
-    if (!leadingSystemBlocks.isEmpty()) {
-      systemInstruction = root.putObject("systemInstruction");
-      ArrayNode sysParts = systemInstruction.putArray("parts");
-      for (ProviderContentBlock block : leadingSystemBlocks) {
-        if (block instanceof ProviderTextBlock textBlock) {
-          ObjectNode part = sysParts.addObject();
-          part.put("text", textBlock.text());
-        } else {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "systemInstruction parts must be text");
-        }
-      }
-    }
+    // 1. 请求唯一的系统指令映射为顶层 systemInstruction.parts
+    ObjectNode systemInstruction = root.putObject("systemInstruction");
+    ArrayNode sysParts = systemInstruction.putArray("parts");
+    ObjectNode systemPart = sysParts.addObject();
+    systemPart.put("text", request.systemInstruction());
 
     // 2. generationConfig 映射
     encodeGenerationConfig(root, request);
@@ -128,8 +99,8 @@ final class GeminiRequestEncoder {
     String currentRole = null;
     ArrayNode currentParts = null;
 
-    for (int i = 0; i < conversationMessages.size(); i++) {
-      ProviderMessage msg = conversationMessages.get(i);
+    for (int i = 0; i < request.messages().size(); i++) {
+      ProviderMessage msg = request.messages().get(i);
 
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
         String wireRole = "model";

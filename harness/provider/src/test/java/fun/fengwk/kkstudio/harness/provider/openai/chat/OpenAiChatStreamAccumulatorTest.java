@@ -84,6 +84,7 @@ class OpenAiChatStreamAccumulatorTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
