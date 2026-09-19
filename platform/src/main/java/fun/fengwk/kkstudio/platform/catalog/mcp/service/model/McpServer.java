@@ -4,26 +4,20 @@ import lombok.Data;
 import lombok.ToString;
 
 import java.time.Instant;
-import java.util.UUID;
+import java.util.Map;
 
-/** Platform MCP server 资源模型。 */
+/** Platform MCP server 资源模型：name 即主键与不可变身份。 */
 @Data
 public class McpServer {
-
-  /** Server 全局唯一 UUID。 */
-  private UUID id;
 
   /** 唯一名（创建后不可变）：{@code ^[a-z][a-z0-9_]*$}，≤32 字符。 */
   private String name;
 
-  /** 连接类型：REMOTE 或 LOCAL。 */
-  private McpConnectionType connectionType;
+  /** Streamable HTTP endpoint URL。 */
+  private String url;
 
-  /** 关联 Environment UUID（LOCAL 必填，REMOTE 恒为 null）。 */
-  private UUID environmentId;
-
-  /** 规范化传输配置 JSON（Remote: url/headers，Local: command/cwd/env）。 */
-  @ToString.Exclude private String connectionConfig;
+  /** 自定义请求 header（可能内嵌凭据，绝不进入日志）。 */
+  @ToString.Exclude private Map<String, String> headers;
 
   /** 公共启用开关。 */
   private boolean enabled;
@@ -33,9 +27,6 @@ public class McpServer {
 
   /** 发现状态：UNVERIFIED、AVAILABLE、FAILED。 */
   private McpDiscoveryStatus discoveryStatus;
-
-  /** 最近一次成功验证的配置版本（nullable）。 */
-  private Long discoveredVersion;
 
   /** 乐观锁行版本：非负，CAS 依据。 */
   private Long version;

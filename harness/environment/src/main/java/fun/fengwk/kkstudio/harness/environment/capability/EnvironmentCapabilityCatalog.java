@@ -20,9 +20,7 @@ import java.util.Set;
  * Atomic Environment Capability execution descriptors.
  *
  * <p>This catalog is independent of model tool names, prompts, renderers and side-effect labels.
- * Its order is the stable order used by the shared capability contract. Management-only
- * capabilities ({@link EnvironmentCapabilityIds#MANAGEMENT_ONLY}) are listed after model-visible
- * capabilities and are never registered as model Tool contributions.
+ * Its order is the stable order used by the shared capability contract.
  */
 public final class EnvironmentCapabilityCatalog {
 
@@ -45,8 +43,6 @@ public final class EnvironmentCapabilityCatalog {
           EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
           EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
   private static final List<EnvironmentCapabilityDescriptor> DESCRIPTORS = createDescriptors();
-  private static final List<EnvironmentCapabilityDescriptor> MANAGEMENT_DESCRIPTORS =
-      createManagementDescriptors();
   private static final Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> BY_ID =
       indexById(DESCRIPTORS);
 
@@ -60,11 +56,6 @@ public final class EnvironmentCapabilityCatalog {
   /** 返回按固定 canonical 顺序排列的不可变 capability descriptor 列表。 */
   public static List<EnvironmentCapabilityDescriptor> descriptors() {
     return DESCRIPTORS;
-  }
-
-  /** 返回仅供管理执行器使用、绝不成为模型 Tool 的 capability descriptor 列表。 */
-  public static List<EnvironmentCapabilityDescriptor> managementDescriptors() {
-    return MANAGEMENT_DESCRIPTORS;
   }
 
   public static Optional<EnvironmentCapabilityDescriptor> find(EnvironmentCapabilityId id) {
@@ -86,20 +77,10 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.MCP_LOCAL_CALL, Duration.ofHours(1)));
+        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)));
   }
 
-  /**
-   * 管理专用能力：只复用 INVOKE/CANCEL/终态通道，不注册为模型 Tool，也不接受 workdir。
-   *
-   * <p>目前只有 local MCP 发现：它由 Platform 的异步管理操作派发，模型不可直接调用。
-   */
-  private static List<EnvironmentCapabilityDescriptor> createManagementDescriptors() {
-    return List.of(descriptor(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER, Duration.ofMinutes(5)));
-  }
-
-  /** 全部已注册 descriptor：模型可见能力在前，管理专用能力在后。 */
+  /** 全部已注册 descriptor。 */
   private static Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> indexById(
       List<EnvironmentCapabilityDescriptor> descriptors) {
     Objects.requireNonNull(descriptors, "descriptors");
@@ -113,15 +94,6 @@ public final class EnvironmentCapabilityCatalog {
       }
       if (result.putIfAbsent(descriptor.id(), descriptor) != null) {
         throw new IllegalStateException("duplicate Environment capability id: " + descriptor.id());
-      }
-    }
-    for (EnvironmentCapabilityDescriptor descriptor : MANAGEMENT_DESCRIPTORS) {
-      if (result.putIfAbsent(descriptor.id(), descriptor) != null) {
-        throw new IllegalStateException("duplicate Environment capability id: " + descriptor.id());
-      }
-      if (!EnvironmentCapabilityIds.MANAGEMENT_ONLY.contains(descriptor.id())) {
-        throw new IllegalStateException(
-            "management descriptor must be management-only: " + descriptor.id());
       }
     }
     return Map.copyOf(result);

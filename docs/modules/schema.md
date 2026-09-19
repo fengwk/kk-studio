@@ -23,8 +23,6 @@ erDiagram
     AGENT_PROVIDER ||--o{ AGENT_MODEL : hosts
     AGENT_MODEL ||--o{ AGENT_DEFINITION : binds
     ENVIRONMENT ||--o| ENVIRONMENT_CONNECTION : leases
-    ENVIRONMENT ||--o{ ENVIRONMENT_OPERATION : executes
-    ENVIRONMENT ||--o{ MCP_SERVER : hosts_local
     MCP_SERVER ||--o{ MCP_TOOL : exposes
     HARNESS_SESSION ||--o{ HARNESS_ENTRY : trees
     HARNESS_SESSION ||--o{ HARNESS_THREAD : owns
@@ -52,15 +50,15 @@ erDiagram
     ISSUE ||--o| ISSUE_CONTROLLER_WORK : schedules
 ```
 
-`storage_upload.completes_to` 表达的是 PENDING → READY 的状态迁移（`blob_id` 由空变非空），不是级联关系：`blob_id` 是 RESTRICT 外键，而 PENDING 时预分配的 `candidate_blob_id` 故意不建外键，因为 blob 行要到 complete 时才创建。同理 `chat.agent_name` 与 `environment_operation.resource_id` 都没有外键，理由写在各自的列注释里。
+`storage_upload.completes_to` 表达的是 PENDING → READY 的状态迁移（`blob_id` 由空变非空），不是级联关系：`blob_id` 是 RESTRICT 外键，而 PENDING 时预分配的 `candidate_blob_id` 故意不建外键，因为 blob 行要到 complete 时才创建。同理 `chat.agent_name` 也没有外键，理由写在列注释里。
 
 表按区域分组，边界可以这样记：
 
 | 区域 | durable 事实 |
 | --- | --- |
 | Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package`、`skill`、`comfyui_workflow_api` |
-| MCP | `mcp_server`、`mcp_tool` |
-| Environment | `environment`、`environment_connection`、`environment_operation` |
+| MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控） |
+| Environment | `environment`、`environment_connection` |
 | Chat / Canvas | `chat`、`canvas_document`、`canvas_group`、`canvas_node`、`canvas_link`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
 | Project / Issue | `project`、`issue`、`issue_dependency`、`issue_input`、`issue_run`、`issue_controller_work` |
 | Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
@@ -118,7 +116,7 @@ erDiagram
 `V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的两个 App 节点（Main 与 Dev）同时使用，所以这条路径有硬性安全要求：
 
 - 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。Dev 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 Main 集成。
-- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`skill`、`agent_definition` 会回灌；`environment_connection` 是重连后重新生成的租约，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`skill`、`agent_definition` 会回灌；`environment_connection` 是重连后重新生成的租约，`mcp_server`/`mcp_tool` 是重建后需要重新创建并发现的 Platform 配置，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
 - 备份 archive 含 Provider credential 与 Environment registration token，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储。
 
 就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 Main 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。

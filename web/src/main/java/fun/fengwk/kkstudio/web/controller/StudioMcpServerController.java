@@ -6,7 +6,6 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,15 +21,13 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDiscoverDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDiscoveryResponseDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
 /**
- * Platform MCP server CRUD, 配置读取与发现管理 API。
+ * Platform MCP server name-keyed CRUD、配置读取与 Streamable HTTP 发现 API。
  *
- * <p>安全边界：标准接口绝不返回完整配置与凭据；全量配置仅由显式 {@code GET /{id}/config} 提供并强制 {@code Cache-Control:
- * no-store}。发现请求统一返回 202 Accepted。
+ * <p>安全边界：标准接口绝不返回 URL 与 headers；完整配置仅由显式 {@code GET /{name}/config} 提供并强制 {@code Cache-Control:
+ * no-store}。
  */
 @AllArgsConstructor
 @RequestMapping("/api/ai/mcp-servers")
@@ -48,14 +45,15 @@ public class StudioMcpServerController {
     return Results.ok(mcpServerService.pageServers(new PageQuery(pageNumber, pageSize)));
   }
 
-  @GetMapping("/{id}")
-  public Result<McpServerDTO> getServer(@PathVariable("id") String id) {
-    return Results.ok(mcpServerService.getServer(id));
+  @GetMapping("/{name}")
+  public Result<McpServerDTO> getServer(@PathVariable("name") String name) {
+    return Results.ok(mcpServerService.getServer(name));
   }
 
-  @GetMapping("/{id}/config")
-  public ResponseEntity<Result<McpServerConfigDTO>> getServerConfig(@PathVariable("id") String id) {
-    McpServerConfigDTO config = mcpServerService.getServerConfig(id);
+  @GetMapping("/{name}/config")
+  public ResponseEntity<Result<McpServerConfigDTO>> getServerConfig(
+      @PathVariable("name") String name) {
+    McpServerConfigDTO config = mcpServerService.getServerConfig(name);
     return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, NO_STORE).body(Results.ok(config));
   }
 
@@ -64,24 +62,22 @@ public class StudioMcpServerController {
     return Results.created(mcpServerService.createServer(createDTO));
   }
 
-  @PutMapping("/{id}")
+  @PutMapping("/{name}")
   public Result<McpServerDTO> updateServer(
-      @PathVariable("id") String id, @RequestBody McpServerUpdateDTO updateDTO) {
-    return Results.ok(mcpServerService.updateServer(id, updateDTO));
+      @PathVariable("name") String name, @RequestBody McpServerUpdateDTO updateDTO) {
+    return Results.ok(mcpServerService.updateServer(name, updateDTO));
   }
 
-  @PostMapping("/{id}/discover")
-  public ResponseEntity<Result<McpServerDiscoveryResponseDTO>> discoverServer(
-      @PathVariable("id") String id, @RequestBody McpServerDiscoverDTO discoverDTO) {
-    String expectedVersion = discoverDTO == null ? null : discoverDTO.getExpectedVersion();
-    McpServerDiscoveryResponseDTO response = mcpServerService.discoverServer(id, expectedVersion);
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.accepted(response));
+  @PostMapping("/{name}/discover")
+  public Result<McpServerDTO> discoverServer(
+      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+    return Results.ok(mcpServerService.discoverServer(name, expectedVersion));
   }
 
-  @DeleteMapping("/{id}")
+  @DeleteMapping("/{name}")
   public Result<Void> deleteServer(
-      @PathVariable("id") String id, @RequestParam("expectedVersion") String expectedVersion) {
-    mcpServerService.deleteServer(id, expectedVersion);
+      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+    mcpServerService.deleteServer(name, expectedVersion);
     return Results.noContent();
   }
 }

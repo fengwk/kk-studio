@@ -55,7 +55,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "chat",
           "environment",
           "environment_connection",
-          "environment_operation",
           "harness_session",
           "harness_entry",
           "harness_thread",
@@ -186,28 +185,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "version");
     assertColumns(
         "mcp_server",
-        "id",
         "name",
-        "connection_type",
-        "environment_id",
-        "connection_config",
+        "url",
+        "headers",
+        "enabled",
         "timeout_millis",
         "discovery_status",
-        "discovered_version",
-        "enabled",
         "created_at",
         "updated_at",
         "version");
-    assertColumns(
-        "mcp_tool",
-        "id",
-        "mcp_server_id",
-        "source_name",
-        "model_name",
-        "description",
-        "input_schema",
-        "schema_revision",
-        "available");
+    assertColumns("mcp_tool", "name", "server_name", "source_name", "description", "input_schema");
     assertColumns("canvas_document", "id", "title", "version", "created_at", "updated_at");
     assertColumns("canvas_group", "id", "canvas_id", "title", "x", "y", "width", "height");
     assertColumns(
@@ -364,27 +351,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "lease_token",
         "lease_until",
         "updated_at");
-    assertColumns(
-        "environment_operation",
-        "id",
-        "environment_id",
-        "resource_type",
-        "resource_id",
-        "operation_type",
-        "status",
-        "resource_version",
-        "arguments",
-        "parameter_summary",
-        "deadline_at",
-        "owner_node_id",
-        "lease_token",
-        "started_at",
-        "finished_at",
-        "result_summary",
-        "failure_code",
-        "failure_message",
-        "created_at",
-        "updated_at");
   }
 
   @Test
@@ -482,9 +448,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "canvas_function_run", "state_json");
     assertColumnType("jsonb", "environment_connection", "runtime_info");
     assertColumnType("jsonb", "issue_run", "result");
-    assertColumnType("jsonb", "environment_operation", "arguments");
-    assertColumnType("jsonb", "environment_operation", "parameter_summary");
-    assertColumnType("jsonb", "environment_operation", "result_summary");
     // description 是自由文本字段，不受列宽限制：Catalog 与 ComfyUI 的四个资源都使用 text。
     assertColumnType("text", "agent_provider", "description");
     assertColumnType("text", "agent_model", "description");
@@ -544,11 +507,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("timestamp with time zone", "environment", "updated_at");
     assertColumnType("timestamp with time zone", "environment_connection", "last_seen_at");
     assertColumnType("timestamp with time zone", "environment_connection", "lease_until");
-    assertColumnType("timestamp with time zone", "environment_operation", "deadline_at");
-    assertColumnType("timestamp with time zone", "environment_operation", "started_at");
-    assertColumnType("timestamp with time zone", "environment_operation", "finished_at");
-    assertColumnType("timestamp with time zone", "environment_operation", "created_at");
-    assertColumnType("timestamp with time zone", "environment_operation", "updated_at");
   }
 
   @Test
@@ -1096,7 +1054,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void generatedDurableEntityIdsUseUuidAndNoBusinessSequence() throws SQLException {
+  void durableEntityIdentifiersUseDeclaredTypesAndNoBusinessSequence() throws SQLException {
     for (String table : CANVAS_UUID_ID_TABLES) {
       assertColumnType("uuid", table, "id");
     }
@@ -1116,11 +1074,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "session_blob_ref", "session_id");
     assertColumnType("uuid", "session_blob_ref", "blob_id");
     assertColumnType("uuid", "chat", "id");
-    assertColumnType("uuid", "mcp_server", "id");
-    assertColumnType("uuid", "mcp_server", "environment_id");
-    assertColumnType("jsonb", "mcp_server", "connection_config");
-    assertColumnType("uuid", "mcp_tool", "id");
-    assertColumnType("uuid", "mcp_tool", "mcp_server_id");
+    assertColumnType("character varying", "mcp_server", "name");
+    assertColumnType("jsonb", "mcp_server", "headers");
+    assertColumnType("character varying", "mcp_tool", "name");
     assertColumnType("jsonb", "mcp_tool", "input_schema");
     assertColumnType("uuid", "comfyui_workflow_api", "id");
     assertColumnType("uuid", "session_owner", "session_id");
@@ -1128,9 +1084,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "session_owner", "canvas_id");
     assertColumnType("uuid", "session_owner", "project_id");
     assertColumnType("uuid", "session_owner", "issue_run_id");
-    assertColumnType("uuid", "environment_operation", "id");
-    assertColumnType("uuid", "environment_operation", "environment_id");
-    assertColumnType("uuid", "environment_operation", "resource_id");
   }
 
   @Test
@@ -1331,8 +1284,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_harness_tool_invocation_call_index",
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate",
-            "uk_mcp_server_name",
-            "uk_mcp_tool_model_name",
             "uk_mcp_tool_server_source_name",
             "uk_session_owner_project",
             "uk_issue_project_number",
@@ -1343,7 +1294,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_issue_run_terminal_action",
             "uk_issue_run_single_active",
             "uk_session_owner_issue_run",
-            "uk_environment_operation_active",
             "uk_skill_package_active",
             "uk_skill_active"),
         indexes,
@@ -1375,9 +1325,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_issue_assignee', 'fk_issue_reviewer',"
                     + " 'fk_issue_dependency_issue', 'fk_issue_dependency_depends_on',"
                     + " 'fk_issue_input_issue', 'fk_issue_run_issue', 'fk_issue_run_agent',"
-                    + " 'fk_issue_run_submission', 'fk_issue_controller_work_issue',"
-                    + " 'fk_mcp_server_environment',"
-                    + " 'fk_environment_operation_environment')")) {
+                    + " 'fk_issue_run_submission', 'fk_issue_controller_work_issue')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -1416,9 +1364,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_issue_run_issue",
             "fk_issue_run_agent",
             "fk_issue_run_submission",
-            "fk_issue_controller_work_issue",
-            "fk_mcp_server_environment",
-            "fk_environment_operation_environment"),
+            "fk_issue_controller_work_issue"),
         foreignKeys,
         "all declared ownership relations must be enforced by PostgreSQL");
   }
@@ -1460,44 +1406,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertTrue(
         blobIndex.contains("(blob_id, session_id)"),
         () -> "blob reverse-lookup index must cover (blob_id, session_id): " + blobIndex);
-  }
-
-  /**
-   * environment_operation 表的结构契约：未终结操作部分唯一索引、抢占索引， 以及 environment_operation.resource_id 故意不建
-   * FK（资源删除后历史必须保留）。
-   */
-  @Test
-  void environmentOperationIndexesAndDeliberateNoForeignKey() throws SQLException {
-    // 未终结操作唯一性：按 (environment_id, resource_type, resource_id) 且只约束 PENDING/RUNNING。
-    String activeIndex =
-        singleString(
-            "select indexdef from pg_indexes"
-                + " where schemaname = 'public' and indexname = 'uk_environment_operation_active'");
-    assertTrue(
-        activeIndex.contains("(environment_id, resource_type, resource_id)")
-            && activeIndex.contains("'PENDING'")
-            && activeIndex.contains("'RUNNING'"),
-        () -> "active operation uniqueness must be partial over PENDING/RUNNING: " + activeIndex);
-    String claimIndex =
-        singleString(
-            "select indexdef from pg_indexes"
-                + " where schemaname = 'public' and indexname = 'idx_environment_operation_claim'");
-    assertTrue(
-        claimIndex.contains("(status, deadline_at, environment_id)")
-            && claimIndex.contains("WHERE"),
-        () -> "claim index must be partial over PENDING: " + claimIndex);
-
-    // operation.resource_id 故意没有外键：删除资源不得抹掉操作历史。
-    assertEquals(
-        0L,
-        singleLong(
-            "select count(*) from pg_constraint as constraint_"
-                + " cross join lateral unnest(constraint_.conkey) as key(attnum)"
-                + " join pg_attribute as attribute"
-                + " on attribute.attrelid = constraint_.conrelid and attribute.attnum = key.attnum"
-                + " where constraint_.contype = 'f'"
-                + " and constraint_.conrelid = 'environment_operation'::regclass"
-                + " and attribute.attname = 'resource_id'"));
   }
 
   @Test

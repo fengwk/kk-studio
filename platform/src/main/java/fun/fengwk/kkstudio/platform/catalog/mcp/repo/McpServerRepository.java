@@ -9,9 +9,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
-/** Platform MCP server 与已发现工具的仓库。 */
+/** Platform MCP server 与当前发现结果的仓库。 */
 public interface McpServerRepository {
 
   Page<McpServer> page(PageQuery pageQuery);
@@ -19,52 +18,38 @@ public interface McpServerRepository {
   /** 返回全部 server 行（按 name 排序）。 */
   List<McpServer> listAllServers();
 
-  Optional<McpServer> getById(UUID id);
+  Optional<McpServer> getByName(String name);
 
   /** 返回有效的 Server 并持有其行锁，直到外层事务结束。 */
-  Optional<McpServer> getByIdForUpdate(UUID id);
-
-  Optional<McpServer> getByName(String name);
+  Optional<McpServer> getForUpdate(String name);
 
   boolean create(McpServer server);
 
-  /** 基于 (id, expectedVersion) 的原子 CAS 更新；重置为 UNVERIFIED 并将版本 +1。 */
-  boolean updateById(McpServer server, long expectedVersion);
+  /** 基于 (name, expectedVersion) 的原子全量 CAS 更新；重置为 UNVERIFIED 并将版本 +1。 */
+  boolean update(McpServer server, long expectedVersion);
 
-  /** 基于 (id, expectedVersion) 的原子 CAS 更新发现状态与发现版本；不变更 version。 */
-  boolean updateDiscoveryResult(
-      UUID id, long expectedVersion, McpDiscoveryStatus discoveryStatus, Long discoveredVersion);
+  /** 基于 (name, expectedVersion) 的原子 CAS 状态更新；不变更 version。 */
+  boolean updateDiscoveryStatus(String name, long expectedVersion, McpDiscoveryStatus status);
 
-  /** 基于 (id, expectedVersion) 的硬删除 CAS；工具行随 ON DELETE CASCADE 物理删除。 */
-  boolean deleteById(UUID id, long expectedVersion);
+  /** 基于 (name, expectedVersion) 的硬删除 CAS；工具行随 ON DELETE CASCADE 物理删除。 */
+  boolean delete(String name, long expectedVersion);
 
-  Optional<McpTool> getToolById(UUID toolId);
+  /** 按模型可见 name 返回工具行。 */
+  Optional<McpTool> getTool(String name);
 
-  /** 按模型可见 name 返回可用工具行。 */
-  Optional<McpTool> getAvailableToolByModelName(String modelName);
+  /** 列出该 server 下全部工具行（按 name 排序）。 */
+  List<McpTool> listTools(String serverName);
 
-  /** 列出该 server 下所有工具（含 tombstone）。 */
-  List<McpTool> listTools(UUID serverId);
+  /** 列出全库工具行（按 name 排序）。 */
+  List<McpTool> listAllTools();
 
-  /** 列出该 server 下可用工具（available = true）。 */
-  List<McpTool> listAvailableTools(UUID serverId);
+  /** 统计 server 下工具数。 */
+  int countTools(String serverName);
 
-  /** 列出全库可用工具（available = true）。 */
-  List<McpTool> listAllAvailableTools();
-
-  /** 统计 server 下可用工具数。 */
-  int countAvailableTools(UUID serverId);
+  /** 物理删除该 server 的全部工具行。 */
+  void deleteTools(String serverName);
 
   void insertTool(McpTool tool);
-
-  /** 保留稳定 UUID/model_name，更新 description/schema/available/schemaRevision。 */
-  void updateTool(McpTool tool);
-
-  /** 按 (serverId, sourceName) 精确删除一个工具行。 */
-  void deleteTool(UUID serverId, String sourceName);
-
-  /** model_name 是否已被占用；refresh 时用 {@code excludingToolId} 排除本行。 */
-  boolean isModelNameTaken(String modelName, UUID excludingToolId);
 
   /** 返回任一 agent_definition.config.tools 引用的 MCP 模型可见工具名集合。 */
   List<String> selectReferencedToolNames();

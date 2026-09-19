@@ -23,12 +23,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentOperationDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -39,19 +37,14 @@ import java.util.UUID;
 class StudioEnvironmentControllerTest {
 
   private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
-  private static final UUID OP_ID = UUID.fromString("33333333-3333-3333-3333-333333333333");
-
   private EnvironmentService environmentService;
-  private EnvironmentOperationService operationService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     environmentService = mock(EnvironmentService.class);
-    operationService = mock(EnvironmentOperationService.class);
 
-    StudioEnvironmentController controller =
-        new StudioEnvironmentController(environmentService, operationService);
+    StudioEnvironmentController controller = new StudioEnvironmentController(environmentService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -220,46 +213,6 @@ class StudioEnvironmentControllerTest {
     verify(environmentService).delete(EnvironmentId.of(ENV_ID), "0");
   }
 
-  /** 意图：验证 GET /api/harness/environments/{envId}/operations 查询操作列表返回 200 OK。 */
-  @Test
-  void listOperationsReturnsOk() throws Exception {
-    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
-    op.setId(OP_ID.toString());
-    when(operationService.list(eq(EnvironmentId.of(ENV_ID)), eq(50))).thenReturn(List.of(op));
-
-    mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/operations"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].id").value(OP_ID.toString()));
-  }
-
-  /** 意图：验证 GET /api/harness/environments/{envId}/operations/{opId} 查询单个操作返回 200 OK。 */
-  @Test
-  void getOperationReturnsOk() throws Exception {
-    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
-    op.setId(OP_ID.toString());
-    when(operationService.get(eq(EnvironmentId.of(ENV_ID)), eq(OP_ID))).thenReturn(op);
-
-    mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/operations/" + OP_ID))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.id").value(OP_ID.toString()));
-  }
-
-  /** 意图：验证 POST /api/harness/environments/{envId}/operations/{opId}/cancel 取消操作返回 200 OK。 */
-  @Test
-  void cancelOperationReturnsOk() throws Exception {
-    EnvironmentOperationDTO op = new EnvironmentOperationDTO();
-    op.setId(OP_ID.toString());
-    op.setStatus("CANCELLED");
-    when(operationService.cancel(eq(EnvironmentId.of(ENV_ID)), eq(OP_ID))).thenReturn(op);
-
-    mockMvc
-        .perform(post("/api/harness/environments/" + ENV_ID + "/operations/" + OP_ID + "/cancel"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("CANCELLED"));
-  }
-
   /** 意图：Card 直接暴露连接行保留的最近一次 READY 宿主 metadata；没有独立 runtime 端点，也没有报告历史。 */
   @Test
   void getEnvironmentExposesRetainedHostMetadata() throws Exception {
@@ -303,6 +256,28 @@ class StudioEnvironmentControllerTest {
   void runtimeEndpointIsGone() throws Exception {
     mockMvc
         .perform(get("/api/harness/environments/" + ENV_ID + "/runtime"))
+        .andExpect(status().isNotFound());
+  }
+
+  /** 意图：Environment 异步管理操作端点已随 environment_operation 表一起移除，访问必须 404。 */
+  @Test
+  void operationsEndpointsAreGone() throws Exception {
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/operations"))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(
+            get(
+                "/api/harness/environments/"
+                    + ENV_ID
+                    + "/operations/33333333-3333-3333-3333-333333333333"))
+        .andExpect(status().isNotFound());
+    mockMvc
+        .perform(
+            post(
+                "/api/harness/environments/"
+                    + ENV_ID
+                    + "/operations/33333333-3333-3333-3333-333333333333/cancel"))
         .andExpect(status().isNotFound());
   }
 }

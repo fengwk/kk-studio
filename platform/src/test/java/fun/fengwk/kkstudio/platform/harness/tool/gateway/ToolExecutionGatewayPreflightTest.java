@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
@@ -45,7 +44,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -405,34 +403,27 @@ class ToolExecutionGatewayPreflightTest {
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
-    UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
-    server.setId(serverId);
-    server.setName("mcp-server");
-    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setName("mcp_server");
     server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setDiscoveredVersion(1L);
     server.setEnabled(true);
     server.setVersion(1L);
-    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setUrl("http://localhost:8080/mcp");
+    server.setHeaders(Map.of());
     server.setTimeoutMillis(5000L);
 
-    UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
-    mcpTool.setId(toolId);
-    mcpTool.setServerId(serverId);
+    mcpTool.setName("mcp_mcp_server_echo");
+    mcpTool.setServerName("mcp_server");
     mcpTool.setSourceName("echo");
-    mcpTool.setModelName("mcp_server_echo");
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    mcpTool.setAvailable(true);
-    mcpTool.setSchemaRevision(1L);
 
-    when(repo.getAvailableToolByModelName("mcp_server_echo")).thenReturn(Optional.of(mcpTool));
-    when(repo.getById(serverId)).thenReturn(Optional.of(server));
+    when(repo.getTool("mcp_mcp_server_echo")).thenReturn(Optional.of(mcpTool));
+    when(repo.getByName("mcp_server")).thenReturn(Optional.of(server));
     when(repo.listAllServers()).thenReturn(List.of(server));
-    when(repo.listAvailableTools(serverId)).thenReturn(List.of(mcpTool));
+    when(repo.listTools("mcp_server")).thenReturn(List.of(mcpTool));
 
     HarnessCatalog harnessCatalog = HarnessCatalog.from(List.of());
     RuntimeToolCatalog toolCatalog =
@@ -450,10 +441,10 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             new ConcurrencyAdmission(Integer.MAX_VALUE));
 
-    ToolContribution contribution = toolCatalog.findTool("mcp_server_echo").orElseThrow();
+    ToolContribution contribution = toolCatalog.findTool("mcp_mcp_server_echo").orElseThrow();
     ToolInvocationRequest request =
         new ToolInvocationRequest(
-            new ToolCall("call-mcp", "mcp_server_echo", "{}"),
+            new ToolCall("call-mcp", "mcp_mcp_server_echo", "{}"),
             new ToolBinding(
                 contribution.definition(),
                 new ContributorBinding(
