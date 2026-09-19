@@ -80,19 +80,19 @@ class ModelRequestMaterializerTest {
   @Test
   void rematerializesTheSameLogicalRequestAfterCodecRoundTrip() {
     EntryPath path = conversationPath(2);
-    ModelRequestSpec spec =
-        liveSpec(List.of(AgentMessage.system("frozen preamble")), bashBinding());
+    ModelRequestSpec spec = liveSpec(bashBinding());
 
     ProviderRequest first = MATERIALIZER.materialize(path, spec);
     ModelRequestSpec restored = CODEC.decode(CODEC.encode(spec));
     ProviderRequest second = MATERIALIZER.materialize(path, restored);
 
     assertEquals(first, second);
-    assertEquals("frozen preamble", textOf(first.messages().get(0)));
-    assertEquals("user-1", textOf(first.messages().get(1)));
-    assertEquals("reply-1", textOf(first.messages().get(2)));
-    assertEquals("user-2", textOf(first.messages().get(3)));
-    assertEquals("reply-2", textOf(first.messages().get(4)));
+    assertEquals("Test system instruction.", first.systemInstruction());
+    assertEquals(4, first.messages().size());
+    assertEquals("user-1", textOf(first.messages().get(0)));
+    assertEquals("reply-1", textOf(first.messages().get(1)));
+    assertEquals("user-2", textOf(first.messages().get(2)));
+    assertEquals("reply-2", textOf(first.messages().get(3)));
     assertEquals(1, first.tools().size());
     assertEquals("bash", first.tools().get(0).name());
     assertEquals(
@@ -102,13 +102,11 @@ class ModelRequestMaterializerTest {
 
   @Test
   void encodedSpecSizeIsIndependentOfOrdinaryHistoryLength() {
-    // 两条独立构造的等价 spec：模拟 resolver 只冻结 preamble/bindings，不把普通历史写入 durable spec。
+    // 两条独立构造的等价 spec：模拟 resolver 只冻结 systemInstruction/bindings，不把普通历史写入 durable spec。
     EntryPath shortPath = conversationPath(1);
     EntryPath longPath = conversationPath(32);
-    ModelRequestSpec shortSpec =
-        specFromFrozenInputs(shortPath, List.of(AgentMessage.system("sys")), bashBinding());
-    ModelRequestSpec longSpec =
-        specFromFrozenInputs(longPath, List.of(AgentMessage.system("sys")), bashBinding());
+    ModelRequestSpec shortSpec = specFromFrozenInputs(shortPath, bashBinding());
+    ModelRequestSpec longSpec = specFromFrozenInputs(longPath, bashBinding());
     String shortEncoded = CODEC.encode(shortSpec);
     String longEncoded = CODEC.encode(longSpec);
 
@@ -117,12 +115,14 @@ class ModelRequestMaterializerTest {
 
     assertEquals(shortSpec, longSpec);
     assertEquals(shortEncoded, longEncoded);
+    assertEquals("Test system instruction.", shortRequest.systemInstruction());
+    assertEquals("Test system instruction.", longRequest.systemInstruction());
     assertFalse(shortEncoded.contains("user-1"));
     assertFalse(longEncoded.contains("user-32"));
     assertFalse(longEncoded.contains("reply-32"));
     assertTrue(longRequest.messages().size() > shortRequest.messages().size());
-    assertEquals(3, shortRequest.messages().size());
-    assertEquals(65, longRequest.messages().size());
+    assertEquals(2, shortRequest.messages().size());
+    assertEquals(64, longRequest.messages().size());
   }
 
   @Test
@@ -163,16 +163,15 @@ class ModelRequestMaterializerTest {
     entries.add(entry(14, 13, user("latest-user")));
 
     ProviderRequest request =
-        MATERIALIZER.materialize(
-            new EntryPath(entries), liveSpec(List.of(AgentMessage.system("sys")), bashBinding()));
+        MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
 
-    assertEquals(5, request.messages().size());
-    assertEquals("sys", textOf(request.messages().get(0)));
+    assertEquals(4, request.messages().size());
+    assertEquals("Test system instruction.", request.systemInstruction());
     assertEquals(
-        CompactionPrompts.compactedContext("kept summary"), textOf(request.messages().get(1)));
-    assertEquals("old-reply", textOf(request.messages().get(2)));
-    assertEquals("kept-user", textOf(request.messages().get(3)));
-    assertEquals("latest-user", textOf(request.messages().get(4)));
+        CompactionPrompts.compactedContext("kept summary"), textOf(request.messages().get(0)));
+    assertEquals("old-reply", textOf(request.messages().get(1)));
+    assertEquals("kept-user", textOf(request.messages().get(2)));
+    assertEquals("latest-user", textOf(request.messages().get(3)));
   }
 
   @Test
@@ -195,11 +194,11 @@ class ModelRequestMaterializerTest {
 
     ProviderRequest request = MATERIALIZER.materialize(path, spec);
 
-    assertEquals(2, request.messages().size());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), textOf(request.messages().get(0)));
+    assertEquals(1, request.messages().size());
+    assertEquals(CompactionPrompts.summarizationSystemPrompt(), request.systemInstruction());
     assertEquals(
         CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary()),
-        textOf(request.messages().get(1)));
+        textOf(request.messages().get(0)));
     assertTrue(request.tools().isEmpty());
   }
 
@@ -215,14 +214,13 @@ class ModelRequestMaterializerTest {
         new Entry(id(4L), id(100L), id(3L), assistant("assistant answer"), T0, replayState));
 
     ProviderRequest request =
-        MATERIALIZER.materialize(
-            new EntryPath(entries), liveSpec(List.of(AgentMessage.system("sys")), bashBinding()));
+        MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
 
-    assertEquals(3, request.messages().size());
-    // index 0: sys
-    // index 1: user
-    // index 2: assistant
-    ProviderMessage assistantMsg = request.messages().get(2);
+    assertEquals(2, request.messages().size());
+    assertEquals("Test system instruction.", request.systemInstruction());
+    // index 0: user
+    // index 1: assistant
+    ProviderMessage assistantMsg = request.messages().get(1);
     assertEquals(replayState, assistantMsg.replayState());
   }
 
@@ -262,35 +260,32 @@ class ModelRequestMaterializerTest {
         new Entry(id(11L), id(100L), id(10L), assistant("new assistant"), T0, newReplayState));
 
     ProviderRequest request =
-        MATERIALIZER.materialize(
-            new EntryPath(entries), liveSpec(List.of(AgentMessage.system("sys")), bashBinding()));
+        MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
 
     // 结构：
-    // 0: sys (null replay)
-    // 1: summary (USER wrapper, null replay)
-    // 2: old assistant (retained old tail: replay 必须被压制为 null)
-    // 3: new user (null replay)
-    // 4: new assistant (post-compaction new tail: replay 必须保留)
-    assertEquals(5, request.messages().size());
-    assertEquals("sys", textOf(request.messages().get(0)));
+    // 0: summary (USER wrapper, null replay)
+    // 1: old assistant (retained old tail: replay 必须被压制为 null)
+    // 2: new user (null replay)
+    // 3: new assistant (post-compaction new tail: replay 必须保留)
+    assertEquals(4, request.messages().size());
+    assertEquals("Test system instruction.", request.systemInstruction());
+
+    assertEquals(CompactionPrompts.compactedContext("summary"), textOf(request.messages().get(0)));
     assertFalse(request.messages().get(0).hasReplayState());
 
-    assertEquals(CompactionPrompts.compactedContext("summary"), textOf(request.messages().get(1)));
-    assertFalse(request.messages().get(1).hasReplayState());
-
-    assertEquals("old assistant", textOf(request.messages().get(2)));
+    assertEquals("old assistant", textOf(request.messages().get(1)));
     assertFalse(
-        request.messages().get(2).hasReplayState(),
+        request.messages().get(1).hasReplayState(),
         "retained old tail assistant entry's replay state must be suppressed");
 
-    assertEquals("new user", textOf(request.messages().get(3)));
-    assertFalse(request.messages().get(3).hasReplayState());
+    assertEquals("new user", textOf(request.messages().get(2)));
+    assertFalse(request.messages().get(2).hasReplayState());
 
-    assertEquals("new assistant", textOf(request.messages().get(4)));
+    assertEquals("new assistant", textOf(request.messages().get(3)));
     assertTrue(
-        request.messages().get(4).hasReplayState(),
+        request.messages().get(3).hasReplayState(),
         "post-compaction assistant entry's replay state must be preserved");
-    assertEquals(newReplayState, request.messages().get(4).replayState());
+    assertEquals(newReplayState, request.messages().get(3).replayState());
   }
 
   private static ProviderReplayState sampleReplayState() {
@@ -325,14 +320,16 @@ class ModelRequestMaterializerTest {
     return new EntryPath(entries);
   }
 
-  /** Resolver 只把 preamble/bindings 冻进 spec；path 上的普通历史不得进入编码。参数保留以证明调用方即使看到长 path 也不会把它写进 spec。 */
-  private static ModelRequestSpec specFromFrozenInputs(
-      EntryPath path, List<AgentMessage> preamble, ToolBinding binding) {
+  /**
+   * Resolver 只把 systemInstruction/bindings 冻进 spec；path 上的普通历史不得进入编码。参数保留以证明调用方即使看到长 path 也不会把它写进
+   * spec。
+   */
+  private static ModelRequestSpec specFromFrozenInputs(EntryPath path, ToolBinding binding) {
     Objects.requireNonNull(path, "path");
-    return liveSpec(preamble, binding);
+    return liveSpec(binding);
   }
 
-  private static ModelRequestSpec liveSpec(List<AgentMessage> preamble, ToolBinding binding) {
+  private static ModelRequestSpec liveSpec(ToolBinding binding) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),

@@ -46,12 +46,43 @@ class CommandHarvestReducerTest {
                     new SetModelCommandPayload(
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
                 queued(id(6L), 6L, new SetEnvironmentCommandPayload("local")),
-                queued(id(8L), 8L, new CustomMessageCommandPayload(system("instruction")))));
+                queued(id(8L), 8L, new CustomMessageCommandPayload(user("instruction")))));
 
     assertEquals(
         new BranchSettings(
             "agent-b", new ModelSelection("anthropic", "claude-opus", "thinking"), "local"),
         result.branchSettings());
+  }
+
+  /**
+   * 测试意图：{@code changes()} 同时承担「哪些设置真的变了」与「提醒顺序」两个契约：no-op 设置命令（与当前值相同）不产生
+   * change，因此调用方不会为未发生的变化注入提醒；产生变化的命令按 command 顺序记录应用后的完整快照。
+   */
+  @Test
+  void changesRecordOnlyEffectiveSettingsInCommandOrder() {
+    CommandHarvestResult result =
+        reducer.reduce(
+            id(7L),
+            BASE,
+            List.of(
+                // no-op：与 BASE 相同，不得产生 change。
+                queued(id(1L), 1L, new SetAgentCommandPayload("coding")),
+                queued(id(2L), 2L, new SetAgentCommandPayload("reviewer")),
+                queued(id(3L), 3L, new SetModelCommandPayload(BASE.model())),
+                queued(id(4L), 4L, new SetEnvironmentCommandPayload("local")),
+                // 消息永远不产生 change。
+                queued(id(5L), 5L, new CustomMessageCommandPayload(user("custom")))));
+
+    assertEquals(
+        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.SET_ENVIRONMENT),
+        result.changes().stream().map(CommandHarvestResult.SettingsChange::type).toList());
+    assertEquals("reviewer", result.changes().get(0).settings().agentName());
+    assertEquals(
+        new ModelSelection("anthropic", "claude-sonnet", "default"),
+        result.changes().get(0).settings().model());
+    assertEquals("local", result.changes().get(1).settings().environmentName());
+    // 每个 change 都携带该命令应用后的完整快照，而不是增量。
+    assertEquals(result.branchSettings(), result.changes().get(1).settings());
   }
 
   /** 测试意图：SET_ENVIRONMENT 的显式 null 是「解除环境选择」，必须真实写回 settings 而不是被当作 no-op。 */
@@ -85,7 +116,7 @@ class CommandHarvestReducerTest {
             List.of(
                 queued(id(1L), 1L, new UserMessageCommandPayload(user("hello"))),
                 queued(id(2L), 2L, new SetModelCommandPayload(replacement)),
-                queued(id(3L), 3L, new CustomMessageCommandPayload(system("system")))));
+                queued(id(3L), 3L, new CustomMessageCommandPayload(user("custom")))));
 
     assertEquals("coding", result.branchSettings().agentName());
     assertEquals(replacement, result.branchSettings().model());
@@ -175,10 +206,6 @@ class CommandHarvestReducerTest {
 
   private static AgentMessage user(String text) {
     return message(AgentMessageRole.USER, text);
-  }
-
-  private static AgentMessage system(String text) {
-    return message(AgentMessageRole.SYSTEM, text);
   }
 
   private static AgentMessage message(AgentMessageRole role, String text) {

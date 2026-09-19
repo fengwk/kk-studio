@@ -5,7 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemCustomMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemReminderCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -301,13 +301,13 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   /**
-   * THREAD user batch 禁止 SYSTEM CUSTOM_MESSAGE 且<b>恰一条</b>末尾 user-like；steering 必须是恰一条 SYSTEM
-   * CUSTOM_MESSAGE。
+   * THREAD batch 形状与初始 batch 一致：<b>恰一条</b>末尾 USER 消息（USER_MESSAGE 或 USER CUSTOM_MESSAGE，含运行时
+   * reminder）；多条 user-like 或 user-like 之后还有额外命令都必须被拒。
    */
   @Test
-  void threadShapeRejectsSystemInUserBatchAndRequiresExactSteering() {
+  void threadShapeRequiresExactlyOneTrailingUserMessage() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    // 非法（请求校验错误，抛 IAE）：user batch 携带 SYSTEM CUSTOM_MESSAGE。
+    // 非法（请求校验错误，抛 IAE）：两条 user-like 命令（运行时 reminder + 真实用户消息）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -317,23 +317,23 @@ class HarnessRuntimeAcceptThreadTest {
                     baseline.rootEntryId(),
                     1,
                     List.of(
-                        systemCustomMessageCommand(TestIds.id(1), "steer"),
+                        systemReminderCommand(TestIds.id(1), "steer"),
                         userMessageCommand(TestIds.id(2), "hi"))),
                 AcceptancePreflight.IDENTITY));
 
-    // 合法：恰一条 SYSTEM steering。
-    AcceptedCommands steering =
+    // 合法：恰一条 user-like，且它本身可以是运行时注入的 reminder CUSTOM_MESSAGE。
+    AcceptedCommands reminderOnly =
         runtime.acceptCommands(
             thread(
                 baseline.threadId(),
                 baseline.rootEntryId(),
                 1,
-                List.of(systemCustomMessageCommand(TestIds.id(3), "steer"))),
+                List.of(systemReminderCommand(TestIds.id(3), "steer"))),
             AcceptancePreflight.IDENTITY);
-    assertFalse(steering.replayed());
-    assertEquals(ThreadCommandState.QUEUED, steering.acceptedCommands().getFirst().state());
+    assertFalse(reminderOnly.replayed());
+    assertEquals(ThreadCommandState.QUEUED, reminderOnly.acceptedCommands().getFirst().state());
 
-    // 非法（IAE）：SYSTEM steering + 多余命令。
+    // 非法（IAE）：SET_* 出现在 user-like 之后。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -343,8 +343,7 @@ class HarnessRuntimeAcceptThreadTest {
                     baseline.rootEntryId(),
                     2,
                     List.of(
-                        systemCustomMessageCommand(TestIds.id(4), "steer"),
-                        userMessageCommand(TestIds.id(5), "hi"))),
+                        userMessageCommand(TestIds.id(5), "hi"), setAgentCommand(TestIds.id(4)))),
                 AcceptancePreflight.IDENTITY));
   }
 

@@ -72,7 +72,7 @@ class PromptCacheRequestFinalizerTest {
         requestWith(
             ProviderCacheControl.breakpoints(
                 PromptCacheRetention.SHORT, "pc1-forged", EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
-            List.of(systemText("S1")),
+            List.of(userText("S1")),
             List.of());
     ProviderCacheControl resolved =
         finalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
@@ -88,7 +88,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest forged =
         requestWith(
             ProviderCacheControl.affinity(PromptCacheRetention.LONG, "pc1-forged-key"),
-            List.of(systemText("S1")),
+            List.of(userText("S1")),
             List.of());
     ProviderCacheControl resolved =
         finalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
@@ -101,7 +101,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest forged =
         requestWith(
             ProviderCacheControl.affinity(PromptCacheRetention.LONG, "pc1-forged"),
-            List.of(systemText("S1")),
+            List.of(userText("S1")),
             List.of());
     ProviderCacheControl resolved =
         finalizer(SESSION_ID).apply(forged, automaticPolicy()).cacheControl();
@@ -113,7 +113,7 @@ class PromptCacheRequestFinalizerTest {
     ProviderRequest forged =
         requestWith(
             ProviderCacheControl.affinity(PromptCacheRetention.LONG, "pc1-forged"),
-            List.of(systemText("S1")),
+            List.of(userText("S1")),
             List.of());
     ProviderCacheControl resolved =
         finalizer(SESSION_ID).apply(forged, disabledPolicy()).cacheControl();
@@ -136,7 +136,7 @@ class PromptCacheRequestFinalizerTest {
     PromptCacheRequestFinalizer b =
         finalizer(UUID.fromString("00000000-0000-0000-0000-0000000000ca"));
     ProviderRequest request =
-        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
+        requestWith(ProviderCacheControl.none(), List.of(userText("S1")), List.of(tool("alpha")));
     String keyA = a.apply(request, affinityPolicy()).cacheControl().affinityKey();
     String keyB = b.apply(request, affinityPolicy()).cacheControl().affinityKey();
     assertNotEquals(keyA, keyB);
@@ -151,7 +151,7 @@ class PromptCacheRequestFinalizerTest {
         new PromptCacheRequestFinalizer(
             SESSION_ID, UUID.fromString("00000000-0000-0000-0000-000000000002"));
     ProviderRequest request =
-        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
+        requestWith(ProviderCacheControl.none(), List.of(userText("S1")), List.of(tool("alpha")));
     String keyA = a.apply(request, affinityPolicy()).cacheControl().affinityKey();
     String keyB = b.apply(request, affinityPolicy()).cacheControl().affinityKey();
     assertNotEquals(keyA, keyB);
@@ -161,7 +161,7 @@ class PromptCacheRequestFinalizerTest {
   @Test
   void explicitPolicyDrivesResolution() {
     ProviderRequest request =
-        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
+        requestWith(ProviderCacheControl.none(), List.of(userText("S1")), List.of(tool("alpha")));
     PromptCacheRequestFinalizer finalizer = finalizer(SESSION_ID);
     ProviderCacheControl disabled = finalizer.apply(request, disabledPolicy()).cacheControl();
     ProviderCacheControl affinity = finalizer.apply(request, affinityPolicy()).cacheControl();
@@ -181,9 +181,8 @@ class PromptCacheRequestFinalizerTest {
 
   @Test
   void breakpointsIntersectCapabilityWithRequestContents() {
-    // Capability 同时支持 SYSTEM 与 TOOLS；请求只有 system => 只有 SYSTEM 进入 breakpoints。
-    ProviderRequest onlySystem =
-        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of());
+    // Capability 同时支持 SYSTEM 与 TOOLS；请求无 tools => 因 systemInstruction 恒非空，只有 SYSTEM 进入 breakpoints。
+    ProviderRequest onlySystem = requestWith(ProviderCacheControl.none(), List.of(), List.of());
     ProviderCacheControl onlySystemResolved =
         finalizer(SESSION_ID)
             .apply(
@@ -194,21 +193,18 @@ class PromptCacheRequestFinalizerTest {
     assertEquals(PromptCacheRetention.SHORT, onlySystemResolved.retention());
     assertEquals(EnumSet.of(PromptCacheBreakpoint.SYSTEM), onlySystemResolved.breakpoints());
 
-    // 请求只有 tool => 只有 TOOLS。
+    // Capability 仅声明 TOOLS（不含 SYSTEM）；请求包含 tool => 只有 TOOLS 进入 breakpoints。
     ProviderRequest onlyTools =
         requestWith(ProviderCacheControl.none(), List.of(), List.of(tool("alpha")));
     ProviderCacheControl onlyToolsResolved =
         finalizer(SESSION_ID)
-            .apply(
-                onlyTools,
-                breakpointsPolicy(
-                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)))
+            .apply(onlyTools, breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.TOOLS)))
             .cacheControl();
     assertEquals(EnumSet.of(PromptCacheBreakpoint.TOOLS), onlyToolsResolved.breakpoints());
 
-    // 请求同时存在 system + tools => 两个都进入 breakpoints。
+    // Capability 同时支持 SYSTEM 与 TOOLS；请求包含 tools => 两者都进入 breakpoints。
     ProviderRequest both =
-        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
+        requestWith(ProviderCacheControl.none(), List.of(), List.of(tool("alpha")));
     ProviderCacheControl bothResolved =
         finalizer(SESSION_ID)
             .apply(
@@ -220,23 +216,21 @@ class PromptCacheRequestFinalizerTest {
         EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS),
         bothResolved.breakpoints());
 
-    // 请求既无 system 也无 tools => 无有效 breakpoint，降级 none()。
+    // Capability 不支持 SYSTEM（仅声明 TOOLS）且请求无 tools => 无有效 breakpoint，降级 none()。
     ProviderRequest empty = requestWith(ProviderCacheControl.none(), List.of(), List.of());
     ProviderCacheControl emptyResolved =
         finalizer(SESSION_ID)
-            .apply(
-                empty,
-                breakpointsPolicy(
-                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)))
+            .apply(empty, breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.TOOLS)))
             .cacheControl();
     assertEquals(PromptCacheRetention.NONE, emptyResolved.retention());
+    assertTrue(emptyResolved.breakpoints().isEmpty());
   }
 
   @Test
   void breakpointsFilterByCapabilityWhenCapabilityLimitedToSystemOnly() {
     // Capability 只声明 SYSTEM 支持时，TOOLS 即使实际有 tools 也应被剔除。
     ProviderRequest request =
-        requestWith(ProviderCacheControl.none(), List.of(systemText("S1")), List.of(tool("alpha")));
+        requestWith(ProviderCacheControl.none(), List.of(userText("S1")), List.of(tool("alpha")));
     ProviderCacheControl resolved =
         finalizer(SESSION_ID)
             .apply(request, breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.SYSTEM)))
@@ -252,11 +246,13 @@ class PromptCacheRequestFinalizerTest {
                 PromptCacheRetention.LONG,
                 "pc1-forged",
                 EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-            List.of(systemText("S1")),
+            List.of(userText("S1")),
             List.of(tool("alpha")));
     ProviderRequest after = finalizer(SESSION_ID).apply(forged, affinityPolicy());
     assertSame(forged.model(), after.model());
     assertSame(forged.variant(), after.variant());
+    assertEquals(forged.outputTokens(), after.outputTokens());
+    assertEquals(forged.systemInstruction(), after.systemInstruction());
     assertEquals(forged.messages(), after.messages());
     assertEquals(forged.tools(), after.tools());
   }
@@ -265,26 +261,31 @@ class PromptCacheRequestFinalizerTest {
   void breakpointsSupportsConversationBreakpointWhenPresent() {
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")));
+    // Capability 声明 CONVERSATION（不含 SYSTEM）；请求包含有效会话消息 => 只有 CONVERSATION 进入 breakpoints。
     ProviderRequest conversationOnly =
         requestWith(ProviderCacheControl.none(), List.of(userMsg), List.of());
     ProviderCacheControl resolved =
         finalizer(SESSION_ID)
             .apply(
-                conversationOnly,
-                breakpointsPolicy(
-                    EnumSet.of(
-                        PromptCacheBreakpoint.SYSTEM,
-                        PromptCacheBreakpoint.TOOLS,
-                        PromptCacheBreakpoint.CONVERSATION)))
+                conversationOnly, breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.CONVERSATION)))
             .cacheControl();
     assertEquals(EnumSet.of(PromptCacheBreakpoint.CONVERSATION), resolved.breakpoints());
 
-    // 请求同时包含 system + tools + conversation
+    // 会话消息为空时，CONVERSATION 断点不生效，降级 none()。
+    ProviderRequest emptyConversation =
+        requestWith(ProviderCacheControl.none(), List.of(), List.of());
+    ProviderCacheControl emptyResolved =
+        finalizer(SESSION_ID)
+            .apply(
+                emptyConversation,
+                breakpointsPolicy(EnumSet.of(PromptCacheBreakpoint.CONVERSATION)))
+            .cacheControl();
+    assertEquals(PromptCacheRetention.NONE, emptyResolved.retention());
+
+    // Capability 声明全部三种断点；请求同时满足 systemInstruction（恒非空）+ tools + conversation => 三者全部进入
+    // breakpoints。
     ProviderRequest allThree =
-        requestWith(
-            ProviderCacheControl.none(),
-            List.of(systemText("S1"), userMsg),
-            List.of(tool("alpha")));
+        requestWith(ProviderCacheControl.none(), List.of(userMsg), List.of(tool("alpha")));
     ProviderCacheControl allResolved =
         finalizer(SESSION_ID)
             .apply(
@@ -303,8 +304,8 @@ class PromptCacheRequestFinalizerTest {
         allResolved.breakpoints());
   }
 
-  private static ProviderMessage systemText(String text) {
-    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock(text)));
+  private static ProviderMessage userText(String text) {
+    return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock(text)));
   }
 
   private static ProviderToolDefinition tool(String name) {

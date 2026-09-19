@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -854,12 +855,10 @@ final class HarnessRuntimeTestSupport {
         idempotencyKey);
   }
 
-  /** 使用给定的稳定 client id 与文本构造一条 SYSTEM role 的 CUSTOM_MESSAGE command。 */
-  static NewThreadCommand systemCustomMessageCommand(UUID idempotencyKey, String text) {
+  /** 使用给定的稳定 client id 与文本构造一条运行时注入的 USER system-reminder CUSTOM_MESSAGE command。 */
+  static NewThreadCommand systemReminderCommand(UUID idempotencyKey, String text) {
     return new NewThreadCommand(
-        new CustomMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)))),
-        idempotencyKey);
+        new CustomMessageCommandPayload(SystemReminder.message(text)), idempotencyKey);
   }
 
   static UserMessageCommandPayload userMessagePayload(String text) {

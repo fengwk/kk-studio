@@ -38,7 +38,9 @@ class ModelRequestSpecJsonCodecTest {
             + modelCodec.encodeVariant(requestSpec.variant())
             + ",\"outputTokens\":"
             + requestSpec.outputTokens()
-            + ",\"preambleMessages\":[],\"toolBindings\":["
+            + ",\"systemInstruction\":\""
+            + requestSpec.systemInstruction()
+            + "\",\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
             + "],\"skillBindings\":[{\"name\":\"review\",\"packageName\":\"review-package\","
             + "\"packageVersion\":\"1.0.0\",\"description\":\"Review code\"}],"
@@ -113,12 +115,58 @@ class ModelRequestSpecJsonCodecTest {
             "model",
             "variant",
             "outputTokens",
-            "preambleMessages",
+            "systemInstruction",
             "toolBindings",
             "skillBindings",
             "subagentBindings",
             "cacheControl"),
         fieldNames);
+  }
+
+  /**
+   * 测试意图：systemInstruction 是唯一的冻结系统指令，必须在 encode/decode 之间逐字保留；解码器若忽略该字段（回退为固定占位文本）， 重放的 invocation
+   * 就会悄悄换成另一条系统指令。这里显式断言往返保真，而不只断言相等性经由同一 spec 构造。
+   */
+  @Test
+  void roundTripPreservesTheExactSystemInstruction() {
+    ModelRequestSpec base = hostModelRequest();
+    String instruction = "You are a careful reviewer.\n\n<rules>\n- be terse\n</rules>";
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            instruction,
+            base.toolBindings(),
+            base.skillBindings(),
+            base.subagentBindings(),
+            base.cacheControl());
+
+    String encoded = codec.encode(requestSpec);
+    assertTrue(encoded.contains("\"systemInstruction\":\"You are a careful reviewer."), encoded);
+
+    ModelRequestSpec decoded = codec.decode(encoded);
+    assertEquals(instruction, decoded.systemInstruction());
+    assertEquals(instruction, codec.decodeNode(codec.encodeNode(requestSpec)).systemInstruction());
+    assertEquals(requestSpec, decoded);
+  }
+
+  /** 解码器必须拒绝缺失或非法的 systemInstruction，而不是回退到任何默认文本。 */
+  @Test
+  void rejectsMissingOrBlankSystemInstruction() {
+    ObjectNode missing = encodedNode();
+    missing.remove("systemInstruction");
+    assertInvalid(missing);
+
+    ObjectNode blank = encodedNode();
+    blank.put("systemInstruction", " ");
+    assertInvalid(blank);
+
+    ObjectNode wrongType = encodedNode();
+    wrongType.putObject("systemInstruction");
+    assertInvalid(wrongType);
   }
 
   @Test

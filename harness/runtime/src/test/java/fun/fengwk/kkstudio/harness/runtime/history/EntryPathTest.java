@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -640,6 +641,76 @@ class EntryPathTest {
                 id(4L), id(3L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
   }
 
+  /**
+   * 测试意图：CONTINUATION 只额外允许运行时注入的 core {@code <system-reminder>} 设置提醒（可多条），普通 contributor
+   * CUSTOM_MESSAGE 与普通 USER 消息仍然拒绝——设置变更必须进入对话，但用户输入不能借提醒形态搭车。
+   */
+  @Test
+  void continuationAllowsSettingRemindersButRejectsOrdinaryMessages() {
+    Entry root = root(settings("root"));
+    UUID threadId = id(9L);
+    Entry start =
+        new Entry(
+            id(2L),
+            SESSION_ID,
+            id(1L),
+            new TurnStartPayload(TurnStartReason.CONTINUATION, settings("turn"), threadId),
+            time(id(2L)));
+    Entry agentReminder =
+        runtimeReminder(id(3L), id(2L), "The agent for this branch is now `reviewer`.");
+    Entry modelReminder =
+        runtimeReminder(id(4L), id(3L), "The model for this branch is now `acme/gpt-x`.");
+    Entry assistant = assistantMessage(id(5L), id(4L));
+    Entry end = turnEnd(id(6L), id(5L), id(2L), TurnEndOutcome.COMPLETED, null, null);
+
+    // 合法：多条设置提醒按序位于 assistant 结果之前。
+    EntryPath accepted =
+        new EntryPath(List.of(root, start, agentReminder, modelReminder, assistant, end));
+    assertEquals(end, accepted.head());
+
+    // 非法：contributor 普通 CUSTOM_MESSAGE 即便带 USER 角色也不得进入 continuation turn。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, start, customMessage(id(3L), id(2L)))));
+    // 非法：core 元数据但正文没有精确 <system-reminder> 定界符。
+    Entry unlabeledCore =
+        new Entry(
+            id(3L),
+            SESSION_ID,
+            id(2L),
+            new CustomMessagePayload(
+                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                new AgentMessage(
+                    AgentMessageRole.USER, List.of(new TextMessageContent("not a reminder"))),
+                CustomMessagePayload.CORE_DETAILS_JSON),
+            time(id(3L)));
+    assertThrows(
+        IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, unlabeledCore)));
+    // 非法：提醒形态但伪装成 contributor 元数据。
+    Entry foreignReminder =
+        new Entry(
+            id(3L),
+            SESSION_ID,
+            id(2L),
+            new CustomMessagePayload(
+                "com.example.plugin",
+                CustomMessagePayload.CORE_CUSTOM_TYPE,
+                CustomMessagePayload.CORE_RENDERER_KEY,
+                SystemReminder.message("The model for this branch is now `acme/gpt-x`."),
+                CustomMessagePayload.CORE_DETAILS_JSON),
+            time(id(3L)));
+    assertThrows(
+        IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, foreignReminder)));
+    // 非法：提醒之后仍不得出现 assistant 结果之外的用户消息。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(root, start, agentReminder, userMessage(id(4L), id(3L)), assistant, end)));
+  }
+
   @Test
   void rejectsToolResultsWithoutMatchingAssistantMessage() {
     Entry root = root(settings("root"));
@@ -1122,7 +1193,22 @@ class EntryPathTest {
             CustomMessagePayload.CORE_CONTRIBUTOR_ID,
             CustomMessagePayload.CORE_CUSTOM_TYPE,
             CustomMessagePayload.CORE_RENDERER_KEY,
-            new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("sys"))),
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("custom"))),
+            CustomMessagePayload.CORE_DETAILS_JSON),
+        time(id));
+  }
+
+  /** 运行时注入的 core {@code <system-reminder>} CUSTOM_MESSAGE（与 SettingsReminder 同形）。 */
+  private static Entry runtimeReminder(UUID id, UUID parentId, String text) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new CustomMessagePayload(
+            CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+            CustomMessagePayload.CORE_CUSTOM_TYPE,
+            CustomMessagePayload.CORE_RENDERER_KEY,
+            SystemReminder.message(text),
             CustomMessagePayload.CORE_DETAILS_JSON),
         time(id));
   }
