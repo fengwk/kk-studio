@@ -151,7 +151,8 @@ public final class DaemonRuntime implements AutoCloseable {
               capabilityRegistry,
               new InMemoryDaemonInvocationJournal(),
               scheduler,
-              taskExecutor);
+              taskExecutor,
+              true);
       completed = true;
       return runtime;
     } finally {
