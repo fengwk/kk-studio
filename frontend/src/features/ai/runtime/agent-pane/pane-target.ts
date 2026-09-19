@@ -45,6 +45,22 @@ function nonBlank(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === expected.length && keys.every((key) => expected.includes(key))
+}
+
+function isEnvironmentName(value: unknown): value is string | null {
+  return value === null
+    || (
+      typeof value === 'string'
+      && value.length > 0
+      && value.length <= 64
+      && value === value.trim()
+      && !value.includes('/')
+    )
+}
+
 function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
   return isRecord(value)
     && (value.type === 'CHAT' || value.type === 'CANVAS')
@@ -53,6 +69,7 @@ function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
 
 function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
   return isRecord(value)
+    && hasExactKeys(value, ['providerName', 'modelName', 'variant'])
     && nonBlank(value.providerName)
     && nonBlank(value.modelName)
     && nonBlank(value.variant)
@@ -71,7 +88,7 @@ function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
   }
   return nonBlank(value.agentName)
     && isModelSelection(value.model)
-    && (value.environmentName === null || nonBlank(value.environmentName))
+    && isEnvironmentName(value.environmentName)
 }
 
 function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
@@ -114,12 +131,18 @@ function isCommandContent(value: unknown): boolean {
     return false
   }
   if (value.type === 'TEXT') {
-    return typeof value.text === 'string'
+    return hasExactKeys(value, ['type', 'text'])
+      && typeof value.text === 'string'
   }
   if (value.type === 'ATTACHMENT') {
-    return nonBlank(value.uploadId)
+    return hasExactKeys(value, ['type', 'uploadId'])
+      && nonBlank(value.uploadId)
   }
   return value.type === 'RESOURCE'
+    && (
+      hasExactKeys(value, ['type', 'blobId', 'name'])
+      || hasExactKeys(value, ['type', 'blobId', 'name', 'preview'])
+    )
     && nonBlank(value.blobId)
     && nonBlank(value.name)
     && (value.preview == null || typeof value.preview === 'string')
@@ -131,16 +154,19 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
   }
   switch (value.type) {
     case 'USER_MESSAGE':
-      return Array.isArray(value.contents)
+      return hasExactKeys(value, ['type', 'idempotencyKey', 'contents'])
+        && Array.isArray(value.contents)
         && value.contents.length > 0
         && value.contents.every(isCommandContent)
     case 'SET_AGENT':
-      return nonBlank(value.agentName)
+      return hasExactKeys(value, ['type', 'idempotencyKey', 'agentName'])
+        && nonBlank(value.agentName)
     case 'SET_MODEL':
-      return isModelSelection(value.model)
+      return hasExactKeys(value, ['type', 'idempotencyKey', 'model'])
+        && isModelSelection(value.model)
     case 'SET_ENVIRONMENT':
-      return Object.hasOwn(value, 'environmentName')
-        && (value.environmentName === null || nonBlank(value.environmentName))
+      return hasExactKeys(value, ['type', 'idempotencyKey', 'environmentName'])
+        && isEnvironmentName(value.environmentName)
     default:
       return false
   }
@@ -168,7 +194,7 @@ function isBranchDraft(value: unknown): value is BranchDraft {
   }
   return nonBlank(value.agentName)
     && isModelSelection(value.model)
-    && (value.environmentName === null || nonBlank(value.environmentName))
+    && isEnvironmentName(value.environmentName)
     && typeof value.yoloEnabled === 'boolean'
 }
 

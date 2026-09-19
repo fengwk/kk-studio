@@ -270,7 +270,7 @@ describe('PaneTarget durable-local FSM', () => {
       {
         type: 'USER_MESSAGE',
         idempotencyKey: 'c1',
-        contents: [{ type: 'ATTACHMENT', uploadId: 'u1', filename: 'file.txt' }],
+        contents: [{ type: 'ATTACHMENT', uploadId: 'u1' }],
       },
     ]) {
       setRequest({ ...validRequest, commands: [command] })
@@ -708,5 +708,47 @@ describe('PaneTarget durable-local FSM', () => {
       },
     }))
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 14. command variants reject unknown and cross-variant fields
+    for (const command of [
+      {
+        type: 'SET_ENVIRONMENT',
+        idempotencyKey: 'cmd-env-6',
+        environmentName: null,
+        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+      },
+      {
+        type: 'SET_AGENT',
+        idempotencyKey: 'cmd-agent-1',
+        agentName: 'assistant',
+        unknownKey: true,
+      },
+      {
+        type: 'USER_MESSAGE',
+        idempotencyKey: 'cmd-user-1',
+        contents: [{ type: 'TEXT', text: 'hello', uploadId: 'unexpected' }],
+      },
+    ]) {
+      storage.setItem(key, JSON.stringify({
+        ...baseValid,
+        request: {
+          ...baseValid.request,
+          commands: [command],
+        },
+      }))
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    }
+
+    // 15. environment names must satisfy the same canonical constraints as the backend
+    for (const environmentName of [' surrounding ', 'contains/slash', 'x'.repeat(65)]) {
+      storage.setItem(key, JSON.stringify({
+        ...baseValid,
+        branchDraft: {
+          ...baseValid.branchDraft,
+          environmentName,
+        },
+      }))
+      expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    }
   })
 })

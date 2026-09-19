@@ -1,8 +1,13 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import lombok.AccessLevel;
 import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 
 /** 单个 Entry branch 的设置快照。 */
 @Data
@@ -22,6 +27,22 @@ public class HarnessBranchSettingsDTO {
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentName;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean environmentNameFieldPresent;
+
+  @JsonSetter("environmentName")
+  public void setEnvironmentName(Object value) {
+    this.environmentName =
+        HarnessRuntimeDtoSupport.requireJsonString(value, "branchSettings.environmentName");
+    this.environmentNameFieldPresent = true;
+  }
+
+  @JsonIgnore
+  public boolean hasEnvironmentNameField() {
+    return environmentNameFieldPresent;
+  }
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
