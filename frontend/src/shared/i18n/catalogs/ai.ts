@@ -2121,70 +2121,6 @@ export const aiCatalog = {
     'en-US': 'Duplicate skill name: {name}',
     'zh-CN': '存在重复的 Skill 名称：{name}',
   },
-  'ai.environment.operations.title': {
-    'en-US': 'Operations',
-    'zh-CN': '异步操作记录',
-  },
-  'ai.environment.operations.loading': {
-    'en-US': 'Loading operations...',
-    'zh-CN': '正在加载操作记录...',
-  },
-  'ai.environment.operations.empty': {
-    'en-US': 'No operation records',
-    'zh-CN': '暂无操作记录',
-  },
-  'ai.environment.operations.targetResource': {
-    'en-US': 'Target Resource',
-    'zh-CN': '目标资源',
-  },
-  'ai.environment.operations.resourceVersionLabel': {
-    'en-US': 'Version',
-    'zh-CN': '版本',
-  },
-  'ai.environment.operations.resourceVersion': {
-    'en-US': 'v{{version}}',
-    'zh-CN': '版本 v{{version}}',
-  },
-  'ai.environment.operations.created': {
-    'en-US': 'Created',
-    'zh-CN': '创建',
-  },
-  'ai.environment.operations.started': {
-    'en-US': 'Started',
-    'zh-CN': '开始',
-  },
-  'ai.environment.operations.finished': {
-    'en-US': 'Finished',
-    'zh-CN': '完成',
-  },
-  'ai.environment.operations.times': {
-    'en-US': 'Times',
-    'zh-CN': '时间',
-  },
-  'ai.environment.operations.deadline': {
-    'en-US': 'Deadline',
-    'zh-CN': '截止',
-  },
-  'ai.environment.operations.cancel': {
-    'en-US': 'Cancel',
-    'zh-CN': '取消操作',
-  },
-  'ai.environment.operations.cancelConfirm': {
-    'en-US': 'Are you sure you want to cancel pending operation "{{id}}"?',
-    'zh-CN': '确认取消该等待中的操作「{{id}}」？',
-  },
-  'ai.environment.operations.failure': {
-    'en-US': 'Failure',
-    'zh-CN': '失败信息',
-  },
-  'ai.environment.operations.parameterSummary': {
-    'en-US': 'Parameters',
-    'zh-CN': '参数摘要',
-  },
-  'ai.environment.operations.resultSummary': {
-    'en-US': 'Result',
-    'zh-CN': '结果摘要',
-  },
   'ai.mcp.title': {
     'en-US': 'MCP Servers',
     'zh-CN': 'MCP 服务',
@@ -2194,8 +2130,8 @@ export const aiCatalog = {
     'zh-CN': '创建 MCP 服务',
   },
   'ai.mcp.createDescription': {
-    'en-US': 'Configure Remote or Local MCP Server',
-    'zh-CN': '配置 Remote 或 Local MCP 服务',
+    'en-US': 'Configure Streamable HTTP MCP Server',
+    'zh-CN': '配置 Streamable HTTP MCP 服务',
   },
   'ai.mcp.edit': {
     'en-US': 'Edit MCP Server',
@@ -2206,8 +2142,8 @@ export const aiCatalog = {
     'zh-CN': '删除 MCP 服务',
   },
   'ai.mcp.deleteConfirm': {
-    'en-US': 'Are you sure you want to delete MCP server "{name}"?',
-    'zh-CN': '确认删除 MCP 服务「{name}」？',
+    'en-US': 'Are you sure you want to delete MCP server "{{name}}"?',
+    'zh-CN': '确认删除 MCP 服务「{{name}}」？',
   },
   'ai.mcp.discover': {
     'en-US': 'Discover Tools',
@@ -2225,45 +2161,17 @@ export const aiCatalog = {
     'en-US': 'Server Name',
     'zh-CN': '服务名称',
   },
-  'ai.mcp.configJson': {
-    'en-US': 'Configuration JSON',
-    'zh-CN': '配置 JSON',
+  'ai.mcp.url': {
+    'en-US': 'Endpoint URL',
+    'zh-CN': '服务地址 (URL)',
   },
-  'ai.mcp.remoteTemplate': {
-    'en-US': 'Remote Template',
-    'zh-CN': 'Remote 模板',
+  'ai.mcp.headers': {
+    'en-US': 'Headers (JSON)',
+    'zh-CN': '自定义请求头 (JSON)',
   },
-  'ai.mcp.localTemplate': {
-    'en-US': 'Local Template',
-    'zh-CN': 'Local 模板',
-  },
-  'ai.mcp.formatJson': {
-    'en-US': 'Format',
-    'zh-CN': '格式化',
-  },
-  'ai.mcp.validateJson': {
-    'en-US': 'Validate',
-    'zh-CN': '校验',
-  },
-  'ai.mcp.validationPassed': {
-    'en-US': 'Configuration is valid',
-    'zh-CN': '配置格式校验通过',
-  },
-  'ai.mcp.envSelect': {
-    'en-US': 'Environment',
-    'zh-CN': '关联环境',
-  },
-  'ai.mcp.type': {
-    'en-US': 'Connection Type',
-    'zh-CN': '连接类型',
-  },
-  'ai.mcp.typeRemote': {
-    'en-US': 'Remote',
-    'zh-CN': '远程 (Remote)',
-  },
-  'ai.mcp.typeLocal': {
-    'en-US': 'Local',
-    'zh-CN': '本地 (Local)',
+  'ai.mcp.headersHint': {
+    'en-US': 'JSON object of request headers. Values may contain ${VAR} placeholders.',
+    'zh-CN': '请求头 JSON 对象，属性值支持 ${VAR} 环境变量占位符。',
   },
   'ai.mcp.toolCount': {
     'en-US': 'Tools',
@@ -2284,10 +2192,6 @@ export const aiCatalog = {
   'ai.mcp.statusFailed': {
     'en-US': 'Failed',
     'zh-CN': '失败',
-  },
-  'ai.mcp.discoveredVersion': {
-    'en-US': 'Discovered Version',
-    'zh-CN': '已验证版本',
   },
   'ai.mcp.enabledState': {
     'en-US': 'Enabled State',
