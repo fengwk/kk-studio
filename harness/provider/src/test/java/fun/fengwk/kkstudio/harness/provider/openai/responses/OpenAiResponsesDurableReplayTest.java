@@ -111,8 +111,6 @@ class OpenAiResponsesDurableReplayTest {
         request(
             List.of(
                 new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("You are helpful."))),
-                new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("call the tool")))));
     OpenAiResponsesEncodedRequest first =
         encoder.encode(firstRequest, descriptor, OpenAiResponsesConfig.defaultConfig());
@@ -182,12 +180,11 @@ class OpenAiResponsesDurableReplayTest {
                     List.of(new TextMessageContent("sunny")),
                     false,
                     "{}")));
+    // 只有当前请求绑定的 native 工具名才保持 provider 原生结构，否则回放与 native tool 结果都会被降级
     List<ProviderMessage> projected =
-        new ProviderMessageProjector(Set.of())
+        new ProviderMessageProjector(Set.of("query"))
             .projectSources(
                 List.of(
-                    ProviderMessageProjector.ProjectedMessage.of(
-                        AgentMessage.system("You are helpful.")),
                     ProviderMessageProjector.ProjectedMessage.of(
                         new AgentMessage(
                             AgentMessageRole.USER,
@@ -199,15 +196,16 @@ class OpenAiResponsesDurableReplayTest {
         encoder.encode(request(projected), descriptor, OpenAiResponsesConfig.defaultConfig());
     JsonNode input = MAPPER.readTree(second.bodyUtf8Bytes()).get("input");
 
-    assertEquals(5, input.size());
-    assertEquals("developer", input.get(0).path("role").asText());
-    assertEquals("reasoning", input.get(2).path("type").asText());
-    assertEquals("enc_blob_durable", input.get(2).path("encrypted_content").asText());
-    assertEquals("Check the weather", input.get(2).path("summary").get(0).path("text").asText());
-    assertEquals("function_call", input.get(3).path("type").asText());
-    assertEquals("call_1", input.get(3).path("call_id").asText());
-    assertEquals("function_call_output", input.get(4).path("type").asText());
-    assertEquals("sunny", input.get(4).path("output").asText());
+    // input 移位：user(0) → reasoning(1) → function_call(2) → function_call_output(3)
+    assertEquals(4, input.size());
+    assertEquals("user", input.get(0).path("role").asText());
+    assertEquals("reasoning", input.get(1).path("type").asText());
+    assertEquals("enc_blob_durable", input.get(1).path("encrypted_content").asText());
+    assertEquals("Check the weather", input.get(1).path("summary").get(0).path("text").asText());
+    assertEquals("function_call", input.get(2).path("type").asText());
+    assertEquals("call_1", input.get(2).path("call_id").asText());
+    assertEquals("function_call_output", input.get(3).path("type").asText());
+    assertEquals("sunny", input.get(3).path("output").asText());
     assertFalse(
         MAPPER.readTree(second.bodyUtf8Bytes()).toString().contains("private draft"),
         "private reasoning text must never reach the wire replay");
@@ -219,12 +217,11 @@ class OpenAiResponsesDurableReplayTest {
     ProviderDescriptor descriptor = createDescriptor();
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
+    // 只有当前请求绑定的 native 工具名才保持 provider 原生结构，否则回放与 native tool 结果都会被降级
     List<ProviderMessage> projected =
-        new ProviderMessageProjector(Set.of())
+        new ProviderMessageProjector(Set.of("query"))
             .projectSources(
                 List.of(
-                    ProviderMessageProjector.ProjectedMessage.of(
-                        AgentMessage.system("You are helpful.")),
                     ProviderMessageProjector.ProjectedMessage.of(
                         new AgentMessage(
                             AgentMessageRole.USER,
@@ -256,12 +253,13 @@ class OpenAiResponsesDurableReplayTest {
                     .bodyUtf8Bytes())
             .get("input");
 
-    assertEquals(5, input.size());
-    assertEquals("reasoning", input.get(2).path("type").asText());
-    assertEquals("durable thought", input.get(2).path("summary").get(0).path("text").asText());
-    assertFalse(input.get(2).has("encrypted_content"));
-    assertEquals("function_call", input.get(3).path("type").asText());
-    assertTrue(input.get(3).has("arguments"));
-    assertEquals("function_call_output", input.get(4).path("type").asText());
+    assertEquals(4, input.size());
+    assertEquals("user", input.get(0).path("role").asText());
+    assertEquals("reasoning", input.get(1).path("type").asText());
+    assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asText());
+    assertFalse(input.get(1).has("encrypted_content"));
+    assertEquals("function_call", input.get(2).path("type").asText());
+    assertTrue(input.get(2).has("arguments"));
+    assertEquals("function_call_output", input.get(3).path("type").asText());
   }
 }
