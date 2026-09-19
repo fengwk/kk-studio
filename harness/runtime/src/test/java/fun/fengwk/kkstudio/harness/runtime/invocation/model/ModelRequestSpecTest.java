@@ -129,8 +129,8 @@ class ModelRequestSpecTest {
   }
 
   @Test
-  void requiresMatchingEnvironmentRoutes() {
-    // Environment tool 与 skill source 必须落在同一 environment，避免一次请求混用多个 workspace。
+  void requiresMatchingEnvironmentToolRoutes() {
+    // Environment tool 必须落在同一 environment，避免一次请求混用多个 workspace。
     EnvironmentId other = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
     assertThrows(
         IllegalArgumentException.class,
@@ -139,11 +139,6 @@ class ModelRequestSpecTest {
                 List.of(environment("fs", ENV_ID), environment("other", other)),
                 List.of(),
                 List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            spec(
-                List.of(environment("fs")), List.of(skill("web", "Web search", other)), List.of()));
   }
 
   @Test

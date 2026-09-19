@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -19,15 +21,14 @@ import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -46,6 +47,7 @@ public final class SystemPromptPreviewService {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
+  private final SkillCatalogQueryService skillCatalogQueryService;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
 
@@ -56,6 +58,7 @@ public final class SystemPromptPreviewService {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
+      SkillCatalogQueryService skillCatalogQueryService,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
@@ -67,6 +70,8 @@ public final class SystemPromptPreviewService {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
+    this.skillCatalogQueryService =
+        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -91,7 +96,7 @@ public final class SystemPromptPreviewService {
     return promptComposer.compose(
         agent.getSystemPrompt(),
         environment,
-        previewSkills(config.getSkills(), environmentId),
+        previewSkills(config.getSkills()),
         previewSubagents(config.getSubagents()));
   }
 
@@ -152,36 +157,32 @@ public final class SystemPromptPreviewService {
     return new CurrentEnvironmentContext(environmentId, os, now.atZone(zone).toLocalDate(), note);
   }
 
-  private List<SkillBinding> previewSkills(
-      List<AgentSkillRefDTO> skillRefs, EnvironmentId environmentId) {
-    if (skillRefs == null || skillRefs.isEmpty() || environmentId == null) {
+  /**
+   * Skills 只从 Platform 自身的全局目录预览，与 Environment 完全无关：环境解析失败也不影响 skills 段。
+   *
+   * <p>保持只读预览的宽容契约：目录中不存在的名称被省略，绝不因单个失效名称使整段预览失败。
+   */
+  private List<SkillBinding> previewSkills(List<String> skillNames) {
+    if (skillNames == null || skillNames.isEmpty()) {
       return List.of();
     }
-    List<EnvironmentSkillDTO> usable;
+    Map<String, CurrentSkill> catalog;
     try {
-      usable = skillInventoryQueryService.listUsableSkills(environmentId);
+      catalog = skillCatalogQueryService.currentSkillsByName();
     } catch (RuntimeException error) {
       return List.of();
     }
     List<SkillBinding> bindings = new ArrayList<>();
-    for (AgentSkillRefDTO ref : skillRefs) {
-      EnvironmentSkillDTO matched =
-          usable.stream()
-              .filter(
-                  candidate ->
-                      candidate.getSourceId().equals(ref.getSourceId())
-                          && candidate.getName().equals(ref.getName()))
-              .findFirst()
-              .orElse(null);
-      if (matched != null) {
+    for (String skillName : skillNames) {
+      CurrentSkill skill = catalog.get(skillName);
+      if (skill != null) {
         bindings.add(
             new SkillBinding(
-                environmentId,
-                UUID.fromString(matched.getSourceId()),
-                matched.getName(),
-                matched.getDescription(),
-                matched.getBaseDirectory(),
-                matched.getContentRevision()));
+                skill.getName(),
+                skill.getPackageName(),
+                skill.getPackageVersion(),
+                skill.getContentRevision(),
+                skill.getDescription()));
       }
     }
     return List.copyOf(bindings);

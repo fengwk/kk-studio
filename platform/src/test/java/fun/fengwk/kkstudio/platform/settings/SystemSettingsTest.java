@@ -39,7 +39,6 @@ class SystemSettingsTest {
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
     assertEquals(5_000L, defaults.tool().toolGatewayOverloadRetryMillis());
-    assertEquals(30_000L, defaults.tool().skillLoadTimeoutMillis());
 
     assertEquals(3, defaults.aiRuntime().retryMaxRetries());
     assertEquals(
@@ -441,7 +440,6 @@ class SystemSettingsTest {
         base.defaultYolo(),
         base.modelGatewayBusyRetryMillis(),
         base.toolGatewayBusyRetryMillis(),
-        base.toolGatewayOverloadRetryMillis(),
-        base.skillLoadTimeoutMillis());
+        base.toolGatewayOverloadRetryMillis());
   }
 }

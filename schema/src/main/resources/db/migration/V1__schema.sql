@@ -123,9 +123,6 @@ create table agent_definition (
     model_provider_name varchar(64) not null,
     model_name      varchar(128)  not null,
     variant         varchar(64),
-    -- 每轮 turn 开始时按此 Environment 解析出当时事实（EnvironmentBinding）；
-    -- 可空表示不绑定 Environment（unbound branch）。
-    environment_id  uuid,
     config          jsonb         not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
@@ -138,13 +135,133 @@ create table agent_definition (
     ),
     constraint fk_agent_definition_model foreign key (model_provider_name, model_name)
         references agent_model (provider_name, name),
-    constraint fk_agent_definition_environment foreign key (environment_id)
-        references environment (id) on delete restrict,
     constraint ck_agent_definition_version_nonneg check (version >= 0)
 );
 
 create index idx_agent_definition_model
     on agent_definition (model_provider_name, model_name);
+
+-- -----------------------------------------------------------------------------
+-- Platform 全局 Skill 目录
+--
+-- Skill 是 Platform 自身的全局资源：身份是全局唯一的 name，内容由一个不可变的
+-- package 版本承载。package 版本与 revision 行一经写入永不修改、永不物理删除，
+-- 因此任何已冻结的 (package_name, package_version, name, content_revision) 都能
+-- 永久精确取回；删除一个 package 只把它置为非活跃并清空其当前 skill 目录行。
+--
+-- canonical 文本规则与 SkillNames 一致：无环绕空白、无控制字符、不含 : / @ \。
+-- -----------------------------------------------------------------------------
+
+create table skill_package (
+    package_name     varchar(128)  not null,
+    package_version  varchar(128)  not null,
+    description      text,
+    package_revision char(64)      not null,
+    active           boolean       not null,
+    create_time      timestamptz(3) not null default current_timestamp,
+    constraint pk_skill_package primary key (package_name, package_version),
+    constraint ck_skill_package_name check (
+        package_name = btrim(package_name)
+        and char_length(package_name) > 0
+        and package_name !~ '[[:cntrl:]]'
+        and position(':' in package_name) = 0
+        and position('/' in package_name) = 0
+        and position('@' in package_name) = 0
+        and position('\' in package_name) = 0
+    ),
+    constraint ck_skill_package_version check (
+        package_version = btrim(package_version)
+        and char_length(package_version) > 0
+        and package_version !~ '[[:cntrl:]]'
+    ),
+    constraint ck_skill_package_description check (
+        description is null
+        or (description = btrim(description) and char_length(description) > 0)
+    ),
+    constraint ck_skill_package_revision check (package_revision ~ '^[0-9a-f]{64}$')
+);
+
+comment on table skill_package is 'Platform 全局 Skill package 的不可变版本：每个 (name, version) 恰一行，旧版本的 active=false 永久保留';
+comment on column skill_package.package_name is 'package 名（非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
+comment on column skill_package.package_version is 'package 版本（非空白、无环绕空白、无控制字符、≤128）；一经写入永不复用';
+comment on column skill_package.description is '可空 package 描述；null 表示未填写';
+comment on column skill_package.package_revision is '该版本内容的确定性聚合 SHA-256（小写 64 位十六进制）';
+comment on column skill_package.active is '是否为该 package 名当前的活跃版本；删除 package 时仅置 false 并清空当前 skill 行';
+comment on column skill_package.create_time is '创建时间（毫秒精度）';
+
+-- 每个 package 名至多一个活跃版本：并发安装由该唯一索引收敛。
+create unique index uk_skill_package_active
+    on skill_package (package_name)
+    where active;
+
+comment on index uk_skill_package_active is '每个 package 名至多一个活跃版本';
+
+create table skill_revision (
+    package_name     varchar(128)  not null,
+    package_version  varchar(128)  not null,
+    name             varchar(128)  not null,
+    description      text          not null,
+    content          text          not null,
+    content_revision char(64)      not null,
+    create_time      timestamptz(3) not null default current_timestamp,
+    constraint pk_skill_revision primary key (package_name, package_version, name),
+    constraint fk_skill_revision_package foreign key (package_name, package_version)
+        references skill_package (package_name, package_version) on delete restrict,
+    constraint ck_skill_revision_name check (
+        name = btrim(name)
+        and char_length(name) > 0
+        and name !~ '[[:cntrl:]]'
+        and position(':' in name) = 0
+        and position('/' in name) = 0
+        and position('@' in name) = 0
+        and position('\' in name) = 0
+    ),
+    constraint ck_skill_revision_description check (
+        description = btrim(description)
+        and char_length(description) > 0
+        and char_length(description) <= 1024
+        and translate(description, chr(10), '') !~ '[[:cntrl:]]'
+    ),
+    constraint ck_skill_revision_content check (content <> ''),
+    constraint ck_skill_revision_content_revision check (content_revision ~ '^[0-9a-f]{64}$')
+);
+
+comment on table skill_revision is '不可变 Skill 内容版本：行一经写入永不修改、永不删除，正文的精确 UTF-8 SHA-256 保存在 content_revision';
+comment on column skill_revision.package_name is '所属 package 名（与 package_version 一起指向不可变 package 版本）';
+comment on column skill_revision.package_version is '所属 package 版本';
+comment on column skill_revision.name is 'Skill canonical 名（该 package 版本内唯一）';
+comment on column skill_revision.description is 'Skill 描述（非空、无环绕空白、≤1024、仅允许 LF 换行）';
+comment on column skill_revision.content is 'Skill 完整正文（非空，长度不设人为上限）';
+comment on column skill_revision.content_revision is '正文精确 UTF-8 字节的 SHA-256（小写 64 位十六进制）';
+comment on column skill_revision.create_time is '创建时间（毫秒精度）';
+
+-- 当前全局 Skill 目录：name 全局唯一，指向承载它的不可变 revision。
+create table skill (
+    name             varchar(128)  primary key,
+    package_name     varchar(128)  not null,
+    package_version  varchar(128)  not null,
+    constraint fk_skill_revision foreign key (package_name, package_version, name)
+        references skill_revision (package_name, package_version, name) on delete restrict,
+    constraint ck_skill_name check (
+        name = btrim(name)
+        and char_length(name) > 0
+        and name !~ '[[:cntrl:]]'
+        and position(':' in name) = 0
+        and position('/' in name) = 0
+        and position('@' in name) = 0
+        and position('\' in name) = 0
+    )
+);
+
+comment on table skill is '当前生效的全局 Skill 目录：name 全局唯一，指向承载它的不可变 skill_revision 行';
+comment on column skill.name is 'Skill canonical 名（全局唯一）';
+comment on column skill.package_name is '承载该 Skill 的 package 名';
+comment on column skill.package_version is '承载该 Skill 的不可变 package 版本';
+
+create index idx_skill_package
+    on skill (package_name, package_version);
+
+comment on index idx_skill_package is '按 package 定位当前 Skill 目录行';
 
 -- Platform MCP Server 配置。name 是产品侧唯一路由身份且创建后不可变；
 -- connection_config 只保存与 connection_type 对应的传输参数。
@@ -1073,7 +1190,7 @@ comment on column system_setting.updated_at is '最后更新时间（毫秒精�
 
 insert into system_setting (id, config) values (
     1,
-     '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"skillLoadTimeoutMillis":30000,"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
+     '{"advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},"aiRuntime":{"compactionKeepRecentTokens":20000,"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentIdleTimeoutMillis":0,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},"environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},"integrations":{"comfyui":{"connectTimeoutMillis":10000,"enabled":false,"maxInputFileBytes":52428800,"readTimeoutMillis":30000,"websocketTimeoutMillis":1800000},"gptImage2":{"askTimeoutSeconds":900,"hubExecutionTimeoutMillis":960000,"maxWaitMillis":1200000,"paidEnabled":false},"minimaxH3":{"comfyConnectTimeoutMillis":10000,"comfyMaxWaitMillis":1800000,"comfyPollIntervalMillis":2000,"comfyRequestTimeoutMillis":30000,"enabled":false,"promptMaxWaitMillis":600000},"openCliHub":{"baseUrl":null,"connectTimeoutMillis":5000,"enabled":false,"longPollTimeoutMillis":130000,"maxErrorResponseBytes":4096,"maxJsonResponseBytes":524288,"maxOutputChars":65535,"requestTimeoutMillis":120000,"streamBufferBytes":16384},"seedance":{"enabled":false,"hubExecutionTimeoutMillis":600000,"maxWaitMillis":1800000,"retry":0,"statusPollIntervalMillis":30000}},"storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":600,"s3PresignMaxExpiresSeconds":3600,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":3600},"tool":{"defaultYolo":false,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayBusyRetryMillis":1000,"toolGatewayOverloadRetryMillis":5000}}'::jsonb
 );
 
 -- System settings version NOTIFY hint.

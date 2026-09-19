@@ -39,6 +39,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "agent_provider",
           "agent_model",
           "agent_definition",
+          "skill_package",
+          "skill_revision",
+          "skill",
           "flyway_schema_history",
           "comfyui_workflow_api",
           "mcp_server",
@@ -169,7 +172,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "model_provider_name",
         "model_name",
         "variant",
-        "environment_id",
         "config",
         "created_at",
         "updated_at",
@@ -1390,7 +1392,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_environment_skill_source_environment",
             "uk_environment_skill_source_default",
             "uk_environment_skill_environment_name",
-            "uk_environment_operation_active"),
+            "uk_environment_operation_active",
+            "uk_skill_package_active"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -1401,7 +1404,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             st.executeQuery(
                 "select conname from pg_constraint where contype = 'f'"
                     + " and conname in ('fk_agent_model_provider',"
-                    + " 'fk_agent_definition_model', 'fk_agent_definition_environment',"
+                    + " 'fk_agent_definition_model',"
+                    + " 'fk_skill_revision_package', 'fk_skill_revision',"
                     + " 'fk_environment_connection_environment',"
                     + " 'fk_harness_work_environment',"
                     + " 'fk_canvas_group_canvas',"
@@ -1433,7 +1437,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "fk_agent_model_provider",
             "fk_agent_definition_model",
-            "fk_agent_definition_environment",
+            "fk_skill_revision_package",
+            "fk_skill_revision",
             "fk_environment_connection_environment",
             "fk_harness_work_environment",
             "fk_canvas_group_canvas",

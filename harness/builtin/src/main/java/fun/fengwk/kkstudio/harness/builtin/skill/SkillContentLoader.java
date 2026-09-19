@@ -1,0 +1,18 @@
+package fun.fengwk.kkstudio.harness.builtin.skill;
+
+/**
+ * 按冻结身份精确加载 Skill 正文的端口。
+ *
+ * <p>实现必须精确匹配 {@code (packageName, packageVersion, name, contentRevision)}；找不到精确版本时抛出异常，绝不按名称回退到 当前
+ * Skill 版本。端口是同步的：正文加载不引入单独的异步超时通道。
+ */
+@FunctionalInterface
+public interface SkillContentLoader {
+
+  /**
+   * 加载冻结的精确 revision 正文。
+   *
+   * @throws IllegalArgumentException 缺失该精确 revision 时
+   */
+  String load(String packageName, String packageVersion, String name, String contentRevision);
+}

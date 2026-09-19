@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.model;
 import lombok.Data;
 
 import java.time.Instant;
-import java.util.UUID;
 
 /** 全局 Agent definition 资源。 */
 @Data
@@ -26,9 +25,6 @@ public class AgentDefinition {
 
   /** 可选 Variant 覆盖；null/空表示不覆盖，运行时解析为 Model 配置的 defaultVariant。 */
   private String variant;
-
-  /** 绑定的 Environment UUID（可选；null 表示不绑定环境）。 */
-  private UUID environmentId;
 
   /** 可执行配置 JSON（tools/skills/subagents/inheritParentEnvironment），映射 {@code config} jsonb 列，必填。 */
   private String configJson;

@@ -33,7 +33,6 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
 
   private static final String RESOURCE = "agent_definition";
   private static final String MODEL_RESOURCE = "agent_model";
-  private static final String ENVIRONMENT_RESOURCE = "environment";
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConverter agentDefinitionConverter;
@@ -58,8 +57,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
-    referenceResolver.requireEnvironmentAndSkills(
-        definition.getEnvironmentId(), config.getSkills());
+    referenceResolver.requireCurrentSkills(config.getSkills());
     referenceResolver.requireSubagentsForCreate(definition.getName(), config.getSubagents());
     try {
       if (!agentDefinitionRepository.create(definition)) {
@@ -70,9 +68,6 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
           RESOURCE, "agent definition name already exists: " + definition.getName(), error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        if (definition.getEnvironmentId() != null) {
-          throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
-        }
         throw new AiResourceNotFoundException(MODEL_RESOURCE);
       }
       throw error;
@@ -97,8 +92,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
-    referenceResolver.requireEnvironmentAndSkills(
-        definition.getEnvironmentId(), config.getSkills());
+    referenceResolver.requireCurrentSkills(config.getSkills());
     AgentDefinition locked =
         referenceResolver.requireAgentAndSubagentsForUpdate(name, config.getSubagents());
     ensureExpectedVersion(locked, name, rawExpected, expected);
@@ -113,9 +107,6 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
       }
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
-        if (definition.getEnvironmentId() != null) {
-          throw new AiResourceNotFoundException(ENVIRONMENT_RESOURCE);
-        }
         throw new AiResourceNotFoundException(MODEL_RESOURCE);
       }
       throw error;

@@ -52,14 +52,13 @@ public record SystemSettings(
     advanced = Objects.requireNonNull(advanced, "advanced");
   }
 
-  /** tool section：权限规则（保序数组）+ 默认 YOLO + 模型/工具 Gateway 与 skill 加载预算。 */
+  /** tool section：权限规则（保序数组）+ 默认 YOLO + 模型/工具 Gateway 重试预算。 */
   public record Tool(
       Map<String, List<PermissionRule>> permission,
       boolean defaultYolo,
       long modelGatewayBusyRetryMillis,
       long toolGatewayBusyRetryMillis,
-      long toolGatewayOverloadRetryMillis,
-      long skillLoadTimeoutMillis) {
+      long toolGatewayOverloadRetryMillis) {
 
     /** 默认 permission：write/edit/bash 各自 {@code * -> ask}（read 保持不限制）。 */
     public static final Tool DEFAULT =
@@ -71,8 +70,7 @@ public record SystemSettings(
             false,
             5_000L,
             1_000L,
-            5_000L,
-            30_000L);
+            5_000L);
 
     public Tool {
       permission = copyPermission(permission);
@@ -82,8 +80,6 @@ public record SystemSettings(
           toolGatewayBusyRetryMillis, "tool.toolGatewayBusyRetryMillis");
       SystemSettingsValidation.requirePositive(
           toolGatewayOverloadRetryMillis, "tool.toolGatewayOverloadRetryMillis");
-      SystemSettingsValidation.requirePositive(
-          skillLoadTimeoutMillis, "tool.skillLoadTimeoutMillis");
     }
 
     private static Map<String, List<PermissionRule>> copyPermission(

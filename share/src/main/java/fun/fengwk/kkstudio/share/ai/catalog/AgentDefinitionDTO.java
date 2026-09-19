@@ -23,9 +23,6 @@ public class AgentDefinitionDTO {
   /** 当前生效的模型变体 id；null 表示未显式指定（运行时解析 model config 的 defaultVariant）。 */
   private String variant;
 
-  /** 绑定的 Environment UUID 字符串（可空；null 表示未绑定环境）。 */
-  private String environmentId;
-
   /** 结构化执行配置（tools/skills/subagents/inheritParentEnvironment），来自持久化的 config JSONB 列。 */
   private AgentDefinitionConfigDTO config;
 

@@ -2,20 +2,21 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.List;
 import java.util.Objects;
 
 /**
- * 依据 {@link RuntimeToolCatalog} 校验 Agent 选择：工具必须存在且可被 Agent 选择，skill 与 subagent 名遵守长度规则。
+ * 依据 {@link RuntimeToolCatalog} 校验 Agent 选择：工具必须存在且可被 Agent 选择，Skill 名必须 canonical，subagent
+ * 名遵守长度规则。
  *
  * <p>Agent 与 Environment 解耦：环境工具的可用性由每个 branch 的 Environment 选择在执行期决定，配置阶段不再按任何 Environment
- * 拒绝或过滤环境工具。
+ * 拒绝或过滤环境工具；Skill 名指向 Platform 的全局目录，因此配置阶段只校验形状，存在性与锁定由引用解析器负责。
  */
 @Component
 public final class AgentDefinitionConfigValidator {
@@ -29,7 +30,7 @@ public final class AgentDefinitionConfigValidator {
   public void validate(AgentDefinitionConfigDTO config) {
     Objects.requireNonNull(config, "config");
     validateToolNames(config.getTools());
-    validateSkills(config.getSkills());
+    validateSkillNames(config.getSkills());
     validateSubagents(config.getSubagents());
   }
 
@@ -46,14 +47,18 @@ public final class AgentDefinitionConfigValidator {
     }
   }
 
-  private static void validateSkills(List<AgentSkillRefDTO> refs) {
-    if (refs == null) {
+  private static void validateSkillNames(List<String> names) {
+    if (names == null) {
       return;
     }
-    for (AgentSkillRefDTO ref : refs) {
-      if (ref != null && ref.getName() != null && ref.getName().length() > 128) {
-        throw new IllegalArgumentException(
-            "agent skill name must be <= 128 characters: " + ref.getName());
+    for (String name : names) {
+      if (name == null) {
+        throw new IllegalArgumentException("agent skill name must not be null");
+      }
+      try {
+        SkillNames.canonicalSkillName(name);
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException("invalid agent skill name: " + name, error);
       }
     }
   }

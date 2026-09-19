@@ -40,11 +40,10 @@ class ModelRequestSpecJsonCodecTest {
             + requestSpec.outputTokens()
             + ",\"preambleMessages\":[],\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
-            + "],\"skillBindings\":[{\"sourceEnvironmentId\":\"123e4567-e89b-12d3-a456-426614174000\","
-            + "\"sourceId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
-            + "\"name\":\"review\",\"description\":\"Review code\","
-            + "\"baseDirectory\":\"/home/dev/.agents/skills/review\","
-            + "\"contentRevision\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}],"
+            + "],\"skillBindings\":[{\"name\":\"review\",\"packageName\":\"review-package\","
+            + "\"packageVersion\":\"1.0.0\","
+            + "\"contentRevision\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\","
+            + "\"description\":\"Review code\"}],"
             + "\"subagentBindings\":[],\"cacheControl\":"
             + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
             + "}";
@@ -146,8 +145,8 @@ class ModelRequestSpecJsonCodecTest {
     toolsType.putObject("toolBindings");
     assertInvalid(toolsType);
 
-    // skill binding 六字段全部必填：缺少新身份字段的旧形状必须被拒绝，而不是 tolerant 解码。
-    for (String field : List.of("sourceId", "baseDirectory", "contentRevision")) {
+    // Skill binding 的包身份与内容 revision 全部必填，缺失时必须严格拒绝。
+    for (String field : List.of("packageName", "packageVersion", "contentRevision")) {
       ObjectNode missingSkillField = encodedNode();
       ObjectNode skill = (ObjectNode) missingSkillField.path("skillBindings").get(0);
       skill.remove(field);

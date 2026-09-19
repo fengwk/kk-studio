@@ -167,7 +167,6 @@ class SystemSettingsDtoContractTest {
     tool.setModelGatewayBusyRetryMillis(5000L);
     tool.setToolGatewayBusyRetryMillis(1000L);
     tool.setToolGatewayOverloadRetryMillis(5000L);
-    tool.setSkillLoadTimeoutMillis(30000L);
     dto.setTool(tool);
     return dto;
   }

@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.model.AgentDefi
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 
 import java.util.List;
-import java.util.UUID;
 
 /** 基于 PostgreSQL 的全局 Agent definition 仓库。 */
 @AllArgsConstructor
@@ -45,13 +44,8 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
-  public boolean existsReferencingSkillSource(UUID environmentId, UUID sourceId) {
-    return agentDefinitionMapper.existsReferencingSkillSource(environmentId, sourceId);
-  }
-
-  @Override
-  public boolean existsByEnvironmentId(UUID environmentId) {
-    return agentDefinitionMapper.existsByEnvironmentId(environmentId);
+  public boolean existsReferencingSkill(String skillName) {
+    return agentDefinitionMapper.existsReferencingSkill(skillName);
   }
 
   @Override
@@ -80,7 +74,6 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     result.setModelProviderName(definition.getModelProviderName());
     result.setModelName(definition.getModelName());
     result.setVariant(definition.getVariant());
-    result.setEnvironmentId(definition.getEnvironmentId());
     result.setConfigJson(definition.getConfigJson());
     return result;
   }
@@ -96,7 +89,6 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     result.setModelProviderName(definition.getModelProviderName());
     result.setModelName(definition.getModelName());
     result.setVariant(definition.getVariant());
-    result.setEnvironmentId(definition.getEnvironmentId());
     result.setConfigJson(definition.getConfigJson());
     result.setVersion(definition.getVersion());
     result.setCreateTime(definition.getCreateTime());

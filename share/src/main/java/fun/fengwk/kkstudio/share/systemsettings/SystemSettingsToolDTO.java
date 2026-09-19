@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * tool section：权限规则（保序数组）+ 默认 YOLO + 模型/工具 Gateway 与 skill 加载预算。
+ * tool section：权限规则（保序数组）+ 默认 YOLO + 模型/工具 Gateway 重试预算。
  *
  * <p>{@code permission} 是模型可见 tool name 到有序规则数组的映射；规则数组顺序即求值顺序，必须保持。key 也可使用精确 {@code *} 表示全局规则。
  * action 取值仅为 {@code allow}/{@code ask}/{@code deny}。
@@ -27,8 +27,6 @@ public class SystemSettingsToolDTO {
   private Long toolGatewayBusyRetryMillis;
 
   private Long toolGatewayOverloadRetryMillis;
-
-  private Long skillLoadTimeoutMillis;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

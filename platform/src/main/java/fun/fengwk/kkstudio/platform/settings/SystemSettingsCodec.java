@@ -196,8 +196,7 @@ public class SystemSettingsCodec {
         requiredMillis(dto.getModelGatewayBusyRetryMillis(), "tool.modelGatewayBusyRetryMillis"),
         requiredMillis(dto.getToolGatewayBusyRetryMillis(), "tool.toolGatewayBusyRetryMillis"),
         requiredMillis(
-            dto.getToolGatewayOverloadRetryMillis(), "tool.toolGatewayOverloadRetryMillis"),
-        requiredMillis(dto.getSkillLoadTimeoutMillis(), "tool.skillLoadTimeoutMillis"));
+            dto.getToolGatewayOverloadRetryMillis(), "tool.toolGatewayOverloadRetryMillis"));
   }
 
   private static SystemSettings.AiRuntime toAiRuntime(SystemSettingsAiRuntimeDTO dto) {
@@ -427,7 +426,6 @@ public class SystemSettingsCodec {
     dto.setModelGatewayBusyRetryMillis(tool.modelGatewayBusyRetryMillis());
     dto.setToolGatewayBusyRetryMillis(tool.toolGatewayBusyRetryMillis());
     dto.setToolGatewayOverloadRetryMillis(tool.toolGatewayOverloadRetryMillis());
-    dto.setSkillLoadTimeoutMillis(tool.skillLoadTimeoutMillis());
     return dto;
   }
 

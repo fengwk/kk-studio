@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.builtin.skill.SkillContentLoader;
 import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
@@ -42,11 +43,9 @@ public class BuiltinHarnessContributorConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public LoadSkillTool loadSkillTool(
-      ThreadSelectedSkillLookup skillLookup, SystemSettingsSnapshot systemSettingsSnapshot) {
-    // skill 正文加载超时：每次 execute 从 SystemSettingsSnapshot 现读 tool.skillLoadTimeoutMillis。
-    return new LoadSkillTool(
-        skillLookup,
-        () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().skillLoadTimeoutMillis()));
+      ThreadSelectedSkillLookup skillLookup, SkillContentLoader skillContentLoader) {
+    // Skill 正文由 Platform 全局目录直接按冻结 revision 提供，不经 Daemon，也不需要独立超时预算。
+    return new LoadSkillTool(skillLookup, skillContentLoader);
   }
 
   /**

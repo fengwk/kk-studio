@@ -8,26 +8,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.ArrayList;
 import java.util.List;
 
 class AgentDefinitionConfigCodecTest {
 
-  private static final String SOURCE_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-  private static final String SOURCE_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-
   private final AgentDefinitionConfigCodec codec =
       new AgentDefinitionConfigCodec(new ObjectMapper());
 
-  /** 测试意图：验证完整的 AgentDefinitionConfigDTO（含规范结构化 skills 引用）能够正确往返编解码并保持元素顺序。 */
+  /** 测试意图：验证完整配置（含全局 Skill 名称）能够正确往返编解码并保持元素顺序。 */
   @Test
   void roundTripsCompleteConfigAndPreservesOrder() {
     AgentDefinitionConfigDTO config = config();
     config.setTools(List.of("read"));
-    config.setSkills(
-        List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "ops")));
+    config.setSkills(List.of("dev", "ops"));
     config.setSubagents(List.of("reviewer"));
     config.setInheritParentEnvironment(false);
 
@@ -35,9 +30,7 @@ class AgentDefinitionConfigCodecTest {
     AgentDefinitionConfigDTO decoded = codec.decode(encoded);
 
     assertEquals(List.of("read"), decoded.getTools());
-    assertEquals(
-        List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "ops")),
-        decoded.getSkills());
+    assertEquals(List.of("dev", "ops"), decoded.getSkills());
     assertEquals(List.of("reviewer"), decoded.getSubagents());
     assertEquals(Boolean.FALSE, decoded.getInheritParentEnvironment());
   }
@@ -105,85 +98,63 @@ class AgentDefinitionConfigCodecTest {
   @Test
   void rejectsNullElementsInSkills() {
     AgentDefinitionConfigDTO config = config();
-    List<AgentSkillRefDTO> skillsWithNull = new ArrayList<>();
-    skillsWithNull.add(new AgentSkillRefDTO(SOURCE_A, "dev"));
+    List<String> skillsWithNull = new ArrayList<>();
+    skillsWithNull.add("dev");
     skillsWithNull.add(null);
     config.setSkills(skillsWithNull);
     assertThrows(IllegalArgumentException.class, () -> codec.encode(config));
-  }
-
-  /** 测试意图：验证 sourceId 必须为小写 canonical UUID，拒绝大写字母、空白以及非 UUID 格式。 */
-  @Test
-  void rejectsNonCanonicalAndMalformedSourceId() {
-    AgentDefinitionConfigDTO upper = config();
-    upper.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A.toUpperCase(), "dev")));
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(upper));
-
-    AgentDefinitionConfigDTO blank = config();
-    blank.setSkills(List.of(new AgentSkillRefDTO("   ", "dev")));
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(blank));
-
-    AgentDefinitionConfigDTO malformed = config();
-    malformed.setSkills(List.of(new AgentSkillRefDTO("not-a-uuid", "dev")));
-    assertThrows(IllegalArgumentException.class, () -> codec.encode(malformed));
   }
 
   /** 测试意图：验证 Skill 名称必须是规范短名，拒绝空白、首尾空格、超长以及包含非法分隔符或控制字符的名称。 */
   @Test
   void rejectsInvalidCanonicalShortNames() {
     AgentDefinitionConfigDTO blankName = config();
-    blankName.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, " ")));
+    blankName.setSkills(List.of(" "));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(blankName));
 
     AgentDefinitionConfigDTO padded = config();
-    padded.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, " dev ")));
+    padded.setSkills(List.of(" dev "));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(padded));
 
     AgentDefinitionConfigDTO slash = config();
-    slash.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, "my/skill")));
+    slash.setSkills(List.of("my/skill"));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(slash));
 
     AgentDefinitionConfigDTO colon = config();
-    colon.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, "my:skill")));
+    colon.setSkills(List.of("my:skill"));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(colon));
 
     AgentDefinitionConfigDTO at = config();
-    at.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, "my@skill")));
+    at.setSkills(List.of("my@skill"));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(at));
 
     AgentDefinitionConfigDTO backslash = config();
-    backslash.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, "my\\skill")));
+    backslash.setSkills(List.of("my\\skill"));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(backslash));
 
     AgentDefinitionConfigDTO control = config();
-    control.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, "my\nskill")));
+    control.setSkills(List.of("my\nskill"));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(control));
 
     AgentDefinitionConfigDTO tooLong = config();
-    tooLong.setSkills(List.of(new AgentSkillRefDTO(SOURCE_A, "a".repeat(129))));
+    tooLong.setSkills(List.of("a".repeat(129)));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(tooLong));
   }
 
-  /** 测试意图：验证 skills 引用严格拒绝重复的 (sourceId, name) 标识组合。 */
+  /** 测试意图：验证全局 Skill 名称严格拒绝重复。 */
   @Test
   void rejectsDuplicateSkillIdentities() {
     AgentDefinitionConfigDTO duplicate = config();
-    duplicate.setSkills(
-        List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_A, "dev")));
+    duplicate.setSkills(List.of("dev", "dev"));
     assertThrows(IllegalArgumentException.class, () -> codec.encode(duplicate));
-
-    // 不同 sourceId 的同名在纯 Codec 层允许（Environment 唯一性由 referenceResolver 校验）
-    AgentDefinitionConfigDTO differentSources = config();
-    differentSources.setSkills(
-        List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "dev")));
-    AgentDefinitionConfigDTO decoded = codec.decode(codec.encode(differentSources));
-    assertEquals(2, decoded.getSkills().size());
   }
 
-  /** 测试意图：验证严格拒绝旧的字符串数组 skills 格式（无容错旧字符串解码）。 */
+  /** 测试意图：验证严格拒绝旧的结构化 Environment Skill 引用格式。 */
   @Test
-  void rejectsLegacyStringArraySkills() {
-    String legacy = "{\"tools\":[],\"skills\":[\"dev\"],\"subagents\":[]}";
+  void rejectsLegacyStructuredSkillReferences() {
+    String legacy =
+        "{\"tools\":[],\"skills\":[{\"sourceId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
+            + "\"name\":\"dev\"}],\"subagents\":[]}";
     assertThrows(IllegalStateException.class, () -> codec.decode(legacy));
   }
 

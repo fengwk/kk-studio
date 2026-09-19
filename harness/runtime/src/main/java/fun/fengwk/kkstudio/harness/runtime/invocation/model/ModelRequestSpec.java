@@ -79,7 +79,7 @@ public record ModelRequestSpec(
     requireUniqueToolBindings(toolBindings);
     requireUniqueSkillNames(skillBindings);
     requireUniqueSubagentNames(subagentBindings);
-    requireConsistentEnvironments(toolBindings, skillBindings);
+    requireConsistentEnvironments(toolBindings);
   }
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {
@@ -114,8 +114,7 @@ public record ModelRequestSpec(
     }
   }
 
-  private static void requireConsistentEnvironments(
-      List<ToolBinding> toolBindings, List<SkillBinding> skillBindings) {
+  private static void requireConsistentEnvironments(List<ToolBinding> toolBindings) {
     EnvironmentId environmentId = null;
     boolean environmentSeen = false;
     for (ToolBinding binding : toolBindings) {
@@ -127,18 +126,6 @@ public record ModelRequestSpec(
         environmentSeen = true;
       } else if (!Objects.equals(environmentId, binding.environmentId())) {
         throw new IllegalArgumentException("environment-bound tools must share one environment");
-      }
-    }
-    for (SkillBinding skill : skillBindings) {
-      if (skill.sourceEnvironmentId() == null) {
-        continue;
-      }
-      if (!environmentSeen) {
-        environmentId = skill.sourceEnvironmentId();
-        environmentSeen = true;
-      } else if (!Objects.equals(environmentId, skill.sourceEnvironmentId())) {
-        throw new IllegalArgumentException(
-            "skill source environment must match environment-bound tools");
       }
     }
   }
