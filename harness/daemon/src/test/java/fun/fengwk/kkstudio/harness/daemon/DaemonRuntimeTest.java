@@ -31,9 +31,6 @@ import fun.fengwk.kkstudio.harness.daemon.coding.TestCodingConfig;
 import fun.fengwk.kkstudio.harness.daemon.coding.WriteCapability;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillTestSupport;
-import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
@@ -45,9 +42,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResultCodes;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
@@ -58,7 +53,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -241,7 +235,10 @@ class DaemonRuntimeTest {
     DaemonEnvironmentInfo firstEnvironment =
         capabilitiesCodec.decode(handshake.get(1).payloadJson()).environment();
     assertEquals("Custom & stable environment.", firstEnvironment.note());
-    assertTrue(codec.readPayload(handshake.get(1)).path("skillSources").isArray());
+    JsonNode ready = codec.readPayload(handshake.get(1));
+    assertEquals(2, ready.size());
+    assertEquals(DaemonCapabilities.VERSION, ready.path("version").asInt());
+    assertEquals(ENVIRONMENT_ROOT.toString(), ready.path("environment").path("rootPath").asText());
 
     transport.disconnect();
     transport.awaitConnections(1);
@@ -273,7 +270,6 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
-                DaemonSkillTestSupport.open(dataDir()),
                 null,
                 (registry, executor, scheduler) -> registry.register(new TestCapability())));
   }
@@ -294,7 +290,7 @@ class DaemonRuntimeTest {
             dataDir());
     CodingToolsConfig toolsConfig = TestCodingConfig.withBridge(ENVIRONMENT_ROOT);
 
-    runtime = DaemonRuntime.create(config, toolsConfig, DaemonSkillTestSupport.open(dataDir()));
+    runtime = DaemonRuntime.create(config, toolsConfig);
 
     assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
     runtime.close();
@@ -323,7 +319,6 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
-                DaemonSkillTestSupport.open(dataDir()),
                 null,
                 (registry, executor, scheduler) -> {
                   executorRef.set(executor);
@@ -337,66 +332,40 @@ class DaemonRuntimeTest {
     assertTrue(schedulerRef.get().awaitTermination(1, TimeUnit.SECONDS));
   }
 
-  /**
-   * Daemon 发出的 READY payload 必须能被 Cloud 共享的 capabilities codec 解码回完整能力对象（skills），避免 Cloud/Daemon
-   * 协议漂移。
-   */
+  /** Daemon 发出的 READY payload 必须能被共享 capabilities codec 精确解码，避免 Cloud/Daemon 协议漂移。 */
   @Test
   void readyCapabilitiesPayloadIsFullyDecodableBySharedCodec() throws Exception {
-    Path skillRoot = Files.createTempDirectory("daemon-skills-codec");
-    Path skillDir = skillRoot.resolve("demo");
-    Files.createDirectories(skillDir);
-    Files.writeString(
-        skillDir.resolve("SKILL.md"), "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n");
-    try {
-      DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
-      FakeTransport transport = new FakeTransport();
-      DaemonSkillRegistry skillRegistry =
-          DaemonSkillTestSupport.publish(dataDir(), skillRoot, 1).registry();
-      runtime =
-          runtime(
-              transport,
-              new TestCapability(),
-              skillRegistry,
-              Duration.ofMinutes(1),
-              Duration.ofSeconds(10));
+    DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
 
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake();
-      List<DaemonEnvelope> handshake = transport.takeMessages(2);
-      assertMessageTypes(handshake, HELLO, READY);
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    List<DaemonEnvelope> handshake = transport.takeMessages(2);
+    assertMessageTypes(handshake, HELLO, READY);
 
-      DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
+    DaemonCapabilities capabilities = capabilitiesCodec.decode(handshake.get(1).payloadJson());
 
-      assertEquals(DaemonCapabilities.VERSION, capabilities.version());
-      // READY 必须携带已发布来源集合的生成版本，Platform 以它为该报告做持久围栏。
-      assertEquals(1L, capabilities.sourceSetVersion());
-      assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
-      assertEquals(
-          DaemonOperatingSystemDetector.detectCurrent(),
-          capabilities.environment().operatingSystem());
-      assertEquals(
-          new DaemonConfig(
-                  URI.create("ws://localhost/gateway"),
-                  registrationTokenFile(),
-                  Duration.ofMinutes(1),
-                  Duration.ZERO,
-                  Duration.ofSeconds(1),
-                  Duration.ofSeconds(10),
-                  null,
-                  ENVIRONMENT_ROOT,
-                  dataDir())
-              .effectiveNote(capabilities.environment().operatingSystem()),
-          capabilities.environment().note());
-      List<DaemonSkillDescriptor> flat = capabilities.flattenSkills();
-      assertEquals(1, flat.size());
-      assertEquals("demo", flat.get(0).name());
-      assertEquals("Demo skill", flat.get(0).description());
-      assertEquals(skillDir.toRealPath().toString(), flat.get(0).baseDirectory());
-    } finally {
-      deleteRecursively(skillRoot);
-    }
+    assertEquals(DaemonCapabilities.VERSION, capabilities.version());
+    assertEquals(ZoneId.systemDefault().getId(), capabilities.environment().timeZone());
+    assertEquals(
+        DaemonOperatingSystemDetector.detectCurrent(),
+        capabilities.environment().operatingSystem());
+    assertEquals(ENVIRONMENT_ROOT.toString(), capabilities.environment().rootPath());
+    assertEquals(
+        new DaemonConfig(
+                URI.create("ws://localhost/gateway"),
+                registrationTokenFile(),
+                Duration.ofMinutes(1),
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(10),
+                null,
+                ENVIRONMENT_ROOT,
+                dataDir())
+            .effectiveNote(capabilities.environment().operatingSystem()),
+        capabilities.environment().note());
   }
 
   /** READY 后必须在配置周期内发送 HEARTBEAT。 */
@@ -709,76 +678,6 @@ class DaemonRuntimeTest {
     assertEquals(1, tool.executions.get());
   }
 
-  /** skill.load 作为标准 capability 执行：按精确 (sourceId,name,revision) 返回正文与 baseDirectory。 */
-  @Test
-  void loadsSkillViaCapabilityInvocation() throws Exception {
-    Path skillRoot = Files.createTempDirectory("daemon-skill-root");
-    Path skillDir = skillRoot.resolve("my-skill");
-    Files.createDirectories(skillDir);
-    Files.writeString(
-        skillDir.resolve("SKILL.md"),
-        "---\nname: my-skill\ndescription: A test skill\n---\n# My Skill Body\nInstruction content.");
-    try {
-      DaemonSkillRegistry skillRegistry =
-          DaemonSkillTestSupport.publish(dataDir(), skillRoot, 1).registry();
-      DaemonSkillDescriptor descriptor = skillRegistry.descriptors().getFirst();
-      FakeTransport transport = new FakeTransport();
-      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-      registry.register(
-          new SkillLoadCapability(skillRegistry, Executors.newVirtualThreadPerTaskExecutor()));
-      runtime = runtime(transport, registry, skillRegistry);
-
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake();
-      transport.takeMessages(2);
-
-      transport.receive(
-          invoke(
-              "skill-1",
-              EnvironmentCapabilityIds.SKILL_LOAD,
-              EnvironmentCapabilityCatalog.VERSION,
-              "{\"sourceId\":\""
-                  + descriptor.sourceId()
-                  + "\",\"name\":\"my-skill\",\"revision\":\""
-                  + descriptor.contentRevision()
-                  + "\"}"));
-      List<DaemonEnvelope> messages = transport.takeMessages(2);
-      assertMessageTypes(messages, STARTED, COMPLETED);
-      JsonNode result = codec.readPayload(messages.get(1)).path("result");
-      assertFalse(result.path("error").asBoolean());
-      JsonNode payload = result.path("contents").get(0).path("json");
-      assertEquals("# My Skill Body\nInstruction content.", payload.path("body").asText());
-      assertEquals(skillDir.toRealPath().toString(), payload.path("baseDirectory").asText());
-
-      // 未知 revision 必须返回 RESOURCE_CHANGED，绝不回退到当前版本。
-      transport.receive(
-          invoke(
-              "skill-2",
-              EnvironmentCapabilityIds.SKILL_LOAD,
-              EnvironmentCapabilityCatalog.VERSION,
-              "{\"sourceId\":\""
-                  + descriptor.sourceId()
-                  + "\",\"name\":\"my-skill\",\"revision\":\""
-                  + "0".repeat(64)
-                  + "\"}"));
-      List<DaemonEnvelope> missing = transport.takeMessages(2);
-      assertMessageTypes(missing, STARTED, COMPLETED);
-      EnvironmentCapabilityResult missingResult =
-          resultCodec.decodeResult(missing.get(1).payloadJson());
-      assertTrue(missingResult.error());
-      // 稳定码走结构化 details，可读文本保持固定：调用方据码判定，不解析自由文本。
-      assertTrue(
-          missingResult.detailsJson().contains(EnvironmentCapabilityResultCodes.RESOURCE_CHANGED));
-      assertTrue(
-          ((TextResultContent) missingResult.contents().get(0))
-              .text()
-              .contains("no longer available"));
-    } finally {
-      deleteRecursively(skillRoot);
-    }
-  }
-
   /** Cloud 声明的 capability 版本必须匹配本地 descriptor，避免以错误参数契约启动 capability。 */
   @Test
   void rejectsMismatchedCapabilityVersion() throws InterruptedException {
@@ -921,7 +820,6 @@ class DaemonRuntimeTest {
                   dataDir()),
               transport,
               registry,
-              DaemonSkillTestSupport.open(dataDir()),
               new InMemoryDaemonInvocationJournal(),
               scheduler,
               taskExecutor);
@@ -1634,60 +1532,37 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
-  /** READY 能力对象只携带 environment 与按来源分组的 skill 摘要，且不含正文。 */
+  /** READY 能力对象只携带 version 与宿主 environment 元数据，绝不携带 Skill/MCP 目录。 */
   @Test
-  void announcesSkillsInCapabilities() throws Exception {
-    Path skillRoot = Files.createTempDirectory("daemon-skills");
-    Path skillDir = skillRoot.resolve("demo");
-    Files.createDirectories(skillDir);
-    String body = "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n";
-    Files.writeString(skillDir.resolve("SKILL.md"), body);
-    try {
-      FakeTransport transport = new FakeTransport();
-      DaemonSkillRegistry skills =
-          DaemonSkillTestSupport.publish(dataDir(), skillRoot, 1).registry();
-      runtime =
-          runtime(
-              transport,
-              new TestCapability(),
-              skills,
-              Duration.ofMinutes(1),
-              Duration.ofSeconds(10));
+  void announcesHostMetadataOnlyInCapabilities() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    runtime = runtime(transport, new TestCapability());
 
-      runtime.start();
-      transport.awaitConnections(1);
-      completeHandshake();
-      List<DaemonEnvelope> handshake = transport.takeMessages(2);
-      assertMessageTypes(handshake, HELLO, READY);
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    List<DaemonEnvelope> handshake = transport.takeMessages(2);
+    assertMessageTypes(handshake, HELLO, READY);
 
-      JsonNode payload = codec.readPayload(handshake.get(1));
-      assertFalse(payload.has("tools"));
-      assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
-      // 顶层集合版本必须出现在 environment 与 skillSources 之间，缺省的旧形状不允许。
-      assertEquals(1L, payload.path("sourceSetVersion").asLong());
-      assertTrue(payload.path("environment").path("workingDirectory").isMissingNode());
-      assertTrue(payload.path("environment").path("note").isTextual());
-      assertTrue(payload.path("environment").path("rootPath").isTextual());
-      assertEquals(1, payload.path("skillSources").size());
-      JsonNode source = payload.path("skillSources").get(0);
-      assertEquals(DaemonSkillTestSupport.SOURCE_ID.toString(), source.path("sourceId").asText());
-      assertEquals(1, source.path("sourceVersion").asLong());
-      assertFalse(source.path("sourceRevision").asText().isBlank());
-      assertEquals(1, source.path("skills").size());
-      JsonNode skill = source.path("skills").get(0);
-      assertEquals("demo", skill.path("name").asText());
-      assertEquals("Demo skill", skill.path("description").asText());
-      assertEquals(skillDir.toRealPath().toString(), skill.path("baseDirectory").asText());
-      assertEquals(64, skill.path("contentRevision").asText().length());
-      // READY 只上报身份与描述，正文与旧字段绝不出现。
-      assertTrue(skill.path("body").isMissingNode());
-      assertTrue(skill.path("path").isMissingNode());
-      assertTrue(skill.path("content").isMissingNode());
-      assertFalse(payload.has("skills"));
-      assertFalse(payload.has("mcpServers"));
-    } finally {
-      deleteRecursively(skillRoot);
-    }
+    JsonNode payload = codec.readPayload(handshake.get(1));
+    assertEquals(2, payload.size());
+    assertFalse(payload.has("tools"));
+    assertFalse(payload.has("skills"));
+    assertFalse(payload.has("skillSources"));
+    assertFalse(payload.has("sourceSetVersion"));
+    assertFalse(payload.has("mcpServers"));
+    assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
+    JsonNode environment = payload.path("environment");
+    assertEquals(4, environment.size());
+    assertTrue(environment.path("operatingSystem").isTextual());
+    assertTrue(environment.path("timeZone").isTextual());
+    assertTrue(environment.path("note").isTextual());
+    assertTrue(environment.path("rootPath").isTextual());
+    assertTrue(environment.path("workingDirectory").isMissingNode());
+    // 严格 wire 形状：必须能被共享 codec 往返解码。
+    assertEquals(
+        DaemonCapabilities.VERSION,
+        new DaemonCapabilitiesCodec().decode(handshake.get(1).payloadJson()).version());
   }
 
   /** transport 同步抛错和异步返回空连接都必须收敛为下一次重连。 */
@@ -1775,7 +1650,7 @@ class DaemonRuntimeTest {
   void doesNotRouteStaleInvokeOrMalformedInputResponsesToReplacementConnection()
       throws InterruptedException {
     FakeTransport transport = new FakeTransport();
-    runtime = runtime(transport, new TestCapability(), DaemonSkillTestSupport.open(dataDir()));
+    runtime = runtime(transport, new TestCapability());
 
     runtime.start();
     transport.awaitConnections(1);
@@ -1927,7 +1802,6 @@ class DaemonRuntimeTest {
                 dataDir()),
             transport,
             registry,
-            DaemonSkillTestSupport.open(dataDir()),
             new InMemoryDaemonInvocationJournal(),
             scheduler,
             taskExecutor);
@@ -1974,7 +1848,6 @@ class DaemonRuntimeTest {
                 dataDir()),
             transport,
             registry,
-            DaemonSkillTestSupport.open(dataDir()),
             new InMemoryDaemonInvocationJournal(),
             scheduler,
             taskExecutor);
@@ -1996,13 +1869,7 @@ class DaemonRuntimeTest {
   void shutdownConvergesWhenTransportCloseThrows() throws Exception {
     FakeTransport transport = new FakeTransport();
     transport.closeThrows.set(true);
-    runtime =
-        runtime(
-            transport,
-            new TestCapability(),
-            DaemonSkillTestSupport.open(dataDir()),
-            Duration.ofMinutes(1),
-            Duration.ofSeconds(10));
+    runtime = runtime(transport, new TestCapability(), Duration.ofMinutes(1));
 
     runtime.start();
     transport.awaitConnections(1);
@@ -2074,7 +1941,6 @@ class DaemonRuntimeTest {
             dataDir()),
         transport,
         registry,
-        DaemonSkillTestSupport.open(dataDir()),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor());
@@ -2098,7 +1964,6 @@ class DaemonRuntimeTest {
             dataDir()),
         transport,
         registry,
-        DaemonSkillTestSupport.open(dataDir()),
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor());
@@ -2120,31 +1985,6 @@ class DaemonRuntimeTest {
             dataDir()),
         transport,
         registry,
-        DaemonSkillTestSupport.open(dataDir()),
-        new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor(),
-        Executors.newVirtualThreadPerTaskExecutor());
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      DaemonCapabilityRegistry registry,
-      DaemonSkillRegistry skillRegistry) {
-    handshakeTransport = transport;
-    return new DaemonRuntime(
-        new DaemonConfig(
-            URI.create("ws://localhost/gateway"),
-            registrationTokenFile(),
-            Duration.ofMinutes(1),
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
-            null,
-            ENVIRONMENT_ROOT,
-            dataDir()),
-        transport,
-        registry,
-        skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor());
@@ -2170,7 +2010,6 @@ class DaemonRuntimeTest {
             dataDir()),
         transport,
         registry,
-        DaemonSkillTestSupport.open(dataDir()),
         journal,
         Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor());
@@ -2196,7 +2035,6 @@ class DaemonRuntimeTest {
             dataDir()),
         transport,
         registry,
-        DaemonSkillTestSupport.open(dataDir()),
         new InMemoryDaemonInvocationJournal(),
         scheduler,
         Executors.newVirtualThreadPerTaskExecutor());
@@ -2205,28 +2043,6 @@ class DaemonRuntimeTest {
   private DaemonRuntime runtime(
       FakeTransport transport,
       EnvironmentCapability capability,
-      Duration heartbeatInterval,
-      Duration defaultToolTimeout) {
-    return runtime(
-        transport,
-        capability,
-        DaemonSkillTestSupport.open(dataDir()),
-        heartbeatInterval,
-        defaultToolTimeout);
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      DaemonSkillRegistry skillRegistry) {
-    return runtime(
-        transport, capability, skillRegistry, Duration.ofMinutes(1), Duration.ofSeconds(10));
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      DaemonSkillRegistry skillRegistry,
       Duration heartbeatInterval,
       Duration defaultToolTimeout) {
     handshakeTransport = transport;
@@ -2245,7 +2061,6 @@ class DaemonRuntimeTest {
             dataDir()),
         transport,
         registry,
-        skillRegistry,
         new InMemoryDaemonInvocationJournal(),
         Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor());
@@ -2262,7 +2077,7 @@ class DaemonRuntimeTest {
                 try {
                   Files.deleteIfExists(path);
                 } catch (Exception ignored) {
-                  // 尽力清理 temp skill fixture
+                  // 尽力清理临时 fixture
                 }
               });
     }

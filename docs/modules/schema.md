@@ -23,9 +23,6 @@ erDiagram
     AGENT_PROVIDER ||--o{ AGENT_MODEL : hosts
     AGENT_MODEL ||--o{ AGENT_DEFINITION : binds
     ENVIRONMENT ||--o| ENVIRONMENT_CONNECTION : leases
-    ENVIRONMENT ||--o| ENVIRONMENT_INVENTORY : reports
-    ENVIRONMENT ||--o{ ENVIRONMENT_SKILL_SOURCE : configures
-    ENVIRONMENT_SKILL_SOURCE ||--o{ ENVIRONMENT_SKILL : discovers
     ENVIRONMENT ||--o{ ENVIRONMENT_OPERATION : executes
     ENVIRONMENT ||--o{ MCP_SERVER : hosts_local
     MCP_SERVER ||--o{ MCP_TOOL : exposes
@@ -61,9 +58,9 @@ erDiagram
 
 | 区域 | durable 事实 |
 | --- | --- |
-| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`comfyui_workflow_api` |
+| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package`、`skill`、`comfyui_workflow_api` |
 | MCP | `mcp_server`、`mcp_tool` |
-| Environment / Skill | `environment`、`environment_connection`、`environment_inventory`、`environment_skill_source`、`environment_skill`、`environment_operation` |
+| Environment | `environment`、`environment_connection`、`environment_operation` |
 | Chat / Canvas | `chat`、`canvas_document`、`canvas_group`、`canvas_node`、`canvas_link`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
 | Project / Issue | `project`、`issue`、`issue_dependency`、`issue_input`、`issue_run`、`issue_controller_work` |
 | Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
@@ -111,7 +108,7 @@ erDiagram
 | profile | 资源 | 内容 |
 | --- | --- | --- |
 | dev | [`R__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql) | 先删除再插入确定性 stub Provider/Model/Agent（`stub` provider、`acceptance-stub` model、`default-assistant` agent），离线开发可直接跑通对话 |
-| e2e | [`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) | 八家 Provider 与真实模型目录（含 pricing/abilities/variants）、四张 Environment Card 与 inventory/Skill 来源；同时把 `tool.permission` 覆盖为四个 base 分类各 `* -> ask` |
+| e2e | [`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) | 八家 Provider 与真实模型目录（含 pricing/abilities/variants）、四张 Environment Card 与 runtime 行；同时把 `tool.permission` 覆盖为四个 base 分类各 `* -> ask` |
 | canvas-test | [`R__canvas_test_seed.sql`](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) | 只覆盖 Docker Canvas test stack 需要缩短或启用的设置：上传有效期、OpenCLI Hub、GPT Image 2、Seedance |
 
 三份都是 `R__` repeatable migration，可重复执行：seed 拥有的行按定义同步（`on conflict ... do update` 或先删后插），用户可能改过的行用 `do nothing` 保护。e2e seed **不含**任何真实凭据，密钥在运行时由环境注入；Provider 只有一个 `'stub'` 之类完全公开的占位值。`V1__schema.sql` 自身插入一行安全的 `system_setting` 默认聚合（`tool.permission` 默认只对 `write`/`edit`/`bash` 要求审批，`read` 不受限），[`E2eToolPermissionProfileTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/E2eToolPermissionProfileTest.java) 断言源码内默认值与代码中的 `SystemSettings` 默认完全一致。
@@ -121,7 +118,7 @@ erDiagram
 `V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的两个 App 节点（Main 与 Dev）同时使用，所以这条路径有硬性安全要求：
 
 - 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。Dev 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 Main 集成。
-- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`environment_skill_source`、`environment_inventory`、`environment_skill`、`agent_provider`、`agent_model`、`agent_definition` 会回灌；`environment_connection` 是重连后重新生成的租约，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`skill`、`agent_definition` 会回灌；`environment_connection` 是重连后重新生成的租约，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
 - 备份 archive 含 Provider credential 与 Environment registration token，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储。
 
 就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 Main 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。

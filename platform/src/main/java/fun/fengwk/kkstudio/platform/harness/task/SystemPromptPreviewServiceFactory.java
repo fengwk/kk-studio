@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 
 import java.time.Clock;
 import java.util.Objects;
@@ -21,7 +20,6 @@ public final class SystemPromptPreviewServiceFactory {
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
-  private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final SkillCatalogQueryService skillCatalogQueryService;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
@@ -31,7 +29,6 @@ public final class SystemPromptPreviewServiceFactory {
       AgentDefinitionConfigCodec agentConfigCodec,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
-      EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       SkillCatalogQueryService skillCatalogQueryService,
       AgentPromptComposer promptComposer,
       Clock clock) {
@@ -41,8 +38,6 @@ public final class SystemPromptPreviewServiceFactory {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.skillInventoryQueryService =
-        Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.skillCatalogQueryService =
         Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
@@ -56,7 +51,6 @@ public final class SystemPromptPreviewServiceFactory {
         agentConfigCodec,
         environmentRegistry,
         environmentRepository,
-        skillInventoryQueryService,
         skillCatalogQueryService,
         promptComposer,
         clock);

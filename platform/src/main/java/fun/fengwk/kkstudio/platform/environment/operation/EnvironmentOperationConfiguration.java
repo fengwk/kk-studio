@@ -8,7 +8,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
-/** Environment Skill 来源管理操作执行所需的底层调度器与线程池装配。 */
+/** Environment 管理操作执行所需的底层调度器与线程池装配。 */
 @Configuration(proxyBeanMethods = false)
 public class EnvironmentOperationConfiguration {
 

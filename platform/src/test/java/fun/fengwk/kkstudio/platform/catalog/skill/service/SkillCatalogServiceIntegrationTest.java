@@ -12,7 +12,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillRevision;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -27,7 +26,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackageUpdateDTO;
 
 import java.util.List;
 
-/** Platform 全局 Skill package 生命周期、不可变 revision 与 Agent 引用保护集成测试。 */
+/** Platform 全局 Skill package 生命周期、历史内容精确读取与 Agent 引用保护集成测试。 */
 public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private SkillCatalogService service;
@@ -35,9 +34,9 @@ public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSuppor
   @Autowired private DatabaseSkillContentLoader contentLoader;
   @Autowired private JdbcTemplate jdbc;
 
-  /** 意图：完整替换只切换当前目录，旧 revision 始终可按冻结身份精确读取。 */
+  /** 意图：完整替换只切换活跃版本，旧版本内容始终可按三元组精确读取。 */
   @Test
-  public void preservesImmutableRevisionsAcrossUpdateAndDelete() {
+  public void preservesHistoricalContentAcrossUpdateAndDelete() {
     SkillPackageDetailDTO created =
         service.createPackage(
             create(
@@ -61,16 +60,10 @@ public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSuppor
         () ->
             service.createPackage(create("core", "other", null, skill("extra", "Extra", "body"))));
 
-    SkillRevision oldRevision = repository.getRevision("core", "1.0.0", "dev");
-    assertNotNull(oldRevision);
-    assertEquals(
-        "old body", contentLoader.load("core", "1.0.0", "dev", oldRevision.getContentRevision()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> contentLoader.load("core", "1.0.0", "dev", "0".repeat(64)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> contentLoader.load("core", "1.0.0", "missing", "0".repeat(64)));
+    // 历史版本正文按精确三元组读取；未知三元组必须失败而不是回退到活跃版本。
+    assertEquals("old body", contentLoader.load("core", "1.0.0", "dev"));
+    assertThrows(IllegalArgumentException.class, () -> contentLoader.load("core", "1.0.0", "ops"));
+    assertThrows(IllegalArgumentException.class, () -> contentLoader.load("core", "9.9.9", "dev"));
 
     SkillPackageDetailDTO updated =
         service.updatePackage(
@@ -86,8 +79,7 @@ public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSuppor
     assertEquals(List.of("dev", "ops"), skillNames(updated));
     assertFalse(repository.getPackage("core", "1.0.0").isActive());
     assertTrue(repository.getPackage("core", "2.0.0").isActive());
-    assertEquals(
-        "old body", contentLoader.load("core", "1.0.0", "dev", oldRevision.getContentRevision()));
+    assertEquals("old body", contentLoader.load("core", "1.0.0", "dev"));
     assertThrows(
         AiValidationException.class,
         () ->
@@ -108,12 +100,12 @@ public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSuppor
     assertTrue(service.listSkills().isEmpty());
     assertTrue(service.listPackages().isEmpty());
     assertFalse(repository.getPackage("core", "2.0.0").isActive());
-    assertEquals("old body", repository.getRevision("core", "1.0.0", "dev").getContent());
-    assertEquals("new body", repository.getRevision("core", "2.0.0", "dev").getContent());
+    assertEquals("old body", contentLoader.load("core", "1.0.0", "dev"));
+    assertEquals("new body", contentLoader.load("core", "2.0.0", "dev"));
     assertThrows(AiResourceNotFoundException.class, () -> service.deletePackage("core", "2.0.0"));
   }
 
-  /** 意图：移除仍被 Agent 引用的名称必须失败，而保留同名并更新内容不算移除。 */
+  /** 意图：停用仍被 Agent 引用的名称必须失败，而保留同名并更新内容不算移除。 */
   @Test
   public void protectsAgentReferencesBySkillName() {
     service.createPackage(
@@ -142,10 +134,10 @@ public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSuppor
                 skill("dev", "Development", "body v2"),
                 skill("ops", "Operations", "ops v2")));
     assertEquals("2", updated.getPackageVersion());
-    assertEquals("body v2", repository.getRevision("core", "2", "dev").getContent());
+    assertEquals("body v2", contentLoader.load("core", "2", "dev"));
   }
 
-  /** 意图：版本永不复用、Skill 名全局唯一，失败安装不得遗留 package 或目录行。 */
+  /** 意图：版本永不复用、Skill 名全局唯一，失败安装不得遗留 package 或内容行。 */
   @Test
   public void rejectsVersionReuseAndCrossPackageSkillConflictsAtomically() {
     service.createPackage(create("core", "1", null, skill("dev", "Development", "core body")));
@@ -177,6 +169,17 @@ public class SkillCatalogServiceIntegrationTest extends PostgresSpringTestSuppor
     SkillPackage oldPackage = repository.getPackage("core", "1");
     assertNotNull(oldPackage);
     assertFalse(oldPackage.isActive());
+  }
+
+  /** 意图：正文按提交的精确字节保存与读取，包含首尾空白与换行，绝不裁剪。 */
+  @Test
+  public void preservesExactContentWhitespace() {
+    String content = "  line one\n\tindented\n  trailing  \n";
+    service.createPackage(create("core", "1", null, skill("padded", "Padded", content)));
+
+    assertEquals(content, contentLoader.load("core", "1", "padded"));
+    assertEquals(content, service.getPackage("core").getSkills().getFirst().getContent());
+    assertEquals(content, repository.getSkill("core", "1", "padded").getContent());
   }
 
   private void insertAgentReferencing(String skillName) {

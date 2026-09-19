@@ -34,7 +34,7 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
 
   private final UUID envId = UUID.randomUUID();
   private final UUID opId = UUID.randomUUID();
-  private final UUID sourceId = UUID.randomUUID();
+  private final UUID resourceId = UUID.randomUUID();
   private final UUID nodeId = UUID.randomUUID();
   private final UUID leaseToken = UUID.randomUUID();
 
@@ -48,9 +48,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     return new CreatePendingOperationCommand(
         opId,
         envId,
-        EnvironmentOperationResourceType.SKILL_SOURCE,
-        sourceId,
-        EnvironmentOperationType.SKILL_REFRESH,
+        EnvironmentOperationResourceType.MCP_SERVER,
+        resourceId,
+        EnvironmentOperationType.MCP_SERVER_DISCOVER,
         0L,
         "{\"path\":\"/opt\"}",
         "{\"type\":\"PATH\"}",
@@ -61,9 +61,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
     return new CreatePendingOperationWithTimeoutCommand(
         opId,
         envId,
-        EnvironmentOperationResourceType.SKILL_SOURCE,
-        sourceId,
-        EnvironmentOperationType.SKILL_REFRESH,
+        EnvironmentOperationResourceType.MCP_SERVER,
+        resourceId,
+        EnvironmentOperationType.MCP_SERVER_DISCOVER,
         0L,
         "{\"path\":\"/opt\"}",
         "{\"type\":\"PATH\"}",
@@ -77,27 +77,10 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         new CreatePendingOperationCommand(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            -1L,
-            "{}",
-            "{}",
-            Instant.now().plusSeconds(60));
-    assertThrows(AiValidationException.class, () -> repository.createPending(cmd));
-  }
-
-  /** 测试意图：验证创建挂起操作命令中 resourceType 与 type.resourceType() 不匹配时拒绝并抛出 AiValidationException。 */
-  @Test
-  void validateCommand_resourceTypeMismatch_throwsAiValidationException() {
-    CreatePendingOperationCommand cmd =
-        new CreatePendingOperationCommand(
-            opId,
-            envId,
             EnvironmentOperationResourceType.MCP_SERVER,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
-            0L,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            -1L,
             "{}",
             "{}",
             Instant.now().plusSeconds(60));
@@ -114,9 +97,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
             new CreatePendingOperationCommand(
                 opId,
                 envId,
-                EnvironmentOperationResourceType.SKILL_SOURCE,
-                sourceId,
-                EnvironmentOperationType.SKILL_REFRESH,
+                EnvironmentOperationResourceType.MCP_SERVER,
+                resourceId,
+                EnvironmentOperationType.MCP_SERVER_DISCOVER,
                 0L,
                 null,
                 "{}",
@@ -127,9 +110,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         new CreatePendingOperationCommand(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             0L,
             "   ",
             "{}",
@@ -141,9 +124,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         new CreatePendingOperationCommand(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             0L,
             "not-a-json",
             "{}",
@@ -169,9 +152,9 @@ class PostgresqlEnvironmentOperationRepositoryValidationTest {
         new CreatePendingOperationWithTimeoutCommand(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             -1L,
             "{}",
             "{}",

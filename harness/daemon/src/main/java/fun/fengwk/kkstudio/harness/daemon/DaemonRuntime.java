@@ -16,9 +16,6 @@ import fun.fengwk.kkstudio.harness.daemon.mcp.DaemonLocalMcpManager;
 import fun.fengwk.kkstudio.harness.daemon.mcp.DaemonLocalMcpParser;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpLocalCallCapability;
 import fun.fengwk.kkstudio.harness.daemon.mcp.McpLocalDiscoverCapability;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillSourceCapability;
-import fun.fengwk.kkstudio.harness.daemon.skill.SkillLoadCapability;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
@@ -95,7 +92,6 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private final DaemonTransport transport;
   private final DaemonCapabilityRegistry capabilityRegistry;
-  private final DaemonSkillRegistry skillRegistry;
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
@@ -134,57 +130,39 @@ public final class DaemonRuntime implements AutoCloseable {
    * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由 runtime
    * 独占生命周期；任一步构造失败都会释放 transport 和已创建的执行资源。
    */
-  public static DaemonRuntime create(
-      DaemonConfig config, CodingToolsConfig toolsConfig, DaemonSkillRegistry skillRegistry) {
+  public static DaemonRuntime create(DaemonConfig config, CodingToolsConfig toolsConfig) {
     Objects.requireNonNull(toolsConfig, "toolsConfig");
     DaemonLocalMcpManager mcpManager = new DaemonLocalMcpManager();
     // WELCOME 之前无法知道本 Daemon 绑定的 Environment；本地 MCP 能力通过该引用在运行期读取绑定值，并在可用时严格匹配。
     AtomicReference<EnvironmentId> boundEnvironmentId = new AtomicReference<>();
     return create(
         config,
-        skillRegistry,
         mcpManager,
         boundEnvironmentId,
         (registry, executor, scheduler) -> {
           DaemonLocalMcpParser mcpParser =
               new DaemonLocalMcpParser(System::getenv, boundId(boundEnvironmentId));
           CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler);
-          registry.register(new SkillLoadCapability(skillRegistry, executor));
           registry.register(new McpLocalCallCapability(mcpManager, mcpParser, executor));
-          registry.register(
-              new DaemonSkillSourceCapability(
-                  DaemonSkillSourceCapability.Operation.REFRESH, skillRegistry, executor));
-          registry.register(
-              new DaemonSkillSourceCapability(
-                  DaemonSkillSourceCapability.Operation.INSTALL, skillRegistry, executor));
-          registry.register(
-              new DaemonSkillSourceCapability(
-                  DaemonSkillSourceCapability.Operation.UPDATE, skillRegistry, executor));
           registry.register(new McpLocalDiscoverCapability(mcpManager, mcpParser, executor));
         });
   }
 
+  static DaemonRuntime create(DaemonConfig config, CapabilityRegistrar registrar) {
+    return create(config, null, new AtomicReference<>(), registrar);
+  }
+
   static DaemonRuntime create(
-      DaemonConfig config, DaemonSkillRegistry skillRegistry, CapabilityRegistrar registrar) {
-    return create(config, skillRegistry, null, registrar);
+      DaemonConfig config, DaemonLocalMcpManager mcpManager, CapabilityRegistrar registrar) {
+    return create(config, mcpManager, new AtomicReference<>(), registrar);
   }
 
   static DaemonRuntime create(
       DaemonConfig config,
-      DaemonSkillRegistry skillRegistry,
-      DaemonLocalMcpManager mcpManager,
-      CapabilityRegistrar registrar) {
-    return create(config, skillRegistry, mcpManager, new AtomicReference<>(), registrar);
-  }
-
-  static DaemonRuntime create(
-      DaemonConfig config,
-      DaemonSkillRegistry skillRegistry,
       DaemonLocalMcpManager mcpManager,
       AtomicReference<EnvironmentId> boundEnvironmentId,
       CapabilityRegistrar registrar) {
     Objects.requireNonNull(config, "config");
-    Objects.requireNonNull(skillRegistry, "skillRegistry");
     Objects.requireNonNull(registrar, "registrar");
     ScheduledThreadPoolExecutor scheduler = newScheduler();
     ExecutorService taskExecutor = null;
@@ -200,7 +178,6 @@ public final class DaemonRuntime implements AutoCloseable {
               config,
               transport,
               capabilityRegistry,
-              skillRegistry,
               new InMemoryDaemonInvocationJournal(),
               scheduler,
               taskExecutor,
@@ -228,28 +205,17 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonConfig config,
       DaemonTransport transport,
       DaemonCapabilityRegistry capabilityRegistry,
-      DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor) {
     this(
-        config,
-        transport,
-        capabilityRegistry,
-        skillRegistry,
-        journal,
-        scheduler,
-        taskExecutor,
-        null,
-        null,
-        false);
+        config, transport, capabilityRegistry, journal, scheduler, taskExecutor, null, null, false);
   }
 
   DaemonRuntime(
       DaemonConfig config,
       DaemonTransport transport,
       DaemonCapabilityRegistry capabilityRegistry,
-      DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
@@ -258,7 +224,6 @@ public final class DaemonRuntime implements AutoCloseable {
         config,
         transport,
         capabilityRegistry,
-        skillRegistry,
         journal,
         scheduler,
         taskExecutor,
@@ -271,7 +236,6 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonConfig config,
       DaemonTransport transport,
       DaemonCapabilityRegistry capabilityRegistry,
-      DaemonSkillRegistry skillRegistry,
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
@@ -283,7 +247,6 @@ public final class DaemonRuntime implements AutoCloseable {
         boundEnvironmentId == null ? new AtomicReference<>() : boundEnvironmentId;
     this.transport = Objects.requireNonNull(transport, "transport");
     this.capabilityRegistry = Objects.requireNonNull(capabilityRegistry, "capabilityRegistry");
-    this.skillRegistry = Objects.requireNonNull(skillRegistry, "skillRegistry");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
@@ -514,13 +477,8 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private boolean sendReady(ActiveConnection connection) {
-    DaemonSkillRegistry.PublishedInventory inventory = skillRegistry.inventory();
     DaemonCapabilities capabilities =
-        new DaemonCapabilities(
-            DaemonCapabilities.VERSION,
-            environmentInfo,
-            inventory.sourceSetVersion(),
-            inventory.snapshots());
+        new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo);
     return sendOn(
         connection, DaemonMessageType.READY, null, capabilitiesCodec.encode(capabilities));
   }

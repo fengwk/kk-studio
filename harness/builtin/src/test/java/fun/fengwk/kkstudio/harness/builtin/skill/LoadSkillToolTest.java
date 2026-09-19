@@ -33,14 +33,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 覆盖平台 Skill 解析、冻结版本加载与失败语义。 */
+/** 覆盖平台 Skill 解析、冻结身份加载与失败语义。 */
 class LoadSkillToolTest {
 
-  private static final String REVISION =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
   private static SelectedSkill selectedSkill() {
-    return new SelectedSkill("dev", "developer-tools", "1.0.0", REVISION, "Developer rules");
+    return new SelectedSkill("dev", "developer-tools", "1.0.0", "Developer rules");
   }
 
   /** 工具无需 Environment，且仅声明一个必填名称参数。 */
@@ -49,7 +46,7 @@ class LoadSkillToolTest {
     LoadSkillTool tool =
         new LoadSkillTool(
             (invocationId, threadId, skillName) -> Optional.empty(),
-            (packageName, packageVersion, name, contentRevision) -> {
+            (packageName, packageVersion, name) -> {
               throw new AssertionError("unexpected load");
             });
 
@@ -69,16 +66,14 @@ class LoadSkillToolTest {
 
   /** 加载器接收冻结的包版本身份并原样返回正文。 */
   @Test
-  void loadsSelectedFrozenRevisionWithoutEnvironment() throws Exception {
+  void loadsSelectedFrozenIdentityWithoutEnvironment() throws Exception {
     AtomicReference<SelectedSkill> loaded = new AtomicReference<>();
     LoadSkillTool tool =
         new LoadSkillTool(
             (invocationId, threadId, skillName) ->
                 "dev".equals(skillName) ? Optional.of(selectedSkill()) : Optional.empty(),
-            (packageName, packageVersion, name, contentRevision) -> {
-              loaded.set(
-                  new SelectedSkill(
-                      name, packageName, packageVersion, contentRevision, "Developer rules"));
+            (packageName, packageVersion, name) -> {
+              loaded.set(new SelectedSkill(name, packageName, packageVersion, "Developer rules"));
               return "# Skill\n\nDo the thing.\n";
             });
 
@@ -96,7 +91,7 @@ class LoadSkillToolTest {
     LoadSkillTool missing =
         new LoadSkillTool(
             (invocationId, threadId, skillName) -> Optional.empty(),
-            (packageName, packageVersion, name, contentRevision) -> "unused");
+            (packageName, packageVersion, name) -> "unused");
     ToolResult missingResult = execute(missing, "{\"name\":\"missing\"}");
     assertTrue(missingResult.error());
     assertTrue(text(missingResult).contains("unknown or unselected skill"));
@@ -104,12 +99,12 @@ class LoadSkillToolTest {
     LoadSkillTool failed =
         new LoadSkillTool(
             (invocationId, threadId, skillName) -> Optional.of(selectedSkill()),
-            (packageName, packageVersion, name, contentRevision) -> {
-              throw new IllegalStateException("revision missing");
+            (packageName, packageVersion, name) -> {
+              throw new IllegalStateException("content missing");
             });
     ToolResult failedResult = execute(failed, "{\"name\":\"dev\"}");
     assertTrue(failedResult.error());
-    assertTrue(text(failedResult).contains("revision missing"));
+    assertTrue(text(failedResult).contains("content missing"));
 
     ToolResult blankResult = execute(missing, "{\"name\":\"  \"}");
     assertTrue(blankResult.error());
@@ -122,7 +117,7 @@ class LoadSkillToolTest {
     LoadSkillTool tool =
         new LoadSkillTool(
             (invocationId, threadId, skillName) -> Optional.empty(),
-            (packageName, packageVersion, name, contentRevision) -> "unused");
+            (packageName, packageVersion, name) -> "unused");
     AtomicReference<ToolResult> result = new AtomicReference<>();
     CountDownLatch latch = new CountDownLatch(1);
 
@@ -139,24 +134,18 @@ class LoadSkillToolTest {
     assertTrue(text(result.get()).contains("durable execution context"));
   }
 
-  /** SelectedSkill 必须完整冻结包身份、revision 和展示描述。 */
+  /** SelectedSkill 必须完整冻结包身份和展示描述。 */
   @Test
   void selectedSkillRequiresCompleteFrozenIdentity() {
     assertThrows(
         NullPointerException.class,
-        () -> new SelectedSkill(null, "package", "1.0.0", REVISION, "description"));
+        () -> new SelectedSkill(null, "package", "1.0.0", "description"));
     assertThrows(
-        NullPointerException.class,
-        () -> new SelectedSkill("dev", null, "1.0.0", REVISION, "description"));
+        NullPointerException.class, () -> new SelectedSkill("dev", null, "1.0.0", "description"));
     assertThrows(
-        NullPointerException.class,
-        () -> new SelectedSkill("dev", "package", null, REVISION, "description"));
+        NullPointerException.class, () -> new SelectedSkill("dev", "package", null, "description"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new SelectedSkill("dev", "package", "1.0.0", null, "description"));
-    assertThrows(
-        NullPointerException.class,
-        () -> new SelectedSkill("dev", "package", "1.0.0", REVISION, null));
+        NullPointerException.class, () -> new SelectedSkill("dev", "package", "1.0.0", null));
   }
 
   private static ToolResult execute(LoadSkillTool tool, String argumentsJson) throws Exception {

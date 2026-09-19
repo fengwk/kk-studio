@@ -35,8 +35,6 @@ class DatabaseThreadSelectedSkillLookupTest {
 
   private static final UUID INVOCATION_ID = new UUID(0L, 42L);
   private static final UUID THREAD_ID = new UUID(0L, 7L);
-  private static final String CONTENT_REVISION =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   @Test
   void resolvesFrozenSkillBindingsThroughTheCodec() {
@@ -48,12 +46,11 @@ class DatabaseThreadSelectedSkillLookupTest {
 
     assertTrue(result.isPresent());
     SelectedSkill skill = result.get();
-    // 包身份与 revision 都必须来自持久请求，load_skill 才能按精确版本取回正文。
+    // 包身份必须来自持久请求，load_skill 才能按精确的三元组取回正文。
     assertEquals("review", skill.name());
     assertEquals("review-package", skill.packageName());
     assertEquals("1.0.0", skill.packageVersion());
     assertEquals("Review code", skill.description());
-    assertEquals(CONTENT_REVISION, skill.contentRevision());
 
     assertTrue(lookup.findSelected(INVOCATION_ID, THREAD_ID, "unknown").isEmpty());
   }
@@ -78,7 +75,6 @@ class DatabaseThreadSelectedSkillLookupTest {
 
     assertEquals("review-package", skill.packageName());
     assertEquals("1.0.0", skill.packageVersion());
-    assertEquals(CONTENT_REVISION, skill.contentRevision());
   }
 
   private static String encodedRequest() {
@@ -91,9 +87,7 @@ class DatabaseThreadSelectedSkillLookupTest {
             1024,
             List.of(),
             List.of(),
-            List.of(
-                new SkillBinding(
-                    "review", "review-package", "1.0.0", CONTENT_REVISION, "Review code")),
+            List.of(new SkillBinding("review", "review-package", "1.0.0", "Review code")),
             List.of(),
             ProviderCacheControl.none());
     return REQUEST_CODEC.encode(requestSpec);

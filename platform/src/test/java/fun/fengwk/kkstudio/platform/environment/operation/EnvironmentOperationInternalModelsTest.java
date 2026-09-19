@@ -39,9 +39,9 @@ class EnvironmentOperationInternalModelsTest {
         new EnvironmentOperation(
             opId,
             UUID.randomUUID(),
-            EnvironmentOperationResourceType.SKILL_SOURCE,
+            EnvironmentOperationResourceType.MCP_SERVER,
             UUID.randomUUID(),
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             EnvironmentOperationStatus.RUNNING,
             1L,
             "{}",
@@ -67,7 +67,7 @@ class EnvironmentOperationInternalModelsTest {
   void claimedOperationDoesNotLeakSecretsInToString() {
     UUID opId = UUID.randomUUID();
     UUID envId = UUID.randomUUID();
-    UUID sourceId = UUID.randomUUID();
+    UUID resourceId = UUID.randomUUID();
     UUID ownerNodeId = UUID.randomUUID();
     UUID leaseToken = UUID.randomUUID();
     String secretArgs = "{\"token\":\"super_secret_token_123\"}";
@@ -76,13 +76,13 @@ class EnvironmentOperationInternalModelsTest {
         new EnvironmentOperation(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             EnvironmentOperationStatus.RUNNING,
             1L,
             secretArgs,
-            "{\"sourceType\":\"git\"}",
+            "{\"type\":\"mcp\"}",
             Instant.now().plusSeconds(60),
             ownerNodeId,
             leaseToken,
@@ -107,19 +107,19 @@ class EnvironmentOperationInternalModelsTest {
   void createPendingOperationWithTimeoutCommandDoesNotLeakArgumentsInToString() {
     UUID opId = UUID.randomUUID();
     UUID envId = UUID.randomUUID();
-    UUID sourceId = UUID.randomUUID();
+    UUID resourceId = UUID.randomUUID();
     String secretArgs = "{\"gitPassword\":\"my_password_xyz\"}";
 
     CreatePendingOperationWithTimeoutCommand cmd =
         new CreatePendingOperationWithTimeoutCommand(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             1L,
             secretArgs,
-            "{\"type\":\"git\"}",
+            "{\"type\":\"mcp\"}",
             30000L);
 
     String str = cmd.toString();
@@ -157,7 +157,7 @@ class EnvironmentOperationInternalModelsTest {
   void environmentOperationDoesNotLeakSecretsInToStringAndJson() throws Exception {
     UUID opId = UUID.randomUUID();
     UUID envId = UUID.randomUUID();
-    UUID sourceId = UUID.randomUUID();
+    UUID resourceId = UUID.randomUUID();
     UUID ownerNodeId = UUID.randomUUID();
     UUID leaseToken = UUID.randomUUID();
     String secretArgs = "{\"privateKey\":\"super_secret_ssh_key\"}";
@@ -166,13 +166,13 @@ class EnvironmentOperationInternalModelsTest {
         new EnvironmentOperation(
             opId,
             envId,
-            EnvironmentOperationResourceType.SKILL_SOURCE,
-            sourceId,
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationResourceType.MCP_SERVER,
+            resourceId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             EnvironmentOperationStatus.RUNNING,
             1L,
             secretArgs,
-            "{\"type\":\"git\"}",
+            "{\"type\":\"mcp\"}",
             Instant.now().plusSeconds(60),
             ownerNodeId,
             leaseToken,
@@ -212,9 +212,9 @@ class EnvironmentOperationInternalModelsTest {
         new SafeEnvironmentOperation(
             UUID.randomUUID(),
             UUID.randomUUID(),
-            EnvironmentOperationResourceType.SKILL_SOURCE,
+            EnvironmentOperationResourceType.MCP_SERVER,
             UUID.randomUUID(),
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             EnvironmentOperationStatus.RUNNING,
             1L,
             "{}",
@@ -232,9 +232,9 @@ class EnvironmentOperationInternalModelsTest {
         new SafeEnvironmentOperation(
             UUID.randomUUID(),
             UUID.randomUUID(),
-            EnvironmentOperationResourceType.SKILL_SOURCE,
+            EnvironmentOperationResourceType.MCP_SERVER,
             UUID.randomUUID(),
-            EnvironmentOperationType.SKILL_REFRESH,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
             EnvironmentOperationStatus.SUCCEEDED,
             1L,
             "{}",

@@ -5,20 +5,19 @@
  * EnvironmentId}（Environment 的唯一路由 UUID）。
  *
  * <p>当前 {@code READY} payload 由 {@link
- * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的能力对象： {@code
- * {"version":1,"environment":{"operatingSystem","timeZone","note","rootPath"},"sourceSetVersion":0,
- * "skillSources":[{"sourceId","sourceVersion","sourceRevision","skills":[{"sourceId","sourceVersion",
- * "name","description","baseDirectory","contentRevision"}],"diagnostics":[{location,message}]}]}}。
+ * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的宿主 metadata
+ * 对象： {@code {"version":1,"environment":{"operatingSystem","timeZone","note","rootPath"}}}。它是 READY
+ * 的唯一 wire 形状：Daemon 不再上报任何目录或 Skill 事实。
  *
  * <p>Capability INVOKE payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec} 编解码，字段固定为 {@code
  * capabilityId}、{@code capabilityVersion}、{@code arguments} 和 {@code timeoutMillis}；Environment
  * Daemon 使用 {@link fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol#VERSION}。 {@code
- * skill.source.refresh/install/update} 只复用该 INVOKE/CANCEL/结果通道，不成为模型 Tool。
+ * mcp.local.discover} 只复用该 INVOKE/CANCEL/结果通道，不成为模型 Tool。
  *
  * <p>result payload（{@code PROGRESS} / {@code COMPLETED}）由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec} 编解码，通过通用 {@code
- * INVOKE} 模型承载所有能力（包括 Skill）。resource 内容不在 wire 上传输：Daemon 终态编码前把字节经 {@link
+ * INVOKE} 模型承载所有能力。resource 内容不在 wire 上传输：Daemon 终态编码前把字节经 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader} 直传全局对象存储，wire 只承载 {@code
  * uploadId} 与权威元数据，控制面由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec} 的 {@code

@@ -5,12 +5,10 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.mapper.SkillCatalogMapper;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.model.CurrentSkillDO;
+import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.model.SkillDO;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.model.SkillPackageDO;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.model.SkillRevisionDO;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillRevision;
 
 import java.util.Collection;
 import java.util.List;
@@ -23,30 +21,33 @@ public class PostgresqlSkillCatalogRepository implements SkillCatalogRepository 
   private final SkillCatalogMapper skillCatalogMapper;
 
   @Override
-  public List<CurrentSkill> listCurrentSkills() {
-    return skillCatalogMapper.listCurrentSkills().stream().map(this::toCurrentSkill).toList();
+  public List<Skill> listActiveSkills() {
+    return skillCatalogMapper.listActiveSkills().stream().map(this::toSkill).toList();
   }
 
   @Override
-  public List<CurrentSkill> listCurrentSkillsByPackage(String packageName, String packageVersion) {
-    return skillCatalogMapper.listCurrentSkillsByPackage(packageName, packageVersion).stream()
-        .map(this::toCurrentSkill)
+  public List<Skill> listActiveSkillsByPackage(String packageName, String packageVersion) {
+    return skillCatalogMapper.listActiveSkillsByPackage(packageName, packageVersion).stream()
+        .map(this::toSkill)
         .toList();
   }
 
   @Override
-  public CurrentSkill getCurrentSkill(String name) {
-    return toCurrentSkill(skillCatalogMapper.getCurrentSkill(name));
+  public Skill getActiveSkill(String name) {
+    return toSkill(skillCatalogMapper.getActiveSkill(name));
   }
 
   @Override
-  public List<CurrentSkill> lockCurrentSkillsByNames(Collection<String> names) {
+  public Skill getSkill(String packageName, String packageVersion, String name) {
+    return toSkill(skillCatalogMapper.getSkill(packageName, packageVersion, name));
+  }
+
+  @Override
+  public List<Skill> lockActiveSkillsByNames(Collection<String> names) {
     if (names.isEmpty()) {
       return List.of();
     }
-    return skillCatalogMapper.lockCurrentSkillsByNames(names).stream()
-        .map(this::toCurrentSkill)
-        .toList();
+    return skillCatalogMapper.lockActiveSkillsByNames(names).stream().map(this::toSkill).toList();
   }
 
   @Override
@@ -75,26 +76,14 @@ public class PostgresqlSkillCatalogRepository implements SkillCatalogRepository 
   }
 
   @Override
-  public SkillRevision getRevision(String packageName, String packageVersion, String name) {
-    return toRevision(skillCatalogMapper.getRevision(packageName, packageVersion, name));
-  }
-
-  @Override
-  public List<SkillRevision> listRevisions(String packageName, String packageVersion) {
-    return skillCatalogMapper.listRevisions(packageName, packageVersion).stream()
-        .map(this::toRevision)
-        .toList();
-  }
-
-  @Override
   public boolean insertPackage(SkillPackage skillPackage) {
     return skillCatalogMapper.insertPackage(toPackageDO(skillPackage)) == 1;
   }
 
   @Override
-  public void insertRevisions(List<SkillRevision> revisions) {
-    if (!revisions.isEmpty()) {
-      skillCatalogMapper.insertRevisions(revisions.stream().map(this::toRevisionDO).toList());
+  public void insertSkills(List<Skill> skills) {
+    if (!skills.isEmpty()) {
+      skillCatalogMapper.insertSkills(skills.stream().map(this::toSkillDO).toList());
     }
   }
 
@@ -104,15 +93,8 @@ public class PostgresqlSkillCatalogRepository implements SkillCatalogRepository 
   }
 
   @Override
-  public void deleteCurrentSkillsByPackage(String packageName) {
-    skillCatalogMapper.deleteCurrentSkillsByPackage(packageName);
-  }
-
-  @Override
-  public void insertCurrentSkills(List<CurrentSkill> skills) {
-    if (!skills.isEmpty()) {
-      skillCatalogMapper.insertCurrentSkills(skills.stream().map(this::toCurrentSkillDO).toList());
-    }
+  public void setSkillsActiveByPackage(String packageName, String packageVersion, boolean active) {
+    skillCatalogMapper.setSkillsActiveByPackage(packageName, packageVersion, active);
   }
 
   private SkillPackage toPackage(SkillPackageDO row) {
@@ -123,7 +105,6 @@ public class PostgresqlSkillCatalogRepository implements SkillCatalogRepository 
     target.setPackageName(row.getPackageName());
     target.setPackageVersion(row.getPackageVersion());
     target.setDescription(row.getDescription());
-    target.setPackageRevision(row.getPackageRevision());
     target.setActive(Boolean.TRUE.equals(row.getActive()));
     target.setCreateTime(row.getCreateTime());
     return target;
@@ -134,59 +115,33 @@ public class PostgresqlSkillCatalogRepository implements SkillCatalogRepository 
     target.setPackageName(model.getPackageName());
     target.setPackageVersion(model.getPackageVersion());
     target.setDescription(model.getDescription());
-    target.setPackageRevision(model.getPackageRevision());
     target.setActive(model.isActive());
     return target;
   }
 
-  private SkillRevision toRevision(SkillRevisionDO row) {
+  private Skill toSkill(SkillDO row) {
     if (row == null) {
       return null;
     }
-    SkillRevision target = new SkillRevision();
+    Skill target = new Skill();
     target.setPackageName(row.getPackageName());
     target.setPackageVersion(row.getPackageVersion());
     target.setName(row.getName());
     target.setDescription(row.getDescription());
     target.setContent(row.getContent());
-    target.setContentRevision(row.getContentRevision());
+    target.setActive(Boolean.TRUE.equals(row.getActive()));
     target.setCreateTime(row.getCreateTime());
     return target;
   }
 
-  private SkillRevisionDO toRevisionDO(SkillRevision model) {
-    SkillRevisionDO target = new SkillRevisionDO();
+  private SkillDO toSkillDO(Skill model) {
+    SkillDO target = new SkillDO();
     target.setPackageName(model.getPackageName());
     target.setPackageVersion(model.getPackageVersion());
     target.setName(model.getName());
     target.setDescription(model.getDescription());
     target.setContent(model.getContent());
-    target.setContentRevision(model.getContentRevision());
-    return target;
-  }
-
-  private CurrentSkill toCurrentSkill(CurrentSkillDO row) {
-    if (row == null) {
-      return null;
-    }
-    CurrentSkill target = new CurrentSkill();
-    target.setName(row.getName());
-    target.setPackageName(row.getPackageName());
-    target.setPackageVersion(row.getPackageVersion());
-    target.setDescription(row.getDescription());
-    target.setContentRevision(row.getContentRevision());
-    target.setContent(row.getContent());
-    return target;
-  }
-
-  private CurrentSkillDO toCurrentSkillDO(CurrentSkill model) {
-    CurrentSkillDO target = new CurrentSkillDO();
-    target.setName(model.getName());
-    target.setPackageName(model.getPackageName());
-    target.setPackageVersion(model.getPackageVersion());
-    target.setDescription(model.getDescription());
-    target.setContentRevision(model.getContentRevision());
-    target.setContent(model.getContent());
+    target.setActive(model.isActive());
     return target;
   }
 }

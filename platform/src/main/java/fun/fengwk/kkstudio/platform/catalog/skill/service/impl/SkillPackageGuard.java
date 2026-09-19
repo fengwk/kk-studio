@@ -32,18 +32,18 @@ final class SkillPackageGuard {
   }
 
   /**
-   * 按 {@code name} 升序 {@code FOR UPDATE} 锁定给定名称的当前 Skill 行。
+   * 按 {@code name} 升序 {@code FOR UPDATE} 锁定给定名称的活跃 Skill 行。
    *
-   * <p>与 Agent 创建/更新的选择校验共用同一把行锁顺序，因此“校验引用”与“移除 Skill”严格串行，不存在并发悬空引用。
+   * <p>与 Agent 创建/更新的选择校验共用同一把行锁顺序，因此“校验引用”与“停用 Skill”严格串行，不存在并发悬空引用。
    */
-  void lockCurrentSkills(Collection<String> names) {
-    skillCatalogRepository.lockCurrentSkillsByNames(names);
+  void lockActiveSkills(Collection<String> names) {
+    skillCatalogRepository.lockActiveSkillsByNames(names);
   }
 
   /**
-   * 拒绝移除仍被任何 Agent 引用的 Skill。
+   * 拒绝停用仍被任何 Agent 引用的 Skill。
    *
-   * <p>只有从当前目录真正消失的名称才算移除；保留同名 Skill（内容可变更）不构成移除。
+   * <p>只有从活跃目录真正消失的名称才算移除；保留同名 Skill（内容可变更）不构成移除。
    */
   void ensureRemovable(Collection<String> removedNames) {
     List<String> referenced =

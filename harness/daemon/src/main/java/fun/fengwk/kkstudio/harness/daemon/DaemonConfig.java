@@ -21,12 +21,11 @@ import java.util.Objects;
  * 只保存路径，因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。已删除的 {@code
  * --registration-token} 作为未知参数 fail closed，不提供兼容回退。
  *
- * <p>{@code --data-dir} 承载受管 Git checkout、不可变 skill 正文与 manifest、本地大文本输出与 daemon 进程锁； 省略时为 {@link
- * #defaultDataDir()}。二进制结果不落本地 Resource 仓库，而是由 Daemon 直传对象存储。Daemon 不配置也不持有 Environment UUID，连接建立后由
- * Gateway 在 WELCOME 消息中下发。environment root 默认启动用户 canonical HOME，只是宿主展示元数据，不构成任何工具的默认目录。
+ * <p>{@code --data-dir} 承载本地大文本输出与 daemon 进程锁；省略时为 {@link #defaultDataDir()}。二进制结果不落本地 Resource
+ * 仓库，而是由 Daemon 直传对象存储。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。environment
+ * root 默认启动用户 canonical HOME，只是宿主展示元数据，不构成任何工具的默认目录。
  *
- * <p>不存在的 Skill 来源不再由 CLI 覆盖：来源是 Platform 的受管配置，Daemon 只按请求扫描。{@code --note} 会进入受信任的模型 SYSTEM
- * Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
+ * <p>{@code --note} 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
 public record DaemonConfig(
     URI gatewayUri,
@@ -95,10 +94,7 @@ public record DaemonConfig(
         DEFAULT_JAVAP_EXECUTABLE);
   }
 
-  /**
-   * 解析 CLI 参数。{@code --data-dir} 可省略并回退到 {@link #defaultDataDir()}；已删除的 {@code --skill-dir} 与
-   * {@code --registration-token} 都作为未知参数失败，避免操作者以为旧契约仍然生效。
-   */
+  /** 解析 CLI 参数。{@code --data-dir} 可省略并回退到 {@link #defaultDataDir()}；任何未声明参数都失败。 */
   public static DaemonConfig fromArgs(String[] args) {
     Objects.requireNonNull(args, "args");
     String gatewayUri = null;
