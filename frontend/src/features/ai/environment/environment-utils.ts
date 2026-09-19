@@ -1,20 +1,7 @@
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
-import type { EnvironmentCardDTO, EnvironmentOperationStatus } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type { AppLocale } from '@/shared/i18n'
-
-export function isActiveOperationStatus(status: EnvironmentOperationStatus): boolean {
-  return status === 'PENDING' || status === 'RUNNING'
-}
-
-export function isTerminalOperationStatus(status: EnvironmentOperationStatus): boolean {
-  return (
-    status === 'SUCCEEDED'
-    || status === 'FAILED'
-    || status === 'CANCELLED'
-    || status === 'UNKNOWN'
-  )
-}
 
 export function filterEnvironments(
   environments: EnvironmentCardDTO[],

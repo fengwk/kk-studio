@@ -101,7 +101,7 @@ result status 对齐。
 | Agent Model | `/api/ai/catalog/models` | page、create；路径参数复合 `(providerName, modelNameHead, *modelNameTail)` 承载可含 `/` 的 model name |
 | Agent Definition | `/api/ai/catalog/agents` | page、create、update、expectedVersion delete |
 | Tool catalog | `GET /api/ai/catalog/tools` | Platform/Environment 可选工具目录投影 |
-| MCP Server | `/api/ai/mcp-servers`、`/{id}/config`、`/{id}/discover` | JSON-only CRUD；显式配置查询附带 `Cache-Control: no-store`；发现统一 202 |
+| MCP Server | `/api/ai/mcp-servers`、`/{name}`、`/{name}/config`、`/{name}/discover` | name-keyed 显式 HTTP CRUD（name 不可变、无改名端点）；显式配置查询附带 `Cache-Control: no-store`；发现同步返回 200 |
 | Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
@@ -114,7 +114,7 @@ result status 对齐。
 | Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|commands|snapshot` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 Coordinator Harness command |
 | Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/status|dependencies|inputs|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、六态迁移、依赖、追加输入、Run 人工动作与归档 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/operations/...` | Environment Card 创建/查询/删除、token 轮换、异步操作；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息直接随 Card 返回 |
+| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息直接随 Card 返回 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
@@ -224,7 +224,6 @@ profile locations：
 harness_runtime_work
 issue_controller_work_due
 canvas_function_work
-environment_operation_pending
 harness_thread_version
 canvas_version
 project_issue_changed
@@ -239,7 +238,7 @@ Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread：�
 破坏 LISTEN 循环，空闲无通知时不会触发意外断连与额外 resync。某个 handler 抛错只隔离
 该 handler，不终止 loop；连接断开按 backoff 重连，重连成功再次 resync。关闭顺序是
 `connection.abort` → interrupt loop thread → 最多 5s join，`SmartLifecycle.close` 幂等。
-前四个 channel 只做 dispatcher wake，version、realtime、settings 和 Project handler
+前三个 channel 只做 dispatcher wake，version、realtime、settings 和 Project handler
 负责各自的 snapshot/resync 逻辑，NOTIFY 本身不是 durable event log。
 
 ### Application Event WebSocket
@@ -302,15 +301,9 @@ close code `1010` 关闭，且不向会话核心暴露通道。非 servlet Sprin
 `WebEnvironment.MOCK`）中 `EnvironmentDaemonWebSocketContainerFactoryBean` 检测不到
 `ServerContainer` 时 no-op，因此测试 context 不需要真实 JSR-356 container。
 
-[EnvironmentOperationDispatcherLifecycle](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/EnvironmentOperationDispatcherLifecycle.java)
-phase 为 `Integer.MAX_VALUE - 1`，始终自动启动且独立于 `workers-enabled`；在 Dev 节点
-（`workers-enabled=false`）应用节点只作为提交与查询控制面，调度器仍启动，但依赖 SQL
-层的 owner-node 与租约隔离（`conn.owner_node_id = ? AND conn.status = 'READY' AND
-conn.lease_until > statement_timestamp()`），因此只有当前持有 Daemon 租约的节点真正
-抢占并排空操作。[HarnessRuntimeConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
-声明组合 `EnvironmentSessionListener`，通过 `ObjectProvider` 弱引用同时唤醒
-`EnvironmentOperationDispatcher` 与 `HarnessWorkDispatcher`，解除与
-`EnvironmentDaemonServer` 的循环依赖并隔离两方异常。
+[HarnessRuntimeConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
+声明组合 `EnvironmentSessionListener`，通过 `ObjectProvider` 弱引用唤醒可选的
+`HarnessWorkDispatcher`，解除与 `EnvironmentDaemonServer` 的循环依赖并隔离异常。
 
 ### Trusted JAR 启动加载
 
@@ -329,7 +322,6 @@ composition root。
 | --- | --- | --- |
 | Harness workers | `HarnessRuntimeLifecycle`，`MAX_VALUE - 1` | `workers-enabled=false` 不启动 dispatcher；store、processor 与 realtime bean 仍可用；start 失败回滚 dispatcher，stop 幂等 |
 | Issue Controller | `IssueControllerRuntimeLifecycle`，`MAX_VALUE - 1` | 与 Harness workers 共用 `workers-enabled`；不启动时仍保留 REST 与 notification loop |
-| Environment Operation | `EnvironmentOperationDispatcherLifecycle`，`MAX_VALUE - 1` | 独立于 `workers-enabled` 自动启动，claim 由 SQL owner-node 租约门控 |
 | Browser heartbeat | `applicationEventHeartbeatScheduler` | destroy `shutdown`；handler `@PreDestroy` 先发 1012 `SEND_FAILED` |
 | Application Event Hub | `ApplicationEventHub`，destroy `close` | 关闭 resource upstream、标记 subscriptions closed |
 | PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
@@ -426,7 +418,7 @@ HTTP boundary 按目录定位：
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single
 baseline、PostgreSQL notification reconnect/resync、Harness/Issue worker NOTIFY+poll
 唤醒、Project trigger invalidation、ack-before-event、bounded sender、Environment large
-READY frame、dynamic MCP discovery/planning/execution、strict DTO、trusted JAR
+READY frame、synchronous MCP discovery/execution、strict DTO、trusted JAR
 classloader lifecycle、locale fallback 与静态 SPA fallback。
 
 ---

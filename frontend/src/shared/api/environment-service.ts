@@ -2,11 +2,8 @@ import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
-  EnvironmentOperationDTO,
   EnvironmentRegistrationTokenDTO,
 } from '@/shared/api/contracts/ai-environment'
-
-export const DEFAULT_OPERATION_LIMIT = 50
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
   return {
@@ -34,32 +31,6 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
     deleteEnvironment: (id: string, expectedVersion: string): Promise<void> =>
       client.delete(
         `/harness/environments/${encodeURIComponent(id)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
-      ),
-
-    // --- Durable async management operations ---
-
-    listOperations: (
-      environmentId: string,
-      limit = DEFAULT_OPERATION_LIMIT,
-    ): Promise<EnvironmentOperationDTO[]> =>
-      client.get(
-        `/harness/environments/${encodeURIComponent(environmentId)}/operations?limit=${encodeURIComponent(String(limit))}`,
-      ),
-
-    getOperation: (
-      environmentId: string,
-      operationId: string,
-    ): Promise<EnvironmentOperationDTO> =>
-      client.get(
-        `/harness/environments/${encodeURIComponent(environmentId)}/operations/${encodeURIComponent(operationId)}`,
-      ),
-
-    cancelOperation: (
-      environmentId: string,
-      operationId: string,
-    ): Promise<EnvironmentOperationDTO> =>
-      client.post(
-        `/harness/environments/${encodeURIComponent(environmentId)}/operations/${encodeURIComponent(operationId)}/cancel`,
       ),
   }
 }

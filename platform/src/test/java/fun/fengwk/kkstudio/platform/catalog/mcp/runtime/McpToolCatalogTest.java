@@ -10,25 +10,23 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 
 /**
  * 动态 MCP 运行时工具目录测试。
  *
- * <p>验证从 Repository 现读 MCP 工具数据并映射为符合契约的 ToolContribution。
+ * <p>验证从 Repository 现读 MCP 工具数据并映射为符合契约的 {@link ToolContribution}：模型可见工具名就是 ContributionId 的
+ * localName，且只有 enabled 的 AVAILABLE server 下的工具可被选择。
  */
 class McpToolCatalogTest {
 
@@ -43,36 +41,13 @@ class McpToolCatalogTest {
 
   @Test
   void listsSelectableToolsAcrossAllServers() {
-    // 意图：验证从全部 Server 聚合工具列表并正确按模型可见工具名排序
-    UUID serverId = UUID.randomUUID();
-    McpServer server = new McpServer();
-    server.setId(serverId);
-    server.setName("github");
-    server.setConnectionType(McpConnectionType.REMOTE);
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setDiscoveredVersion(2L);
-    server.setEnabled(true);
-    server.setVersion(2L);
-    server.setConnectionConfig("{\"url\":\"https://mcp.github.com\",\"headers\":{}}");
-    server.setTimeoutMillis(15000L);
-
-    UUID tool1Id = UUID.randomUUID();
-    McpTool tool1 = new McpTool();
-    tool1.setId(tool1Id);
-    tool1.setServerId(serverId);
-    tool1.setSourceName("list_repos");
-    tool1.setModelName("mcp_github_list_repos");
-    tool1.setDescription("List repositories");
-    tool1.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    tool1.setAvailable(true);
-    tool1.setSchemaRevision(2L);
+    // 意图：从全部 Server 聚合工具并按模型可见工具名排序，工具名即 ContributionId.localName
+    McpServer server = server("github", McpDiscoveryStatus.AVAILABLE, true);
+    McpTool tool = tool("mcp_github_list_repos", "github", "list_repos", "List repositories");
 
     when(repository.listAllServers()).thenReturn(List.of(server));
-    when(repository.listAvailableTools(serverId)).thenReturn(List.of(tool1));
-    when(repository.getAvailableToolByModelName("mcp_github_list_repos"))
-        .thenReturn(Optional.of(tool1));
-    when(repository.getById(serverId)).thenReturn(Optional.of(server));
+    when(repository.listTools("github")).thenReturn(List.of(tool));
+    when(repository.getByName("github")).thenReturn(Optional.of(server));
 
     List<ToolContribution> tools = catalog.selectableTools();
     assertEquals(1, tools.size());
@@ -86,117 +61,62 @@ class McpToolCatalogTest {
         ToolSideEffect.NON_IDEMPOTENT, contribution.definition().descriptor().sideEffect());
     assertEquals(15000L, contribution.definition().descriptor().timeout().toMillis());
     assertEquals("platform.mcp", contribution.id().contributorId().value());
-    assertEquals(McpStableIds.localName(tool1Id), contribution.id().localName());
+    assertEquals("mcp-github-list-repos", contribution.id().localName());
     assertFalse(contribution.requirements().environmentRequired());
   }
 
   @Test
-  void findsToolByModelName() {
-    // 意图：验证按 mcp_tool.model_name 查找工具贡献
-    UUID serverId = UUID.randomUUID();
-    McpServer server = new McpServer();
-    server.setId(serverId);
-    server.setName("brave");
-    server.setConnectionType(McpConnectionType.REMOTE);
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setDiscoveredVersion(0L);
-    server.setEnabled(true);
-    server.setVersion(0L);
-    server.setConnectionConfig("{\"url\":\"https://brave.com/mcp\",\"headers\":{}}");
-    server.setTimeoutMillis(5000L);
+  void findsToolByModelVisibleName() {
+    // 意图：按 mcp_tool.name 查找到可执行贡献，且不依赖任何隐藏 UUID
+    McpServer server = server("brave", McpDiscoveryStatus.AVAILABLE, true);
+    McpTool tool = tool("mcp_brave_search", "brave", "search", "Search");
 
-    UUID toolId = UUID.randomUUID();
-    McpTool tool = new McpTool();
-    tool.setId(toolId);
-    tool.setServerId(serverId);
-    tool.setSourceName("web_search");
-    tool.setModelName("mcp_brave_web_search");
-    tool.setDescription("Search web");
-    tool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    tool.setAvailable(true);
-    tool.setSchemaRevision(1L);
+    when(repository.getTool("mcp_brave_search")).thenReturn(Optional.of(tool));
+    when(repository.getByName("brave")).thenReturn(Optional.of(server));
 
-    when(repository.getAvailableToolByModelName("mcp_brave_web_search"))
-        .thenReturn(Optional.of(tool));
-    when(repository.getById(serverId)).thenReturn(Optional.of(server));
-
-    Optional<ToolContribution> result = catalog.findTool("mcp_brave_web_search");
-    assertTrue(result.isPresent());
-    assertEquals("mcp_brave_web_search", result.get().definition().descriptor().name());
-    assertEquals(McpStableIds.localName(toolId), result.get().id().localName());
+    ToolContribution contribution = catalog.findTool("mcp_brave_search").orElseThrow();
+    assertEquals("mcp_brave_search", contribution.definition().descriptor().name());
+    assertEquals("mcp-brave-search", contribution.id().localName());
+    assertTrue(catalog.findTool("mcp_brave_missing").isEmpty());
   }
 
   @Test
-  void localMcpToolRequiresEnvironmentId() {
-    // 意图：验证 Local MCP 工具贡献必须附带 requiredEnvironmentId
-    UUID serverId = UUID.randomUUID();
-    UUID envUuid = UUID.randomUUID();
-    EnvironmentId envId = EnvironmentId.of(envUuid);
+  void excludesToolsOfDisabledOrUnverifiedServers() {
+    // 意图：只有 enabled 且 AVAILABLE 的 server 下的工具进入运行时目录
+    McpServer disabled = server("disabled", McpDiscoveryStatus.AVAILABLE, false);
+    McpServer unverified = server("unverified", McpDiscoveryStatus.UNVERIFIED, true);
+    McpServer failed = server("failed", McpDiscoveryStatus.FAILED, true);
+    McpTool tool = tool("mcp_disabled_tool", "disabled", "tool", "Tool");
+
+    when(repository.listAllServers()).thenReturn(List.of(disabled, unverified, failed));
+    assertTrue(catalog.selectableTools().isEmpty());
+
+    when(repository.getTool("mcp_disabled_tool")).thenReturn(Optional.of(tool));
+    when(repository.getByName("disabled")).thenReturn(Optional.of(disabled));
+    assertTrue(catalog.findTool("mcp_disabled_tool").isEmpty());
+  }
+
+  private static McpServer server(String name, McpDiscoveryStatus status, boolean enabled) {
     McpServer server = new McpServer();
-    server.setId(serverId);
-    server.setName("local-dev");
-    server.setConnectionType(McpConnectionType.LOCAL);
-    server.setEnvironmentId(envUuid);
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setDiscoveredVersion(1L);
-    server.setEnabled(true);
+    server.setName(name);
+    server.setUrl("https://mcp.example.com/mcp");
+    server.setHeaders(Map.of());
+    server.setEnabled(enabled);
+    server.setTimeoutMillis(15000L);
+    server.setDiscoveryStatus(status);
     server.setVersion(1L);
-    server.setConnectionConfig(
-        "{\"command\":[\"node\",\"server.js\"],\"cwd\":\"/app\",\"env\":{}}");
-    server.setTimeoutMillis(5000L);
-
-    UUID toolId = UUID.randomUUID();
-    McpTool tool = new McpTool();
-    tool.setId(toolId);
-    tool.setServerId(serverId);
-    tool.setSourceName("local_tool");
-    tool.setModelName("mcp_local_tool");
-    tool.setDescription("Local tool description");
-    tool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    tool.setAvailable(true);
-    tool.setSchemaRevision(1L);
-
-    when(repository.getAvailableToolByModelName("mcp_local_tool")).thenReturn(Optional.of(tool));
-    when(repository.getById(serverId)).thenReturn(Optional.of(server));
-
-    Optional<ToolContribution> result = catalog.findTool("mcp_local_tool");
-    assertTrue(result.isPresent());
-    assertTrue(result.get().requirements().environmentRequired());
-    assertEquals(envId, result.get().requirements().requiredEnvironmentId());
+    return server;
   }
 
-  @Test
-  void returnsEmptyWhenToolOrServerNotFound() {
-    // 意图：未知模型可见工具名、或工具存在但 Server 不可选择时返回 empty
-    assertFalse(catalog.findTool("mcp_unknown_tool").isPresent());
-
-    UUID serverId = UUID.randomUUID();
-    McpServer disabledServer = new McpServer();
-    disabledServer.setId(serverId);
-    disabledServer.setName("disabled");
-    disabledServer.setConnectionType(McpConnectionType.REMOTE);
-    disabledServer.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    disabledServer.setDiscoveredVersion(1L);
-    disabledServer.setEnabled(false);
-    disabledServer.setVersion(1L);
-    disabledServer.setConnectionConfig("{\"url\":\"https://mcp.example.com\",\"headers\":{}}");
-    disabledServer.setTimeoutMillis(5000L);
+  private static McpTool tool(
+      String name, String serverName, String sourceName, String description) {
     McpTool tool = new McpTool();
-    tool.setId(UUID.randomUUID());
-    tool.setServerId(serverId);
-    tool.setSourceName("hidden");
-    tool.setModelName("mcp_disabled_hidden");
-    tool.setDescription("Hidden");
+    tool.setName(name);
+    tool.setServerName(serverName);
+    tool.setSourceName(sourceName);
+    tool.setDescription(description);
     tool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    tool.setAvailable(true);
-    tool.setSchemaRevision(1L);
-    when(repository.getAvailableToolByModelName("mcp_disabled_hidden"))
-        .thenReturn(Optional.of(tool));
-    when(repository.getById(serverId)).thenReturn(Optional.of(disabledServer));
-
-    assertFalse(catalog.findTool("mcp_disabled_hidden").isPresent());
+    return tool;
   }
 }

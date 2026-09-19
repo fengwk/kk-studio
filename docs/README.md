@@ -30,7 +30,7 @@
 | [Harness Contributor API](modules/harness-contributor-api.md) | Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
 | [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
 | [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
-| [Harness MCP](modules/harness-mcp.md) | Remote/Local MCP client 如何处理预算、取消和 stdio 子进程？ |
+| [Harness MCP](modules/harness-mcp.md) | 无状态 MCP client 如何处理总预算、取消与结果映射？ |
 
 ### Environment 与主机能力
 
@@ -38,7 +38,7 @@
 | --- | --- |
 | [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录和 protocol v1 如何定义？ |
 | [Environment Server](modules/harness-environment-server.md) | Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
-| [Harness Daemon](modules/harness-daemon.md) | 独立主机进程如何执行文件、命令、LSP、Skill、MCP 和二进制上传？ |
+| [Harness Daemon](modules/harness-daemon.md) | 独立主机进程如何执行文件、命令、LSP 与二进制上传？ |
 
 ### Canvas 与数据契约
 

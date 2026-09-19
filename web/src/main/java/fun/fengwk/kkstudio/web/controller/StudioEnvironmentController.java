@@ -15,12 +15,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.operation.EnvironmentOperationService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentOperationDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 
@@ -28,7 +26,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 稳定 Environment Card 与异步管理操作 REST API。
+ * 稳定 Environment Card REST API。
  *
  * <p>{@code registrationToken} 仅出现在 create、显式只读 token 以及 rotate-token 响应中；三者均返回 {@code
  * Cache-Control: no-store}， 避免敏感凭据进入 HTTP 缓存。列表与普通详情永不返回 token。最近一次 READY 的宿主 metadata 直接随 Card
@@ -42,7 +40,6 @@ public class StudioEnvironmentController {
   private static final String NO_STORE = "no-store";
 
   private final EnvironmentService environmentService;
-  private final EnvironmentOperationService operationService;
 
   @GetMapping
   public Result<List<EnvironmentCardDTO>> listEnvironments() {
@@ -82,30 +79,6 @@ public class StudioEnvironmentController {
       @PathVariable String environmentId, @RequestParam String expectedVersion) {
     environmentService.delete(parseEnvironmentId(environmentId), expectedVersion);
     return Results.noContent();
-  }
-
-  // --- Durable async management operations ---
-
-  @GetMapping("/{environmentId}/operations")
-  public Result<List<EnvironmentOperationDTO>> listOperations(
-      @PathVariable String environmentId, @RequestParam(defaultValue = "50") int limit) {
-    return Results.ok(operationService.list(parseEnvironmentId(environmentId), limit));
-  }
-
-  @GetMapping("/{environmentId}/operations/{operationId}")
-  public Result<EnvironmentOperationDTO> getOperation(
-      @PathVariable String environmentId, @PathVariable String operationId) {
-    return Results.ok(
-        operationService.get(
-            parseEnvironmentId(environmentId), parseCanonicalUuid(operationId, "operationId")));
-  }
-
-  @PostMapping("/{environmentId}/operations/{operationId}/cancel")
-  public Result<EnvironmentOperationDTO> cancelOperation(
-      @PathVariable String environmentId, @PathVariable String operationId) {
-    return Results.ok(
-        operationService.cancel(
-            parseEnvironmentId(environmentId), parseCanonicalUuid(operationId, "operationId")));
   }
 
   private static EnvironmentId parseEnvironmentId(String text) {

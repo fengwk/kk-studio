@@ -221,25 +221,16 @@ class BuiltinHarnessContributorTest {
   }
 
   /**
-   * 验证动态 MCP 能力（mcp.local.call / mcp.local.discover）绝不会自动注册为模型工具。
+   * 验证 BuiltinHarnessContributor 只注册固定的 9 个环境能力工具，绝不泄漏任何 MCP 相关工具身份。
    *
-   * <p>即使 EnvironmentCapabilityCatalog.descriptors() 包含 mcp.local.call， BuiltinHarnessContributor
-   * 也严格只注册固定的 9 个环境能力工具， 确保动态 MCP 工具家族或管理能力绝不会被自动注册泄漏到模型工具目录。
+   * <p>环境能力目录本身已不含 MCP：Platform 只通过 Streamable HTTP 在 Backend 内实现 MCP，因此内置 contributor
+   * 的模型工具集合必须恰好等于工作目录语义的 9 项能力。
    */
   @Test
-  void dynamicMcpCapabilitiesAreNeverAutoRegisteredAsModelTools() {
-    // 前置断言：确认 EnvironmentCapabilityCatalog.descriptors() 中确实包含 MCP_LOCAL_CALL，
-    // managementDescriptors() 中确实包含 MCP_LOCAL_DISCOVER。
+  void builtinToolsAreExactlyTheNineEnvironmentCapabilities() {
     assertTrue(
         EnvironmentCapabilityCatalog.descriptors().stream()
-            .anyMatch(
-                descriptor -> descriptor.id().equals(EnvironmentCapabilityIds.MCP_LOCAL_CALL)),
-        "Precondition: EnvironmentCapabilityCatalog.descriptors() must contain MCP_LOCAL_CALL");
-    assertTrue(
-        EnvironmentCapabilityCatalog.managementDescriptors().stream()
-            .anyMatch(
-                descriptor -> descriptor.id().equals(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER)),
-        "Precondition: EnvironmentCapabilityCatalog.managementDescriptors() must contain MCP_LOCAL_DISCOVER");
+            .noneMatch(descriptor -> descriptor.id().value().contains("mcp")));
 
     Tool loadSkill = stubTool("load_skill", ToolRequirements.environment());
     Tool task = stubTool("task", ToolRequirements.none());
@@ -247,7 +238,7 @@ class BuiltinHarnessContributorTest {
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
-    // 1. 断言没有任何已注册工具绑定到 MCP_LOCAL_CALL 或 MCP_LOCAL_DISCOVER
+    // 1. 断言没有任何已注册工具名称或 rendererKey 泄漏 MCP 身份
     for (ToolContribution tool : catalog.tools()) {
       ToolDescriptor descriptor = tool.definition().descriptor();
       assertFalse(
@@ -256,25 +247,8 @@ class BuiltinHarnessContributorTest {
       assertFalse(
           descriptor.rendererKey().toLowerCase().contains("mcp"),
           "Registered tool rendererKey must not contain mcp: " + descriptor.rendererKey());
-
-      if (tool.tool() instanceof EnvironmentCapabilityTool envTool) {
-        EnvironmentCapabilityId capId = envTool.capability().id();
-        assertFalse(
-            capId.equals(EnvironmentCapabilityIds.MCP_LOCAL_CALL),
-            "Registered tool must not be bound to mcp.local.call");
-        assertFalse(
-            capId.equals(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER),
-            "Registered tool must not be bound to mcp.local.discover");
-      }
     }
 
-    // 2. 确认通过模型名称无法查找到任何 MCP 相关工具
-    assertTrue(catalog.findTool("mcp.local.call").isEmpty());
-    assertTrue(catalog.findTool("mcp_local_call").isEmpty());
-    assertTrue(catalog.findTool("mcp.local.discover").isEmpty());
-    assertTrue(catalog.findTool("mcp_local_discover").isEmpty());
-
-    // 3. 收集所有由 EnvironmentCapabilityTool 支持的工具能力 ID，断言恰好等于 9 个固定能力
     Set<EnvironmentCapabilityId> expectedCapabilityIds =
         Set.of(
             EnvironmentCapabilityIds.FS_READ,
@@ -300,10 +274,8 @@ class BuiltinHarnessContributorTest {
         envTools.stream().map(tool -> tool.capability().id()).collect(Collectors.toSet());
 
     assertEquals(expectedCapabilityIds, registeredCapabilityIds);
-    assertFalse(registeredCapabilityIds.contains(EnvironmentCapabilityIds.MCP_LOCAL_CALL));
-    assertFalse(registeredCapabilityIds.contains(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER));
 
-    // 4. 断言已注册的环境工具模型可见 name 集合恰好等于固定的 9 个内置环境工具名
+    // 2. 断言已注册的环境工具模型可见 name 集合恰好等于固定的 9 个内置环境工具名
     Set<String> expectedToolNames =
         Set.of(
             "read",

@@ -8,15 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 
 import java.util.List;
-import java.util.Set;
 
-/** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
+/** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 10 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 9 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -29,8 +28,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
-            EnvironmentCapabilityIds.MCP_LOCAL_CALL);
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
 
     assertEquals("1", EnvironmentCapabilityCatalog.version());
     assertEquals(
@@ -43,8 +41,7 @@ class EnvironmentCapabilityCatalogTest {
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile",
-            "mcp.local.call"),
+            "lsp.java-decompile"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
         expected,
@@ -64,44 +61,12 @@ class EnvironmentCapabilityCatalogTest {
     }
     // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。
     assertEquals(
-        expected.subList(0, 9),
+        expected,
         EnvironmentCapabilityCatalog.descriptors().stream()
             .map(EnvironmentCapabilityDescriptor::id)
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
-    assertFalse(
-        EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.MCP_LOCAL_CALL));
-  }
-
-  /**
-   * 管理专用能力必须在固定顺序中注册、与模型可见能力分离、无需 workdir，且仍能被 find 解析。
-   *
-   * <p>它们复用 INVOKE/CANCEL/结果通道，但绝不进入模型工具目录，因此 descriptor 列表与 management 列表必须严格区分。
-   */
-  @Test
-  void exposesManagementOnlyMcpDiscoverCapability() {
-    List<EnvironmentCapabilityId> expected = List.of(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER);
-
-    assertEquals(
-        expected,
-        EnvironmentCapabilityCatalog.managementDescriptors().stream()
-            .map(EnvironmentCapabilityDescriptor::id)
-            .toList());
-    assertEquals(EnvironmentCapabilityIds.MANAGEMENT_ONLY, Set.copyOf(expected));
-    for (EnvironmentCapabilityId id : expected) {
-      assertTrue(EnvironmentCapabilityCatalog.find(id).isPresent(), id.value());
-      assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(id), id.value());
-      assertTrue(
-          EnvironmentCapabilityCatalog.descriptors().stream()
-              .noneMatch(descriptor -> descriptor.id().equals(id)),
-          id.value());
-    }
-    for (EnvironmentCapabilityDescriptor descriptor :
-        EnvironmentCapabilityCatalog.managementDescriptors()) {
-      assertEquals("1", descriptor.version(), descriptor.id().value());
-    }
-    assertTrue(
-        EnvironmentCapabilityCatalog.find(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER).isPresent());
+    assertTrue(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
   }
 
   /** descriptor 是 execution 的唯一事实源；可通过 find 与 require 查询。 */
@@ -120,43 +85,15 @@ class EnvironmentCapabilityCatalogTest {
                 new EnvironmentCapabilityId("unknown.capability")));
   }
 
-  /** local MCP 调用与发现能力 schema 仅强制要求 command/cwd/environmentId/type，可选配置缺省时仍合法。 */
+  /** 每个模型可见能力都必须携带非空 object input schema 与正超时，且不接受额外属性。 */
   @Test
-  void mcpLocalCapabilitySchemasAllowOptionalConfigFields() {
-    for (EnvironmentCapabilityId id :
-        List.of(
-            EnvironmentCapabilityIds.MCP_LOCAL_CALL, EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER)) {
-      ObjectSchema configSchema =
-          (ObjectSchema)
-              EnvironmentCapabilityCatalog.require(id).inputSchema().properties().get("config");
-      assertEquals(
-          Set.of("command", "cwd", "environmentId", "type"), configSchema.required(), id.value());
-      assertFalse(configSchema.additionalProperties(), id.value());
-      assertEquals(
-          Set.of("command", "cwd", "enabled", "env", "environmentId", "timeoutMillis", "type"),
-          configSchema.properties().keySet(),
-          id.value());
+  void everyDescriptorCarriesExecutableSchemaAndPositiveTimeout() {
+    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
+      String id = descriptor.id().value();
+      InputSchema schema = descriptor.inputSchema();
+      assertFalse(schema.additionalProperties(), id);
+      assertFalse(schema.properties().isEmpty(), id);
+      assertFalse(descriptor.timeout().isZero() || descriptor.timeout().isNegative(), id);
     }
-
-    String validJson =
-        "{\"config\":{\"command\":[\"echo\"],\"cwd\":\"/opt/mcp\",\"environmentId\":\"11111111-1111-4111-8111-111111111111\",\"type\":\"local\"},"
-            + "\"configVersion\":1,\"serverId\":\"11111111-1111-4111-8111-111111111111\"}";
-    EnvironmentCapabilityCall call = new EnvironmentCapabilityCall("call-1", validJson);
-    EnvironmentCapabilityCall validated =
-        call.validateFor(
-            EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER));
-    assertSame(call, validated);
-    assertEquals(validJson, validated.argumentsJson());
-
-    String missingCwdJson =
-        "{\"config\":{\"command\":[\"echo\"],\"environmentId\":\"11111111-1111-4111-8111-111111111111\",\"type\":\"local\"},"
-            + "\"configVersion\":1,\"serverId\":\"11111111-1111-4111-8111-111111111111\"}";
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new EnvironmentCapabilityCall("call-1", missingCwdJson)
-                .validateFor(
-                    EnvironmentCapabilityCatalog.require(
-                        EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER)));
   }
 }

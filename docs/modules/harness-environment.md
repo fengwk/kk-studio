@@ -16,7 +16,7 @@ Stable Environment 资源、daemon envelope 的 scope、分支执行派生的环
 capabilityId / capabilityVersion / inputSchema / timeout
 ```
 
-模型可见能力按固定 canonical 顺序排列，共 10 项：
+模型可见能力按固定 canonical 顺序排列，共 9 项：
 
 | capabilityId | 声明的能力超时 | arguments 需要 `workdir` |
 | --- | --- | --- |
@@ -29,13 +29,12 @@ capabilityId / capabilityVersion / inputSchema / timeout
 | `lsp.goto-definition` | 2 分钟 | 是 |
 | `lsp.workspace-symbols` | 2 分钟 | 是 |
 | `lsp.java-decompile` | 2 分钟 | 是 |
-| `mcp.local.call` | 1 小时 | 否 |
 
-管理专用能力只有 1 项：`mcp.local.discover`（5 分钟），只复用 INVOKE/CANCEL/终态通道，绝不进入模型 Tool 目录，也不接受 `workdir`。[`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java) 固化这些标识，并以 `MANAGEMENT_ONLY` 集合区分管理边界。
+目录里的每一项都是模型可见的原子执行契约，没有仅供控制面使用的隐藏描述符；MCP 是 Platform 在 Backend 进程内通过 Streamable HTTP 承载的能力，不进入本目录。[`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java) 固化这些标识。
 
 capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityId.java) 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。`EnvironmentCapabilityCatalog.requiresWorkdir(id)` 只按 capability ID 判定，不从版本号推断。
 
-各能力的 arguments schema 是冻结的 classpath 资源，需要目录的 9 项 coding/process/LSP 能力都显式要求目标 Daemon 文件系统上的绝对 `workdir`；`mcp.local.call` 接收 `serverId`、`configVersion`、`toolName`、`arguments` 与 `config`，`mcp.local.discover` 接收 `serverId`、`configVersion` 与 `config`，两者共享的 `config` 必填 `type=local`、`environmentId`、`command` 与 `cwd`。
+各能力的 arguments schema 是冻结的 classpath 资源，9 项 coding/process/LSP 能力都显式要求目标 Daemon 文件系统上的绝对 `workdir`。
 
 能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
 
@@ -132,7 +131,7 @@ environment: operatingSystem / timeZone / note / rootPath
 
 READY 只公开宿主侧的四项环境元数据：目标操作系统、时区、可信操作者备注与 Daemon 的 canonical Environment root。`operatingSystem` 是发送前 workdir 词法校验的目标 OS 依据；`rootPath` 只展示。`environment` 是必填对象且字段固定；未知字段、缺失字段或非字符串值都是协议错误。
 
-载荷的硬约束：`note` 单行且不超过 512 字符，`rootPath` 非空，四项都只承载展示语义。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；Skill 目录完全由 Platform 全局目录提供，因此 READY 不再携带任何来源快照或 Skill 描述。
+载荷的硬约束：`note` 单行且不超过 512 字符，`rootPath` 非空，四项都只承载展示语义。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；Skill 与 MCP 目录完全由 Platform 侧的全局目录提供，READY 只描述宿主事实。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java) 规定 INVOKE payload 固定包含 `capabilityId`、`capabilityVersion`、`arguments` 与 `timeoutMillis`，全部必填，`arguments` 必须是 JSON 对象，`timeoutMillis` 必须是非负整数毫秒。INVOKE 外壳不携带目录字段，需要目录的能力由自己的 arguments 携带绝对 `workdir`；`timeoutMillis` 为 0 表示沿用默认超时。
 
@@ -155,7 +154,7 @@ COMMIT: transferId / uploadId
 
 `transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 KiB 字符，FAILED 说明至多 512 字符。[`DaemonPresignedPut`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符、过期时刻必须是规范 `Instant`。codec 两端都拒绝未知/缺失/重复字段、尾随 JSON、非 canonical UUID/Instant、非法摘要与互相矛盾的 ticket 状态。
 
-二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力——包括 `mcp.local.*`——统一通过通用 INVOKE 与结果协议交互。
+二进制字节不进入 WebSocket：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。所有能力统一通过通用 INVOKE 与结果协议交互。
 
 ## workdir 词法契约
 
@@ -187,7 +186,7 @@ harness-environment
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.environment` | 环境身份标识。定义跨 Runtime、Platform Gateway 与 Daemon 共享的规范 UUID 路由身份（`EnvironmentId`），只做纯内存值对象与 canonical 格式校验；物理文件与网络 I/O 由各端实现承载。 |
-| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。冻结 catalog 版本 `"1"` 的 11 项 descriptor（10 项模型可见 + 1 项管理专用）、底层异步执行接口与传输窄端口，并严格约束发送异常确定性与 `PROGRESS* -> exactly one terminal`。管理能力只复用执行通道，不进入模型 Tool 目录。 |
+| `fun.fengwk.kkstudio.harness.environment.capability` | 跨环境共享的原子能力契约与执行 SPI。冻结 catalog 版本 `"1"` 的 9 项模型可见 descriptor、底层异步执行接口与传输窄端口，并严格约束发送异常确定性与 `PROGRESS* -> exactly one terminal`。 |
 | `fun.fengwk.kkstudio.harness.environment.daemon` | Platform Gateway 与 Environment Daemon 之间的 protocol v1 全部 wire 形状：协议封包、READY 宿主元数据、INVOKE/结果/资源票据编解码器、预签名 PUT 值与 workdir 词法校验。连接代际、路由租约、对象存储 I/O 与执行日志由外层状态机和适配器管理。 |
 
 ## 源码与测试
@@ -197,7 +196,7 @@ harness-environment
 测试守卫：
 
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
-- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：10 项模型可见能力的固定顺序与版本、1 项管理能力集合、`requiresWorkdir` 判定与 schema 共享关系。
+- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：9 项模型可见能力的固定顺序与版本、全目录 `requiresWorkdir` 判定与 schema 共享关系。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与有效超时、结果体积边界、发送异常分类、事件顺序与终态唯一。
 - [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonEnvelopeTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeTest.java)：protocol v1 版本、scope 与 invocationId 规则、未知/重复/尾随字段拒绝。
 - [`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)：READY 只接受 `{version, environment}` wire 形状，未知字段（含历史上的来源快照字段）、缺失字段与非法值都被拒绝。
