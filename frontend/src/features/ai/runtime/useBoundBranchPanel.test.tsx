@@ -151,7 +151,7 @@ const agents = [
     config: {
       inheritParentEnvironment: true,
       tools: ['web_search'],
-      skills: [{ sourceId: 'src-1', name: 'skill-a' }],
+      skills: ['skill-a'],
       subagents: [],
     },
     version: '0',

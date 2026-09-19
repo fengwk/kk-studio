@@ -12,44 +12,14 @@ describe('queryKeys', () => {
   })
 
   /**
-   * 测试意图：验证 Environment 相关的 Skill 来源、持久库存与管理操作具有确定性且互相隔离的查询键。
+   * 测试意图：验证 Skill 全局目录、Skill Packages 以及 Environment 管理操作具有确定性的查询键。
    */
-  it('builds deterministic query keys for Environment skill sources, inventory, and operations', () => {
-    expect(queryKeys.environments.skillSources('env-1')).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'skill-sources',
-    ])
-    expect(queryKeys.environments.skillSource('env-1', 'src-1')).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'skill-sources',
-      'src-1',
-    ])
-    expect(queryKeys.environments.inventory('env-1')).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'inventory',
-    ])
-    expect(queryKeys.environments.inventorySkills('env-1', true)).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'inventory',
-      'skills',
-      true,
-    ])
-    expect(queryKeys.environments.inventorySkills('env-1', false)).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'inventory',
-      'skills',
-      false,
-    ])
+  it('builds deterministic query keys for Skills and Environment operations', () => {
+    expect(queryKeys.skills.all).toEqual(['skills'])
+    expect(queryKeys.skills.list).toEqual(['skills', 'list'])
+    expect(queryKeys.skills.packages).toEqual(['skills', 'packages'])
+    expect(queryKeys.skills.packageDetail('pkg-1')).toEqual(['skills', 'packages', 'pkg-1'])
+
     expect(queryKeys.environments.operations('env-1', 20)).toEqual([
       'environments',
       'detail',

@@ -28,7 +28,6 @@ function createMockAgent(name: string): AgentDefinitionDTO {
     systemPrompt: null,
     model: 'mock-model',
     variant: null,
-    environmentId: null,
     config: { tools: [], mcpServers: [] },
     version: 1,
     createTime: '2026-09-14T00:00:00Z',
