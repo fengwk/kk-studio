@@ -1,7 +1,4 @@
 import { useEffect, useState, type FormEventHandler } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { environmentService } from '@/shared/api/environment-service'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { buildResourceSubmitPlan } from '@/features/ai/catalog/ai-resource-editor-submit-plans'
 import type { ConfirmModalState } from '@/shared/ui/console/confirm-modal'
 import { toUserFacingErrorMessage } from '@/features/ai/ai-user-facing-error'
@@ -29,23 +26,16 @@ export function useAiConsoleResourceController(
     modelsQuery,
     agentsQuery,
     toolsQuery,
+    skillsQuery,
     environmentsQuery,
     providers,
     models,
     agents,
     toolCatalog,
+    skills,
     environments,
   } = useAiConsoleResourceQueries(enabled)
   const editorState = useAiConsoleResourceEditorState({ providers, models, agents })
-  const isAgentModalOpen = editorState.resourceModal?.kind === 'agent'
-  const trimmedEnvironmentId = (editorState.agentDraft.environmentId ?? '').trim()
-  const inventorySkillsEnabled = isAgentModalOpen && trimmedEnvironmentId !== ''
-
-  const inventorySkillsQuery = useQuery({
-    queryKey: queryKeys.environments.inventorySkills(trimmedEnvironmentId, true),
-    queryFn: () => environmentService.listInventorySkills(trimmedEnvironmentId, true),
-    enabled: inventorySkillsEnabled,
-  })
 
   const closeDeleteConfirm = () => setDeleteConfirm(null)
   const mutations = useAiConsoleResourceMutations({
@@ -170,12 +160,13 @@ export function useAiConsoleResourceController(
     modelsQuery,
     agentsQuery,
     toolsQuery,
+    skillsQuery,
     environmentsQuery,
-    inventorySkillsQuery,
     providers,
     models,
     agents,
     toolCatalog,
+    skills,
     environments,
     resourceMutationError: mutations.resourceMutationError,
     providerDeletePending: mutations.providerDeletePending,
@@ -187,10 +178,9 @@ export function useAiConsoleResourceController(
       models,
       agents,
       toolCatalog,
-      environments,
-      inventorySkills: inventorySkillsQuery.data ?? [],
-      inventorySkillsLoading: inventorySkillsQuery.isLoading && inventorySkillsEnabled,
-      inventorySkillsError: inventorySkillsQuery.error,
+      skills,
+      skillsLoading: skillsQuery.isLoading,
+      skillsError: skillsQuery.error,
       providerDraft: editorState.providerDraft,
       modelDraft: editorState.modelDraft,
       agentDraft: editorState.agentDraft,

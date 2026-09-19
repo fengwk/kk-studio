@@ -25,6 +25,10 @@ export const aiCatalog = {
     'en-US': 'MCP Server',
     'zh-CN': 'MCP 服务',
   },
+  'ai.nav.skillPackages': {
+    'en-US': 'Skill Packages',
+    'zh-CN': 'Skill Packages',
+  },
   'ai.catalog.resourceType.agent': {
     'en-US': 'Agent',
     'zh-CN': 'Agent',
@@ -1971,7 +1975,7 @@ export const aiCatalog = {
   },
   'ai.environment.lastSeen': {
     'en-US': 'Last seen',
-    'zh-CN': '最近查看',
+    'zh-CN': '最近活动',
   },
   'ai.environment.capabilities': {
     'en-US': 'Capabilities',
@@ -1989,205 +1993,133 @@ export const aiCatalog = {
     'en-US': 'Manage Environment',
     'zh-CN': '管理环境',
   },
-  'ai.environment.sources.title': {
-    'en-US': 'Skill Sources',
-    'zh-CN': 'Skill 来源',
+  'ai.environment.runtime.title': {
+    'en-US': 'Host Information',
+    'zh-CN': '宿主信息',
   },
-  'ai.environment.sources.create': {
-    'en-US': 'Add Source',
-    'zh-CN': '添加来源',
-  },
-  'ai.environment.sources.edit': {
-    'en-US': 'Edit Source',
-    'zh-CN': '编辑来源',
-  },
-  'ai.environment.sources.delete': {
-    'en-US': 'Delete Source',
-    'zh-CN': '删除来源',
-  },
-  'ai.environment.sources.deleteConfirm': {
-    'en-US': 'Are you sure you want to delete this skill source?',
-    'zh-CN': '确认删除该 Skill 来源？',
-  },
-  'ai.environment.sources.type': {
-    'en-US': 'Source Type',
-    'zh-CN': '来源类型',
-  },
-  'ai.environment.sources.typePath': {
-    'en-US': 'PATH Directory',
-    'zh-CN': 'PATH 目录',
-  },
-  'ai.environment.sources.typeGit': {
-    'en-US': 'GIT Repository',
-    'zh-CN': 'GIT 仓库',
-  },
-  'ai.environment.sources.path': {
-    'en-US': 'Host Directory Path',
-    'zh-CN': '宿主目录路径',
-  },
-  'ai.environment.sources.pathPlaceholder': {
-    'en-US': 'e.g. ~/skills or /opt/skills',
-    'zh-CN': '如 ~/skills 或 /opt/skills',
-  },
-  'ai.environment.sources.gitUrl': {
-    'en-US': 'Git Repository URL',
-    'zh-CN': 'Git 仓库 URL',
-  },
-  'ai.environment.sources.gitUrlPlaceholder': {
-    'en-US': 'https://github.com/org/repo.git',
-    'zh-CN': 'https://github.com/org/repo.git',
-  },
-  'ai.environment.sources.gitRef': {
-    'en-US': 'Git Ref',
-    'zh-CN': 'Git Ref',
-  },
-  'ai.environment.sources.gitRefPlaceholder': {
-    'en-US': 'Default HEAD if empty',
-    'zh-CN': '缺省跟踪默认 HEAD',
-  },
-  'ai.environment.sources.scanPath': {
-    'en-US': 'Relative Scan Path',
-    'zh-CN': '相对扫描路径',
-  },
-  'ai.environment.sources.scanPathPlaceholder': {
-    'en-US': 'Default repo root if empty',
-    'zh-CN': '缺省仓库根目录',
-  },
-  'ai.environment.sources.defaultBadge': {
-    'en-US': 'Default',
-    'zh-CN': '缺省',
-  },
-  'ai.environment.sources.version': {
-    'en-US': 'Config Version',
-    'zh-CN': '配置版本',
-  },
-  'ai.environment.sources.appliedVersion': {
-    'en-US': 'Applied Version',
-    'zh-CN': '应用版本',
-  },
-  'ai.environment.sources.appliedRevision': {
-    'en-US': 'Applied Revision',
-    'zh-CN': '应用 Revision',
-  },
-  'ai.environment.sources.lastAppliedAt': {
-    'en-US': 'Last Applied',
-    'zh-CN': '最近应用',
-  },
-  'ai.environment.sources.diagnostics': {
-    'en-US': 'Diagnostics',
-    'zh-CN': '扫描诊断',
-  },
-  'ai.environment.sources.empty': {
-    'en-US': 'No skill sources configured',
-    'zh-CN': '暂未配置 Skill 来源',
-  },
-  'ai.environment.sources.loading': {
-    'en-US': 'Loading skill sources...',
-    'zh-CN': '正在加载 Skill 来源...',
-  },
-  'ai.environment.sources.defaultTypeImmutable': {
-    'en-US': 'Default source type cannot be changed to GIT',
-    'zh-CN': '缺省来源类型不可变更为 GIT',
-  },
-  'ai.environment.sources.pathRequired': {
-    'en-US': 'Host directory path is required',
-    'zh-CN': '必须填写宿主目录路径',
-  },
-  'ai.environment.sources.gitUrlRequired': {
-    'en-US': 'Git repository URL is required',
-    'zh-CN': '必须填写 Git 仓库 URL',
-  },
-  'ai.environment.action.refresh': {
-    'en-US': 'Refresh',
-    'zh-CN': 'Refresh',
-  },
-  'ai.environment.action.install': {
-    'en-US': 'Install',
-    'zh-CN': 'Install',
-  },
-  'ai.environment.action.update': {
-    'en-US': 'Update',
-    'zh-CN': 'Update',
-  },
-  'ai.environment.action.dialogTitle': {
-    'en-US': '{{action}} Skill Source',
-    'zh-CN': '{{action}} Skill 来源',
-  },
-  'ai.environment.action.dialogDescription': {
-    'en-US': 'Execute {{action}} on source "{{target}}".',
-    'zh-CN': '对来源「{{target}}」执行 {{action}} 操作。',
-  },
-  'ai.environment.action.timeoutMillis': {
-    'en-US': 'Timeout (ms)',
-    'zh-CN': '超时时间 (毫秒)',
-  },
-  'ai.environment.action.timeoutInvalid': {
-    'en-US': 'Timeout must be a positive safe integer',
-    'zh-CN': '超时时间必须为正安全整数',
-  },
-  'ai.environment.inventory.title': {
-    'en-US': 'Durable Inventory',
-    'zh-CN': '持久化 Inventory',
-  },
-  'ai.environment.inventory.loading': {
-    'en-US': 'Loading inventory...',
-    'zh-CN': '正在加载 Inventory...',
-  },
-  'ai.environment.inventory.sourceSetVersion': {
-    'en-US': 'Desired Source Set (sourceSetVersion)',
-    'zh-CN': '期望来源代际 (sourceSetVersion)',
-  },
-  'ai.environment.inventory.appliedSourceSetVersion': {
-    'en-US': 'Applied Source Set (appliedSourceSetVersion)',
-    'zh-CN': '已接受代际 (appliedSourceSetVersion)',
-  },
-  'ai.environment.inventory.operatingSystem': {
+  'ai.environment.runtime.operatingSystem': {
     'en-US': 'Operating System',
     'zh-CN': '操作系统',
   },
-  'ai.environment.inventory.timeZone': {
+  'ai.environment.runtime.timeZone': {
     'en-US': 'Timezone',
     'zh-CN': '时区',
   },
-  'ai.environment.inventory.note': {
+  'ai.environment.runtime.rootPath': {
+    'en-US': 'Root Path',
+    'zh-CN': '根路径',
+  },
+  'ai.environment.runtime.note': {
     'en-US': 'Note',
     'zh-CN': '备注',
   },
-  'ai.environment.inventory.rootPath': {
-    'en-US': 'Root Path',
-    'zh-CN': 'Root 路径',
+  'ai.skillPackages.title': {
+    'en-US': 'Skill Packages',
+    'zh-CN': 'Skill Packages',
   },
-  'ai.environment.inventory.reportedAt': {
-    'en-US': 'Reported At',
-    'zh-CN': '上报时间',
+  'ai.skillPackages.description': {
+    'en-US': 'Platform-global Skill Packages and definitions',
+    'zh-CN': '平台全局 Skill Package 及其定义管理',
   },
-  'ai.environment.inventory.persistedSkills': {
-    'en-US': 'Persisted Skills List',
-    'zh-CN': '已持久化 Skill 列表',
+  'ai.skillPackages.create': {
+    'en-US': 'Create Package',
+    'zh-CN': '创建 Package',
   },
-  'ai.environment.inventory.noSkills': {
-    'en-US': 'No skills discovered in inventory',
-    'zh-CN': '未发现任何持久化 Skill',
+  'ai.skillPackages.edit': {
+    'en-US': 'Edit Package',
+    'zh-CN': '编辑 Package',
   },
-  'ai.environment.inventory.skillName': {
-    'en-US': 'Skill Name',
-    'zh-CN': 'Skill 名称',
+  'ai.skillPackages.delete': {
+    'en-US': 'Delete Package',
+    'zh-CN': '删除 Package',
   },
-  'ai.environment.inventory.sourceId': {
-    'en-US': 'Source ID',
-    'zh-CN': '来源 ID',
+  'ai.skillPackages.deleteConfirm': {
+    'en-US': 'Are you sure you want to delete skill package "{name}"?',
+    'zh-CN': '确认删除 Skill Package “{name}”？',
   },
-  'ai.environment.inventory.description': {
+  'ai.skillPackages.name': {
+    'en-US': 'Package Name',
+    'zh-CN': 'Package 名称',
+  },
+  'ai.skillPackages.version': {
+    'en-US': 'Version',
+    'zh-CN': '版本',
+  },
+  'ai.skillPackages.newVersion': {
+    'en-US': 'New Version',
+    'zh-CN': '新版本',
+  },
+  'ai.skillPackages.descriptionLabel': {
     'en-US': 'Description',
     'zh-CN': '描述',
   },
-  'ai.environment.inventory.baseDirectory': {
-    'en-US': 'Base Directory',
-    'zh-CN': '宿主目录',
+  'ai.skillPackages.skillsCount': {
+    'en-US': 'Skills Count',
+    'zh-CN': '包含 Skill 数量',
   },
-  'ai.environment.inventory.contentRevision': {
-    'en-US': 'Content Revision',
-    'zh-CN': '内容 Revision',
+  'ai.skillPackages.updatedAt': {
+    'en-US': 'Updated At',
+    'zh-CN': '更新时间',
+  },
+  'ai.skillPackages.empty': {
+    'en-US': 'No Skill Packages found',
+    'zh-CN': '暂无 Skill Package',
+  },
+  'ai.skillPackages.loading': {
+    'en-US': 'Loading Skill Packages...',
+    'zh-CN': '正在加载 Skill Packages...',
+  },
+  'ai.skillPackages.skillsSection': {
+    'en-US': 'Skill Definitions',
+    'zh-CN': 'Skill 定义列表',
+  },
+  'ai.skillPackages.addSkill': {
+    'en-US': 'Add Skill Definition',
+    'zh-CN': '添加 Skill 定义',
+  },
+  'ai.skillPackages.removeSkill': {
+    'en-US': 'Remove Skill',
+    'zh-CN': '移除 Skill',
+  },
+  'ai.skillPackages.skillName': {
+    'en-US': 'Skill Name',
+    'zh-CN': 'Skill 名称',
+  },
+  'ai.skillPackages.skillDescription': {
+    'en-US': 'Skill Description',
+    'zh-CN': 'Skill 描述',
+  },
+  'ai.skillPackages.skillContent': {
+    'en-US': 'Skill Content',
+    'zh-CN': 'Skill 内容 (Markdown / 指令)',
+  },
+  'ai.skillPackages.nameRequired': {
+    'en-US': 'Package name is required',
+    'zh-CN': 'Package 名称不能为空',
+  },
+  'ai.skillPackages.versionRequired': {
+    'en-US': 'Package version is required',
+    'zh-CN': 'Package 版本不能为空',
+  },
+  'ai.skillPackages.atLeastOneSkill': {
+    'en-US': 'At least one skill definition is required',
+    'zh-CN': '至少需要一条 Skill 定义',
+  },
+  'ai.skillPackages.skillNameRequired': {
+    'en-US': 'Skill name cannot be empty',
+    'zh-CN': 'Skill 名称不能为空',
+  },
+  'ai.skillPackages.skillDescriptionRequired': {
+    'en-US': 'Skill description cannot be empty',
+    'zh-CN': 'Skill 描述不能为空',
+  },
+  'ai.skillPackages.skillContentRequired': {
+    'en-US': 'Skill content cannot be empty',
+    'zh-CN': 'Skill 内容不能为空',
+  },
+  'ai.skillPackages.duplicateSkillName': {
+    'en-US': 'Duplicate skill name: {name}',
+    'zh-CN': '存在重复的 Skill 名称：{name}',
   },
   'ai.environment.operations.title': {
     'en-US': 'Operations',

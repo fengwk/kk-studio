@@ -134,4 +134,43 @@ describe('agentService', () => {
     expect(client.delete).toHaveBeenNthCalledWith(3, '/ai/catalog/agents/default-assistant', { params: { expectedVersion: '11' } })
   })
 
+  /**
+   * 测试意图：验证 Skill 全局目录与 Skill Package 的增删改查端点。
+   */
+  it('maps skills and skill package endpoints correctly', async () => {
+    const client = createClient()
+    const service = createAgentService(client)
+
+    await service.listSkills()
+    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/catalog/skills')
+
+    await service.listSkillPackages()
+    expect(client.get).toHaveBeenNthCalledWith(2, '/ai/catalog/skill-packages')
+
+    await service.getSkillPackage('core skills')
+    expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/skill-packages/core%20skills')
+
+    const createPkg = {
+      name: 'core',
+      packageVersion: '1.0.0',
+      description: 'Core skills',
+      skills: [{ name: 'read', description: 'Read file', content: 'content' }],
+    }
+    await service.createSkillPackage(createPkg)
+    expect(client.post).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages', createPkg)
+
+    const updatePkg = {
+      expectedPackageVersion: '1.0.0',
+      newPackageVersion: '1.1.0',
+      description: 'Updated core skills',
+      skills: [{ name: 'read', description: 'Read file updated', content: 'new content' }],
+    }
+    await service.updateSkillPackage('core', updatePkg)
+    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages/core', updatePkg)
+
+    await service.deleteSkillPackage('core', '1.1.0')
+    expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages/core', {
+      params: { expectedPackageVersion: '1.1.0' },
+    })
+  })
 })

@@ -11,7 +11,6 @@ import {
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
-  AgentSkillRefDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type {
   HarnessBranchSettingsDTO,
@@ -64,9 +63,8 @@ const modelWithoutCatalogEntry: AgentModelDTO = {
 
 function agent(
   tools: string[],
-  skills: AgentSkillRefDTO[],
+  skills: string[],
   subagents: string[],
-  environmentId: string | null = 'env-uuid-1',
 ): AgentDefinitionDTO {
   return {
     name: 'root',
@@ -74,7 +72,6 @@ function agent(
     systemPrompt: null,
     model: 'provider/model',
     variant: null,
-    environmentId,
     config: { inheritParentEnvironment: true, tools, skills, subagents },
     version: '1',
     createTime: '2026-08-09T00:00:00Z',

@@ -15,6 +15,7 @@ describe('AI extension composition architecture', () => {
       ['ai.agents', 'agents'],
       ['ai.models', 'models'],
       ['ai.providers', 'providers'],
+      ['ai.skill-packages', 'skill-packages'],
       ['ai.environments', 'environments'],
       ['ai.mcp-servers', 'mcp-servers'],
     ])
@@ -53,6 +54,7 @@ describe('AI extension composition architecture', () => {
       'ai.agents',
       'ai.models',
       'ai.providers',
+      'ai.skill-packages',
       'ai.environments',
       'ai.mcp-servers',
       'ai.comfyui',

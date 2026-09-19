@@ -9,6 +9,11 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderUpdateDTO,
+  SkillDTO,
+  SkillPackageCreateDTO,
+  SkillPackageDTO,
+  SkillPackageDetailDTO,
+  SkillPackageUpdateDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { PageResult } from '@/shared/api/contracts/base'
@@ -72,6 +77,32 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     deleteAgent: (name: string, expectedVersion: string): Promise<void> =>
       client.delete(`/ai/catalog/agents/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
+
+    // --- Global Skills & Skill Packages ---
+
+    listSkills: (): Promise<SkillDTO[]> => client.get('/ai/catalog/skills'),
+
+    listSkillPackages: (): Promise<SkillPackageDTO[]> => client.get('/ai/catalog/skill-packages'),
+
+    getSkillPackage: (name: string): Promise<SkillPackageDetailDTO> =>
+      client.get(`/ai/catalog/skill-packages/${encodeURIComponent(name)}`),
+
+    createSkillPackage: (data: SkillPackageCreateDTO): Promise<SkillPackageDetailDTO> =>
+      client.post('/ai/catalog/skill-packages', data),
+
+    updateSkillPackage: (
+      name: string,
+      data: SkillPackageUpdateDTO,
+    ): Promise<SkillPackageDetailDTO> =>
+      client.put(`/ai/catalog/skill-packages/${encodeURIComponent(name)}`, data),
+
+    deleteSkillPackage: (
+      name: string,
+      expectedPackageVersion: string,
+    ): Promise<void> =>
+      client.delete(`/ai/catalog/skill-packages/${encodeURIComponent(name)}`, {
+        params: { expectedPackageVersion },
+      }),
 
   }
 }
