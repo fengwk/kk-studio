@@ -25,15 +25,11 @@ export const queryKeys = {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
     detail: (id: string) => ['environments', 'detail', id] as const,
-    operations: (environmentId: string, limit: number) =>
-      ['environments', 'detail', environmentId, 'operations', limit] as const,
-    operation: (environmentId: string, operationId: string) =>
-      ['environments', 'detail', environmentId, 'operations', operationId] as const,
   },
   mcpServers: {
     all: ['mcp-servers'] as const,
     list: (pageNumber = 1, pageSize = 50) => ['mcp-servers', 'list', pageNumber, pageSize] as const,
-    detail: (id: string) => ['mcp-servers', 'detail', id] as const,
+    detail: (name: string) => ['mcp-servers', 'detail', name] as const,
   },
   chats: {
     all: ['chats'] as const,

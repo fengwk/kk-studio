@@ -1,9 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { DEFAULT_OPERATION_LIMIT } from '@/shared/api/environment-service'
 
 export interface InvalidateEnvironmentOptions {
-  operations?: boolean
   list?: boolean
 }
 
@@ -12,21 +10,12 @@ export interface InvalidateEnvironmentOptions {
  */
 export function invalidateEnvironmentArtifacts(
   queryClient: QueryClient,
-  environmentId: string,
-  options: InvalidateEnvironmentOptions,
+  _environmentId?: string,
+  options?: InvalidateEnvironmentOptions,
 ): Promise<void[]> {
   const promises: Promise<void>[] = []
 
-  if (options.operations) {
-    promises.push(
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.environments.operations(environmentId, DEFAULT_OPERATION_LIMIT),
-        exact: true,
-      }),
-    )
-  }
-
-  if (options.list) {
+  if (!options || options.list) {
     promises.push(
       queryClient.invalidateQueries({
         queryKey: queryKeys.environments.list,
