@@ -205,7 +205,7 @@ export function useAgentThreadController(
     [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
   const working = isThreadWorking(thread, timeline)
-  const runtimeLabels = resolveRuntimeLabels(thread, models, agents)
+  const runtimeLabels = resolveRuntimeLabels(thread, models)
 
   useEffect(() => {
     if (initializedReplayThreadRef.current === threadId) {
@@ -665,7 +665,6 @@ export function useAgentThreadController(
 function resolveRuntimeLabels(
   thread: ReturnType<typeof useAgentThreadQueries>['thread'],
   models: AgentModelView[],
-  _agents: ReturnType<typeof useAgentThreadQueries>['agents'],
 ) {
   const settings = thread?.branchSettings
   const model = models.find(
