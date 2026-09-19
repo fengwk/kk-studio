@@ -61,7 +61,7 @@ createdAt / updatedAt: 毫秒截断，updatedAt >= createdAt
 
 创建与更新成功后携带且仅携带一个 `AppendCustomEntry("goal.state", 1, …)`，查询与所有错误结果不带任何 effects。真正把条目写进会话树并保证「要么全成功、要么整体回滚」的是 Runtime 的 [`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolOutcomeAppender.java)：本模块只声明意图，不触碰存储。
 
-[`GoalContextProjector`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java) 只在最新快照为 `ACTIVE` 时，用 `active-goal-context.md` 模板与规范 `goal` 包裹对象生成一条文本片段；快照不存在或已终结则返回空列表。片段由 Platform 在规划下一次模型请求时按 `AgentMessage.system` 注入 preamble，因此已完成的目标不会继续占用上下文。
+[`GoalContextProjector`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java) 只在最新快照为 `ACTIVE` 时，用 `active-goal-context.md` 模板与规范 `goal` 包裹对象生成一条文本片段；快照不存在或已终结则返回空列表。片段由 Platform 在规划下一次模型请求时拼接进单条 `systemInstruction`，因此已完成的目标不会继续占用上下文。
 
 ## Skill 与 Subagent 桥接
 

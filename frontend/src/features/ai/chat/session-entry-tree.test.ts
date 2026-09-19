@@ -13,7 +13,7 @@ const entries: HarnessSessionEntryDTO[] = [
   entry('user', 'root', 'MESSAGE', message('USER', 'original prompt')),
   entry('assistant', 'user', 'MESSAGE', message('ASSISTANT', 'answer')),
   entry('tool', 'assistant', 'MESSAGE', message('TOOL', 'tool result')),
-  entry('custom', 'assistant', 'CUSTOM_MESSAGE', message('SYSTEM', 'custom text')),
+  entry('custom', 'assistant', 'CUSTOM_MESSAGE', message('USER', 'custom text')),
   entry('error', 'root', 'ASSISTANT_ERROR', { error: { kind: 'INVALID_REQUEST', message: 'bad turn' } }),
 ]
 
@@ -69,7 +69,7 @@ describe('Session Entry Tree', () => {
     expect(byEntryId.get('error')?.isLastSibling).toBe(true)
   })
 
-  it('keeps system and tool Entries out of the conversation view while re-attaching visible descendants', () => {
+  it('keeps non-conversation and tool Entries out of the conversation view while re-attaching visible descendants', () => {
     const tree: HarnessSessionEntryDTO[] = [
       entry('root', null, 'ROOT', {}),
       entry('user', 'root', 'MESSAGE', message('USER', 'a user prompt')),
@@ -90,7 +90,7 @@ describe('Session Entry Tree', () => {
       entry('user1', 'root', 'MESSAGE', message('USER', 'first user')),
       entry('tool', 'user1', 'MESSAGE', message('TOOL', 'a tool result')),
       entry('assistant', 'tool', 'MESSAGE', message('ASSISTANT', 'second reply')),
-      entry('custom', 'tool', 'CUSTOM_MESSAGE', message('SYSTEM', 'second branch')),
+      entry('custom', 'tool', 'CUSTOM_MESSAGE', message('USER', 'second branch')),
       entry('user2', 'root', 'MESSAGE', message('USER', 'second user')),
       entry('response', 'user2', 'MESSAGE', message('ASSISTANT', 'reply')),
     ]
@@ -133,7 +133,7 @@ describe('Session Entry Tree', () => {
     ])
   })
 
-  it('classifies unknown and malformed Entries while keeping the conversation view free of system records', () => {
+  it('classifies unknown and malformed Entries while keeping the conversation view free of non-conversation records', () => {
     const unknown = entry('unknown', null, 'MESSAGE', { message: { role: 'OTHER' } })
     const custom = entry('custom', null, 'CUSTOM_MESSAGE', {})
     expect(buildSessionEntryTree([unknown, custom], 'all').map((row) => row.kind)).toEqual(['other', 'custom'])
@@ -151,7 +151,7 @@ describe('Session Entry Tree', () => {
       },
     })
     const fullDraft = '用户原始内容 '.repeat(40)
-    const custom = entry('custom-draft', 'root', 'CUSTOM_MESSAGE', message('SYSTEM', fullDraft))
+    const custom = entry('custom-draft', 'root', 'CUSTOM_MESSAGE', message('USER', fullDraft))
 
     expect(buildSessionEntryTree([assistant], 'all')[0]?.preview).toBe('面向用户的正文')
     expect(buildSessionEntryTree([assistant], 'all', parseHistorySearchTokens('内部计划'))).toEqual([])
