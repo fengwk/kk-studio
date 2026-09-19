@@ -236,7 +236,12 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
     model: model.ref,
     variant: VARIANT,
     environmentId,
-    config: { tools: [...TOOL_NAMES], skills: [], subagents: [] },
+    config: {
+      tools: [...TOOL_NAMES],
+      skills: [],
+      subagents: [],
+      inheritParentEnvironment: true,
+    },
   }
   const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
   assert(status === 201, `create Agent status ${status}`)

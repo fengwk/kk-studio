@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -160,19 +161,24 @@ public class DatabaseSubagentRunner implements SubagentRunner {
         try (SubagentRunRegistry.Reservation reservation = reserve(parent, resumeThreadId)) {
           UUID sourceHeadEntryId;
           ThreadSnapshot child;
+          // 父环境是调用方 Model invocation 冻结的 branch 环境：子 Agent 的开关决定是否继承。
+          String parentEnvironmentName =
+              parent.snapshot().entryPath().baseSettings().environmentName();
           if (resumeThreadId == null) {
             child =
                 createChild(
                     runtime,
                     parent,
                     selected.name(),
+                    parentEnvironmentName,
                     taskRequest.prompt(),
                     taskRequest.invocationId());
             sourceHeadEntryId = child.thread().headEntryId();
           } else {
             child = resumeChild(runtime, parent, resumeThreadId);
-            // 恢复既有子会话只物化自身 Agent/Model；不重新注入父目录。
-            BranchSettings target = settingsMaterializer.materialize(selected.name());
+            // 恢复既有子会话按被调用 Agent 的继承开关重新收敛目标 settings。
+            BranchSettings target =
+                settingsMaterializer.materializeSubagent(selected.name(), parentEnvironmentName);
             List<NewThreadCommand> commands =
                 taskCommands(child.entryPath().baseSettings(), target, taskRequest.prompt());
             sourceHeadEntryId = child.thread().headEntryId();
@@ -450,11 +456,13 @@ public class DatabaseSubagentRunner implements SubagentRunner {
       HarnessRuntime runtime,
       ParentContext parent,
       String subagentType,
+      String parentEnvironmentName,
       String prompt,
       UUID taskInvocationId) {
     int childDepth = parent.depth() + 1;
-    // 新建子会话不继承父目录：目录由每次工具调用显式提供。
-    BranchSettings settings = settingsMaterializer.materialize(subagentType);
+    // 新建子会话不继承父目录：目录由每次工具调用显式提供。父环境只按子 Agent 的开关继承。
+    BranchSettings settings =
+        settingsMaterializer.materializeSubagent(subagentType, parentEnvironmentName);
     try {
       AcceptedCommands accepted =
           runtime.acceptCommands(
@@ -502,6 +510,11 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     return snapshot;
   }
 
+  /**
+   * 恢复子会话的配置收敛命令前缀：{@code SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> USER}。
+   *
+   * <p>环境只有在与当前目标不同（含清除为 null）时才发送 {@code SET_ENVIRONMENT}，null 表示明确解除该分支的环境选择。
+   */
   private static List<NewThreadCommand> taskCommands(
       BranchSettings current, BranchSettings target, String prompt) {
     List<NewThreadCommand> commands = new ArrayList<>();
@@ -510,6 +523,9 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     }
     if (!current.model().equals(target.model())) {
       commands.add(command(new SetModelCommandPayload(target.model())));
+    }
+    if (!Objects.equals(current.environmentName(), target.environmentName())) {
+      commands.add(command(new SetEnvironmentCommandPayload(target.environmentName())));
     }
     commands.add(command(new UserMessageCommandPayload(AgentMessage.user(prompt))));
     return List.copyOf(commands);

@@ -240,6 +240,7 @@ function agent() {
     model: 'model-1',
     variant: 'default',
     config: {
+      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],

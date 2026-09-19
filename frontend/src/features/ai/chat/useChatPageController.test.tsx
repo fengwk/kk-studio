@@ -152,6 +152,7 @@ function agent() {
     variant: 'default',
     environmentId: null,
     config: {
+      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],

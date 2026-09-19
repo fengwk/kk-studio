@@ -257,6 +257,19 @@ export function AgentForm({
         ) : null}
       </fieldset>
 
+      <div className="form-group">
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={draft.inheritParentEnvironment}
+            onChange={(event) =>
+              onChange({ ...draft, inheritParentEnvironment: event.target.checked })
+            }
+          />
+          <span>{t('ai.catalog.form.inheritParentEnvironment')}</span>
+        </label>
+      </div>
+
       {models.length === 0 && (
         <div className="inline-hint" role="status">
           {t('ai.catalog.form.needModel')}

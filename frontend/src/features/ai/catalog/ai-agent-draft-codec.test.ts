@@ -59,9 +59,16 @@ describe('ai-agent-draft-codec', () => {
       model: 'minimax/model',
       variant: '',
       environmentId: '',
+      inheritParentEnvironment: true,
       subagents: [],
     })
-    expect(emptyAgentDraft()).toMatchObject({ model: '', variant: '', environmentId: '', subagents: [] })
+    expect(emptyAgentDraft()).toMatchObject({
+      model: '',
+      variant: '',
+      environmentId: '',
+      inheritParentEnvironment: true,
+      subagents: [],
+    })
   })
 
   it('normalizes tool names and capability names and rejects collisions in create payloads', () => {
@@ -117,6 +124,7 @@ describe('ai-agent-draft-codec', () => {
       variant: 'quality',
       environmentId: 'env-uuid-1',
       config: {
+        inheritParentEnvironment: false,
         tools: [' read ', ''],
         skills: [{ sourceId: ' src-1 ', name: ' dev ' }],
         subagents: [' writer ', ''],
@@ -133,6 +141,7 @@ describe('ai-agent-draft-codec', () => {
       model: 'minimax/model',
       variant: 'quality',
       environmentId: 'env-uuid-1',
+      inheritParentEnvironment: false,
       tools: ['read'],
       skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['writer'],
@@ -179,6 +188,7 @@ describe('ai-agent-draft-codec', () => {
       variant: 'quality',
       environmentId: 'env-uuid-1',
       config: {
+        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ sourceId: 'src-1', name: 'dev' }],
         subagents: ['helper'],
@@ -192,6 +202,7 @@ describe('ai-agent-draft-codec', () => {
       variant: 'quality',
       environmentId: 'env-uuid-1',
       config: {
+        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ sourceId: 'src-1', name: 'dev' }],
         subagents: ['helper'],
@@ -207,6 +218,7 @@ describe('ai-agent-draft-codec', () => {
       systemPrompt: null,
       environmentId: null,
       config: {
+        inheritParentEnvironment: true,
         tools: ['read', 'bash'],
         skills: [{ sourceId: 'src-1', name: 'dev' }],
         subagents: ['helper'],
@@ -242,11 +254,52 @@ describe('ai-agent-draft-codec', () => {
     },
   )
 
-  it('writes the strict config shape with only tools, skills, and subagents', () => {
+  it('writes the strict config shape with tools, skills, subagents, and inheritParentEnvironment', () => {
     expect(toEditableAgent(draft()).config).toEqual({
+      inheritParentEnvironment: true,
       tools: ['read', 'bash'],
       skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['helper'],
     })
+  })
+
+  it('encodes and decodes inheritParentEnvironment as exact required boolean', () => {
+    const defaultDraft = emptyAgentDraft()
+    expect(defaultDraft.inheritParentEnvironment).toBe(true)
+
+    const trueAgent: AgentDefinitionDTO = {
+      name: 'assistant-true',
+      description: null,
+      systemPrompt: null,
+      model: 'minimax/model',
+      variant: null,
+      environmentId: null,
+      config: {
+        inheritParentEnvironment: true,
+        tools: [],
+        skills: [],
+        subagents: [],
+      },
+      version: '1',
+      createTime: null,
+      updateTime: null,
+    }
+    const trueDraft = toAgentDraft(trueAgent)
+    expect(trueDraft.inheritParentEnvironment).toBe(true)
+    expect(toEditableAgent(trueDraft).config.inheritParentEnvironment).toBe(true)
+    expect(toEditableAgentUpdate(trueDraft).config.inheritParentEnvironment).toBe(true)
+
+    const falseAgent: AgentDefinitionDTO = {
+      ...trueAgent,
+      name: 'assistant-false',
+      config: {
+        ...trueAgent.config,
+        inheritParentEnvironment: false,
+      },
+    }
+    const falseDraft = toAgentDraft(falseAgent)
+    expect(falseDraft.inheritParentEnvironment).toBe(false)
+    expect(toEditableAgent(falseDraft).config.inheritParentEnvironment).toBe(false)
+    expect(toEditableAgentUpdate(falseDraft).config.inheritParentEnvironment).toBe(false)
   })
 })

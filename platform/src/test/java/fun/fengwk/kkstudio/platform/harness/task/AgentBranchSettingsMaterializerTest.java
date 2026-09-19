@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
@@ -34,15 +36,25 @@ class AgentBranchSettingsMaterializerTest {
         new AgentBranchSettingsMaterializer(
             agentRepository,
             modelRepository,
-            new AgentModelRuntimeConfigParser(new ObjectMapper()));
+            new AgentModelRuntimeConfigParser(new ObjectMapper()),
+            new AgentDefinitionConfigCodec(new ObjectMapper()));
   }
 
   private void stub(String agentName, String variant, String modelConfigJson) {
+    stub(agentName, variant, modelConfigJson, true);
+  }
+
+  private void stub(
+      String agentName, String variant, String modelConfigJson, boolean inheritParentEnvironment) {
     AgentDefinition agent = new AgentDefinition();
     agent.setName(agentName);
     agent.setModelProviderName("openai");
     agent.setModelName("gpt-x");
     agent.setVariant(variant);
+    agent.setConfigJson(
+        "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":"
+            + inheritParentEnvironment
+            + "}");
     when(agentRepository.getByName(agentName)).thenReturn(agent);
 
     AgentModel model = new AgentModel();
@@ -63,6 +75,32 @@ class AgentBranchSettingsMaterializerTest {
     // branch settings 只冻结 Agent 与 model selection：环境与目录都不进入历史。
     assertEquals("alpha", settings.agentName());
     assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
+    // root/普通调用没有父调用，environmentName 恒为 null。
+    assertNull(settings.environmentName());
+  }
+
+  /** 测试意图：验证 subagent 物化只在 inheritParentEnvironment=true 时使用父调用冻结的 Environment name。 */
+  @Test
+  void inheritsParentEnvironmentOnlyWhenSubagentEnablesIt() {
+    stub("alpha", null, validModelConfig(), true);
+
+    BranchSettings inherited = materializer.materializeSubagent("alpha", "env-a");
+
+    assertEquals("env-a", inherited.environmentName());
+    assertEquals(new ModelSelection("openai", "gpt-x", "quality"), inherited.model());
+
+    stub("beta", null, validModelConfig(), false);
+    BranchSettings isolated = materializer.materializeSubagent("beta", "env-a");
+
+    assertNull(isolated.environmentName());
+  }
+
+  /** 测试意图：验证父子环境为 null 时（父 branch 未选择 Environment）继承开关也不会凭空造出环境。 */
+  @Test
+  void keepsNullEnvironmentWhenParentHasNone() {
+    stub("alpha", null, validModelConfig(), true);
+
+    assertNull(materializer.materializeSubagent("alpha", null).environmentName());
   }
 
   /** Agent 显式 variant 覆盖默认 variant。 */
@@ -110,6 +148,26 @@ class AgentBranchSettingsMaterializerTest {
     assertTrue(
         modelConfigError.getMessage().contains("invalid subagent model configuration: alpha"));
     assertInstanceOf(IllegalArgumentException.class, modelConfigError.getCause());
+  }
+
+  /** 测试意图：验证 subagent 物化读取损坏的 Agent config 时以带上下文与原因链的稳定异常失败。 */
+  @Test
+  void wrapsCorruptAgentConfigsWithContext() {
+    AgentDefinition broken = new AgentDefinition();
+    broken.setName("broken");
+    broken.setModelProviderName("openai");
+    broken.setModelName("gpt-x");
+    broken.setConfigJson("{\"tools\":[]}");
+    when(agentRepository.getByName("broken")).thenReturn(broken);
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> materializer.materializeSubagent("broken", "env-a"));
+
+    assertTrue(
+        error.getMessage().contains("invalid subagent configuration: broken"), error.getMessage());
+    assertInstanceOf(IllegalStateException.class, error.getCause());
   }
 
   private static String validModelConfig() {

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -22,7 +21,6 @@ public final class SystemPromptPreviewServiceFactory {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
-  private final SubagentConfigProvider configProvider;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
 
@@ -32,7 +30,6 @@ public final class SystemPromptPreviewServiceFactory {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
-      SubagentConfigProvider configProvider,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.agentDefinitionRepository =
@@ -43,7 +40,6 @@ public final class SystemPromptPreviewServiceFactory {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
-    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -56,7 +52,6 @@ public final class SystemPromptPreviewServiceFactory {
         environmentRegistry,
         environmentRepository,
         skillInventoryQueryService,
-        configProvider,
         promptComposer,
         clock);
   }

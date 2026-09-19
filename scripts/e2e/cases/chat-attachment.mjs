@@ -319,7 +319,12 @@ registerCase({
             systemPrompt: 'Complete without calling tools.',
             model: `${model.providerName}/${model.name}`,
             variant: 'default',
-            config: { tools: ['get_goal'], skills: [], subagents: [] },
+            config: {
+              tools: ['get_goal'],
+              skills: [],
+              subagents: [],
+              inheritParentEnvironment: true,
+            },
           })
         ).json,
       )
@@ -389,6 +394,7 @@ registerCase({
               tools: ['get_goal', 'create_goal'],
               skills: [],
               subagents: [],
+              inheritParentEnvironment: true,
             },
             expectedVersion: agent.version,
           })

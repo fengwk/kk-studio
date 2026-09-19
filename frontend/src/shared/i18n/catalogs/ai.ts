@@ -465,6 +465,10 @@ export const aiCatalog = {
     'en-US': 'No candidate Subagents',
     'zh-CN': '暂无候选 Subagents',
   },
+  'ai.catalog.form.inheritParentEnvironment': {
+    'en-US': "Inherit parent session's current Environment when delegated to as a subagent",
+    'zh-CN': '作为子 Agent 被委派时，继承父会话当前 Environment',
+  },
   'ai.catalog.form.skillCatalogSource': {
     'en-US': 'Skill Catalog Environment',
     'zh-CN': 'Skill 目录 Environment',

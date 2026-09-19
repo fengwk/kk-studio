@@ -47,6 +47,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     model: 'minimax/MiniMax',
     variant: 'quality',
     config: {
+      inheritParentEnvironment: true,
       tools: ['read', 'bash', 'grep'],
       skills: [{ sourceId: 'src-1', name: 'dev' }],
       subagents: ['writer'],
@@ -103,6 +104,7 @@ describe('AI resource cards', () => {
       <AgentResourceCard
         agent={agent({
           config: {
+            inheritParentEnvironment: true,
             tools: [],
             skills: [
               { sourceId: 'src-1', name: 'skill-alpha' },
@@ -129,6 +131,7 @@ describe('AI resource cards', () => {
       <AgentResourceCard
         agent={agent({
           config: {
+            inheritParentEnvironment: true,
             tools: [],
             skills: [],
             subagents: ['helper', 'writer', 'architect'],
@@ -152,7 +155,7 @@ describe('AI resource cards', () => {
     rerender(
       <AgentResourceCard
         agent={agent({
-          config: { tools: [], skills: [], subagents: [] },
+          config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
         })}
         models={[]}
         onEdit={() => undefined}
@@ -172,6 +175,7 @@ describe('AI resource cards', () => {
           model: 'missing-model',
           variant: null,
           config: {
+            inheritParentEnvironment: true,
             tools: [],
             skills: [],
             subagents: [],

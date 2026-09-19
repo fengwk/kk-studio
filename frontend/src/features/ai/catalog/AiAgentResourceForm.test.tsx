@@ -91,7 +91,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     model: 'minimax/MiniMax',
     variant: null,
     environmentId: null,
-    config: { tools: [], skills: [], subagents: [] },
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
     updateTime: null,
@@ -641,5 +641,82 @@ describe('AgentForm current contracts', () => {
 
     // 产出的 tools 包含原有 bash、legacy-tool 以及新勾选的 generic-tool
     expect(drafts.at(-1)?.tools).toEqual(['bash', 'legacy-tool', 'generic-tool'])
+  })
+
+  it('defaults inheritParentEnvironment checkbox to checked in create mode and toggles to false', async () => {
+    const user = userEvent.setup()
+    let currentDraft: AgentDraft = emptyAgentDraft(modelWithVariants())
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>(currentDraft)
+      return (
+        <AgentForm
+          mode="create"
+          draft={draft}
+          models={[modelWithVariants()]}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: '作为子 Agent 被委派时，继承父会话当前 Environment',
+    })
+    expect(checkbox).toBeInTheDocument()
+    expect(checkbox).toBeChecked()
+    expect(currentDraft.inheritParentEnvironment).toBe(true)
+
+    // 用户切换开关为 false
+    await user.click(checkbox)
+    expect(checkbox).not.toBeChecked()
+    expect(currentDraft.inheritParentEnvironment).toBe(false)
+
+    // 转换为提交请求体包含 required inheritParentEnvironment: false
+    const createPayload = toEditableAgent({ ...currentDraft, name: 'new-agent' })
+    expect(createPayload.config.inheritParentEnvironment).toBe(false)
+  })
+
+  it('accurately renders inheritParentEnvironment as unchecked when editing false draft and toggles to true', async () => {
+    const user = userEvent.setup()
+    let currentDraft: AgentDraft = {
+      ...emptyAgentDraft(modelWithVariants()),
+      name: 'existing-agent',
+      inheritParentEnvironment: false,
+    }
+    function Harness() {
+      const [draft, setDraft] = useState<AgentDraft>(currentDraft)
+      return (
+        <AgentForm
+          mode="edit"
+          draft={draft}
+          models={[modelWithVariants()]}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    const checkbox = screen.getByRole('checkbox', {
+      name: '作为子 Agent 被委派时，继承父会话当前 Environment',
+    })
+    expect(checkbox).toBeInTheDocument()
+    expect(checkbox).not.toBeChecked()
+    expect(currentDraft.inheritParentEnvironment).toBe(false)
+
+    // 用户切换开关为 true
+    await user.click(checkbox)
+    expect(checkbox).toBeChecked()
+    expect(currentDraft.inheritParentEnvironment).toBe(true)
+
+    const updatePayload = toEditableAgent({ ...currentDraft, name: 'existing-agent' })
+    expect(updatePayload.config.inheritParentEnvironment).toBe(true)
   })
 })

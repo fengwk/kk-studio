@@ -60,7 +60,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     validateConfig(config);
     referenceResolver.requireEnvironmentAndSkills(
         definition.getEnvironmentId(), config.getSkills());
-    referenceResolver.requireSubagentsForUpdate(config.getSubagents());
+    referenceResolver.requireSubagentsForCreate(definition.getName(), config.getSubagents());
     try {
       if (!agentDefinitionRepository.create(definition)) {
         throw new IllegalStateException("create agent definition failed");

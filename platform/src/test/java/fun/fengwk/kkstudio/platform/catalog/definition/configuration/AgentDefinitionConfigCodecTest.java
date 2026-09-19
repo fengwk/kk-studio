@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition.configuration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ class AgentDefinitionConfigCodecTest {
     config.setSkills(
         List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "ops")));
     config.setSubagents(List.of("reviewer"));
+    config.setInheritParentEnvironment(false);
 
     String encoded = codec.encode(config);
     AgentDefinitionConfigDTO decoded = codec.decode(encoded);
@@ -37,6 +39,44 @@ class AgentDefinitionConfigCodecTest {
         List.of(new AgentSkillRefDTO(SOURCE_A, "dev"), new AgentSkillRefDTO(SOURCE_B, "ops")),
         decoded.getSkills());
     assertEquals(List.of("reviewer"), decoded.getSubagents());
+    assertEquals(Boolean.FALSE, decoded.getInheritParentEnvironment());
+  }
+
+  /**
+   * 测试意图：验证 inheritParentEnvironment 的严格契约——缺省（字段缺失）解析为 true，序列化总是显式输出该字段，而显式 JSON null 属于非法 shape
+   * 并 fail closed。
+   */
+  @Test
+  void defaultsInheritParentEnvironmentToTrueAndRejectsExplicitNull() {
+    // 缺省：持久化 JSON 不含该字段时按 DTO 初值得到 true。
+    AgentDefinitionConfigDTO omitted =
+        codec.decode("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
+    assertEquals(Boolean.TRUE, omitted.getInheritParentEnvironment());
+
+    // 编码始终显式输出该字段，使当前持久化形状自描述。
+    String encoded = codec.encode(config());
+    assertTrue(encoded.contains("\"inheritParentEnvironment\":true"), encoded);
+
+    // 显式 null 不是缺省而是非法 shape：decode 走 stored config 严格边界。
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":null}"));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":\"false\"}"));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":0}"));
+    // encode 同样拒绝 null 值的 config 对象。
+    AgentDefinitionConfigDTO nullSwitch = config();
+    nullSwitch.setInheritParentEnvironment(null);
+    assertThrows(IllegalArgumentException.class, () -> codec.encode(nullSwitch));
   }
 
   /** 测试意图：验证编解码时严格要求必填字段，拒绝 null 字段与非规范配置。 */

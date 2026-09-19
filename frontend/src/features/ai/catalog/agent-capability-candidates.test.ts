@@ -20,7 +20,7 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
     model: 'minimax/MiniMax',
     variant: null,
     environmentId: null,
-    config: { tools: [], skills: [], subagents: [] },
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
     createTime: null,
     updateTime: null,

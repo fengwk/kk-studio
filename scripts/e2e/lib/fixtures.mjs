@@ -220,12 +220,33 @@ export function agentConfigMatrix() {
     {
       id: 'valid.empty_lists',
       ok: true,
-      title: '空 tools/skills/subagents',
+      title: '空 tools/skills/subagents 且继承开关缺省为 true',
       build: () => ({
         tools: [],
         skills: [],
         subagents: [],
       }),
+      assertCreated: (agent) => {
+        if (agent.config?.inheritParentEnvironment !== true) {
+          throw new Error(`inheritParentEnvironment must default to true: ${JSON.stringify(agent)}`)
+        }
+      },
+    },
+    {
+      id: 'valid.disable_parent_environment_inheritance',
+      ok: true,
+      title: '显式关闭父 Environment 继承',
+      build: () => ({
+        tools: [],
+        skills: [],
+        subagents: [],
+        inheritParentEnvironment: false,
+      }),
+      assertCreated: (agent) => {
+        if (agent.config?.inheritParentEnvironment !== false) {
+          throw new Error(`inheritParentEnvironment=false was not preserved: ${JSON.stringify(agent)}`)
+        }
+      },
     },
     {
       id: 'valid.goal_contributor_tools',
@@ -235,6 +256,7 @@ export function agentConfigMatrix() {
         tools: ['create_goal', 'get_goal', 'update_goal'],
         skills: [],
         subagents: [],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -246,6 +268,7 @@ export function agentConfigMatrix() {
       build: () => ({
         skills: [],
         subagents: [],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -257,6 +280,7 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: [],
         subagents: [],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -268,6 +292,33 @@ export function agentConfigMatrix() {
       build: () => ({
         tools: [],
         skills: [],
+        inheritParentEnvironment: true,
+      }),
+    },
+    {
+      id: 'invalid.null_inherit_parent_environment',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /inheritParentEnvironment|required/i,
+      title: 'inheritParentEnvironment 显式 null 拒绝',
+      build: () => ({
+        tools: [],
+        skills: [],
+        subagents: [],
+        inheritParentEnvironment: null,
+      }),
+    },
+    {
+      id: 'invalid.non_boolean_inherit_parent_environment',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /Failed to read request|inheritParentEnvironment|boolean/i,
+      title: 'inheritParentEnvironment 非布尔值拒绝',
+      build: () => ({
+        tools: [],
+        skills: [],
+        subagents: [],
+        inheritParentEnvironment: 'false',
       }),
     },
     {
@@ -280,6 +331,7 @@ export function agentConfigMatrix() {
         tools: ['definitely_not_a_real_tool'],
         skills: [],
         subagents: [],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -301,6 +353,7 @@ export function agentConfigMatrix() {
           },
         ],
         subagents: [],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -313,6 +366,7 @@ export function agentConfigMatrix() {
         tools: [],
         skills: [],
         subagents: ['missing-agent', 'missing-agent'],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -325,6 +379,7 @@ export function agentConfigMatrix() {
         tools: [],
         skills: [],
         subagents: ['definitely-not-a-real-agent'],
+        inheritParentEnvironment: true,
       }),
     },
     {
@@ -337,6 +392,7 @@ export function agentConfigMatrix() {
         tools: [],
         skills: [],
         subagents: [],
+        inheritParentEnvironment: true,
         unexpected: true,
       }),
     },

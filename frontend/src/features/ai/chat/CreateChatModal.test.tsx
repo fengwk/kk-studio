@@ -13,6 +13,7 @@ const agentWithEnv: AgentDefinitionDTO = {
   variant: 'default',
   environmentId: 'env-dev-1',
   config: {
+    inheritParentEnvironment: true,
     tools: [],
     skills: [],
     subagents: [],

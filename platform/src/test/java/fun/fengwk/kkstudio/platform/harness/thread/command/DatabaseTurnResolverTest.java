@@ -875,7 +875,7 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void taskDelegationComesFromLatestAllowlistAndDepthBudget() {
+  void taskDelegationComesFromLatestAllowlistOnly() {
     Fixture fixture = taskFixture();
     fixture.agentConfig.setSubagents(List.of("reviewer"));
     fixture.subagent("reviewer", "Review");
@@ -893,8 +893,19 @@ class DatabaseTurnResolverTest {
         List.of(),
         withoutTask.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(preambleText(withoutTask).contains("subagent"));
+  }
 
+  /**
+   * 测试意图：验证 task declaration 与冻结的 subagent binding 只由非空 allowlist 决定，绝不按 Session depth 动态移除；递归深度是
+   * task 调用期 gate，由 DatabaseSubagentRunner 拒绝。
+   */
+  @Test
+  void keepsTaskDeclarationAndSubagentBindingsAtMaxDepth() {
+    Fixture fixture = taskFixture();
     fixture.agentConfig.setSubagents(List.of("reviewer"));
+    fixture.subagent("reviewer", "Review");
+
+    // maxDepth=2：depth=2 的 subagent session 已到达部署上限，但规划仍然声明 task 并冻结 binding。
     EntryPath depthLimited =
         new EntryPath(
             List.of(
@@ -905,13 +916,13 @@ class DatabaseTurnResolverTest {
                     new RootPayload(
                         settings("default"), new SubagentContext(id(90), id(80), id(70), 2)),
                     NOW)));
-    ModelRequestSpec depthLimitedRequest = fixture.resolved(depthLimited);
-    assertEquals(List.of(), depthLimitedRequest.subagentBindings());
+
+    ModelRequestSpec requestSpec = fixture.resolved(depthLimited);
     assertEquals(
-        List.of(),
-        depthLimitedRequest.toolBindings().stream()
-            .map(binding -> binding.descriptor().name())
-            .toList());
+        List.of(new SubagentBinding("reviewer", "Review")), requestSpec.subagentBindings());
+    assertEquals(
+        List.of(TaskTool.NAME),
+        requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
   }
 
   /** allowlist 指向不存在的 subagent 时立即拒绝，绝不静默跳过。 */
@@ -2544,7 +2555,6 @@ class DatabaseTurnResolverTest {
               environmentRepository,
               skillInventoryQueryService,
               () -> new CompactionConfig(20_000, null),
-              () -> subagentConfig,
               new AgentPromptComposer(() -> subagentConfig),
               roleToolSelector,
               roleContextProjector,

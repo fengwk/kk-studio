@@ -123,7 +123,7 @@ registerCase({
             systemPrompt: 's',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [] },
+            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
           }),
         { status: 400, messageIncludes },
       )
@@ -146,7 +146,7 @@ registerCase({
           systemPrompt: 's',
           model: modelRef(model),
           variant: '__missing_variant__',
-          config: { tools: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
         }),
       { status: 400, messageIncludes: /variant/i },
     )
@@ -317,7 +317,7 @@ registerCase({
           systemPrompt: 'you are e2e',
           model: modelRef(model),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
         })
       ).json,
     )
@@ -329,7 +329,7 @@ registerCase({
           systemPrompt: 'updated prompt',
           model: modelRef(updatedModel),
           variant: updatedModel.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: false },
           expectedVersion: agent.version,
         })
       ).json,
@@ -339,6 +339,7 @@ registerCase({
       JSON.stringify(updated),
     )
     assert(updated.systemPrompt === 'updated prompt', JSON.stringify(updated))
+    assert(updated.config?.inheritParentEnvironment === false, JSON.stringify(updated))
     await ctx.call(
       'DELETE',
       `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
@@ -357,7 +358,7 @@ registerCase({
           systemPrompt: 'recreated prompt',
           model: modelRef(model),
           variant: model.config.defaultVariant,
-          config: { tools: [], skills: [], subagents: [] },
+          config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
         })
       ).json,
     )
@@ -379,7 +380,7 @@ registerCase({
   id: 'crud.agent.subagent_reference_lifecycle',
   level: 'L1',
   title: 'Agent subagents 名称引用与删除保护',
-  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents',
+  docs: '创建 parent.subagents=[child] 后 child DELETE => 409；PUT parent 移除引用后 child 可硬删除；公开 config 始终完整返回 tools/skills/subagents/inheritParentEnvironment',
   async run(ctx) {
     const model = await firstModel(ctx)
     const suffix = cid().slice(0, 8)
@@ -394,7 +395,7 @@ registerCase({
             systemPrompt: 'return a concise report',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [] },
+            config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
           })
         ).json,
       )
@@ -406,7 +407,12 @@ registerCase({
             systemPrompt: 'delegate when needed',
             model: modelRef(model),
             variant: model.config.defaultVariant,
-            config: { tools: [], skills: [], subagents: [child.name] },
+            config: {
+              tools: [],
+              skills: [],
+              subagents: [child.name],
+              inheritParentEnvironment: false,
+            },
           })
         ).json,
       )
@@ -415,7 +421,8 @@ registerCase({
           && parent.config.tools.length === 0
           && Array.isArray(parent.config?.skills)
           && parent.config.skills.length === 0
-          && JSON.stringify(parent.config?.subagents) === JSON.stringify([child.name]),
+          && JSON.stringify(parent.config?.subagents) === JSON.stringify([child.name])
+          && parent.config?.inheritParentEnvironment === false,
         JSON.stringify(parent),
       )
       await expectHttpError(
@@ -436,7 +443,12 @@ registerCase({
               systemPrompt: parent.systemPrompt,
               model: parent.model,
               variant: parent.variant,
-              config: { tools: [], skills: [], subagents: [] },
+              config: {
+                tools: [],
+                skills: [],
+                subagents: [],
+                inheritParentEnvironment: true,
+              },
               expectedVersion: parent.version,
             },
           )

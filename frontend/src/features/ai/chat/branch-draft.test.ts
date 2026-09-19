@@ -75,7 +75,7 @@ function agent(
     model: 'provider/model',
     variant: null,
     environmentId,
-    config: { tools, skills, subagents },
+    config: { inheritParentEnvironment: true, tools, skills, subagents },
     version: '1',
     createTime: '2026-08-09T00:00:00Z',
     updateTime: '2026-08-09T00:00:00Z',

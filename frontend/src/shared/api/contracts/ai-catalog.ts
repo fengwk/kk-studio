@@ -129,6 +129,8 @@ export interface AgentSkillRefDTO {
 }
 
 export interface AgentDefinitionConfigDTO {
+  /** 子 Agent 被委派时是否继承父会话当前的 Environment。 */
+  inheritParentEnvironment: boolean
   /** 有序且唯一的模型可见 tool name 列表；候选来自离线 tool catalog。 */
   tools: string[]
   skills: AgentSkillRefDTO[]
