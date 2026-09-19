@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from 'react'
+import type { RefObject } from 'react'
 import {
   ThreadEventView,
   useThreadPanelViewState,
@@ -72,30 +72,26 @@ export function useBoundThreadPanelLabels(
   environments: EnvironmentCardDTO[],
   controller: {
     runtimeLabels: {
-      environment: string | null
+      environmentName: string | null
       contextWindow: number | undefined
     }
     branchUsage: TurnUsage | null
   },
 ): ChatPanelLabels {
-  const environmentReadyById = useMemo(
-    () => new Map(environments.map((environment) => [environment.id, environment.ready])),
-    [environments],
-  )
-  const environmentId = controller.runtimeLabels.environment
-  const boundEnvCard = environmentId
-    ? environments.find((e) => e.id === environmentId)
+  const environmentName = controller.runtimeLabels.environmentName
+  const boundEnvCard = environmentName
+    ? environments.find((e) => e.name === environmentName)
     : undefined
   const environmentReady =
-    boundEnvCard != null
-      ? boundEnvCard.ready
-      : environmentId != null
-        ? (environmentReadyById.get(environmentId) ?? false)
-        : undefined
-  const environment = environmentId
+    environmentName == null
+      ? undefined
+      : boundEnvCard != null
+        ? boundEnvCard.ready
+        : false
+  const environment = environmentName
     ? {
-        environmentId,
-        environmentName: boundEnvCard?.name ?? environmentId,
+        environmentId: boundEnvCard?.id ?? environmentName,
+        environmentName,
       }
     : null
   return {

@@ -874,27 +874,47 @@ export function useAgentPaneController({
       model: activeDraft.model,
       models,
       yoloEnabled: activeDraft.yoloEnabled,
+      environmentName: activeDraft.environmentName,
+      environments,
       onModelChange: (model) => {
         if (isBoundTarget(target)) {
           branchPanel.selectModel(model)
         } else {
-          setLocalDraft((current) => current ? { ...current, model } : current)
+          setLocalDraft((current) => (current ? { ...current, model } : current))
         }
       },
       onYoloChange: (enabled) => {
         if (isBoundTarget(target)) {
           branchPanel.setYoloEnabled(enabled)
         } else {
-          setLocalDraft((current) => current ? { ...current, yoloEnabled: enabled } : current)
+          setLocalDraft((current) => (current ? { ...current, yoloEnabled: enabled } : current))
+        }
+      },
+      onEnvironmentChange: (environmentName) => {
+        if (isBoundTarget(target)) {
+          branchPanel.selectEnvironment(environmentName)
+        } else {
+          setLocalDraft((current) => (current ? { ...current, environmentName } : current))
         }
       },
     },
   }
-  const currentAgent = agents.find((item) => item.name === activeDraft?.agentName)
-  const boundEnvironment = currentAgent?.environmentId
-    ? environments.find((env) => env.id === currentAgent.environmentId) ?? null
+  const activeDraftEnvironmentName = activeDraft?.environmentName ?? null
+  const boundEnvCard = activeDraftEnvironmentName
+    ? environments.find((env) => env.name === activeDraftEnvironmentName) ?? null
     : null
-  const environmentReady = boundEnvironment ? boundEnvironment.ready : undefined
+  const boundEnvironment = activeDraftEnvironmentName
+    ? {
+        id: boundEnvCard?.id ?? activeDraftEnvironmentName,
+        name: activeDraftEnvironmentName,
+      }
+    : null
+  const environmentReady =
+    activeDraftEnvironmentName == null
+      ? undefined
+      : boundEnvCard != null
+        ? boundEnvCard.ready
+        : false
   const error = actionError
     ?? (isBoundTarget(target) ? branchPanel.yoloError ?? controller.actionError : null)
     ?? (isNewThreadTarget(target) && treeEntriesQuery.error

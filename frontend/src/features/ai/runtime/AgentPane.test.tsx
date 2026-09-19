@@ -1590,4 +1590,68 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     const atChild2 = branchDraftFromEntryPath(entries, 'child-2', fallbackDraft)
     expect(atChild2?.environmentName).toBeNull()
   })
+
+  /**
+   * 测试意图：验证 unbound 与 bound footer 对 environmentName 的投影规则：
+   * 1. unbound 面板按 activeDraft.environmentName 匹配卡片，未知 name 显示 unavailable 而不是 none；
+   * 2. bound 面板保持 snapshot facts 语义，不混入 pane 本地未提交的 environment draft。
+   */
+  it('projects environment status in unbound and bound footers according to snapshot semantics', async () => {
+    const envCard: EnvironmentCardDTO = {
+      id: 'uuid-env-ready',
+      name: 'cluster-ready',
+      status: 'READY',
+      ready: true,
+      lastSeen: '2026-09-19T00:00:00.000Z',
+      capabilities: [],
+      rootPath: null,
+      version: '1',
+      createTime: '2026-09-19T00:00:00.000Z',
+      updateTime: '2026-09-19T00:00:00.000Z',
+    }
+
+    // 1. unbound 面板：未知环境名称显示 unavailable
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const { result: unboundResult } = renderHook(
+      () =>
+        useAgentPaneController({
+          owner: { type: 'CHAT', id: CHAT_ID },
+          paneId: 'p1',
+          target: { kind: 'NEW_SESSION_DRAFT' },
+          agents,
+          environments: [envCard],
+          defaults: {},
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    )
+
+    await waitFor(() => expect(unboundResult.current.activeDraft).not.toBeNull())
+
+    // 本地草稿切换为已知环境
+    act(() => {
+      unboundResult.current.composer.settings?.onEnvironmentChange('cluster-ready')
+    })
+    expect(unboundResult.current.boundEnvironment?.name).toBe('cluster-ready')
+    expect(unboundResult.current.environmentReady).toBe(true)
+
+    // 本地草稿切换为未知环境：不可用且标记 false
+    act(() => {
+      unboundResult.current.composer.settings?.onEnvironmentChange('unknown-env')
+    })
+    expect(unboundResult.current.boundEnvironment?.name).toBe('unknown-env')
+    expect(unboundResult.current.environmentReady).toBe(false)
+
+    // 本地草稿清空为 None
+    act(() => {
+      unboundResult.current.composer.settings?.onEnvironmentChange(null)
+    })
+    expect(unboundResult.current.boundEnvironment).toBeNull()
+    expect(unboundResult.current.environmentReady).toBeUndefined()
+  })
 })

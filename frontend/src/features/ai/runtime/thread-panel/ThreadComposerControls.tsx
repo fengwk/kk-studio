@@ -23,15 +23,22 @@ export interface ThreadComposerModelOption {
   }
 }
 
+export interface ThreadComposerEnvironmentOption {
+  name: string
+}
+
 export interface ThreadComposerSettingsInput {
   model: ThreadComposerModelSelection
   models: readonly ThreadComposerModelOption[]
   yoloEnabled: boolean
+  environmentName: string | null
+  environments: readonly ThreadComposerEnvironmentOption[]
   onModelChange: (model: ThreadComposerModelSelection) => void
   onYoloChange: (enabled: boolean) => void
+  onEnvironmentChange: (environmentName: string | null) => void
 }
 
-export type ThreadComposerControlMenu = 'permission' | 'model' | 'variant' | null
+export type ThreadComposerControlMenu = 'permission' | 'environment' | 'model' | 'variant' | null
 
 interface SelectableItem {
   id: string
@@ -62,6 +69,13 @@ export function ThreadComposerControls({
   const [activeId, setActiveId] = useState('')
   const [query, setQuery] = useState('')
   const [variantModel, setVariantModel] = useState<ThreadComposerModelOption | null>(null)
+  const environmentOptions = useMemo(() => {
+    const names = (settings.environments ?? []).map((env) => env.name.trim()).filter(Boolean)
+    if (settings.environmentName && !names.includes(settings.environmentName)) {
+      names.push(settings.environmentName)
+    }
+    return Array.from(new Set(names))
+  }, [settings.environmentName, settings.environments])
   const models = useMemo(
     () => settings.models.filter((model) => variantIds(model).length > 0),
     [settings.models],
@@ -78,6 +92,12 @@ export function ThreadComposerControls({
         { id: 'yolo', label: t('ai.runtime.composer.permissionYolo') },
       ]
     }
+    if (menu === 'environment') {
+      return [
+        { id: '__none__', label: t('ai.runtime.composer.environmentNone') },
+        ...environmentOptions.map((name) => ({ id: name, label: name })),
+      ]
+    }
     if (menu === 'model') {
       const needle = query.trim().toLowerCase()
       return models.flatMap((model) => {
@@ -92,7 +112,7 @@ export function ThreadComposerControls({
       return variantIds(variantTarget).map((variant) => ({ id: variant, label: variant }))
     }
     return []
-  }, [menu, models, query, t, variantTarget])
+  }, [environmentOptions, menu, models, query, t, variantTarget])
 
   useEffect(() => {
     if (menu == null) {
@@ -102,6 +122,8 @@ export function ThreadComposerControls({
     }
     if (menu === 'permission') {
       setActiveId(settings.yoloEnabled ? 'yolo' : 'default')
+    } else if (menu === 'environment') {
+      setActiveId(settings.environmentName ?? '__none__')
     } else if (menu === 'model') {
       const currentId = currentModel ? modelId(currentModel) : ''
       setActiveId(currentId)
@@ -126,6 +148,7 @@ export function ThreadComposerControls({
     currentModel,
     menu,
     models,
+    settings.environmentName,
     settings.model.modelName,
     settings.model.providerName,
     settings.model.variant,
@@ -167,6 +190,11 @@ export function ThreadComposerControls({
     }
     if (menu === 'permission') {
       settings.onYoloChange(id === 'yolo')
+      onMenuChange(null, true)
+      return
+    }
+    if (menu === 'environment') {
+      settings.onEnvironmentChange(id === '__none__' ? null : id)
       onMenuChange(null, true)
       return
     }
@@ -247,6 +275,7 @@ export function ThreadComposerControls({
   const permissionLabel = settings.yoloEnabled
     ? t('ai.runtime.composer.permissionYolo')
     : t('ai.runtime.composer.permissionDefault')
+  const environmentLabel = settings.environmentName ?? t('ai.runtime.composer.environmentNone')
   const modelLabel =
     settings.model.providerName && settings.model.modelName
       ? `${settings.model.providerName}/${settings.model.modelName} · ${settings.model.variant}`
@@ -265,6 +294,19 @@ export function ThreadComposerControls({
           onClick={() => onMenuChange(menu === 'permission' ? null : 'permission')}
         >
           <span>{permissionLabel}</span>
+          <ChevronDown aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="thread-composer-control thread-composer-environment-control"
+          title={environmentLabel}
+          aria-label={t('ai.runtime.composer.environment')}
+          aria-haspopup="listbox"
+          aria-expanded={menu === 'environment'}
+          disabled={disabled}
+          onClick={() => onMenuChange(menu === 'environment' ? null : 'environment')}
+        >
+          <span>{environmentLabel}</span>
           <ChevronDown aria-hidden="true" />
         </button>
       </div>
@@ -287,7 +329,11 @@ export function ThreadComposerControls({
         <div
           className={[
             'thread-composer-menu',
-            menu === 'permission' ? 'permission' : 'model',
+            menu === 'permission'
+              ? 'permission'
+              : menu === 'environment'
+                ? 'environment'
+                : 'model',
           ].join(' ')}
         >
           {menu === 'variant' ? (
@@ -325,9 +371,11 @@ export function ThreadComposerControls({
             aria-label={
               menu === 'permission'
                 ? t('ai.runtime.composer.permissionOptions')
-                : menu === 'variant'
-                  ? t('ai.runtime.composer.variantOptions')
-                  : t('ai.runtime.composer.modelOptions')
+                : menu === 'environment'
+                  ? t('ai.runtime.composer.environmentOptions')
+                  : menu === 'variant'
+                    ? t('ai.runtime.composer.variantOptions')
+                    : t('ai.runtime.composer.modelOptions')
             }
             onKeyDown={handleKeyDown}
           >
@@ -336,13 +384,16 @@ export function ThreadComposerControls({
               const current =
                 menu === 'permission'
                   ? item.id === (settings.yoloEnabled ? 'yolo' : 'default')
-                  : menu === 'model'
-                    ? item.id === modelIdOfSelection(settings.model)
-                    : (
-                        variantTarget?.providerName === settings.model.providerName
-                        && variantTarget.name === settings.model.modelName
-                        && item.id === settings.model.variant
-                      )
+                  : menu === 'environment'
+                    ? (item.id === '__none__' && settings.environmentName == null)
+                      || item.id === settings.environmentName
+                    : menu === 'model'
+                      ? item.id === modelIdOfSelection(settings.model)
+                      : (
+                          variantTarget?.providerName === settings.model.providerName
+                          && variantTarget.name === settings.model.modelName
+                          && item.id === settings.model.variant
+                        )
               return (
                 <li key={item.id}>
                   <button

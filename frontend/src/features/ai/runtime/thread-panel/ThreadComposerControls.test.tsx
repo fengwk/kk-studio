@@ -35,8 +35,11 @@ function createSettings(overrides: Partial<ThreadComposerSettingsInput> = {}): T
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
     models: MODELS,
     yoloEnabled: false,
+    environmentName: null,
+    environments: [],
     onModelChange: vi.fn(),
     onYoloChange: vi.fn(),
+    onEnvironmentChange: vi.fn(),
     ...overrides,
   }
 }
@@ -406,5 +409,99 @@ describe('ThreadComposerControls menu switching', () => {
     const { onMenuChange } = renderOpen('permission')
     await user.click(screen.getByRole('listbox', { name: '权限选项' }))
     expect(onMenuChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('ThreadComposerControls environment menu', () => {
+  /** 测试意图：验证未选环境时 trigger 显示 None，已选时展示具体环境名称。 */
+  it('renders None when environmentName is null, and renders name when present', () => {
+    const noneView = renderOpen(null, createSettings({ environmentName: null }))
+    expect(screen.getByRole('button', { name: '环境' })).toHaveTextContent('None')
+    noneView.unmount()
+
+    renderOpen(null, createSettings({ environmentName: 'dev-cluster' }))
+    expect(screen.getByRole('button', { name: '环境' })).toHaveTextContent('dev-cluster')
+  })
+
+  /** 测试意图：验证环境下拉选项第一项为 None，之后为去重环境名；孤立环境名（orphan）仍然展示。 */
+  it('renders None as first option, followed by environments, and preserves orphan environmentName', () => {
+    renderOpen(
+      'environment',
+      createSettings({
+        environmentName: 'orphan-env',
+        environments: [{ name: 'dev-cluster' }, { name: 'prod-box' }, { name: 'dev-cluster' }],
+      }),
+    )
+
+    const listbox = screen.getByRole('listbox', { name: '环境选项' })
+    const options = within(listbox).getAllByRole('option')
+    expect(options.map((opt) => opt.textContent)).toEqual([
+      'None',
+      'dev-cluster',
+      'prod-box',
+      'orphan-env',
+    ])
+  })
+
+  /** 测试意图：验证点击选项调用 onEnvironmentChange，选择 None 时传 null，选择环境名时传对应名称。 */
+  it('calls onEnvironmentChange with name or null on option selection', async () => {
+    const user = userEvent.setup()
+    const onEnvironmentChange = vi.fn()
+    const onMenuChange = vi.fn()
+
+    render(
+      <ThreadComposerControls
+        settings={createSettings({
+          environmentName: 'dev-cluster',
+          environments: [{ name: 'dev-cluster' }, { name: 'prod-box' }],
+          onEnvironmentChange,
+        })}
+        menu="environment"
+        disabled={false}
+        onMenuChange={onMenuChange}
+      />,
+    )
+
+    const listbox = screen.getByRole('listbox', { name: '环境选项' })
+    await user.click(within(listbox).getByRole('option', { name: 'prod-box' }))
+    expect(onEnvironmentChange).toHaveBeenCalledWith('prod-box')
+    expect(onMenuChange).toHaveBeenCalledWith(null, true)
+
+    // 选择 None 时传 null
+    await user.click(within(listbox).getByRole('option', { name: 'None' }))
+    expect(onEnvironmentChange).toHaveBeenCalledWith(null)
+  })
+
+  /** 测试意图：验证 ArrowDown 与 Enter 键盘快捷键在环境菜单中的导航与选中行为。 */
+  it('supports keyboard navigation and Escape dismissal in environment menu', async () => {
+    const user = userEvent.setup()
+    const onEnvironmentChange = vi.fn()
+    const onMenuChange = vi.fn()
+
+    render(
+      <ThreadComposerControls
+        settings={createSettings({
+          environmentName: null,
+          environments: [{ name: 'env-1' }],
+          onEnvironmentChange,
+        })}
+        menu="environment"
+        disabled={false}
+        onMenuChange={onMenuChange}
+      />,
+    )
+
+    const listbox = screen.getByRole('listbox', { name: '环境选项' })
+    listbox.focus()
+
+    // 默认高亮 None；向下键移动到 env-1 并回车选中
+    await user.keyboard('{ArrowDown}')
+    await user.keyboard('{Enter}')
+    expect(onEnvironmentChange).toHaveBeenCalledWith('env-1')
+    expect(onMenuChange).toHaveBeenCalledWith(null, true)
+
+    // 按 Escape 键直接关闭菜单
+    await user.keyboard('{Escape}')
+    expect(onMenuChange).toHaveBeenCalledWith(null, true)
   })
 })

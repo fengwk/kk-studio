@@ -9,6 +9,7 @@ export {
   type ThreadPanelMainMode,
   type ThreadPanelMainView,
   type ThreadCommand,
+  type ThreadComposerEnvironmentOption,
   type ThreadComposerModelOption,
   type ThreadComposerModelSelection,
   type ThreadComposerSettingsInput,

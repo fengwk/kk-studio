@@ -8,7 +8,7 @@ export interface LiveEnvironmentCapabilityDTO {
 /**
  * Environment Card DTO（包含稳定 Card 属性与当前 live 连接投影）。
  *
- * id 是 canonical UUID；name 是可编辑 display name。
+ * id 是 canonical UUID；name 是全局唯一、创建后不可变身份。
  * registrationToken 在 create / rotate-token 响应中返回刚生成的新值，列表与详情查询始终为 null；
  * 按需读取当前值走 `GET /harness/environments/{id}/token`（no-store，不进入 query cache）。
  */
@@ -47,11 +47,6 @@ export interface EnvironmentRegistrationTokenDTO {
 
 export interface EnvironmentCreateDTO {
   name: string
-}
-
-export interface EnvironmentUpdateDTO {
-  name: string
-  expectedVersion: string
 }
 
 /** 单个有界扫描诊断响应 DTO。 */

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Check, Copy, KeyRound, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Box, Check, Copy, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { filterEnvironments, formatTimestamp } from '@/features/ai/environment/environment-utils'
 import { copyTextToClipboard } from '@/features/ai/environment/clipboard'
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
@@ -41,12 +41,6 @@ function TagRow({ label, names, limit = 3 }: { label: string; names: string[]; l
   )
 }
 
-interface EditModalState {
-  environment: EnvironmentCardDTO
-  name: string
-  error: string | null
-}
-
 interface TokenModalState {
   environmentName: string
   token: string
@@ -60,7 +54,6 @@ export function EnvironmentsPage() {
   const [createName, setCreateName] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const [editModal, setEditModal] = useState<EditModalState | null>(null)
   const [tokenModal, setTokenModal] = useState<TokenModalState | null>(null)
   const [copied, setCopied] = useState(false)
   const [copiedEnvironmentId, setCopiedEnvironmentId] = useState<string | null>(null)
@@ -119,38 +112,12 @@ export function EnvironmentsPage() {
     },
   })
 
-  const updateMutation = useMutation({
-    mutationFn: ({
-      id,
-      expectedVersion,
-      name,
-    }: {
-      id: string
-      expectedVersion: string
-      name: string
-    }) => environmentService.updateEnvironment(id, { name, expectedVersion }),
-    onSuccess: () => {
-      setEditModal(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-    },
-    onError: (err: unknown) => {
-      if (isConflictError(err)) {
-        setConflict(presentConflict(err))
-        setEditModal(null)
-        return
-      }
-      const message = err instanceof Error ? err.message : String(err)
-      setEditModal((prev) => (prev ? { ...prev, error: message } : null))
-    },
-  })
-
   const rotateMutation = useMutation({
     mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
       environmentService.rotateToken(id, expectedVersion),
     onSuccess: (card) => {
       setRotateTarget(null)
       setRotateError(null)
-      setEditModal(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
       if (card.registrationToken) {
         setTokenModal({
@@ -165,7 +132,6 @@ export function EnvironmentsPage() {
         setConflict(presentConflict(err))
         setRotateTarget(null)
         setRotateError(null)
-        setEditModal(null)
         return
       }
       setRotateError(err instanceof Error ? err.message : String(err))
@@ -225,21 +191,6 @@ export function EnvironmentsPage() {
     }
     setCreateError(null)
     createMutation.mutate(trimmed)
-  }
-
-  function handleUpdateSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!editModal) return
-    const trimmed = editModal.name.trim()
-    if (!trimmed) {
-      setEditModal({ ...editModal, error: t('ai.environment.name') })
-      return
-    }
-    updateMutation.mutate({
-      id: editModal.environment.id,
-      expectedVersion: editModal.environment.version,
-      name: trimmed,
-    })
   }
 
   /** 复制反馈：成功时标记 2 秒后自动复位，并清理上一个计时器。 */
@@ -378,18 +329,15 @@ export function EnvironmentsPage() {
                   <button
                     type="button"
                     className="action-enter-btn"
-                    aria-label={`${t('ai.environment.edit')} ${environment.name}`}
+                    aria-label={`${t('ai.environment.rotateToken')} ${environment.name}`}
                     onClick={() => {
                       setConflict(null)
-                      setEditModal({
-                        environment,
-                        name: environment.name,
-                        error: null,
-                      })
+                      setRotateError(null)
+                      setRotateTarget(environment)
                     }}
                   >
-                    <Pencil aria-hidden="true" />
-                    {t('ai.catalog.action.edit')}
+                    <KeyRound aria-hidden="true" />
+                    {t('ai.environment.rotateToken')}
                   </button>
                   <button
                     type="button"
@@ -459,82 +407,6 @@ export function EnvironmentsPage() {
                   type="submit"
                   className="btn-primary"
                   disabled={createMutation.isPending}
-                >
-                  {t('shared.confirm')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </ModalBackdrop>
-      )}
-
-      {editModal && (
-        <ModalBackdrop
-          onClose={() => {
-            if (!updateMutation.isPending && !rotateMutation.isPending) {
-              setEditModal(null)
-            }
-          }}
-        >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('ai.environment.edit')}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <ModalHeader
-              title={t('ai.environment.edit')}
-              onClose={() => setEditModal(null)}
-              closeDisabled={updateMutation.isPending || rotateMutation.isPending}
-            />
-            <form onSubmit={handleUpdateSubmit}>
-              <div className="modal-body">
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.environment.name')}</FieldLabel>
-                  <input
-                    value={editModal.name}
-                    onChange={(e) =>
-                      setEditModal({ ...editModal, name: e.target.value, error: null })
-                    }
-                    placeholder={t('ai.environment.namePlaceholder')}
-                    maxLength={64}
-                    required
-                    autoFocus
-                  />
-                </label>
-                {editModal.error && (
-                  <p className="field-error" role="alert">
-                    {editModal.error}
-                  </p>
-                )}
-              </div>
-              <div className="modal-footer modal-footer-with-leading-action">
-                <button
-                  type="button"
-                  className="ghost-btn modal-footer-leading-action"
-                  onClick={() => {
-                    setConflict(null)
-                    setRotateError(null)
-                    setRotateTarget(editModal.environment)
-                  }}
-                  disabled={updateMutation.isPending || rotateMutation.isPending}
-                >
-                  <KeyRound aria-hidden="true" />
-                  {t('ai.environment.rotateToken')}
-                </button>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => setEditModal(null)}
-                  disabled={updateMutation.isPending || rotateMutation.isPending}
-                >
-                  {t('shared.cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={updateMutation.isPending || rotateMutation.isPending}
                 >
                   {t('shared.confirm')}
                 </button>
@@ -666,7 +538,6 @@ export function EnvironmentsPage() {
           setConflict(null)
           setCreateModalOpen(false)
           setCreateError(null)
-          setEditModal(null)
           setRotateTarget(null)
           setRotateError(null)
           setDeleteTarget(null)

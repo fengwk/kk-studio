@@ -1013,6 +1013,18 @@ export const aiCatalog = {
     'en-US': 'YOLO',
     'zh-CN': 'YOLO',
   },
+  'ai.runtime.composer.environment': {
+    'en-US': 'Environment',
+    'zh-CN': '环境',
+  },
+  'ai.runtime.composer.environmentOptions': {
+    'en-US': 'Environment options',
+    'zh-CN': '环境选项',
+  },
+  'ai.runtime.composer.environmentNone': {
+    'en-US': 'None',
+    'zh-CN': 'None',
+  },
   'ai.runtime.composer.model': {
     'en-US': 'Model',
     'zh-CN': 'Model',
@@ -1821,10 +1833,6 @@ export const aiCatalog = {
     'en-US': 'Failed to update Agent',
     'zh-CN': '更新 Agent 失败',
   },
-  'ai.runtime.action.updateEnvironmentFailed': {
-    'en-US': 'Failed to update Environment',
-    'zh-CN': '更新 Environment 失败',
-  },
   'ai.runtime.action.updateYoloFailed': {
     'en-US': 'Failed to update YOLO',
     'zh-CN': '更新 YOLO 失败',
@@ -1904,14 +1912,6 @@ export const aiCatalog = {
   'ai.environment.createDescription': {
     'en-US': 'Register execution environment and capabilities',
     'zh-CN': '注册执行环境与运行时能力',
-  },
-  'ai.environment.edit': {
-    'en-US': 'Edit Environment',
-    'zh-CN': '编辑环境',
-  },
-  'ai.environment.rename': {
-    'en-US': 'Rename Environment',
-    'zh-CN': '重命名环境',
   },
   'ai.environment.name': {
     'en-US': 'Environment Name',
