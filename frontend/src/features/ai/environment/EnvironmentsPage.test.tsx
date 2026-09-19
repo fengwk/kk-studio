@@ -320,9 +320,9 @@ describe('EnvironmentsPage', () => {
     renderPage()
 
     expect(await screen.findByText('seconds-box')).toBeInTheDocument()
-    expect(screen.getAllByText(/最近查看 · /).length).toBe(3)
-    expect(screen.getAllByText(/最近查看 · 2025\/06\/15/)).toHaveLength(2)
-    expect(screen.getByText('最近查看 · not-a-date')).toBeInTheDocument()
+    expect(screen.getAllByText(/最近活动 · /).length).toBe(3)
+    expect(screen.getAllByText(/最近活动 · 2025\/06\/15/)).toHaveLength(2)
+    expect(screen.getByText('最近活动 · not-a-date')).toBeInTheDocument()
   })
 
   it('truncates tag rows to three chips and shows the +N remainder', async () => {

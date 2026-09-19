@@ -62,7 +62,7 @@ yoloEnabled / nextCommandSequence / version / createdAt / updatedAt
 - `NEW_THREAD`：`KEY SHARE` 锁既有 Session（不串行化同 Session 的兄弟创建），校验 `startEntryId` 属于该 Session，插入 Thread + Commands + Work；不复制任何 Entry，新 Thread 的 head 直接指向该 Entry。
 - `THREAD`：先按 immutable `sessionId` 做 `KEY SHARE`，再 `FOR UPDATE` 锁 Thread；exact ordered replay 必须**先于**任何 cursor / preflight 准入，全新批次要求 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 精确匹配（否则 `STALE_COMMAND_CURSOR`），随后调用 preflight、预留连续 sequence、请求 THREAD Work。
 
-命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；初始批次以恰一条 user-like message 结尾（可带 SYSTEM CUSTOM_MESSAGE 前缀），`THREAD` 批次要么是恰一条 SYSTEM CUSTOM_MESSAGE 引导，要么是禁止 SYSTEM 消息、以恰一条 user-like message 结尾的用户批次；非法批次是请求校验错误（`IllegalArgumentException`）。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
+命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；所有 target 的命令批次都要求**恰有一条末尾 USER 消息**（`USER_MESSAGE` 或 `CUSTOM_MESSAGE`，`CUSTOM_MESSAGE` 角色限定为 `USER`）；非法批次是请求校验错误（`IllegalArgumentException`）。当配置命令产生实际变更时，`TurnPlanBuilder` 在紧邻本 turn 的用户消息前注入包装在 `<system-reminder>` 定界符中的 durable USER `CUSTOM_MESSAGE`（`SettingsReminder`），模型与前端均感知其为注入的上下文提醒而非用户发言。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
 
 状态由标记字段派生：无标记即 `QUEUED`；有 `appliedTurnStartEntryId` 即 `APPLIED`；`stopRequestId` 与 `cancelledAt` 成对存在且无 `appliedTurnStartEntryId` 即 `CANCELLED`。
 
@@ -86,10 +86,19 @@ RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 
 ```text
 providerType / providerConnectionGenerationId / model / variant / outputTokens
-preambleMessages / toolBindings / skillBindings / subagentBindings / cacheControl
+systemInstruction / toolBindings / skillBindings / subagentBindings / cacheControl
 ```
 
-工具、Skill、Subagent 名各自唯一；需要环境的 Tool binding 共享 Branch 冻结的 `EnvironmentId`，Skill binding 则独立冻结 Platform 全局 `(packageName, packageVersion, name)` 三元组。完整历史、可由 bindings 派生的 Provider tools、branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合改为专用 SYSTEM + USER 摘要提示词，工具列表为空）。
+工具、Skill、Subagent 名各自唯一；需要环境的 Tool binding 共享 Branch 冻结的 `EnvironmentId`，Skill binding 则独立冻结 Platform 全局 `(packageName, packageVersion, name)` 三元组。完整历史、可由 bindings 派生的 Provider tools、branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合使用专用 summarization systemInstruction 与单个 USER 摘要提示词，工具列表为空）。
+
+[`ProviderMessageProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ProviderMessageProjector.java) 将语义 Context 投影为与 Provider SDK 无关的 `ProviderMessage`：
+
+- **会话角色**：`ProviderMessageRole` 仅有 `USER`、`ASSISTANT`、`TOOL`，系统指令由顶层 `systemInstruction` 单独承载，会话消息中绝不出现 SYSTEM 角色。
+- **动态工具降级**：历史工具调用的 native 资格按次判定。只有当调用名在当前请求的 `nativeToolNames`（由当前 bindings 决定）中时，assistant tool call 与其 TOOL 结果才按 native provider 结构投影；其余未绑定的调用在投影时降级为 assistant 文本（描述调用与逐字 arguments），其结果降级为 USER 文本内容，绝不产生 TOOL 消息。降级只发生在本次调用投影结果中，durable Entry 与 `callIndex` 永不被改写，也不存在 `historyText` 重写。
+- **结果输出顺序**：同一 assistant 之后的 native TOOL 结果严格先于降级 USER 结果输出，以保证 provider 要求的 tool-call adjacency，组内保持相对顺序。
+- **动态无标签围栏**：降级内容中的逐字 payload 使用动态围栏（反引号数取 `max(3, 内容中最长反引号连续段 + 1)`，不带语言标识），防止逐字 payload 中的反引号与空白被误读。
+- **回放状态控制**：被降级改写的 assistant 消息清除 `ProviderReplayState`（native payload 已与投影内容不一致），未被改写的 assistant 消息保留 replay state。
+- **未配对调用处理**：对当前连续 Tool chain 中未配对的 native ToolCall，在角色切换或 Context 结束前合成 error ToolResult `No result provided`（仅存在于本次 ProviderRequest，不写 Session Entry）；降级调用只在文本中体现，不合成结果。
 
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 是 `harness_tool_invocation` 行的当前状态：冻结的 `ToolCall` 参数、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、`assistantEntryId`、`callIndex`、审批记录、结果、副作用批次与错误描述。
 
@@ -133,7 +142,7 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor；Processor �
 压缩复用普通的持久化 ModelInvocation、MODEL Work 与两个 Processor，只是 `TURN_START(reason=COMPACTION)` 上冻结了 `CompactionStart`：
 
 ```text
-TURN_START(COMPACTION) -> ModelInvocation（summary SYSTEM + USER，zero tools）-> COMPACTION(summaryText) -> TURN_END
+TURN_START(COMPACTION) -> ModelInvocation（summarization systemInstruction + USER，zero tools）-> COMPACTION(summaryText) -> TURN_END
 ```
 
 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java) 默认 `keepRecentTokens=20_000`、可选 `fallbackModel`，并派生全部阈值：`effectiveKeep = min(keepRecentTokens, C/2)`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeep, C - effectiveReserve)`、`manualMinimum = min(keepRecentTokens*2, C/2)`；压缩输出预算取 `min(maxOutputTokens, floor(reserve * 0.8), removedPrefixTokens)`，TURN_PREFIX 阶段把 0.8 换成 0.5。有效保留量按 `reserve` 与 `maxOutputTokens` 取小，因此窗口很小时不会预留超过可用输出。
@@ -167,7 +176,7 @@ Stop 在 Thread 锁内校验归属、version 与客户端 `stopRequestId`：活�
 
 [`ConcurrencyAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmission.java) 提供纯内存、无等待队列的进程内并发槽位，网关用它约束外部执行压力；槽位满立即返回空，`Lease` 幂等释放且恰好归还一个许可。[`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryPolicy.java) 提供 `FIXED` / `EXPONENTIAL` 确定性退避，只计算是否允许下一次重试与延迟，不读时钟、不写状态；重试只能基于初始冻结的请求契约重新物化，`NON_IDEMPOTENT` 工具永不自动重试。
 
-`ModelUsage` 记录七个非负维度（`inputTokens`、`outputTokens`、`cacheReadTokens`、`cacheWriteTokens`、`cacheWriteLongTokens`、`reasoningTokens`、`providerTotalTokens`），前六类是互斥计费类别；`ModelCost` 以 scale 12 HALF_UP 逐项计价，并在构造时校验总额严格等于六项之和。[`PromptCacheAffinityKeyFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) 从 session、provider 连接代际与 wire model、连续首部 SYSTEM 消息、按序工具名/描述/schema 派生 `pc2-` 前缀的长度前缀数据帧亲和键（动态历史与采样参数不参与），[`PromptCacheRequestFinalizer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java) 把调用方显式声明的策略收敛为请求上的不可变缓存控制指令。
+`ModelUsage` 记录七个非负维度（`inputTokens`、`outputTokens`、`cacheReadTokens`、`cacheWriteTokens`、`cacheWriteLongTokens`、`reasoningTokens`、`providerTotalTokens`），前六类是互斥计费类别；`ModelCost` 以 scale 12 HALF_UP 逐项计价，并在构造时校验总额严格等于六项之和。[`PromptCacheAffinityKeyFactory`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheAffinityKeyFactory.java) 从 session、provider 连接代际与 wire model、唯一的 `systemInstruction` 全文、按序工具名/描述/schema 派生 `pc2-` 前缀的长度前缀数据帧亲和键（动态历史与采样参数不参与），[`PromptCacheRequestFinalizer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/cache/PromptCacheRequestFinalizer.java) 把调用方显式声明的策略收敛为请求上的不可变缓存控制指令。
 
 运行时策略全部通过构造注入的配置对象给出，不在模块内缓存或自建线程：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)（lease 配置、统一的 resolve 失败延迟、现读的压缩配置）、[`ModelProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorConfig.java)（lease、现读重试策略、dispatch 失败延迟、`StreamFlushConfig`）、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java)（另加 preflight 失败延迟）。[`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessorLeaseConfig.java) 要求 heartbeat 间隔严格小于租约时长，保证两次续租之间租约不会自然过期。
 

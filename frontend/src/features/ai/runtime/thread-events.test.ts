@@ -135,7 +135,7 @@ describe('buildThreadEventTimeline', () => {
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'hi' }])),
       entry('custom-message-1', 'CUSTOM_MESSAGE', {
-        message: { role: 'SYSTEM', contents: [{ type: 'text', text: 'custom' }] },
+        message: { role: 'USER', contents: [{ type: 'text', text: 'custom' }] },
       }),
       entry('fail-1', 'MODEL_ATTEMPT_FAILURE', {
         attempt: { attempt: 1, sequence: 2, text: 'p', thinking: '' },
