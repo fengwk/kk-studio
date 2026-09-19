@@ -15,18 +15,16 @@ export const queryKeys = {
     all: ['tools'] as const,
     list: ['tools', 'list'] as const,
   },
+  skills: {
+    all: ['skills'] as const,
+    list: ['skills', 'list'] as const,
+    packages: ['skills', 'packages'] as const,
+    packageDetail: (name: string) => ['skills', 'packages', name] as const,
+  },
   environments: {
     all: ['environments'] as const,
     list: ['environments', 'list'] as const,
     detail: (id: string) => ['environments', 'detail', id] as const,
-    skillSources: (environmentId: string) =>
-      ['environments', 'detail', environmentId, 'skill-sources'] as const,
-    skillSource: (environmentId: string, sourceId: string) =>
-      ['environments', 'detail', environmentId, 'skill-sources', sourceId] as const,
-    inventory: (environmentId: string) =>
-      ['environments', 'detail', environmentId, 'inventory'] as const,
-    inventorySkills: (environmentId: string, usableOnly: boolean) =>
-      ['environments', 'detail', environmentId, 'inventory', 'skills', usableOnly] as const,
     operations: (environmentId: string, limit: number) =>
       ['environments', 'detail', environmentId, 'operations', limit] as const,
     operation: (environmentId: string, operationId: string) =>

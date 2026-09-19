@@ -123,9 +123,52 @@ export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
   expectedVersion: CatalogVersion
 }
 
-export interface AgentSkillRefDTO {
-  sourceId: string
+export interface SkillDTO {
+  /** Skill canonical 名（全局唯一）。 */
   name: string
+  /** Skill 描述。 */
+  description: string
+  /** 承载该 Skill 的 package 名。 */
+  packageName: string
+  /** 承载该 Skill 的 package 版本（不可变，永不复用）。 */
+  packageVersion: string
+}
+
+export interface SkillDefinitionDTO {
+  /** Skill canonical 名。 */
+  name: string
+  /** Skill 描述。 */
+  description: string
+  /** Skill 正文。 */
+  content: string
+}
+
+export interface SkillPackageDTO {
+  name: string
+  packageVersion: string
+  description: string | null
+  skills: SkillDTO[]
+}
+
+export interface SkillPackageDetailDTO {
+  name: string
+  packageVersion: string
+  description: string | null
+  skills: SkillDefinitionDTO[]
+}
+
+export interface SkillPackageCreateDTO {
+  name: string
+  packageVersion: string
+  description?: string | null
+  skills: SkillDefinitionDTO[]
+}
+
+export interface SkillPackageUpdateDTO {
+  expectedPackageVersion: string
+  newPackageVersion: string
+  description?: string | null
+  skills: SkillDefinitionDTO[]
 }
 
 export interface AgentDefinitionConfigDTO {
@@ -133,7 +176,8 @@ export interface AgentDefinitionConfigDTO {
   inheritParentEnvironment: boolean
   /** 有序且唯一的模型可见 tool name 列表；候选来自离线 tool catalog。 */
   tools: string[]
-  skills: AgentSkillRefDTO[]
+  /** 选中的 Platform 全局 Skill canonical 名列表；按声明顺序且不可重复。 */
+  skills: string[]
   /** 可通过 task 委派的 Agent 名称 allowlist；只接受短名。 */
   subagents: string[]
 }
@@ -155,8 +199,6 @@ export interface AgentDefinitionDTO {
   model: string
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
-  /** 绑定的 Environment UUID 字符串（可空；null 表示未绑定环境）。 */
-  environmentId: string | null
   config: AgentDefinitionConfigDTO
   version: CatalogVersion
   createTime: InstantTimestamp
@@ -171,8 +213,6 @@ export interface AgentDefinitionEditablePropertiesDTO {
   model: string
   /** 可选覆盖；为 null 表示使用所选 Model 的 defaultVariant。 */
   variant: string | null
-  /** 可空绑定的 Environment UUID 字符串（null/空白表示清除环境绑定）。 */
-  environmentId?: string | null
   config: AgentDefinitionConfigDTO
 }
 

@@ -25,13 +25,15 @@ const resourceQueryEnabledByScope: Record<
     models: true,
     agents: true,
     tools: true,
-    environments: true,
+    skills: true,
+    environments: false,
   },
   models: {
     providers: true,
     models: true,
     agents: false,
     tools: false,
+    skills: false,
     environments: false,
   },
   providers: {
@@ -39,6 +41,7 @@ const resourceQueryEnabledByScope: Record<
     models: false,
     agents: false,
     tools: false,
+    skills: false,
     environments: false,
   },
 }
@@ -66,6 +69,7 @@ export function useCatalogPageController(scope: CatalogPageScope) {
     ...(resourceQueryEnabled.models ? [resourceController.modelsQuery] : []),
     ...(resourceQueryEnabled.agents ? [resourceController.agentsQuery] : []),
     ...(resourceQueryEnabled.tools ? [resourceController.toolsQuery] : []),
+    ...(resourceQueryEnabled.skills ? [resourceController.skillsQuery] : []),
     ...(resourceQueryEnabled.environments
       ? [resourceController.environmentsQuery]
       : []),

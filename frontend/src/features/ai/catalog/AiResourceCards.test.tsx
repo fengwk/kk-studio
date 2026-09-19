@@ -49,7 +49,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     config: {
       inheritParentEnvironment: true,
       tools: ['read', 'bash', 'grep'],
-      skills: [{ sourceId: 'src-1', name: 'dev' }],
+      skills: ['dev'],
       subagents: ['writer'],
     },
     version: '1',
@@ -99,18 +99,14 @@ describe('AI resource cards', () => {
     expect(onDelete).toHaveBeenCalledOnce()
   })
 
-  it('projects skill ref names as tags on the agent card', () => {
+  it('projects skill names as tags on the agent card', () => {
     render(
       <AgentResourceCard
         agent={agent({
           config: {
             inheritParentEnvironment: true,
             tools: [],
-            skills: [
-              { sourceId: 'src-1', name: 'skill-alpha' },
-              { sourceId: 'src-2', name: 'skill-beta' },
-              { sourceId: 'src-3', name: 'skill-gamma' },
-            ],
+            skills: ['skill-alpha', 'skill-beta', 'skill-gamma'],
             subagents: [],
           },
         })}
