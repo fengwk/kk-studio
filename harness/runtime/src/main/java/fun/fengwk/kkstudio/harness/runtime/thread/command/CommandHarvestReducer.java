@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -20,6 +21,7 @@ public final class CommandHarvestReducer {
     Objects.requireNonNull(eligibleCommands, "eligibleCommands");
 
     long previousSequence = 0L;
+    List<CommandHarvestResult.SettingsChange> changes = new ArrayList<>();
     for (ThreadCommand command : eligibleCommands) {
       Objects.requireNonNull(command, "eligibleCommands[]");
       if (!command.threadId().equals(threadId)) {
@@ -46,12 +48,33 @@ public final class CommandHarvestReducer {
       switch (payload) {
         case UserMessageCommandPayload ignored -> {}
         case CustomMessageCommandPayload ignored -> {}
-        case SetAgentCommandPayload value -> settings = settings.withAgentName(value.agentName());
-        case SetModelCommandPayload value -> settings = settings.withModel(value.model());
-        case SetEnvironmentCommandPayload value -> settings =
-            settings.withEnvironmentName(value.environmentName());
+        case SetAgentCommandPayload value -> {
+          BranchSettings updated = settings.withAgentName(value.agentName());
+          if (!updated.equals(settings)) {
+            settings = updated;
+            changes.add(
+                new CommandHarvestResult.SettingsChange(ThreadCommandType.SET_AGENT, settings));
+          }
+        }
+        case SetModelCommandPayload value -> {
+          BranchSettings updated = settings.withModel(value.model());
+          if (!updated.equals(settings)) {
+            settings = updated;
+            changes.add(
+                new CommandHarvestResult.SettingsChange(ThreadCommandType.SET_MODEL, settings));
+          }
+        }
+        case SetEnvironmentCommandPayload value -> {
+          BranchSettings updated = settings.withEnvironmentName(value.environmentName());
+          if (!updated.equals(settings)) {
+            settings = updated;
+            changes.add(
+                new CommandHarvestResult.SettingsChange(
+                    ThreadCommandType.SET_ENVIRONMENT, settings));
+          }
+        }
       }
     }
-    return new CommandHarvestResult(settings);
+    return new CommandHarvestResult(settings, changes);
   }
 }

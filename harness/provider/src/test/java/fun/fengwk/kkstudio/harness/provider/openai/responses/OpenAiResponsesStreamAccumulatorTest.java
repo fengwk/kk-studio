@@ -75,6 +75,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         model,
         new ModelVariant("default"),
         1024,
+        "Test system instruction.",
         List.of(),
         List.of(),
         ProviderCacheControl.none());

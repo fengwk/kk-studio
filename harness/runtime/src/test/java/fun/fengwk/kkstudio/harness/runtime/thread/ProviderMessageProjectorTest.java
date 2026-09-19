@@ -32,7 +32,7 @@ class ProviderMessageProjectorTest {
   /** 已解析的 tool chain 保留所有受支持的 content 类型，无需合成 TOOL message。 */
   @Test
   void projectsResolvedToolChainAndAllSupportedContents() {
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
 
     List<ProviderMessage> projected =
         projector.project(
@@ -99,7 +99,7 @@ class ProviderMessageProjectorTest {
   /** Role 边界与 request 末尾都只修复当前打开的、复用 ID 的那次出现位置。 */
   @Test
   void synthesizesErrorForEachSubsequentOrphanWithTheSameToolCallId() {
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
 
     List<ProviderMessage> projected =
         projector.project(
@@ -126,7 +126,7 @@ class ProviderMessageProjectorTest {
    */
   @Test
   void projectsDurableResourceBlocksPreservingBlobFacts() {
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
 
     List<ProviderMessage> projected =
         projector.project(
@@ -146,7 +146,7 @@ class ProviderMessageProjectorTest {
 
   @Test
   void projectExternalizedTextResourceCarriesStructureFacts() {
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
     List<ProviderMessage> projected =
         projector.project(
             List.of(

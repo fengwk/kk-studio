@@ -90,7 +90,13 @@ class OpenAiResponsesDurableReplayTest {
             true,
             pricing);
     return new ProviderRequest(
-        model, DEFAULT_VARIANT, 1024, messages, List.of(TOOL), ProviderCacheControl.none());
+        model,
+        DEFAULT_VARIANT,
+        1024,
+        "Test system instruction.",
+        messages,
+        List.of(TOOL),
+        ProviderCacheControl.none());
   }
 
   /**
@@ -177,7 +183,7 @@ class OpenAiResponsesDurableReplayTest {
                     false,
                     "{}")));
     List<ProviderMessage> projected =
-        new ProviderMessageProjector()
+        new ProviderMessageProjector(Set.of())
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(
@@ -214,7 +220,7 @@ class OpenAiResponsesDurableReplayTest {
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
     List<ProviderMessage> projected =
-        new ProviderMessageProjector()
+        new ProviderMessageProjector(Set.of())
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(

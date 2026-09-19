@@ -131,7 +131,13 @@ class AnthropicThinkingTest {
 
     ProviderRequest turn1Request =
         new ProviderRequest(
-            modelDesc, variant, 1024, List.of(userMsg1), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg1),
+            List.of(),
+            ProviderCacheControl.none());
 
     AnthropicEncodedRequest encodedTurn1 = encoder.encode(turn1Request, descriptor);
     JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
@@ -229,6 +235,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, asstMsg1, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -282,6 +289,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1),
             List.of(tool),
             ProviderCacheControl.none());
@@ -385,6 +393,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, asstMsg, toolResultMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -435,7 +444,13 @@ class AnthropicThinkingTest {
 
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
@@ -483,6 +498,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, asstMsg, nextUser),
             List.of(),
             ProviderCacheControl.none());
@@ -511,7 +527,13 @@ class AnthropicThinkingTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     String hash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
@@ -554,6 +576,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, asstMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -581,7 +604,13 @@ class AnthropicThinkingTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     String currentHash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     // 构造模型不一致的 affinity (例如来自 claude-haiku-4-5-20251001)
@@ -617,6 +646,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, asstMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -674,6 +704,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, asstMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -700,7 +731,13 @@ class AnthropicThinkingTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest req =
         new ProviderRequest(
-            modelDesc, variant, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     String currentHash = encoder.encode(req, descriptor).sourcePrefixHash();
 
     ObjectNode payload = NODES.objectNode();
@@ -734,6 +771,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, tamperedMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -768,6 +806,7 @@ class AnthropicThinkingTest {
             nonReasoningModel,
             variantWithEffort,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -788,6 +827,7 @@ class AnthropicThinkingTest {
             reasoningModel,
             variantWithoutEffort,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")))),
@@ -822,6 +862,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Ping")))),
@@ -867,7 +908,13 @@ class AnthropicThinkingTest {
             List.of(new ProviderTextBlock("Explain quantum superposition.")));
     ProviderRequest turn1Request =
         new ProviderRequest(
-            modelDesc, variant, 16384, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            16384,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     AnthropicEncodedRequest encodedTurn1 = budgetEncoder.encode(turn1Request, descriptor);
     JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
@@ -940,6 +987,7 @@ class AnthropicThinkingTest {
             modelDesc,
             variant,
             16384,
+            "Test system instruction.",
             List.of(userMsg, assistantMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());

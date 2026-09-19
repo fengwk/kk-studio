@@ -445,13 +445,25 @@ class PromptCacheAffinityKeyFactoryTest {
     ModelDescriptor m = model("provider", "m1");
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
-        m, variant, 1024, List.of(), List.of(tools), ProviderCacheControl.none());
+        m,
+        variant,
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(tools),
+        ProviderCacheControl.none());
   }
 
   private static ProviderRequest baseRequestWithModel(ModelDescriptor descriptor) {
     ModelVariant variant = new ModelVariant("default");
     return new ProviderRequest(
-        descriptor, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
+        descriptor,
+        variant,
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   private static ProviderRequest withMessages(
@@ -460,6 +472,7 @@ class PromptCacheAffinityKeyFactoryTest {
         template.model(),
         template.variant(),
         1024,
+        "Test system instruction.",
         messages,
         template.tools(),
         template.cacheControl());
@@ -506,6 +519,7 @@ class PromptCacheAffinityKeyFactoryTest {
         template.model(),
         template.variant(),
         1024,
+        "Test system instruction.",
         List.of(new ProviderMessage(ProviderMessageRole.SYSTEM, leadingSystemContents)),
         template.tools(),
         template.cacheControl());

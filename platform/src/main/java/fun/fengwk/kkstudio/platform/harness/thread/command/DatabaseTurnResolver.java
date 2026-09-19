@@ -41,8 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -116,7 +114,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ProjectRoleToolSelector roleToolSelector;
   private final ProjectRoleContextProjector roleContextProjector;
   private final Clock clock;
-  private final ProviderMessageProjector messageProjector;
   private final SchemaJsonCodec schemaCodec;
   private final PromptCacheAffinityKeyFactory cacheKeyFactory;
 
@@ -158,7 +155,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.roleContextProjector =
         Objects.requireNonNull(roleContextProjector, "roleContextProjector");
     this.clock = Objects.requireNonNull(clock, "clock");
-    this.messageProjector = new ProviderMessageProjector();
     this.schemaCodec = new SchemaJsonCodec();
     this.cacheKeyFactory = new PromptCacheAffinityKeyFactory();
   }
@@ -259,8 +255,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsedModel.tools(),
             parsedModel.reasoning(),
             parsedModel.pricing());
-    List<AgentMessage> preamble =
-        preambleMessages(
+    String systemInstruction =
+        systemInstruction(
             threadId,
             agent.getSystemPrompt(),
             currentEnvironment,
@@ -271,13 +267,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
         outputTokens(
             parsedModel,
             contextWindow(parsedModel),
-            CompactionPlanner.estimateRequestTokens(path, preamble));
+            CompactionPlanner.estimateRequestTokens(path, systemInstruction));
     ProviderCacheControl cacheControl =
         cacheControl(
             descriptor,
             variant,
             outputTokens,
-            preamble,
+            systemInstruction,
             toolBindings,
             sessionId,
             providerConnectionGenerationId,
@@ -289,7 +285,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             descriptor,
             variant,
             outputTokens,
-            preamble,
+            "Test system instruction.",
             toolBindings,
             skillBindings,
             subagentBindings,
@@ -378,7 +374,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 parsedModel.pricing()),
             variant,
             maxOutput,
-            List.of(),
+            "Test system instruction.",
             List.of(),
             List.of(),
             List.of(),
@@ -620,24 +616,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return PromptCachePolicy.of(capability, retention);
   }
 
-  private List<AgentMessage> preambleMessages(
+  /**
+   * 本轮请求唯一的系统指令：Agent 正文 / Environment / Skills / Subagents 组合段，加上 Project 角色上下文与注册顺序稳定的
+   * Contributor context projector 片段，用空行确定性拼接为一个字符串——不写入任何会话消息。
+   */
+  private String systemInstruction(
       UUID threadId,
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
       List<SkillBinding> skillBindings,
       List<SubagentBinding> subagentBindings,
       EntryPath path) {
-    List<AgentMessage> preamble = new ArrayList<>();
-    String composedPrompt =
-        promptComposer.compose(systemPrompt, currentEnvironment, skillBindings, subagentBindings);
-    if (!composedPrompt.isBlank()) {
-      preamble.add(AgentMessage.system(composedPrompt));
-    }
+    List<String> sections = new ArrayList<>();
+    addSection(
+        sections,
+        promptComposer.compose(systemPrompt, currentEnvironment, skillBindings, subagentBindings));
     Optional<String> roleContext =
         Objects.requireNonNull(roleContextProjector.project(threadId), "role context");
-    if (roleContext.isPresent()) {
-      preamble.add(AgentMessage.system(roleContext.get()));
-    }
+    roleContext.ifPresent(context -> addSection(sections, context));
     for (ContextProjectorContribution contribution : harnessCatalog.contextProjectors()) {
       String contributorId = contribution.id().contributorId().value();
       BranchView branch = new ScopedBranchView(path.entries(), contributorId);
@@ -649,17 +645,26 @@ public final class DatabaseTurnResolver implements TurnResolver {
         Objects.requireNonNull(
             fragment,
             "contributor context projector returned a null fragment: " + contribution.id());
-        preamble.add(AgentMessage.system(fragment.text()));
+        addSection(sections, fragment.text());
       }
     }
-    return List.copyOf(preamble);
+    if (sections.isEmpty()) {
+      throw rejection("system instruction must not be blank");
+    }
+    return String.join("\n\n", sections);
+  }
+
+  private static void addSection(List<String> sections, String section) {
+    if (section != null && !section.isBlank()) {
+      sections.add(section);
+    }
   }
 
   private ProviderCacheControl cacheControl(
       ModelDescriptor descriptor,
       ModelVariant variant,
       int outputTokens,
-      List<AgentMessage> preamble,
+      String systemInstruction,
       List<ToolBinding> toolBindings,
       UUID sessionId,
       UUID providerConnectionGenerationId,
@@ -676,7 +681,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
             descriptor,
             variant,
             outputTokens,
-            messageProjector.project(preamble),
+            "Test system instruction.",
+            systemInstruction,
+            List.of(),
             providerTools,
             ProviderCacheControl.none());
     return new PromptCacheRequestFinalizer(

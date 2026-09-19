@@ -118,6 +118,7 @@ class AnthropicRequestEncoderTest {
             logicalModel,
             new ModelVariant("default"),
             4096,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -270,30 +271,22 @@ class AnthropicRequestEncoderTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
   }
 
+  /** 系统指令是唯一的顶层 system 单块文本，请求正文（含文档）只来自会话消息。 */
   @Test
-  void encodesSystemMessageWithTextAndPdfDocument() throws IOException {
-    String base64Pdf = "data:application/pdf;base64,JVBERi0xLjUK";
+  void encodesSystemInstructionAsSingleTopLevelTextBlock() throws IOException {
     ProviderRequest request =
         request(
             defaultVariant(),
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM,
-                    List.of(
-                        new ProviderTextBlock("system prompt"),
-                        new ProviderDocumentBlock("application/pdf", base64Pdf))),
-                userMsg(new ProviderTextBlock("user message"))),
+            List.of(userMsg(new ProviderTextBlock("user message"))),
             List.of(),
             ProviderCacheControl.none());
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     JsonNode systemNode = root.path("system");
-    assertEquals(2, systemNode.size());
+    assertEquals(1, systemNode.size());
     assertEquals("text", systemNode.get(0).path("type").asText());
-    assertEquals("system prompt", systemNode.get(0).path("text").asText());
-    assertEquals("document", systemNode.get(1).path("type").asText());
-    assertEquals("base64", systemNode.get(1).path("source").path("type").asText());
+    assertEquals("Test system instruction.", systemNode.get(0).path("text").asText());
   }
 
   @Test
@@ -549,6 +542,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             variantWithReasoning,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -591,6 +585,7 @@ class AnthropicRequestEncoderTest {
               reasoningModel,
               new ModelVariant("v", effort),
               outputTokens,
+              "Test system instruction.",
               List.of(userMsg(new ProviderTextBlock("hi"))),
               List.of(),
               ProviderCacheControl.none());
@@ -629,6 +624,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "high"),
             4096,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -659,6 +655,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "low"),
             1,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -689,6 +686,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "off"),
             65536,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -705,6 +703,7 @@ class AnthropicRequestEncoderTest {
               reasoningModel,
               new ModelVariant("v", unsupportedEffort),
               65536,
+              "Test system instruction.",
               List.of(userMsg(new ProviderTextBlock("hi"))),
               List.of(),
               ProviderCacheControl.none());
@@ -736,6 +735,7 @@ class AnthropicRequestEncoderTest {
             nonReasoningModel,
             variantWithEffort,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -761,6 +761,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             variantNullEffort,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -776,6 +777,7 @@ class AnthropicRequestEncoderTest {
             nonReasoningModel,
             variantNullEffort,
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -791,6 +793,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "off"),
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -823,6 +826,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "off"),
             1024,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -856,6 +860,7 @@ class AnthropicRequestEncoderTest {
             reasoningModel,
             new ModelVariant("v", "high"),
             512,
+            "Test system instruction.",
             List.of(userMsg(new ProviderTextBlock("hi"))),
             List.of(),
             ProviderCacheControl.none());
@@ -1440,7 +1445,7 @@ class AnthropicRequestEncoderTest {
     AgentMessage userAgentMsg =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent("What is the weather?")));
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
     List<ProviderMessage> projectedMessages =
         projector.project(List.of(userAgentMsg, asstAgentMsg));
 
@@ -1488,15 +1493,12 @@ class AnthropicRequestEncoderTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, "Test system instruction.", messages, tools, cacheControl);
   }
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
-  }
-
-  private static ProviderMessage sysMsg(ProviderContentBlock... blocks) {
-    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(blocks));
   }
 
   private static ProviderMessage asstMsg(
@@ -1842,7 +1844,8 @@ class AnthropicRequestEncoderTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, "Test system instruction.", messages, tools, cacheControl);
   }
 
   private static ProviderRequest requestWithModel(
@@ -1860,6 +1863,7 @@ class AnthropicRequestEncoderTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, "Test system instruction.", messages, tools, cacheControl);
   }
 }

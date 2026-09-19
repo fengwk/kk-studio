@@ -21,14 +21,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -37,18 +37,19 @@ import java.util.UUID;
  * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩摘要调用通过 basis
  * EntryPath 末尾 owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed
  * Invocation 后仍可从 Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
+ *
+ * <p>历史 native 资格按次判定：只有 toolName 在当前 {@code toolBindings} 中的 tool call / result 才保持 native
+ * provider 结构，其余在投影时降级为文本，durable Entry 永不被改写。
  */
 public final class ModelRequestMaterializer {
 
-  private final ProviderMessageProjector messageProjector;
   private final SchemaJsonCodec schemaCodec;
 
   public ModelRequestMaterializer() {
-    this(new ProviderMessageProjector(), new SchemaJsonCodec());
+    this(new SchemaJsonCodec());
   }
 
-  ModelRequestMaterializer(ProviderMessageProjector messageProjector, SchemaJsonCodec schemaCodec) {
-    this.messageProjector = Objects.requireNonNull(messageProjector, "messageProjector");
+  ModelRequestMaterializer(SchemaJsonCodec schemaCodec) {
     this.schemaCodec = Objects.requireNonNull(schemaCodec, "schemaCodec");
   }
 
@@ -73,39 +74,44 @@ public final class ModelRequestMaterializer {
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
+    List<ProviderToolDefinition> tools = providerTools(spec.toolBindings());
     List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
-    for (AgentMessage preamble : spec.preambleMessages()) {
-      projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(preamble));
-    }
     appendHistory(path, projectedMessages);
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
         spec.outputTokens(),
-        messageProjector.projectSources(projectedMessages),
-        providerTools(spec.toolBindings()),
+        spec.systemInstruction(),
+        projector(spec.toolBindings()).projectSources(projectedMessages),
+        tools,
         spec.cacheControl());
   }
 
-  /** 摘要调用：永远构建一个 SYSTEM（summarization system）+ 一个 USER（conversation + summary prompt）请求。 */
+  /** 摘要调用：summarization system prompt 是唯一 systemInstruction，conversation 是一个 USER 消息。 */
   private ProviderRequest materializeCompaction(
       EntryPath path, ModelRequestSpec spec, CompactionStart compaction) {
     CompactionSummaryInput input = CompactionPlanner.reconstructSummaryInput(path, compaction);
-    List<AgentMessage> semanticMessages = new ArrayList<>(2);
-    semanticMessages.add(AgentMessage.system(CompactionPrompts.summarizationSystemPrompt()));
     String userPrompt =
         compaction.phase() == CompactionPhase.TURN_PREFIX
             ? CompactionPrompts.turnPrefixUserPrompt(input.messages())
             : CompactionPrompts.summaryUserPrompt(input.messages(), input.previousSummary());
-    semanticMessages.add(
-        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(userPrompt))));
+    ProviderMessageProjector projector = projector(List.of());
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
         spec.outputTokens(),
-        messageProjector.project(semanticMessages),
+        CompactionPrompts.summarizationSystemPrompt(),
+        projector.project(List.of(AgentMessage.user(userPrompt))),
         List.of(),
         spec.cacheControl());
+  }
+
+  private ProviderMessageProjector projector(List<ToolBinding> toolBindings) {
+    Set<String> nativeToolNames = new HashSet<>();
+    for (ToolBinding binding : toolBindings) {
+      nativeToolNames.add(binding.descriptor().name());
+    }
+    return new ProviderMessageProjector(nativeToolNames);
   }
 
   /**

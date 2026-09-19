@@ -360,6 +360,7 @@ class PromptCacheRequestFinalizerTest {
         new ModelDescriptor(
             "provider", "m1", "m1", Set.of(ModelInputModality.TEXT), true, false, pricing());
     ModelVariant variant = new ModelVariant("default");
-    return new ProviderRequest(model, variant, 1024, messages, tools, forged);
+    return new ProviderRequest(
+        model, variant, 1024, "Test system instruction.", messages, tools, forged);
   }
 }

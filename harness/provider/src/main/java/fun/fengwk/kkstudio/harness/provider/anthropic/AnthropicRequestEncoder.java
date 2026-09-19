@@ -101,37 +101,16 @@ final class AnthropicRequestEncoder {
 
     ArrayNode toolsArray = encodeTools(request.tools());
 
-    // 提取 leading SYSTEM 与 conversation messages
-    List<ProviderMessage> messages = request.messages();
-    List<ProviderContentBlock> leadingSystemBlocks = new ArrayList<>();
-    List<ProviderMessage> conversationMessages = new ArrayList<>();
-    boolean seenNonSystem = false;
-
-    for (ProviderMessage msg : messages) {
-      if (msg.role() == ProviderMessageRole.SYSTEM) {
-        if (seenNonSystem) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "Anthropic does not allow mid-conversation SYSTEM messages");
-        }
-        leadingSystemBlocks.addAll(msg.contents());
-      } else {
-        seenNonSystem = true;
-        conversationMessages.add(msg);
-      }
-    }
-
-    ArrayNode unmarkedSystemArray = null;
-    if (!leadingSystemBlocks.isEmpty()) {
-      unmarkedSystemArray = NODES.arrayNode();
-      for (ProviderContentBlock block : leadingSystemBlocks) {
-        unmarkedSystemArray.add(encodeSystemBlock(block));
-      }
-    }
+    // 系统指令是请求唯一的顶层 system；编码为单块数组以便 SYSTEM breakpoint 仍可打标。
+    ArrayNode unmarkedSystemArray = NODES.arrayNode();
+    ObjectNode systemBlock = NODES.objectNode();
+    systemBlock.put("type", "text");
+    systemBlock.put("text", request.systemInstruction());
+    unmarkedSystemArray.add(systemBlock);
 
     // 从左到右构建 wire messages 并维护 prefix hash
     ArrayNode wireMessagesArray = NODES.arrayNode();
-    for (ProviderMessage msg : conversationMessages) {
+    for (ProviderMessage msg : request.messages()) {
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
         String currentPrefixHash =
             AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
@@ -158,9 +137,7 @@ final class AnthropicRequestEncoder {
     if (toolsArray != null && !toolsArray.isEmpty()) {
       root.set("tools", toolsArray);
     }
-    if (unmarkedSystemArray != null && !unmarkedSystemArray.isEmpty()) {
-      root.set("system", unmarkedSystemArray);
-    }
+    root.set("system", unmarkedSystemArray);
     root.set("messages", wireMessagesArray);
 
     byte[] utf8Bytes;
@@ -278,20 +255,6 @@ final class AnthropicRequestEncoder {
       toolNode.set("input_schema", schemaNode);
     }
     return array;
-  }
-
-  private static ObjectNode encodeSystemBlock(ProviderContentBlock block) {
-    if (block instanceof ProviderTextBlock textBlock) {
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "text");
-      node.put("text", textBlock.text());
-      return node;
-    }
-    if (block instanceof ProviderDocumentBlock documentBlock) {
-      return encodeDocumentBlock(documentBlock);
-    }
-    throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST, "unsupported system content block type");
   }
 
   private static ObjectNode encodeUserMessage(ProviderMessage message) {

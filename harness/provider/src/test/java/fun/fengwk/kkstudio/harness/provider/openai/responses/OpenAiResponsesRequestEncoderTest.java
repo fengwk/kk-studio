@@ -137,6 +137,7 @@ class OpenAiResponsesRequestEncoderTest {
         model,
         variant != null ? variant : DEFAULT_VARIANT,
         outputTokens,
+        "Test system instruction.",
         messages != null ? messages : List.of(),
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());
@@ -406,7 +407,13 @@ class OpenAiResponsesRequestEncoderTest {
 
     ProviderRequest cachedRequest =
         new ProviderRequest(
-            createModel(), DEFAULT_VARIANT, 1024, messages, List.of(), cacheControl);
+            createModel(),
+            DEFAULT_VARIANT,
+            1024,
+            "Test system instruction.",
+            messages,
+            List.of(),
+            cacheControl);
     JsonNode first =
         MAPPER.readTree(
             encoder
@@ -661,7 +668,8 @@ class OpenAiResponsesRequestEncoderTest {
     userMsg.put("type", "message").put("role", "user");
     userMsg.putArray("content").addObject().put("type", "input_text").put("text", "question");
     String validPrefixHash =
-        OpenAiResponsesPrefixHasher.calculateHash(MAPPER.createArrayNode(), priorInput);
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", MAPPER.createArrayNode(), priorInput);
 
     ObjectNode payload = MAPPER.createObjectNode();
     ArrayNode outputArr = payload.putArray("output");
@@ -1024,7 +1032,7 @@ class OpenAiResponsesRequestEncoderTest {
     // 计算精确 prefixHash 以便匹配
     String currentHash =
         OpenAiResponsesPrefixHasher.calculateHash(
-            MAPPER.createArrayNode(), MAPPER.createArrayNode());
+            "Test system instruction.", MAPPER.createArrayNode(), MAPPER.createArrayNode());
     ProviderReplayState replayMatched =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
@@ -1662,7 +1670,7 @@ class OpenAiResponsesRequestEncoderTest {
     pFallback.putArray("output").add(fcFallbackId);
     String calcHash =
         OpenAiResponsesPrefixHasher.calculateHash(
-            MAPPER.createArrayNode(), MAPPER.createArrayNode());
+            "Test system instruction.", MAPPER.createArrayNode(), MAPPER.createArrayNode());
     ProviderReplayState rsFallback =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,

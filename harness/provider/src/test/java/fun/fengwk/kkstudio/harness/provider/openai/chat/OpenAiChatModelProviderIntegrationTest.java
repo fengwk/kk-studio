@@ -166,6 +166,7 @@ class OpenAiChatModelProviderIntegrationTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1),
             List.of(tool),
             ProviderCacheControl.none());
@@ -217,6 +218,7 @@ class OpenAiChatModelProviderIntegrationTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, asstMsg, toolMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -274,6 +276,7 @@ class OpenAiChatModelProviderIntegrationTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

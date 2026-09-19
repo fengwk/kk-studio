@@ -18,16 +18,13 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -304,13 +301,10 @@ final class ManualCompactionControl {
     return locked;
   }
 
+  /** queued 快照中是否存在 user-like 输入（USER_MESSAGE 或 USER CUSTOM_MESSAGE）；SET_* 不构成用户需求。 */
   private static boolean hasUserDemand(List<ThreadCommand> queued) {
     for (ThreadCommand command : queued) {
-      if (command.payload() instanceof UserMessageCommandPayload) {
-        return true;
-      }
-      if (command.payload() instanceof CustomMessageCommandPayload custom
-          && custom.message().role() == AgentMessageRole.USER) {
+      if (command.type().isMessage()) {
         return true;
       }
     }

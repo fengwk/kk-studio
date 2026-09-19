@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCachePolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 
 import java.util.EnumSet;
@@ -28,11 +27,11 @@ import java.util.UUID;
  *   <li>{@link PromptCacheRetention#NONE} 一律输出 {@link ProviderCacheControl#none()}。
  *   <li>policy capability 为 {@link PromptCacheMode#UNKNOWN} / {@link PromptCacheMode#UNSUPPORTED} /
  *       {@link PromptCacheMode#AUTOMATIC} 一律输出 {@code none()}；harness 不向 Provider 传递 cache hint。
- *   <li>{@link PromptCacheMode#AFFINITY} 即使没有 system/tools 也派生 affinity key，输出 {@link
+ *   <li>{@link PromptCacheMode#AFFINITY} 即使没有 tools 也派生 affinity key，输出 {@link
  *       ProviderCacheControl#affinity}。
- *   <li>{@link PromptCacheMode#BREAKPOINTS} 求 capability 支持 breakpoints 与请求实际内容的交集： leading SYSTEM
- *       存在才允许 SYSTEM，tools 非空才允许 TOOLS，非 SYSTEM 对话消息非空才允许 CONVERSATION；如无有效 breakpoint 则输出 {@code
- *       none()}， 否则输出 {@link ProviderCacheControl#breakpoints}。
+ *   <li>{@link PromptCacheMode#BREAKPOINTS} 求 capability 支持 breakpoints 与请求实际内容的交集： tools 非空才允许
+ *       TOOLS，会话消息非空才允许 CONVERSATION；system instruction 由 policy capability 自身声明支持时始终参与 SYSTEM
+ *       断点，如无有效 breakpoint 则输出 {@code none()}， 否则输出 {@link ProviderCacheControl#breakpoints}。
  * </ul>
  */
 public final class PromptCacheRequestFinalizer {
@@ -64,6 +63,7 @@ public final class PromptCacheRequestFinalizer {
         request.model(),
         request.variant(),
         request.outputTokens(),
+        request.systemInstruction(),
         request.messages(),
         request.tools(),
         resolved);
@@ -88,7 +88,8 @@ public final class PromptCacheRequestFinalizer {
       ProviderRequest request, PromptCacheCapability capability, PromptCacheRetention retention) {
     Set<PromptCacheBreakpoint> supported = capability.supportedBreakpoints();
     EnumSet<PromptCacheBreakpoint> resolved = EnumSet.noneOf(PromptCacheBreakpoint.class);
-    if (supported.contains(PromptCacheBreakpoint.SYSTEM) && hasLeadingSystem(request)) {
+    // systemInstruction 恒非空，因此 capability 声明支持 SYSTEM 断点时它总是有效前缀。
+    if (supported.contains(PromptCacheBreakpoint.SYSTEM)) {
       resolved.add(PromptCacheBreakpoint.SYSTEM);
     }
     if (supported.contains(PromptCacheBreakpoint.TOOLS) && !request.tools().isEmpty()) {
@@ -104,17 +105,9 @@ public final class PromptCacheRequestFinalizer {
         retention, keyFactory.create(sessionId, providerConnectionGenerationId, request), resolved);
   }
 
-  private static boolean hasLeadingSystem(ProviderRequest request) {
-    if (request.messages().isEmpty()) {
-      return false;
-    }
-    ProviderMessage first = request.messages().get(0);
-    return first.role() == ProviderMessageRole.SYSTEM;
-  }
-
   private static boolean hasConversationContent(ProviderRequest request) {
     for (ProviderMessage message : request.messages()) {
-      if (message.role() != ProviderMessageRole.SYSTEM && !message.contents().isEmpty()) {
+      if (!message.contents().isEmpty()) {
         return true;
       }
     }

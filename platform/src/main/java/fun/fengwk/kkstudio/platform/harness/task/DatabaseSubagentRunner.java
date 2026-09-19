@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -556,8 +557,9 @@ public class DatabaseSubagentRunner implements SubagentRunner {
     if (snapshot.model() == null && snapshot.toolSiblings().isEmpty()) {
       return false;
     }
+    // 内部软预算提醒以 USER system-reminder 持久化：系统指令只由请求的 systemInstruction 承载。
     CustomMessageCommandPayload reminderPayload =
-        new CustomMessageCommandPayload(AgentMessage.system(SubagentPrompts.maxTurnsReminder()));
+        new CustomMessageCommandPayload(SystemReminder.message(SubagentPrompts.maxTurnsReminder()));
     NewThreadCommand reminder =
         new NewThreadCommand(
             reminderPayload,

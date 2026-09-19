@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SettingsReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -34,12 +35,12 @@ import java.util.function.Supplier;
  * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath 与 queued Command 快照构造完整合法 candidate
  * EntryPath，不接触 Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
- * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）与 SYSTEM CUSTOM_MESSAGE（用于 task
- * soft steering），保留 USER_MESSAGE 与 USER CUSTOM_MESSAGE；INPUT 只消费到首条 user-like message为止的命令前缀，并先做可选
- * history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加
- * TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message；COMPACTION 只追加
- * TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的 {@link
- * CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
+ * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT），保留全部 USER_MESSAGE 与
+ * CUSTOM_MESSAGE（含 max-turn 等内部 steering 提醒）；INPUT 消费到首条 user-like message 为止的命令前缀，并先做可选 history
+ * normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加
+ * TURN_START(INPUT)、生效 SET_* 变更的 {@link SettingsReminder} USER 消息与按 sequence 顺序的 USER/CUSTOM
+ * Message； COMPACTION 只追加 TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的
+ * {@link CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
 final class TurnPlanBuilder {
 
@@ -114,9 +115,25 @@ final class TurnPlanBuilder {
             now));
     parentId = turnStartEntryId;
     if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
+      // SET_* 变更提醒采用固定前缀顺序，紧邻本 turn 的 user-like 消息之前。
+      for (CommandHarvestResult.SettingsChange change : harvest.changes()) {
+        UUID entryId = idAllocator.get();
+        candidateEntries.add(
+            new Entry(
+                entryId,
+                sessionId,
+                parentId,
+                new CustomMessagePayload(
+                    CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+                    CustomMessagePayload.CORE_CUSTOM_TYPE,
+                    CustomMessagePayload.CORE_RENDERER_KEY,
+                    SettingsReminder.message(change),
+                    CustomMessagePayload.CORE_DETAILS_JSON),
+                now));
+        parentId = entryId;
+      }
       for (ThreadCommand command : plannedCommands) {
-        if (reason == TurnStartReason.INPUT
-            && command.type() == ThreadCommandType.USER_MESSAGE
+        if (command.type() == ThreadCommandType.USER_MESSAGE
             && consumedCommands.contains(command)) {
           UUID entryId = idAllocator.get();
           candidateEntries.add(
@@ -167,7 +184,7 @@ final class TurnPlanBuilder {
         preparation);
   }
 
-  /** INPUT 消费完整 queued 快照；CONTINUATION 额外消费 SYSTEM steering message；COMPACTION 消费零 Command。 */
+  /** INPUT 消费完整 queued 快照；CONTINUATION 只消费 SET_* 配置命令；COMPACTION 消费零 Command。 */
   static boolean isConsumed(TurnStartReason reason, ThreadCommand command) {
     if (reason == TurnStartReason.INPUT) {
       return true;
@@ -175,20 +192,13 @@ final class TurnPlanBuilder {
     if (reason == TurnStartReason.COMPACTION) {
       return false;
     }
-    return switch (command.type()) {
-      case SET_AGENT, SET_MODEL, SET_ENVIRONMENT -> true;
-      case CUSTOM_MESSAGE -> ((CustomMessageCommandPayload) command.payload()).message().role()
-          == AgentMessageRole.SYSTEM;
-      case USER_MESSAGE -> false;
-    };
+    return command.type().isSetting();
   }
 
+  /** user-like：最终用户输入，含 contributor / runtime 注入的 USER CUSTOM_MESSAGE。 */
   private static boolean isUserLike(ThreadCommand command) {
-    if (command.type() == ThreadCommandType.USER_MESSAGE) {
-      return true;
-    }
-    return command.payload() instanceof CustomMessageCommandPayload custom
-        && custom.message().role() == AgentMessageRole.USER;
+    return command.type() == ThreadCommandType.USER_MESSAGE
+        || command.type() == ThreadCommandType.CUSTOM_MESSAGE;
   }
 
   /**

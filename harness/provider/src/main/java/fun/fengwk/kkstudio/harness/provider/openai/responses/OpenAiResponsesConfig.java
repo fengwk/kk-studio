@@ -90,9 +90,9 @@ public record OpenAiResponsesConfig(OpenAiPromptCacheMode openAiPromptCacheMode)
       case AUTOMATIC -> PromptCacheCapability.automatic();
       case LEGACY -> PromptCacheCapability.affinity(
           Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG));
+        // 系统指令是本协议顶层 instructions 字符串，input 中没有可打标的 system 内容块，因此不声明 SYSTEM 断点。
       case GPT_5_6_EXPLICIT -> PromptCacheCapability.breakpoints(
-          Set.of(PromptCacheRetention.SHORT),
-          Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
+          Set.of(PromptCacheRetention.SHORT), Set.of(PromptCacheBreakpoint.CONVERSATION));
     };
   }
 }

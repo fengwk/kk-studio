@@ -253,7 +253,7 @@ class ProviderReplayMaterializationTransportTest {
     assertTrue(durableUserJson.contains(BLOB_ID.toString()));
     assertFalse(durableUserJson.contains("base64"));
     AgentMessage durableUser = messages.decode(durableUserJson);
-    ProviderMessageProjector projector = new ProviderMessageProjector();
+    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
     Set<ModelInputModality> modalities =
         Set.of(ModelInputModality.TEXT, ModelInputModality.DOCUMENT);
     ProviderRequest firstRequest =
@@ -428,7 +428,13 @@ class ProviderReplayMaterializationTransportTest {
         new ModelDescriptor(
             "test-provider", "test-model", "test-model", modalities, false, true, pricing);
     return new ProviderRequest(
-        model, new ModelVariant("default"), 1024, messages, List.of(), ProviderCacheControl.none());
+        model,
+        new ModelVariant("default"),
+        1024,
+        "Test system instruction.",
+        messages,
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   private static StorageBlob activeTextBlob() {

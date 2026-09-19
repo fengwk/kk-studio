@@ -129,6 +129,7 @@ class OpenAiResponsesStreamingDecoderTest {
         model,
         new ModelVariant("default"),
         1024,
+        "Test system instruction.",
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
         List.of(),

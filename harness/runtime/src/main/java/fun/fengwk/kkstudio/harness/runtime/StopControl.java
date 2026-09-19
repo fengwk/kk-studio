@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -526,20 +527,16 @@ final class StopControl {
     return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
 
-  /**
-   * 按 sequence 升序还原被取消的 user-like 消息内容（USER_MESSAGE 与 USER role 的 CUSTOM_MESSAGE）；SET_* 与 SYSTEM
-   * steering 不返回。
-   */
+  /** 按 sequence 升序还原被取消的真实用户输入（USER_MESSAGE 与用户 CUSTOM_MESSAGE）；SET_* 与运行时提醒不返回。 */
   private static List<CancelledUserMessage> cancelledUserMessages(List<ThreadCommand> cancelled) {
     List<CancelledUserMessage> messages = new ArrayList<>();
     for (ThreadCommand command : cancelled) {
       AgentMessage message =
           switch (command.payload()) {
             case UserMessageCommandPayload user -> user.message();
-            case CustomMessageCommandPayload custom -> custom.message().role()
-                    == AgentMessageRole.USER
-                ? custom.message()
-                : null;
+            case CustomMessageCommandPayload custom -> SystemReminder.isReminder(custom.message())
+                ? null
+                : custom.message();
             default -> null;
           };
       if (message != null) {

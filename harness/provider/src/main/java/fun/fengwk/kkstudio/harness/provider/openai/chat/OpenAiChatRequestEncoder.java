@@ -97,8 +97,9 @@ final class OpenAiChatRequestEncoder {
       root.set("tools", toolsArray);
     }
 
-    // 从左到右构建 wire messages 并维护 prefix hash
+    // 从左到右构建 wire messages 并维护 prefix hash；系统指令合成为唯一的前导 system message。
     ArrayNode wireMessagesArray = NODES.arrayNode();
+    wireMessagesArray.add(encodeSystemInstruction(request.systemInstruction()));
     for (ProviderMessage message : request.messages()) {
       if (message.role() == ProviderMessageRole.ASSISTANT) {
         String currentPrefixHash =
@@ -193,7 +194,6 @@ final class OpenAiChatRequestEncoder {
 
   private static ObjectNode encodeMessage(ProviderMessage message, OpenAiChatConfiguration config) {
     return switch (message.role()) {
-      case SYSTEM -> encodeSystemMessage(message);
       case USER -> encodeUserMessage(message, config);
       case TOOL -> encodeToolMessage(message);
       case ASSISTANT -> throw new ProviderException(
@@ -202,20 +202,11 @@ final class OpenAiChatRequestEncoder {
     };
   }
 
-  private static ObjectNode encodeSystemMessage(ProviderMessage message) {
+  /** 本协议没有顶层 system 字段，因此把请求唯一的系统指令合成为一条前导 system message。 */
+  private static ObjectNode encodeSystemInstruction(String systemInstruction) {
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "system");
-    StringBuilder sb = new StringBuilder();
-    for (ProviderContentBlock block : message.contents()) {
-      if (block instanceof ProviderTextBlock tb) {
-        sb.append(tb.text());
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "SYSTEM message contains unsupported block: " + block.getClass().getSimpleName());
-      }
-    }
-    msgNode.put("content", sb.toString());
+    msgNode.put("content", systemInstruction);
     return msgNode;
   }
 

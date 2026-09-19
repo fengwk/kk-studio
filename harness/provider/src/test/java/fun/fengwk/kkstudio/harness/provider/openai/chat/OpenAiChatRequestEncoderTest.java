@@ -102,6 +102,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -134,6 +135,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -164,6 +166,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantWithReasoning,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -179,6 +182,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantOff,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -192,6 +196,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             variantWithReasoning,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -226,6 +231,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantLow,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -242,6 +248,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantOff,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -257,6 +264,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -269,7 +277,13 @@ class OpenAiChatRequestEncoderTest {
     // 4. DEEPSEEK 格式下 reasoning=false 且 effort="low" -> 均不生成 thinking 和 reasoning_effort
     ProviderRequest reqNonReasoningWithEffort =
         new ProviderRequest(
-            modelDesc, variantLow, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variantLow,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootNonReasoningWithEffort =
         MAPPER.readTree(
             encoder.encode(reqNonReasoningWithEffort, descriptor, deepseekConfig).bodyUtf8Bytes());
@@ -282,6 +296,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -319,7 +334,13 @@ class OpenAiChatRequestEncoderTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest request =
         new ProviderRequest(
-            modelDesc, variant, 100, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            100,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     JsonNode root =
         MAPPER.readTree(
@@ -344,6 +365,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -378,6 +400,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(toolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -406,6 +429,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userImg),
             List.of(),
             ProviderCacheControl.none());
@@ -439,6 +463,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userImgBase64),
             List.of(),
             ProviderCacheControl.none());
@@ -459,6 +484,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userAudioUrl),
             List.of(),
             ProviderCacheControl.none());
@@ -481,6 +507,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userAudioBase64),
             List.of(),
             ProviderCacheControl.none());
@@ -503,6 +530,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userPdf),
             List.of(),
             ProviderCacheControl.none());
@@ -534,6 +562,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userVideo),
             List.of(),
             ProviderCacheControl.none());
@@ -554,6 +583,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1),
             List.of(),
             ProviderCacheControl.none());
@@ -588,6 +618,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, validAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -628,6 +659,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, illegalAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -655,6 +687,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, fallbackAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -688,6 +721,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(sysMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -707,6 +741,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(sysMsg, userMsg),
             List.of(),
             cacheControlLegacy);
@@ -726,7 +761,13 @@ class OpenAiChatRequestEncoderTest {
             EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
     ProviderRequest reqGpt =
         new ProviderRequest(
-            modelDesc, defaultVariant, 1024, List.of(sysMsg, userMsg), List.of(), cacheControlGpt);
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(sysMsg, userMsg),
+            List.of(),
+            cacheControlGpt);
     JsonNode rootGpt =
         MAPPER.readTree(encoder.encode(reqGpt, descriptor, configGpt).bodyUtf8Bytes());
     assertEquals("my-key-gpt", rootGpt.path("prompt_cache_key").asText());
@@ -748,6 +789,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(sysMsg, userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -763,7 +805,13 @@ class OpenAiChatRequestEncoderTest {
         ProviderCacheControl.affinity(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLegacyLong =
         new ProviderRequest(
-            modelDesc, defaultVariant, 1024, List.of(sysMsg, userMsg), List.of(), cacheControlLong);
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(sysMsg, userMsg),
+            List.of(),
+            cacheControlLong);
     JsonNode rootLegacyLong =
         MAPPER.readTree(encoder.encode(reqLegacyLong, descriptor, configLegacy).bodyUtf8Bytes());
     assertEquals("24h", rootLegacyLong.path("prompt_cache_retention").asText());
@@ -785,6 +833,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(asstWithThinking),
             List.of(),
             ProviderCacheControl.none());
@@ -807,6 +856,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(asstWithImage),
             List.of(),
             ProviderCacheControl.none());
@@ -824,6 +874,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(sysWithImage),
             List.of(),
             ProviderCacheControl.none());
@@ -842,6 +893,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(toolJsonMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -868,6 +920,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(audioFlac),
             List.of(),
             ProviderCacheControl.none());
@@ -883,6 +936,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(audioBadUri),
             List.of(),
             ProviderCacheControl.none());
@@ -900,6 +954,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1),
             List.of(),
             ProviderCacheControl.none());
@@ -921,6 +976,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -948,6 +1004,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, mismatchTextMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -977,6 +1034,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1011,6 +1069,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, validToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1040,6 +1099,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badRoleTypeMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1068,6 +1128,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, nonObjToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1087,6 +1148,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -1103,6 +1165,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -1128,6 +1191,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(mp3Msg),
             List.of(),
             ProviderCacheControl.none());
@@ -1162,6 +1226,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(badDocMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1177,6 +1242,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(rawPdfMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1213,6 +1279,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, asstOnlyTools),
             List.of(),
             cacheControlGpt);
@@ -1249,6 +1316,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, toolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1277,6 +1345,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1314,6 +1383,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1344,6 +1414,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, unknownFieldMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1375,6 +1446,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, mismatchThinkingMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1406,6 +1478,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, validFallbackMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1444,6 +1517,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1476,6 +1550,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1511,6 +1586,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg3),
             List.of(),
             ProviderCacheControl.none());
@@ -1546,6 +1622,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg4),
             List.of(),
             ProviderCacheControl.none());
@@ -1583,6 +1660,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, asstMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1625,6 +1703,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, asstMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1677,6 +1756,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1713,6 +1793,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1747,6 +1828,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg3),
             List.of(),
             ProviderCacheControl.none());
@@ -1782,6 +1864,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg4),
             List.of(),
             ProviderCacheControl.none());
@@ -1820,6 +1903,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1848,6 +1932,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1871,6 +1956,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User),
             List.of(),
             ProviderCacheControl.none());
@@ -1953,6 +2039,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User, turn1Asst, turn2User),
             List.of(),
             ProviderCacheControl.none());
@@ -1997,6 +2084,7 @@ class OpenAiChatRequestEncoderTest {
               modelDesc,
               defaultVariant,
               1024,
+              "Test system instruction.",
               List.of(user1, fallbackMsg),
               List.of(),
               ProviderCacheControl.none());
@@ -2032,6 +2120,7 @@ class OpenAiChatRequestEncoderTest {
               modelDesc,
               defaultVariant,
               1024,
+              "Test system instruction.",
               List.of(user1, replayMsg),
               List.of(),
               ProviderCacheControl.none());
@@ -2064,6 +2153,7 @@ class OpenAiChatRequestEncoderTest {
               modelDesc,
               defaultVariant,
               1024,
+              "Test system instruction.",
               List.of(user1, msgWithBadDurable),
               List.of(),
               ProviderCacheControl.none());
@@ -2091,6 +2181,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -2131,6 +2222,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User),
             List.of(),
             ProviderCacheControl.none());
@@ -2171,6 +2263,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User, assistantMsg),
             List.of(),
             ProviderCacheControl.none());

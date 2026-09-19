@@ -459,7 +459,7 @@ final class ToolProcessorTestSupport {
         provider.model(),
         provider.variant(),
         1024,
-        List.of(),
+        "Test system instruction.",
         List.of(hostBinding(ToolSideEffect.READ_ONLY)),
         List.of(),
         List.of(),
@@ -471,6 +471,7 @@ final class ToolProcessorTestSupport {
         modelDescriptor(),
         new ModelVariant("v1"),
         1024,
+        "Test system instruction.",
         List.of(),
         List.of(),
         ProviderCacheControl.none());

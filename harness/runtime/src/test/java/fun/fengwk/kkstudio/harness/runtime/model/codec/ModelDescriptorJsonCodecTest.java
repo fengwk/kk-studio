@@ -304,6 +304,7 @@ class ModelDescriptorJsonCodecTest {
             model,
             variant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("hello")))),
@@ -397,6 +398,7 @@ class ModelDescriptorJsonCodecTest {
         model,
         variant,
         1024,
+        "Test system instruction.",
         new ArrayList<>(),
         List.of(new ProviderToolDefinition("lookup", "Look up facts", "{}")),
         ProviderCacheControl.none());

@@ -6,8 +6,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import java.util.Objects;
 
 /**
- * 业务扩展注入的对话消息 Entry：冻结的 {@link AgentMessage}（SYSTEM / USER）保持 model-visible，{@code detailsJson} 是
- * bounded canonical JSON object 字符串且绝不投影给 provider。
+ * 业务扩展注入的对话消息 Entry：冻结的 {@link AgentMessage}（USER）保持 model-visible，{@code detailsJson} 是 bounded
+ * canonical JSON object 字符串且绝不投影给 provider。
  *
  * <p>非 contributor（platform command）产生的 CUSTOM_MESSAGE 使用稳定的内置消息元数据常量：contributorId {@code
  * core}、customType {@code message}、rendererKey {@code message}、details {@code {}}。
@@ -40,8 +40,8 @@ public record CustomMessagePayload(
     HistoryValueCodecs.requireCanonicalIdentifier(customType, "customType");
     HistoryValueCodecs.requireCanonicalIdentifier(rendererKey, "rendererKey");
     message = Objects.requireNonNull(message, "message");
-    if (message.role() != AgentMessageRole.SYSTEM && message.role() != AgentMessageRole.USER) {
-      throw new IllegalArgumentException("custom message role must be SYSTEM or USER");
+    if (message.role() != AgentMessageRole.USER) {
+      throw new IllegalArgumentException("custom message role must be USER");
     }
     Objects.requireNonNull(detailsJson, "detailsJson");
     JsonObjects.requireCanonicalObjectJson(detailsJson, "detailsJson", MAX_DETAILS_JSON_CHARS);

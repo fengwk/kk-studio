@@ -129,6 +129,7 @@ class ProviderRequestJsonCodecTest {
             base.model(),
             base.variant(),
             base.outputTokens(),
+            "Test system instruction.",
             List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(externalized))),
             base.tools(),
             base.cacheControl());
@@ -200,6 +201,7 @@ class ProviderRequestJsonCodecTest {
             request.model(),
             request.variant(),
             1024,
+            "Test system instruction.",
             request.messages(),
             List.of(invalidTool),
             request.cacheControl());
@@ -359,6 +361,7 @@ class ProviderRequestJsonCodecTest {
               request.model(),
               request.variant(),
               1024,
+              "Test system instruction.",
               List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(media))),
               request.tools(),
               request.cacheControl());
@@ -430,6 +433,7 @@ class ProviderRequestJsonCodecTest {
         model,
         selectedVariant,
         1024,
+        "Test system instruction.",
         List.of(
             new ProviderMessage(
                 ProviderMessageRole.SYSTEM,
@@ -489,6 +493,7 @@ class ProviderRequestJsonCodecTest {
         source.model(),
         source.variant(),
         1024,
+        "Test system instruction.",
         source.messages(),
         source.tools(),
         cacheCase.control());

@@ -227,7 +227,7 @@ class ProviderReplayStateJsonCodecTest {
                         BigDecimal.ZERO)),
                 new ModelVariant("v1"),
                 1024,
-                List.of(),
+                "Test system instruction.",
                 List.of(),
                 List.of(),
                 List.of(),
