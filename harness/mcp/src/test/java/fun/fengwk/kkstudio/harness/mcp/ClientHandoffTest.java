@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * {@link ClientHandoff} 所有权交接测试。
@@ -45,6 +47,32 @@ class ClientHandoffTest {
     handoff.offer(resource);
     handoff.take();
     assertThat(resource.closeCount()).isZero();
+  }
+
+  /**
+   * 清理失败不得覆盖原始异常：交接被迫关闭资源时，资源关闭抛出的异常必须被吞掉。
+   *
+   * <p>该路径发生在超时/失败的收尾阶段，任何外抛都会掩盖真正的失败原因并让调用方看到误导性错误。
+   */
+  @Test
+  void closeFailureDuringAbandonIsSwallowed() {
+    AtomicInteger closeAttempts = new AtomicInteger(0);
+    AutoCloseable failing =
+        () -> {
+          closeAttempts.incrementAndGet();
+          throw new IllegalStateException("close failed");
+        };
+
+    ClientHandoff<AutoCloseable> handoff = new ClientHandoff<>();
+    handoff.offer(failing);
+    assertThatCode(handoff::abandon).doesNotThrowAnyException();
+    assertThat(closeAttempts).hasValue(1);
+
+    // offer 后放弃的另一分支同样必须吞掉关闭异常
+    ClientHandoff<AutoCloseable> reverse = new ClientHandoff<>();
+    reverse.abandon();
+    assertThatCode(() -> reverse.offer(failing)).doesNotThrowAnyException();
+    assertThat(closeAttempts).hasValue(2);
   }
 
   /**

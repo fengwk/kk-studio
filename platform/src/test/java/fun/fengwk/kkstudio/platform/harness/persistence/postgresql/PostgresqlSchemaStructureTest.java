@@ -1054,7 +1054,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void generatedDurableEntityIdsUseUuidAndNoBusinessSequence() throws SQLException {
+  void durableEntityIdentifiersUseDeclaredTypesAndNoBusinessSequence() throws SQLException {
     for (String table : CANVAS_UUID_ID_TABLES) {
       assertColumnType("uuid", table, "id");
     }
@@ -1074,9 +1074,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "session_blob_ref", "session_id");
     assertColumnType("uuid", "session_blob_ref", "blob_id");
     assertColumnType("uuid", "chat", "id");
-    assertColumnType("varchar", "mcp_server", "name");
+    assertColumnType("character varying", "mcp_server", "name");
     assertColumnType("jsonb", "mcp_server", "headers");
-    assertColumnType("varchar", "mcp_tool", "name");
+    assertColumnType("character varying", "mcp_tool", "name");
     assertColumnType("jsonb", "mcp_tool", "input_schema");
     assertColumnType("uuid", "comfyui_workflow_api", "id");
     assertColumnType("uuid", "session_owner", "session_id");
@@ -1325,8 +1325,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_issue_assignee', 'fk_issue_reviewer',"
                     + " 'fk_issue_dependency_issue', 'fk_issue_dependency_depends_on',"
                     + " 'fk_issue_input_issue', 'fk_issue_run_issue', 'fk_issue_run_agent',"
-                    + " 'fk_issue_run_submission', 'fk_issue_controller_work_issue',"
-                    + " 'fk_mcp_server_environment')")) {
+                    + " 'fk_issue_run_submission', 'fk_issue_controller_work_issue')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -1365,8 +1364,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_issue_run_issue",
             "fk_issue_run_agent",
             "fk_issue_run_submission",
-            "fk_issue_controller_work_issue",
-            "fk_mcp_server_environment"),
+            "fk_issue_controller_work_issue"),
         foreignKeys,
         "all declared ownership relations must be enforced by PostgreSQL");
   }
