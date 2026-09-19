@@ -50,6 +50,18 @@ class ModelResponsePlannerTest {
     assertSame(ModelResponsePlan.Completed.class, plan.getClass());
   }
 
+  /** thinking-only 是有效模型输出；COMPLETE 且无工具调用时必须正常结束回合。 */
+  @Test
+  void completeWithThinkingOnlyCompletesTheTurn() {
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(
+                "", "reasoning without visible text", GenerationStopReason.COMPLETE, List.of()),
+            bindings());
+
+    assertSame(ModelResponsePlan.Completed.class, plan.getClass());
+  }
+
   @Test
   void completeWithValidCallsCreatesReadySlotsInOrdinalOrder() {
     ModelResponsePlan plan =
@@ -311,9 +323,14 @@ class ModelResponsePlannerTest {
 
   private static ProviderResponse response(
       GenerationStopReason stopReason, List<ProviderToolCall> calls) {
+    return response("response text", "", stopReason, calls);
+  }
+
+  private static ProviderResponse response(
+      String text, String thinking, GenerationStopReason stopReason, List<ProviderToolCall> calls) {
     return new ProviderResponse(
-        "response text",
-        "",
+        text,
+        thinking,
         calls,
         stopReason,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
