@@ -9,11 +9,13 @@ export interface AiConsoleResourceQueries {
   modelsQuery: ReturnType<typeof useQuery>
   agentsQuery: ReturnType<typeof useQuery>
   toolsQuery: ReturnType<typeof useQuery>
+  skillsQuery: ReturnType<typeof useQuery>
   environmentsQuery: ReturnType<typeof useQuery>
   providers: Awaited<ReturnType<typeof agentService.listProviders>>['results']
   models: AgentModelView[]
   agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
   toolCatalog: Awaited<ReturnType<typeof agentService.listTools>>
+  skills: Awaited<ReturnType<typeof agentService.listSkills>>
   environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
 }
 
@@ -22,7 +24,8 @@ export interface AiConsoleResourceQueryEnabled {
   models: boolean
   agents: boolean
   tools: boolean
-  environments: boolean
+  skills?: boolean
+  environments?: boolean
 }
 
 export function useAiConsoleResourceQueries(
@@ -52,10 +55,16 @@ export function useAiConsoleResourceQueries(
     enabled: enabled.tools,
   })
 
+  const skillsQuery = useQuery({
+    queryKey: queryKeys.skills.list,
+    queryFn: () => agentService.listSkills(),
+    enabled: Boolean(enabled.skills),
+  })
+
   const environmentsQuery = useQuery({
     queryKey: queryKeys.environments.list,
     queryFn: () => environmentService.listEnvironments(),
-    enabled: enabled.environments,
+    enabled: Boolean(enabled.environments),
   })
 
   return {
@@ -63,11 +72,13 @@ export function useAiConsoleResourceQueries(
     modelsQuery,
     agentsQuery,
     toolsQuery,
+    skillsQuery,
     environmentsQuery,
     providers: providersQuery.data?.results ?? [],
     models: toAgentModelViews(modelsQuery.data?.results ?? []),
     agents: agentsQuery.data?.results ?? [],
     toolCatalog: toolsQuery.data ?? [],
+    skills: skillsQuery.data ?? [],
     environments: environmentsQuery.data ?? [],
   }
 }

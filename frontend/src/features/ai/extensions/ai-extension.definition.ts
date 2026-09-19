@@ -9,6 +9,7 @@ import {
   ProvidersRoute,
   ResourceDeleteDialog,
   ResourceEditorDialog,
+  SkillPackagesRoute,
 } from '@/features/ai/extensions/ai-extension'
 import { TaskToolRendererLazy } from '@/features/ai/extensions/TaskToolRendererLazy'
 import { isTaskToolRendererExpandable } from '@/features/ai/runtime/thread-panel/messages/task-tool-display'
@@ -23,6 +24,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.agents', path: 'agents', component: AgentsRoute, priority: 100 },
     { id: 'ai.models', path: 'models', component: ModelsRoute, priority: 100 },
     { id: 'ai.providers', path: 'providers', component: ProvidersRoute, priority: 100 },
+    { id: 'ai.skill-packages', path: 'skill-packages', component: SkillPackagesRoute, priority: 100 },
     { id: 'ai.environments', path: 'environments', component: EnvironmentsRoute, priority: 100 },
     { id: 'ai.mcp-servers', path: 'mcp-servers', component: McpServersRoute, priority: 100 },
   ],
@@ -31,6 +33,13 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.nav.agents', label: 'Agent', labelKey: 'ai.nav.agents', path: 'agents', priority: 100 },
     { id: 'ai.nav.models', label: 'Model', labelKey: 'ai.nav.models', path: 'models', priority: 100 },
     { id: 'ai.nav.providers', label: 'Provider', labelKey: 'ai.nav.providers', path: 'providers', priority: 100 },
+    {
+      id: 'ai.nav.skill-packages',
+      label: 'Skill Packages',
+      labelKey: 'ai.nav.skillPackages',
+      path: 'skill-packages',
+      priority: 95,
+    },
     {
       id: 'ai.nav.environments',
       label: 'Environment',

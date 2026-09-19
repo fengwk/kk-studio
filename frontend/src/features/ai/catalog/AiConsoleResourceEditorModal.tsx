@@ -8,9 +8,9 @@ import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
+  SkillDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO, EnvironmentSkillDTO } from '@/shared/api/contracts/ai-environment'
 import { useI18n } from '@/shared/i18n'
 
 export function ResourceEditorModal({
@@ -19,10 +19,9 @@ export function ResourceEditorModal({
   models,
   agents = [],
   toolCatalog = [],
-  environments = [],
-  inventorySkills = [],
-  inventorySkillsLoading = false,
-  inventorySkillsError = null,
+  skills = [],
+  skillsLoading = false,
+  skillsError = null,
   providerDraft,
   modelDraft,
   agentDraft,
@@ -40,10 +39,9 @@ export function ResourceEditorModal({
   models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
-  environments?: EnvironmentCardDTO[]
-  inventorySkills?: EnvironmentSkillDTO[]
-  inventorySkillsLoading?: boolean
-  inventorySkillsError?: unknown
+  skills?: SkillDTO[]
+  skillsLoading?: boolean
+  skillsError?: unknown
   providerDraft: ProviderDraft
   modelDraft: ModelDraft
   agentDraft: AgentDraft
@@ -102,10 +100,9 @@ export function ResourceEditorModal({
               models={models}
               agents={agents}
               toolCatalog={toolCatalog}
-              environments={environments}
-              inventorySkills={inventorySkills}
-              inventorySkillsLoading={inventorySkillsLoading}
-              inventorySkillsError={inventorySkillsError}
+              skills={skills}
+              skillsLoading={skillsLoading}
+              skillsError={skillsError}
               fieldErrors={fieldErrors}
               onChange={onAgentDraftChange}
             />

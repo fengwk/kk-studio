@@ -150,7 +150,6 @@ function agent() {
     systemPrompt: null,
     model: 'minimax/MiniMax',
     variant: 'default',
-    environmentId: null,
     config: {
       inheritParentEnvironment: true,
       tools: [],

@@ -15,6 +15,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     listModels: vi.fn(),
     listAgents: vi.fn(),
     listTools: vi.fn(),
+    listSkills: vi.fn(),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
@@ -39,20 +40,21 @@ const scopeQueryMatrix: Array<{
     models: number
     agents: number
     tools: number
+    skills: number
     environments: number
   }
 }> = [
   {
     scope: 'agents',
-    expected: { providers: 1, models: 1, agents: 1, tools: 1, environments: 1 },
+    expected: { providers: 1, models: 1, agents: 1, tools: 1, skills: 1, environments: 0 },
   },
   {
     scope: 'models',
-    expected: { providers: 1, models: 1, agents: 0, tools: 0, environments: 0 },
+    expected: { providers: 1, models: 1, agents: 0, tools: 0, skills: 0, environments: 0 },
   },
   {
     scope: 'providers',
-    expected: { providers: 1, models: 0, agents: 0, tools: 0, environments: 0 },
+    expected: { providers: 1, models: 0, agents: 0, tools: 0, skills: 0, environments: 0 },
   },
 ]
 
@@ -63,6 +65,7 @@ describe('useCatalogPageController', () => {
     vi.mocked(agentService.listModels).mockResolvedValue(page([model()]))
     vi.mocked(agentService.listAgents).mockResolvedValue(page([agent()]))
     vi.mocked(agentService.listTools).mockResolvedValue([])
+    vi.mocked(agentService.listSkills).mockResolvedValue([])
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
   })
 
@@ -78,6 +81,7 @@ describe('useCatalogPageController', () => {
         expect(agentService.listModels).toHaveBeenCalledTimes(expected.models)
         expect(agentService.listAgents).toHaveBeenCalledTimes(expected.agents)
         expect(agentService.listTools).toHaveBeenCalledTimes(expected.tools)
+        expect(agentService.listSkills).toHaveBeenCalledTimes(expected.skills)
         expect(environmentService.listEnvironments).toHaveBeenCalledTimes(
           expected.environments,
         )
