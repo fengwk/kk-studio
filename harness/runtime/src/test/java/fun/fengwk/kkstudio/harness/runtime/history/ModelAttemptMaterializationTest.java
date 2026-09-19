@@ -74,7 +74,7 @@ class ModelAttemptMaterializationTest {
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
 
   @Test
   void acceptsExactFailedAttemptAndTerminalPartial() {

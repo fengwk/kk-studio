@@ -606,7 +606,7 @@ export function assertThreadSettings(accepted, testCase, agentName) {
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
-      === 'agentName,model',
+      === 'agentName,environmentName,model',
     `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
 }

@@ -44,7 +44,7 @@ class CompactionSummaryAssemblerTest {
   private static final UUID OWNER_THREAD_ID = id(101L);
   private static final Instant NOW = Instant.parse("2026-08-20T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
 
   @Test
   void historyPhaseStoresOnlyCanonicalPartialSummary() {

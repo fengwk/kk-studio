@@ -64,6 +64,8 @@ public final class AgentBranchSettingsMaterializer {
                     "subagent model variant not found: " + agentName + " variant=" + variantName));
     return new BranchSettings(
         agent.getName(),
-        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName));
+        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName),
+        // 子 Agent 只物化自身的 Agent/Model 选择；Environment 由调用方按 inheritParentEnvironment 单独决定。
+        null);
   }
 }

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.AccessLevel;
 import lombok.Data;
@@ -14,7 +15,7 @@ import java.util.List;
 @Data
 public class HarnessCommandCreateDTO {
 
-  /** SET_AGENT、SET_MODEL 或 USER_MESSAGE。 */
+  /** USER_MESSAGE、SET_AGENT、SET_MODEL 或 SET_ENVIRONMENT。 */
   private String type;
 
   /** canonical UUID string 幂等键。 */
@@ -29,6 +30,15 @@ public class HarnessCommandCreateDTO {
   /** SET_MODEL 的目标模型。 */
   private HarnessModelSelectionDTO model;
 
+  /**
+   * SET_ENVIRONMENT 的目标 Environment 名；null 表示解除该 branch 的环境选择。
+   *
+   * <p>该字段是否出现由 {@link #hasEnvironmentNameField()} 单独跟踪：SET_ENVIRONMENT 必须显式携带它（即使为 null）， 其余命令
+   * 携带即拒绝。HTTP 全局配置默认省略 null，因此这里强制 {@link JsonInclude.Include#ALWAYS} 以便请求形态可精确重放。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String environmentName;
+
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean contentsFieldPresent;
@@ -40,6 +50,10 @@ public class HarnessCommandCreateDTO {
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean modelFieldPresent;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean environmentNameFieldPresent;
 
   @JsonSetter("type")
   public void setType(Object value) {
@@ -70,6 +84,13 @@ public class HarnessCommandCreateDTO {
     this.modelFieldPresent = true;
   }
 
+  @JsonSetter("environmentName")
+  public void setEnvironmentName(Object value) {
+    this.environmentName =
+        HarnessRuntimeDtoSupport.requireJsonString(value, "command.environmentName");
+    this.environmentNameFieldPresent = true;
+  }
+
   @JsonIgnore
   public boolean hasContentsField() {
     return contentsFieldPresent;
@@ -83,6 +104,11 @@ public class HarnessCommandCreateDTO {
   @JsonIgnore
   public boolean hasModelField() {
     return modelFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasEnvironmentNameField() {
+    return environmentNameFieldPresent;
   }
 
   @JsonAnySetter

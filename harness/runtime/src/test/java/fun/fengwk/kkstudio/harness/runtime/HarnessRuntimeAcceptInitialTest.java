@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -296,9 +297,9 @@ class HarnessRuntimeAcceptInitialTest {
     assertFalse(withSystem.replayed());
   }
 
-  /** SET_* 前缀固定顺序必须是 SET_AGENT -&gt; SET_MODEL：用正反两个请求证明该顺序（正向通过 / 反向 IAE）。 */
+  /** SET_* 前缀固定顺序必须是 SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT：用正反请求证明该顺序（正向通过 / 反向 IAE）。 */
   @Test
-  void setPrefixOrderRequiresAgentBeforeModel() {
+  void setPrefixOrderRequiresAgentBeforeModelBeforeEnvironment() {
     // 合法：全前缀 + 单条 user message。
     AcceptedCommands result =
         runtime.acceptCommands(
@@ -310,6 +311,7 @@ class HarnessRuntimeAcceptInitialTest {
                     new NewThreadCommand(
                         new SetModelCommandPayload(new ModelSelection("acme", "gpt-x", "default")),
                         TestIds.id(3)),
+                    new NewThreadCommand(new SetEnvironmentCommandPayload("local"), TestIds.id(5)),
                     userMessageCommand(TestIds.id(4), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
@@ -329,6 +331,23 @@ class HarnessRuntimeAcceptInitialTest {
                         setAgent(TestIds.id(1)),
                         userMessageCommand(TestIds.id(3), "hi"))),
                 AcceptancePreflight.IDENTITY));
+    // 非法：SET_ENVIRONMENT 出现在 SET_MODEL 之前（顺序不变量拒绝）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(126),
+                    TestIds.id(127),
+                    List.of(
+                        new NewThreadCommand(
+                            new SetEnvironmentCommandPayload("local"), TestIds.id(2)),
+                        new NewThreadCommand(
+                            new SetModelCommandPayload(
+                                new ModelSelection("acme", "gpt-x", "default")),
+                            TestIds.id(3)),
+                        userMessageCommand(TestIds.id(1), "hi"))),
+                AcceptancePreflight.IDENTITY));
     // 非法：同类型 SET_* 出现两次。
     assertThrows(
         IllegalArgumentException.class,
@@ -341,6 +360,32 @@ class HarnessRuntimeAcceptInitialTest {
                         setAgent(TestIds.id(1)),
                         setAgent(TestIds.id(2)),
                         userMessageCommand(TestIds.id(3), "hi"))),
+                AcceptancePreflight.IDENTITY));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(128),
+                    TestIds.id(129),
+                    List.of(
+                        new NewThreadCommand(
+                            new SetEnvironmentCommandPayload("local"), TestIds.id(2)),
+                        new NewThreadCommand(new SetEnvironmentCommandPayload(null), TestIds.id(3)),
+                        userMessageCommand(TestIds.id(1), "hi"))),
+                AcceptancePreflight.IDENTITY));
+    // 非法：SET_* 出现在消息之后。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(130),
+                    TestIds.id(131),
+                    List.of(
+                        userMessageCommand(TestIds.id(1), "hi"),
+                        new NewThreadCommand(
+                            new SetEnvironmentCommandPayload("local"), TestIds.id(2)))),
                 AcceptancePreflight.IDENTITY));
   }
 

@@ -76,6 +76,7 @@ function branchSettings(
   return {
     agentName: 'assistant',
     model: modelSelection(),
+    environmentName: null,
     ...overrides,
   }
 }

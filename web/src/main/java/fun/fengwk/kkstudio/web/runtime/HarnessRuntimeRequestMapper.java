@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -237,7 +238,8 @@ public final class HarnessRuntimeRequestMapper {
     requireNonNull(dto, "branchSettings");
     return new BranchSettings(
         requireText(dto.getAgentName(), "branchSettings.agentName"),
-        toModelSelection(dto.getModel()));
+        toModelSelection(dto.getModel()),
+        dto.getEnvironmentName());
   }
 
   private static ModelSelection toModelSelection(HarnessModelSelectionDTO dto) {
@@ -263,18 +265,32 @@ public final class HarnessRuntimeRequestMapper {
       case "USER_MESSAGE" -> {
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
       case "SET_AGENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case "SET_MODEL" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
+        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
+      }
+      case "SET_ENVIRONMENT" -> {
+        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
+        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
+        requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        // SET_ENVIRONMENT 必须显式携带 environmentName（显式 null 表示解除选择），与「字段缺失」严格区分。
+        if (!dto.hasEnvironmentNameField()) {
+          throw new IllegalArgumentException(
+              "SET_ENVIRONMENT requires an explicit nullable environmentName field");
+        }
+        yield new SetEnvironmentCommandPayload(dto.getEnvironmentName());
       }
       case "CUSTOM_MESSAGE" -> throw new IllegalArgumentException(
           "CUSTOM_MESSAGE is not allowed on the product HTTP surface");
@@ -284,7 +300,10 @@ public final class HarnessRuntimeRequestMapper {
 
   private static void validateHttpCommandShape(List<NewThreadCommand> commands) {
     List<ThreadCommandType> prefixOrder =
-        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.SET_MODEL);
+        List.of(
+            ThreadCommandType.SET_AGENT,
+            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_ENVIRONMENT);
     int lastSetOrder = -1;
     int userMessageCount = 0;
     for (int i = 0; i < commands.size(); i++) {
@@ -298,7 +317,8 @@ public final class HarnessRuntimeRequestMapper {
       }
       int order = prefixOrder.indexOf(type);
       if (order <= lastSetOrder) {
-        throw new IllegalArgumentException("HTTP commands must use SET_AGENT, SET_MODEL order");
+        throw new IllegalArgumentException(
+            "HTTP commands must use SET_AGENT, SET_MODEL, SET_ENVIRONMENT order");
       }
       lastSetOrder = order;
     }

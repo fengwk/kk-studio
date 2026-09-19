@@ -19,6 +19,7 @@ export interface HarnessModelSelectionDTO {
 export interface HarnessBranchSettingsDTO {
   agentName: string
   model: HarnessModelSelectionDTO
+  environmentName: string | null
 }
 
 export type EntryType =
@@ -122,6 +123,7 @@ export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
   | { type: 'SET_AGENT'; idempotencyKey: string; agentName: string }
   | { type: 'SET_MODEL'; idempotencyKey: string; model: HarnessModelSelectionDTO }
+  | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environmentName: string | null }
 
 /**
  * Thread YOLO policy 直接更新请求；expectedVersion 是精确的 version CAS 游标

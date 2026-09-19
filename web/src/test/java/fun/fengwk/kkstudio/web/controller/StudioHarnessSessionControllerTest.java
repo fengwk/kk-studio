@@ -187,7 +187,8 @@ class StudioHarnessSessionControllerTest {
             SESSION_ID,
             null,
             new RootPayload(
-                new BranchSettings("assistant", new ModelSelection("openai", "gpt-5", "default"))),
+                new BranchSettings(
+                    "assistant", new ModelSelection("openai", "gpt-5", "default"), null)),
             Instant.parse("2026-08-10T00:00:00Z"));
     when(harnessQueryService.listSessionEntries(SESSION_ID)).thenReturn(List.of(root));
 

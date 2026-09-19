@@ -195,7 +195,8 @@ BranchDraft、Composer parts、generation 和 `unknownOutcome`；存在 pending 
 
 - `NEW_SESSION` 只发送 `USER_MESSAGE`，完整 BranchDraft 写进 `rootSettings`；
 - `NEW_THREAD_DRAFT` 和 `BOUND_THREAD` 在 `USER_MESSAGE` 前按固定顺序追加
-  `SET_AGENT`、`SET_MODEL` 的 diff；Agent 工具选择由最新 Agent definition 的
+  `SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT` 的 diff（`environmentName` 可空，null 表示清除）；
+  Agent 工具选择由最新 Agent definition 的
   `config.tools` 决定，不生成 branch tool command；
 - `BOUND_THREAD` 的 target 携带 `expectedHeadEntryId` 和
   `expectedNextCommandSequence`；YOLO 是 `PUT /yolo` 的直接控制面，不进入 mailbox；

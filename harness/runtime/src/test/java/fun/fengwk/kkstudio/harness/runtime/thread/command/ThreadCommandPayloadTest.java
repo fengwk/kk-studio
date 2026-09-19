@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,12 +28,14 @@ class ThreadCommandPayloadTest {
             ThreadCommandType.USER_MESSAGE,
             ThreadCommandType.CUSTOM_MESSAGE,
             ThreadCommandType.SET_AGENT,
-            ThreadCommandType.SET_MODEL),
+            ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_ENVIRONMENT),
         List.of(
                 new UserMessageCommandPayload(user("hello")),
                 new CustomMessageCommandPayload(system("system")),
                 new SetAgentCommandPayload("coding"),
-                new SetModelCommandPayload(MODEL))
+                new SetModelCommandPayload(MODEL),
+                new SetEnvironmentCommandPayload(null))
             .stream()
             .map(ThreadCommandPayload::type)
             .toList());
@@ -55,7 +58,7 @@ class ThreadCommandPayloadTest {
     assertThrows(NullPointerException.class, () -> new UserMessageCommandPayload(null));
   }
 
-  /** SET_* payload 只接受 canonical 取值；model selection 作为整体原子替换。 */
+  /** SET_* payload 只接受 canonical 取值；model selection 作为整体原子替换；环境名允许 null。 */
   @Test
   void settingPayloadsEnforceCanonicalValuesAndAtomicModel() {
     assertEquals(MODEL, new SetModelCommandPayload(MODEL).model());
@@ -63,14 +66,27 @@ class ThreadCommandPayloadTest {
     assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" coding"));
     assertThrows(IllegalArgumentException.class, () -> new SetAgentCommandPayload(" "));
     assertThrows(NullPointerException.class, () -> new SetModelCommandPayload(null));
+    assertEquals("local", new SetEnvironmentCommandPayload("local").environmentName());
+    assertNull(new SetEnvironmentCommandPayload(null).environmentName());
+    assertThrows(IllegalArgumentException.class, () -> new SetEnvironmentCommandPayload(" "));
+    assertThrows(IllegalArgumentException.class, () -> new SetEnvironmentCommandPayload(" a"));
+    assertThrows(IllegalArgumentException.class, () -> new SetEnvironmentCommandPayload("a/b"));
+    assertThrows(
+        IllegalArgumentException.class, () -> new SetEnvironmentCommandPayload("e".repeat(65)));
   }
 
   @Test
-  void classifiesMessageCommandTypes() {
+  void classifiesMessageAndSettingCommandTypes() {
     assertTrue(ThreadCommandType.USER_MESSAGE.isMessage());
     assertTrue(ThreadCommandType.CUSTOM_MESSAGE.isMessage());
     assertFalse(ThreadCommandType.SET_AGENT.isMessage());
     assertFalse(ThreadCommandType.SET_MODEL.isMessage());
+    assertFalse(ThreadCommandType.SET_ENVIRONMENT.isMessage());
+    assertFalse(ThreadCommandType.USER_MESSAGE.isSetting());
+    assertFalse(ThreadCommandType.CUSTOM_MESSAGE.isSetting());
+    assertTrue(ThreadCommandType.SET_AGENT.isSetting());
+    assertTrue(ThreadCommandType.SET_MODEL.isSetting());
+    assertTrue(ThreadCommandType.SET_ENVIRONMENT.isSetting());
   }
 
   private static AgentMessage user(String text) {

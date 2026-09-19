@@ -4,6 +4,7 @@ import {
   acceptanceConflictReason,
   buildAcceptanceRequest,
   copyBranchDraft,
+  createBranchSettings,
   isDefiniteAcceptanceFailure,
   isUnknownAcceptanceOutcome,
   prependFrozenComposerParts,
@@ -22,9 +23,9 @@ import { ApiError } from '@/shared/api/client'
 import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 
 const baseDraft: BranchDraft = {
-  environment: null,
   agentName: 'assistant',
   model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+  environmentName: null,
   yoloEnabled: false,
 }
 
@@ -40,9 +41,9 @@ const thread: HarnessThreadDTO = {
   status: 'IDLE',
   processing: false,
   branchSettings: {
-    environment: null,
     agentName: 'assistant',
     model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+    environmentName: null,
   },
   createTime: null,
   updateTime: null,
@@ -71,8 +72,32 @@ describe('AgentPane acceptance pipeline', () => {
       rootSettings: {
         agentName: 'assistant',
         model: baseDraft.model,
+        environmentName: null,
       },
       yoloEnabled: false,
+    })
+  })
+
+  /**
+   * 测试意图：锁定 createBranchSettings 转换契约，确保 environmentName 字段完整包含（包括显式 null 与有效字符串），
+   * 绝不在构建 NEW_SESSION 的 rootSettings 时丢失或丢弃。
+   */
+  it('includes environmentName (null and string) in createBranchSettings output', () => {
+    const settingsWithNull = createBranchSettings(baseDraft)
+    expect(settingsWithNull).toEqual({
+      agentName: 'assistant',
+      model: baseDraft.model,
+      environmentName: null,
+    })
+
+    const settingsWithString = createBranchSettings({
+      ...baseDraft,
+      environmentName: 'isolated-docker',
+    })
+    expect(settingsWithString).toEqual({
+      agentName: 'assistant',
+      model: baseDraft.model,
+      environmentName: 'isolated-docker',
     })
   })
 

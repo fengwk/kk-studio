@@ -99,6 +99,7 @@ describe('PaneTarget durable-local FSM', () => {
           rootSettings: {
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            environmentName: null,
           },
           yoloEnabled: false,
         },
@@ -111,6 +112,7 @@ describe('PaneTarget durable-local FSM', () => {
       branchDraft: {
         agentName: 'assistant',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        environmentName: null,
         yoloEnabled: false,
       },
       composerParts: [createTextPart('hello')],
@@ -175,6 +177,7 @@ describe('PaneTarget durable-local FSM', () => {
           rootSettings: {
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            environmentName: null,
           },
           yoloEnabled: false,
         },
@@ -187,6 +190,7 @@ describe('PaneTarget durable-local FSM', () => {
       branchDraft: {
         agentName: 'assistant',
         model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        environmentName: null,
         yoloEnabled: false,
       },
       composerParts: [createTextPart('hello')],
@@ -484,6 +488,225 @@ describe('PaneTarget durable-local FSM', () => {
     setPending({
       owner: { type: 'CHAT', id: 'different-owner' },
     })
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+  })
+
+  /**
+   * 测试意图：锁定 environmentName 持久化 exact-shape 契约。
+   * - rootSettings 与 branchDraft 必须严格拥有 exact keys（包含 environmentName），缺少 environmentName 必须 fail-closed 拒绝；
+   * - environmentName 允许显式 null 或非空白字符串，空白字符串或未知字段必须被拒绝；
+   * - SET_ENVIRONMENT 命令必须显式包含 environmentName（可为 null 或非空白字符串），缺少该属性或空白/非字符串必须被拒绝。
+   */
+  it('enforces exact-shape persistence for environmentName on branchDraft, rootSettings, and SET_ENVIRONMENT', () => {
+    const owner = { type: 'CHAT' as const, id: 'chat-1' }
+    const storage = memoryStorage()
+    const key = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
+    const baseValid = {
+      owner,
+      target: { kind: 'NEW_SESSION_DRAFT' },
+      request: {
+        owner,
+        target: {
+          type: 'NEW_SESSION',
+          sessionId: 's1',
+          threadId: 't1',
+          rootSettings: {
+            agentName: 'assistant',
+            model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            environmentName: null,
+          },
+          yoloEnabled: false,
+        },
+        commands: [{
+          type: 'USER_MESSAGE',
+          idempotencyKey: 'c1',
+          contents: [{ type: 'TEXT', text: 'hello' }],
+        }],
+      },
+      branchDraft: {
+        agentName: 'assistant',
+        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        environmentName: null,
+        yoloEnabled: false,
+      },
+      composerParts: [createTextPart('hello')],
+      generation: 1,
+      unknownOutcome: true,
+    }
+
+    // 1. explicit null accepted for rootSettings & branchDraft
+    storage.setItem(key, JSON.stringify(baseValid))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+
+    // 2. valid non-blank string environmentName accepted
+    const withStringEnv = {
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        target: {
+          ...baseValid.request.target,
+          rootSettings: {
+            ...baseValid.request.target.rootSettings,
+            environmentName: 'prod-env',
+          },
+        },
+      },
+      branchDraft: {
+        ...baseValid.branchDraft,
+        environmentName: 'prod-env',
+      },
+    }
+    storage.setItem(key, JSON.stringify(withStringEnv))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+
+    // 3. rootSettings without environmentName is rejected (fail-closed)
+    const rootSettingsWithoutEnv = {
+      agentName: baseValid.request.target.rootSettings.agentName,
+      model: baseValid.request.target.rootSettings.model,
+    }
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        target: {
+          ...baseValid.request.target,
+          rootSettings: rootSettingsWithoutEnv,
+        },
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 4. rootSettings with blank environmentName is rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        target: {
+          ...baseValid.request.target,
+          rootSettings: {
+            ...baseValid.request.target.rootSettings,
+            environmentName: '   ',
+          },
+        },
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 5. rootSettings with unknown extra key is rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        target: {
+          ...baseValid.request.target,
+          rootSettings: {
+            ...baseValid.request.target.rootSettings,
+            unknownKey: 'invalid',
+          },
+        },
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 6. branchDraft without environmentName is rejected (fail-closed)
+    const branchDraftWithoutEnv = {
+      agentName: baseValid.branchDraft.agentName,
+      model: baseValid.branchDraft.model,
+      yoloEnabled: baseValid.branchDraft.yoloEnabled,
+    }
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      branchDraft: branchDraftWithoutEnv,
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 7. branchDraft with blank environmentName is rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      branchDraft: {
+        ...baseValid.branchDraft,
+        environmentName: '   ',
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 8. branchDraft with unknown extra key is rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      branchDraft: {
+        ...baseValid.branchDraft,
+        unknownKey: 'invalid',
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 9. SET_ENVIRONMENT command: explicit null accepted
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        commands: [{
+          type: 'SET_ENVIRONMENT',
+          idempotencyKey: 'cmd-env-1',
+          environmentName: null,
+        }],
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+
+    // 10. SET_ENVIRONMENT command: valid string accepted
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        commands: [{
+          type: 'SET_ENVIRONMENT',
+          idempotencyKey: 'cmd-env-2',
+          environmentName: 'dev-cluster',
+        }],
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+
+    // 11. SET_ENVIRONMENT command: missing environmentName property rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        commands: [{
+          type: 'SET_ENVIRONMENT',
+          idempotencyKey: 'cmd-env-3',
+        }],
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 12. SET_ENVIRONMENT command: blank environmentName rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        commands: [{
+          type: 'SET_ENVIRONMENT',
+          idempotencyKey: 'cmd-env-4',
+          environmentName: '   ',
+        }],
+      },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    // 13. SET_ENVIRONMENT command: non-string non-null environmentName rejected
+    storage.setItem(key, JSON.stringify({
+      ...baseValid,
+      request: {
+        ...baseValid.request,
+        commands: [{
+          type: 'SET_ENVIRONMENT',
+          idempotencyKey: 'cmd-env-5',
+          environmentName: 12345,
+        }],
+      },
+    }))
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
   })
 })

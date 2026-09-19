@@ -64,13 +64,14 @@ function isBranchSettings(value: unknown): value is HarnessBranchSettingsDTO {
   }
   const keys = Object.keys(value)
   if (
-    keys.length !== 2
-    || !keys.every((key) => key === 'agentName' || key === 'model')
+    keys.length !== 3
+    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'environmentName')
   ) {
     return false
   }
   return nonBlank(value.agentName)
     && isModelSelection(value.model)
+    && (value.environmentName === null || nonBlank(value.environmentName))
 }
 
 function isCommandTarget(value: unknown): value is AgentCommandTargetDTO {
@@ -137,6 +138,9 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
       return nonBlank(value.agentName)
     case 'SET_MODEL':
       return isModelSelection(value.model)
+    case 'SET_ENVIRONMENT':
+      return Object.hasOwn(value, 'environmentName')
+        && (value.environmentName === null || nonBlank(value.environmentName))
     default:
       return false
   }
@@ -157,13 +161,14 @@ function isBranchDraft(value: unknown): value is BranchDraft {
   }
   const keys = Object.keys(value)
   if (
-    keys.length !== 3
-    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'yoloEnabled')
+    keys.length !== 4
+    || !keys.every((key) => key === 'agentName' || key === 'model' || key === 'environmentName' || key === 'yoloEnabled')
   ) {
     return false
   }
   return nonBlank(value.agentName)
     && isModelSelection(value.model)
+    && (value.environmentName === null || nonBlank(value.environmentName))
     && typeof value.yoloEnabled === 'boolean'
 }
 

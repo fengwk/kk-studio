@@ -100,6 +100,8 @@ public final class HarnessRuntimeResponseMapper {
     HarnessBranchSettingsDTO dto = new HarnessBranchSettingsDTO();
     dto.setAgentName(settings.agentName());
     dto.setModel(toModelSelectionDto(settings.model()));
+    // Environment 引用平铺为 nullable canonical name；null 显式保留（@JsonInclude(ALWAYS)）。
+    dto.setEnvironmentName(settings.environmentName());
     return dto;
   }
 

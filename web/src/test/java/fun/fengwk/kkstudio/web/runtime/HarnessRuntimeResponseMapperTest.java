@@ -134,6 +134,8 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals("openai", dto.getBranchSettings().getModel().getProviderName());
     assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
     assertEquals("default", dto.getBranchSettings().getModel().getVariant());
+    // Environment 引用投影为 nullable name（该 fixture 未选择环境）。
+    assertNull(dto.getBranchSettings().getEnvironmentName());
     assertEquals(NOW, dto.getCreateTime());
     assertEquals(NOW, dto.getUpdateTime());
     assertFalse(dto.getProcessing());

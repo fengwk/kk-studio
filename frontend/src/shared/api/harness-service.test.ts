@@ -33,6 +33,7 @@ describe('harnessService', () => {
         rootSettings: {
           agentName: 'assistant',
           model: { providerName: 'p', modelName: 'm', variant: 'v' },
+          environmentName: null,
         },
         yoloEnabled: false,
       },

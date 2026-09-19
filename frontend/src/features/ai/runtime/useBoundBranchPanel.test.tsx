@@ -70,6 +70,7 @@ function branchSettings(
   return {
     agentName: 'assistant',
     model: modelSelection(),
+    environmentName: null,
     ...overrides,
   }
 }
@@ -278,6 +279,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.draft).toEqual({
       agentName: 'coder',
       model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
+      environmentName: null,
       yoloEnabled: true,
     })
     // effectiveBase 仍是干净快照；draft 已变脏。
@@ -662,6 +664,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.draft).toEqual({
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
+      environmentName: null,
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)
@@ -726,6 +729,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.draft).toEqual({
       agentName: 'assistant2',
       model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
+      environmentName: null,
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)
@@ -866,6 +870,7 @@ describe('useBoundBranchPanel', () => {
     expect(result.current.draft).toEqual({
       agentName: 'fresh',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      environmentName: null,
       yoloEnabled: true,
     })
     expect(result.current.dirty).toBe(false)

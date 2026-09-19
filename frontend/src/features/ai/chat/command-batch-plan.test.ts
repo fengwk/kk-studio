@@ -18,6 +18,7 @@ function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBra
   return {
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    environmentName: null,
     ...overrides,
   }
 }
@@ -45,6 +46,7 @@ function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
   return {
     agentName: 'assistant',
     model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    environmentName: null,
     yoloEnabled: false,
     ...overrides,
   }

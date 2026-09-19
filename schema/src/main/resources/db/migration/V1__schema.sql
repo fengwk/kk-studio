@@ -1253,7 +1253,8 @@ create table harness_thread_command (
             'USER_MESSAGE',
             'CUSTOM_MESSAGE',
             'SET_AGENT',
-            'SET_MODEL'
+            'SET_MODEL',
+            'SET_ENVIRONMENT'
         )
     ),
     constraint ck_harness_thread_command_request_hash check (

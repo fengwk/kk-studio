@@ -25,7 +25,7 @@ import java.util.Set;
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
  * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
- * ModelSelection}。
+ * ModelSelection}；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除环境选择）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -40,6 +40,7 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
+  private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
 
@@ -119,6 +120,7 @@ public final class ThreadCommandPayloadJsonCodec {
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
+      case SET_ENVIRONMENT -> decodeSetEnvironment(root);
     };
   }
 
@@ -151,6 +153,16 @@ public final class ThreadCommandPayloadJsonCodec {
       case SetModelCommandPayload value -> NODES
           .objectNode()
           .set("model", encodeModelSelection(value.model()));
+      case SetEnvironmentCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        // environmentName 必须显式存在：null 表示解除环境选择，与「字段缺失」严格区分。
+        if (value.environmentName() == null) {
+          node.putNull("environmentName");
+        } else {
+          node.put("environmentName", value.environmentName());
+        }
+        yield node;
+      }
     };
   }
 
@@ -186,6 +198,26 @@ public final class ThreadCommandPayloadJsonCodec {
     ObjectNode node = requireObject(value, "SET_MODEL");
     requireExactFields(node, SET_MODEL_FIELDS, "SET_MODEL");
     return new SetModelCommandPayload(decodeModelSelection(node.get("model")));
+  }
+
+  private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
+    ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
+    requireExactFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
+    return new SetEnvironmentCommandPayload(
+        nullableEnvironmentName(node, "environmentName", "SET_ENVIRONMENT"));
+  }
+
+  /** 解码可空 Environment 名：text 或 null；其他类型（含对象/数组）确定性拒绝。 */
+  private static String nullableEnvironmentName(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return CommandValueValidation.requireCanonicalEnvironmentName(
+        value.textValue(), context + "." + field);
   }
 
   private static ModelSelection decodeModelSelection(JsonNode value) {

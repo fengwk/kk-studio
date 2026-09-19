@@ -267,7 +267,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     Session session = new Session(sessionId, "session", now);
     BranchSettings branchSettings =
         new BranchSettings(
-            agentName, new ModelSelection(providerName, configuredModelName, "default"));
+            agentName, new ModelSelection(providerName, configuredModelName, "default"), null);
     Entry rootEntry = new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings), now);
 
     harnessStore.transaction(
