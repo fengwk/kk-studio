@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -45,6 +46,27 @@ class HarnessRuntimeDtoContractTest {
     assertNull(target.getSessionId());
     assertEquals("THREAD", target.getType());
     assertEquals("3", target.getExpectedNextCommandSequence());
+  }
+
+  @Test
+  void branchSettingsTracksRequiredNullableEnvironmentNamePresence() throws Exception {
+    HarnessBranchSettingsDTO explicitNull =
+        MAPPER.readValue(
+            """
+            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+             "environmentName":null}
+            """,
+            HarnessBranchSettingsDTO.class);
+    HarnessBranchSettingsDTO missing =
+        MAPPER.readValue(
+            """
+            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"}}
+            """,
+            HarnessBranchSettingsDTO.class);
+
+    assertTrue(explicitNull.hasEnvironmentNameField());
+    assertNull(explicitNull.getEnvironmentName());
+    assertFalse(missing.hasEnvironmentNameField());
   }
 
   @Test

@@ -236,6 +236,10 @@ public final class HarnessRuntimeRequestMapper {
 
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
+    if (!dto.hasEnvironmentNameField()) {
+      throw new IllegalArgumentException(
+          "branchSettings requires an explicit nullable environmentName field");
+    }
     return new BranchSettings(
         requireText(dto.getAgentName(), "branchSettings.agentName"),
         toModelSelection(dto.getModel()),

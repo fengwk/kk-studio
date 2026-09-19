@@ -43,7 +43,10 @@ class HarnessRuntimeRequestMapperTest {
 
   private static final String THREAD_ID = idText(1);
 
-  /** 测试意图：rootSettings 的 environmentName 必须是 nullable 映射——null 与 canonical 文本都要精确保留。 */
+  /**
+   * 测试意图：rootSettings 的 environmentName 是 required-nullable 字段——显式 null 与 canonical 文本都要精确保留，字段缺失必须
+   * fail closed。
+   */
   @Test
   void mapsNullableEnvironmentNameFromRootSettings() {
     HarnessCommandTargetDTO target = newSessionTarget();
@@ -60,6 +63,17 @@ class HarnessRuntimeRequestMapperTest {
     AcceptCommandsTarget.NewSession cleared =
         assertInstanceOf(AcceptCommandsTarget.NewSession.class, withoutEnvironment.target());
     assertNull(cleared.rootSettings().environmentName());
+
+    HarnessCommandTargetDTO missing = newSessionTarget();
+    HarnessBranchSettingsDTO missingSettings = new HarnessBranchSettingsDTO();
+    missingSettings.setAgentName(missing.getRootSettings().getAgentName());
+    missingSettings.setModel(missing.getRootSettings().getModel());
+    missing.setRootSettings(missingSettings);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(missing, userCommand("missing"))));
 
     HarnessCommandTargetDTO invalid = newSessionTarget();
     invalid.getRootSettings().setEnvironmentName("a/b");
@@ -628,6 +642,7 @@ class HarnessRuntimeRequestMapperTest {
     HarnessBranchSettingsDTO settings = new HarnessBranchSettingsDTO();
     settings.setAgentName("default-assistant");
     settings.setModel(modelSelection());
+    settings.setEnvironmentName(null);
     return settings;
   }
 
