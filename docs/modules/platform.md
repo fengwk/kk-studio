@@ -38,7 +38,7 @@ classloader 由 web 的
 | [project](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project) | `ProjectServiceImpl`、`IssueServiceImpl`、`IssueRunServiceImpl`、`IssueControllerDispatcher`、`IssueReconciler`、`ProjectHarnessContributor` | Project/Issue 生命周期与确定性 Coordinator |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
-| [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration`、`EnvironmentOperationDispatcher` | Environment Card、Daemon 会话装配、宿主元数据保留与异步操作 |
+| [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration` | Environment Card、Daemon 会话装配与宿主元数据保留 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `PlatformCanvasResourceLifecycle`、`CanvasBlobResourceMaterializer`、Canvas Function adapters | Canvas Resource 生命周期与 Function adapter |
 | [comfyui](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui) | `ComfyuiWorkflowApiServiceImpl`、`ComfyuiRuntimeService` | Workflow 卡片与无状态运行 |
 | [error](../../platform/src/main/java/fun/fengwk/kkstudio/platform/error)、[persistence](../../platform/src/main/java/fun/fengwk/kkstudio/platform/persistence) | `DomainErrorCode`、`PostgresqlIntegrityViolationClassifier` | 领域错误分类与 FK/唯一约束到领域错误的映射 |
@@ -95,23 +95,33 @@ wire value 分别是 `openai`、`openai_response`、`anthropic`、`google`；`fr
 
 ## MCP server 与运行时工具目录
 
-MCP 配置与发现结果保存于 `mcp_server`、`mcp_tool`。创建和更新只严格解析一份
-Remote/Local 配置 JSON 并把状态置为 `UNVERIFIED`；标准列表和详情返回安全投影，完整
-`configJson` 只经显式配置查询返回。显式发现统一返回 `202 Accepted`：
+MCP 配置与发现结果保存于 `mcp_server`、`mcp_tool`，唯一身份是 server 的不可变 `name`：
+它同时是主键与 HTTP 路径身份，也是模型可见工具名 `mcp_<name>_<tool>` 的组成段。创建与
+更新只接受显式 HTTP 字段（URL、headers、enabled、timeout），并严格拒绝任何未知字段，把
+状态置为 `UNVERIFIED`；标准列表、详情与更新响应只返回安全投影（name、enabled、
+timeoutMillis、discoveryStatus、toolCount、version、时间），URL 与 headers 只有显式
+`GET /{name}/config`（强制 `Cache-Control: no-store`）才返回，且 headers 里的
+`${VAR}` 占位符保持原样、不回显解析后的凭据。
 
-- Remote 在请求线程事务外通过 `harness-mcp` Streamable HTTP client 完成握手、
-  `tools/list` 与 schema/name 校验，再在短事务中锁 server、校验 CAS version 并原子
-  更新目录；失败时把当前版本标记为 `FAILED`。
-- Local 创建持久 `MCP_SERVER_DISCOVER` Environment operation，由目标 Daemon 的
-  `mcp.local.discover` 执行；结果发布器按固定锁顺序验证 READY route lease、Environment
-  归属、server/version 与严格结果 envelope，再把目录更新、Server `AVAILABLE` 状态与
-  操作终态提交在同一事务中。
+显式发现在请求线程同步完成：事务外通过 `harness-mcp` Streamable HTTP client 完成握手、
+`tools/list` 与 schema/name 校验，再在短事务中 `SELECT ... FOR UPDATE` 锁 server、校验
+CAS version 并整体物理替换目录——先清空该 server 的全部工具行，再写入本次发现结果，没有
+tombstone、修订号或 `available` 标记。任一步失败都完整保留旧工具行：
 
-[MCP 工具身份](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/McpStableIds.java)
-分两层：scoped `ContributionId` 是 contributor `platform.mcp` + localName
-`tool.<32hex>`，仍由 mcp_tool 行的稳定 UUID 派生并用于归属与持久定位；Agent 侧唯一
-身份是 `mcp_tool.model_name`。工具消失时保留稳定行并置 `available=false`，schema
-改变或工具重新出现时推进 `schemaRevision`；身份与漂移判定都不依赖任何工具版本字段。
+- 版本 CAS 不一致抛出 version conflict；
+- 发现请求失败或工具名/schema/description 非法时拒绝整批结果，不写任何行；
+- 被某个 Agent 引用的工具名将从目录中消失时 fail closed 并抛出 in-use 错误。
+
+因此目录内容与 `AVAILABLE` 状态总是一次发现结果的原子快照。Server 删除同样先做引用校验，
+再用 CAS 删除，工具行随 `fk_mcp_tool_server` 级联清理。
+
+动态目录的贡献身份由模型可见工具名派生：`ContributionId` 的 contributor 是
+`platform.mcp`，localName 由工具名把 `_` 换成 `-` 得到（模型可见名只含 `[a-z0-9_]`，
+该转换一一对应，不引入隐藏 UUID 或修订号）。Agent 侧的唯一身份就是
+`mcp_tool.name`；[`McpToolNameNormalizer`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/McpToolNameNormalizer.java)
+固定命名为 `mcp_<server>_<normalized_source>`，normalize 规则是 lowercase、非
+`[a-z0-9]` 字符替换为 `_`、合并连续 `_`、去首尾 `_`，结果必须满足 `ToolDescriptor`
+name 语法且 ≤64 字符，超长或同批发现内冲突都直接拒绝，绝不追加 hash 后缀。
 
 [RuntimeToolCatalogConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
 装配三个 bean：包装静态 `HarnessCatalog` 的 `HarnessToolCatalogAdapter`、读库的
@@ -122,20 +132,20 @@ name（无论 `ContributionId` 是否一致）都 fail closed；`ToolCatalogQuer
 只通过它列出或查找工具。
 
 [McpToolCatalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog.java)
-只选拔 `enabled=true`、`AVAILABLE`、`discoveredVersion==version` 且工具
-`available=true` 的记录。Remote Tool 要求为 none，在受管 `toolGatewayExecutor` 中以
-per-call client 执行；Local Tool 要求当前 branch 恰好选择 Server 所属 Environment（未选择
-时在调用入口以 `ENVIRONMENT_NOT_SELECTED` 拒绝），并把
-冻结配置包装为 `mcp.local.call` capability。两条路径的 side effect 都是
-`NON_IDEMPOTENT`，发送前重新围栏 server version、tool schema revision 与可用状态，
-一次绝对 deadline 覆盖 client 初始化和调用，取消只作用于当前调用。连接、协议和执行
-失败只向 Tool result 暴露稳定通用文本，不泄漏 URL、headers、env、command 或 cwd。
+每次调用现读 DB，只选拔 `enabled=true` 且 `AVAILABLE` 的 server 行与它们的工具行，按
+模型可见名升序返回。
+[`RemoteMcpExecutableTool`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/RemoteMcpExecutableTool.java)
+在受管 `toolGatewayExecutor` 中以 per-call client 执行，`ToolRequirements` 为 none
+（不绑定任何 Environment），side effect 是 `NON_IDEMPOTENT`。发送前按工具名重读当前行
+并重新校验 server 可选拔状态与工具归属，一次绝对 deadline 覆盖 client 初始化和调用，
+取消只作用于当前调用；超时、取消、配置漂移与执行失败只向 Tool result 暴露稳定通用文本，
+不泄漏 URL、headers 或内部异常。
 
 ## Chat、Project 与 Issue
 
 [ChatServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat/service/impl/ChatServiceImpl.java)
 提供 Chat CRUD，保存 title、agentName、`yoloEnabled`、version 和时间；
-Chat 本身不持有 Environment 或目录：具体 branch 的环境身份由该 branch 的 `BranchSettings.environmentName` 在每轮 turn 解析（Agent definition 的 `environmentId` 保留，但不参与解析）。
+Chat 本身不持有 Environment；具体 branch 的环境身份由该 branch 的 `BranchSettings.environmentName` 在每轮 turn 解析，Agent definition 的 `config` 不含任何 Environment 字段。
 `deleteChat` 先排他锁定 Chat，再调用
 `SessionDeletionOrchestrator.deleteSessionsByOwner(OwnerType.CHAT, chatId)` 深删除
 全部 Session，最后删除 Chat 行；`session_owner` 只表达 owner relation，不绕过 Session
@@ -281,8 +291,6 @@ Platform 侧的产品适配器只做映射，不持有会话状态：[Environmen
 推进连接状态并覆盖连接行保留的宿主 metadata（`environment_connection.runtime_info`）；
 断开或重新 CONNECTING 只回退状态、绝不清空该保留事实，因此 Daemon 离线后系统提示词
 和管理页面仍可读取最后一次已接受的 OS、时区、备注与 root path。
-[EnvironmentOperationDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/operation/EnvironmentOperationDispatcher.java)
-按 `environment_operation_pending` 通知与 SQL owner-node 租约隔离排空持久操作。
 Skill 正文不经过 Daemon：内部工具 `load_skill` 经 `DatabaseSkillContentLoader` 按冻结的
 `(packageName, packageVersion, name)` 从不可变 `skill` 行精确读取正文。
 
@@ -609,7 +617,7 @@ third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错�
 | Project、Issue | [project/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)、[project/controller/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/controller/)、[project/session/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/session/) | [`IssueReconcilerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconcilerTest.java)、[`ProjectHarnessSessionBootstrapServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/session/ProjectHarnessSessionBootstrapServiceTest.java) |
 | Model、Tool 执行 | [harness/model/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/)、[harness/tool/gateway/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/) | [`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java) |
 | turn 解析与 prompt 物化 | [harness/thread/command/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/)、[harness/task/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/)、[harness/skill/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/skill/) | [`DatabaseTurnResolverTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolverTest.java)、[`AgentPromptComposerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposerTest.java) |
-| Environment | [environment/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/)、[environment/registry/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/)、[environment/operation/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/operation/) | [`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、[`EnvironmentServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImplTest.java) |
+| Environment | [environment/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/)、[environment/registry/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/) | [`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、[`EnvironmentServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImplTest.java) |
 | Canvas 与 ComfyUI 适配 | [canvas/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/)、[canvas/function/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/)、[comfyui/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/comfyui/) | [`PlatformCanvasResourceLifecycleTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycleTest.java)、[`ComfyuiRuntimeServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/comfyui/ComfyuiRuntimeServiceTest.java) |
 | Storage、Blob | [storage/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/)、[storage/service/impl/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/service/impl/) | [`StorageUploadServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadServiceIntegrationTest.java)、[`StorageUploadCleanupLeaseIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadCleanupLeaseIntegrationTest.java) |
 | Settings | [settings/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/) | [`SystemSettingsServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImplTest.java)、[`SystemSettingsServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceIntegrationTest.java) |

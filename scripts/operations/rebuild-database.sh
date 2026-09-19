@@ -94,6 +94,7 @@ Preserved tables:
 
 Not preserved:
   chat / canvas / project / issue / harness / storage
+  mcp_server / mcp_tool (Platform MCP configuration and its discovered tools)
   environment_connection (a runtime lease recreated by Daemon reconnect)
   system_setting (the canonical default is inserted by V1)
 
@@ -337,7 +338,7 @@ show_plan() {
   echo "Plan:"
   echo "  1. Stop all App containers."
   echo "  2. Write and validate a full custom-format backup."
-  echo "  3. Export the seven preserved tables to a mode-0600 custom archive."
+  echo "  3. Export the six preserved tables to a mode-0600 custom archive."
   if [ "$SKIP_SNAPSHOT" = true ]; then
     echo "  4. Drop the old database (--skip-snapshot)."
   else
