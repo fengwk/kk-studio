@@ -1592,11 +1592,10 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
   })
 
   /**
-   * 测试意图：验证 unbound 与 bound footer 对 environmentName 的投影规则：
-   * 1. unbound 面板按 activeDraft.environmentName 匹配卡片，未知 name 显示 unavailable 而不是 none；
-   * 2. bound 面板保持 snapshot facts 语义，不混入 pane 本地未提交的 environment draft。
+   * 测试意图：验证 unbound footer 按 activeDraft.environmentName 匹配卡片，
+   * 未知 name 显示 unavailable 而不是 none。
    */
-  it('projects environment status in unbound and bound footers according to snapshot semantics', async () => {
+  it('projects unbound environment status from the active draft', async () => {
     const envCard: EnvironmentCardDTO = {
       id: 'uuid-env-ready',
       name: 'cluster-ready',

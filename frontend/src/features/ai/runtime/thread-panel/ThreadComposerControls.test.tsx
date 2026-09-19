@@ -443,7 +443,7 @@ describe('ThreadComposerControls environment menu', () => {
     ])
   })
 
-  /** 测试意图：验证点击选项调用 onEnvironmentChange，选择 None 时传 null，选择环境名时传对应名称。 */
+  /** 测试意图：验证选择严格保留环境名称，即使名称与内部“无环境”标记相似；只有 None 传 null。 */
   it('calls onEnvironmentChange with name or null on option selection', async () => {
     const user = userEvent.setup()
     const onEnvironmentChange = vi.fn()
@@ -453,7 +453,11 @@ describe('ThreadComposerControls environment menu', () => {
       <ThreadComposerControls
         settings={createSettings({
           environmentName: 'dev-cluster',
-          environments: [{ name: 'dev-cluster' }, { name: 'prod-box' }],
+          environments: [
+            { name: 'dev-cluster' },
+            { name: 'prod-box' },
+            { name: '__none__' },
+          ],
           onEnvironmentChange,
         })}
         menu="environment"
@@ -466,6 +470,9 @@ describe('ThreadComposerControls environment menu', () => {
     await user.click(within(listbox).getByRole('option', { name: 'prod-box' }))
     expect(onEnvironmentChange).toHaveBeenCalledWith('prod-box')
     expect(onMenuChange).toHaveBeenCalledWith(null, true)
+
+    await user.click(within(listbox).getByRole('option', { name: '__none__' }))
+    expect(onEnvironmentChange).toHaveBeenCalledWith('__none__')
 
     // 选择 None 时传 null
     await user.click(within(listbox).getByRole('option', { name: 'None' }))

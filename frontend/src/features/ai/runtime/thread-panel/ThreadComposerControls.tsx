@@ -45,6 +45,8 @@ interface SelectableItem {
   label: string
 }
 
+const NO_ENVIRONMENT_ITEM_ID = 'environment:none'
+
 /**
  * Composer 底栏的轻量 anchored menus。
  *
@@ -94,8 +96,8 @@ export function ThreadComposerControls({
     }
     if (menu === 'environment') {
       return [
-        { id: '__none__', label: t('ai.runtime.composer.environmentNone') },
-        ...environmentOptions.map((name) => ({ id: name, label: name })),
+        { id: NO_ENVIRONMENT_ITEM_ID, label: t('ai.runtime.composer.environmentNone') },
+        ...environmentOptions.map((name) => ({ id: environmentItemId(name), label: name })),
       ]
     }
     if (menu === 'model') {
@@ -123,7 +125,11 @@ export function ThreadComposerControls({
     if (menu === 'permission') {
       setActiveId(settings.yoloEnabled ? 'yolo' : 'default')
     } else if (menu === 'environment') {
-      setActiveId(settings.environmentName ?? '__none__')
+      setActiveId(
+        settings.environmentName == null
+          ? NO_ENVIRONMENT_ITEM_ID
+          : environmentItemId(settings.environmentName),
+      )
     } else if (menu === 'model') {
       const currentId = currentModel ? modelId(currentModel) : ''
       setActiveId(currentId)
@@ -194,7 +200,14 @@ export function ThreadComposerControls({
       return
     }
     if (menu === 'environment') {
-      settings.onEnvironmentChange(id === '__none__' ? null : id)
+      const selectedName = environmentOptions.find((name) => environmentItemId(name) === id)
+      if (id === NO_ENVIRONMENT_ITEM_ID) {
+        settings.onEnvironmentChange(null)
+      } else if (selectedName != null) {
+        settings.onEnvironmentChange(selectedName)
+      } else {
+        return
+      }
       onMenuChange(null, true)
       return
     }
@@ -385,8 +398,11 @@ export function ThreadComposerControls({
                 menu === 'permission'
                   ? item.id === (settings.yoloEnabled ? 'yolo' : 'default')
                   : menu === 'environment'
-                    ? (item.id === '__none__' && settings.environmentName == null)
-                      || item.id === settings.environmentName
+                    ? (item.id === NO_ENVIRONMENT_ITEM_ID && settings.environmentName == null)
+                      || (
+                        settings.environmentName != null
+                        && item.id === environmentItemId(settings.environmentName)
+                      )
                     : menu === 'model'
                       ? item.id === modelIdOfSelection(settings.model)
                       : (
@@ -431,4 +447,8 @@ function modelId(model: ThreadComposerModelOption): string {
 
 function modelIdOfSelection(model: ThreadComposerModelSelection): string {
   return `${model.providerName}/${model.modelName}`
+}
+
+function environmentItemId(name: string): string {
+  return `environment:name:${name}`
 }
