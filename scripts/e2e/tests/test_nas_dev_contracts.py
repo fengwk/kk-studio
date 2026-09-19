@@ -434,9 +434,8 @@ class TestNasDevImageContracts(unittest.TestCase):
                 self.assertNotIn(identifier, body, f"{surface.name} must not configure {identifier}")
 
     def test_docs_describe_the_mount_and_gh_login_contract(self):
-        # Intent: the NAS Compose file lives outside this repository, so the committed docs
-        # are the only place where the four persistent mounts and the one-time
-        # `gh auth login` step can be verified.
+        # Intent: deployment owns the external mount contract, while the development guide
+        # owns the operator's one-time `gh auth login` procedure.
         deployment = DEPLOYMENT_DOC.read_text()
         development = DEVELOPMENT_DOC.read_text()
         for mount in (
@@ -446,10 +445,8 @@ class TestNasDevImageContracts(unittest.TestCase):
             "/home/kkdaemon/.config/gh",
         ):
             self.assertIn(mount, deployment, mount)
-            self.assertIn(mount, development, mount)
-        for doc in (deployment, development):
-            self.assertIn("KK_STUDIO_SSH_CREDENTIALS_DIR", doc)
-            self.assertIn("/etc/ssh/ssh_known_hosts", doc)
+        self.assertIn("KK_STUDIO_SSH_CREDENTIALS_DIR", deployment)
+        self.assertIn("/etc/ssh/ssh_known_hosts", deployment)
         # SSH only grants Git access; gh keeps its own API scopes from an interactive login.
         self.assertIn("SSH key 只让 Git 能读写仓库", development)
         for login in (
@@ -664,23 +661,24 @@ class TestNasDevImageContracts(unittest.TestCase):
             )
 
     def test_docs_state_main_owned_execution_and_dev_synchronous_preview(self):
-        # Intent: the NAS Compose file and Gateway config live outside this repository, so
-        # the committed docs are the only place defining who executes Work and who owns
-        # Flyway; stale claims would mislead operators into re-enabling Dev workers or
-        # pointing the Dev Daemon back at its own container.
+        # Intent: deployment owns the external Compose/control-plane contract, while the
+        # development guide owns the operator-facing Main/Dev execution model.
         deployment = DEPLOYMENT_DOC.read_text()
         development = DEVELOPMENT_DOC.read_text()
+        self.assertIn("KK_STUDIO_CONTROL_PLANE_BASE_URL", deployment)
+        self.assertIn("KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED", deployment)
+        self.assertIn("`.env`", deployment)
+        self.assertIn(
+            "KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}",
+            deployment,
+        )
+        self.assertIn(f"KK_STUDIO_CONTROL_PLANE_BASE_URL={CONTROL_PLANE_BASE_URL}", deployment)
+        self.assertIn(f"ws://vps-kk-studio:8080{DAEMON_GATEWAY_PATH}", deployment)
+        self.assertIn("Main 是共享 schema 的唯一 Flyway owner", development)
+        self.assertIn("异步 Harness 执行只有 Main 一个执行者", development)
+        self.assertIn("KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false", development)
         for doc in (deployment, development):
-            self.assertIn("KK_STUDIO_CONTROL_PLANE_BASE_URL", doc)
-            self.assertIn("KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED", doc)
-            self.assertIn("`.env`", doc)
-            self.assertIn(
-                "KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}",
-                doc,
-            )
             self.assertNotIn("ws://127.0.0.1:8080/api/harness/environment-daemon/v1", doc)
-        self.assertIn(f"KK_STUDIO_CONTROL_PLANE_BASE_URL={CONTROL_PLANE_BASE_URL}", development)
-        self.assertIn(f"ws://vps-kk-studio:8080{DAEMON_GATEWAY_PATH}", development)
 
     def test_image_defaults_to_prod_profile_with_flyway_disabled(self):
         # Intent: only Main owns Flyway; the Dev node reuses the prod profile but must never
