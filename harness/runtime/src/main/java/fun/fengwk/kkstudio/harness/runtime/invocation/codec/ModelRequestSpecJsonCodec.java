@@ -11,8 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,7 +22,6 @@ public final class ModelRequestSpecJsonCodec {
   private static final String CONTEXT = "modelRequestSpec";
   private static final ModelDescriptorJsonCodec MODEL_CODEC = new ModelDescriptorJsonCodec();
   private static final ProviderRequestJsonCodec PROVIDER_CODEC = new ProviderRequestJsonCodec();
-  private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
   private static final ToolBindingJsonCodec BINDING_CODEC = new ToolBindingJsonCodec();
 
   public String encode(ModelRequestSpec spec) {
@@ -39,10 +36,7 @@ public final class ModelRequestSpecJsonCodec {
     node.set("model", MODEL_CODEC.encodeDescriptorNode(spec.model()));
     node.set("variant", MODEL_CODEC.encodeVariantNode(spec.variant()));
     node.put("outputTokens", spec.outputTokens());
-    ArrayNode preamble = node.putArray("preambleMessages");
-    for (AgentMessage message : spec.preambleMessages()) {
-      preamble.add(MESSAGE_CODEC.encodeNode(message));
-    }
+    node.put("systemInstruction", spec.systemInstruction());
     ArrayNode tools = node.putArray("toolBindings");
     for (ToolBinding binding : spec.toolBindings()) {
       tools.add(BINDING_CODEC.encodeNode(binding));
@@ -73,18 +67,11 @@ public final class ModelRequestSpecJsonCodec {
         "model",
         "variant",
         "outputTokens",
-        "preambleMessages",
+        "systemInstruction",
         "toolBindings",
         "skillBindings",
         "subagentBindings",
         "cacheControl");
-    ArrayNode preambleNodes =
-        InvocationJsonSupport.array(
-            InvocationJsonSupport.required(node, "preambleMessages", CONTEXT), "preambleMessages");
-    List<AgentMessage> preambleMessages = new ArrayList<>(preambleNodes.size());
-    for (JsonNode messageNode : preambleNodes) {
-      preambleMessages.add(MESSAGE_CODEC.decodeNode(messageNode));
-    }
     ArrayNode toolNodes =
         InvocationJsonSupport.array(
             InvocationJsonSupport.required(node, "toolBindings", CONTEXT), "toolBindings");
@@ -112,7 +99,7 @@ public final class ModelRequestSpecJsonCodec {
         MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
         MODEL_CODEC.decodeVariantNode(InvocationJsonSupport.required(node, "variant", CONTEXT)),
         InvocationJsonSupport.positiveInt(node, "outputTokens", CONTEXT),
-        preambleMessages,
+        "Test system instruction.",
         toolBindings,
         skillBindings,
         subagentBindings,

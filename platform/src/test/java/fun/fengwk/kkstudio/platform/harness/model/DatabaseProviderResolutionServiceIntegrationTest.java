@@ -189,6 +189,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
             descriptor(name),
             new ModelVariant("default"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("leading system")))),
@@ -291,6 +292,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         descriptor(providerName),
         new ModelVariant("default"),
         1024,
+        "Test system instruction.",
         List.of(),
         List.of(),
         cacheControl);

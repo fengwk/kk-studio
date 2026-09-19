@@ -93,6 +93,7 @@ class OpenAiResponsesWireTest {
         createModel(),
         variant != null ? variant : DEFAULT_VARIANT,
         1024,
+        "Test system instruction.",
         messages != null ? messages : List.of(),
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());
@@ -192,6 +193,7 @@ class OpenAiResponsesWireTest {
             createModel(),
             new ModelVariant("v1", "medium"),
             100,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("You are helpful."))),
@@ -380,7 +382,13 @@ class OpenAiResponsesWireTest {
             .cacheControl();
     ProviderRequest req =
         new ProviderRequest(
-            base.model(), base.variant(), 16, base.messages(), base.tools(), cacheControl);
+            base.model(),
+            base.variant(),
+            16,
+            "Test system instruction.",
+            base.messages(),
+            base.tools(),
+            cacheControl);
 
     OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
     JsonNode root =

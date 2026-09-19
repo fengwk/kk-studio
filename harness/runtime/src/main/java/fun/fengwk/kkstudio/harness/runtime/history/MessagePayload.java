@@ -13,11 +13,11 @@ import java.util.Set;
 /**
  * durable 会话消息。
  *
- * <p>SYSTEM 消息属于 {@link CustomMessagePayload}。USER 消息不携带 metadata；ASSISTANT 消息必须携带 {@link
- * AssistantMessageMetadata} 且不能携带 tool result metadata；assistant tool call id 必须唯一，以保证
- * callIndex/prefix 校验的确定性。TOOL 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant metadata，且唯一的
- * {@link ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。生成 stop reason 与 tool call 存在性
- * 正交（{@code COMPLETE}/{@code LENGTH} 均可有 calls），不在此处施加等价约束。
+ * <p>系统指令由每次请求的 systemInstruction 承载，消息角色只有 USER / ASSISTANT / TOOL。USER 消息不携带 metadata； ASSISTANT
+ * 消息必须携带 {@link AssistantMessageMetadata} 且不能携带 tool result metadata；assistant tool call id
+ * 必须唯一，以保证 callIndex/prefix 校验的确定性。TOOL 消息必须携带 {@link ToolResultMetadata} 且不能携带 assistant
+ * metadata，且唯一的 {@link ToolResultMessageContent#toolCallId()} 必须与 metadata 匹配。生成 stop reason 与 tool
+ * call 存在性正交（{@code COMPLETE}/{@code LENGTH} 均可有 calls），不在此处施加等价约束。
  */
 public record MessagePayload(
     AgentMessage message,
@@ -28,7 +28,6 @@ public record MessagePayload(
   public MessagePayload {
     message = Objects.requireNonNull(message, "message");
     switch (message.role()) {
-      case SYSTEM -> throw new IllegalArgumentException("MESSAGE payload must not use SYSTEM role");
       case USER -> {
         if (assistantMetadata != null || toolResultMetadata != null) {
           throw new IllegalArgumentException(

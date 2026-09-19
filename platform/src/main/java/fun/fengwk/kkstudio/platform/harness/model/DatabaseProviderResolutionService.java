@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
@@ -141,6 +140,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
             request.model(),
             request.variant(),
             request.outputTokens(),
+            request.systemInstruction(),
             // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，内联 media 仅存在于有效请求。
             // 内联位置能力来自当前 adapter：协议或连接配置不支持的媒体一律退化为文本回退。
             resourceMaterializer.materialize(
@@ -208,7 +208,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
       String affinityKey) {
     Set<PromptCacheBreakpoint> supported = capability.supportedBreakpoints();
     EnumSet<PromptCacheBreakpoint> resolved = EnumSet.noneOf(PromptCacheBreakpoint.class);
-    if (supported.contains(PromptCacheBreakpoint.SYSTEM) && hasLeadingSystem(request)) {
+    // systemInstruction 恒非空，因此 capability 声明支持 SYSTEM 断点时它总是有效前缀。
+    if (supported.contains(PromptCacheBreakpoint.SYSTEM)) {
       resolved.add(PromptCacheBreakpoint.SYSTEM);
     }
     if (supported.contains(PromptCacheBreakpoint.TOOLS) && !request.tools().isEmpty()) {
@@ -235,17 +236,9 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     return PromptCacheRetention.NONE;
   }
 
-  private static boolean hasLeadingSystem(ProviderRequest request) {
-    if (request.messages().isEmpty()) {
-      return false;
-    }
-    ProviderMessage first = request.messages().get(0);
-    return first.role() == ProviderMessageRole.SYSTEM;
-  }
-
   private static boolean hasConversationContent(ProviderRequest request) {
     for (ProviderMessage message : request.messages()) {
-      if (message.role() != ProviderMessageRole.SYSTEM && !message.contents().isEmpty()) {
+      if (!message.contents().isEmpty()) {
         return true;
       }
     }

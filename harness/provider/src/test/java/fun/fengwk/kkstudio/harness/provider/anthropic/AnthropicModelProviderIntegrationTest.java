@@ -166,6 +166,7 @@ class AnthropicModelProviderIntegrationTest {
                 pricing()),
             new ModelVariant("default"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -248,6 +249,7 @@ class AnthropicModelProviderIntegrationTest {
                 pricing()),
             new ModelVariant("default"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -337,6 +339,7 @@ class AnthropicModelProviderIntegrationTest {
                 pricing()),
             new ModelVariant("default"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -400,6 +403,7 @@ class AnthropicModelProviderIntegrationTest {
                 pricing()),
             badVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -466,6 +470,7 @@ class AnthropicModelProviderIntegrationTest {
                 pricing()),
             new ModelVariant("default"),
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

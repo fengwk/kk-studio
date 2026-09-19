@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
@@ -286,8 +287,8 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
 
   /**
    * 入队 preflight：把 USER 消息中按 manifest 顺序的 label 段落物化为全局存储 RESOURCE 内容（同一 store 事务内下载 canvas
-   * original 字节并摄入，任何失败整体回滚）。消息结构：contents[0] 是 manifest 表格，contents[1+i] 是第 i 个引用的 label 段落；物化后在每个
-   * label 段落之后追加对应 RESOURCE。
+   * original 字节并摄入，任何失败整体回滚）。消息结构：可选的 leading {@code <system-reminder>} 段落，随后是 manifest 表格，再往后 是第 i
+   * 个引用的 label 段落；物化后在每个 label 段落之后追加对应 RESOURCE。
    */
   private AcceptancePreflight mediaPreflight(
       CanvasFunctionExecutionContext context, H3ReferenceManifest manifest) {
@@ -300,14 +301,15 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
           continue;
         }
         AgentMessage message = custom.message();
-        if (message.contents().size() != 1 + items.size()) {
+        int offset = hasLeadingReminder(message) ? 1 : 0;
+        if (message.contents().size() != offset + 1 + items.size()) {
           throw new IllegalStateException(
               "H3 prompt message must carry the manifest table plus one label per reference");
         }
-        List<AgentMessageContent> contents = new ArrayList<>(1 + items.size() * 2);
-        contents.add(message.contents().get(0));
+        List<AgentMessageContent> contents = new ArrayList<>(offset + 1 + items.size() * 2);
+        contents.addAll(message.contents().subList(0, offset + 1));
         for (int i = 0; i < items.size(); i++) {
-          AgentMessageContent label = message.contents().get(1 + i);
+          AgentMessageContent label = message.contents().get(offset + 1 + i);
           if (!(label instanceof TextMessageContent)
               || !((TextMessageContent) label).text().startsWith("\nThe next attachment is ")) {
             throw new IllegalStateException("H3 prompt label mismatch at index " + i);
@@ -321,6 +323,12 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       }
       return List.copyOf(prepared);
     };
+  }
+
+  /** 合成 USER 消息允许携带 trusted system 文本的前导提醒段，它不参与 manifest/label 结构校验。 */
+  private static boolean hasLeadingReminder(AgentMessage message) {
+    AgentMessageContent first = message.contents().get(0);
+    return first instanceof TextMessageContent text && SystemReminder.isReminderText(text.text());
   }
 
   private static ResourceMessageContent ingestMedia(

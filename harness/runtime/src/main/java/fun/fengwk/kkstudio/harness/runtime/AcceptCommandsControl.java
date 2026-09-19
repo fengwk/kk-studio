@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -482,14 +481,12 @@ final class AcceptCommandsControl {
 
   /**
    * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
-   * SET_ENVIRONMENT）、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE
-   * 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE steering，要么是不含 SYSTEM CUSTOM_MESSAGE、<b>恰有一条</b>末尾
-   * user-like 的用户 batch。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
+   * SET_ENVIRONMENT）、至多一次且全部出现在消息之前；任何 target 都要求<b>恰有一条</b>末尾 USER 消息。非法 batch 是请求校验 错误，抛 {@link
+   * IllegalArgumentException} 而非业务冲突。
    */
   private static void validateBatchShape(
       AcceptCommandsTarget target, List<NewThreadCommand> commands) {
-    int userLikeCount = 0;
-    int systemCount = 0;
+    int userMessageCount = 0;
     int lastSetOrder = -1;
     boolean sawMessage = false;
     for (NewThreadCommand command : commands) {
@@ -507,40 +504,18 @@ final class AcceptCommandsControl {
         continue;
       }
       sawMessage = true;
-      if (isUserLike(command)) {
-        userLikeCount++;
-      } else {
-        systemCount++;
+      if (isUserMessage(command)) {
+        userMessageCount++;
       }
     }
-    if (target instanceof AcceptCommandsTarget.NewSession
-        || target instanceof AcceptCommandsTarget.NewThread) {
-      if (userLikeCount != 1 || !isUserLike(commands.get(commands.size() - 1))) {
-        throw invalidBatch(target, "initial batches must end with exactly one user-like message");
-      }
-      return;
-    }
-    // THREAD
-    if (systemCount > 0) {
-      if (commands.size() != 1 || userLikeCount != 0) {
-        throw invalidBatch(
-            target, "thread steering must be exactly one SYSTEM CUSTOM_MESSAGE and nothing else");
-      }
-      return;
-    }
-    // THREAD user batch：恰一条末尾 user-like（不是至少一条）。
-    if (userLikeCount != 1 || !isUserLike(commands.get(commands.size() - 1))) {
-      throw invalidBatch(
-          target, "thread user batches must contain exactly one trailing user-like message");
+    if (userMessageCount != 1 || !isUserMessage(commands.get(commands.size() - 1))) {
+      throw invalidBatch(target, "batches must end with exactly one USER message");
     }
   }
 
-  private static boolean isUserLike(NewThreadCommand command) {
-    if (command.payload() instanceof UserMessageCommandPayload) {
-      return true;
-    }
-    return command.payload() instanceof CustomMessageCommandPayload custom
-        && custom.message().role() == AgentMessageRole.USER;
+  private static boolean isUserMessage(NewThreadCommand command) {
+    return command.payload() instanceof UserMessageCommandPayload
+        || command.payload() instanceof CustomMessageCommandPayload;
   }
 
   private static IllegalArgumentException invalidBatch(

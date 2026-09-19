@@ -338,7 +338,7 @@ class ResolvedRequestValidatorTest {
                 BigDecimal.ZERO)),
         new ModelVariant(model.variant()),
         1024,
-        preamble,
+        "Test system instruction.",
         tools,
         skills,
         subagents,

@@ -3408,7 +3408,7 @@ class ModelProcessorTest {
         modelDescriptor(),
         new ModelVariant("v1"),
         1024,
-        List.of(),
+        "Test system instruction.",
         bindings,
         List.of(),
         List.of(),
@@ -3420,6 +3420,7 @@ class ModelProcessorTest {
         modelDescriptor(),
         new ModelVariant("v1"),
         1024,
+        "Test system instruction.",
         List.of(),
         tools,
         ProviderCacheControl.none());

@@ -116,6 +116,7 @@ class OpenAiChatThinkingTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1),
             List.of(),
             ProviderCacheControl.none());
@@ -190,6 +191,7 @@ class OpenAiChatThinkingTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, turn1Asst, user2),
             List.of(),
             ProviderCacheControl.none());

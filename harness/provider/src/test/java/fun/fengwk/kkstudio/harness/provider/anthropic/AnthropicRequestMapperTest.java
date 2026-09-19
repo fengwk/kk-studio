@@ -1828,7 +1828,8 @@ class AnthropicRequestMapperTest {
             true,
             false,
             pricing());
-    return new ProviderRequest(model, variant, 1024, messages, tools, cacheControl);
+    return new ProviderRequest(
+        model, variant, 1024, "Test system instruction.", messages, tools, cacheControl);
   }
 
   private static ModelPricing pricing() {
@@ -1848,10 +1849,6 @@ class AnthropicRequestMapperTest {
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
-  }
-
-  private static ProviderMessage sysMsg(ProviderContentBlock... blocks) {
-    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(blocks));
   }
 
   private static ProviderMessage asstMsg(ProviderContentBlock... blocks) {

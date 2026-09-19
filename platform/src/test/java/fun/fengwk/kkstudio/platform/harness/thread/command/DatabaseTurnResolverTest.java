@@ -1055,7 +1055,7 @@ class DatabaseTurnResolverTest {
 
     // 验证 static context projector 依旧被 HarnessCatalog 正确投影进 preamble
     List<ProviderMessage> projectedPreamble =
-        new ProviderMessageProjector().project(spec.preambleMessages());
+        new ProviderMessageProjector(Set.of()).project(spec.preambleMessages());
     boolean foundProjected =
         projectedPreamble.stream()
             .anyMatch(pm -> textOf(pm).contains("projected-context-fragment"));
@@ -1325,7 +1325,8 @@ class DatabaseTurnResolverTest {
   }
 
   private static String preambleText(ModelRequestSpec spec) {
-    return textOf(new ProviderMessageProjector().project(spec.preambleMessages()).getFirst());
+    return textOf(
+        new ProviderMessageProjector(Set.of()).project(spec.preambleMessages()).getFirst());
   }
 
   private static List<ProviderMessage> materialized(EntryPath path, ModelRequestSpec spec) {

@@ -97,6 +97,8 @@ final class OpenAiResponsesRequestEncoder {
     root.put("model", request.model().modelId());
     root.put("stream", true);
     root.put("store", false);
+    // 系统指令是本协议唯一的顶层 instructions 字符串，绝不作为 input item 下发。
+    root.put("instructions", request.systemInstruction());
 
     applyOutputBudget(root, request.outputTokens());
     applyReasoningParameters(root, request.variant());
@@ -107,7 +109,6 @@ final class OpenAiResponsesRequestEncoder {
     }
 
     ArrayNode inputItems = NODES.arrayNode();
-    List<ObjectNode> systemContentBlocks = new ArrayList<>();
     List<ObjectNode> conversationContentBlocks = new ArrayList<>();
 
     for (ProviderMessage msg : request.messages()) {
@@ -115,22 +116,20 @@ final class OpenAiResponsesRequestEncoder {
           msg,
           descriptor,
           request.model(),
+          request.systemInstruction(),
           toolsArray,
           inputItems,
-          systemContentBlocks,
           conversationContentBlocks);
     }
     root.set("input", inputItems);
 
     // 计算冻结前缀哈希（在打 cache breakpoint 之前计算）
-    String sourcePrefixHash = OpenAiResponsesPrefixHasher.calculateHash(toolsArray, inputItems);
+    String sourcePrefixHash =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            request.systemInstruction(), toolsArray, inputItems);
 
     applyCacheControl(
-        root,
-        config.openAiPromptCacheMode(),
-        request.cacheControl(),
-        systemContentBlocks,
-        conversationContentBlocks);
+        root, config.openAiPromptCacheMode(), request.cacheControl(), conversationContentBlocks);
 
     byte[] utf8Bytes;
     try {
@@ -211,26 +210,14 @@ final class OpenAiResponsesRequestEncoder {
       ProviderMessage msg,
       ProviderDescriptor descriptor,
       ModelDescriptor model,
+      String systemInstruction,
       ArrayNode toolsArray,
       ArrayNode inputItems,
-      List<ObjectNode> systemContentBlocks,
       List<ObjectNode> conversationContentBlocks) {
     Objects.requireNonNull(msg, "msg");
     ProviderMessageRole role = msg.role();
 
     switch (role) {
-      case SYSTEM -> {
-        ObjectNode sysMsg = inputItems.addObject();
-        sysMsg.put("type", "message");
-        // 推理模型把系统指令编码为 developer message；非推理模型保持既有 system 行为。
-        sysMsg.put("role", model.reasoning() ? "developer" : "system");
-        ArrayNode contents = sysMsg.putArray("content");
-        for (ProviderContentBlock block : msg.contents()) {
-          ObjectNode blockNode = encodeSystemContentBlock(block);
-          contents.add(blockNode);
-          systemContentBlocks.add(blockNode);
-        }
-      }
       case USER -> {
         ObjectNode userMsg = inputItems.addObject();
         userMsg.put("type", "message");
@@ -246,7 +233,7 @@ final class OpenAiResponsesRequestEncoder {
         ProviderReplayState replayState = msg.replayState();
         if (replayState != null) {
           String currentPrefixHash =
-              OpenAiResponsesPrefixHasher.calculateHash(toolsArray, inputItems);
+              OpenAiResponsesPrefixHasher.calculateHash(systemInstruction, toolsArray, inputItems);
           if (canReplay(
               replayState, descriptor, model.modelId(), currentPrefixHash, msg.contents())) {
             ArrayNode outputArray = extractOutputArray(replayState.payload());
@@ -275,19 +262,6 @@ final class OpenAiResponsesRequestEncoder {
         }
       }
     }
-  }
-
-  private static ObjectNode encodeSystemContentBlock(ProviderContentBlock block) {
-    if (block instanceof ProviderTextBlock textBlock) {
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "input_text");
-      node.put("text", textBlock.text());
-      return node;
-    }
-    throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST,
-        "OpenAI Responses does not support content block type in SYSTEM: "
-            + block.getClass().getSimpleName());
   }
 
   private static ObjectNode encodeUserContentBlock(ProviderContentBlock block) {
@@ -737,7 +711,6 @@ final class OpenAiResponsesRequestEncoder {
       ObjectNode root,
       OpenAiPromptCacheMode cacheMode,
       ProviderCacheControl cacheControl,
-      List<ObjectNode> systemContentBlocks,
       List<ObjectNode> conversationContentBlocks) {
     if (cacheMode == OpenAiPromptCacheMode.AUTOMATIC) {
       // AUTOMATIC: 不发任何 cache hint（防御性忽略可能传入的非 none cacheControl），匹配 OpenAI Chat 行为
@@ -765,12 +738,7 @@ final class OpenAiResponsesRequestEncoder {
         ObjectNode marker = NODES.objectNode();
         marker.put("mode", "explicit");
 
-        if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.SYSTEM)
-            && !systemContentBlocks.isEmpty()) {
-          ObjectNode lastSysBlock = systemContentBlocks.get(systemContentBlocks.size() - 1);
-          lastSysBlock.set("prompt_cache_breakpoint", marker);
-        }
-
+        // 系统指令是顶层 instructions 字符串，input 中没有可打标的内容块，因此本协议不支持 SYSTEM 断点。
         if (cacheControl.breakpoints().contains(PromptCacheBreakpoint.CONVERSATION)
             && !conversationContentBlocks.isEmpty()) {
           ObjectNode lastConvBlock =

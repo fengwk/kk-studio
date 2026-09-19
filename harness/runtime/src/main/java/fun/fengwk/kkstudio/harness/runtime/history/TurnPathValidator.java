@@ -195,7 +195,7 @@ final class TurnPathValidator {
           throw new IllegalArgumentException(
               "tool results require an assistant message with tool calls");
         }
-        // ASSISTANT：本 turn 唯一的 assistant result。SYSTEM 在此处不可能出现。
+        // ASSISTANT：本 turn 唯一的 assistant result。
         if (openReason == TurnStartReason.COMPACTION) {
           throw new IllegalArgumentException(
               "compaction turns require a COMPACTION result, not an assistant message");

@@ -71,6 +71,7 @@ class GeminiWireTest {
             pricing),
         variant,
         1024,
+        "Test system instruction.",
         List.of(),
         List.of(),
         ProviderCacheControl.none());

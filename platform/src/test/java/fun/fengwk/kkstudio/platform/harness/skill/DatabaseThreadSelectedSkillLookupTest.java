@@ -85,7 +85,7 @@ class DatabaseThreadSelectedSkillLookupTest {
             modelDescriptor(),
             new ModelVariant("v1"),
             1024,
-            List.of(),
+            "Test system instruction.",
             List.of(),
             List.of(new SkillBinding("review", "review-package", "1.0.0", "Review code")),
             List.of(),

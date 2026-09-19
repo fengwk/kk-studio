@@ -235,7 +235,7 @@ class ToolExecutionGatewayCallbackTest {
     ProviderToolResultBlock projected =
         assertInstanceOf(
             ProviderToolResultBlock.class,
-            new ProviderMessageProjector()
+            new ProviderMessageProjector(Set.of())
                 .project(List.of(payload.message()))
                 .getFirst()
                 .contents()

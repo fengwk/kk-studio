@@ -200,6 +200,7 @@ class PlatformModelGatewayTest {
             PROVIDER_REQUEST.model(),
             PROVIDER_REQUEST.variant(),
             1024,
+            "Test system instruction.",
             PROVIDER_REQUEST.messages(),
             PROVIDER_REQUEST.tools(),
             ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-effective-key"));
@@ -1087,7 +1088,13 @@ class PlatformModelGatewayTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO));
     return new ProviderRequest(
-        descriptor, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
+        descriptor,
+        variant,
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   private static ProviderResponse response() {

@@ -1119,6 +1119,7 @@ class DatabaseProviderResolutionServiceTest {
                 BigDecimal.ZERO)),
         new ModelVariant("default"),
         1024,
+        "Test system instruction.",
         messages,
         tools,
         cacheControl);

@@ -239,7 +239,7 @@ public class HarnessOwnerQueryService {
     return null;
   }
 
-  /** head 用户可读消息/资源预览：非 SYSTEM 消息 text 优先、其次资源名；无则 null。 */
+  /** head 用户可读消息/资源预览：用户可读消息 text 优先、其次资源名；无则 null。 */
   private static String messagePreview(Entry entry) {
     AgentMessage message =
         switch (entry.payload()) {
@@ -247,7 +247,7 @@ public class HarnessOwnerQueryService {
           case CustomMessagePayload value -> value.message();
           default -> null;
         };
-    if (message == null || message.role() == AgentMessageRole.SYSTEM) {
+    if (message == null) {
       return null;
     }
     String text = firstText(message);

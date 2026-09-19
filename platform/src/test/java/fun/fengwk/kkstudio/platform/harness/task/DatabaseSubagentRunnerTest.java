@@ -405,7 +405,7 @@ class DatabaseSubagentRunnerTest {
             modelDescriptor(),
             new ModelVariant("default"),
             1024,
-            List.of(),
+            "Test system instruction.",
             List.of(),
             List.of(),
             List.of(new SubagentBinding(SUBAGENT, "Review the change.")),
