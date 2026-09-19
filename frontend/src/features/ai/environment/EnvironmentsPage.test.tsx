@@ -11,7 +11,6 @@ vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     createEnvironment: vi.fn(),
-    updateEnvironment: vi.fn(),
     getRegistrationToken: vi.fn(),
     rotateToken: vi.fn(),
     deleteEnvironment: vi.fn(),
@@ -118,7 +117,7 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
     expect(screen.getAllByText('Capabilities').length).toBe(3)
 
-    // 验证每个环境卡片底部有「复制 Token / 管理 / 编辑 / 删除」四个动作，绝不暴露轮换 Token 动作；
+    // 验证每个环境卡片底部有「复制 Token / 管理 / 重新生成 Token / 删除」四个动作；
     // 且加载列表后不得预取 token（点击才请求）。
     const cards = screen.getAllByRole('article')
     expect(cards).toHaveLength(3)
@@ -127,9 +126,8 @@ describe('EnvironmentsPage', () => {
       expect(footerButtons).toHaveLength(4)
       expect(within(card).getByRole('button', { name: /复制 Token/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /管理/ })).toBeInTheDocument()
-      expect(within(card).getByRole('button', { name: /编辑环境/ })).toBeInTheDocument()
+      expect(within(card).getByRole('button', { name: /重新生成 Token/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
-      expect(within(card).queryByRole('button', { name: /重新生成 Token/ })).toBeNull()
     }
     expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
   })
@@ -240,29 +238,8 @@ describe('EnvironmentsPage', () => {
     expect(within(card).queryByText('已复制！')).toBeNull()
   })
 
-  it('edits and renames an environment card', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({ id: 'env-1', name: 'old-name', version: '1' }),
-    ])
-    vi.mocked(environmentService.updateEnvironment).mockResolvedValue(
-      environment({ id: 'env-1', name: 'renamed', version: '2' }),
-    )
-    renderPage()
-
-    const editBtn = await screen.findByRole('button', { name: /编辑环境/ })
-    await user.click(editBtn)
-
-    const input = screen.getByRole('textbox', { name: /环境名称/ })
-    await user.clear(input)
-    await user.type(input, 'renamed')
-    await user.click(screen.getByRole('button', { name: '确认' }))
-
-    expect(environmentService.updateEnvironment).toHaveBeenCalledWith('env-1', { name: 'renamed', expectedVersion: '1' })
-  })
-
-  // 验证从卡片编辑弹窗中调用「重新生成 Token」次级动作：卡片仅暴露按需复制，成功轮换后展示新 token 并关闭编辑弹窗
-  it('rotates registration token and displays the new token from edit dialog', async () => {
+  // 验证从卡片中直接调用「重新生成 Token」动作：确认后成功轮换并展示新 token 弹窗
+  it('rotates registration token and displays the new token', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'my-box', version: '1' }),
@@ -273,17 +250,8 @@ describe('EnvironmentsPage', () => {
     installClipboard()
     renderPage()
 
-    // 卡片上只有按需「复制 Token」，绝不暴露轮换 token 按钮
     const card = await screen.findByRole('article')
-    expect(within(card).queryByRole('button', { name: /重新生成 Token/ })).toBeNull()
-
-    // 打开编辑弹窗
-    const editBtn = within(card).getByRole('button', { name: /编辑环境/ })
-    await user.click(editBtn)
-
-    // 在编辑弹窗中点击「重新生成 Token」
-    const editDialog = await screen.findByRole('dialog', { name: '编辑环境' })
-    const rotateBtn = within(editDialog).getByRole('button', { name: '重新生成 Token' })
+    const rotateBtn = within(card).getByRole('button', { name: /重新生成 Token/ })
     await user.click(rotateBtn)
 
     // 确认弹窗
@@ -293,7 +261,6 @@ describe('EnvironmentsPage', () => {
 
     expect(environmentService.rotateToken).toHaveBeenCalledWith('env-1', '1')
     expect(await screen.findByText('rotated-tok-999')).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
     // 轮换不应顺带读取 token
     expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
   })
@@ -382,46 +349,6 @@ describe('EnvironmentsPage', () => {
     expect(capabilityRow!.querySelector('.meta-chips')).toHaveAttribute('title', 'a, b, c, d, e')
   })
 
-  // 验证 Environment update 发生 HTTP 409 冲突时通过 ConflictPresenter 呈现，点击刷新后关闭过期编辑弹窗并拉取最新列表，绝不自动重试
-  it('handles 409 conflict on update and resets stale edit modal on explicit refresh without auto-replay', async () => {
-    const user = userEvent.setup()
-    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({ id: 'env-1', name: 'old-name', version: '1' }),
-    ])
-    vi.mocked(environmentService.updateEnvironment).mockRejectedValue(
-      new ApiError('版本冲突', 409, 'CONFLICT', {
-        reason: 'version_conflict',
-        detail: 'Environment version modified concurrently',
-      }),
-    )
-    renderPage()
-
-    const editBtn = await screen.findByRole('button', { name: /编辑环境/ })
-    await user.click(editBtn)
-
-    const input = screen.getByRole('textbox', { name: /环境名称/ })
-    await user.clear(input)
-    await user.type(input, 'new-name')
-    await user.click(screen.getByRole('button', { name: '确认' }))
-
-    // 冲突弹窗展示且不提供自动重试按钮
-    const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
-    expect(within(conflictModal).getByText(/version_conflict/)).toBeInTheDocument()
-    expect(within(conflictModal).getByText('Environment version modified concurrently')).toBeInTheDocument()
-    expect(within(conflictModal).queryByRole('button', { name: '重试' })).toBeNull()
-
-    // 点击刷新：重置 stale modal 并触发权威重新拉取
-    const listCallsBefore = vi.mocked(environmentService.listEnvironments).mock.calls.length
-    await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog', { name: '持久状态已变化' })).toBeNull()
-      expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
-    })
-    expect(vi.mocked(environmentService.listEnvironments).mock.calls.length).toBeGreaterThan(listCallsBefore)
-    expect(environmentService.updateEnvironment).toHaveBeenCalledTimes(1)
-  })
-
   // 验证 Environment rotate 失败时在确认弹窗中可见展示错误（防止静默失败），并在 409 时走共享 ConflictPresenter 语义
   it('shows visible error on rotate token failure and handles 409 conflict refresh', async () => {
     const user = userEvent.setup()
@@ -434,12 +361,8 @@ describe('EnvironmentsPage', () => {
     installClipboard()
     renderPage()
 
-    // 打开编辑弹窗
-    const editBtn = await screen.findByRole('button', { name: /编辑环境/ })
-    await user.click(editBtn)
-
-    const editDialog = await screen.findByRole('dialog', { name: '编辑环境' })
-    const rotateBtn = within(editDialog).getByRole('button', { name: '重新生成 Token' })
+    const card = await screen.findByRole('article')
+    const rotateBtn = within(card).getByRole('button', { name: /重新生成 Token/ })
     await user.click(rotateBtn)
 
     const modal = await screen.findByRole('alertdialog', { name: '重新生成 Token' })
@@ -458,7 +381,6 @@ describe('EnvironmentsPage', () => {
     const conflictModal = await screen.findByRole('alertdialog', { name: '持久状态已变化' })
     expect(within(conflictModal).getByText(/stale_version/)).toBeInTheDocument()
     expect(screen.queryByRole('alertdialog', { name: '重新生成 Token' })).toBeNull()
-    expect(screen.queryByRole('dialog', { name: '编辑环境' })).toBeNull()
 
     await user.click(within(conflictModal).getByRole('button', { name: '刷新' }))
     await waitFor(() => {

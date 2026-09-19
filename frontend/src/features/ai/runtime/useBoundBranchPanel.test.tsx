@@ -274,12 +274,13 @@ describe('useBoundBranchPanel', () => {
       expect(result.current.selectAgent('missing')).toBe(false)
       result.current.setYoloEnabled(true)
       result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+      result.current.selectEnvironment('dev-env')
     })
 
     expect(result.current.draft).toEqual({
       agentName: 'coder',
       model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
-      environmentName: null,
+      environmentName: 'dev-env',
       yoloEnabled: true,
     })
     // effectiveBase 仍是干净快照；draft 已变脏。
@@ -289,14 +290,17 @@ describe('useBoundBranchPanel', () => {
     await send(result)
 
     const [batch] = vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]!
-    // buildBranchDiffCommands 的固定顺序：AGENT/MODEL + USER_MESSAGE；yolo 走直接控制面。
+    // buildBranchDiffCommands 的固定顺序：AGENT/MODEL/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
     expect(batch.commands.map((command) => command.type)).toEqual([
       'SET_AGENT',
       'SET_MODEL',
+      'SET_ENVIRONMENT',
       'USER_MESSAGE',
     ])
     const setAgent = batch.commands[0]!
     expect(setAgent).toMatchObject({ agentName: 'coder' })
+    const setEnv = batch.commands[2]!
+    expect(setEnv).toMatchObject({ environmentName: 'dev-env' })
     // 直接控制面调用基于 snapshot version 的精确 CAS，绝不生成 SET_YOLO command。
     expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
       expectedVersion: '0',

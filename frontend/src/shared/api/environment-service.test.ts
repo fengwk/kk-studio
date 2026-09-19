@@ -49,25 +49,6 @@ describe('environmentService', () => {
   })
 
   /**
-   * 测试意图：验证更新 Environment 端点使用 PUT /harness/environments/{id}，
-   * 且 expectedVersion 包含在请求 Body 中，不再放在 query string。
-   */
-  it('updates environment name with expectedVersion included in the request body', async () => {
-    const client = {
-      get: vi.fn(async () => ({})),
-      post: vi.fn(async () => ({})),
-      put: vi.fn(async () => ({ id: 'env-1', name: 'dev-renamed', version: '2' })),
-      delete: vi.fn(async () => ({})),
-    }
-    const service = createEnvironmentService(client)
-    await service.updateEnvironment('env-1', { name: 'dev-renamed', expectedVersion: '1' })
-    expect(client.put).toHaveBeenCalledWith(
-      '/harness/environments/env-1',
-      { name: 'dev-renamed', expectedVersion: '1' },
-    )
-  })
-
-  /**
    * 测试意图：验证按需读取当前 registration token 使用 GET /harness/environments/{id}/token，
    * 且该调用是普通只读 GET（不携带 expectedVersion、不触发轮换）。
    */

@@ -665,7 +665,7 @@ export function useAgentThreadController(
 function resolveRuntimeLabels(
   thread: ReturnType<typeof useAgentThreadQueries>['thread'],
   models: AgentModelView[],
-  agents: ReturnType<typeof useAgentThreadQueries>['agents'],
+  _agents: ReturnType<typeof useAgentThreadQueries>['agents'],
 ) {
   const settings = thread?.branchSettings
   const model = models.find(
@@ -674,10 +674,9 @@ function resolveRuntimeLabels(
       && item.name === settings?.model.modelName,
   )
   const contextWindow = extractContextWindow(model)
-  const agent = settings?.agentName ? agents.find((item) => item.name === settings.agentName) : undefined
-  const environment = agent?.environmentId ?? null
+  const environmentName = settings?.environmentName ?? null
   return {
-    environment,
+    environmentName,
     contextWindow,
   }
 }

@@ -10,7 +10,6 @@ import type {
   EnvironmentSkillSourceCreateDTO,
   EnvironmentSkillSourceDTO,
   EnvironmentSkillSourceUpdateDTO,
-  EnvironmentUpdateDTO,
 } from '@/shared/api/contracts/ai-environment'
 
 export const DEFAULT_OPERATION_LIMIT = 50
@@ -24,12 +23,6 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
 
     createEnvironment: (data: EnvironmentCreateDTO): Promise<EnvironmentCardDTO> =>
       client.post('/harness/environments', data),
-
-    updateEnvironment: (
-      id: string,
-      data: EnvironmentUpdateDTO,
-    ): Promise<EnvironmentCardDTO> =>
-      client.put(`/harness/environments/${encodeURIComponent(id)}`, data),
 
     /**
      * 按需读取当前 registrationToken（不轮换、幂等、响应 no-store）。

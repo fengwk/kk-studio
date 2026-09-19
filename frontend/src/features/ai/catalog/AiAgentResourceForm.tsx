@@ -3,11 +3,9 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
-  filterToolsForEnvironment,
   toggleSkillRef,
   withSelectedOrphans,
   withSelectedSkillOrphans,
-  withSelectedToolOrphans,
   type CapabilityOption,
   type SkillCandidateOption,
 } from '@/features/ai/catalog/agent-capability-candidates'
@@ -111,10 +109,9 @@ export function AgentForm({
     })),
   ]
 
-  const toolCandidates = withSelectedToolOrphans(
-    buildToolCandidates(toolCatalog, draft.environmentId),
+  const toolCandidates = withSelectedOrphans(
+    buildToolCandidates(toolCatalog),
     draft.tools,
-    toolCatalog,
   )
   const visibleToolValues = new Set(toolCandidates.map((option) => option.value))
   const visibleSelectedTools = draft.tools.filter((id) => visibleToolValues.has(id.trim()))
@@ -206,7 +203,6 @@ export function AgentForm({
                 ...draft,
                 environmentId: newEnvironmentId,
                 skills: [],
-                tools: filterToolsForEnvironment(draft.tools, toolCatalog, newEnvironmentId),
               })
             }
           }}

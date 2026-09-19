@@ -351,6 +351,10 @@ export function useBoundBranchPanel({
     editDraft({ model })
   }
 
+  function selectEnvironment(environmentName: string | null) {
+    editDraft({ environmentName })
+  }
+
   /**
    * 用权威 Thread DTO 完整重载 base + draft（base === draft，干净）。用于
    * 接受外部刷新后的当前 Thread 快照（yolo 保留服务器值；settings 取自 DTO）。
@@ -378,6 +382,7 @@ export function useBoundBranchPanel({
     selectAgent,
     setYoloEnabled,
     selectModel,
+    selectEnvironment,
     resetDraftFromThread,
   }
 }

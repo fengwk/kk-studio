@@ -3670,6 +3670,7 @@ div.is-error {
   min-width: 0;
   display: flex;
   align-items: center;
+  gap: 4px;
 }
 
 .thread-composer-controls-right {
@@ -3716,6 +3717,10 @@ div.is-error {
   flex: 0 0 13px;
 }
 
+.thread-composer-environment-control {
+  max-width: min(100%, 200px);
+}
+
 .thread-composer-model-control {
   max-width: min(100%, 420px);
 }
@@ -3733,7 +3738,8 @@ div.is-error {
   overflow: hidden;
 }
 
-.thread-composer-menu.permission {
+.thread-composer-menu.permission,
+.thread-composer-menu.environment {
   left: 0;
 }
 
