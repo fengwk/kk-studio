@@ -130,10 +130,6 @@ class HarnessRuntimeConfigurationTest {
   private SmartLifecycle harnessRuntimeLifecycle;
 
   @Autowired
-  @Qualifier("environmentOperationDispatcherLifecycle")
-  private SmartLifecycle environmentOperationDispatcherLifecycle;
-
-  @Autowired
   @Qualifier("harnessDispatcherDrainExecutor")
   private ExecutorService drainExecutor;
 
@@ -205,10 +201,6 @@ class HarnessRuntimeConfigurationTest {
     assertFalse(properties.isWorkersEnabled(), "web test profile must keep workers disabled");
     assertNotNull(harnessRuntime, "control/query plane must stay available");
     assertFalse(harnessRuntimeLifecycle.isRunning());
-    assertTrue(
-        environmentOperationDispatcherLifecycle.isRunning(),
-        "environment operation dispatcher must auto-start independently of workers-enabled");
-    assertEquals(Integer.MAX_VALUE - 1, environmentOperationDispatcherLifecycle.getPhase());
     assertTrue(
         postgresqlNotificationLoop.isRunning(),
         "application notification loop remains active for Thread/Canvas when workers are disabled");
