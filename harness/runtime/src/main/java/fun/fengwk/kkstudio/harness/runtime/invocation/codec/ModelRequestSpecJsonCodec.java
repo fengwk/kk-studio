@@ -99,7 +99,7 @@ public final class ModelRequestSpecJsonCodec {
         MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),
         MODEL_CODEC.decodeVariantNode(InvocationJsonSupport.required(node, "variant", CONTEXT)),
         InvocationJsonSupport.positiveInt(node, "outputTokens", CONTEXT),
-        "Test system instruction.",
+        InvocationJsonSupport.text(node, "systemInstruction", CONTEXT),
         toolBindings,
         skillBindings,
         subagentBindings,
