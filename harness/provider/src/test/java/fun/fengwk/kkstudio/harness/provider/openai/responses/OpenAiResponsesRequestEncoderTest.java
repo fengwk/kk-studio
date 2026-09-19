@@ -82,7 +82,7 @@ class OpenAiResponsesRequestEncoderTest {
         pricing());
   }
 
-  /** 非推理模型：保留既有 system message 行为。 */
+  /** 非推理模型：验证顶层 instructions 编码与推理能力无关。 */
   private ModelDescriptor nonReasoningModel() {
     return new ModelDescriptor(
         "openai_test",
@@ -284,28 +284,24 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(t.path("parameters").path("additionalProperties").asBoolean());
   }
 
-  /** 验证系统指令角色：推理模型编码为 developer，非推理模型保持 system。 */
+  /** 验证系统指令始终编码为唯一的顶层 instructions 字符串，与模型是否具备推理能力无关。 */
   @Test
-  void test_systemMessageRoleFollowsModelReasoning() throws Exception {
+  void test_systemInstructionIsEncodedAsTopLevelInstructions() throws Exception {
     List<ProviderMessage> messages =
         List.of(
-            new ProviderMessage(
-                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system rules"))),
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
 
     JsonNode reasoningRoot = encodedRoot(request(messages));
-    assertEquals("developer", reasoningRoot.get("input").get(0).path("role").asText());
-    assertEquals(
-        "input_text",
-        reasoningRoot.get("input").get(0).path("content").get(0).path("type").asText());
-    assertEquals(
-        "system rules",
-        reasoningRoot.get("input").get(0).path("content").get(0).path("text").asText());
+    assertEquals("Test system instruction.", reasoningRoot.path("instructions").asText());
+    assertEquals(1, reasoningRoot.get("input").size());
+    assertEquals("user", reasoningRoot.get("input").get(0).path("role").asText());
 
     JsonNode plainRoot =
         encodedRoot(request(nonReasoningModel(), DEFAULT_VARIANT, messages, List.of(), null));
-    assertEquals("system", plainRoot.get("input").get(0).path("role").asText());
+    assertEquals("Test system instruction.", plainRoot.path("instructions").asText());
+    assertEquals(1, plainRoot.get("input").size());
+    assertEquals("user", plainRoot.get("input").get(0).path("role").asText());
   }
 
   /** 验证 max_output_tokens 下限：过小的冻结预算明确拒绝，合法预算原样下发。 */
@@ -398,8 +394,6 @@ class OpenAiResponsesRequestEncoderTest {
     UUID sessionId = UUID.fromString("33333333-3333-3333-3333-333333333333");
     List<ProviderMessage> messages =
         List.of(
-            new ProviderMessage(
-                ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system rules"))),
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
     ProviderCacheControl cacheControl = runtimeAffinityCacheControl(sessionId, request(messages));
@@ -579,15 +573,11 @@ class OpenAiResponsesRequestEncoderTest {
     ProviderDescriptor desc = createDescriptor();
     ProviderCacheControl cacheControl =
         ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT,
-            "aff_key_999",
-            Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
+            PromptCacheRetention.SHORT, "aff_key_999", Set.of(PromptCacheBreakpoint.CONVERSATION));
 
     ProviderRequest request =
         request(
             List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system rules"))),
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt")))),
             cacheControl);
@@ -625,7 +615,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("in_memory", rootLegacy.path("prompt_cache_retention").asText());
     assertFalse(rootLegacy.has("prompt_cache_options"));
 
-    // 3. GPT_5_6_EXPLICIT: 非 NONE 发送 options + key，并在 SYSTEM 与 CONVERSATION 打 breakpoint marker
+    // 3. GPT_5_6_EXPLICIT: 非 NONE 发送 options + key，并在会话内容块打 CONVERSATION breakpoint marker
     OpenAiResponsesEncodedRequest encExplicit =
         encoder.encode(
             request, desc, new OpenAiResponsesConfig(OpenAiPromptCacheMode.GPT_5_6_EXPLICIT));
@@ -634,10 +624,8 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("explicit", rootExplicit.path("prompt_cache_options").path("mode").asText());
     assertEquals("30m", rootExplicit.path("prompt_cache_options").path("ttl").asText());
 
-    JsonNode sysBlock = rootExplicit.get("input").get(0).get("content").get(0);
-    assertEquals("explicit", sysBlock.path("prompt_cache_breakpoint").path("mode").asText());
-
-    JsonNode convBlock = rootExplicit.get("input").get(1).get("content").get(0);
+    // 系统指令是顶层 instructions 字符串，input 中没有 SYSTEM 打标位置，因此只存在 CONVERSATION 断点
+    JsonNode convBlock = rootExplicit.get("input").get(0).get("content").get(0);
     assertEquals("explicit", convBlock.path("prompt_cache_breakpoint").path("mode").asText());
 
     // 4. GPT_5_6_EXPLICIT 下 retention 为 NONE: 发送 options 且无 key/breakpoint 明确表达禁用
@@ -1400,10 +1388,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exM2.kind());
   }
 
-  /**
-   * 测试意图：全面验证回放校验子结构边界条件（非 Object 项、未知项类型、畸形字段、 id 回退、文本与工具调用失配、不支持的 durable 块）、SYSTEM 消息非文本拦截与 URI
-   * 校验防御。
-   */
+  /** 测试意图：全面验证回放校验子结构边界条件（非 Object 项、未知项类型、畸形字段、 id 回退、文本与工具调用失配、不支持的 durable 块）与媒体 URI 校验防御。 */
   @Test
   void test_replayAndValidationBoundaryConditions() throws Exception {
     ProviderDescriptor desc = createDescriptor();
@@ -1799,22 +1784,7 @@ class OpenAiResponsesRequestEncoderTest {
                 desc,
                 OpenAiResponsesConfig.defaultConfig()));
 
-    // 12. SYSTEM 消息包含非文本块拦截
-    assertThrows(
-        ProviderException.class,
-        () ->
-            encoder.encode(
-                request(
-                    List.of(
-                        new ProviderMessage(
-                            ProviderMessageRole.SYSTEM,
-                            List.of(
-                                new ProviderImageBlock(
-                                    "image/png", "https://example.com/a.png"))))),
-                desc,
-                OpenAiResponsesConfig.defaultConfig()));
-
-    // 13. USER 消息媒体 URI 边界拦截
+    // 12. USER 消息媒体 URI 边界拦截
     assertThrows(
         ProviderException.class,
         () ->
