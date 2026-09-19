@@ -23,7 +23,7 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 | Model Catalog | 分别管理 Provider、真实模型 ID、上下文限制、能力、Variant 与价格 |
 | Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills、Subagents 和 Environment |
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
-| MCP | 注册 Remote MCP；Local MCP 通过处于 `READY` 状态的 Environment Daemon 以 stdio 运行 |
+| MCP | 注册 Streamable HTTP MCP Server，发现其工具并作为 Agent 可选工具执行 |
 | Projects 与 Canvas | 管理 Project / Issue，并通过 Canvas、Function 和 ComfyUI 组织图形工作流 |
 
 当前内置模型协议包括 OpenAI Chat Completions、OpenAI Responses、Anthropic

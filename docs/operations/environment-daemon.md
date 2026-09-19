@@ -160,10 +160,11 @@ rm ~/.config/systemd/user/kk-studio-daemon.service
 systemctl --user daemon-reload
 rm -rf ~/.local/lib/kk-studio
 rm -f ~/.config/kk-studio/daemon.token
-rm -rf ~/.kk-studio        # 数据目录，包含 durable 命令文本日志与 Skill 快照
+rm -rf ~/.kk-studio        # 数据目录：进程锁与 resources/{text,staging}
 ```
 
-最后一条会删除 durable 命令文本日志与 Skill 快照，确认不再需要这些记录后再执行。
+最后一条会删除进程锁、durable 命令文本日志（`resources/text/*.log`）与上传中转暂存
+（`resources/staging/*.part`），确认不再需要这些记录后再执行。
 
 ## 常见问题
 
