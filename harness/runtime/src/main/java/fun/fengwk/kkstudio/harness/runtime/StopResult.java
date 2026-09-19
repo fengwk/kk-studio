@@ -13,8 +13,7 @@ import java.util.UUID;
  * {@code closeRequestId}；queued-only receipt：本 Thread 上带该 {@code stopRequestId} 的已取消
  * Command），本次调用不写任何 marker、不触碰 version。{@code stoppedTurnEndEntryId} 在停止了一个 live Turn 时非 null；纯
  * queued-only / 未创建 Turn 时（包括 queued-only replay）为 null。{@code thread} 始终是当前 Thread
- * projection，{@code cancelledUserMessages} 按 sequence 升序返回被取消的 user-like 消息内容（SET_* 与 SYSTEM
- * steering 不返回）。
+ * projection，{@code cancelledUserMessages} 按 sequence 升序返回被取消的真实用户输入（SET_* 与运行时提醒不返回）。
  */
 public record StopResult(
     boolean replayed,

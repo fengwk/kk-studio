@@ -1,17 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.cache;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -24,8 +15,8 @@ import java.util.UUID;
 /**
  * 派生稳定的 Prompt Cache affinity key。
  *
- * <p>finalizer 唯一可信派生点；同一 session + provider connection generation/model + 稳定 system/tool
- * 前缀的请求始终命中同一 key，动态 USER/ASSISTANT/TOOL history 绝不进入 key。
+ * <p>finalizer 唯一可信派生点；同一 session + provider connection generation/model + 稳定 system
+ * instruction/tool 前缀的请求始终命中同一 key，动态 USER/ASSISTANT/TOOL history 绝不进入 key。
  *
  * <p>实现要点：
  *
@@ -34,9 +25,9 @@ import java.util.UUID;
  *   <li>digest 输入采用 {@code (type, nameLen:4B, name, valueLen:4B, value)} 的长度前缀帧； 每个复合对象的每个
  *       字段必须单独成帧，绝不依赖分隔字符或 NUL 拼接，因此字段值包含 NUL 也不会与跨字段拼接碰撞。
  *   <li>版本字段独立标记，用于将来在不破坏旧 key 的前提下增量调整算法。
- *   <li>输入：版本、sessionId、providerName、providerConnectionGenerationId、modelId（真实 wire 模型标识）、连续
- *       leading SYSTEM messages 的完整合法 typed contents（每个 content 独立成帧），以及按请求顺序的 tool
- *       name/description/inputSchemaJson。Provider 类型与 capability 由调用方显式解析、不随请求持久化，因此也不进入 key。
+ *   <li>输入：版本、sessionId、providerName、providerConnectionGenerationId、modelId（真实 wire 模型标识）、唯一的
+ *       system instruction 全文，以及按请求顺序的 tool name/description/inputSchemaJson。Provider 类型与
+ *       capability 由调用方显式解析、不随请求持久化，因此也不进入 key。
  * </ul>
  */
 public final class PromptCacheAffinityKeyFactory {
@@ -57,10 +48,13 @@ public final class PromptCacheAffinityKeyFactory {
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
     ModelDescriptor model = Objects.requireNonNull(request.model(), "request.model()");
-    List<ProviderMessage> messages =
-        Objects.requireNonNull(request.messages(), "request.messages()");
-    List<ProviderToolDefinition> tools = Objects.requireNonNull(request.tools(), "request.tools()");
-    byte[] digest = digest(sessionId, providerConnectionGenerationId, model, messages, tools);
+    byte[] digest =
+        digest(
+            sessionId,
+            providerConnectionGenerationId,
+            model,
+            request.systemInstruction(),
+            request.tools());
     return VERSION + "-" + encode(digest);
   }
 
@@ -68,7 +62,7 @@ public final class PromptCacheAffinityKeyFactory {
       UUID sessionId,
       UUID providerConnectionGenerationId,
       ModelDescriptor model,
-      List<ProviderMessage> messages,
+      String systemInstruction,
       List<ProviderToolDefinition> tools) {
     MessageDigest md = newMessageDigest();
     writeField(md, 'V', "version", VERSION);
@@ -77,7 +71,7 @@ public final class PromptCacheAffinityKeyFactory {
     writeField(
         md, 'G', "providerConnectionGenerationId", providerConnectionGenerationId.toString());
     writeField(md, 'M', "modelId", model.modelId());
-    writeLeadingSystemMessages(md, messages);
+    writeField(md, 'X', "systemInstruction", systemInstruction);
     writeTools(md, tools);
     return md.digest();
   }
@@ -92,62 +86,6 @@ public final class PromptCacheAffinityKeyFactory {
 
   private static String encode(byte[] bytes) {
     return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-  }
-
-  private static void writeLeadingSystemMessages(MessageDigest md, List<ProviderMessage> messages) {
-    int leadingSystem = countLeadingSystem(messages);
-    writeField(md, 'C', "leadingSystemCount", Integer.toString(leadingSystem));
-    for (int messageIndex = 0; messageIndex < leadingSystem; messageIndex++) {
-      ProviderMessage message = messages.get(messageIndex);
-      writeField(md, 'R', "role@" + messageIndex, message.role().name());
-      List<ProviderContentBlock> contents = message.contents();
-      writeField(md, 'N', "contentCount@" + messageIndex, Integer.toString(contents.size()));
-      for (int blockIndex = 0; blockIndex < contents.size(); blockIndex++) {
-        writeContent(md, messageIndex, blockIndex, contents.get(blockIndex));
-      }
-    }
-  }
-
-  private static int countLeadingSystem(List<ProviderMessage> messages) {
-    int count = 0;
-    for (ProviderMessage message : messages) {
-      if (message.role() != ProviderMessageRole.SYSTEM) {
-        break;
-      }
-      count++;
-    }
-    return count;
-  }
-
-  private static void writeContent(
-      MessageDigest md, int messageIndex, int blockIndex, ProviderContentBlock block) {
-    String tag = blockFieldTag(messageIndex, blockIndex);
-    // 只展开 leading SYSTEM 合法 6 类内容块。ToolCall/ToolResult 由 ProviderMessage 验证约束在
-    // ASSISTANT/TOOL message 中出现，因此这里遇到它们属于协议违规，交给 default 显式失败。
-    if (block instanceof ProviderTextBlock text) {
-      writeField(md, 'B', tag + "/TEXT/text", text.text());
-    } else if (block instanceof ProviderImageBlock image) {
-      writeField(md, 'B', tag + "/IMAGE/mediaType", image.mediaType());
-      writeField(md, 'B', tag + "/IMAGE/source", image.source());
-    } else if (block instanceof ProviderAudioBlock audio) {
-      writeField(md, 'B', tag + "/AUDIO/mediaType", audio.mediaType());
-      writeField(md, 'B', tag + "/AUDIO/source", audio.source());
-    } else if (block instanceof ProviderVideoBlock video) {
-      writeField(md, 'B', tag + "/VIDEO/mediaType", video.mediaType());
-      writeField(md, 'B', tag + "/VIDEO/source", video.source());
-    } else if (block instanceof ProviderThinkingBlock thinking) {
-      writeField(md, 'B', tag + "/THINKING/thinking", thinking.thinking());
-    } else if (block instanceof ProviderJsonBlock json) {
-      writeField(md, 'B', tag + "/JSON/json", json.json());
-    } else {
-      throw new IllegalStateException(
-          "leading SYSTEM contents must be one of TEXT/IMAGE/AUDIO/VIDEO/THINKING/JSON, got: "
-              + block.getClass().getSimpleName());
-    }
-  }
-
-  private static String blockFieldTag(int messageIndex, int blockIndex) {
-    return "msg#" + messageIndex + "/block#" + blockIndex;
   }
 
   private static void writeTools(MessageDigest md, List<ProviderToolDefinition> tools) {

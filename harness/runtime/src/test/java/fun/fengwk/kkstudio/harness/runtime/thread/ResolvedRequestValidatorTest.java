@@ -127,27 +127,21 @@ class ResolvedRequestValidatorTest {
   }
 
   @Test
-  void rejectsPreambleOnCompactionRequest() {
-    // 压缩请求的输入上下文由 candidate path 重建，spec 不得额外携带 preamble。
+  void rejectsCacheControlOnCompactionRequest() {
+    // 压缩请求必须禁用 cache，携带任何非 none 的 cache control 都会被拒绝。
     assertCompactionRejects(
         preparation(),
-        List.of(AgentMessage.system("unexpected")),
         List.of(),
         List.of(),
         List.of(),
-        ProviderCacheControl.none());
+        ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "key"));
   }
 
   @Test
   void rejectsToolBindingOnCompactionRequest() {
     // 压缩只发送 model/variant，不能把任何 tool binding 带入 Provider 请求。
     assertCompactionRejects(
-        preparation(),
-        List.of(),
-        List.of(hostTool()),
-        List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        preparation(), List.of(hostTool()), List.of(), List.of(), ProviderCacheControl.none());
   }
 
   @Test
@@ -155,7 +149,6 @@ class ResolvedRequestValidatorTest {
     // 压缩调用不加载 skill；skill 绑定必须留在正常 turn。
     assertCompactionRejects(
         preparation(),
-        List.of(),
         List.of(),
         List.of(skillBinding("dev", ENV_BINDING)),
         List.of(),
@@ -169,7 +162,6 @@ class ResolvedRequestValidatorTest {
         preparation(),
         List.of(),
         List.of(),
-        List.of(),
         List.of(new SubagentBinding("reviewer", "review the summary")),
         ProviderCacheControl.none());
   }
@@ -179,7 +171,6 @@ class ResolvedRequestValidatorTest {
     // 压缩请求必须禁用 Provider cache，避免摘要请求复用正常 turn 的缓存策略。
     assertCompactionRejects(
         preparation(),
-        List.of(),
         List.of(),
         List.of(),
         List.of(),
@@ -224,7 +215,6 @@ class ResolvedRequestValidatorTest {
 
   private static void assertCompactionRejects(
       CompactionPreparation preparation,
-      List<AgentMessage> preamble,
       List<ToolBinding> tools,
       List<SkillBinding> skills,
       List<SubagentBinding> subagents,
@@ -239,7 +229,6 @@ class ResolvedRequestValidatorTest {
                     resolved(
                         normalSpec(
                             preparation.executionModel(),
-                            preamble,
                             tools,
                             skills,
                             subagents,
@@ -286,12 +275,7 @@ class ResolvedRequestValidatorTest {
 
   private static ModelRequestSpec compactionSpec(CompactionPreparation preparation) {
     return normalSpec(
-        preparation.executionModel(),
-        List.of(),
-        List.of(),
-        List.of(),
-        List.of(),
-        ProviderCacheControl.none());
+        preparation.executionModel(), List.of(), List.of(), List.of(), ProviderCacheControl.none());
   }
 
   private static ModelRequestSpec normalSpec(BranchSettings settings) {
@@ -304,12 +288,11 @@ class ResolvedRequestValidatorTest {
       List<SkillBinding> skills,
       List<SubagentBinding> subagents,
       ProviderCacheControl cacheControl) {
-    return normalSpec(settings.model(), List.of(), tools, skills, subagents, cacheControl);
+    return normalSpec(settings.model(), tools, skills, subagents, cacheControl);
   }
 
   private static ModelRequestSpec normalSpec(
       ModelSelection model,
-      List<AgentMessage> preamble,
       List<ToolBinding> tools,
       List<SkillBinding> skills,
       List<SubagentBinding> subagents,
@@ -338,7 +321,7 @@ class ResolvedRequestValidatorTest {
                 BigDecimal.ZERO)),
         new ModelVariant(model.variant()),
         1024,
-        preamble,
+        "Test system instruction.",
         tools,
         skills,
         subagents,

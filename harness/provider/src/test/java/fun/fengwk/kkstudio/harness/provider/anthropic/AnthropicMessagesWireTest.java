@@ -322,6 +322,7 @@ class AnthropicMessagesWireTest {
             reasoningModel,
             variant,
             4096,
+            "Test system instruction.",
             List.of(userTextMsg("test")),
             List.of(),
             ProviderCacheControl.none());
@@ -371,6 +372,7 @@ class AnthropicMessagesWireTest {
             reasoningModel,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userTextMsg("test")),
             List.of(),
             ProviderCacheControl.none());
@@ -422,6 +424,7 @@ class AnthropicMessagesWireTest {
             reasoningModel,
             variantNone,
             1024,
+            "Test system instruction.",
             List.of(userTextMsg("test")),
             List.of(),
             ProviderCacheControl.none());
@@ -630,6 +633,7 @@ class AnthropicMessagesWireTest {
             reasoningModel,
             variant,
             1024,
+            "Test system instruction.",
             List.of(userTextMsg("solve this")),
             List.of(),
             ProviderCacheControl.none());
@@ -691,16 +695,13 @@ class AnthropicMessagesWireTest {
     assertEquals("Hello Claude", messages.get(0).path("content").get(0).path("text").asText());
   }
 
-  /** 验证开头的系统消息被提取到顶级 system 数组中。 */
+  /** 验证请求唯一的系统指令编码为顶级 system 数组中的单条 text 块，且不进入 messages。 */
   @Test
   void should_respect_system_message() throws Exception {
-    ProviderMessage systemMsg =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM,
-            List.of(new ProviderTextBlock("You are a helpful assistant.")));
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest("claude-3-5-sonnet", null, List.of(systemMsg, userTextMsg("hi")), null, null);
+        requestWithInstruction(
+            "You are a helpful assistant.", List.of(userTextMsg("hi")), null, null);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
@@ -715,11 +716,9 @@ class AnthropicMessagesWireTest {
     assertEquals("user", messages.get(0).path("role").asText());
   }
 
-  /** 验证多轮有序历史消息（SYSTEM -> USER -> ASSISTANT -> USER）在线缆上保持严格顺序。 */
+  /** 验证多轮有序历史消息（USER -> ASSISTANT -> USER）在线缆上保持严格顺序，系统指令始终是顶层单块。 */
   @Test
   void should_respect_multiple_messages() throws Exception {
-    ProviderMessage sys =
-        new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Sys")));
     ProviderMessage u1 = userTextMsg("User 1");
     ProviderMessage a1 =
         new ProviderMessage(
@@ -727,8 +726,7 @@ class AnthropicMessagesWireTest {
     ProviderMessage u2 = userTextMsg("User 2");
 
     ProviderDescriptor descriptor = createDescriptor(null);
-    ProviderRequest request =
-        createRequest("claude-3-5-sonnet", null, List.of(sys, u1, a1, u2), null, null);
+    ProviderRequest request = requestWithInstruction("Sys", List.of(u1, a1, u2), null, null);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
@@ -768,25 +766,6 @@ class AnthropicMessagesWireTest {
     assertEquals("assistant", messages.get(0).path("role").asText());
     assertEquals("user", messages.get(1).path("role").asText());
     assertEquals("user", messages.get(2).path("role").asText());
-  }
-
-  /** 验证对话中间出现 SYSTEM 消息时被 AnthropicRequestEncoder 确定性拒绝并抛出 INVALID_REQUEST。 */
-  @Test
-  void should_reject_mid_conversation_system_message_before_io() {
-    ProviderMessage u1 = userTextMsg("Hello");
-    ProviderMessage sysMid =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Mid system")));
-
-    ProviderDescriptor descriptor = createDescriptor(null);
-    ProviderRequest request =
-        createRequest("claude-3-5-sonnet", null, List.of(u1, sysMid), null, null);
-
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
-    assertTrue(
-        ex.getMessage().contains("Anthropic does not allow mid-conversation SYSTEM messages"));
   }
 
   // ==========================================
@@ -1161,17 +1140,13 @@ class AnthropicMessagesWireTest {
   /** 验证当缓存保留策略为 NONE 时线缆所有字段均不包含 cache_control 标记。 */
   @Test
   void should_not_place_cache_markers_when_retention_is_none() throws Exception {
-    ProviderMessage sys =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("System prompt")));
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "tool", "{\"type\":\"object\"}");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest(
-            "claude-3-5-sonnet",
-            null,
-            List.of(sys, userTextMsg("hi")),
+        requestWithInstruction(
+            "System prompt",
+            List.of(userTextMsg("hi")),
             List.of(tool),
             ProviderCacheControl.none());
 
@@ -1183,20 +1158,16 @@ class AnthropicMessagesWireTest {
     assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
   }
 
-  /** 验证 SYSTEM 缓存断点与 SHORT 保留策略在线缆最后一个 system 块上放置 ephemeral 标记且不带 ttl。 */
+  /** 验证 SYSTEM 缓存断点与 SHORT 保留策略在唯一的顶层 system 块上放置 ephemeral 标记且不带 ttl。 */
   @Test
   void should_cache_system_message() throws Exception {
-    ProviderMessage sys =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("System prompt")));
     ProviderCacheControl cacheControl =
         new ProviderCacheControl(
             PromptCacheRetention.SHORT, "test-aff", Set.of(PromptCacheBreakpoint.SYSTEM));
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest(
-            "claude-3-5-sonnet", null, List.of(sys, userTextMsg("hi")), null, cacheControl);
+        requestWithInstruction("System prompt", List.of(userTextMsg("hi")), null, cacheControl);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
@@ -1205,34 +1176,6 @@ class AnthropicMessagesWireTest {
     assertTrue(sysBlock.has("cache_control"));
     assertEquals("ephemeral", sysBlock.path("cache_control").path("type").asText());
     assertFalse(sysBlock.path("cache_control").has("ttl"), "SHORT retention must not have ttl");
-  }
-
-  /** 验证存在多个 SYSTEM 消息块时仅在最后一个 system 块上放置 cache_control 标记。 */
-  @Test
-  void should_cache_multiple_system_messages() throws Exception {
-    ProviderMessage sys1 =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Sys block 1")));
-    ProviderMessage sys2 =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Sys block 2")));
-    ProviderCacheControl cacheControl =
-        new ProviderCacheControl(
-            PromptCacheRetention.SHORT, "test-aff", Set.of(PromptCacheBreakpoint.SYSTEM));
-
-    ProviderDescriptor descriptor = createDescriptor(null);
-    ProviderRequest request =
-        createRequest(
-            "claude-3-5-sonnet", null, List.of(sys1, sys2, userTextMsg("hi")), null, cacheControl);
-
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-
-    JsonNode systemArray = root.path("system");
-    assertEquals(2, systemArray.size());
-    assertFalse(
-        systemArray.get(0).has("cache_control"), "first system block must not have cache marker");
-    assertTrue(systemArray.get(1).has("cache_control"), "last system block must have cache marker");
   }
 
   /** 验证 TOOLS 缓存断点在线缆 tools 数组的最后一个工具定义上放置 cache_control 标记。 */
@@ -1268,8 +1211,6 @@ class AnthropicMessagesWireTest {
   /** 验证 SYSTEM 与 TOOLS 同时设置缓存断点时各自的末尾项均正确放置 cache_control。 */
   @Test
   void should_cache_system_message_and_tools() throws Exception {
-    ProviderMessage sys =
-        new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Sys")));
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
         new ProviderCacheControl(
@@ -1279,12 +1220,7 @@ class AnthropicMessagesWireTest {
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest(
-            "claude-3-5-sonnet",
-            null,
-            List.of(sys, userTextMsg("hi")),
-            List.of(tool),
-            cacheControl);
+        requestWithInstruction("Sys", List.of(userTextMsg("hi")), List.of(tool), cacheControl);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
@@ -1296,16 +1232,13 @@ class AnthropicMessagesWireTest {
   /** 验证 LONG 保留策略在线缆 cache_control 中显式包含 ttl=1h 属性。 */
   @Test
   void should_cache_system_message_with_long_retention_and_1h_ttl() throws Exception {
-    ProviderMessage sys =
-        new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("Sys")));
     ProviderCacheControl cacheControl =
         new ProviderCacheControl(
             PromptCacheRetention.LONG, "test-aff", Set.of(PromptCacheBreakpoint.SYSTEM));
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
-        createRequest(
-            "claude-3-5-sonnet", null, List.of(sys, userTextMsg("hi")), null, cacheControl);
+        requestWithInstruction("Sys", List.of(userTextMsg("hi")), null, cacheControl);
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
@@ -1874,6 +1807,22 @@ class AnthropicMessagesWireTest {
     return createRequest(modelName, variant, 1024, messages, tools, cacheControl);
   }
 
+  /** 指定系统指令的请求：系统指令是顶层字段，不再作为会话消息出现。 */
+  private ProviderRequest requestWithInstruction(
+      String systemInstruction,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
+    return new ProviderRequest(
+        createModelDescriptor("claude-3-5-sonnet"),
+        new ModelVariant("default"),
+        1024,
+        systemInstruction,
+        messages,
+        tools != null ? tools : List.of(),
+        cacheControl != null ? cacheControl : ProviderCacheControl.none());
+  }
+
   private ProviderRequest createRequest(
       String modelName,
       ModelVariant variant,
@@ -1885,6 +1834,7 @@ class AnthropicMessagesWireTest {
         createModelDescriptor(modelName),
         variant != null ? variant : new ModelVariant("default"),
         outputTokens,
+        "Test system instruction.",
         messages,
         tools != null ? tools : List.of(),
         cacheControl != null ? cacheControl : ProviderCacheControl.none());

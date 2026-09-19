@@ -319,7 +319,7 @@ virtual-thread-per-task executor。
 3. 根据当前 Provider cache capability 规范化 durable cache control；
 4. 通过 `ProviderResourceMaterializer` 物化当前 attempt 的 Resource：模型输入模态、
    adapter 用户/工具结果能力与 Blob MIME 同时匹配时，图片、音频、视频和 PDF 统一转成
-   Base64 data URI；非 PDF 文档、缺失或非 ACTIVE Blob、能力不匹配及 SYSTEM/ASSISTANT
+   Base64 data URI；非 PDF 文档、缺失或非 ACTIVE Blob、能力不匹配及 ASSISTANT
    资源使用确定性文本回退，不读取内容、不生成预签名 URL。
 
 持久化只保存自己的 `ResourceMessageContent` / `ProviderResourceBlock`（Blob ID、名称、
@@ -396,7 +396,7 @@ externalization，第一个 terminal 后任何迟到信号、其余 Resource 写
    `ENVIRONMENT_NOT_SELECTED` 失败，绝不阻止规划）；`requiredEnvironmentId` 与已选环境
    冲突时在 planning 阶段确定性返回 `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
-5. Contributor context projector、system prompt、cache control、context window 与
+5. Contributor context projector、system instruction、cache control、context window 与
    output budget。
 
 每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Skill 严格按全局 name 从
@@ -404,7 +404,9 @@ Platform 当前目录解析并冻结 `(packageName, packageVersion, name, descri
 Branch Environment 无关；名称缺失返回 `PLANNING_FAILED`。
 [AgentPromptComposer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposer.java)
 拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}`
-placeholder，其余 `${...}` 与未闭合形式保持原文。
+placeholder，其余 `${...}` 与未闭合形式保持原文。Platform 将其与 Project 角色上下文、
+Contributor context projector 片段用空行确定性拼接为单条非空 `systemInstruction` 冻结进
+`ModelRequestSpec`，会话历史中绝不作为系统消息注入。
 [DatabaseThreadSelectedSkillLookup](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/skill/DatabaseThreadSelectedSkillLookup.java)
 从冻结的 ModelRequestSpec 读取 Skill binding，正文由 `load_skill` 经
 `DatabaseSkillContentLoader` 按精确的三元组读取，不会用当前 Agent

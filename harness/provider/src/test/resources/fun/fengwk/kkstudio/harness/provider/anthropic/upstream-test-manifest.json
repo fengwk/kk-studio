@@ -9,9 +9,9 @@
     "license": "Apache License 2.0",
     "adaptationPrinciples": [
       "1. Comprehensive Inventory: 100% covers all 40 test files in langchain4j-anthropic/src/test/java and tracked inherited base classes (core/common/reactive test bases) with 423 real test methods expanded to 577 invocations across parameter dimensions.",
-      "2. Honest Status & No False Equivalence Policy: Exactly 146 applicable invocations are PORTED and PASSED, validated via reflection-backed target existence and test-annotation checks against declared local test methods; exactly 0 pending invocations remain; all 431 non-applicable invocations are classified OUT_OF_SCOPE with precise capabilityMismatch reasons; tests asserting different contracts are rejected or renamed rather than creating false equivalence.",
+      "2. Honest Status & No False Equivalence Policy: Exactly 145 applicable invocations are PORTED and PASSED, validated via reflection-backed target existence and test-annotation checks against declared local test methods; exactly 0 pending invocations remain; all 432 non-applicable invocations are classified OUT_OF_SCOPE with precise capabilityMismatch reasons; tests asserting different contracts are rejected or renamed rather than creating false equivalence.",
       "3. Native Thinking Adaptation: Native provider adapts thinkingType and budget to reasoning capability and typed effort while strictly preserving output and deterministic replay semantics (positive thinking and thinking with tools ported to AnthropicThinkingTest; negative return/send toggles marked OUT_OF_SCOPE).",
-      "4. Precise Capability Mismatch: OUT_OF_SCOPE items strictly document the specific architectural mismatch (e.g., SDK Builder equals/hash/toBuilder facade, Batch API, count_tokens, model catalog, AiServices facade, server tools/skills, SDK automatic retry, Reactive Streams Publisher/TCK/BlockHound, third-party caching proxy, arbitrary custom headers/userId, tool choice controls, ResponseFormat/structured-output beta, disabled negative capability tests, callback exception handling differences, synchronous client, and mid-conversation SYSTEM policy).",
+      "4. Precise Capability Mismatch: OUT_OF_SCOPE items strictly document the specific architectural mismatch (e.g., SDK Builder equals/hash/toBuilder facade, Batch API, count_tokens, model catalog, AiServices facade, server tools/skills, SDK automatic retry, Reactive Streams Publisher/TCK/BlockHound, third-party caching proxy, arbitrary custom headers/userId, tool choice controls, ResponseFormat/structured-output beta, disabled negative capability tests, callback exception handling differences, synchronous client, and single top-level system instruction policy).",
       "5. Orthogonal Credential Invariant: 121 credential-bound integration tests maintain their independent realInteropStatus marker of NOT_EXECUTED_REQUIRES_CREDENTIAL orthogonally to mappingStatus (across ported offline replay fixtures and converted OUT_OF_SCOPE records).",
       "6. Security & Sanitization: Sensitive header and error body logging constraints are explicitly tracked via securityAdaptation."
     ]
@@ -20,9 +20,9 @@
     "totalSourceFiles": 40,
     "totalMethods": 423,
     "totalInvocations": 577,
-    "portedInvocations": 146,
+    "portedInvocations": 145,
     "inScopePendingInvocations": 0,
-    "outOfScopeInvocations": 431,
+    "outOfScopeInvocations": 432,
     "realCredentialInvocations": 121
   },
   "methods": [
@@ -777,13 +777,13 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"ANTHROPIC_API_KEY\", matches = \".+\")",
           "capability": "Messages Protocol IT",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicMessagesWireTest#should_cache_multiple_system_messages",
-          "fixture": "anthropic/fixtures/messages-wire.json",
-          "validationLayer": "wire/protocol",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
+          "capabilityMismatch": "Multiple cached system messages are not representable: runtime carries exactly one top-level system instruction per request",
           "securityAdaptation": null
         }
       ]
@@ -1510,7 +1510,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]
@@ -3049,7 +3049,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system blocks must be leading",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         },
         {
@@ -3790,7 +3790,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system messages cannot appear after user or tool results",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]
@@ -3815,7 +3815,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system messages cannot appear after user or tool results",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]
@@ -3840,7 +3840,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system messages cannot appear after user or tool results",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]
@@ -4165,7 +4165,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system messages cannot be placed mid-conversation",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]
@@ -4190,7 +4190,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system messages cannot be placed mid-conversation",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]
@@ -4215,7 +4215,7 @@
           "mappingStatus": "OUT_OF_SCOPE",
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": null,
-          "capabilityMismatch": "Native harness rejects mid-conversation SYSTEM messages before I/O; system messages cannot be placed mid-conversation",
+          "capabilityMismatch": "System instruction is carried once per request at the top level; conversation messages cannot express SYSTEM at all",
           "securityAdaptation": null
         }
       ]

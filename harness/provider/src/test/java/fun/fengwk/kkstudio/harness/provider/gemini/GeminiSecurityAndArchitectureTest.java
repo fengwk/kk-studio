@@ -202,7 +202,13 @@ class GeminiSecurityAndArchitectureTest {
         };
     ProviderRequest req =
         new ProviderRequest(
-            dummyModel(), DEFAULT_VARIANT, 1024, List.of(), List.of(), ProviderCacheControl.none());
+            dummyModel(),
+            DEFAULT_VARIANT,
+            1024,
+            "Test system instruction.",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
     ProviderDescriptor desc =
         new ProviderDescriptor(
             "p1",
@@ -230,6 +236,7 @@ class GeminiSecurityAndArchitectureTest {
             dummyModel(),
             DEFAULT_VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,

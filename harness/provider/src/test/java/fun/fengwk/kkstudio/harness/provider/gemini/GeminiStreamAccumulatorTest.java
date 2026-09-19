@@ -101,7 +101,13 @@ class GeminiStreamAccumulatorTest {
     ModelVariant variant = new ModelVariant("default");
     request =
         new ProviderRequest(
-            model, variant, 1024, List.of(), List.of(), ProviderCacheControl.none());
+            model,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
 
     emittedEvents = new ArrayList<>();
     bridge = new GeminiStreamBridge(handler);

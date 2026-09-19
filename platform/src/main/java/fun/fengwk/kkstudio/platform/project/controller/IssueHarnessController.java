@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
@@ -145,7 +146,7 @@ class IssueHarnessController {
     NewThreadCommand command =
         new NewThreadCommand(
             new CustomMessageCommandPayload(
-                AgentMessage.system("Continue working on issue #" + issue.getNumber() + ".")),
+                SystemReminder.message("Continue working on issue #" + issue.getNumber() + ".")),
             continuationKey(
                 run.getId(),
                 run.getContinuationCount(),
@@ -172,7 +173,7 @@ class IssueHarnessController {
       NewThreadCommand command =
           new NewThreadCommand(
               new CustomMessageCommandPayload(
-                  AgentMessage.system(
+                  SystemReminder.message(
                       "Issue #"
                           + issue.getNumber()
                           + " run entered "

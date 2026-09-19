@@ -87,7 +87,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -313,7 +312,7 @@ class DatabaseTurnResolverTest {
         List.of(),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(List.of(), requestSpec.skillBindings());
-    assertTrue(requestSpec.preambleMessages().getFirst().contents().toString().contains("date:"));
+    assertTrue(requestSpec.systemInstruction().contains("date:"));
   }
 
   @Test
@@ -327,7 +326,7 @@ class DatabaseTurnResolverTest {
             + "<current_environment>\n"
             + "- date: 2026-08-02\n"
             + "</current_environment>",
-        preambleText(requestSpec));
+        instructionText(requestSpec));
   }
 
   @Test
@@ -336,14 +335,14 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
 
     // 未选择 Environment：空环境上下文只保留服务端时钟派生的日期。
-    String none = preambleText(fixture.resolved(fixture.path(unboundSettings("default"))));
+    String none = instructionText(fixture.resolved(fixture.path(unboundSettings("default"))));
     assertFalse(none.contains("- name:"), none);
     assertFalse(none.contains("- system:"), none);
     assertTrue(none.contains("- date: 2026-08-01"), none);
     assertFalse(none.contains("- note:"), none);
 
     // 已选择 Environment 但既无 live daemon 也无持久报告：回退到服务端时钟，规划仍然成功。
-    String unreported = preambleText(fixture.resolved(fixture.path(settings("default"))));
+    String unreported = instructionText(fixture.resolved(fixture.path(settings("default"))));
     assertFalse(unreported.contains("- system:"), unreported);
     assertTrue(unreported.contains("- date: 2026-08-01"), unreported);
     assertFalse(unreported.contains("- note:"), unreported);
@@ -362,7 +361,7 @@ class DatabaseTurnResolverTest {
             "/home/dev"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
-    String prompt = preambleText(requestSpec);
+    String prompt = instructionText(requestSpec);
 
     assertTrue(prompt.contains("- system: linux"), prompt);
     assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
@@ -374,7 +373,7 @@ class DatabaseTurnResolverTest {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.connectingEnvironment(ENV_A);
 
-    String withoutMetadata = preambleText(fixture.resolved(fixture.path(settings("default"))));
+    String withoutMetadata = instructionText(fixture.resolved(fixture.path(settings("default"))));
     assertFalse(withoutMetadata.contains("- system:"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
     assertFalse(withoutMetadata.contains("- note:"), withoutMetadata);
@@ -384,10 +383,10 @@ class DatabaseTurnResolverTest {
             DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.", "/home/dev");
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
-    String ready = preambleText(readyFixture.resolved(readyFixture.path(settings("default"))));
+    String ready = instructionText(readyFixture.resolved(readyFixture.path(settings("default"))));
     Fixture staleFixture = new Fixture(List.of(), List.of(), List.of());
     staleFixture.staleEnvironment(ENV_A, environmentInfo);
-    String stale = preambleText(staleFixture.resolved(staleFixture.path(settings("default"))));
+    String stale = instructionText(staleFixture.resolved(staleFixture.path(settings("default"))));
     assertEquals(ready, stale);
     assertTrue(stale.contains("- system: wsl"), stale);
     assertTrue(stale.contains("- date: 2026-08-02"), stale);
@@ -581,7 +580,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(new SkillBinding("dev", "test-package", "1.0.0", "dev description")),
         requestSpec.skillBindings());
-    assertFalse(preambleText(requestSpec).contains("- system:"));
+    assertFalse(instructionText(requestSpec).contains("- system:"));
   }
 
   /** 测试意图：环境块只取自连接行保留的宿主 metadata；无连接行时不伪造 OS/note。 */
@@ -590,14 +589,14 @@ class DatabaseTurnResolverTest {
     Fixture live = new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     live.readyEnvironment(ENV_A);
     ModelRequestSpec liveSpec = live.resolved(live.path(settings("default")));
-    assertTrue(preambleText(liveSpec).contains("- system: linux"));
+    assertTrue(instructionText(liveSpec).contains("- system: linux"));
 
     Fixture offline =
         new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     offline.connectingEnvironment(ENV_A);
     ModelRequestSpec offlineSpec = offline.resolved(offline.path(settings("default")));
-    assertFalse(preambleText(offlineSpec).contains("- system:"));
-    assertFalse(preambleText(offlineSpec).contains("- note:"));
+    assertFalse(instructionText(offlineSpec).contains("- system:"));
+    assertFalse(instructionText(offlineSpec).contains("- note:"));
   }
 
   /** 测试意图：CONNECTING 连接行保留的最近一次 READY 宿主 metadata 仍进入环境块（断线不清空）。 */
@@ -609,8 +608,8 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
-    assertTrue(preambleText(requestSpec).contains("- system: wsl"));
-    assertTrue(preambleText(requestSpec).contains("- note: Retained note"));
+    assertTrue(instructionText(requestSpec).contains("- system: wsl"));
+    assertTrue(instructionText(requestSpec).contains("- note: Retained note"));
   }
 
   @Test
@@ -708,9 +707,8 @@ class DatabaseTurnResolverTest {
     assertEquals("goal.create", binding.contributor().localName());
     assertEquals("goal.state", binding.contributor().stateAccesses().getFirst().customType());
     assertTrue(
-        materialized(path, requestSpec).stream()
-            .map(DatabaseTurnResolverTest::textOf)
-            .anyMatch(text -> text.contains("\"objective\":\"ship\"")));
+        requestSpec.systemInstruction().contains("\"objective\":\"ship\""),
+        requestSpec.systemInstruction());
   }
 
   @Test
@@ -808,7 +806,7 @@ class DatabaseTurnResolverTest {
         List.of(TaskTool.NAME),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
-    String system = preambleText(requestSpec);
+    String system = instructionText(requestSpec);
     assertTrue(system.contains("<available_subagents>"), system);
     assertTrue(system.contains("<name>reviewer</name>"), system);
     assertTrue(
@@ -842,7 +840,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(),
         withoutTask.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertFalse(preambleText(withoutTask).contains("subagent"));
+    assertFalse(instructionText(withoutTask).contains("subagent"));
   }
 
   /**
@@ -943,18 +941,27 @@ class DatabaseTurnResolverTest {
     EntryPath path = multiTurnPath(settings);
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
+    // 系统指令不再以 SYSTEM 消息进入会话投影：它只在 systemInstruction 中，messages 只含对话。
+    String instruction = requestSpec.systemInstruction();
+    assertTrue(instruction.startsWith("agent system prompt"), instruction);
+    // 确定性空行拼接顺序：Agent 正文 → Environment → Skills，段间恰为空行分隔。
+    int environmentAt = instruction.indexOf("<current_environment>");
+    int skillsAt = instruction.indexOf("<available_skills>");
+    assertTrue(environmentAt > "agent system prompt".length(), instruction);
+    assertTrue(skillsAt > environmentAt, instruction);
+    assertTrue(
+        instruction.contains("</current_environment>\n\nThe following skills provide"),
+        instruction);
+    assertTrue(instruction.contains("<name>dev</name>"), instruction);
+
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(4, messages.size());
-    assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
-    assertTrue(textOf(messages.get(0)).startsWith("agent system prompt"));
-    assertTrue(textOf(messages.get(0)).contains("<available_skills>"));
-    assertTrue(textOf(messages.get(0)).contains("<name>dev</name>"));
-    assertEquals(ProviderMessageRole.USER, messages.get(1).role());
-    assertEquals("first user", textOf(messages.get(1)));
-    assertEquals(ProviderMessageRole.ASSISTANT, messages.get(2).role());
-    assertEquals("partial text", textOf(messages.get(2)));
-    assertEquals(ProviderMessageRole.USER, messages.get(3).role());
-    assertEquals("custom note", textOf(messages.get(3)));
+    assertEquals(3, messages.size());
+    assertEquals(ProviderMessageRole.USER, messages.get(0).role());
+    assertEquals("first user", textOf(messages.get(0)));
+    assertEquals(ProviderMessageRole.ASSISTANT, messages.get(1).role());
+    assertEquals("partial text", textOf(messages.get(1)));
+    assertEquals(ProviderMessageRole.USER, messages.get(2).role());
+    assertEquals("custom note", textOf(messages.get(2)));
   }
 
   /** failed-attempt 与 terminal error partial 都是 UI/audit 事实，绝不进入 Provider messages。 */
@@ -967,10 +974,10 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(2, messages.size());
-    assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
-    assertEquals(ProviderMessageRole.USER, messages.get(1).role());
-    assertEquals("visible user", textOf(messages.get(1)));
+    // 会话投影只含可见对话消息；系统指令单独承载，绝不作为 SYSTEM 消息出现在 messages 中。
+    assertEquals(1, messages.size());
+    assertEquals(ProviderMessageRole.USER, messages.get(0).role());
+    assertEquals("visible user", textOf(messages.get(0)));
     String projected = messages.stream().map(DatabaseTurnResolverTest::textOf).toList().toString();
     assertFalse(projected.contains("retry-only-secret"));
     assertFalse(projected.contains("terminal-only-secret"));
@@ -1045,13 +1052,10 @@ class DatabaseTurnResolverTest {
     ToolBinding toolBinding = spec.toolBindings().get(0);
     assertEquals("mcp_srv_echo", toolBinding.definition().descriptor().name());
 
-    // 验证 static context projector 依旧被 HarnessCatalog 正确投影进 preamble
-    List<ProviderMessage> projectedPreamble =
-        new ProviderMessageProjector().project(spec.preambleMessages());
-    boolean foundProjected =
-        projectedPreamble.stream()
-            .anyMatch(pm -> textOf(pm).contains("projected-context-fragment"));
-    assertTrue(foundProjected, "Preamble must contain text from static context projector");
+    // 验证 static context projector 依旧被 HarnessCatalog 正确投影进唯一系统指令
+    assertTrue(
+        spec.systemInstruction().contains("projected-context-fragment"),
+        "systemInstruction must contain text from static context projector");
   }
 
   @Test
@@ -1062,7 +1066,7 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
-    String system = preambleText(requestSpec);
+    String system = instructionText(requestSpec);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
     assertTrue(system.contains("<description>d&amp;e</description>"));
   }
@@ -1277,7 +1281,7 @@ class DatabaseTurnResolverTest {
         new Fixture(List.of("create_goal"), List.of(), List.of(hostDescriptor("create_goal")));
     EntryPath path = fixture.path(settings("custom"));
     ModelRequestSpec frozen = fixture.resolved(path);
-    String preamble = preambleText(frozen);
+    String preamble = instructionText(frozen);
     ModelDescriptor model = frozen.model();
     ModelVariant variant = frozen.variant();
     List<ToolBinding> tools = frozen.toolBindings();
@@ -1286,15 +1290,16 @@ class DatabaseTurnResolverTest {
     fixture.agent.setSystemPrompt("changed system prompt");
     fixture.agentConfig.setTools(List.of());
 
-    // 二次 resolve 证明 mutation 真实生效：live spec 的 preamble 与 tools 都变了，而 frozen spec 不受影响。
+    // 二次 resolve 证明 mutation 真实生效：live spec 的 systemInstruction 与 tools 都变了，而 frozen spec 不受影响。
     ModelRequestSpec live = fixture.resolved(path);
-    assertNotEquals(preamble, preambleText(live));
+    assertNotEquals(preamble, instructionText(live));
     assertNotEquals(tools, live.toolBindings());
     assertEquals(
         List.of(),
         live.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
 
-    assertEquals(preamble, preambleText(frozen));
+    assertEquals(preamble, instructionText(frozen));
+    assertEquals(preamble, frozen.systemInstruction());
     assertEquals(model, frozen.model());
     assertEquals(variant, frozen.variant());
     assertEquals(tools, frozen.toolBindings());
@@ -1304,7 +1309,9 @@ class DatabaseTurnResolverTest {
         tools.stream().map(binding -> binding.descriptor().name()).toList());
     ProviderRequest after = new ModelRequestMaterializer().materialize(path, frozen);
     assertEquals(before, after);
-    assertEquals(preamble, textOf(after.messages().getFirst()));
+    // 物化边界把冻结的 instruction 原样带到 Provider 请求，不再合成 SYSTEM 消息。
+    assertEquals(preamble, after.systemInstruction());
+    assertTrue(after.messages().stream().noneMatch(m -> textOf(m).equals(preamble)));
     assertEquals(List.of("create_goal"), after.tools().stream().map(tool -> tool.name()).toList());
   }
 
@@ -1316,8 +1323,9 @@ class DatabaseTurnResolverTest {
     return text.toString();
   }
 
-  private static String preambleText(ModelRequestSpec spec) {
-    return textOf(new ProviderMessageProjector().project(spec.preambleMessages()).getFirst());
+  /** 唯一系统指令正文：spec.systemInstruction() 即本次请求唯一的系统指令，不存在 preamble 消息列表。 */
+  private static String instructionText(ModelRequestSpec spec) {
+    return spec.systemInstruction();
   }
 
   private static List<ProviderMessage> materialized(EntryPath path, ModelRequestSpec spec) {
@@ -1601,20 +1609,20 @@ class DatabaseTurnResolverTest {
     assertEquals(123, resolved.maxOutputTokens());
     // 压缩预算写入 spec.outputTokens，variant 不再承载输出上限。
     assertEquals(123, requestSpec.outputTokens());
-    assertEquals(List.of(), requestSpec.preambleMessages());
+    // 压缩 turn 的 spec 冻结摘要 system prompt：唯一指令，不存在 preamble 消息列表。
+    assertEquals(CompactionPrompts.summarizationSystemPrompt(), requestSpec.systemInstruction());
     assertEquals(List.of(), requestSpec.toolBindings());
     assertEquals(List.of(), requestSpec.skillBindings());
     assertEquals(List.of(), requestSpec.subagentBindings());
     assertEquals(ProviderCacheControl.none(), requestSpec.cacheControl());
+    assertFalse(requestSpec.systemInstruction().contains("<current_environment>"));
     // materializer 从 candidate path 的 CompactionStart 重建摘要 prompt，而不是从 spec 读取切分元数据。
     List<ProviderMessage> providerMessages = materialized(historyPath, requestSpec);
-    assertEquals(2, providerMessages.size());
-    assertEquals(ProviderMessageRole.SYSTEM, providerMessages.get(0).role());
-    assertEquals(CompactionPrompts.summarizationSystemPrompt(), textOf(providerMessages.get(0)));
-    assertFalse(textOf(providerMessages.get(0)).contains("<current_environment>"));
-    assertEquals(ProviderMessageRole.USER, providerMessages.get(1).role());
+    // 摘要调用只投影一条 USER（conversation + summary prompt）；system 指令走 systemInstruction。
+    assertEquals(1, providerMessages.size());
+    assertEquals(ProviderMessageRole.USER, providerMessages.get(0).role());
     assertEquals(
-        CompactionPrompts.summaryUserPrompt(messages, null), textOf(providerMessages.get(1)));
+        CompactionPrompts.summaryUserPrompt(messages, null), textOf(providerMessages.get(0)));
     // FULL 预算为 min(1024, floor(0.8 * 1024) = 819, removedPrefixTokens=123) = 123。
   }
 
@@ -1633,7 +1641,7 @@ class DatabaseTurnResolverTest {
 
     // 上下文只剩 37 token 时严格取 remaining，不应用正数钳位或 variant 回退。
     long estimatedInputTokens =
-        CompactionPlanner.estimateRequestTokens(path, resolved.spec().preambleMessages());
+        CompactionPlanner.estimateRequestTokens(path, resolved.spec().systemInstruction());
     fixture.modelLimits(estimatedInputTokens + 37, 600);
     resolved = fixture.resolvedResult(path, null);
     assertEquals(37, resolved.maxOutputTokens());
@@ -1782,16 +1790,16 @@ class DatabaseTurnResolverTest {
     EntryPath path = projectionPath(settings, "summary text", id(4));
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
+    // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER。
+    assertTrue(requestSpec.systemInstruction().startsWith("agent system prompt"));
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(5, messages.size());
-    assertEquals(ProviderMessageRole.SYSTEM, messages.get(0).role());
-    assertTrue(textOf(messages.get(0)).startsWith("agent system prompt"));
-    assertEquals(ProviderMessageRole.USER, messages.get(1).role());
-    assertEquals(CompactionPrompts.compactedContext("summary text"), textOf(messages.get(1)));
+    assertEquals(4, messages.size());
+    assertEquals(ProviderMessageRole.USER, messages.get(0).role());
+    assertEquals(CompactionPrompts.compactedContext("summary text"), textOf(messages.get(0)));
     // 从 cut（ASST1）本身开始保留：ASST1、USER2、ASST2 继续投影；COMPACTION 控制 turn 内部不投影。
-    assertEquals("first reply", textOf(messages.get(2)));
-    assertEquals("second user", textOf(messages.get(3)));
-    assertEquals("second reply", textOf(messages.get(4)));
+    assertEquals("first reply", textOf(messages.get(1)));
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
   }
 
   @Test
@@ -1803,12 +1811,12 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(5, messages.size());
-    assertEquals("first user", textOf(messages.get(1)));
-    assertEquals("first reply", textOf(messages.get(2)));
-    // 被停止压缩 turn 内部的 ABORTED 一律不投影。
-    assertEquals("second user", textOf(messages.get(3)));
-    assertEquals("second reply", textOf(messages.get(4)));
+    // 投影里没有 SYSTEM 消息：messages 只含对话（被停止压缩 turn 内部的 ABORTED 不投影）。
+    assertEquals(4, messages.size());
+    assertEquals("first user", textOf(messages.get(0)));
+    assertEquals("first reply", textOf(messages.get(1)));
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
   }
 
   /** 损坏的压缩引用必须 fail closed：解析阶段（输出预算需要投影 cut）即确定性抛错，绝不产出静默降级的请求。 */
@@ -1830,13 +1838,14 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
-    assertEquals(6, messages.size());
-    assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(1)));
+    // 投影里没有 SYSTEM 消息：wrapper summary 是第一条 USER，索引整体前移一位。
+    assertEquals(5, messages.size());
+    assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(0)));
     // 只有最新压缩的 wrapper；从最新 cut（USER2）起保留。
-    assertEquals("second user", textOf(messages.get(2)));
-    assertEquals("second reply", textOf(messages.get(3)));
-    assertEquals("third user", textOf(messages.get(4)));
-    assertEquals("third reply", textOf(messages.get(5)));
+    assertEquals("second user", textOf(messages.get(1)));
+    assertEquals("second reply", textOf(messages.get(2)));
+    assertEquals("third user", textOf(messages.get(3)));
+    assertEquals("third reply", textOf(messages.get(4)));
   }
 
   @Test
@@ -1950,23 +1959,34 @@ class DatabaseTurnResolverTest {
     fixture.roleContext(THREAD_ID, roleContextText);
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
-    List<AgentMessage> preamble = spec.preambleMessages();
 
-    assertEquals(3, preamble.size());
-    // 消息 1: 普通 Agent prompt
-    assertTrue(preamble.get(0).contents().toString().contains("agent system prompt"));
-    // 消息 2: Project role dynamic context
-    assertTrue(preamble.get(1).contents().toString().contains(roleContextText));
-    // 消息 3: Contributor fragment
-    assertTrue(preamble.get(2).contents().toString().contains("contributor-fragment-text"));
+    // 唯一系统指令按确定性顺序串联：Agent 正文 → Environment → Project role context → Contributor fragment，
+    // 段间恰为空行（composer 对环境段 stripTrailing，因此连接处只有一个空行）。
+    String instruction = spec.systemInstruction();
+    assertEquals(
+        "agent system prompt\n\n"
+            + "<current_environment>\n"
+            + "- date: 2026-08-02\n"
+            + "</current_environment>"
+            + "\n\n"
+            + roleContextText
+            + "\n\n"
+            + "contributor-fragment-text",
+        instruction);
+    int agentAt = instruction.indexOf("agent system prompt");
+    int roleAt = instruction.indexOf(roleContextText);
+    int contributorAt = instruction.indexOf("contributor-fragment-text");
+    assertEquals(0, agentAt);
+    assertTrue(roleAt > agentAt, instruction);
+    assertTrue(contributorAt > roleAt, instruction);
 
-    // 普通 thread (Optional.empty): 零角色 context 消息
+    // 普通 thread (Optional.empty): 角色 context 段整体省略，顺序与空行分隔不变。
     fixture.roleContext(THREAD_ID, null);
     ModelRequestSpec ordinarySpec = fixture.resolved(fixture.path(settings("default")));
-    List<AgentMessage> ordinaryPreamble = ordinarySpec.preambleMessages();
-    assertEquals(2, ordinaryPreamble.size());
-    assertTrue(ordinaryPreamble.get(0).contents().toString().contains("agent system prompt"));
-    assertTrue(ordinaryPreamble.get(1).contents().toString().contains("contributor-fragment-text"));
+    String ordinaryInstruction = ordinarySpec.systemInstruction();
+    assertFalse(ordinaryInstruction.contains(roleContextText));
+    assertTrue(ordinaryInstruction.endsWith("\n\ncontributor-fragment-text"), ordinaryInstruction);
+    assertTrue(ordinaryInstruction.startsWith("agent system prompt"), ordinaryInstruction);
   }
 
   @Test
@@ -2054,7 +2074,9 @@ class DatabaseTurnResolverTest {
     verify(fixture.roleContextProjector, never()).project(any());
     assertEquals(List.of(), spec.toolBindings());
     assertEquals(List.of(), spec.skillBindings());
-    assertEquals(List.of(), spec.preambleMessages());
+    // 压缩 spec 的指令是摘要 system prompt，与 live resolver 的 Agent 组合指令完全不同。
+    assertEquals(CompactionPrompts.summarizationSystemPrompt(), spec.systemInstruction());
+    assertFalse(spec.systemInstruction().contains("agent system prompt"));
   }
 
   @Test

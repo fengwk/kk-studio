@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -81,25 +82,33 @@ public final class HarnessOneShotService {
     }
     HarnessRuntime runtime = requireRuntime();
     var settings = settingsMaterializer.materialize(agentName);
-    CustomMessageCommandPayload systemPayload =
-        new CustomMessageCommandPayload(AgentMessage.system(systemMessage));
-    CustomMessageCommandPayload userPayload = new CustomMessageCommandPayload(userMessage);
-    NewThreadCommand systemCommand =
+    CustomMessageCommandPayload payload =
+        new CustomMessageCommandPayload(combine(systemMessage, userMessage));
+    NewThreadCommand command =
         new NewThreadCommand(
-            systemPayload,
-            UUID.randomUUID(),
-            ThreadCommandPayloadJsonCodec.requestHash(systemPayload));
-    NewThreadCommand userCommand =
-        new NewThreadCommand(
-            userPayload, UUID.randomUUID(), ThreadCommandPayloadJsonCodec.requestHash(userPayload));
+            payload, UUID.randomUUID(), ThreadCommandPayloadJsonCodec.requestHash(payload));
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.NewSession(
                     UUID.randomUUID(), UUID.randomUUID(), settings, null, false),
-                List.of(systemCommand, userCommand)),
+                List.of(command)),
             preflight);
     return accepted.thread().id();
+  }
+
+  /**
+   * 可信 system 文本与调用方内容合成同一最终 USER 消息：admission 只接受恰一条末尾 USER 命令，因此不额外提交 system 命令。 可信文本用 {@code
+   * <system-reminder>} 包裹，与运行时注入的上下文提醒同形。
+   */
+  private static AgentMessage combine(String systemMessage, AgentMessage userMessage) {
+    if (systemMessage == null || systemMessage.isBlank()) {
+      return userMessage;
+    }
+    List<AgentMessageContent> contents = new ArrayList<>(userMessage.contents().size() + 1);
+    contents.add(new TextMessageContent(SystemReminder.wrap(systemMessage) + "\n\n"));
+    contents.addAll(userMessage.contents());
+    return new AgentMessage(AgentMessageRole.USER, contents);
   }
 
   public String await(UUID threadId, Duration timeout, BooleanSupplier continueWaiting) {

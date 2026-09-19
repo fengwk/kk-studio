@@ -41,7 +41,7 @@ final class PortTestData {
         modelDescriptor(),
         new ModelVariant("v1"),
         1024,
-        List.of(),
+        "Test system instruction.",
         List.of(),
         List.of(),
         List.of(),
@@ -53,6 +53,7 @@ final class PortTestData {
         modelDescriptor(),
         new ModelVariant("v1"),
         1024,
+        "Test system instruction.",
         List.of(),
         List.of(),
         ProviderCacheControl.none());

@@ -478,6 +478,7 @@ class AnthropicErrorHandlingTest {
         model,
         new ModelVariant("default"),
         1024,
+        "Test system instruction.",
         List.of(
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("Test ping")))),

@@ -116,6 +116,7 @@ class OpenAiChatThinkingTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1),
             List.of(),
             ProviderCacheControl.none());
@@ -190,6 +191,7 @@ class OpenAiChatThinkingTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, turn1Asst, user2),
             List.of(),
             ProviderCacheControl.none());
@@ -198,9 +200,10 @@ class OpenAiChatThinkingTest {
         encoder.encode(turn2Request, descriptor, OpenAiChatConfiguration.defaults());
     JsonNode root2 = MAPPER.readTree(encoded2.bodyUtf8Bytes());
     ArrayNode messages2 = (ArrayNode) root2.path("messages");
-    assertEquals(3, messages2.size());
+    // 合成的系统指令消息占据 0 号，会话消息整体后移一位
+    assertEquals(4, messages2.size());
 
-    JsonNode wireAsst = messages2.get(1);
+    JsonNode wireAsst = messages2.get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
     assertEquals("The sum is 2.", wireAsst.path("content").asText());
     assertEquals(

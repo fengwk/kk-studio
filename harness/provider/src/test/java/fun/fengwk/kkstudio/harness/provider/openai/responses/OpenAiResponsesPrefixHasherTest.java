@@ -21,8 +21,11 @@ class OpenAiResponsesPrefixHasherTest {
   /** 验证空 tools 与空 input 时哈希稳定且符合 64 位小写十六进制规范。 */
   @Test
   void test_emptyInputHash() {
-    String hash1 = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), NODES.arrayNode());
-    String hash2 = OpenAiResponsesPrefixHasher.calculateHash(null, null);
+    String hash1 =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), NODES.arrayNode());
+    String hash2 =
+        OpenAiResponsesPrefixHasher.calculateHash("Test system instruction.", null, null);
     assertEquals(hash1, hash2);
     assertTrue(HASH_PATTERN.matcher(hash1).matches());
   }
@@ -40,8 +43,12 @@ class OpenAiResponsesPrefixHasherTest {
     obj2.put("role", "user");
     obj2.put("type", "message");
 
-    String hash1 = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), input1);
-    String hash2 = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), input2);
+    String hash1 =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), input1);
+    String hash2 =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), input2);
     assertEquals(hash1, hash2);
   }
 
@@ -72,9 +79,12 @@ class OpenAiResponsesPrefixHasherTest {
     ObjectNode bp = block2.putObject("prompt_cache_breakpoint");
     bp.put("mode", "explicit");
 
-    String hashNoCache = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), inputNoCache);
+    String hashNoCache =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), inputNoCache);
     String hashWithCache =
-        OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), inputWithCache);
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), inputWithCache);
     assertEquals(hashNoCache, hashWithCache);
   }
 
@@ -103,7 +113,8 @@ class OpenAiResponsesPrefixHasherTest {
     block.put("type", "input_text");
     block.put("text", "weather in Shanghai");
 
-    String baseHash = OpenAiResponsesPrefixHasher.calculateHash(baseTools, baseInput);
+    String baseHash =
+        OpenAiResponsesPrefixHasher.calculateHash("Test system instruction.", baseTools, baseInput);
 
     // 2. 在工具层级及深层参数中注入四个字段
     ArrayNode toolsWithCache = NODES.arrayNode();
@@ -120,7 +131,10 @@ class OpenAiResponsesPrefixHasherTest {
     loc.put("type", "string");
     loc.putObject("prompt_cache_breakpoint").put("mode", "explicit");
 
-    assertEquals(baseHash, OpenAiResponsesPrefixHasher.calculateHash(toolsWithCache, baseInput));
+    assertEquals(
+        baseHash,
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", toolsWithCache, baseInput));
 
     // 3. 在消息层级及多层深层嵌套子对象中注入四个字段
     ArrayNode inputWithDeepCache = NODES.arrayNode();
@@ -142,7 +156,9 @@ class OpenAiResponsesPrefixHasherTest {
     blockWithCache.putObject("prompt_cache_options").put("ttl", "30m");
 
     assertEquals(
-        baseHash, OpenAiResponsesPrefixHasher.calculateHash(baseTools, inputWithDeepCache));
+        baseHash,
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", baseTools, inputWithDeepCache));
 
     // 4. 四个字段单独逐一添加，均不改变哈希
     for (String field :
@@ -165,7 +181,10 @@ class OpenAiResponsesPrefixHasherTest {
           .put("type", "input_text")
           .put("text", "weather in Shanghai");
 
-      assertEquals(baseHash, OpenAiResponsesPrefixHasher.calculateHash(baseTools, singleInput));
+      assertEquals(
+          baseHash,
+          OpenAiResponsesPrefixHasher.calculateHash(
+              "Test system instruction.", baseTools, singleInput));
     }
   }
 
@@ -181,7 +200,8 @@ class OpenAiResponsesPrefixHasherTest {
     msg.put("type", "message").put("role", "user");
     msg.putArray("content").addObject().put("type", "input_text").put("text", "1+1");
 
-    String baseHash = OpenAiResponsesPrefixHasher.calculateHash(baseTools, baseInput);
+    String baseHash =
+        OpenAiResponsesPrefixHasher.calculateHash("Test system instruction.", baseTools, baseInput);
 
     // 1. 语义文本改变
     ArrayNode changedTextInput = NODES.arrayNode();
@@ -189,7 +209,9 @@ class OpenAiResponsesPrefixHasherTest {
     msg1.put("type", "message").put("role", "user");
     msg1.putArray("content").addObject().put("type", "input_text").put("text", "1+2");
     assertNotEquals(
-        baseHash, OpenAiResponsesPrefixHasher.calculateHash(baseTools, changedTextInput));
+        baseHash,
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", baseTools, changedTextInput));
 
     // 2. 消息角色改变
     ArrayNode changedRoleInput = NODES.arrayNode();
@@ -197,12 +219,17 @@ class OpenAiResponsesPrefixHasherTest {
     msg2.put("type", "message").put("role", "assistant");
     msg2.putArray("content").addObject().put("type", "input_text").put("text", "1+1");
     assertNotEquals(
-        baseHash, OpenAiResponsesPrefixHasher.calculateHash(baseTools, changedRoleInput));
+        baseHash,
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", baseTools, changedRoleInput));
 
     // 3. 工具名称改变
     ArrayNode changedTool = NODES.arrayNode();
     changedTool.addObject().put("type", "function").put("name", "calculator");
-    assertNotEquals(baseHash, OpenAiResponsesPrefixHasher.calculateHash(changedTool, baseInput));
+    assertNotEquals(
+        baseHash,
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", changedTool, baseInput));
 
     // 4. 非排除的类似前缀属性添加（如 prompt_cache_other）
     ArrayNode extraPropInput = NODES.arrayNode();
@@ -210,7 +237,10 @@ class OpenAiResponsesPrefixHasherTest {
     msg4.put("type", "message").put("role", "user");
     msg4.put("prompt_cache_other", "should_not_be_excluded");
     msg4.putArray("content").addObject().put("type", "input_text").put("text", "1+1");
-    assertNotEquals(baseHash, OpenAiResponsesPrefixHasher.calculateHash(baseTools, extraPropInput));
+    assertNotEquals(
+        baseHash,
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", baseTools, extraPropInput));
   }
 
   /** 验证不同内容、不同参数或不同工具定义产生互不相同的哈希值。 */
@@ -222,8 +252,12 @@ class OpenAiResponsesPrefixHasherTest {
     ArrayNode input2 = NODES.arrayNode();
     input2.addObject().put("type", "message").put("text", "world");
 
-    String hash1 = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), input1);
-    String hash2 = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), input2);
+    String hash1 =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), input1);
+    String hash2 =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), input2);
     assertNotEquals(hash1, hash2);
   }
 
@@ -234,7 +268,9 @@ class OpenAiResponsesPrefixHasherTest {
     ObjectNode obj = input.addObject();
     obj.put("text", "line1\nline2\t\"quoted\"\\backslash\b\f\r\u0001");
 
-    String hash = OpenAiResponsesPrefixHasher.calculateHash(NODES.arrayNode(), input);
+    String hash =
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", NODES.arrayNode(), input);
     assertTrue(HASH_PATTERN.matcher(hash).matches());
   }
 }

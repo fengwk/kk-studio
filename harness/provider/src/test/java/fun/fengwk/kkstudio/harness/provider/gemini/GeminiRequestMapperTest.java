@@ -84,6 +84,7 @@ class GeminiRequestMapperTest {
             model(),
             VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
@@ -126,6 +127,7 @@ class GeminiRequestMapperTest {
             model(),
             VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Check weather")))),
@@ -154,6 +156,7 @@ class GeminiRequestMapperTest {
             model(),
             VARIANT,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Compute 1+1"))),
@@ -207,7 +210,13 @@ class GeminiRequestMapperTest {
 
     ProviderRequest req =
         new ProviderRequest(
-            model(), VARIANT, 1024, List.of(), List.of(), ProviderCacheControl.none());
+            model(),
+            VARIANT,
+            1024,
+            "Test system instruction.",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
 
     // STOP -> COMPLETE
     GeminiStreamAccumulator accStop =

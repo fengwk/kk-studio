@@ -20,13 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.chat.service.ChatService;
@@ -179,11 +173,10 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
         TurnResolver.Result reboundResolution = turnResolver.resolve(THREAD_ID, path, null);
         TurnResolver.Resolved resolved =
             assertInstanceOf(TurnResolver.Resolved.class, reboundResolution);
-        var leading = resolved.spec().preambleMessages().get(0);
-        assertEquals(AgentMessageRole.SYSTEM, leading.role());
+        // 系统指令是唯一字符串：同名重建后的当前行 systemPrompt 必须出现在其中，绝不再有 leading SYSTEM 消息。
         assertTrue(
-            textOfPreamble(leading).contains(reboundSystemPrompt),
-            "同名重建后的当前行 systemPrompt 必须出现在有效请求的 leading SYSTEM 中");
+            resolved.spec().systemInstruction().contains(reboundSystemPrompt),
+            "同名重建后的当前行 systemPrompt 必须出现在有效请求的唯一 systemInstruction 中");
       } finally {
         agentDefinitionService.deleteAgent("default-assistant", reboundAgent.getVersion());
       }
@@ -238,23 +231,5 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       }
     }
     return Integer.MAX_VALUE;
-  }
-
-  private static String textOf(ProviderMessage message) {
-    StringBuilder text = new StringBuilder();
-    for (ProviderContentBlock content : message.contents()) {
-      text.append(((ProviderTextBlock) content).text());
-    }
-    return text.toString();
-  }
-
-  private static String textOfPreamble(AgentMessage message) {
-    StringBuilder text = new StringBuilder();
-    for (var content : message.contents()) {
-      if (content instanceof TextMessageContent textContent) {
-        text.append(textContent.text());
-      }
-    }
-    return text.toString();
   }
 }

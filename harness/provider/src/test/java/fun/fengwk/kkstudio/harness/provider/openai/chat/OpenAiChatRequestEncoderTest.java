@@ -102,6 +102,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -116,9 +117,12 @@ class OpenAiChatRequestEncoderTest {
     assertTrue(root.path("stream_options").path("include_usage").asBoolean());
 
     ArrayNode messages = (ArrayNode) root.path("messages");
-    assertEquals(1, messages.size());
-    assertEquals("user", messages.get(0).path("role").asText());
-    assertEquals("Hello", messages.get(0).path("content").asText());
+    // 唯一的系统指令合成为前导 system message，会话消息紧随其后
+    assertEquals(2, messages.size());
+    assertEquals("system", messages.get(0).path("role").asText());
+    assertEquals("Test system instruction.", messages.get(0).path("content").asText());
+    assertEquals("user", messages.get(1).path("role").asText());
+    assertEquals("Hello", messages.get(1).path("content").asText());
   }
 
   @Test
@@ -134,6 +138,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -164,6 +169,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantWithReasoning,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -179,6 +185,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantOff,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -192,6 +199,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             variantWithReasoning,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -226,6 +234,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantLow,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -242,6 +251,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             variantOff,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -257,6 +267,7 @@ class OpenAiChatRequestEncoderTest {
             reasoningModel,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -269,7 +280,13 @@ class OpenAiChatRequestEncoderTest {
     // 4. DEEPSEEK 格式下 reasoning=false 且 effort="low" -> 均不生成 thinking 和 reasoning_effort
     ProviderRequest reqNonReasoningWithEffort =
         new ProviderRequest(
-            modelDesc, variantLow, 1024, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variantLow,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
     JsonNode rootNonReasoningWithEffort =
         MAPPER.readTree(
             encoder.encode(reqNonReasoningWithEffort, descriptor, deepseekConfig).bodyUtf8Bytes());
@@ -282,6 +299,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -319,7 +337,13 @@ class OpenAiChatRequestEncoderTest {
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     ProviderRequest request =
         new ProviderRequest(
-            modelDesc, variant, 100, List.of(userMsg), List.of(), ProviderCacheControl.none());
+            modelDesc,
+            variant,
+            100,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
 
     JsonNode root =
         MAPPER.readTree(
@@ -344,6 +368,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(tool),
             ProviderCacheControl.none());
@@ -378,6 +403,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(toolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -388,10 +414,10 @@ class OpenAiChatRequestEncoderTest {
                 .encode(request, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) root.path("messages");
-    assertEquals(1, messages.size());
-    assertEquals("tool", messages.get(0).path("role").asText());
-    assertEquals("call_123", messages.get(0).path("tool_call_id").asText());
-    assertEquals("{\"temp\":25}", messages.get(0).path("content").asText());
+    assertEquals(2, messages.size());
+    assertEquals("tool", messages.get(1).path("role").asText());
+    assertEquals("call_123", messages.get(1).path("tool_call_id").asText());
+    assertEquals("{\"temp\":25}", messages.get(1).path("content").asText());
   }
 
   @Test
@@ -406,6 +432,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userImg),
             List.of(),
             ProviderCacheControl.none());
@@ -424,7 +451,7 @@ class OpenAiChatRequestEncoderTest {
             OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     JsonNode rootImg =
         MAPPER.readTree(encoder.encode(reqImg, descriptor, configImg).bodyUtf8Bytes());
-    ArrayNode parts = (ArrayNode) rootImg.path("messages").get(0).path("content");
+    ArrayNode parts = (ArrayNode) rootImg.path("messages").get(1).path("content");
     assertEquals("image_url", parts.get(0).path("type").asText());
     assertEquals("https://example.com/a.jpg", parts.get(0).path("image_url").path("url").asText());
 
@@ -439,12 +466,13 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userImgBase64),
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootImgBase64 =
         MAPPER.readTree(encoder.encode(reqImgBase64, descriptor, configImg).bodyUtf8Bytes());
-    ArrayNode imgBase64Parts = (ArrayNode) rootImgBase64.path("messages").get(0).path("content");
+    ArrayNode imgBase64Parts = (ArrayNode) rootImgBase64.path("messages").get(1).path("content");
     assertEquals("image_url", imgBase64Parts.get(0).path("type").asText());
     assertEquals(base64Png, imgBase64Parts.get(0).path("image_url").path("url").asText());
     assertFalse(imgBase64Parts.get(0).path("image_url").path("url").asText().contains(" "));
@@ -459,6 +487,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userAudioUrl),
             List.of(),
             ProviderCacheControl.none());
@@ -481,12 +510,13 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userAudioBase64),
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootAudio =
         MAPPER.readTree(encoder.encode(reqAudioBase64, descriptor, configAudio).bodyUtf8Bytes());
-    ArrayNode audioParts = (ArrayNode) rootAudio.path("messages").get(0).path("content");
+    ArrayNode audioParts = (ArrayNode) rootAudio.path("messages").get(1).path("content");
     assertEquals("input_audio", audioParts.get(0).path("type").asText());
     assertEquals("UklGRg==", audioParts.get(0).path("input_audio").path("data").asText());
     assertEquals("wav", audioParts.get(0).path("input_audio").path("format").asText());
@@ -503,6 +533,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userPdf),
             List.of(),
             ProviderCacheControl.none());
@@ -518,7 +549,7 @@ class OpenAiChatRequestEncoderTest {
             OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     JsonNode rootPdf =
         MAPPER.readTree(encoder.encode(reqPdf, descriptor, configPdf).bodyUtf8Bytes());
-    ArrayNode pdfParts = (ArrayNode) rootPdf.path("messages").get(0).path("content");
+    ArrayNode pdfParts = (ArrayNode) rootPdf.path("messages").get(1).path("content");
     assertEquals("file", pdfParts.get(0).path("type").asText());
     assertEquals(
         "data:application/pdf;base64,JVBERi==",
@@ -534,6 +565,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userVideo),
             List.of(),
             ProviderCacheControl.none());
@@ -554,6 +586,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1),
             List.of(),
             ProviderCacheControl.none());
@@ -588,6 +621,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, validAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -598,9 +632,9 @@ class OpenAiChatRequestEncoderTest {
                 .encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) root.path("messages");
-    assertEquals(3, messages.size());
+    assertEquals(4, messages.size());
 
-    JsonNode replayedAsst = messages.get(1);
+    JsonNode replayedAsst = messages.get(2);
     assertEquals("assistant", replayedAsst.path("role").asText());
     assertEquals("Why did chicken cross road?", replayedAsst.path("content").asText());
     assertEquals("A classic joke is appropriate.", replayedAsst.path("reasoning_content").asText());
@@ -628,6 +662,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, illegalAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -655,6 +690,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg1, fallbackAsstMsg, userMsg2),
             List.of(),
             ProviderCacheControl.none());
@@ -663,7 +699,7 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(fallbackReq, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    JsonNode fallbackAsstNode = fallbackRoot.path("messages").get(1);
+    JsonNode fallbackAsstNode = fallbackRoot.path("messages").get(2);
     assertEquals("assistant", fallbackAsstNode.path("role").asText());
     assertEquals("Fallback answer", fallbackAsstNode.path("content").asText());
     assertFalse(fallbackAsstNode.has("reasoning_content"));
@@ -672,9 +708,6 @@ class OpenAiChatRequestEncoderTest {
   @Test
   @DisplayName("三种 Prompt Cache 模式验证：AUTOMATIC, LEGACY, GPT_5_6_EXPLICIT")
   void testPromptCacheModes() throws Exception {
-    ProviderMessage sysMsg =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("System prompt")));
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("User prompt")));
@@ -688,7 +721,8 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
-            List.of(sysMsg, userMsg),
+            "Test system instruction.",
+            List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootAuto =
@@ -707,7 +741,8 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
-            List.of(sysMsg, userMsg),
+            "Test system instruction.",
+            List.of(userMsg),
             List.of(),
             cacheControlLegacy);
     JsonNode rootLegacy =
@@ -726,7 +761,13 @@ class OpenAiChatRequestEncoderTest {
             EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION));
     ProviderRequest reqGpt =
         new ProviderRequest(
-            modelDesc, defaultVariant, 1024, List.of(sysMsg, userMsg), List.of(), cacheControlGpt);
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            cacheControlGpt);
     JsonNode rootGpt =
         MAPPER.readTree(encoder.encode(reqGpt, descriptor, configGpt).bodyUtf8Bytes());
     assertEquals("my-key-gpt", rootGpt.path("prompt_cache_key").asText());
@@ -748,7 +789,8 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
-            List.of(sysMsg, userMsg),
+            "Test system instruction.",
+            List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootGptNone =
@@ -756,14 +798,21 @@ class OpenAiChatRequestEncoderTest {
     assertFalse(rootGptNone.has("prompt_cache_key"));
     assertEquals("explicit", rootGptNone.path("prompt_cache_options").path("mode").asText());
     assertEquals("system", rootGptNone.path("messages").get(0).path("role").asText());
-    assertEquals("System prompt", rootGptNone.path("messages").get(0).path("content").asText());
+    assertEquals(
+        "Test system instruction.", rootGptNone.path("messages").get(0).path("content").asText());
 
     // 5. LEGACY with LONG retention -> 24h
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.affinity(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLegacyLong =
         new ProviderRequest(
-            modelDesc, defaultVariant, 1024, List.of(sysMsg, userMsg), List.of(), cacheControlLong);
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            cacheControlLong);
     JsonNode rootLegacyLong =
         MAPPER.readTree(encoder.encode(reqLegacyLong, descriptor, configLegacy).bodyUtf8Bytes());
     assertEquals("24h", rootLegacyLong.path("prompt_cache_retention").asText());
@@ -785,6 +834,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(asstWithThinking),
             List.of(),
             ProviderCacheControl.none());
@@ -793,7 +843,7 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(reqAsstThinking, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    JsonNode asstNode = rootAsstThinking.path("messages").get(0);
+    JsonNode asstNode = rootAsstThinking.path("messages").get(1);
     assertEquals("answer text", asstNode.path("content").asText());
     assertEquals(1, asstNode.path("tool_calls").size());
 
@@ -807,6 +857,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(asstWithImage),
             List.of(),
             ProviderCacheControl.none());
@@ -814,24 +865,7 @@ class OpenAiChatRequestEncoderTest {
         ProviderException.class,
         () -> encoder.encode(reqAsstImage, descriptor, OpenAiChatConfiguration.defaults()));
 
-    // 3. SYSTEM 包含非 TextBlock 抛异常
-    ProviderMessage sysWithImage =
-        new ProviderMessage(
-            ProviderMessageRole.SYSTEM,
-            List.of(new ProviderImageBlock("image/png", "data:image/png;base64,123")));
-    ProviderRequest reqSysImage =
-        new ProviderRequest(
-            modelDesc,
-            defaultVariant,
-            1024,
-            List.of(sysWithImage),
-            List.of(),
-            ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqSysImage, descriptor, OpenAiChatConfiguration.defaults()));
-
-    // 4. TOOL 消息包含 ProviderJsonBlock
+    // 3. TOOL 消息包含 ProviderJsonBlock
     ProviderToolResultBlock resultWithJson =
         new ProviderToolResultBlock(
             "call_json", "calc", List.of(new ProviderJsonBlock("{\"ans\":42}")), false, "{}");
@@ -842,6 +876,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(toolJsonMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -850,9 +885,9 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(reqToolJson, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals("{\"ans\":42}", rootToolJson.path("messages").get(0).path("content").asText());
+    assertEquals("{\"ans\":42}", rootToolJson.path("messages").get(1).path("content").asText());
 
-    // 6. 不支持的音频格式抛异常
+    // 4. 不支持的音频格式抛异常
     OpenAiChatConfiguration audioConfig =
         new OpenAiChatConfiguration(
             true,
@@ -868,6 +903,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(audioFlac),
             List.of(),
             ProviderCacheControl.none());
@@ -883,6 +919,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(audioBadUri),
             List.of(),
             ProviderCacheControl.none());
@@ -900,6 +937,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1),
             List.of(),
             ProviderCacheControl.none());
@@ -921,6 +959,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -948,6 +987,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, mismatchTextMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -977,6 +1017,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1011,6 +1052,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, validToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1019,9 +1061,9 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(reqValidTool, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals(2, rootValidTool.path("messages").size());
+    assertEquals(3, rootValidTool.path("messages").size());
     assertEquals(
-        "c1", rootValidTool.path("messages").get(1).path("tool_calls").get(0).path("id").asText());
+        "c1", rootValidTool.path("messages").get(2).path("tool_calls").get(0).path("id").asText());
 
     // 5. payload role 不是 text
     ObjectNode badRoleTypePayload = MAPPER.createObjectNode();
@@ -1040,6 +1082,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badRoleTypeMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1068,6 +1111,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, nonObjToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1087,6 +1131,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -1103,6 +1148,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
@@ -1128,6 +1174,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(mp3Msg),
             List.of(),
             ProviderCacheControl.none());
@@ -1137,7 +1184,7 @@ class OpenAiChatRequestEncoderTest {
         "mp3",
         rootMp3
             .path("messages")
-            .get(0)
+            .get(1)
             .path("content")
             .get(0)
             .path("input_audio")
@@ -1162,6 +1209,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(badDocMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1177,6 +1225,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(rawPdfMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1186,7 +1235,7 @@ class OpenAiChatRequestEncoderTest {
         "data:application/pdf;base64,JVBERi0xLjQK",
         rootRawPdf
             .path("messages")
-            .get(0)
+            .get(1)
             .path("content")
             .get(0)
             .path("file")
@@ -1213,13 +1262,15 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, asstOnlyTools),
             List.of(),
             cacheControlGpt);
     JsonNode rootBreak =
         MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor, configGpt).bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
-    JsonNode userNode = messages.get(0);
+    // 0 号是合成的系统指令消息，user 消息紧随其后
+    JsonNode userNode = messages.get(1);
     assertTrue(userNode.path("content").get(0).path("prompt_cache_breakpoint").asBoolean());
   }
 
@@ -1249,6 +1300,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, toolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1258,7 +1310,7 @@ class OpenAiChatRequestEncoderTest {
                 .encode(reqMulti, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
     assertEquals(
-        "Result: {\"score\":99} done", rootMulti.path("messages").get(1).path("content").asText());
+        "Result: {\"score\":99} done", rootMulti.path("messages").get(2).path("content").asText());
 
     // 2. 包含非法块（例如 ProviderImageBlock）必须抛出 INVALID_REQUEST
     ProviderToolResultBlock badBlockResult =
@@ -1277,6 +1329,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg, badToolMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1314,6 +1367,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, badRoleMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1344,6 +1398,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, unknownFieldMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1375,6 +1430,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, mismatchThinkingMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1406,6 +1462,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, validFallbackMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1414,8 +1471,8 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(reqValidFallback, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    assertEquals("assistant", rootFallback.path("messages").get(1).path("role").asText());
-    assertEquals("text", rootFallback.path("messages").get(1).path("content").asText());
+    assertEquals("assistant", rootFallback.path("messages").get(2).path("role").asText());
+    assertEquals("text", rootFallback.path("messages").get(2).path("content").asText());
   }
 
   @Test
@@ -1444,6 +1501,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1476,6 +1534,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1511,6 +1570,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg3),
             List.of(),
             ProviderCacheControl.none());
@@ -1546,6 +1606,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg4),
             List.of(),
             ProviderCacheControl.none());
@@ -1583,13 +1644,14 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, asstMsg),
             List.of(),
             ProviderCacheControl.none());
     JsonNode root =
         MAPPER.readTree(
             encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
-    JsonNode wireAsst = root.path("messages").get(1);
+    JsonNode wireAsst = root.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
     assertEquals("fallback result", wireAsst.path("content").asText());
     assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
@@ -1625,6 +1687,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, asstMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -1632,7 +1695,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode root =
         MAPPER.readTree(
             encoder.encode(req, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
-    JsonNode wireAsst = root.path("messages").get(1);
+    JsonNode wireAsst = root.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
     assertEquals("fallback result", wireAsst.path("content").asText());
     assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
@@ -1677,6 +1740,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1713,6 +1777,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1747,6 +1812,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg3),
             List.of(),
             ProviderCacheControl.none());
@@ -1782,6 +1848,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg4),
             List.of(),
             ProviderCacheControl.none());
@@ -1820,6 +1887,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg1),
             List.of(),
             ProviderCacheControl.none());
@@ -1848,6 +1916,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(user1, msg2),
             List.of(),
             ProviderCacheControl.none());
@@ -1871,6 +1940,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User),
             List.of(),
             ProviderCacheControl.none());
@@ -1953,6 +2023,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User, turn1Asst, turn2User),
             List.of(),
             ProviderCacheControl.none());
@@ -1961,9 +2032,9 @@ class OpenAiChatRequestEncoderTest {
         encoder.encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults());
     JsonNode wireRoot = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
     ArrayNode wireMessages = (ArrayNode) wireRoot.path("messages");
-    assertEquals(3, wireMessages.size());
+    assertEquals(4, wireMessages.size());
 
-    JsonNode wireAsst = wireMessages.get(1);
+    JsonNode wireAsst = wireMessages.get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
     assertEquals("Result 42", wireAsst.path("content").asText());
     assertEquals("Solving...", wireAsst.path("reasoning_content").asText());
@@ -1997,6 +2068,7 @@ class OpenAiChatRequestEncoderTest {
               modelDesc,
               defaultVariant,
               1024,
+              "Test system instruction.",
               List.of(user1, fallbackMsg),
               List.of(),
               ProviderCacheControl.none());
@@ -2032,6 +2104,7 @@ class OpenAiChatRequestEncoderTest {
               modelDesc,
               defaultVariant,
               1024,
+              "Test system instruction.",
               List.of(user1, replayMsg),
               List.of(),
               ProviderCacheControl.none());
@@ -2064,6 +2137,7 @@ class OpenAiChatRequestEncoderTest {
               modelDesc,
               defaultVariant,
               1024,
+              "Test system instruction.",
               List.of(user1, msgWithBadDurable),
               List.of(),
               ProviderCacheControl.none());
@@ -2091,6 +2165,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(userMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -2131,6 +2206,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User),
             List.of(),
             ProviderCacheControl.none());
@@ -2171,6 +2247,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(turn1User, assistantMsg),
             List.of(),
             ProviderCacheControl.none());
@@ -2180,10 +2257,10 @@ class OpenAiChatRequestEncoderTest {
             encoder
                 .encode(turn2Req, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
-    JsonNode wireCalls = wire.path("messages").get(1).path("tool_calls");
+    JsonNode wireCalls = wire.path("messages").get(2).path("tool_calls");
 
     assertEquals(
-        "native reasoning", wire.path("messages").get(1).path("reasoning_content").asText());
+        "native reasoning", wire.path("messages").get(2).path("reasoning_content").asText());
     assertEquals(1, wireCalls.size());
     assertEquals("call_replay_1", wireCalls.get(0).path("id").asText());
     assertEquals("function", wireCalls.get(0).path("type").asText());

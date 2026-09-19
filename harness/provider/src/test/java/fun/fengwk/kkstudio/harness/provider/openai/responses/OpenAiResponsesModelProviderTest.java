@@ -178,6 +178,7 @@ class OpenAiResponsesModelProviderTest {
         createModel(),
         new ModelVariant("default"),
         1024,
+        "Test system instruction.",
         List.of(
             new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
         List.of(),
@@ -374,6 +375,7 @@ class OpenAiResponsesModelProviderTest {
             createModel(),
             invalidVariant,
             1024,
+            "Test system instruction.",
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),

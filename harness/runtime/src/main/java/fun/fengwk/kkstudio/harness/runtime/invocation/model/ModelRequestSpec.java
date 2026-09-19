@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 
 import java.util.HashSet;
 import java.util.List;
@@ -18,9 +17,9 @@ import java.util.UUID;
  * 一次 Model invocation 的紧凑冻结请求。
  *
  * <p>{@link ProviderType}、{@code providerConnectionGenerationId}、{@link ModelDescriptor}、{@link
- * ModelVariant}、{@code outputTokens} 与 preamble / bindings / cacheControl 是本次调用的唯一 durable
- * 契约。connection generation 防止 Provider endpoint、凭据或协议配置轮换后，既有 invocation 静默改用新连接。{@code
- * outputTokens} 是本次请求唯一的输出预算（普通 turn 由 Model 级 {@code limit.output} 与剩余上下文计算，压缩 turn
+ * ModelVariant}、{@code outputTokens} 与唯一的 {@code systemInstruction} / bindings / cacheControl
+ * 是本次调用的唯一 durable 契约。connection generation 防止 Provider endpoint、凭据或协议配置轮换后，既有 invocation
+ * 静默改用新连接。{@code outputTokens} 是本次请求唯一的输出预算（普通 turn 由 Model 级 {@code limit.output} 与剩余上下文计算，压缩 turn
  * 由压缩阶段预算决定），Provider 请求必须原样携带该预算。完整对话历史、可由 {@code toolBindings} 派生的 Provider tools、顶层
  * Environment、YOLO、contextWindow 与压缩元数据（压缩调用由 basis EntryPath 末尾 owned TURN_START.compaction
  * 识别）都不进入本对象；每次 attempt 由 {@link ModelRequestMaterializer} 从 EntryPath 重建内存 {@code
@@ -32,7 +31,7 @@ public record ModelRequestSpec(
     ModelDescriptor model,
     ModelVariant variant,
     int outputTokens,
-    List<AgentMessage> preambleMessages,
+    String systemInstruction,
     List<ToolBinding> toolBindings,
     List<SkillBinding> skillBindings,
     List<SubagentBinding> subagentBindings,
@@ -45,7 +44,7 @@ public record ModelRequestSpec(
       ModelDescriptor model,
       ModelVariant variant,
       int outputTokens,
-      List<AgentMessage> preambleMessages,
+      String systemInstruction,
       List<ToolBinding> toolBindings,
       List<SkillBinding> skillBindings,
       ProviderCacheControl cacheControl) {
@@ -55,7 +54,7 @@ public record ModelRequestSpec(
         model,
         variant,
         outputTokens,
-        preambleMessages,
+        systemInstruction,
         toolBindings,
         skillBindings,
         List.of(),
@@ -71,7 +70,9 @@ public record ModelRequestSpec(
     if (outputTokens <= 0) {
       throw new IllegalArgumentException("outputTokens must be positive");
     }
-    preambleMessages = List.copyOf(Objects.requireNonNull(preambleMessages, "preambleMessages"));
+    if (systemInstruction == null || systemInstruction.isBlank()) {
+      throw new IllegalArgumentException("systemInstruction must not be blank");
+    }
     toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
     skillBindings = List.copyOf(Objects.requireNonNull(skillBindings, "skillBindings"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));

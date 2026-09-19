@@ -7,7 +7,6 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTes
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.skill;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -52,7 +50,7 @@ class ModelRequestSpecTest {
     assertEquals(List.of("bash", "fs"), names(spec.toolBindings()));
     assertEquals(List.of("web"), skillNames(spec.skillBindings()));
     assertEquals(List.of("reviewer"), subagentNames(spec.subagentBindings()));
-    assertTrue(spec.preambleMessages().isEmpty());
+    assertEquals("Test system instruction.", spec.systemInstruction());
   }
 
   @Test
@@ -62,7 +60,6 @@ class ModelRequestSpecTest {
     List<SkillBinding> skills = new ArrayList<>(List.of(skill("web", "Web search", ENV_ID)));
     List<SubagentBinding> subagents =
         new ArrayList<>(List.of(new SubagentBinding("reviewer", "Review changes")));
-    List<AgentMessage> preamble = new ArrayList<>(List.of(AgentMessage.system("sys")));
     ModelRequestSpec spec =
         new ModelRequestSpec(
             ProviderType.OPENAI,
@@ -70,7 +67,7 @@ class ModelRequestSpecTest {
             modelDescriptor(),
             variant(),
             1024,
-            preamble,
+            "Test system instruction.",
             tools,
             skills,
             subagents,
@@ -79,13 +76,58 @@ class ModelRequestSpecTest {
     tools.add(host("extra"));
     skills.add(skill("extra", "Extra", ENV_ID));
     subagents.add(new SubagentBinding("extra", "Extra"));
-    preamble.add(AgentMessage.system("more"));
 
     assertEquals(List.of("bash"), names(spec.toolBindings()));
     assertEquals(List.of("web"), skillNames(spec.skillBindings()));
     assertEquals(List.of("reviewer"), subagentNames(spec.subagentBindings()));
-    assertEquals(1, spec.preambleMessages().size());
     assertThrows(UnsupportedOperationException.class, () -> spec.toolBindings().add(host("x")));
+  }
+
+  @Test
+  void rejectsBlankSystemInstruction() {
+    // systemInstruction 必须非空且非空白字符串。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "",
+                List.of(),
+                List.of(),
+                List.of(),
+                ProviderCacheControl.none()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "   ",
+                List.of(),
+                List.of(),
+                List.of(),
+                ProviderCacheControl.none()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                ProviderCacheControl.none()));
   }
 
   @Test
@@ -165,7 +207,7 @@ class ModelRequestSpecTest {
                 modelDescriptor(),
                 variant(),
                 1024,
-                List.of(),
+                "Test system instruction.",
                 List.of(),
                 List.of(),
                 List.of(),
@@ -179,7 +221,7 @@ class ModelRequestSpecTest {
                 modelDescriptor(),
                 variant(),
                 1024,
-                List.of(),
+                "Test system instruction.",
                 List.of(),
                 List.of(),
                 List.of(),
@@ -190,10 +232,10 @@ class ModelRequestSpecTest {
             new ModelRequestSpec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
-                modelDescriptor(),
-                variant(),
-                1024,
                 null,
+                variant(),
+                1024,
+                "Test system instruction.",
                 List.of(),
                 List.of(),
                 List.of(),
@@ -207,7 +249,7 @@ class ModelRequestSpecTest {
                 modelDescriptor(),
                 variant(),
                 1024,
-                List.of(),
+                "Test system instruction.",
                 null,
                 List.of(),
                 List.of(),
@@ -222,7 +264,7 @@ class ModelRequestSpecTest {
         modelDescriptor(),
         variant(),
         1024,
-        List.of(),
+        "Test system instruction.",
         tools,
         skills,
         subagents,

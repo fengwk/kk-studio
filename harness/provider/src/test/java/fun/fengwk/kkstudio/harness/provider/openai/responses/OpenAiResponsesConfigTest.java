@@ -68,7 +68,7 @@ class OpenAiResponsesConfigTest {
     assertEquals(PromptCacheMode.BREAKPOINTS, cap.mode());
     assertTrue(cap.supports(PromptCacheRetention.SHORT));
     assertFalse(cap.supports(PromptCacheRetention.LONG));
-    assertTrue(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.SYSTEM));
+    assertFalse(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.SYSTEM));
     assertTrue(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.CONVERSATION));
     assertFalse(cap.supportedBreakpoints().contains(PromptCacheBreakpoint.TOOLS));
   }

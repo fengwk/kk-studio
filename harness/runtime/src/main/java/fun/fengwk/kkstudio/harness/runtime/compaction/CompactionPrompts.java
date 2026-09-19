@@ -142,9 +142,6 @@ public final class CompactionPrompts {
             }
           }
         }
-        case SYSTEM -> {
-          // summarization 输入不包含 SYSTEM 消息。
-        }
       }
     }
     return String.join("\n\n", parts);
