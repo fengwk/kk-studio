@@ -120,7 +120,8 @@ name（无论 `ContributionId` 是否一致）都 fail closed；`ToolCatalogQuer
 [McpToolCatalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog.java)
 只选拔 `enabled=true`、`AVAILABLE`、`discoveredVersion==version` 且工具
 `available=true` 的记录。Remote Tool 要求为 none，在受管 `toolGatewayExecutor` 中以
-per-call client 执行；Local Tool 要求 Agent 精确绑定 Server 所属 Environment，并把
+per-call client 执行；Local Tool 要求当前 branch 恰好选择 Server 所属 Environment（未选择
+时在调用入口以 `ENVIRONMENT_NOT_SELECTED` 拒绝），并把
 冻结配置包装为 `mcp.local.call` capability。两条路径的 side effect 都是
 `NON_IDEMPOTENT`，发送前重新围栏 server version、tool schema revision 与可用状态，
 一次绝对 deadline 覆盖 client 初始化和调用，取消只作用于当前调用。连接、协议和执行
@@ -130,7 +131,7 @@ per-call client 执行；Local Tool 要求 Agent 精确绑定 Server 所属 Envi
 
 [ChatServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat/service/impl/ChatServiceImpl.java)
 提供 Chat CRUD，保存 title、agentName、`yoloEnabled`、version 和时间；
-Environment 身份来自 Agent definition 的可空 `environmentId`，Chat 本身不持有目录。
+Chat 本身不持有 Environment 或目录：具体 branch 的环境身份由该 branch 的 `BranchSettings.environmentName` 在每轮 turn 解析（Agent definition 的 `environmentId` 保留，但不参与解析）。
 `deleteChat` 先排他锁定 Chat，再调用
 `SessionDeletionOrchestrator.deleteSessionsByOwner(OwnerType.CHAT, chatId)` 深删除
 全部 Session，最后删除 Chat 行；`session_owner` 只表达 owner relation，不绕过 Session
@@ -252,8 +253,8 @@ Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocat
 
 ## Environment
 
-Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由主键，`name` 为
-展示名）；跨节点 route ownership 由 `environment_connection` 租约保存。每个 JVM 共享
+Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由主键，全局唯一且
+不可变的 `name` 为对外身份）；跨节点 route ownership 由 `environment_connection` 租约保存。每个 JVM 共享
 一个 `nodeInstanceId`，[EnvironmentRegistry](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistry.java)
 以 `(environmentId, ownerNodeId, leaseToken)` 围栏读写数据库权威路由，并实现会话核心
 的 `DaemonLeaseStore`。
@@ -271,7 +272,8 @@ Environment 的持久化 Card 保存于 `environment` 表（UUID `id` 为路由�
 Platform 侧的产品适配器只做映射，不持有会话状态：[EnvironmentDaemonGateway](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/gateway/EnvironmentDaemonGateway.java)
 暴露会话核心与租约实现，供 Web 层 WebSocket transport 与产品查询复用；
 [EnvironmentServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImpl.java)
-在 Product CRUD 上执行 CAS 与引用校验；
+在 Product CRUD 上执行 CAS 与引用校验，唯一的可变状态是 `registrationToken` 轮换
+（`name` 是不可变身份，不存在改名入口）；
 [EnvironmentOperationDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment/operation/EnvironmentOperationDispatcher.java)
 按 `environment_operation_pending` 通知与 SQL owner-node 租约隔离排空持久操作。Skill
 正文的唯一加载链是内部工具 `load_skill` 经 `BoundEnvironment` 调用 `skill.load` 能力。
@@ -370,11 +372,13 @@ externalization，第一个 terminal 后任何迟到信号、其余 Resource 写
 
 1. 当前 Agent、Model、Provider、Variant 与 ProviderFactory，并把 Variant 未显式声明的
    输出上限补齐为 Model 全局 `limit.output`；
-2. 当前 Environment context；
+2. 当前 Environment context：只按 `BranchSettings.environmentName()` 查全局唯一且不可变的
+   name 得到路由身份，name 无法解析时确定性返回 `PLANNING_FAILED`；
 3. Agent config 中的每个工具 ID 都通过 `RuntimeToolCatalog.findTool(id)` 查找并校验
-   `visibility() == ToolVisibility.SELECTABLE`；`environmentRequired()` 为 true 但当前
-   Agent 无可用 Environment 时在 planning 阶段确定性返回
-   `AssistantError.code=PLANNING_FAILED`；
+   `visibility() == ToolVisibility.SELECTABLE`；`environmentRequired()` 为 true 但该
+   branch 未选择 Environment 时仍绑定为 null 并保留完整工具声明（调用时才以
+   `ENVIRONMENT_NOT_SELECTED` 失败，绝不阻止规划）；`requiredEnvironmentId` 与已选环境
+   冲突时在 planning 阶段确定性返回 `AssistantError.code=PLANNING_FAILED`；
 4. skills、subagents 和内部 `load_skill` / `task`；
 5. Contributor context projector、system prompt、cache control、context window 与
    output budget。

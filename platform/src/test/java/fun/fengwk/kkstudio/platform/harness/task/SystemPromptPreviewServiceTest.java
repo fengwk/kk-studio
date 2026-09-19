@@ -26,6 +26,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -48,6 +50,17 @@ class SystemPromptPreviewServiceTest {
   private static final UUID THREAD_ID = new UUID(0L, 1L);
   private static final UUID SESSION_ID = new UUID(0L, 2L);
   private static final String SOURCE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  private static final EnvironmentId ENVIRONMENT_ID =
+      EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+
+  /** Branch settings 冻结的不可变 Environment name：预览只按它解析环境。 */
+  private static final String ENV_NAME = "local";
+
+  private static final BranchSettings BOUND_SETTINGS =
+      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), ENV_NAME);
+
+  private static final BranchSettings UNBOUND_SETTINGS =
+      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
 
   @Test
   void composesLatestAgentBodyAndCurrentEnvironmentWhenAgentExists() {
@@ -98,11 +111,10 @@ class SystemPromptPreviewServiceTest {
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
-    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
-    agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
     agent.setSystemPrompt("You are the planner.");
     agent.setConfigJson("agent-config");
@@ -150,11 +162,10 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
-    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
-    agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
     agent.setSystemPrompt("You are the planner.");
     agent.setConfigJson("agent-config");
@@ -194,11 +205,10 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
-    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
-    agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
     agent.setSystemPrompt("You are the planner.");
     agent.setConfigJson("agent-config");
@@ -238,11 +248,10 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
-    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
-    agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
     agent.setSystemPrompt("You are the planner.");
     agent.setConfigJson("agent-config");
@@ -277,11 +286,10 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
-    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
-    agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
     agent.setSystemPrompt("You are the planner.");
     agent.setConfigJson("agent-config");
@@ -305,6 +313,75 @@ class SystemPromptPreviewServiceTest {
 
     assertTrue(preview.contains("- system: wsl"), preview);
     assertFalse(preview.contains("- note:"), preview);
+  }
+
+  /** 测试意图：验证 branch 未选择 Environment 时预览仍渲染空环境块，且绝不因「无环境」失败。 */
+  @Test
+  void rendersEmptyEnvironmentWhenBranchHasNoEnvironment() {
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot(UNBOUND_SETTINGS));
+    AgentDefinition agent = new AgentDefinition();
+    agent.setName("assistant");
+    agent.setSystemPrompt("You are the planner.");
+    agent.setConfigJson("agent-config");
+    when(agents.getByName("assistant")).thenReturn(agent);
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of("read"));
+    config.setSkills(List.of());
+    config.setSubagents(List.of());
+    when(codec.decode("agent-config")).thenReturn(config);
+
+    String preview =
+        service(
+                runtime,
+                agents,
+                codec,
+                mock(EnvironmentRegistry.class),
+                mock(EnvironmentSkillInventoryQueryService.class))
+            .preview(THREAD_ID);
+
+    assertTrue(preview.startsWith("You are the planner."), preview);
+    assertTrue(preview.contains("<current_environment>"), preview);
+    assertFalse(preview.contains("- system:"), preview);
+    assertFalse(preview.contains("- note:"), preview);
+  }
+
+  /** 测试意图：验证 branch 选择的 Environment name 无法解析时，预览宽容回退为空环境上下文（绝不 500）， 且不读取任何 Agent 侧环境字段。 */
+  @Test
+  void fallsBackToEmptyEnvironmentWhenBranchNameCannotBeResolved() {
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
+    EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot(BOUND_SETTINGS));
+    AgentDefinition agent = new AgentDefinition();
+    agent.setName("assistant");
+    agent.setSystemPrompt("You are the planner.");
+    agent.setConfigJson("agent-config");
+    when(agents.getByName("assistant")).thenReturn(agent);
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of(new AgentSkillRefDTO(SOURCE_ID, "dev")));
+    config.setSubagents(List.of());
+    when(codec.decode("agent-config")).thenReturn(config);
+
+    // EnvironmentRepository 无法按 name 找到 Environment：预览必须宽容，不做任何 live/inventory 查询。
+    String preview =
+        service(
+                runtime,
+                agents,
+                codec,
+                environments,
+                mock(EnvironmentSkillInventoryQueryService.class),
+                mock(EnvironmentRepository.class))
+            .preview(THREAD_ID);
+
+    assertTrue(preview.startsWith("You are the planner."), preview);
+    assertTrue(preview.contains("- date: 2026-08-17"), preview);
+    assertFalse(preview.contains("- system:"), preview);
+    assertFalse(preview.contains("<available_skills>"), preview);
   }
 
   /** 测试意图：验证当 Agent 配置解析异常时，预览仍正常降级渲染系统提示词和当前环境，不中断流程。 */
@@ -335,11 +412,10 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
-    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
     AgentDefinition agent = new AgentDefinition();
-    agent.setEnvironmentId(environmentId.value());
     agent.setName("assistant");
     agent.setSystemPrompt("You are the planner.");
     agent.setConfigJson("agent-config");
@@ -413,7 +489,8 @@ class SystemPromptPreviewServiceTest {
         agents,
         codec,
         mock(EnvironmentRegistry.class),
-        mock(EnvironmentSkillInventoryQueryService.class));
+        mock(EnvironmentSkillInventoryQueryService.class),
+        boundRepository());
   }
 
   private static SystemPromptPreviewService service(
@@ -422,11 +499,22 @@ class SystemPromptPreviewServiceTest {
       AgentDefinitionConfigCodec codec,
       EnvironmentRegistry environmentRegistry,
       EnvironmentSkillInventoryQueryService skillSources) {
+    return service(runtime, agents, codec, environmentRegistry, skillSources, boundRepository());
+  }
+
+  private static SystemPromptPreviewService service(
+      HarnessRuntime runtime,
+      AgentDefinitionRepository agents,
+      AgentDefinitionConfigCodec codec,
+      EnvironmentRegistry environmentRegistry,
+      EnvironmentSkillInventoryQueryService skillSources,
+      EnvironmentRepository environmentRepository) {
     SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 7);
     return new SystemPromptPreviewServiceFactory(
             agents,
             codec,
             environmentRegistry,
+            environmentRepository,
             skillSources,
             () -> subagentConfig,
             new AgentPromptComposer(() -> subagentConfig),
@@ -434,9 +522,20 @@ class SystemPromptPreviewServiceTest {
         .create(runtime);
   }
 
+  private static EnvironmentRepository boundRepository() {
+    EnvironmentRepository repository = mock(EnvironmentRepository.class);
+    Environment environment = new Environment();
+    environment.setId(ENVIRONMENT_ID.value());
+    environment.setName(ENV_NAME);
+    when(repository.getByName(ENV_NAME)).thenReturn(environment);
+    return repository;
+  }
+
   private static ThreadSnapshot snapshot() {
-    BranchSettings settings =
-        new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
+    return snapshot(BOUND_SETTINGS);
+  }
+
+  private static ThreadSnapshot snapshot(BranchSettings settings) {
     EntryPath path =
         new EntryPath(
             List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));

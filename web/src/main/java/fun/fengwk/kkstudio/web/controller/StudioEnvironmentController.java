@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 
 import java.util.List;
 import java.util.UUID;
@@ -71,14 +70,6 @@ public class StudioEnvironmentController {
   public ResponseEntity<Result<EnvironmentCardDTO>> createEnvironment(
       @RequestBody EnvironmentCreateDTO request) {
     return noStore(Results.created(environmentService.create(request)));
-  }
-
-  @PutMapping("/{environmentId}")
-  public Result<EnvironmentCardDTO> updateEnvironment(
-      @PathVariable String environmentId, @RequestBody EnvironmentUpdateDTO request) {
-    String expectedVersion = request != null ? request.getExpectedVersion() : null;
-    return Results.ok(
-        environmentService.update(parseEnvironmentId(environmentId), request, expectedVersion));
   }
 
   /** 幂等只读当前 registrationToken；不轮换、不改变 version/updateTime。 */

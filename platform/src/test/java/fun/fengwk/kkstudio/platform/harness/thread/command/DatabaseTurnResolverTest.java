@@ -111,6 +111,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
@@ -166,6 +168,12 @@ class DatabaseTurnResolverTest {
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final EnvironmentId ENV_MISSING =
       EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
+
+  /** Branch settings 冻结的 Environment name：resolver 只按它查库解析，绝不读 Agent definition。 */
+  private static final String ENV_A_NAME = "env-a";
+
+  private static final String ENV_B_NAME = "env-b";
+  private static final String ENV_MISSING_NAME = "env-missing";
   private static final UUID SKILL_SOURCE_ID =
       UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final String CONTENT_REVISION =
@@ -306,9 +314,8 @@ class DatabaseTurnResolverTest {
   @Test
   void resolvesModelOnlyBranchWithoutEnvironment() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.agent.setEnvironmentId(null);
 
-    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
     assertEquals(
         List.of(),
@@ -320,9 +327,8 @@ class DatabaseTurnResolverTest {
   @Test
   void alwaysProjectsNoneCurrentEnvironmentIntoProviderRequest() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.agent.setEnvironmentId(null);
 
-    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
     assertEquals(
         "agent system prompt\n\n"
@@ -333,22 +339,22 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void noLiveMetadataUsesServiceClockZoneForNoneAndMissingEnvironment() {
+  void noLiveMetadataUsesServiceClockZoneForNoneAndUnreportedEnvironment() {
     Clock serviceClock = Clock.fixed(NOW, ZoneId.of("America/Los_Angeles"));
     Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
-    fixture.agent.setEnvironmentId(null);
 
-    String none = preambleText(fixture.resolved(fixture.path(settings("default"))));
+    // 未选择 Environment：空环境上下文只保留服务端时钟派生的日期。
+    String none = preambleText(fixture.resolved(fixture.path(unboundSettings("default"))));
     assertFalse(none.contains("- name:"), none);
     assertFalse(none.contains("- system:"), none);
     assertTrue(none.contains("- date: 2026-08-01"), none);
     assertFalse(none.contains("- note:"), none);
 
-    fixture.agent.setEnvironmentId(ENV_MISSING.value());
-    String missing = preambleText(fixture.resolved(fixture.path(settings("default"))));
-    assertFalse(missing.contains("- system:"), missing);
-    assertTrue(missing.contains("- date: 2026-08-01"), missing);
-    assertFalse(missing.contains("- note:"), missing);
+    // 已选择 Environment 但既无 live daemon 也无持久报告：回退到服务端时钟，规划仍然成功。
+    String unreported = preambleText(fixture.resolved(fixture.path(settings("default"))));
+    assertFalse(unreported.contains("- system:"), unreported);
+    assertTrue(unreported.contains("- date: 2026-08-01"), unreported);
+    assertFalse(unreported.contains("- note:"), unreported);
   }
 
   @Test
@@ -425,36 +431,81 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void rejectsEnvironmentToolsWhenBranchHasNoEnvironment() {
-    // Agent 没有环境路由时，声明 environmentRequired 的工具无法绑定：确定性拒绝。
+  void keepsEnvironmentToolDeclarationsWhenBranchHasNoEnvironment() {
+    // 未选择 Environment 的 branch 仍能规划：环境工具保持声明，但冻结为 null 路由，调用时才失败。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    fixture.agent.setEnvironmentId(null);
-    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
-    assertEquals(
-        "environment tool read requires an environment binding but the agent has no environment",
-        rejected.error().message());
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
-    // Agent skills 要求 Agent 自身选择 Environment；没有选择时精确拒绝。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of());
-    fixture.agent.setEnvironmentId(null);
     assertEquals(
-        "agent skills require an environment but the agent has no environment",
-        fixture.rejected(fixture.path(settings("default"))).error().message());
+        List.of("read"),
+        requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+    assertTrue(requestSpec.toolBindings().getFirst().environmentRequired());
+    assertNull(requestSpec.toolBindings().getFirst().environmentId());
+
+    // Agent skills 仍要求当前 branch 选择 Environment；没有选择时精确拒绝。
+    Fixture skillsFixture = new Fixture(List.of(), List.of("dev"), List.of());
+    assertEquals(
+        "agent skills require an environment but the branch has no environment",
+        skillsFixture.rejected(skillsFixture.path(unboundSettings("default"))).error().message());
   }
 
   @Test
-  void missingOrNotReadyLatestEnvironmentDoesNotRejectToolPlanning() {
-    // 缺失的 latest 环境：工具按最新名称绑定，规划成功。
+  void resolvesEnvironmentIdFromImmutableBranchNameAndRejectsUnknownName() {
+    // branch 的 Environment name 解析为内部路由身份；缺失 name 时确定性拒绝规划，绝不回退 Agent 配置。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
-    fixture.agent.setEnvironmentId(ENV_MISSING.value());
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(ENV_MISSING, requestSpec.toolBindings().getFirst().environmentId());
-
-    // 未 READY 的 latest 环境：同样按最新名称绑定，规划成功；绝不回看更旧 branch settings。
-    fixture = new Fixture(List.of("read"), List.of(), List.of());
-    fixture.connectingEnvironment(ENV_A);
-    requestSpec = fixture.resolved(fixture.path(settings("default")));
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
+
+    BranchSettings missingName =
+        new BranchSettings(
+            "assistant", new ModelSelection("provider", "model", "default"), ENV_MISSING_NAME);
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(missingName));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals("environment not found: " + ENV_MISSING_NAME, rejected.error().message());
+  }
+
+  @Test
+  void notReadySelectedEnvironmentDoesNotRejectToolPlanning() {
+    // 未 READY 的已选 Environment：按 name 解析出的精确身份绑定，规划成功，不做 READY 检查。
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+    fixture.connectingEnvironment(ENV_A);
+
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
+
+    assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
+  }
+
+  @Test
+  void fixedRequiredEnvironmentIsFrozenAndOnlyConflictsWithAnotherSelectedEnvironment() {
+    HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool", ENV_B);
+
+    // branch 选择的正是该固定环境：正常冻结。
+    Fixture matching = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
+    assertEquals(
+        ENV_B,
+        matching
+            .resolved(
+                matching.path(
+                    new BranchSettings(
+                        "assistant",
+                        new ModelSelection("provider", "model", "default"),
+                        ENV_B_NAME)))
+            .toolBindings()
+            .getFirst()
+            .environmentId());
+
+    // branch 选择了另一个非 null 环境：确定性拒绝规划。
+    Fixture conflicting = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
+    TurnResolver.Rejected rejected = conflicting.rejected(conflicting.path(settings("default")));
+    assertEquals(
+        "tool fixed_tool requires environment " + ENV_B + " but branch has environment " + ENV_A,
+        rejected.error().message());
+
+    // branch 未选择环境：仍冻结 null，调用时得到 ENVIRONMENT_NOT_SELECTED，而不是规划失败。
+    Fixture unbound = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
+    ModelRequestSpec unboundSpec = unbound.resolved(unbound.path(unboundSettings("default")));
+    assertTrue(unboundSpec.toolBindings().getFirst().environmentRequired());
+    assertNull(unboundSpec.toolBindings().getFirst().environmentId());
   }
 
   @Test
@@ -471,46 +522,48 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void agentEnvironmentDoesNotComeFromBranchHistory() {
-    // Branch history 不再携带 Environment；Agent 未选择环境时，历史 fixture 参数不能提供隐式绑定。
+  void environmentBindingComesOnlyFromLatestBranchSettingsName() {
+    // 未选择 Environment 的 branch：环境工具保持声明但冻结 null 路由，历史参数不能提供隐式绑定。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
     fixture.readyEnvironment(ENV_A);
-    fixture.agent.setEnvironmentId(null);
-    BranchSettings firstTurn = settings("default");
-    BranchSettings latestTurn = settings("default");
 
-    TurnResolver.Rejected rejected = fixture.rejected(multiTurnPath(firstTurn, latestTurn));
+    ModelRequestSpec unbound =
+        fixture.resolved(multiTurnPath(unboundSettings("default"), unboundSettings("default")));
     assertEquals(
-        "environment tool read requires an environment binding but the agent has no environment",
-        rejected.error().message());
+        List.of("read"),
+        unbound.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+    assertNull(unbound.toolBindings().getFirst().environmentId());
 
-    // Agent 指向缺失 Environment 时仍冻结该精确 id，不回看任何历史目录/环境状态。
-    fixture = new Fixture(List.of("read"), List.of(), List.of());
-    fixture.readyEnvironment(ENV_A);
-    fixture.agent.setEnvironmentId(ENV_MISSING.value());
-    ModelRequestSpec requestSpec =
-        fixture.resolved(multiTurnPath(settings("default"), settings("default")));
-    assertEquals(ENV_MISSING, requestSpec.toolBindings().getFirst().environmentId());
+    // 最新 turn 选择 ENV_A_NAME：按 name 解析出的精确身份绑定，绝不回看更旧 settings。
+    Fixture rebound = new Fixture(List.of("read"), List.of(), List.of());
+    rebound.readyEnvironment(ENV_A);
+    ModelRequestSpec bound =
+        rebound.resolved(multiTurnPath(unboundSettings("default"), settings("default")));
+    assertEquals(ENV_A, bound.toolBindings().getFirst().environmentId());
 
-    // Agent skills 同样只认 Agent 环境；历史 fixture 参数不能提供隐式绑定。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
-    fixture.readyEnvironment(ENV_A, List.of("dev"));
-    fixture.agent.setEnvironmentId(null);
-    assertEquals(
-        "agent skills require an environment but the agent has no environment",
-        fixture
-            .rejected(multiTurnPath(settings("default"), settings("default")))
-            .error()
-            .message());
+    // 历史 turn 选择过的 name 不能为最新未选择环境提供隐式绑定。
+    Fixture cleared = new Fixture(List.of("read"), List.of(), List.of());
+    cleared.readyEnvironment(ENV_A);
+    ModelRequestSpec clearedSpec =
+        cleared.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
+    assertNull(clearedSpec.toolBindings().getFirst().environmentId());
   }
 
   @Test
-  void skillsRequireTheSelectedEnvironmentToExist() {
+  void skillsRequireTheSelectedBranchEnvironmentNameToExist() {
+    // name 无法解析时 skills 与工具同样确定性拒绝规划。
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
-    fixture.agent.setEnvironmentId(ENV_MISSING.value());
     assertEquals(
-        "environment not found: " + ENV_MISSING,
-        fixture.rejected(fixture.path(settings("default"))).error().message());
+        "environment not found: " + ENV_MISSING_NAME,
+        fixture
+            .rejected(
+                fixture.path(
+                    new BranchSettings(
+                        "assistant",
+                        new ModelSelection("provider", "model", "default"),
+                        ENV_MISSING_NAME)))
+            .error()
+            .message());
   }
 
   /**
@@ -577,13 +630,14 @@ class DatabaseTurnResolverTest {
 
   @Test
   void routesByExactEnvironmentIdAndNeverFallsBack() {
-    // 两个独立 canonical 名称；branch 只认精确名称，绝不回看更旧 settings 或 fallback。
+    // 两个独立不可变 name；branch 只认 settings 中那一个 name，绝不回看更旧 settings 或 fallback。
     Fixture fixture =
         new Fixture(List.of("bash"), List.of("dev-b"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
-    fixture.agent.setEnvironmentId(ENV_B.value());
-    BranchSettings settings = settings("default");
+    BranchSettings settings =
+        new BranchSettings(
+            "assistant", new ModelSelection("provider", "model", "default"), ENV_B_NAME);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
@@ -1317,8 +1371,14 @@ class DatabaseTurnResolverTest {
     return new ModelRequestMaterializer().materialize(path, spec).messages();
   }
 
-  /** BranchSettings 只保留 agent/model；Environment 来自 Agent definition。 */
+  /** BranchSettings 冻结 agent/model 与可空 environmentName；解析出的 EnvironmentId 只能来自该 name。 */
   private static BranchSettings settings(String variant) {
+    return new BranchSettings(
+        "assistant", new ModelSelection("provider", "model", variant), ENV_A_NAME);
+  }
+
+  /** 未选择 Environment 的 branch：环境工具仍需声明并可规划，调用时才失败。 */
+  private static BranchSettings unboundSettings(String variant) {
     return new BranchSettings("assistant", new ModelSelection("provider", "model", variant), null);
   }
 
@@ -1827,11 +1887,10 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void ordinaryAgentWithoutEnvironmentHasNoImplicitTools() {
+  void branchWithoutEnvironmentHasNoImplicitTools() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.agent.setEnvironmentId(null);
 
-    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+    ModelRequestSpec spec = fixture.resolved(fixture.path(unboundSettings("default")));
 
     assertEquals(List.of(), spec.toolBindings());
   }
@@ -2207,6 +2266,23 @@ class DatabaseTurnResolverTest {
         NOW);
   }
 
+  /** 声明固定 {@code requiredEnvironmentId} 的 SELECTABLE 工具 catalog。 */
+  private static HarnessCatalog fixedEnvironmentCatalog(
+      String toolName, EnvironmentId requiredEnvironmentId) {
+    HarnessContributor fixedContributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("fixed"), "Fixed", "1", Set.of()),
+            registrar -> {
+              Tool tool = mock(Tool.class);
+              when(tool.descriptor()).thenReturn(hostDescriptor(toolName));
+              when(tool.requirements())
+                  .thenReturn(ToolRequirements.environment(requiredEnvironmentId));
+              registrar.registerTool(
+                  toolName.replace('_', '.'), tool, ToolVisibility.SELECTABLE, 0);
+            });
+    return HarnessCatalog.from(List.of(defaultBuiltinContributor(), fixedContributor));
+  }
+
   private static Fixture taskFixture() {
     return new Fixture(
         List.of(),
@@ -2229,6 +2305,7 @@ class DatabaseTurnResolverTest {
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
+    private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
     private final EnvironmentSkillInventoryQueryService skillInventoryQueryService =
         mock(EnvironmentSkillInventoryQueryService.class);
     private final AgentDefinition agent = new AgentDefinition();
@@ -2363,8 +2440,13 @@ class DatabaseTurnResolverTest {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
       agent.setConfigJson("agent-config");
-      agent.setEnvironmentId(ENV_A.value());
+      // Agent 不再持有 Environment；branch settings 的 name 是唯一环境选择源。
+      agent.setEnvironmentId(null);
       when(agents.getByName("assistant")).thenReturn(agent);
+
+      // 默认 branch 选择 ENV_A_NAME：解析为内部路由身份 ENV_A。
+      bindEnvironment(ENV_A_NAME, ENV_A);
+      bindEnvironment(ENV_B_NAME, ENV_B);
 
       provider.setName("provider");
       provider.setProviderType(persistedProviderType);
@@ -2459,6 +2541,7 @@ class DatabaseTurnResolverTest {
               toolCatalog,
               catalog,
               environmentRegistry,
+              environmentRepository,
               skillInventoryQueryService,
               () -> new CompactionConfig(20_000, null),
               () -> subagentConfig,
@@ -2466,6 +2549,14 @@ class DatabaseTurnResolverTest {
               roleToolSelector,
               roleContextProjector,
               clock);
+    }
+
+    /** 把 branch 可见的不可变 Environment name 注册为内部路由身份。 */
+    private void bindEnvironment(String name, EnvironmentId environmentId) {
+      Environment environment = new Environment();
+      environment.setId(environmentId.value());
+      environment.setName(name);
+      when(environmentRepository.getByName(name)).thenReturn(environment);
     }
 
     private void roleTools(UUID threadId, List<String> tools) {

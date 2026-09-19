@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -331,11 +330,34 @@ class ToolExecutionGatewayStartTest {
     assertTrue(rejected.error().message().contains("Frozen contributor binding"));
   }
 
+  /** 未选择 Environment 的 branch：start 必须在提交执行前以稳定 kind 拒绝，且不触碰 transport。 */
   @Test
-  void environmentToolRequiresEnvironmentId() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolGatewayTestSupport.environmentRequest("call-1", null));
+  void unselectedEnvironmentToolIsRejectedAtStartWithoutExecuting() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
+
+    // 构造期安全探针会占用队列一个位置；start 拒绝不得再提交任何执行任务。
+    int queuedBefore = executor.queued.size();
+
+    ToolGateway.StartResult result =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                ToolGatewayTestSupport.unselectedEnvironmentRequest("call-1")),
+            new ToolGatewayTestSupport.RecordingListener());
+
+    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+    assertEquals("ENVIRONMENT_NOT_SELECTED", rejected.error().kind());
+    assertTrue(
+        rejected.error().message().contains("select an Environment"), rejected.error().message());
+    // 未向 Environment transport 发送任何调用，也没有新提交的执行任务或结果写入。
+    assertTrue(transport.invocations.isEmpty());
+    assertEquals(queuedBefore, executor.queued.size());
+    assertTrue(store.puts.isEmpty());
   }
 
   @Test

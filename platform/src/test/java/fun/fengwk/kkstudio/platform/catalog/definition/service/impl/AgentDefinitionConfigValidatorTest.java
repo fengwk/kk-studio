@@ -52,55 +52,36 @@ class AgentDefinitionConfigValidatorTest {
   private static final String INTERNAL_TOOL_NAME = "load_skill";
 
   @Test
-  void acceptsEnvironmentAndHostToolNamesWhenEnvironmentIsBound() {
-    // 验证任意已绑定 Environment 均可满足通用环境工具要求，且不影响同时选择宿主工具。
-    try (Fixture fixture = new Fixture(List.of(hostTool(CUSTOM_TOOL_NAME)))) {
+  void acceptsEnvironmentToolsAndAgentConfigWithNoEnvironment() {
+    // Agent 与 Environment 解耦：没有 Agent environment 也能保存 environment-required 工具，
+    // 也可保存绑定固定 Environment 的动态工具；这些约束在执行期按 branch 选择判定。
+    Tool fixedEnvironmentTool =
+        tool(
+            hostDescriptor(CUSTOM_TOOL_NAME),
+            ToolRequirements.environment(EnvironmentId.of(UUID.randomUUID())));
+    try (Fixture fixture = new Fixture(List.of(hostTool("host_tool"), fixedEnvironmentTool))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of(ENVIRONMENT_TOOL_NAME, CUSTOM_TOOL_NAME));
+      config.setTools(List.of(ENVIRONMENT_TOOL_NAME, "host_tool", CUSTOM_TOOL_NAME));
       config.setSkills(
           List.of(
               new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "dev"),
               new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "ops")));
       config.setSubagents(List.of("reviewer"));
-      assertDoesNotThrow(() -> fixture.validator.validate(config, UUID.randomUUID()));
+
+      assertDoesNotThrow(() -> fixture.validator.validate(config));
     }
   }
 
   @Test
-  void rejectsEnvironmentToolWithoutEnvironment() {
-    // 验证无 Environment 的 Agent 不能保存环境工具，避免将必然执行失败的配置持久化。
+  void acceptsGenericEnvironmentToolRequirements() {
+    // environmentRequired 但无固定 Environment 的通用环境能力同样随时可配置。
     try (Fixture fixture = new Fixture(List.of())) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of(ENVIRONMENT_TOOL_NAME));
       config.setSkills(List.of());
       config.setSubagents(List.of());
 
-      IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config));
-      assertTrue(error.getMessage().contains("agent has no environment"));
-    }
-  }
-
-  @Test
-  void validatesToolBoundToExactEnvironment() {
-    // 验证绑定特定 Environment 的动态工具只允许配置给同一个 Environment。
-    UUID requiredEnvironmentId = UUID.randomUUID();
-    Tool tool =
-        tool(
-            hostDescriptor(CUSTOM_TOOL_NAME),
-            ToolRequirements.environment(new EnvironmentId(requiredEnvironmentId)));
-    try (Fixture fixture = new Fixture(List.of(tool))) {
-      AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
-      config.setTools(List.of(CUSTOM_TOOL_NAME));
-      config.setSkills(List.of());
-      config.setSubagents(List.of());
-
-      assertDoesNotThrow(() -> fixture.validator.validate(config, requiredEnvironmentId));
-      IllegalArgumentException error =
-          assertThrows(
-              IllegalArgumentException.class,
-              () -> fixture.validator.validate(config, UUID.randomUUID()));
-      assertTrue(error.getMessage().contains("but agent has environment"));
+      assertDoesNotThrow(() -> fixture.validator.validate(config));
     }
   }
 

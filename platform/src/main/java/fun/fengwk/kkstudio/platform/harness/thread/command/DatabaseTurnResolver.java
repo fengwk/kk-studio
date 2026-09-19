@@ -58,6 +58,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepositor
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
@@ -85,11 +87,12 @@ import java.util.UUID;
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
  * {@link ModelRequestSpec}、contextWindow 与 outputTokens。
  *
- * <p>输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection}）；实现按这些精确引用读取
- * 最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的 tools/skills/subagents 每个新 turn 都从最新 Agent
- * 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 由 AgentDefinition.environmentId 在每轮 turn 开始时
- * 按引用解析出当时事实（{@link EnvironmentId}）：要求环境的工具一律按最新解析出的环境绑定（未选定环境时确定性拒绝规划）； Agent skills
- * 解析自持久化的可用库存（{@link
+ * <p>输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection} / 可空
+ * environmentName）；实现按这些精确引用读取最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的
+ * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。 Environment 只由
+ * {@link BranchSettings#environmentName()} 在每轮 turn 开始时按全局唯一且不可变的 name 解析出当时 的内部路由身份（{@link
+ * EnvironmentId}）：要求环境的工具一律按解析出的环境绑定，未选择环境的 branch 仍能规划并保持完整工具声明（调用时才以 {@code
+ * ENVIRONMENT_NOT_SELECTED} 失败），name 无法解析时确定性拒绝规划； Agent skills 解析自持久化的可用库存（{@link
  * fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService#listUsableSkills(EnvironmentId)}），
  * 规划成功时冻结 SkillBinding 的完整事实，不依赖 live daemon 连接或 READY 租约。当 live daemon
  * 离线时，环境上下文回退至持久化元数据（OS、时区、note）； 引用缺失或失效时确定性拒绝规划（返回 {@link Result.Rejected}，稳定 error code {@value
@@ -111,6 +114,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final RuntimeToolCatalog toolCatalog;
   private final HarnessCatalog harnessCatalog;
   private final EnvironmentRegistry environmentRegistry;
+  private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final CompactionConfigProvider compactionConfigProvider;
   private final SubagentConfigProvider subagentConfigProvider;
@@ -132,6 +136,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       RuntimeToolCatalog toolCatalog,
       HarnessCatalog harnessCatalog,
       EnvironmentRegistry environmentRegistry,
+      EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       CompactionConfigProvider compactionConfigProvider,
       SubagentConfigProvider subagentConfigProvider,
@@ -149,6 +154,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
     this.harnessCatalog = Objects.requireNonNull(harnessCatalog, "harnessCatalog");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.compactionConfigProvider =
@@ -230,7 +237,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + ")");
 
     Instant now = clock.instant();
-    EnvironmentId environmentId = resolveEnvironmentId(agent);
+    EnvironmentId environmentId = resolveEnvironmentId(settings.environmentName());
     CurrentEnvironmentContext currentEnvironment = resolveCurrentEnvironment(environmentId, now);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), environmentId);
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
@@ -300,9 +307,19 @@ public final class DatabaseTurnResolver implements TurnResolver {
         outputTokens);
   }
 
-  /** 环境完全由 Agent definition 决定；目录不再参与工具绑定。 */
-  private static EnvironmentId resolveEnvironmentId(AgentDefinition agent) {
-    return agent.getEnvironmentId() == null ? null : EnvironmentId.of(agent.getEnvironmentId());
+  /**
+   * Environment 只由当前 branch settings 的可空 name 决定：null 表示未选择环境；非 null 时按全局唯一且不可变的 name 查 Environment
+   * 并取内部路由身份，缺失时确定性拒绝规划。
+   */
+  private EnvironmentId resolveEnvironmentId(String environmentName) {
+    if (environmentName == null) {
+      return null;
+    }
+    Environment environment = environmentRepository.getByName(environmentName);
+    if (environment == null) {
+      throw rejection("environment not found: " + environmentName);
+    }
+    return EnvironmentId.of(environment.getId());
   }
 
   /**
@@ -468,8 +485,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具一律绑定 Agent 选择的 {@code environmentId} （Agent
-   * 未选择环境时确定性拒绝规划）；所有工具冻结 ContributorBinding 与 state accesses。缺失能力仍立即拒绝，绝不静默跳过。
+   * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具绑定当前 branch settings 解析出的 {@code environmentId}；branch
+   * 未选择环境时绑定 null，工具保持声明并在调用时以 {@code ENVIRONMENT_NOT_SELECTED} 确定性失败，绝不拒绝规划。贡献声明的固定 {@code
+   * requiredEnvironmentId} 只在 branch 已选择另一个非 null 环境时确定性拒绝。缺失能力仍立即拒绝，绝不静默跳过。
    */
   private List<ToolBinding> resolveTools(EnvironmentId environmentId, List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
@@ -493,31 +511,27 @@ public final class DatabaseTurnResolver implements TurnResolver {
               stateAccesses);
       boolean environmentRequired = contribution.requirements().environmentRequired();
       EnvironmentId toolRequiredEnv = contribution.requirements().requiredEnvironmentId();
-      EnvironmentId requiredEnvironmentId = environmentRequired ? environmentId : null;
-      if (environmentRequired && requiredEnvironmentId == null) {
-        throw rejection(
-            "environment tool "
-                + toolName
-                + " requires an environment binding but the agent has no environment");
-      }
-      if (toolRequiredEnv != null && !toolRequiredEnv.equals(environmentId)) {
+      if (toolRequiredEnv != null
+          && environmentId != null
+          && !toolRequiredEnv.equals(environmentId)) {
         throw rejection(
             "tool "
                 + toolName
                 + " requires environment "
                 + toolRequiredEnv
-                + " but agent has environment "
+                + " but branch has environment "
                 + environmentId);
       }
+      EnvironmentId boundEnvironmentId = environmentRequired ? environmentId : null;
       bindings.add(
           new ToolBinding(
-              contribution.definition(), contributor, environmentRequired, requiredEnvironmentId));
+              contribution.definition(), contributor, environmentRequired, boundEnvironmentId));
     }
     return List.copyOf(bindings);
   }
 
   /**
-   * Agent skills 只从最新 Agent config 读取，且必须由 Agent 选择的 Environment 持久可用 inventory 精确提供。
+   * Agent skills 只从最新 Agent config 读取，且必须由当前 branch 选择的 Environment 持久可用 inventory 精确提供。
    *
    * <p>通过 {@link EnvironmentSkillInventoryQueryService#listUsableSkills} 查询持久事实，执行严格复合匹配 {@code
    * (sourceId, name)}；离线时仍可成功规划，陈旧或缺失 ref 确定性拒绝。
@@ -528,7 +542,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       return List.of();
     }
     if (environmentId == null) {
-      throw rejection("agent skills require an environment but the agent has no environment");
+      throw rejection("agent skills require an environment but the branch has no environment");
     }
     List<EnvironmentSkillDTO> usable;
     try {

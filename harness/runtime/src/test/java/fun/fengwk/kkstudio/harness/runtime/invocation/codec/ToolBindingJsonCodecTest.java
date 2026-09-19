@@ -216,17 +216,17 @@ class ToolBindingJsonCodecTest {
     String emptyContributorJson =
         "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}";
 
-    // environmentRequired 为 true 但 environment 为 null
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"definition\":"
-                    + definition
-                    + ",\"contributor\":"
-                    + emptyContributorJson
-                    + ",\"environmentRequired\":true"
-                    + ",\"environmentId\":null}"));
+    // environmentRequired 为 true 但 environment 为 null：branch 未选择 Environment 的合法 durable 形态。
+    ToolBinding unselected =
+        codec.decode(
+            "{\"definition\":"
+                + definition
+                + ",\"contributor\":"
+                + emptyContributorJson
+                + ",\"environmentRequired\":true"
+                + ",\"environmentId\":null}");
+    assertTrue(unselected.environmentRequired());
+    assertNull(unselected.environmentId());
 
     // environmentRequired 为 false 但 environment 非 null
     assertThrows(

@@ -60,9 +60,6 @@ public interface EnvironmentMapper extends BaseMapper {
   @Select("select count(1) > 0 from environment where name = #{name}")
   boolean existsByName(@Param("name") String name);
 
-  @Select("select count(1) > 0 from environment where name = #{name} and id <> #{excludeId}")
-  boolean existsByNameExcludingId(@Param("name") String name, @Param("excludeId") UUID excludeId);
-
   @Insert(
       """
       insert into environment (
@@ -76,8 +73,7 @@ public interface EnvironmentMapper extends BaseMapper {
   @Update(
       """
       update environment
-      set name = #{environment.name},
-          registration_token = #{environment.registrationToken},
+      set registration_token = #{environment.registrationToken},
           updated_at = greatest(updated_at, current_timestamp),
           version = version + 1
       where id = #{environment.id} and version = #{expectedVersion}

@@ -26,8 +26,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
-import java.util.UUID;
-
 /** 全局 Agent definition CRUD。 */
 @AllArgsConstructor
 @Service
@@ -59,7 +57,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     AgentDefinition definition = definitionMutationFactory.newAgent(name, createDTO);
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
-    validateConfig(config, definition.getEnvironmentId());
+    validateConfig(config);
     referenceResolver.requireEnvironmentAndSkills(
         definition.getEnvironmentId(), config.getSkills());
     referenceResolver.requireSubagentsForUpdate(config.getSubagents());
@@ -98,7 +96,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     definitionMutationFactory.update(definition, updateDTO);
     validateVariant(modelRef, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
-    validateConfig(config, definition.getEnvironmentId());
+    validateConfig(config);
     referenceResolver.requireEnvironmentAndSkills(
         definition.getEnvironmentId(), config.getSkills());
     AgentDefinition locked =
@@ -170,9 +168,9 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
   }
 
-  private void validateConfig(AgentDefinitionConfigDTO config, UUID environmentId) {
+  private void validateConfig(AgentDefinitionConfigDTO config) {
     try {
-      configValidator.validate(config, environmentId);
+      configValidator.validate(config);
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }

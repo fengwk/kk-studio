@@ -75,7 +75,7 @@ ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener 
 
 ```text
 environmentRequired      是否需要绑定执行环境
-requiredEnvironmentId    精确要求的目标 Environment；非空时 environmentRequired 必须为 true
+requiredEnvironmentId    精确要求的目标 Environment；非空时 environmentRequired 必须为 true，且 branch 必须恰好选择该 Environment
 stateAccesses[]          该工具访问的 branch custom state 集合（同一 customType 不得重复）
 ```
 
@@ -83,7 +83,7 @@ stateAccesses[]          该工具访问的 branch custom state 集合（同一 
 
 需要环境的工具在 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 中拿到 `invocationId`、`threadId`、`executedAt`、`branch` 与可选的 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 是刻意窄的接口——只有 `environmentId()` 与 `execute(capability, request, listener)`，工具据此执行一个 `EnvironmentCapabilityDescriptor`，而连接注册、路由与协议细节由 Platform 的适配器承担。
 
-环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java) 强制 `environmentRequired` 与 `environmentId` 同真同假；Platform 的 [`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java) 在执行前用冻结的 definition、Contributor provenance 与 `requiredEnvironmentId` 逐项比对当前目录，任何一项不一致都确定性拒绝执行，绝不按当前配置静默重解释。
+环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java) 要求 `environmentRequired=false` 时 `environmentId` 必须为空；`environmentRequired=true` 而 `environmentId` 为空表示 branch 未选择 Environment，工具声明保留到调用时才失败。Platform 的 [`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java) 在执行前用冻结的 definition、Contributor provenance 与 `requiredEnvironmentId` 逐项比对当前目录：未选择 Environment 的环境工具在权限判定前即以稳定的 `ENVIRONMENT_NOT_SELECTED` 拒绝，其余不一致也确定性拒绝执行，绝不按当前配置静默重解释。
 
 ## 分支状态与副作用
 

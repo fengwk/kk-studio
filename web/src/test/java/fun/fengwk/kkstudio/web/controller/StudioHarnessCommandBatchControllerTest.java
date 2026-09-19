@@ -339,10 +339,12 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   private static String rootSettings() {
+    // environmentName 是 required-nullable 字段：未选择 Environment 时必须显式输出 null。
     return """
         {
           "agentName":"default-assistant",
-          "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"}
+          "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"},
+          "environmentName":null
         }
         """;
   }

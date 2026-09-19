@@ -57,11 +57,6 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
   }
 
   @Override
-  public boolean existsByNameExcludingId(String name, UUID excludeId) {
-    return environmentMapper.existsByNameExcludingId(name, excludeId);
-  }
-
-  @Override
   public boolean create(Environment environment) {
     return environmentMapper.insert(toDO(environment)) == 1;
   }

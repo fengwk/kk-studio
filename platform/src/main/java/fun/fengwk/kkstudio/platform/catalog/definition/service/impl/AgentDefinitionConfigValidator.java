@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -11,9 +10,13 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
-/** 依据 {@link RuntimeToolCatalog} 校验 Agent 选择；包含对工具环境需求的强制围栏校验。 */
+/**
+ * 依据 {@link RuntimeToolCatalog} 校验 Agent 选择：工具必须存在且可被 Agent 选择，skill 与 subagent 名遵守长度规则。
+ *
+ * <p>Agent 与 Environment 解耦：环境工具的可用性由每个 branch 的 Environment 选择在执行期决定，配置阶段不再按任何 Environment
+ * 拒绝或过滤环境工具。
+ */
 @Component
 public final class AgentDefinitionConfigValidator {
 
@@ -24,17 +27,13 @@ public final class AgentDefinitionConfigValidator {
   }
 
   public void validate(AgentDefinitionConfigDTO config) {
-    validate(config, null);
-  }
-
-  public void validate(AgentDefinitionConfigDTO config, UUID environmentId) {
     Objects.requireNonNull(config, "config");
-    validateToolNames(config.getTools(), environmentId);
+    validateToolNames(config.getTools());
     validateSkills(config.getSkills());
     validateSubagents(config.getSubagents());
   }
 
-  private void validateToolNames(List<String> values, UUID environmentId) {
+  private void validateToolNames(List<String> values) {
     for (String toolName : values) {
       ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
       if (contribution == null) {
@@ -43,23 +42,6 @@ public final class AgentDefinitionConfigValidator {
       if (contribution.definition().visibility() != ToolVisibility.SELECTABLE) {
         throw new IllegalArgumentException(
             "internal tool cannot be selected by an Agent: " + toolName);
-      }
-      ToolRequirements requirements = contribution.requirements();
-      if (requirements != null && requirements.environmentRequired() && environmentId == null) {
-        throw new IllegalArgumentException(
-            "tool " + toolName + " requires an environment but agent has no environment");
-      }
-      if (requirements != null && requirements.requiredEnvironmentId() != null) {
-        UUID requiredEnvironmentId = requirements.requiredEnvironmentId().value();
-        if (!requiredEnvironmentId.equals(environmentId)) {
-          throw new IllegalArgumentException(
-              "tool "
-                  + toolName
-                  + " requires environment "
-                  + requiredEnvironmentId
-                  + " but agent has environment "
-                  + environmentId);
-        }
       }
     }
   }

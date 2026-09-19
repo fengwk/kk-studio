@@ -201,8 +201,8 @@ class ResolvedRequestValidatorTest {
 
   @Test
   void acceptsAnyEnvironmentIdBecauseBranchSettingsCarryNoDirectory() {
-    // branch 只冻结 agent/model；environment 选择由 Agent definition 每轮解析，因此不同 environmentId 的
-    // tool/skill 与该 branch 都不构成 Resolved 契约冲突。
+    // branch settings 只冻结 agent/model/environmentName，不携带路由身份；Environment 每轮按 name 解析，
+    // 因此候选 Spec 中任意 environmentId 的 tool/skill 都不与 branch 构成 Resolved 契约冲突。
     assertDoesNotThrow(
         () ->
             ResolvedRequestValidator.validate(

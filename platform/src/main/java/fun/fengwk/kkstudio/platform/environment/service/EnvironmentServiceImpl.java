@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
 
 import java.time.Clock;
@@ -99,45 +98,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       results.add(toCardDto(env, false));
     }
     return List.copyOf(results);
-  }
-
-  @Override
-  @Transactional
-  public EnvironmentCardDTO update(
-      EnvironmentId id, EnvironmentUpdateDTO dto, String expectedVersion) {
-    Objects.requireNonNull(id, "id");
-    if (dto == null) {
-      throw new AiValidationException(RESOURCE, "request body must not be null");
-    }
-    long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    Environment env = environmentRepository.lockById(id.value());
-    if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
-    }
-    if (env.getVersion() != expected) {
-      throw new AiVersionConflictException(
-          RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
-    }
-    String newName = validateName(dto.getName());
-    if (environmentRepository.existsByNameExcludingId(newName, id.value())) {
-      throw new AiDuplicateException(RESOURCE, "environment name already exists: " + newName);
-    }
-    env.setName(newName);
-    try {
-      if (!environmentRepository.updateById(env, expected)) {
-        Environment reread = environmentRepository.getById(id.value());
-        if (reread == null) {
-          throw new AiResourceNotFoundException(RESOURCE);
-        }
-        throw new AiVersionConflictException(
-            RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
-      }
-    } catch (DuplicateKeyException error) {
-      throw new AiDuplicateException(
-          RESOURCE, "environment name already exists: " + newName, error);
-    }
-    Environment updated = environmentRepository.getById(id.value());
-    return toCardDto(updated, false);
   }
 
   @Override
