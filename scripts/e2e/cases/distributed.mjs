@@ -25,9 +25,9 @@ async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 30) 
 registerCase({
   id: 'distributed.shared_state',
   level: 'L5',
-  title: '双节点共享状态：跨节点 Environment CRUD 与 404',
+  title: '双节点共享状态：跨节点 Environment 创建/token 轮换 CAS/删除与 404',
   requires: ['distributed'],
-  docs: '在 node A 创建临时 Environment Card，在 node B 读取并更新，回 node A 验证更新内容与 CAS version，再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
+  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token，再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -57,24 +57,83 @@ registerCase({
       assert(fromB.version === latestVersion, 'node B get: version mismatch')
       assert(!fromB.registrationToken, 'GET must never expose registrationToken')
 
-      // 3. 在 node B 更新名称
-      const updatedName = `${envName}-renamed`
-      const updateRes = await ctx.callNode(
+      // 3. 在 node B 轮换 registrationToken：唯一的可变状态，CAS 推进 version，name 作为身份恒定不变
+      const rotateOnBRes = await ctx.callNode(
         'b',
-        'PUT',
-        `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
-        { name: updatedName },
+        'POST',
+        `/api/harness/environments/${encodeURIComponent(createdId)}/registration-token`,
+        { expectedVersion: latestVersion },
       )
-      const updated = envelopeData(updateRes.json)
-      assert(updated.name === updatedName, 'node B update: name mismatch')
-      assert(updated.version !== latestVersion, 'node B update: version must advance')
-      assertDecimalVersion(updated.version, 'updated.version')
-      latestVersion = updated.version
+      const rotatedOnB = envelopeData(rotateOnBRes.json)
+      assert(rotatedOnB.name === envName, 'node B rotate: name must stay immutable')
+      assert(rotatedOnB.version !== latestVersion, 'node B rotate: version must advance')
+      assertDecimalVersion(rotatedOnB.version, 'rotatedOnB.version')
+      assert(
+        typeof rotatedOnB.registrationToken === 'string' && rotatedOnB.registrationToken.length > 0,
+        'node B rotate: expected freshly generated registrationToken',
+      )
+      const tokenFromB = rotatedOnB.registrationToken
+      latestVersion = rotatedOnB.version
 
-      // 4. 回 node A 验证更新内容与 CAS version
+      // 4. 回 node A 验证跨节点 CAS：陈旧 version 必须 409，新 version 必须取到与 node B 不同的新 token
+      await expectHttpError(
+        () =>
+          ctx.callNode(
+            'a',
+            'POST',
+            `/api/harness/environments/${encodeURIComponent(createdId)}/registration-token`,
+            { expectedVersion: created.version },
+          ),
+        { status: 409 },
+      )
+      const rotateOnARes = await ctx.callNode(
+        'a',
+        'POST',
+        `/api/harness/environments/${encodeURIComponent(createdId)}/registration-token`,
+        { expectedVersion: latestVersion },
+      )
+      const rotatedOnA = envelopeData(rotateOnARes.json)
+      assert(rotatedOnA.name === envName, 'node A rotate: name must stay immutable')
+      assert(
+        rotatedOnA.registrationToken !== tokenFromB,
+        'node A rotate: token must differ from the one issued by node B',
+      )
+      assert(rotatedOnA.version !== latestVersion, 'node A rotate: version must advance again')
+      assertDecimalVersion(rotatedOnA.version, 'rotatedOnA.version')
+      latestVersion = rotatedOnA.version
+
+      // 4b. 只读 token 端点跨节点一致：返回当前值，且绝不推进 version
+      const tokenOnBRes = await ctx.callNode(
+        'b',
+        'GET',
+        `/api/harness/environments/${encodeURIComponent(createdId)}/token`,
+      )
+      const tokenOnB = envelopeData(tokenOnBRes.json)
+      assert(tokenOnB.id === createdId, 'node B token read: id mismatch')
+      assert(tokenOnB.version === latestVersion, 'node B token read: version mismatch')
+      assert(
+        tokenOnB.registrationToken === rotatedOnA.registrationToken,
+        'node B token read: must observe the value written by node A',
+      )
+      assert(
+        tokenOnBRes.headers.get('cache-control') === 'no-store',
+        `expected Cache-Control no-store, got ${tokenOnBRes.headers.get('cache-control')}`,
+      )
+
+      // 4c. 改名端点已彻底移除：Environment name 是不可变身份
+      await expectHttpError(
+        () =>
+          ctx.callNode(
+            'a',
+            'PUT',
+            `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+            { name: `${envName}-renamed` },
+          ),
+        { status: 405 },
+      )
       const getARes = await ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
       const fromA = envelopeData(getARes.json)
-      assert(fromA.name === updatedName, 'node A verify: name mismatch')
+      assert(fromA.name === envName, 'node A verify: name must stay immutable')
       assert(fromA.version === latestVersion, 'node A verify: version mismatch')
 
       // 5. 跨节点删除（在 node B 发起）并在两节点验证 404
@@ -98,8 +157,8 @@ registerCase({
         JSON.stringify(
           {
             id: createdId,
-            originalName: envName,
-            updatedName,
+            immutableName: envName,
+            rotated: true,
             finalVersion: latestVersion,
             deleted: true,
           },

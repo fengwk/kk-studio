@@ -16,6 +16,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -34,7 +36,9 @@ import java.util.UUID;
 /**
  * 按当前 root-to-head branch 的最新 Agent / Environment / skills / subagents 现算系统提示词。
  *
- * <p>只读预览：不冻结 ModelInvocation，不校验 Tool catalog；skills 无法解析时省略该段，保证 environment 块始终可见。
+ * <p>只读预览：不冻结 ModelInvocation，不校验 Tool catalog；Environment 只按当前 {@link
+ * BranchSettings#environmentName()} 解析（name 无法解析时宽容回退为空环境上下文，绝不失败），skills 无法解析时省略该段，保证 environment
+ * 块始终可见。
  */
 public final class SystemPromptPreviewService {
 
@@ -42,6 +46,7 @@ public final class SystemPromptPreviewService {
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final EnvironmentRegistry environmentRegistry;
+  private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final SubagentConfigProvider configProvider;
   private final AgentPromptComposer promptComposer;
@@ -52,6 +57,7 @@ public final class SystemPromptPreviewService {
       AgentDefinitionRepository agentDefinitionRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
       EnvironmentRegistry environmentRegistry,
+      EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       SubagentConfigProvider configProvider,
       AgentPromptComposer promptComposer,
@@ -61,6 +67,8 @@ public final class SystemPromptPreviewService {
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
+    this.environmentRepository =
+        Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
@@ -74,7 +82,7 @@ public final class SystemPromptPreviewService {
     BranchSettings settings = path.baseSettings();
     AgentDefinition agent = agentDefinitionRepository.getByName(settings.agentName());
     Instant now = clock.instant();
-    EnvironmentId environmentId = resolveEnvironmentId(agent);
+    EnvironmentId environmentId = resolveEnvironmentId(settings.environmentName());
     CurrentEnvironmentContext environment = resolveCurrentEnvironment(environmentId, now);
     if (agent == null) {
       return promptComposer.compose(null, environment, List.of(), List.of());
@@ -92,12 +100,13 @@ public final class SystemPromptPreviewService {
         previewSubagents(config.getSubagents(), path));
   }
 
-  /** 环境完全由 Agent definition 决定：branch settings 不再持有目录状态。 */
-  private static EnvironmentId resolveEnvironmentId(AgentDefinition agent) {
-    if (agent == null || agent.getEnvironmentId() == null) {
+  /** Environment 只按当前 branch settings 的 name 解析；null 或 name 缺失时宽容回退为空环境。 */
+  private EnvironmentId resolveEnvironmentId(String environmentName) {
+    if (environmentName == null) {
       return null;
     }
-    return EnvironmentId.of(agent.getEnvironmentId());
+    Environment environment = environmentRepository.getByName(environmentName);
+    return environment == null ? null : EnvironmentId.of(environment.getId());
   }
 
   private CurrentEnvironmentContext resolveCurrentEnvironment(

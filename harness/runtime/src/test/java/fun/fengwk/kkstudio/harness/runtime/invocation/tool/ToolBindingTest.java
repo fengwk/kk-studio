@@ -39,7 +39,7 @@ class ToolBindingTest {
 
   @Test
   void acceptsValidEnvironmentRequiredAndUnrequiredBindingShapes() {
-    // 验证 environmentRequired=false 与 environmentRequired=true 两种合法形态均能正确构造。
+    // 验证 environmentRequired=false/true（含未选择环境的 null 路由）三种合法形态均能正确构造。
     ToolBinding host =
         new ToolBinding(
             definition("bash"), contributorProvenance("core", "bash", List.of()), false, null);
@@ -55,6 +55,13 @@ class ToolBindingTest {
     assertTrue(environment.environmentRequired());
     assertEquals(ENV_ID, environment.environmentId());
     assertEquals("base", environment.contributor().contributorId());
+
+    // branch 未选择 Environment：工具保持 environmentRequired，但路由身份为 null，调用时才失败。
+    ToolBinding unselected =
+        new ToolBinding(
+            definition("fs"), contributorProvenance("base", "read", List.of()), true, null);
+    assertTrue(unselected.environmentRequired());
+    assertNull(unselected.environmentId());
   }
 
   @Test
@@ -78,11 +85,6 @@ class ToolBindingTest {
   @Test
   void enforcesEnvironmentRequiredInvariant() {
     ContributorBinding contributor = contributorProvenance("core", "bash", List.of());
-
-    // environmentRequired 为 true 时 environment 必须非 null
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolBinding(definition("env-null"), contributor, true, null));
 
     // environmentRequired 为 false 时 environment 必须为 null
     assertThrows(

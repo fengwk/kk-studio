@@ -77,7 +77,8 @@ import java.util.function.Supplier;
 /**
  * 生产工具执行网关，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
  *
- * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，并执行权限判定。{@link #start} 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
+ * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，拒绝未选择 Environment 的环境工具，然后执行权限判定。{@link #start}
+ * 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
  *
  * <p>工具在句柄 {@link ToolGateway.Handle#activate()} 前不会开始执行。回调桥以有界 FIFO
  * 串行派发信号，并保证单次终态；取消、拒绝、启动失败或终态都会释放租约。远程发送结果不确定时上报 {@code unknown}，不按普通失败处理。
@@ -90,6 +91,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   static final String PERMISSION_DENIED_KIND = "PERMISSION_DENIED";
   static final String TOOL_NOT_FOUND_KIND = "TOOL_NOT_FOUND";
   static final String TOOL_DEFINITION_MISMATCH_KIND = "TOOL_DEFINITION_MISMATCH";
+  static final String ENVIRONMENT_NOT_SELECTED_KIND = "ENVIRONMENT_NOT_SELECTED";
   static final String CANCELLED_KIND = "CANCELLED";
   static final String UNAVAILABLE_KIND = "UNAVAILABLE";
   static final String REMOTE_UNCERTAIN_KIND = "REMOTE_UNCERTAIN";
@@ -193,6 +195,7 @@ public final class ToolExecutionGateway implements ToolGateway {
                   + toolName));
     }
     if (requirements.requiredEnvironmentId() != null
+        && binding.environmentId() != null
         && !requirements.requiredEnvironmentId().equals(binding.environmentId())) {
       return new ResolvedContribution(
           null,
@@ -213,6 +216,24 @@ public final class ToolExecutionGateway implements ToolGateway {
                   + " no longer matches its frozen state access declaration."));
     }
     return new ResolvedContribution(contribution, null);
+  }
+
+  /**
+   * 冻结 binding 声明环境需求但没有 Environment 路由身份时，返回稳定的 {@code ENVIRONMENT_NOT_SELECTED}；否则返回 null。
+   *
+   * <p>这是 branch 未选择 Environment 的确定性结果：错误明确要求为当前 branch 选择 Environment 后重试，绝不伪装成权限、定义或 transport
+   * 失败。
+   */
+  private static ToolInvocationError environmentNotSelected(ToolBinding binding) {
+    if (!binding.environmentRequired() || binding.environmentId() != null) {
+      return null;
+    }
+    return new ToolInvocationError(
+        ENVIRONMENT_NOT_SELECTED_KIND,
+        "Tool "
+            + binding.descriptor().name()
+            + " requires an Environment but this branch has none selected; select an Environment "
+            + "for the branch and retry.");
   }
 
   private static boolean stateAccessesMatch(
@@ -238,6 +259,12 @@ public final class ToolExecutionGateway implements ToolGateway {
     ResolvedContribution resolved = validateContribution(request.binding());
     if (resolved.error() != null) {
       return new ToolGateway.Deny(resolved.error());
+    }
+    // 未选择 Environment 的 branch 仍声明并允许调用环境工具；此时必须在权限判定之前给出可操作的确定性拒绝，
+    // 既不弹审批也不消耗权限策略。
+    ToolInvocationError environmentNotSelected = environmentNotSelected(request.binding());
+    if (environmentNotSelected != null) {
+      return new ToolGateway.Deny(environmentNotSelected);
     }
     ToolSettings settings = toolSettingsProvider.get();
     PermissionEvaluator.Evaluation evaluation =
@@ -283,15 +310,12 @@ public final class ToolExecutionGateway implements ToolGateway {
                 "Registered tool descriptor does not match frozen descriptor: "
                     + contribution.definition().descriptor().name()));
       }
-      if (execution.request().binding().environmentRequired()
-          && execution.request().binding().environmentId() == null) {
+      // preflight 已拦截的形态在此保留同样的 fail-safe：事务外仍有窄窗口，绝不能退化为普通 UNAVAILABLE。
+      ToolInvocationError environmentNotSelected =
+          environmentNotSelected(execution.request().binding());
+      if (environmentNotSelected != null) {
         lease.close();
-        return new ToolGateway.Rejected(
-            new ToolInvocationError(
-                UNAVAILABLE_KIND,
-                "Environment tool "
-                    + contribution.definition().descriptor().name()
-                    + " has no frozen environmentId."));
+        return new ToolGateway.Rejected(environmentNotSelected);
       }
 
       BranchView branch =

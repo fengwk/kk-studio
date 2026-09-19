@@ -192,6 +192,20 @@ final class ToolGatewayTestSupport {
         new ToolBinding(bashContribution.definition(), contributor, true, environmentId));
   }
 
+  /** branch 未选择 Environment 的环境工具请求：environmentRequired=true 但路由身份为 null。 */
+  static ToolInvocationRequest unselectedEnvironmentRequest(String callId) {
+    HarnessCatalog catalog = defaultCatalog();
+    ToolContribution bashContribution = catalog.findTool("bash").orElseThrow();
+    ContributorBinding contributor =
+        new ContributorBinding(
+            bashContribution.id().contributorId().value(),
+            bashContribution.id().localName(),
+            List.of());
+    return new ToolInvocationRequest(
+        new ToolCall(callId, "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"),
+        new ToolBinding(bashContribution.definition(), contributor, true, null));
+  }
+
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
     return new ToolGateway.Execution(
         INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, PROPOSED_ATTEMPT, request);
@@ -330,6 +344,26 @@ final class ToolGatewayTestSupport {
     @Override
     public ToolSettings get() {
       return settings;
+    }
+  }
+
+  /** 记录读取次数的 ToolSettingsProvider：用于证明 preflight 短路时没有读取权限策略。 */
+  static final class CountingToolSettingsProvider implements ToolSettingsProvider {
+    private final ToolSettings settings;
+    private final AtomicInteger reads = new AtomicInteger();
+
+    CountingToolSettingsProvider(ToolSettings settings) {
+      this.settings = settings;
+    }
+
+    @Override
+    public ToolSettings get() {
+      reads.incrementAndGet();
+      return settings;
+    }
+
+    int readCount() {
+      return reads.get();
     }
   }
 

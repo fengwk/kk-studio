@@ -56,8 +56,8 @@ public final class ResolvedRequestValidator {
     }
     ModelSelection expectedModel =
         preparation == null ? settings.model() : preparation.executionModel();
-    // BranchSettings 只持久化 agent/model 选择；environmentId 由 Agent definition 每轮解析并冻结进 binding，
-    // binding 之间的一致性（同一环境、skill source 与该环境一致）由 ModelRequestSpec 构造边界保证。
+    // BranchSettings 只持久化 agent/model 选择与可空 environmentName；Environment 每轮按 name 解析并冻结进
+    // binding，binding 之间的一致性（同一环境、skill source 与该环境一致）由 ModelRequestSpec 构造边界保证。
     if (!spec.model().providerName().equals(expectedModel.providerName())
         || !spec.model().modelName().equals(expectedModel.modelName())) {
       throw new IllegalStateException(

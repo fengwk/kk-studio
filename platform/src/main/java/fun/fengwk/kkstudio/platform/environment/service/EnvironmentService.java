@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 
 import java.util.List;
 
@@ -19,9 +18,6 @@ public interface EnvironmentService {
 
   /** 列表查询所有 Environment Cards，包含 live 状态投影，永不返回 registrationToken。 */
   List<EnvironmentCardDTO> list();
-
-  /** CAS 更新 Environment 名称，永不返回 registrationToken。 */
-  EnvironmentCardDTO update(EnvironmentId id, EnvironmentUpdateDTO dto, String expectedVersion);
 
   /** 幂等只读当前 registrationToken；不轮换、不更新 version/updateTime。 */
   EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id);

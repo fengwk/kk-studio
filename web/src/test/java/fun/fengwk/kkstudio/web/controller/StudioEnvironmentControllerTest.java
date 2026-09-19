@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -19,7 +18,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -43,7 +41,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillSourceUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -194,34 +191,6 @@ class StudioEnvironmentControllerTest {
   }
 
   /**
-   * 意图：验证 PUT /api/harness/environments/{environmentId} 的 expectedVersion 必须从 body 读取并执行 CAS 更新，返回
-   * 200。
-   */
-  @Test
-  void updateEnvironmentReturnsOk() throws Exception {
-    EnvironmentCardDTO card = new EnvironmentCardDTO();
-    card.setId(ENV_ID.toString());
-    card.setName("updated-env");
-    when(environmentService.update(
-            eq(EnvironmentId.of(ENV_ID)), any(EnvironmentUpdateDTO.class), eq("0")))
-        .thenReturn(card);
-
-    mockMvc
-        .perform(
-            put("/api/harness/environments/" + ENV_ID)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"name\":\"updated-env\",\"expectedVersion\":\"0\"}"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.name").value("updated-env"));
-
-    ArgumentCaptor<EnvironmentUpdateDTO> dtoCaptor =
-        ArgumentCaptor.forClass(EnvironmentUpdateDTO.class);
-    verify(environmentService).update(eq(EnvironmentId.of(ENV_ID)), dtoCaptor.capture(), eq("0"));
-    assertEquals("updated-env", dtoCaptor.getValue().getName());
-    assertEquals("0", dtoCaptor.getValue().getExpectedVersion());
-  }
-
-  /**
    * 意图：验证 POST /api/harness/environments/{environmentId}/registration-token 从请求体读取
    * {expectedVersion} 并轮换 token，返回 200 且禁止缓存。
    */
@@ -242,6 +211,17 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.registrationToken").value("new-secret-token"));
 
     verify(environmentService).rotateToken(EnvironmentId.of(ENV_ID), "0");
+  }
+
+  /** 意图：Environment name 是不可变身份，改名端点已彻底移除；只有 token 轮换可以推进 version。 */
+  @Test
+  void environmentUpdateEndpointIsGone() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/harness/environments/" + ENV_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"renamed\",\"expectedVersion\":\"0\"}"))
+        .andExpect(status().isMethodNotAllowed());
   }
 
   /**

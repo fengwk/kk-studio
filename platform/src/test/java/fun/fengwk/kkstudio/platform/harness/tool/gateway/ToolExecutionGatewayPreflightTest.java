@@ -170,6 +170,40 @@ class ToolExecutionGatewayPreflightTest {
     verifyNoInteractions(evaluator);
   }
 
+  /** 未选择 Environment 的环境工具必须在 permission 判定之前短路：返回稳定 kind，且不弹审批、不读权限策略。 */
+  @Test
+  void unselectedEnvironmentToolIsDeniedBeforePermissionEvaluation() {
+    PermissionEvaluator evaluator = mock(PermissionEvaluator.class);
+    ToolGatewayTestSupport.CountingToolSettingsProvider settingsProvider =
+        new ToolGatewayTestSupport.CountingToolSettingsProvider(
+            ToolGatewayTestSupport.settings(PermissionAction.ASK));
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
+    ToolExecutionGateway gateway =
+        new ToolExecutionGateway(
+            new HarnessToolCatalogAdapter(catalog),
+            catalog,
+            ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
+            new ToolGatewayTestSupport.FakeTransport(),
+            evaluator,
+            settingsProvider,
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            new ToolGatewayTestSupport.DirectQueueExecutor(),
+            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
+            ToolGatewayTestSupport.TEST_CLOCK,
+            new ConcurrencyAdmission(Integer.MAX_VALUE));
+
+    ToolGateway.PreflightResult result =
+        gateway.preflight(ToolGatewayTestSupport.unselectedEnvironmentRequest("call-1"));
+
+    ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
+    assertEquals("ENVIRONMENT_NOT_SELECTED", deny.error().kind());
+    assertTrue(deny.error().message().contains("select an Environment"), deny.error().message());
+    // 权限策略未被读取，evaluator 也未被调用：绝不会把该错误伪装成审批或权限拒绝。
+    verifyNoInteractions(evaluator);
+    assertEquals(0, settingsProvider.readCount());
+  }
+
   @Test
   void askReasonLongerThan1024IsTruncatedAtCodePointBoundary() {
     // preview 的 workdir 只来自该次 arguments；超长 workdir 用于压出截断路径。

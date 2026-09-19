@@ -118,7 +118,8 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
                 "providerName":"stub",
                 "modelName":"acceptance-stub",
                 "variant":"default"
-              }
+              },
+              "environmentName":null
             },
             "yoloEnabled":false
           },

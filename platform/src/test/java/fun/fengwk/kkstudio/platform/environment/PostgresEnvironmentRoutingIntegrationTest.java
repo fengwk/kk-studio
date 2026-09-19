@@ -177,11 +177,6 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           }
 
           @Override
-          public boolean existsByNameExcludingId(String name, UUID excludeId) {
-            return false;
-          }
-
-          @Override
           public boolean create(Environment environment) {
             return false;
           }

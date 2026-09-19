@@ -89,7 +89,7 @@ providerType / providerConnectionGenerationId / model / variant / outputTokens
 preambleMessages / toolBindings / skillBindings / subagentBindings / cacheControl
 ```
 
-工具、Skill、Subagent 名各自唯一，且所有环境绑定工具与 Skill 必须共享同一 `EnvironmentId`。完整历史、可由 bindings 派生的 Provider tools、Agent definition 决定的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合改为专用 SYSTEM + USER 摘要提示词，工具列表为空）。
+工具、Skill、Subagent 名各自唯一，且所有环境绑定工具与 Skill 必须共享同一 `EnvironmentId`。完整历史、可由 bindings 派生的 Provider tools、branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合改为专用 SYSTEM + USER 摘要提示词，工具列表为空）。
 
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 是 `harness_tool_invocation` 行的当前状态：冻结的 `ToolCall` 参数、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、`assistantEntryId`、`callIndex`、审批记录、结果、副作用批次与错误描述。
 
@@ -100,7 +100,7 @@ DISPATCHING -> RUNNING / READY（RetryLater）/ FAILED / UNKNOWN
 RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 ```
 
-`ToolBinding` 把工具定义、Contributor 归属、`environmentRequired` 与冻结的 `environmentId` 绑在一起，二者同真同假：**当且仅当 `environmentRequired=true` 时 `environmentId` 必须非空**，声明不需要环境的工具不得携带环境身份。执行端不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolEffectBatch.java) 最多携带 16 条 CUSTOM 副作用，且只在 `SUCCEEDED` 状态允许非空；终态 Tool 行只表示结果已产出，物化为历史 Entry 由 ThreadProcessor 在同一事务里完成，同时物理删除 Tool 行与父 ModelInvocation。
+`ToolBinding` 把工具定义、Contributor 归属、`environmentRequired` 与冻结的 `environmentId` 绑在一起。不变量是**单向**的：`environmentRequired=false` 时 `environmentId` 必须为空，声明不需要环境的工具不得携带环境身份；而 `environmentRequired=true` 允许 `environmentId` 为空，表示 branch 尚未选择 Environment——工具声明完整保留，调用时才以 `ENVIRONMENT_NOT_SELECTED` 确定性失败。执行端不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolEffectBatch.java) 最多携带 16 条 CUSTOM 副作用，且只在 `SUCCEEDED` 状态允许非空；终态 Tool 行只表示结果已产出，物化为历史 Entry 由 ThreadProcessor 在同一事务里完成，同时物理删除 Tool 行与父 ModelInvocation。
 
 `Work` 是调度邮箱的持久化当前状态，每个 target 一行：`target = (THREAD|MODEL|TOOL, targetId)`、`availableAt`、`wakeVersion`、`leaseToken`、`leaseUntil` 与可选的环境路由标记 `requiredEnvironmentId`。所有跃迁都是返回新状态的纯函数（`initial` / `request` / `claim` / `renew` / `complete` / `reschedule`）：`request` 把 `availableAt` 提前到最早值并把 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除该行、被新 wake 推进时只清空租约保留行，`reschedule` 清空租约并重设 `availableAt`。`leaseToken` + `wakeVersion` 共同构成所有权围栏，让迟到的旧执行体无法提交或删除更新的 wake。
 
