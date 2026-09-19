@@ -62,7 +62,8 @@ final class OpenAiChatStreamAccumulator {
   private GenerationStopReason stopReason = null;
   private boolean seenDone = false;
 
-  private final StringBuilder textBuilder = new StringBuilder();
+  private final StringBuilder contentBuilder = new StringBuilder();
+  private final StringBuilder refusalBuilder = new StringBuilder();
   private final StringBuilder reasoningContentBuilder = new StringBuilder();
   private JsonNode reasoningDetailsNode = null;
 
@@ -155,12 +156,21 @@ final class OpenAiChatStreamAccumulator {
       if (delta.has("content") && delta.get("content").isTextual()) {
         String contentDelta = delta.get("content").textValue();
         if (!contentDelta.isEmpty()) {
-          textBuilder.append(contentDelta);
+          contentBuilder.append(contentDelta);
           bridge.emitEvent(new ProviderStreamEvent.TextDelta(contentDelta));
         }
       }
 
-      // 2. reasoning_content
+      // 2. refusal：协议中的成功助手输出，归一化到可见文本通道
+      if (delta.has("refusal") && delta.get("refusal").isTextual()) {
+        String refusalDelta = delta.get("refusal").textValue();
+        if (!refusalDelta.isEmpty()) {
+          refusalBuilder.append(refusalDelta);
+          bridge.emitEvent(new ProviderStreamEvent.TextDelta(refusalDelta));
+        }
+      }
+
+      // 3. reasoning_content
       if (delta.has("reasoning_content") && delta.get("reasoning_content").isTextual()) {
         String reasoningDelta = delta.get("reasoning_content").textValue();
         if (!reasoningDelta.isEmpty()) {
@@ -169,12 +179,12 @@ final class OpenAiChatStreamAccumulator {
         }
       }
 
-      // 3. reasoning_details: 仅保留至 native replay
+      // 4. reasoning_details: 仅保留至 native replay
       if (delta.has("reasoning_details") && !delta.get("reasoning_details").isNull()) {
         mergeReasoningDetails(delta.get("reasoning_details"));
       }
 
-      // 4. tool_calls
+      // 5. tool_calls
       if (delta.has("tool_calls") && delta.get("tool_calls").isArray()) {
         ArrayNode toolCallsArray = (ArrayNode) delta.get("tool_calls");
         for (JsonNode tcNode : toolCallsArray) {
@@ -428,7 +438,7 @@ final class OpenAiChatStreamAccumulator {
 
     ProviderResponse response =
         new ProviderResponse(
-            textBuilder.toString(),
+            contentBuilder.toString() + refusalBuilder,
             reasoningContentBuilder.toString(),
             Collections.unmodifiableList(toolCalls),
             stopReason,
@@ -443,8 +453,11 @@ final class OpenAiChatStreamAccumulator {
     if (canReplay) {
       ObjectNode payload = NODES.objectNode();
       payload.put("role", "assistant");
-      if (!textBuilder.isEmpty() || toolCalls.isEmpty()) {
-        payload.put("content", textBuilder.toString());
+      if (!contentBuilder.isEmpty() || (refusalBuilder.isEmpty() && toolCalls.isEmpty())) {
+        payload.put("content", contentBuilder.toString());
+      }
+      if (!refusalBuilder.isEmpty()) {
+        payload.put("refusal", refusalBuilder.toString());
       }
       if (!toolCalls.isEmpty()) {
         ArrayNode tcArr = payload.putArray("tool_calls");
