@@ -307,7 +307,7 @@ class ModelDescriptorJsonCodecTest {
             "Test system instruction.",
             List.of(
                 new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("hello")))),
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("hello")))),
             List.of(new ProviderToolDefinition("noop", "no-op", "{\"type\":\"object\"}")),
             ProviderCacheControl.none());
 

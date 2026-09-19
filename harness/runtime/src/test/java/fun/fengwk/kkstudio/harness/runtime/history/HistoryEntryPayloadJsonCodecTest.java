@@ -66,7 +66,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CustomMessagePayload.CORE_CONTRIBUTOR_ID,
             CustomMessagePayload.CORE_CUSTOM_TYPE,
             CustomMessagePayload.CORE_RENDERER_KEY,
-            system("system"),
+            user("system"),
             CustomMessagePayload.CORE_DETAILS_JSON);
     EntryPayload customEntry = new CustomEntryPayload("com.example.goal", "goal", 2, "{\"s\":1}");
     EntryPayload attemptFailure =
@@ -142,14 +142,14 @@ class HistoryEntryPayloadJsonCodecTest {
                 TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null)));
     assertEquals(
         "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
-            + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
+            + "\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
             + "\"details\":{}}",
         CODEC.encode(
             new CustomMessagePayload(
                 CustomMessagePayload.CORE_CONTRIBUTOR_ID,
                 CustomMessagePayload.CORE_CUSTOM_TYPE,
                 CustomMessagePayload.CORE_RENDERER_KEY,
-                system("sys"),
+                user("sys"),
                 CustomMessagePayload.CORE_DETAILS_JSON)));
     assertEquals(
         "{\"contributorId\":\"com.example.goal\",\"customType\":\"goal\",\"schemaVersion\":1,"
@@ -643,14 +643,14 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
                 "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
-                    + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]}}"));
+                    + "\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
                 "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
-                    + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
+                    + "\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -658,7 +658,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
                 "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"Message\","
-                    + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
+                    + "\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -674,7 +674,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.CUSTOM_MESSAGE,
                 "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
-                    + "\"message\":{\"role\":\"SYSTEM\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
+                    + "\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"s\"}]},"
                     + "\"details\":{},\"unexpected\":1}"));
   }
 
@@ -760,10 +760,6 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
-  }
-
-  private static AgentMessage system(String text) {
-    return new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)));
   }
 
   private static AgentMessage assistant(String text) {

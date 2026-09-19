@@ -28,7 +28,7 @@ class ThreadCommandPayloadJsonCodecTest {
     List<ThreadCommandPayload> payloads =
         List.of(
             new UserMessageCommandPayload(user("hello")),
-            new CustomMessageCommandPayload(system("system")),
+            new CustomMessageCommandPayload(user("custom")),
             new SetAgentCommandPayload("coding"),
             new SetModelCommandPayload(MODEL),
             new SetEnvironmentCommandPayload("local"),
@@ -253,9 +253,5 @@ class ThreadCommandPayloadJsonCodecTest {
 
   private static AgentMessage user(String text) {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
-  }
-
-  private static AgentMessage system(String text) {
-    return new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent(text)));
   }
 }
