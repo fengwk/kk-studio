@@ -15,9 +15,7 @@ import java.util.stream.Stream;
  *
  * <ul>
  *   <li>Model/Tool 网关使用底层无界虚拟线程，但由显式 ConcurrencyAdmission 提供运行时准入限制；
- *   <li>Subagent 执行使用固定容量零队列 executor，受部署级并发配置严格约束；
- *   <li>Environment 管理操作（EnvironmentOperationConfiguration.java）是经产品契约明确豁免配额的管控执行器：
- *       技能来源刷新/安装等管理任务无人工并发配额与排队，直接按任务使用虚拟线程派发。
+ *   <li>Subagent 执行使用固定容量零队列 executor，受部署级并发配置严格约束。
  * </ul>
  */
 class HarnessExecutionAdmissionArchitectureTest {
@@ -51,14 +49,10 @@ class HarnessExecutionAdmissionArchitectureTest {
   }
 
   @Test
-  void unboundedPerTaskExecutorsAreOwnedOnlyByGatewaysAndEnvironmentManagement()
-      throws IOException {
+  void unboundedPerTaskExecutorsAreOwnedOnlyByModelAndToolGateways() throws IOException {
     Path platformMain = repositoryRoot().resolve("platform/src/main/java");
     List<String> owners =
-        List.of(
-            "ModelExecutionConfiguration.java",
-            "HarnessToolGatewayConfiguration.java",
-            "EnvironmentOperationConfiguration.java");
+        List.of("ModelExecutionConfiguration.java", "HarnessToolGatewayConfiguration.java");
     try (Stream<Path> paths = Files.walk(platformMain)) {
       paths
           .filter(path -> path.toString().endsWith(".java"))
@@ -77,14 +71,6 @@ class HarnessExecutionAdmissionArchitectureTest {
                 }
               });
     }
-
-    String envConfig =
-        Files.readString(
-            platformMain.resolve(
-                "fun/fengwk/kkstudio/platform/environment/operation/EnvironmentOperationConfiguration.java"));
-    assertTrue(
-        envConfig.contains("Executors.newVirtualThreadPerTaskExecutor"),
-        "Environment management worker must use virtual per-task execution because no quota is deliberate");
   }
 
   private static Path repositoryRoot() {

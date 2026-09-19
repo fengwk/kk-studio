@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.service;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpConfigParser.ParsedMcpConfig;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /** MCP server CRUD 输入规范化与校验。 */
@@ -21,9 +21,13 @@ public final class McpServerMutationValidator {
     if (createDTO == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    String name = requireName(createDTO.getName());
-    ParsedMcpConfig config = McpConfigParser.parse(createDTO.getConfigJson());
-    return new NormalizedCreate(name, config);
+    return new NormalizedCreate(
+        requireName(createDTO.getName()),
+        normalizeHttpConfig(
+            createDTO.getUrl(),
+            createDTO.getHeaders(),
+            createDTO.getEnabled(),
+            createDTO.getTimeoutMillis()));
   }
 
   /** 规范化 update 输入。 */
@@ -31,8 +35,12 @@ public final class McpServerMutationValidator {
     if (updateDTO == null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " body must not be null");
     }
-    ParsedMcpConfig config = McpConfigParser.parse(updateDTO.getConfigJson());
-    return new NormalizedUpdate(config);
+    return new NormalizedUpdate(
+        normalizeHttpConfig(
+            updateDTO.getUrl(),
+            updateDTO.getHeaders(),
+            updateDTO.getEnabled(),
+            updateDTO.getTimeoutMillis()));
   }
 
   public static String requireName(String name) {
@@ -50,9 +58,23 @@ public final class McpServerMutationValidator {
     return name;
   }
 
+  /** 校验并规范化显式 HTTP 配置；{@code enabled} 为空时按 true 处理。 */
+  public static HttpConfig normalizeHttpConfig(
+      String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
+    return new HttpConfig(
+        McpConfigParser.requireUrl(url),
+        McpConfigParser.normalizeHeaders(headers),
+        enabled == null || enabled,
+        McpConfigParser.normalizeTimeoutMillis(timeoutMillis));
+  }
+
+  /** 归一化后的显式 HTTP 配置。 */
+  public record HttpConfig(
+      String url, Map<String, String> headers, boolean enabled, long timeoutMillis) {}
+
   /** create 归一化值。 */
-  public record NormalizedCreate(String name, ParsedMcpConfig config) {}
+  public record NormalizedCreate(String name, HttpConfig config) {}
 
   /** update 归一化值。 */
-  public record NormalizedUpdate(ParsedMcpConfig config) {}
+  public record NormalizedUpdate(HttpConfig config) {}
 }

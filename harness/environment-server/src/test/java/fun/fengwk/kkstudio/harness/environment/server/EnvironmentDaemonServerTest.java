@@ -695,33 +695,6 @@ class EnvironmentDaemonServerTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
 
-  /** 测试意图：不要求 workdir 的本地 MCP 能力缺少 workdir 也必须照常发送 INVOKE（身份三字段仍需齐全）。 */
-  @Test
-  void mcpLocalCallDoesNotRequireWorkdir() {
-    Fixture fixture = new Fixture();
-    FakeChannel channel = fixture.connectReady("channel-mcp-local-call");
-    EnvironmentCapabilityDescriptor mcpLocalCall =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_LOCAL_CALL);
-
-    fixture.server.invoke(
-        ENVIRONMENT_ID,
-        new EnvironmentCapabilityExecutionRequest(
-            mcpLocalCall,
-            new EnvironmentCapabilityCall(
-                CALL_ONE.toString(),
-                "{\"serverId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
-                    + "\"configVersion\":0,"
-                    + "\"toolName\":\"echo\",\"arguments\":{},"
-                    + "\"config\":{\"type\":\"local\","
-                    + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
-                    + "\"command\":[\"node\",\"server.js\"],\"cwd\":\"/srv/repo\"}}"),
-            Duration.ofSeconds(5)),
-        new RecordingListener());
-
-    assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
-  }
-
   /** 测试意图：并发 HELLO 抢占同一环境时只有一个连接获得 WELCOME，另一个以 RETRY_LATER 关闭。 */
   @Test
   void concurrentHelloForActiveRouteIsRejectedWithRetryLater() {

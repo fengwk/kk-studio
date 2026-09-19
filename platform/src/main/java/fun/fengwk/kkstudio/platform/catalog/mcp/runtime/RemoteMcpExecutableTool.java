@@ -21,18 +21,15 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.RemoteConnectionConfig;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,9 +37,10 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
- * Remote MCP 工具可执行实现。
+ * Streamable HTTP MCP 工具可执行实现。
  *
- * <p>发送前必须重新围栏比对当前 Server 与 Tool 状态；使用单一 McpDeadline 覆盖初始化与调用； 错误信息绝不泄露 URL、敏感 headers 或系统内部异常栈。
+ * <p>发送前必须按模型可见工具名重新读取当前 DB 行并比对 Server 可选拔状态；使用单一 McpDeadline 覆盖初始化与调用； 错误信息绝不泄露 URL、敏感 headers
+ * 或系统内部异常栈。
  */
 @Slf4j
 public final class RemoteMcpExecutableTool implements Tool {
@@ -52,11 +50,9 @@ public final class RemoteMcpExecutableTool implements Tool {
   private static final String FAILED_MESSAGE = "MCP tool call failed";
 
   private final ToolDescriptor descriptor;
-  private final UUID serverId;
-  private final UUID toolId;
+  private final String serverName;
+  private final String toolName;
   private final String sourceName;
-  private final long frozenConfigVersion;
-  private final long frozenSchemaRevision;
   private final McpServerRepository repository;
   private final ExecutorService executor;
   private final BiFunction<RemoteMcpConfig, McpDeadline, McpClient> clientProvider;
@@ -64,20 +60,16 @@ public final class RemoteMcpExecutableTool implements Tool {
 
   public RemoteMcpExecutableTool(
       ToolDescriptor descriptor,
-      UUID serverId,
-      UUID toolId,
+      String serverName,
+      String toolName,
       String sourceName,
-      long frozenConfigVersion,
-      long frozenSchemaRevision,
       McpServerRepository repository,
       ExecutorService executor) {
     this(
         descriptor,
-        serverId,
-        toolId,
+        serverName,
+        toolName,
         sourceName,
-        frozenConfigVersion,
-        frozenSchemaRevision,
         repository,
         executor,
         McpClientFactory::createRemote,
@@ -86,24 +78,20 @@ public final class RemoteMcpExecutableTool implements Tool {
 
   public RemoteMcpExecutableTool(
       ToolDescriptor descriptor,
-      UUID serverId,
-      UUID toolId,
+      String serverName,
+      String toolName,
       String sourceName,
-      long frozenConfigVersion,
-      long frozenSchemaRevision,
       McpServerRepository repository,
       ExecutorService executor,
       BiFunction<RemoteMcpConfig, McpDeadline, McpClient> clientProvider,
       Function<String, String> envProvider) {
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
-    this.serverId = Objects.requireNonNull(serverId, "serverId");
-    this.toolId = Objects.requireNonNull(toolId, "toolId");
+    this.serverName = Objects.requireNonNull(serverName, "serverName");
+    this.toolName = Objects.requireNonNull(toolName, "toolName");
     if (sourceName == null || sourceName.isBlank()) {
       throw new IllegalArgumentException("sourceName must not be blank");
     }
     this.sourceName = sourceName;
-    this.frozenConfigVersion = frozenConfigVersion;
-    this.frozenSchemaRevision = frozenSchemaRevision;
     this.repository = Objects.requireNonNull(repository, "repository");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.clientProvider = Objects.requireNonNull(clientProvider, "clientProvider");
@@ -125,36 +113,18 @@ public final class RemoteMcpExecutableTool implements Tool {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(listener, "listener");
 
-    Optional<McpServer> serverOpt = repository.getById(serverId);
-    Optional<McpTool> toolOpt = repository.getToolById(toolId);
-
+    Optional<McpServer> serverOpt = repository.getByName(serverName);
+    Optional<McpTool> toolOpt = repository.getTool(toolName);
     if (serverOpt.isEmpty() || toolOpt.isEmpty()) {
-      listener.onComplete(
-          new ToolResult(
-              request.call().id(),
-              List.of(new TextResultContent(CONFIG_CHANGED_MESSAGE)),
-              true,
-              "{}"));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return staleConfiguration(request, listener);
     }
 
     McpServer server = serverOpt.get();
     McpTool tool = toolOpt.get();
-
-    if (server.getConnectionType() != McpConnectionType.REMOTE
-        || !server.isEnabled()
+    if (!server.isEnabled()
         || server.getDiscoveryStatus() != McpDiscoveryStatus.AVAILABLE
-        || server.getVersion() != frozenConfigVersion
-        || !Objects.equals(server.getDiscoveredVersion(), server.getVersion())
-        || !tool.isAvailable()
-        || tool.getSchemaRevision() != frozenSchemaRevision) {
-      listener.onComplete(
-          new ToolResult(
-              request.call().id(),
-              List.of(new TextResultContent(CONFIG_CHANGED_MESSAGE)),
-              true,
-              "{}"));
-      return CompletedToolExecutionHandle.INSTANCE;
+        || !serverName.equals(tool.getServerName())) {
+      return staleConfiguration(request, listener);
     }
 
     Duration serverTimeout = Duration.ofMillis(server.getTimeoutMillis());
@@ -174,14 +144,9 @@ public final class RemoteMcpExecutableTool implements Tool {
         executor.submit(
             () -> {
               try {
-                RemoteConnectionConfig remoteConfig =
-                    (RemoteConnectionConfig)
-                        McpConfigParser.parseConnectionConfig(
-                            server.getConnectionType(), server.getConnectionConfig());
                 Map<String, String> resolvedHeaders =
-                    McpConfigParser.resolveRemoteHeaders(remoteConfig.headers(), envProvider);
-
-                RemoteMcpConfig config = new RemoteMcpConfig(remoteConfig.url(), resolvedHeaders);
+                    McpConfigParser.resolveHeaders(server.getHeaders(), envProvider);
+                RemoteMcpConfig config = new RemoteMcpConfig(server.getUrl(), resolvedHeaders);
                 try (McpClient client = clientProvider.apply(config, deadline)) {
                   if (token.isCancelled()) {
                     return;
@@ -232,5 +197,16 @@ public final class RemoteMcpExecutableTool implements Tool {
         return token.isCancelled();
       }
     };
+  }
+
+  private static ToolExecutionHandle staleConfiguration(
+      ToolExecutionRequest request, ToolExecutionListener listener) {
+    listener.onComplete(
+        new ToolResult(
+            request.call().id(),
+            List.of(new TextResultContent(CONFIG_CHANGED_MESSAGE)),
+            true,
+            "{}"));
+    return CompletedToolExecutionHandle.INSTANCE;
   }
 }

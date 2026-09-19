@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import java.util.Set;
-
 /** 固定 Environment Capability 的原子 canonical 身份。 */
 public final class EnvironmentCapabilityIds {
 
@@ -18,13 +16,6 @@ public final class EnvironmentCapabilityIds {
       new EnvironmentCapabilityId("lsp.workspace-symbols");
   public static final EnvironmentCapabilityId LSP_JAVA_DECOMPILE =
       new EnvironmentCapabilityId("lsp.java-decompile");
-  public static final EnvironmentCapabilityId MCP_LOCAL_CALL =
-      new EnvironmentCapabilityId("mcp.local.call");
-  public static final EnvironmentCapabilityId MCP_LOCAL_DISCOVER =
-      new EnvironmentCapabilityId("mcp.local.discover");
-
-  /** 仅供管理执行器使用的能力：复用 INVOKE/CANCEL/结果通道，但绝不进入模型 Tool 目录。 */
-  public static final Set<EnvironmentCapabilityId> MANAGEMENT_ONLY = Set.of(MCP_LOCAL_DISCOVER);
 
   private EnvironmentCapabilityIds() {}
 }

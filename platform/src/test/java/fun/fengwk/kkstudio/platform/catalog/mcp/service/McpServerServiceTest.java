@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -21,23 +20,26 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerDiscoveryResponseDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 
 /**
- * Platform MCP Server 核心服务集成测试。
+ * Platform MCP Server name-keyed 服务集成测试。
  *
- * <p>基于真实的 PostgreSQL Testcontainer 与轻量 Streamable HTTP MCP Server Mock， 验证严格保存流程、CAS 并发控制、安全 DTO
- * 投影、分离的显式发现与工具代际 tombstone 机制。
+ * <p>基于真实 PostgreSQL Testcontainer 与轻量 Streamable HTTP MCP Server Mock，验证：配置保存不发起网络 I/O、显式发现同步
+ * 执行并整体物理替换工具行、CAS 并发冲突、发现失败不破坏既有快照、被 Agent 引用的工具删除 fail closed， 以及 name 即身份的 CRUD 契约。
  */
 public class McpServerServiceTest extends PostgresSpringTestSupport {
 
@@ -60,245 +62,251 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
   }
 
   @Test
-  public void createsServerWithoutIoAndExposesSafeDto() {
-    // 意图：验证创建时绝不发生网络 IO，初始状态为 UNVERIFIED，DTO 仅暴露安全元数据，通过 getServerConfig 可读取完整配置
-    String configJson =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "headers": {
-            "Authorization": "Bearer secret_token_123"
-          },
-          "timeoutMillis": 10000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
-
-    McpServerCreateDTO createDTO = new McpServerCreateDTO();
-    createDTO.setName("github_core");
-    createDTO.setConfigJson(configJson);
+  public void createsServerWithoutIoAndExposesSafeConfigOnlyViaExplicitEndpoint() {
+    // 意图：创建只持久化显式 HTTP 配置且不发起任何网络 I/O；公开视图不含 URL/headers，显式 config 端点才返回完整配置
+    fakeServer.setFailDiscovery(true);
+    McpServerCreateDTO createDTO =
+        createDto(
+            "github_core",
+            fakeServer.endpointUrl(),
+            Map.of("Authorization", "Bearer secret_token_123"),
+            10000L);
 
     McpServerDTO server = mcpServerService.createServer(createDTO);
     assertNotNull(server);
     assertEquals("github_core", server.getName());
-    assertEquals("remote", server.getType());
-    assertNull(server.getEnvironmentId());
     assertEquals("0", server.getVersion());
     assertEquals(10000L, server.getTimeoutMillis());
     assertEquals("UNVERIFIED", server.getDiscoveryStatus());
-    assertNull(server.getDiscoveredVersion());
     assertEquals(0, server.getToolCount());
+    assertEquals(0, fakeServer.toolCallCount());
 
-    // 验证 getServerConfig 返回完整配置
-    McpServerConfigDTO configDTO = mcpServerService.getServerConfig(server.getId());
-    assertEquals(server.getId(), configDTO.getId());
+    McpServerConfigDTO configDTO = mcpServerService.getServerConfig("github_core");
     assertEquals("github_core", configDTO.getName());
-    assertTrue(configDTO.getConfigJson().contains("secret_token_123"));
+    assertEquals(fakeServer.endpointUrl(), configDTO.getUrl());
+    assertEquals("Bearer secret_token_123", configDTO.getHeaders().get("Authorization"));
+    assertEquals("0", configDTO.getVersion());
 
-    // 确认名称唯一性拒绝
+    // 公开视图物理上只有安全元数据字段：不存在 url、headers、type、environmentId 或任何代理 id
+    assertEquals(
+        List.of(
+            "createTime",
+            "discoveryStatus",
+            "enabled",
+            "name",
+            "timeoutMillis",
+            "toolCount",
+            "updateTime",
+            "version"),
+        declaredFieldNames());
+
+    // name 不可重复
     assertThrows(AiDuplicateException.class, () -> mcpServerService.createServer(createDTO));
   }
 
   @Test
-  public void discoversRemoteToolsSynchronouslyAndUpdatesRevisions() {
-    // 意图：验证 Remote 显式发现同步执行，更新 status 为 AVAILABLE，discovered_version 对齐，支持模式修订与 tombstone
+  public void rejectsInvalidNameAndUrlBeforeAnyPersistence() {
+    // 意图：name 正则、URL 绝对地址与 user-info 凭据约束在落库前确定性拒绝
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            mcpServerService.createServer(
+                createDto("BadName", fakeServer.endpointUrl(), Map.of(), null)));
+    assertThrows(
+        AiValidationException.class,
+        () -> mcpServerService.createServer(createDto("bad_url", "not-a-url", Map.of(), null)));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            mcpServerService.createServer(
+                createDto("bad_cred", "http://user:pw@example.com/mcp", Map.of(), null)));
+    assertThrows(AiValidationException.class, () -> mcpServerService.getServer("Missing"));
+
+    assertEquals(0, countServers());
+  }
+
+  @Test
+  public void discoversRemoteToolsSynchronouslyAndReplacesWholeResult() {
+    // 意图：显式发现同步执行并把状态置为 AVAILABLE，成功的发现整体物理替换当前工具行，不存在 tombstone 或修订版本
     fakeServer.addTool("Search-Files.v1", "Search files by glob", "{\"type\":\"object\"}");
     fakeServer.addTool("read_file", "Read file content", "{\"type\":\"object\"}");
+    mcpServerService.createServer(
+        createDto(
+            "remote_sync", fakeServer.endpointUrl(), Map.of("Authorization", "Bearer tok"), 5000L));
 
-    String configJson =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "headers": {
-            "Authorization": "Bearer secret_token"
-          },
-          "timeoutMillis": 5000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
+    McpServerDTO discovered = mcpServerService.discoverServer("remote_sync", "0");
+    assertEquals("AVAILABLE", discovered.getDiscoveryStatus());
+    assertEquals(2, discovered.getToolCount());
+    assertEquals("0", discovered.getVersion());
 
-    McpServerCreateDTO createDTO = new McpServerCreateDTO();
-    createDTO.setName("remote_sync");
-    createDTO.setConfigJson(configJson);
-
-    McpServerDTO created = mcpServerService.createServer(createDTO);
-    UUID serverId = UUID.fromString(created.getId());
-
-    // 执行显式发现
-    McpServerDiscoveryResponseDTO response = mcpServerService.discoverServer(created.getId(), "0");
-
-    assertNotNull(response.getServer());
-    assertNull(response.getOperation()); // Remote 无异步 operation
-    assertEquals("AVAILABLE", response.getServer().getDiscoveryStatus());
-    assertEquals("0", response.getServer().getDiscoveredVersion());
-    assertEquals(2, response.getServer().getToolCount());
-
-    List<McpTool> tools = repository.listTools(serverId);
+    List<McpTool> tools = repository.listTools("remote_sync");
     assertEquals(2, tools.size());
-    McpTool tool1 =
-        tools.stream().filter(t -> t.getSourceName().equals("Search-Files.v1")).findFirst().get();
-    assertEquals("Search-Files.v1", tool1.getSourceName());
-    assertEquals("mcp_remote_sync_search_files_v1", tool1.getModelName());
-    assertTrue(tool1.isAvailable());
-    assertEquals(0L, tool1.getSchemaRevision());
+    McpTool searchTool =
+        tools.stream()
+            .filter(t -> t.getSourceName().equals("Search-Files.v1"))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("mcp_remote_sync_search_files_v1", searchTool.getName());
+    assertFalse(tools.stream().anyMatch(t -> t.getName().contains("-")));
 
-    // 远端变更：移除 read_file，更新 Search-Files.v1 schema
+    // 远端删掉 read_file 并更新 schema：整行删除并重建，不存在历史 tombstone。
     fakeServer.clearTools();
     fakeServer.addTool(
         "Search-Files.v1",
         "Updated desc",
         "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}}}");
 
-    McpServerDiscoveryResponseDTO response2 = mcpServerService.discoverServer(created.getId(), "0");
-    assertEquals(1, response2.getServer().getToolCount()); // available count
+    McpServerDTO rediscovered = mcpServerService.discoverServer("remote_sync", "0");
+    assertEquals(1, rediscovered.getToolCount());
 
-    List<McpTool> toolsAfter = repository.listTools(serverId);
-    assertEquals(2, toolsAfter.size()); // 1 active + 1 tombstoned
+    List<McpTool> after = repository.listTools("remote_sync");
+    assertEquals(1, after.size());
+    assertEquals("mcp_remote_sync_search_files_v1", after.get(0).getName());
+    assertEquals("Updated desc", after.get(0).getDescription());
+  }
 
-    McpTool updatedTool =
-        toolsAfter.stream()
-            .filter(t -> t.getSourceName().equals("Search-Files.v1"))
-            .findFirst()
-            .get();
-    assertTrue(updatedTool.isAvailable());
-    assertEquals(1L, updatedTool.getSchemaRevision()); // schema 改变 revision 递增
+  @Test
+  public void discoveryFailureKeepsExistingSnapshotAndStatusUnchanged() {
+    // 意图：发现网络失败时抛 AiValidationException，既有工具行与状态保持原样，不被清空
+    fakeServer.addTool("stable", "Stable tool", "{\"type\":\"object\"}");
+    mcpServerService.createServer(createDto("failing", fakeServer.endpointUrl(), Map.of(), 5000L));
+    mcpServerService.discoverServer("failing", "0");
+    assertEquals(1, repository.listTools("failing").size());
 
-    McpTool tombstonedTool =
-        toolsAfter.stream().filter(t -> t.getSourceName().equals("read_file")).findFirst().get();
-    assertFalse(tombstonedTool.isAvailable()); // tombstone 标记为不可用
-    assertEquals(0L, tombstonedTool.getSchemaRevision());
+    fakeServer.setFailDiscovery(true);
+    assertThrows(
+        AiValidationException.class, () -> mcpServerService.discoverServer("failing", "0"));
+
+    assertEquals(1, repository.listTools("failing").size());
+    assertEquals("AVAILABLE", mcpServerService.getServer("failing").getDiscoveryStatus());
+    // 失败绝不推进版本或改变状态
+    assertEquals("0", mcpServerService.getServer("failing").getVersion());
   }
 
   @Test
   public void updatesServerWithCasAndResetsDiscoveryStatus() {
-    // 意图：验证更新配置时通过 CAS 推进 version 并将 discoveryStatus 重置为 UNVERIFIED
+    // 意图：更新通过 CAS 推进 version 并把 discoveryStatus 重置为 UNVERIFIED；过期版本确定性冲突
     fakeServer.addTool("ping", "Ping", "{}");
+    mcpServerService.createServer(
+        createDto("update_test", fakeServer.endpointUrl(), Map.of(), 5000L));
+    mcpServerService.discoverServer("update_test", "0");
+    assertEquals("AVAILABLE", mcpServerService.getServer("update_test").getDiscoveryStatus());
 
-    String config1 =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "timeoutMillis": 5000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
+    McpServerUpdateDTO update = new McpServerUpdateDTO();
+    update.setExpectedVersion("0");
+    update.setUrl(fakeServer.endpointUrl());
+    update.setTimeoutMillis(8000L);
 
-    McpServerCreateDTO createDTO = new McpServerCreateDTO();
-    createDTO.setName("update_test");
-    createDTO.setConfigJson(config1);
-
-    McpServerDTO created = mcpServerService.createServer(createDTO);
-    mcpServerService.discoverServer(created.getId(), "0");
-
-    McpServerDTO availableServer = mcpServerService.getServer(created.getId());
-    assertEquals("AVAILABLE", availableServer.getDiscoveryStatus());
-    assertEquals("0", availableServer.getVersion());
-
-    // 1. 更新为新配置
-    String config2 =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "timeoutMillis": 8000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
-
-    McpServerUpdateDTO updateDTO = new McpServerUpdateDTO();
-    updateDTO.setExpectedVersion("0");
-    updateDTO.setConfigJson(config2);
-
-    McpServerDTO updated = mcpServerService.updateServer(created.getId(), updateDTO);
+    McpServerDTO updated = mcpServerService.updateServer("update_test", update);
     assertEquals("1", updated.getVersion());
     assertEquals(8000L, updated.getTimeoutMillis());
-    assertEquals("UNVERIFIED", updated.getDiscoveryStatus()); // 状态重置
+    assertEquals("UNVERIFIED", updated.getDiscoveryStatus());
 
-    // 2. CAS 冲突检查
+    // 同一 expectedVersion 再次提交必须冲突
     assertThrows(
         AiVersionConflictException.class,
-        () -> mcpServerService.updateServer(created.getId(), updateDTO));
+        () -> mcpServerService.updateServer("update_test", update));
+
+    // discover 与 delete 也必须校验版本
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> mcpServerService.discoverServer("update_test", "0"));
+    assertThrows(
+        AiVersionConflictException.class, () -> mcpServerService.deleteServer("update_test", "0"));
+  }
+
+  @Test
+  public void blocksDiscoveryThatWouldRemoveAgentReferencedTool() {
+    // 意图：若被 Agent 引用的工具名将从目录中消失，发现必须 fail closed 并完整保留旧快照
+    fakeServer.addTool("critical_tool", "Critical", "{}");
+    fakeServer.addTool("removable_tool", "Removable", "{}");
+    mcpServerService.createServer(
+        createDto("inuse_test", fakeServer.endpointUrl(), Map.of(), 5000L));
+    mcpServerService.discoverServer("inuse_test", "0");
+
+    String referencedName =
+        repository.listTools("inuse_test").stream()
+            .filter(t -> t.getSourceName().equals("critical_tool"))
+            .findFirst()
+            .orElseThrow()
+            .getName();
+    insertFakeAgentDefinitionReferencingTool(referencedName);
+
+    // 远端不再提供 critical_tool：引用保护必须阻止整次替换
+    fakeServer.clearTools();
+    fakeServer.addTool("removable_tool", "Removable", "{}");
+
+    assertThrows(AiInUseException.class, () -> mcpServerService.discoverServer("inuse_test", "0"));
+
+    List<McpTool> preserved = repository.listTools("inuse_test");
+    assertEquals(2, preserved.size());
+    assertTrue(preserved.stream().anyMatch(t -> t.getName().equals(referencedName)));
+    assertEquals("AVAILABLE", mcpServerService.getServer("inuse_test").getDiscoveryStatus());
   }
 
   @Test
   public void blocksServerDeleteWhenReferencedByAgentDefinition() {
-    // 意图：当任一 agent_definition.config.tools 引用工具的模型可见名时，Server 删除被 AiInUseException 拦截
+    // 意图：被 Agent 引用的工具所属 Server 拒绝删除；引用清理后删除成功并级联物理删除工具行
     fakeServer.addTool("critical_tool", "Critical", "{}");
+    mcpServerService.createServer(
+        createDto("delete_guard", fakeServer.endpointUrl(), Map.of(), 5000L));
+    mcpServerService.discoverServer("delete_guard", "0");
 
-    String configJson =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "timeoutMillis": 5000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
+    String referencedName = repository.listTools("delete_guard").get(0).getName();
+    insertFakeAgentDefinitionReferencingTool(referencedName);
 
-    McpServerCreateDTO createDTO = new McpServerCreateDTO();
-    createDTO.setName("inuse_test");
-    createDTO.setConfigJson(configJson);
+    assertThrows(AiInUseException.class, () -> mcpServerService.deleteServer("delete_guard", "0"));
+    assertEquals(1, repository.listTools("delete_guard").size());
 
-    McpServerDTO created = mcpServerService.createServer(createDTO);
-    mcpServerService.discoverServer(created.getId(), "0");
-
-    UUID serverId = UUID.fromString(created.getId());
-    McpTool tool = repository.listTools(serverId).get(0);
-    String modelName = tool.getModelName();
-
-    // 模拟存在 agent_definition.config.tools 引用了该模型可见名
-    insertFakeAgentDefinitionReferencingTool(modelName);
-
-    // 1. 删除 Server 被拦截
-    assertThrows(AiInUseException.class, () -> mcpServerService.deleteServer(created.getId(), "0"));
-
-    // 2. 清理 agent_definition 引用后，delete 成功，且级联删除工具行
     jdbc.update("delete from agent_definition where name = 'test_agent_mcp'");
-    mcpServerService.deleteServer(created.getId(), "0");
+    mcpServerService.deleteServer("delete_guard", "0");
 
-    assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from mcp_server where id = ?", Integer.class, serverId));
-    assertEquals(
-        0,
-        jdbc.queryForObject(
-            "select count(*) from mcp_tool where mcp_server_id = ?", Integer.class, serverId));
+    assertEquals(0, countServers());
+    assertEquals(0, repository.listTools("delete_guard").size());
+    assertThrows(
+        AiResourceNotFoundException.class, () -> mcpServerService.getServer("delete_guard"));
   }
 
   @Test
-  public void getAndPageServers() {
-    // 意图：验证 getServer 与分页查询功能
-    String configJson =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "timeoutMillis": 5000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
+  public void getAndPageServersByName() {
+    // 意图：name 即查询身份；未知 name 返回 404 语义异常
+    mcpServerService.createServer(
+        createDto("page_test", fakeServer.endpointUrl(), Map.of(), 5000L));
 
-    McpServerCreateDTO createDTO = new McpServerCreateDTO();
-    createDTO.setName("page_test");
-    createDTO.setConfigJson(configJson);
-
-    McpServerDTO created = mcpServerService.createServer(createDTO);
-
-    McpServerDTO retrieved = mcpServerService.getServer(created.getId());
-    assertEquals(created.getId(), retrieved.getId());
+    McpServerDTO retrieved = mcpServerService.getServer("page_test");
     assertEquals("page_test", retrieved.getName());
+    assertEquals("UNVERIFIED", retrieved.getDiscoveryStatus());
 
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> mcpServerService.getServer(UUID.randomUUID().toString()));
+        AiResourceNotFoundException.class, () -> mcpServerService.getServer("no_such_server"));
 
     Page<McpServerDTO> page = mcpServerService.pageServers(new PageQuery(1, 10));
     assertNotNull(page);
-    assertTrue(page.getResults().stream().anyMatch(s -> s.getId().equals(created.getId())));
+    assertTrue(page.getResults().stream().anyMatch(s -> "page_test".equals(s.getName())));
+  }
+
+  private static McpServerCreateDTO createDto(
+      String name, String url, Map<String, String> headers, Long timeoutMillis) {
+    McpServerCreateDTO createDTO = new McpServerCreateDTO();
+    createDTO.setName(name);
+    createDTO.setUrl(url);
+    createDTO.setHeaders(headers);
+    createDTO.setTimeoutMillis(timeoutMillis);
+    return createDTO;
+  }
+
+  /** 公开视图 DTO 的声明字段集合，用于断言不存在隐藏身份或敏感字段。 */
+  private static List<String> declaredFieldNames() {
+    List<String> names = new ArrayList<>();
+    for (Field field : McpServerDTO.class.getDeclaredFields()) {
+      names.add(field.getName());
+    }
+    Collections.sort(names);
+    return names;
+  }
+
+  private int countServers() {
+    return jdbc.queryForObject("select count(*) from mcp_server", Integer.class);
   }
 
   private void insertFakeAgentDefinitionReferencingTool(String modelName) {

@@ -238,135 +238,72 @@ create unique index uk_skill_active
 
 comment on index uk_skill_active is '每个 Skill 名至多一个活跃行';
 
--- Platform MCP Server 配置。name 是产品侧唯一路由身份且创建后不可变；
--- connection_config 只保存与 connection_type 对应的传输参数。
+-- Platform MCP Server 配置：name 是主键与唯一路由身份，创建后不可变。Backend 只通过
+-- Streamable HTTP 连接 Server；请求 header 可能内嵌凭据，绝不进入列表投影与日志。
 create table mcp_server (
-    id                  uuid          primary key,
-    name                varchar(32)   not null,
-    connection_type     varchar(16)   not null,
-    environment_id      uuid,
-    connection_config   jsonb         not null,
-    enabled             boolean       not null default true,
-    timeout_millis      bigint        not null,
-    discovery_status    varchar(16)   not null default 'UNVERIFIED',
-    discovered_version  bigint,
-    created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
-    version             bigint        not null default 0,
-    constraint fk_mcp_server_environment foreign key (environment_id)
-        references environment (id) on delete restrict,
+    name              varchar(32)    primary key,
+    url               varchar(2048)  not null,
+    headers           jsonb          not null default '{}'::jsonb,
+    enabled           boolean        not null default true,
+    timeout_millis    bigint         not null,
+    discovery_status  varchar(16)    not null default 'UNVERIFIED',
+    created_at        timestamptz(3) not null default current_timestamp,
+    updated_at        timestamptz(3) not null default current_timestamp,
+    version           bigint         not null default 0,
     constraint ck_mcp_server_name check (
         name ~ '^[a-z][a-z0-9_]*$'
     ),
-    constraint ck_mcp_server_connection_type check (
-        connection_type in ('REMOTE', 'LOCAL')
-    ),
-    constraint ck_mcp_server_local_environment check (
-        connection_type not in ('REMOTE', 'LOCAL')
-        or (connection_type = 'LOCAL' and environment_id is not null)
-        or (connection_type = 'REMOTE' and environment_id is null)
-    ),
-    constraint ck_mcp_server_connection_config_object check (
-        jsonb_typeof(connection_config) = 'object'
-    ),
-    constraint ck_mcp_server_connection_config_shape check (
-        connection_type not in ('REMOTE', 'LOCAL')
-        or (
-            connection_type = 'REMOTE'
-            and connection_config ? 'url'
-            and connection_config ? 'headers'
-            and jsonb_typeof(connection_config -> 'url') = 'string'
-            and jsonb_typeof(connection_config -> 'headers') = 'object'
-            and not (connection_config ? 'command')
-            and not (connection_config ? 'cwd')
-            and not (connection_config ? 'env')
-        ) or (
-            connection_type = 'LOCAL'
-            and connection_config ? 'command'
-            and connection_config ? 'cwd'
-            and connection_config ? 'env'
-            and jsonb_typeof(connection_config -> 'command') = 'array'
-            and jsonb_array_length(connection_config -> 'command') > 0
-            and jsonb_typeof(connection_config -> 'cwd') = 'string'
-            and jsonb_typeof(connection_config -> 'env') = 'object'
-            and not (connection_config ? 'url')
-            and not (connection_config ? 'headers')
-        )
+    constraint ck_mcp_server_url_nonblank check (btrim(url) <> ''),
+    constraint ck_mcp_server_headers_object check (
+        jsonb_typeof(headers) = 'object'
     ),
     constraint ck_mcp_server_timeout_positive check (timeout_millis > 0),
     constraint ck_mcp_server_discovery_status check (
         discovery_status in ('UNVERIFIED', 'AVAILABLE', 'FAILED')
     ),
-    constraint ck_mcp_server_discovered_version check (
-        discovered_version is null
-        or (discovered_version >= 0 and discovered_version <= version)
-    ),
     constraint ck_mcp_server_version_nonneg check (version >= 0),
     constraint ck_mcp_server_time_order check (updated_at >= created_at)
 );
 
-create unique index uk_mcp_server_name
-    on mcp_server (name);
-
-create index idx_mcp_server_environment
-    on mcp_server (environment_id)
-    where environment_id is not null;
-
-comment on table mcp_server is 'Platform MCP Server 持久配置：REMOTE 由 Backend 直连 Streamable HTTP，LOCAL 由绑定的 Environment Daemon 启动 stdio 进程';
-comment on column mcp_server.id is 'Server 的全局唯一 UUID（应用侧生成）';
-comment on column mcp_server.name is '唯一名（创建后不可变）：^[a-z][a-z0-9_]*$，≤32 字符；同时作为模型工具名 mcp_<server_name>_<tool> 的组成段';
-comment on column mcp_server.connection_type is '连接类型：REMOTE（Backend 直连 Streamable HTTP）或 LOCAL（Daemon stdio）';
-comment on column mcp_server.environment_id is '关联 Environment UUID：LOCAL 必填且受 restrict 保护；REMOTE 为 null';
-comment on column mcp_server.connection_config is '仅含传输参数的 JSON：Remote 含 url/headers，Local 含 command/cwd/env';
+comment on table mcp_server is 'Platform MCP Server 持久配置：name 即主键与不可变路由身份，仅支持 Streamable HTTP 传输';
+comment on column mcp_server.name is '唯一名与主键（创建后不可变）：^[a-z][a-z0-9_]*$，≤32 字符；同时作为模型工具名 mcp_<name>_<tool> 的组成段';
+comment on column mcp_server.url is 'Streamable HTTP endpoint URL（http/https 绝对地址，不得内嵌 user-info 凭据）';
+comment on column mcp_server.headers is '自定义请求 header JSON object；值支持环境变量整值占位符，由 Backend 从进程环境替换，绝不回显';
 comment on column mcp_server.enabled is '公共启用开关：默认 true；false 时即使 AVAILABLE 也不可被 Agent 选择';
 comment on column mcp_server.timeout_millis is '正整数毫秒超时：连接、发现与 tools/call 共用';
-comment on column mcp_server.discovery_status is '发现状态：UNVERIFIED（未验证）、AVAILABLE（可用）、FAILED（失败）';
-comment on column mcp_server.discovered_version is '最近一次成功验证的配置版本：<= version，未成功或变更后为 null';
+comment on column mcp_server.discovery_status is '发现状态：UNVERIFIED（未验证）、AVAILABLE（可用）、FAILED（失败）；仅 enabled 且 AVAILABLE 进入运行时目录';
 comment on column mcp_server.created_at is '创建时间（毫秒精度）';
 comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护，不得早于 created_at';
 comment on column mcp_server.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据';
 
--- 从 MCP Server 发现并冻结的工具行。下线工具以 available=false 保留稳定身份。
+-- MCP Server 当前发现结果的工具行：成功发现整体物理替换，不存在 tombstone 或修订版本。
 create table mcp_tool (
-    id               uuid          primary key,
-    mcp_server_id    uuid          not null,
-    source_name      varchar(128)  not null,
-    model_name       varchar(64)   not null,
-    description      text          not null,
-    input_schema     jsonb         not null,
-    schema_revision  bigint        not null default 0,
-    available        boolean       not null default true,
-    constraint fk_mcp_tool_server foreign key (mcp_server_id)
-        references mcp_server (id) on delete cascade,
-    constraint ck_mcp_tool_source_name check (char_length(source_name) > 0),
-    constraint ck_mcp_tool_model_name check (
-        model_name ~ '[A-Za-z][A-Za-z0-9_-]*'
+    name           varchar(64)   primary key,
+    server_name    varchar(32)   not null,
+    source_name    varchar(128)  not null,
+    description    text          not null,
+    input_schema   jsonb         not null,
+    constraint fk_mcp_tool_server foreign key (server_name)
+        references mcp_server (name) on delete cascade,
+    constraint ck_mcp_tool_name check (
+        name ~ '[A-Za-z][A-Za-z0-9_-]*'
     ),
+    constraint ck_mcp_tool_source_name check (char_length(source_name) > 0),
     constraint ck_mcp_tool_description_nonblank check (btrim(description) <> ''),
     constraint ck_mcp_tool_input_schema_object check (
         jsonb_typeof(input_schema) = 'object'
-    ),
-    constraint ck_mcp_tool_schema_revision_nonneg check (schema_revision >= 0)
+    )
 );
 
 create unique index uk_mcp_tool_server_source_name
-    on mcp_tool (mcp_server_id, source_name);
+    on mcp_tool (server_name, source_name);
 
-create unique index uk_mcp_tool_model_name
-    on mcp_tool (model_name);
-
-create index idx_mcp_tool_server_available
-    on mcp_tool (mcp_server_id, available);
-
-comment on table mcp_tool is 'MCP Server 发现的工具冻结行：稳定 UUID 支撑 ContributionId，model_name 是模型可见工具身份；父 Server 删除时级联清理';
-comment on column mcp_tool.id is '工具的全局唯一稳定 UUID（按 (mcp_server_id, source_name) 跨发现保留）';
-comment on column mcp_tool.mcp_server_id is '所属 MCP Server；随父行删除级联硬删除';
-comment on column mcp_tool.source_name is 'MCP 工具原始名（同一 Server 内唯一，既有行不可变）';
-comment on column mcp_tool.model_name is '全局唯一模型可见工具名：mcp_<server_name>_<normalized_source_tool_name>，须满足 ToolDescriptor name 语法且 ≤64';
+comment on table mcp_tool is 'MCP Server 当前发现结果的工具行：name 即模型可见工具身份与主键，成功发现整体替换，父 Server 删除时级联清理';
+comment on column mcp_tool.name is '模型可见工具名（主键）：mcp_<server_name>_<normalized_source_tool_name>，须满足 ToolDescriptor name 语法且 ≤64';
+comment on column mcp_tool.server_name is '所属 MCP Server name；随父行删除级联硬删除';
+comment on column mcp_tool.source_name is 'MCP 工具原始名（同一 Server 内唯一）';
 comment on column mcp_tool.description is '工具描述（非空白），冻结进 ToolDescriptor';
 comment on column mcp_tool.input_schema is '工具 JSON input schema（JSON object），冻结进 ToolDescriptor';
-comment on column mcp_tool.schema_revision is '模式修订版本：非负，从 0 开始；schema/description 变更或下线重现时递增';
-comment on column mcp_tool.available is '是否可用：true 表示在当前发现结果中；false 表示已消失的 tombstone';
 
 create table comfyui_workflow_api (
     id                uuid          primary key,
@@ -679,185 +616,6 @@ create index idx_environment_connection_lease_until
 
 create index idx_environment_connection_owner
     on environment_connection (owner_node_id);
-
--- -----------------------------------------------------------------------------
--- Environment operations
---
--- 跨节点管理信箱与不可变历史。resource_id 故意不建 FK：删除或改写资源配置不得抹掉操作历史，
--- 陈旧操作由 Platform 依据资源是否存在/版本是否变化收敛为 RESOURCE_CHANGED。
--- arguments 是冻结的私有执行参数（可能含凭据或敏感配置），errors/list 摘要绝不回显它；
--- parameter_summary 是可以安全公开的摘要。
--- -----------------------------------------------------------------------------
-
-create table environment_operation (
-    id                  uuid           primary key,
-    environment_id      uuid           not null,
-    resource_type       varchar(32)    not null,
-    resource_id         uuid           not null,
-    operation_type      varchar(32)    not null,
-    status              varchar(16)    not null,
-    resource_version    bigint         not null,
-    arguments           jsonb          not null,
-    parameter_summary   jsonb          not null,
-    deadline_at         timestamptz(3) not null,
-    owner_node_id       uuid,
-    lease_token         uuid,
-    started_at          timestamptz(3),
-    finished_at         timestamptz(3),
-    result_summary      jsonb,
-    failure_code        varchar(64),
-    failure_message     text,
-    created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
-    constraint fk_environment_operation_environment foreign key (environment_id)
-        references environment (id) on delete cascade,
-    constraint ck_environment_operation_type check (
-        operation_type in ('MCP_SERVER_DISCOVER')
-    ),
-    constraint ck_environment_operation_resource_type check (
-        resource_type in ('MCP_SERVER')
-    ),
-    constraint ck_environment_operation_status check (
-        status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'CANCELLED')
-    ),
-    constraint ck_environment_operation_version_nonneg check (
-        resource_version >= 0
-    ),
-    constraint ck_environment_operation_arguments_object check (
-        jsonb_typeof(arguments) = 'object'
-    ),
-    constraint ck_environment_operation_parameter_summary_object check (
-        jsonb_typeof(parameter_summary) = 'object'
-    ),
-    constraint ck_environment_operation_result_summary_object check (
-        result_summary is null or jsonb_typeof(result_summary) = 'object'
-    ),
-    constraint ck_environment_operation_state check (
-        (
-            status = 'PENDING'
-            and owner_node_id is null
-            and lease_token is null
-            and started_at is null
-            and finished_at is null
-            and result_summary is null
-            and failure_code is null
-            and failure_message is null
-        )
-        or (
-            status = 'RUNNING'
-            and owner_node_id is not null
-            and lease_token is not null
-            and started_at is not null
-            and finished_at is null
-            and result_summary is null
-            and failure_code is null
-            and failure_message is null
-        )
-        or (
-            status = 'SUCCEEDED'
-            and owner_node_id is not null
-            and lease_token is not null
-            and started_at is not null
-            and finished_at is not null
-            and result_summary is not null
-            and failure_code is null
-            and failure_message is null
-        )
-        or (
-            status = 'FAILED'
-            and finished_at is not null
-            and result_summary is null
-            and failure_code is not null
-            and failure_code = btrim(failure_code)
-            and char_length(failure_code) > 0
-            and failure_message is not null
-            and failure_message = btrim(failure_message)
-            and char_length(failure_message) > 0
-            and (
-                (owner_node_id is null and lease_token is null and started_at is null)
-                or (
-                    owner_node_id is not null
-                    and lease_token is not null
-                    and started_at is not null
-                )
-            )
-        )
-        or (
-            status = 'UNKNOWN'
-            and owner_node_id is not null
-            and lease_token is not null
-            and started_at is not null
-            and finished_at is not null
-            and result_summary is null
-            and failure_code is not null
-            and failure_code = btrim(failure_code)
-            and char_length(failure_code) > 0
-            and failure_message is not null
-            and failure_message = btrim(failure_message)
-            and char_length(failure_message) > 0
-        )
-        or (
-            status = 'CANCELLED'
-            and owner_node_id is null
-            and lease_token is null
-            and started_at is null
-            and finished_at is not null
-            and result_summary is null
-            and failure_code is null
-            and failure_message is null
-        )
-    ),
-    constraint ck_environment_operation_time_order check (
-        deadline_at >= created_at
-        and updated_at >= created_at
-        and (started_at is null or started_at >= created_at)
-        and (finished_at is null or finished_at >= coalesce(started_at, created_at))
-    )
-);
-
-comment on table environment_operation is '跨节点管理操作信箱与不可变历史：PENDING 可被任一合格节点认领，终态不可回退；resource_id 故意不建 FK 以保留资源删除后的历史';
-comment on column environment_operation.id is '操作 UUID（调用方生成，永不重用）';
-comment on column environment_operation.environment_id is '目标 Environment 的全局唯一 UUID（FK cascade）';
-comment on column environment_operation.resource_type is '目标资源类型：MCP_SERVER';
-comment on column environment_operation.resource_id is '目标资源的全局唯一 UUID（故意不建 FK：资源删除后操作历史仍然存在）';
-comment on column environment_operation.operation_type is '操作类型：MCP_SERVER_DISCOVER';
-comment on column environment_operation.status is '生命周期：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED';
-comment on column environment_operation.resource_version is '发起时的目标资源版本；过期操作必须收敛为 RESOURCE_CHANGED';
-comment on column environment_operation.arguments is '冻结的私有调用参数（JSON object；错误与列表摘要绝不回显）';
-comment on column environment_operation.parameter_summary is '可公开的参数摘要（JSON object，不含 URL/凭证）';
-comment on column environment_operation.deadline_at is '认领与执行的硬超时（毫秒精度，不得早于 created_at）';
-comment on column environment_operation.owner_node_id is '认领该操作的 App 节点实例 UUID（PENDING 为空）';
-comment on column environment_operation.lease_token is '认领租约代币，用于围栏被接管的旧执行者';
-comment on column environment_operation.started_at is '认领时间（毫秒精度）';
-comment on column environment_operation.finished_at is '终态时间（毫秒精度，不得早于 started_at）';
-comment on column environment_operation.result_summary is 'SUCCEEDED 状态下的结果摘要（JSON object，可空）';
-comment on column environment_operation.failure_code is '失败分类码（FAILED/UNKNOWN 状态下非空、无环绕空白）';
-comment on column environment_operation.failure_message is '失败描述（FAILED/UNKNOWN 状态下非空、无环绕空白）';
-comment on column environment_operation.created_at is '创建时间（毫秒精度）';
-comment on column environment_operation.updated_at is '最后更新时间（毫秒精度），应用侧维护';
-
--- 同一目标资源同时至多一个未终结操作：重复触发不能产生两个竞争执行者。
-create unique index uk_environment_operation_active
-    on environment_operation (environment_id, resource_type, resource_id)
-    where status in ('PENDING', 'RUNNING');
-
-comment on index uk_environment_operation_active is '同一 (environment, resource_type, resource_id) 至多一个未终结操作';
-
-create index idx_environment_operation_claim
-    on environment_operation (status, deadline_at, environment_id)
-    where status = 'PENDING';
-
-comment on index idx_environment_operation_claim is 'PENDING 认领扫描：按截止时间取最早可执行操作';
-
-create index idx_environment_operation_deadline
-    on environment_operation (deadline_at);
-
-comment on index idx_environment_operation_deadline is '过期操作清扫索引：不区分状态即可按截止时间收敛';
-
-create index idx_environment_operation_environment
-    on environment_operation (environment_id, created_at, id);
-
-comment on index idx_environment_operation_environment is '按 Environment 读取操作历史（created_at, id 稳定序）';
 
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)

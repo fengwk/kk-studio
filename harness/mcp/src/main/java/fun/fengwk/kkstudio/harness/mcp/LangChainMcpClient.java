@@ -31,15 +31,10 @@ import java.util.concurrent.TimeoutException;
  * 基于 LangChain4j {@link DefaultMcpClient} 实现的 {@link McpClient} 包装器。
  *
  * <p>SDK 的 {@code executeTool}/{@code listTools} 是同步阻塞调用，公开 API 不提供 per-call 取消句柄，因此本实现不以 {@code
- * CompletableFuture.supplyAsync(...).cancel(...)} 冒充协议取消：那种做法只停止本地等待，服务端仍会继续执行。
+ * CompletableFuture.supplyAsync(...).cancel(...)} 冒充协议取消。
  *
- * <p>取消与超时都按「请求级」处理，且都不关闭共享 client，因此同一 client 上的其它并发调用不受影响：
- *
- * <ul>
- *   <li>实现 {@link McpDispatchGate} 与 {@link McpRequestAborter} 的传输在真正写出时绑定真实 request
- *       id，因此工具发现与调用都能精确结束在途请求并发送 {@code notifications/cancelled}；
- *   <li>其它传输仍会立即结束本地等待，但不关闭共享 client。
- * </ul>
+ * <p>取消与超时都按「调用级」处理：立即结束本地等待，且不关闭共享 client，因此同一 client 上的其它并发调用不受影响。 Streamable HTTP 传输通过关闭
+ * per-request SSE 流取消，无需额外的协议取消通道。
  */
 final class LangChainMcpClient implements McpClient {
 
@@ -47,7 +42,6 @@ final class LangChainMcpClient implements McpClient {
 
   private final DefaultMcpClient client;
   private final McpTransport transport;
-  private final McpRequestBindings bindings;
   private final ExecutorService workers =
       Executors.newCachedThreadPool(
           runnable -> {
@@ -56,10 +50,9 @@ final class LangChainMcpClient implements McpClient {
             return thread;
           });
 
-  LangChainMcpClient(DefaultMcpClient client, McpTransport transport, McpRequestBindings bindings) {
+  LangChainMcpClient(DefaultMcpClient client, McpTransport transport) {
     this.client = Objects.requireNonNull(client, "client");
     this.transport = transport;
-    this.bindings = Objects.requireNonNull(bindings, "bindings");
   }
 
   @Override
@@ -109,17 +102,14 @@ final class LangChainMcpClient implements McpClient {
     if (token.isCancelled()) {
       throw new McpCancelledException("MCP operation cancelled by caller");
     }
-    McpRequestBindings.Binding binding = bindings.create(token);
     Future<T> future =
         workers.submit(
             () -> {
-              bindings.activate(binding);
               try {
                 return sdkCall.call();
               } catch (CancellationException error) {
                 throw new McpCancelledException("MCP operation cancelled by caller");
               } finally {
-                bindings.deactivate();
                 // worker 线程会被池复用：异常路径留下的 interrupt 状态会污染后续任务的取消判定。
                 Thread.interrupted();
               }
@@ -129,7 +119,6 @@ final class LangChainMcpClient implements McpClient {
       Duration waitBudget = deadline.requireRemaining();
       return future.get(Math.max(1L, waitBudget.toMillis()), TimeUnit.MILLISECONDS);
     } catch (TimeoutException | McpTimeoutException error) {
-      binding.abort("deadline exceeded");
       future.cancel(true);
       throw new McpTimeoutException(what + " timed out");
     } catch (CancellationException error) {
@@ -150,7 +139,6 @@ final class LangChainMcpClient implements McpClient {
       }
       throw new McpException(what + " failed");
     } catch (InterruptedException error) {
-      binding.abort("interrupted");
       future.cancel(true);
       if (token.isCancelled()) {
         throw new McpCancelledException("MCP operation cancelled by caller");
