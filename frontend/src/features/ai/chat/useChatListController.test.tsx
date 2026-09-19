@@ -41,6 +41,7 @@ const agents: AgentDefinitionDTO[] = [
     variant: 'default',
     environmentId: 'env-dev-1',
     config: {
+      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],
@@ -57,6 +58,7 @@ const agents: AgentDefinitionDTO[] = [
     variant: 'default',
     environmentId: 'env-prod-2',
     config: {
+      inheritParentEnvironment: true,
       tools: [],
       skills: [],
       subagents: [],

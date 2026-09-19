@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.task;
 
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -8,7 +7,6 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -48,7 +46,6 @@ public final class SystemPromptPreviewService {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
-  private final SubagentConfigProvider configProvider;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
 
@@ -59,7 +56,6 @@ public final class SystemPromptPreviewService {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
-      SubagentConfigProvider configProvider,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
@@ -71,7 +67,6 @@ public final class SystemPromptPreviewService {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
-    this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -97,7 +92,7 @@ public final class SystemPromptPreviewService {
         agent.getSystemPrompt(),
         environment,
         previewSkills(config.getSkills(), environmentId),
-        previewSubagents(config.getSubagents(), path));
+        previewSubagents(config.getSubagents()));
   }
 
   /** Environment 只按当前 branch settings 的 name 解析；null 或 name 缺失时宽容回退为空环境。 */
@@ -192,10 +187,8 @@ public final class SystemPromptPreviewService {
     return List.copyOf(bindings);
   }
 
-  private List<SubagentBinding> previewSubagents(List<String> names, EntryPath path) {
-    if (names == null
-        || names.isEmpty()
-        || sessionDepth(path) >= configProvider.subagentConfig().maxDepth()) {
+  private List<SubagentBinding> previewSubagents(List<String> names) {
+    if (names == null || names.isEmpty()) {
       return List.of();
     }
     List<SubagentBinding> bindings = new ArrayList<>(names.size());
@@ -209,10 +202,5 @@ public final class SystemPromptPreviewService {
       }
     }
     return List.copyOf(bindings);
-  }
-
-  private static int sessionDepth(EntryPath path) {
-    RootPayload root = (RootPayload) path.root().payload();
-    return root.subagentContext() == null ? 1 : root.subagentContext().depth();
   }
 }

@@ -63,7 +63,7 @@ const assistantAgent = {
   systemPrompt: null,
   model: 'minimax/MiniMax',
   variant: 'default',
-  config: { tools: [], skills: [], subagents: [] },
+  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
   createTime: null,
   updateTime: null,

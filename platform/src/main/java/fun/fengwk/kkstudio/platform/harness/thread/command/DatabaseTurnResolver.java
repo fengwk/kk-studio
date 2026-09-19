@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
@@ -23,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
@@ -117,7 +115,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final CompactionConfigProvider compactionConfigProvider;
-  private final SubagentConfigProvider subagentConfigProvider;
   private final AgentPromptComposer promptComposer;
   private final ProjectRoleToolSelector roleToolSelector;
   private final ProjectRoleContextProjector roleContextProjector;
@@ -139,7 +136,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       CompactionConfigProvider compactionConfigProvider,
-      SubagentConfigProvider subagentConfigProvider,
       AgentPromptComposer promptComposer,
       ProjectRoleToolSelector roleToolSelector,
       ProjectRoleContextProjector roleContextProjector,
@@ -160,8 +156,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
-    this.subagentConfigProvider =
-        Objects.requireNonNull(subagentConfigProvider, "subagentConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.roleToolSelector = Objects.requireNonNull(roleToolSelector, "roleToolSelector");
     this.roleContextProjector =
@@ -240,8 +234,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     EnvironmentId environmentId = resolveEnvironmentId(settings.environmentName());
     CurrentEnvironmentContext currentEnvironment = resolveCurrentEnvironment(environmentId, now);
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), environmentId);
-    List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents(), path);
-    List<String> toolNames = resolveToolNames(agentConfig, path, threadId);
+    List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
+    List<String> toolNames = resolveToolNames(agentConfig, threadId);
     List<ToolBinding> toolBindings = resolveTools(environmentId, toolNames);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
@@ -453,8 +447,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** 从最新 Agent 配置派生本 turn 的模型可见工具名；随后注入 Project 角色工具。 */
-  private List<String> resolveToolNames(
-      AgentDefinitionConfigDTO config, EntryPath path, UUID threadId) {
+  private List<String> resolveToolNames(AgentDefinitionConfigDTO config, UUID threadId) {
     LinkedHashSet<String> toolNames = new LinkedHashSet<>();
     for (String toolName : config.getTools()) {
       if (toolName == null || toolName.isBlank()) {
@@ -474,8 +467,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (!config.getSkills().isEmpty()) {
       toolNames.add(LoadSkillTool.NAME);
     }
-    if (!config.getSubagents().isEmpty()
-        && sessionDepth(path) < subagentConfigProvider.subagentConfig().maxDepth()) {
+    if (!config.getSubagents().isEmpty()) {
+      // task 只由非空 subagents allowlist 声明：递归深度是调用期 gate，绝不动态裁剪工具面。
       toolNames.add(TaskTool.NAME);
     }
     List<String> roleTools =
@@ -630,12 +623,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * task 由最新 Agent allowlist 且当前 Session depth 小于部署上限时绑定。名称与描述在 ModelRequestSpec 中冻结， Tool 执行绝不依据后续
-   * Agent 配置扩权。
+   * task 只由最新 Agent 的非空 subagents allowlist 绑定：名称与描述在 ModelRequestSpec 中冻结，Tool 执行绝不依据后续 Agent
+   * 配置扩权，也不按 Session depth 动态移除声明；递归上限由 {@code task} 调用期的深度 gate 拒绝。
    */
-  private List<SubagentBinding> resolveSubagents(List<String> names, EntryPath path) {
-    if (names.isEmpty()
-        || sessionDepth(path) >= subagentConfigProvider.subagentConfig().maxDepth()) {
+  private List<SubagentBinding> resolveSubagents(List<String> names) {
+    if (names.isEmpty()) {
       return List.of();
     }
     List<SubagentBinding> bindings = new ArrayList<>(names.size());
@@ -648,11 +640,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
               subagent.getDescription() == null ? "" : subagent.getDescription()));
     }
     return List.copyOf(bindings);
-  }
-
-  private static int sessionDepth(EntryPath path) {
-    RootPayload root = (RootPayload) path.root().payload();
-    return root.subagentContext() == null ? 1 : root.subagentContext().depth();
   }
 
   private static ModelVariant findVariant(ParsedAgentModelConfig model, String name) {

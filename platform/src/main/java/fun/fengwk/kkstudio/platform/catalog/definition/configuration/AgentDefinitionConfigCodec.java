@@ -40,6 +40,11 @@ public class AgentDefinitionConfigCodec {
         .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
     strictMapper
+        .coercionConfigFor(LogicalType.Boolean)
+        .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+        .setCoercion(CoercionInputShape.Float, CoercionAction.Fail);
+    strictMapper
         .coercionConfigFor(LogicalType.Textual)
         .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
         .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
@@ -80,6 +85,11 @@ public class AgentDefinitionConfigCodec {
     validateToolNames(config.getTools());
     validateSkillRefs(config.getSkills());
     validateNames(config.getSubagents(), "subagents");
+    if (config.getInheritParentEnvironment() == null) {
+      // 缺省是 true（DTO 字段初值）；显式 JSON null 解析后即为 null，必须 fail closed。
+      throw new IllegalArgumentException(
+          "agent definition config inheritParentEnvironment is required");
+    }
   }
 
   private static void validateSkillRefs(List<AgentSkillRefDTO> refs) {

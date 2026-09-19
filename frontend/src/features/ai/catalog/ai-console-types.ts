@@ -73,6 +73,7 @@ export interface AgentDraft {
   model: string
   variant: string
   environmentId: string
+  inheritParentEnvironment: boolean
   tools: string[]
   skills: AgentSkillRefDTO[]
   subagents: string[]

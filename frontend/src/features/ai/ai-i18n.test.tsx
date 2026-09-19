@@ -40,6 +40,7 @@ const agent = {
   model: 'm1',
   variant: 'default',
   config: {
+    inheritParentEnvironment: true,
     tools: [],
     skills: [],
     subagents: [],

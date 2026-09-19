@@ -55,7 +55,7 @@ Catalog 是名称寻址的全局资源集合，所有变更 service 都使用 `e
 | --- | --- | --- |
 | Provider | `agent_provider.name` | `ProviderType`、base URL、credential、内部 timeout config |
 | Model | `(provider_name, name)` | context/output limit、abilities、variants、pricing、default variant |
-| Agent | `agent_definition.name` | system prompt、Model 引用、variant 覆盖、tools/skills/subagents |
+| Agent | `agent_definition.name` | system prompt、Model 引用、variant 覆盖、tools/skills/subagents 与子会话 Environment 继承策略 |
 
 三类资源的 `description` 都是无长度上限的自由文本（PostgreSQL `text`），与
 `system_prompt` 同属展示事实，不参与名称、可见性、CAS 或路由判定，空值按 `trimToNull`
@@ -67,6 +67,11 @@ Model 的 `name` 支持重命名，其 Provider 保持不可变；Provider 与 A
 Model 引用、再删除旧行；任一步不满足预期即抛错并整体回滚。删除由 `AgentProviderGuard`、
 `AgentModelReferenceResolver`、`AgentDefinitionReferenceResolver` 拒绝仍被引用的资源，
 并通过 `PostgresqlIntegrityViolationClassifier` 把外键约束映射为领域错误。
+
+Agent 的严格 `config` 保存 `tools`、`skills`、`subagents` 与
+`inheritParentEnvironment`；继承开关缺省为 `true`，显式 `null` 非法。委派图允许
+自引用和环，不做静态拓扑限制；删除 Agent 时自身引用随目标行一起消失，只有其它 Agent
+仍存在的入边会阻止删除。
 
 配置 JSON 全部走 strict codec：
 
@@ -394,13 +399,16 @@ placeholder，其余 `${...}` 与未闭合形式保持原文。
 调用 `skill.load` 读取，不会用当前 Agent 配置扩张已冻结调用。
 
 [AgentBranchSettingsMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentBranchSettingsMaterializer.java)
-为新建/恢复的 subagent 按最新 Agent/Model catalog 物化 `agentName` 与 model，
-`environmentName` 置 null；Environment 由调用方按 `inheritParentEnvironment` 单独决定，
-工具、skill 和 subagent binding 在每个
-live turn 重新解析。Task 的 agent name、description、parent/root/depth 和 invocation
-归属在 durable binding 中冻结，执行期间不因 Catalog 变更扩权。Compaction resolver 是
-窄路径：只解析 `CompactionPreparation.executionModel`，返回零 tools/skills/subagents 的
-ModelRequestSpec。
+为普通 root 按最新 Agent/Model catalog 物化 `agentName` 与 model，并固定
+`environmentName=null`；为新建或恢复的 subagent 额外读取被调用 Agent 的
+`inheritParentEnvironment`，决定是否采用父 Model invocation 已冻结的
+`environmentName`。恢复会话以 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> USER`
+命令前缀收敛完整目标设置。工具、skill 和 subagent binding 在每个 live turn 重新解析；
+非空 `subagents` 始终声明 `task` 并冻结 allowlist，递归深度上限只在实际调用时返回稳定
+Tool error，不动态裁剪工具面。Task 的 agent name、description、parent/root/depth 和
+invocation 归属在 durable binding 中冻结，执行期间不因 Catalog 变更扩权。Compaction
+resolver 是窄路径：只解析 `CompactionPreparation.executionModel`，返回零
+tools/skills/subagents 的 ModelRequestSpec。
 
 ## Canvas 与 ComfyUI 适配
 

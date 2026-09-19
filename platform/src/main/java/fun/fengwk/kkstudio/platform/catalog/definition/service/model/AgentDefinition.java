@@ -30,7 +30,7 @@ public class AgentDefinition {
   /** 绑定的 Environment UUID（可选；null 表示不绑定环境）。 */
   private UUID environmentId;
 
-  /** 可执行配置 JSON（tools/skills/subagents 列表），映射 {@code config} jsonb 列，必填。 */
+  /** 可执行配置 JSON（tools/skills/subagents/inheritParentEnvironment），映射 {@code config} jsonb 列，必填。 */
   private String configJson;
 
   /** 乐观锁版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */

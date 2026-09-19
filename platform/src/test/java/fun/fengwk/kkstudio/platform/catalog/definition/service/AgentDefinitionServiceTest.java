@@ -49,6 +49,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertEquals(List.of(), definition.getConfig().getTools());
     assertEquals(List.of(), definition.getConfig().getSkills());
     assertEquals(List.of(), definition.getConfig().getSubagents());
+    assertEquals(Boolean.TRUE, definition.getConfig().getInheritParentEnvironment());
     assertEquals("0", definition.getVersion());
     assertThrows(
         AiDuplicateException.class,
@@ -139,6 +140,60 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
+  }
+
+  /** 测试意图：Agent 委派图允许自引用和环；自身引用不要求预先存在且不阻止删除自身，其它 Agent 的入边仍受删除保护。 */
+  @Test
+  void subagentAllowlistAllowsSelfReferenceAndCycles() {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("recursive-provider-" + suffix);
+    AgentModelDTO model = model(provider.getName(), "recursive-model-" + suffix);
+    String modelRef = provider.getName() + "/" + model.getName();
+    String selfName = "recursive-self-" + suffix;
+    String leftName = "recursive-left-" + suffix;
+    String rightName = "recursive-right-" + suffix;
+
+    AgentDefinitionCreateDTO selfCreate = agent(modelRef, selfName);
+    selfCreate.getConfig().setSubagents(List.of(selfName));
+    AgentDefinitionDTO self = agentDefinitionService.createAgent(selfCreate);
+    assertEquals(List.of(selfName), self.getConfig().getSubagents());
+    agentDefinitionService.deleteAgent(selfName, self.getVersion());
+
+    AgentDefinitionDTO left = agentDefinitionService.createAgent(agent(modelRef, leftName));
+    AgentDefinitionCreateDTO rightCreate = agent(modelRef, rightName);
+    rightCreate.getConfig().setSubagents(List.of(leftName));
+    AgentDefinitionDTO right = agentDefinitionService.createAgent(rightCreate);
+
+    AgentDefinitionUpdateDTO closeCycle = new AgentDefinitionUpdateDTO();
+    closeCycle.setDescription(left.getDescription());
+    closeCycle.setSystemPrompt(left.getSystemPrompt());
+    closeCycle.setModel(left.getModel());
+    closeCycle.setVariant(left.getVariant());
+    closeCycle.setConfig(left.getConfig());
+    closeCycle.getConfig().setSubagents(List.of(rightName));
+    closeCycle.setExpectedVersion(left.getVersion());
+    left = agentDefinitionService.updateAgent(leftName, closeCycle);
+    assertEquals(List.of(rightName), left.getConfig().getSubagents());
+    assertEquals(List.of(leftName), right.getConfig().getSubagents());
+
+    assertThrows(
+        AiInUseException.class,
+        () -> agentDefinitionService.deleteAgent(rightName, right.getVersion()));
+
+    AgentDefinitionUpdateDTO openCycle = new AgentDefinitionUpdateDTO();
+    openCycle.setDescription(left.getDescription());
+    openCycle.setSystemPrompt(left.getSystemPrompt());
+    openCycle.setModel(left.getModel());
+    openCycle.setVariant(left.getVariant());
+    openCycle.setConfig(left.getConfig());
+    openCycle.getConfig().setSubagents(List.of());
+    openCycle.setExpectedVersion(left.getVersion());
+    left = agentDefinitionService.updateAgent(leftName, openCycle);
+
+    agentDefinitionService.deleteAgent(rightName, right.getVersion());
+    agentDefinitionService.deleteAgent(leftName, left.getVersion());
+    agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
   @Test

@@ -1367,7 +1367,7 @@ async function createHoldingQueueFixture(
         systemPrompt: 'Wait for the local E2E stream.',
         model: `${state.model.providerName}/${state.model.name}`,
         variant: 'default',
-        config: { tools: [], skills: [], subagents: [] },
+        config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       },
     )
     assert(

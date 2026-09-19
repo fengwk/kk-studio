@@ -84,7 +84,7 @@ describe('agentService', () => {
       systemPrompt: null,
       model: 'minimax/MiniMax-M2.7',
       variant: 'default',
-      config: { tools: [], skills: [], subagents: [] },
+      config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     }
     const updateProviderBody = { description: 'updated', expectedVersion: '7' }
     const updateModelBody = {

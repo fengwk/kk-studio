@@ -126,10 +126,16 @@ final class AgentDefinitionReferenceResolver {
     }
   }
 
-  /** 锁定并校验 task allowlist 中的全部 Agent，防止其在当前配置写入事务中被并发删除。 */
-  void requireSubagentsForUpdate(List<String> names) {
+  /**
+   * 创建 Agent 时锁定并校验 task allowlist 中的既有 Agent。
+   *
+   * <p>自身引用无需预先存在：目标行将在同一事务中插入；其它名称仍必须存在并加锁。
+   */
+  void requireSubagentsForCreate(String agentName, List<String> names) {
     for (String name : names.stream().sorted().toList()) {
-      requireAgentForUpdate(name);
+      if (!name.equals(agentName)) {
+        requireAgentForUpdate(name);
+      }
     }
   }
 
@@ -155,7 +161,7 @@ final class AgentDefinitionReferenceResolver {
     if (agentDefinitionRepository.existsReferencingSubagent(name)) {
       throw new AiInUseException(
           DEFINITION_RESOURCE,
-          DEFINITION_RESOURCE + " is referenced by an agent subagents allowlist: " + name);
+          DEFINITION_RESOURCE + " is referenced by another agent subagents allowlist: " + name);
     }
   }
 }

@@ -44,7 +44,8 @@ no-op、resync 或内部重试，不能覆盖新 owner 的状态。
 Agent 是可复用的行为定义：它声明 system prompt、默认 Model、Tool、Skill 和可委派的
 其他 Agent，不绑定具体 Environment，也没有“主 Agent”或“Subagent”类型。一个 Agent
 是否作为子 Agent 使用，只取决于另一个 Agent 是否选择了它；委派关系可以递归，但运行时
-由统一深度上限终止无限递归。
+由统一深度上限终止无限递归。委派图允许自引用和环；`task` 工具面不随当前深度变化，
+到达上限后的实际调用返回明确错误。
 
 一次对话真正执行在哪里，由 Branch 的完整设置决定：
 
@@ -67,9 +68,11 @@ Branch 未选择 Environment 或引用已不存在时，调用返回明确 Tool 
 prompt、Tool surface 或 Prompt Cache affinity。这样用户仍可在无 Environment 的对话中
 正常使用模型和 Platform Tool，并能从错误直接知道需要选择或启动哪个 Environment。
 
-子 Agent 新建 Session 时使用自身默认 Model；其 `inheritParentEnvironment` 决定是否把
+子 Agent 新建 Session 时使用自身默认 Model；其默认开启的
+`inheritParentEnvironment` 决定是否把
 父 Model invocation 已冻结的 `environmentName` 作为子 Branch 初始值。该选项只影响
-委派，不限制 Agent 作为普通 Chat 根 Agent 使用。
+委派，不限制 Agent 作为普通 Chat 根 Agent 使用；恢复既有子 Session 时同样按该规则把
+Agent、Model 与 Environment 收敛到当前目标设置。
 
 Skill 是 Platform 全局名称资源，与 Environment inventory 解耦。Package 负责安装和原子
 升级，Agent 与 `load_skill` 只使用全局唯一 Skill name；一次 Model invocation 会冻结

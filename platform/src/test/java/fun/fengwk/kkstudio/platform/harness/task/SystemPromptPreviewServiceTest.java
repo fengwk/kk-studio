@@ -516,7 +516,6 @@ class SystemPromptPreviewServiceTest {
             environmentRegistry,
             environmentRepository,
             skillSources,
-            () -> subagentConfig,
             new AgentPromptComposer(() -> subagentConfig),
             Clock.fixed(NOW, ZoneOffset.UTC))
         .create(runtime);

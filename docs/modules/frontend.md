@@ -261,9 +261,11 @@ upload handle 只能按 upload id 删除，blob original/preview URL 只在资�
 
 [`features/ai`](../../frontend/src/features/ai) 分成 catalog、chat、composer、environment、
 mcp、runtime 六个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
-Agent 的 `tools`、`subagents` 用 catalog candidate 校验（candidate 身份就是模型可见 name），`skills` 用显式
-`{sourceId, name}` 引用并从绑定 Environment 的持久 inventory 构建候选，切换或解绑
-Environment 会清空选择。Chat 只持久化 title、agentName 与 YOLO 开关，Environment
+Agent 的 `tools`、`subagents` 用 catalog candidate 校验（candidate 身份就是模型可见
+name），`skills` 用显式 `{sourceId, name}` 引用并从绑定 Environment 的持久 inventory
+构建候选，切换或解绑 Environment 会清空选择。Agent 表单还显式编辑
+`inheritParentEnvironment`（新建默认开启），决定该 Agent 被 `task` 委派时是否继承父
+会话当前 Environment。Chat 只持久化 title、agentName 与 YOLO 开关，Environment
 是可空的分支选择（`BranchSettings.environmentName`），随每个分支的 branchSettings 独立
 保存并逐字段投影。
 

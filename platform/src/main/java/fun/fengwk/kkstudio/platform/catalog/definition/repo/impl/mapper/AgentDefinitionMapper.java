@@ -61,7 +61,8 @@ public interface AgentDefinitionMapper extends BaseMapper {
       select exists (
           select 1
           from agent_definition
-          where jsonb_exists(config -> 'subagents', #{name})
+          where name <> #{name}
+            and jsonb_exists(config -> 'subagents', #{name})
       )
       """)
   boolean existsReferencingSubagent(@Param("name") String name);
