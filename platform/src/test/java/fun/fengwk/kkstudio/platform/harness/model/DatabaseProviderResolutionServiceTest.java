@@ -778,7 +778,7 @@ class DatabaseProviderResolutionServiceTest {
                 ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
                 List.of(
                     new ProviderMessage(
-                        ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system")))),
+                        ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
                 List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
     assertEquals(
         ProviderCacheControl.breakpoints(
@@ -786,7 +786,7 @@ class DatabaseProviderResolutionServiceTest {
             "pc-key",
             EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
         resolved.effectiveRequest().cacheControl(),
-        "leading SYSTEM 与 tools 都命中 capability 断点能力");
+        "systemInstruction 与 tools 都命中 capability 断点能力");
   }
 
   /** 意图：执行期使用完整历史重新求交集，确保原生 Anthropic 的最新对话断点不会被 durable spec 丢弃。 */
@@ -813,8 +813,6 @@ class DatabaseProviderResolutionServiceTest {
                     EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
                 List.of(
                     new ProviderMessage(
-                        ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system"))),
-                    new ProviderMessage(
                         ProviderMessageRole.USER, List.of(new ProviderTextBlock("history")))),
                 List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
     assertEquals(
@@ -824,35 +822,7 @@ class DatabaseProviderResolutionServiceTest {
   }
 
   @Test
-  void breakpointsCapabilityKeepsOnlyToolsWhenLeadingIsNotSystem() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT),
-                    EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(
-                    new ProviderMessage(
-                        ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
-                List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
-    assertEquals(
-        ProviderCacheControl.breakpoints(
-            PromptCacheRetention.SHORT, "pc-key", EnumSet.of(PromptCacheBreakpoint.TOOLS)),
-        resolved.effectiveRequest().cacheControl(),
-        "首条消息非 SYSTEM 时只保留 tools 断点");
-  }
-
-  @Test
-  void breakpointsCapabilityDegradesToNoneOnEmptyMessages() {
+  void breakpointsCapabilityKeepsSystemAndToolsWhenConversationIsEmpty() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
         resolution(
@@ -869,38 +839,19 @@ class DatabaseProviderResolutionServiceTest {
             request(
                 ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
                 List.of(),
-                List.of()));
-    assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
-  }
-
-  @Test
-  void breakpointsCapabilityDegradesToNoneWithoutIntersection() {
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    // capability 只支持 SYSTEM 断点，但请求首条是 USER 且无 tools：无交集 → none()。
-    DatabaseProviderResolutionService resolution =
-        resolution(
-            factory(
-                ProviderType.OPENAI,
-                PromptCacheCapability.breakpoints(
-                    Set.of(PromptCacheRetention.SHORT), EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
-                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI,
-            GENERATION_ID,
-            request(
-                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(
-                    new ProviderMessage(
-                        ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")))),
                 List.of(new ProviderToolDefinition("search", "search tool", "{}"))));
-    assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
+    assertEquals(
+        ProviderCacheControl.breakpoints(
+            PromptCacheRetention.SHORT,
+            "pc-key",
+            EnumSet.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.TOOLS)),
+        resolved.effectiveRequest().cacheControl(),
+        "systemInstruction 恒有效前缀：无会话消息时仍保留 SYSTEM 与 tools 断点");
   }
 
   @Test
-  void breakpointsCapabilityDegradesToNoneWithSystemOnlyRequest() {
+  void breakpointsCapabilityDegradesToNoneOnEmptyMessages() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
-    // capability 只支持 TOOLS 断点，但请求只有 leading SYSTEM 且无 tools：无交集 → none()。
     DatabaseProviderResolutionService resolution =
         resolution(
             factory(
@@ -914,9 +865,29 @@ class DatabaseProviderResolutionServiceTest {
             GENERATION_ID,
             request(
                 ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
-                List.of(
-                    new ProviderMessage(
-                        ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system")))),
+                List.of(),
+                List.of()));
+    assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
+  }
+
+  @Test
+  void breakpointsCapabilityDegradesToNoneWithSystemOnlyRequest() {
+    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
+    // capability 只支持 TOOLS 断点，但请求只有 systemInstruction 且无 tools：无交集 → none()。
+    DatabaseProviderResolutionService resolution =
+        resolution(
+            factory(
+                ProviderType.OPENAI,
+                PromptCacheCapability.breakpoints(
+                    Set.of(PromptCacheRetention.SHORT), EnumSet.of(PromptCacheBreakpoint.TOOLS)),
+                adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
+    ProviderResolutionService.ResolvedExecution resolved =
+        resolution.resolve(
+            ProviderType.OPENAI,
+            GENERATION_ID,
+            request(
+                ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc-key"),
+                List.of(),
                 List.of()));
     assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
   }

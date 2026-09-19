@@ -267,15 +267,15 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
         Set.of(PromptCacheRetention.SHORT, PromptCacheRetention.LONG),
         legacy.supportedRetentions());
 
-    // GPT_5_6_EXPLICIT -> BREAKPOINTS (SHORT + SYSTEM, CONVERSATION)
+    // GPT_5_6_EXPLICIT -> BREAKPOINTS (SHORT + CONVERSATION)
+    // Responses 的 systemInstruction 是顶层 instructions 字符串，input 中没有可打标的 system 内容块，
+    // 因此该协议不声明 SYSTEM 断点。
     PromptCacheCapability gptExplicit =
         openaiResponsesProviderFactory.promptCacheCapability(
             "{\"openAiPromptCacheMode\":\"GPT_5_6_EXPLICIT\"}");
     assertEquals(PromptCacheMode.BREAKPOINTS, gptExplicit.mode());
     assertEquals(Set.of(PromptCacheRetention.SHORT), gptExplicit.supportedRetentions());
-    assertEquals(
-        Set.of(PromptCacheBreakpoint.SYSTEM, PromptCacheBreakpoint.CONVERSATION),
-        gptExplicit.supportedBreakpoints());
+    assertEquals(Set.of(PromptCacheBreakpoint.CONVERSATION), gptExplicit.supportedBreakpoints());
   }
 
   /** 意图：验证 Google 与 Anthropic 工厂暴露固定的标准提示缓存能力。 */

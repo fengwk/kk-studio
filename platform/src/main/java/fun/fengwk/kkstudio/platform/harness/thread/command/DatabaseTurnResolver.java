@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -285,7 +286,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             descriptor,
             variant,
             outputTokens,
-            "Test system instruction.",
+            systemInstruction,
             toolBindings,
             skillBindings,
             subagentBindings,
@@ -374,7 +375,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 parsedModel.pricing()),
             variant,
             maxOutput,
-            "Test system instruction.",
+            CompactionPrompts.summarizationSystemPrompt(),
             List.of(),
             List.of(),
             List.of(),
@@ -681,7 +682,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
             descriptor,
             variant,
             outputTokens,
-            "Test system instruction.",
             systemInstruction,
             List.of(),
             providerTools,

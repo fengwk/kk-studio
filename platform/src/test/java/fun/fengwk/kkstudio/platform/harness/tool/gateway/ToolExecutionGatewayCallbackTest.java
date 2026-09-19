@@ -42,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -235,7 +236,7 @@ class ToolExecutionGatewayCallbackTest {
     ProviderToolResultBlock projected =
         assertInstanceOf(
             ProviderToolResultBlock.class,
-            new ProviderMessageProjector(Set.of())
+            new ProviderMessageProjector(Set.of(DESCRIPTOR.name()))
                 .project(List.of(payload.message()))
                 .getFirst()
                 .contents()

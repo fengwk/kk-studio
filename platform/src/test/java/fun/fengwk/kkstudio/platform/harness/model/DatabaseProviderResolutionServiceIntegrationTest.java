@@ -22,12 +22,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
@@ -184,15 +181,14 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
     AgentProviderDTO created =
         createProvider(name, "anthropic", "https://anthropic.example/v1", "secret", 12_000L);
     UUID generationId = connectionGenerationId(name);
+    // 会话消息为空：此时唯一有效前缀就是恒非空的 systemInstruction。
     ProviderRequest request =
         new ProviderRequest(
             descriptor(name),
             new ModelVariant("default"),
             1024,
             "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("leading system")))),
+            List.of(),
             List.of(),
             ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "pc1-key"));
 
@@ -203,7 +199,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         ProviderCacheControl.breakpoints(
             PromptCacheRetention.SHORT, "pc1-key", EnumSet.of(PromptCacheBreakpoint.SYSTEM)),
         first.effectiveRequest().cacheControl(),
-        "leading SYSTEM 与当前 BREAKPOINTS capability 求交集得到 SYSTEM");
+        "systemInstruction 与当前 BREAKPOINTS capability 求交集得到 SYSTEM");
 
     // Provider 类型切换到 google（AUTOMATIC）：当前 capability 不接受显式 hint，因此降级为 none()。
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
