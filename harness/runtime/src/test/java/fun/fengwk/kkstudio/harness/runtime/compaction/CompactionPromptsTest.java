@@ -196,12 +196,8 @@ class CompactionPromptsTest {
   }
 
   @Test
-  void emptyAndSystemMessagesProduceNoSections() {
-    assertEquals(
-        "",
-        CompactionPrompts.serializeConversation(
-            List.of(
-                new AgentMessage(AgentMessageRole.SYSTEM, List.of(new TextMessageContent("s"))))));
+  void emptyAndBlankContentProduceNoSections() {
+    assertEquals("", CompactionPrompts.serializeConversation(List.of(AgentMessage.user(""))));
     assertEquals("", CompactionPrompts.serializeConversation(List.of()));
   }
 

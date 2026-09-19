@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -123,8 +124,8 @@ class HarnessNamesTest {
   }
 
   @Test
-  void sessionNameIsDerivedFromTrailingUserLikeMessageOnly() {
-    // 初始 Session 名只取 validate 后末尾 user-like command：前缀 SYSTEM 文本不参与命名。
+  void sessionNameIsDerivedFromTheSingleFinalUserMessage() {
+    // 初始 batch 只允许恰一条末尾 USER 消息：Session 名只取该消息文本，SET_* 前缀不参与命名。
     UUID sessionId = TestIds.id(107);
     UUID threadId = TestIds.id(108);
     runtime.acceptCommands(
@@ -132,12 +133,23 @@ class HarnessNamesTest {
             sessionId,
             threadId,
             List.of(
-                HarnessRuntimeTestSupport.systemCustomMessageCommand(
-                    UUID.randomUUID(), "prefix system text"),
+                new NewThreadCommand(new SetAgentCommandPayload("assistant"), UUID.randomUUID()),
                 userMessage("trailing user text"))),
         AcceptancePreflight.IDENTITY);
     Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
     assertEquals("trailing user text", stored.name());
+  }
+
+  @Test
+  void sessionNameIsDerivedFromFinalCustomUserMessage() {
+    // USER CUSTOM_MESSAGE 同样是合法的末尾 USER 消息，其文本参与命名（contributor 注入的用户消息不再被忽略）。
+    UUID sessionId = TestIds.id(111);
+    UUID threadId = TestIds.id(112);
+    runtime.acceptCommands(
+        newSession(sessionId, threadId, List.of(customUserMessage("custom user text"))),
+        AcceptancePreflight.IDENTITY);
+    Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
+    assertEquals("custom user text", stored.name());
   }
 
   @Test

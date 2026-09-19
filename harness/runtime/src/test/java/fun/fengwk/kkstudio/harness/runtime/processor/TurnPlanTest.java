@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -103,21 +104,24 @@ class TurnPlanTest {
     assertFalse(consumed.hasDeferredUserMessages());
   }
 
+  /**
+   * CONTINUATION 只消费 SET_* 配置命令：所有 queued USER/CUSTOM message command（含运行时 reminder command）都保留给后续
+   * INPUT 由 planner 物化；planner 自己注入的设置提醒不是 queued command。
+   */
   @Test
-  void continuationConsumesOnlySystemCustomMessagesForSteering() {
-    ThreadCommand system =
+  void continuationConsumesOnlySettingCommands() {
+    ThreadCommand setting =
         new ThreadCommand(
             TestIds.id(1),
             1L,
-            new CustomMessageCommandPayload(AgentMessage.system("finish now")),
+            new SetAgentCommandPayload("coding"),
             TestIds.id(5),
-            ThreadCommandPayloadJsonCodec.requestHash(
-                new CustomMessageCommandPayload(AgentMessage.system("finish now"))),
+            ThreadCommandPayloadJsonCodec.requestHash(new SetAgentCommandPayload("coding")),
             null,
             null,
             null,
             Instant.EPOCH);
-    ThreadCommand user =
+    ThreadCommand custom =
         new ThreadCommand(
             TestIds.id(2),
             1L,
@@ -130,8 +134,8 @@ class TurnPlanTest {
             null,
             Instant.EPOCH);
 
-    assertTrue(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, system));
-    assertFalse(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, user));
+    assertTrue(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, setting));
+    assertFalse(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, custom));
   }
 
   @Test
