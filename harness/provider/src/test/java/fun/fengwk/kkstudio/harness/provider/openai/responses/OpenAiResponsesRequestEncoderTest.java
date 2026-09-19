@@ -723,7 +723,8 @@ class OpenAiResponsesRequestEncoderTest {
         .put("type", "input_text")
         .put("text", "unsafe request");
     String prefixHash =
-        OpenAiResponsesPrefixHasher.calculateHash(MAPPER.createArrayNode(), priorInput);
+        OpenAiResponsesPrefixHasher.calculateHash(
+            "Test system instruction.", MAPPER.createArrayNode(), priorInput);
 
     ObjectNode payload = MAPPER.createObjectNode();
     ObjectNode message = payload.putArray("output").addObject();

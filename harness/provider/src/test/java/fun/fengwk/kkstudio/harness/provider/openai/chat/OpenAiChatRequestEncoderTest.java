@@ -717,6 +717,7 @@ class OpenAiChatRequestEncoderTest {
                 modelDesc,
                 defaultVariant,
                 1024,
+                "Test system instruction.",
                 List.of(firstUser),
                 List.of(),
                 ProviderCacheControl.none()),
@@ -745,6 +746,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(firstUser, refusal, nextUser),
             List.of(),
             ProviderCacheControl.none());
@@ -754,7 +756,7 @@ class OpenAiChatRequestEncoderTest {
                 .encode(nextRequest, descriptor, OpenAiChatConfiguration.defaults())
                 .bodyUtf8Bytes());
 
-    JsonNode replayedRefusal = root.path("messages").get(1);
+    JsonNode replayedRefusal = root.path("messages").get(2);
     assertEquals("I cannot help with that.", replayedRefusal.path("refusal").asText());
     assertFalse(replayedRefusal.has("content"));
 
@@ -768,6 +770,7 @@ class OpenAiChatRequestEncoderTest {
             modelDesc,
             defaultVariant,
             1024,
+            "Test system instruction.",
             List.of(firstUser, mismatchedRefusal, nextUser),
             List.of(),
             ProviderCacheControl.none());
