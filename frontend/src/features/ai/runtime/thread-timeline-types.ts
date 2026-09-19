@@ -1,7 +1,6 @@
 type DialogueRole =
   | 'user'
   | 'assistant'
-  | 'system'
   | 'tool'
   | 'meta'
   | 'entry'
@@ -62,7 +61,7 @@ interface BaseDialogueMessage {
 }
 
 export interface TextDialogueMessage extends BaseDialogueMessage {
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant'
   text: string
   /**
    * 可选的 durable 附件（user 消息的 RESOURCE parts 投影）；预览/下载 URL
@@ -155,7 +154,7 @@ export type DialogueMessage =
 export interface QueuedThreadMessage {
   /** 稳定客户端幂等键（DTO idempotencyKey）；也是 UI 渲染 key。 */
   idempotencyKey: string
-  role: 'user' | 'system'
+  role: 'user'
   text: string
   sequence: string
 }

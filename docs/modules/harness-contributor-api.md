@@ -93,7 +93,7 @@ stateAccesses[]          该工具访问的 branch custom state 集合（同一 
 
 状态变更通过 [`ToolOutcome`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 声明，而不是直接写存储：`customEntries` 是有序的 [`AppendCustomEntry`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java) 列表，每项含 `customType`、正数 `schemaVersion` 与非空 `dataJson`，owner 由当前 Tool contribution 自动决定。`ToolOutcome` 构造期强制正确性约束：错误结果不得携带任何 effects。真正的落库在 [`harness-runtime`](harness-runtime.md) 的 [`ToolOutcomeAppender`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolOutcomeAppender.java) 中，与 ToolResult Entry 在同一事务里按声明顺序追加，校验失败即整体回滚，不产生部分条目。
 
-[`ContextProjector`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 把 `BranchView` 纯函数式投影为不可变的 `List<ContextFragment>`，只读、不产生副作用。Platform 在规划下一次模型请求时按 Catalog 冻结顺序执行全部投影器，并把片段按 `system` 消息注入 preamble。
+[`ContextProjector`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java) 把 `BranchView` 纯函数式投影为不可变的 `List<ContextFragment>`，只读、不产生副作用。Platform 在规划下一次模型请求时按 Catalog 冻结顺序执行全部投影器，并把片段按空行确定性拼接进本次请求唯一的 `systemInstruction` 中（会话消息中绝不注入系统消息）。
 
 ## 扩展一个 Contributor
 

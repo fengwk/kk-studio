@@ -12,10 +12,10 @@ import {
 import type { RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
 
 describe('thread timeline edge branches', () => {
-  it('projects system messages, empty user content, tool resources, and assistant errors', () => {
+  it('projects custom user messages, empty user content, tool resources, and assistant errors', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('2', 'MESSAGE', messagePayload('SYSTEM', [{ type: 'text', text: '系统提示' }])),
+        entry('2', 'CUSTOM_MESSAGE', customMessagePayload('USER', '系统提示')),
         entry('3', 'MESSAGE', messagePayload('USER', [])),
         entry(
           '5',
@@ -79,7 +79,7 @@ describe('thread timeline edge branches', () => {
       [],
     )
 
-    expect(timeline.messages.some((m) => m.role === 'system' && m.text === '系统提示')).toBe(true)
+    expect(timeline.messages.some((m) => m.role === 'user' && m.text === '系统提示')).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'assistant' && String(m.text).includes('boom'))).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'tool' && m.status === 'error')).toBe(true)
     expect(timeline.messages.some((m) => m.role === 'tool' && m.attachments.length > 0)).toBe(true)
@@ -193,22 +193,22 @@ describe('thread timeline edge branches', () => {
   it('keeps durable custom messages in transcript and queued messages in decoration order', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('custom-system', 'CUSTOM_MESSAGE', customMessagePayload('SYSTEM', 'durable system')),
+        entry('custom-first', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'durable first')),
         entry('custom-user', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'durable user')),
       ],
       [
-        command('queued-system', '1', 'CUSTOM_MESSAGE', customMessagePayload('SYSTEM', 'queued system'), 'QUEUED'),
+        command('queued-first', '1', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued first'), 'QUEUED'),
         command('queued-user', '2', 'CUSTOM_MESSAGE', customMessagePayload('USER', 'queued user'), 'QUEUED'),
       ],
       [],
     )
 
     expect(timeline.messages).toMatchObject([
-      { role: 'system', text: 'durable system' },
+      { role: 'user', text: 'durable first' },
       { role: 'user', text: 'durable user' },
     ])
     expect(timeline.queuedMessages).toMatchObject([
-      { role: 'system', text: 'queued system' },
+      { role: 'user', text: 'queued first' },
       { role: 'user', text: 'queued user' },
     ])
   })
@@ -499,15 +499,15 @@ describe('thread timeline edge branches', () => {
     expect(parseApproval('[1]')).toBeNull()
   })
 
-  it('projects empty USER/SYSTEM/TOOL entries and unknown non-message entries', () => {
-    // 防御性 fallback：无内容的 USER/SYSTEM 消息投影为 empty_message 事件；
+  it('projects empty USER/CUSTOM/TOOL entries and unknown non-message entries', () => {
+    // 防御性 fallback：无内容的 USER/CUSTOM 消息投影为 empty_message 事件；
     // TOOL role 没有 tool_result 时同样投影 empty_message；未知 entryType
     // （此处 'CUSTOM' 与 'SOMETHING_ELSE'）投影为 unknown_entry，而不是静默丢弃。
     const timeline = buildThreadTimeline(
       [
         entry('empty-user', 'MESSAGE', { message: { role: 'USER', contents: [] } }),
-        entry('empty-system', 'MESSAGE', {
-          message: { role: 'SYSTEM', contents: [{ type: 'text', text: '' }] },
+        entry('empty-custom', 'CUSTOM_MESSAGE', {
+          message: { role: 'USER', contents: [{ type: 'text', text: '' }] },
         }),
         entry('empty-tool', 'MESSAGE', {
           message: { role: 'TOOL', contents: [{ type: 'unexpected', text: 'x' }] },
@@ -713,12 +713,12 @@ describe('thread timeline edge branches', () => {
   })
 
   it('drops QUEUED CUSTOM_MESSAGE with blank contents and falls back unknown roles to user', () => {
-    // QUEUED 命令提取防御：无文本内容不产生 queued message；非 SYSTEM 的
-    // CUSTOM_MESSAGE role 按生产语义回退投影为 user（仅 SYSTEM 显式保留）。
+    // QUEUED 命令提取防御：无文本内容不产生 queued message；
+    // CUSTOM_MESSAGE role 按生产语义统一投影为 user。
     const timeline = buildThreadTimeline(
       [],
       [
-        command('blank', '1', 'CUSTOM_MESSAGE', customMessagePayload('SYSTEM', ''), 'QUEUED'),
+        command('blank', '1', 'CUSTOM_MESSAGE', customMessagePayload('USER', ''), 'QUEUED'),
         command(
           'weird-role',
           '2',
@@ -737,13 +737,13 @@ describe('thread timeline edge branches', () => {
   })
 
   it('projects unsupported message entries for unknown roles with or without role name', () => {
-    // MESSAGE/CUSTOM_MESSAGE 出现非 USER/SYSTEM/ASSISTANT/TOOL 角色时投影为
+    // MESSAGE 出现非 USER/ASSISTANT/TOOL 角色（如 HUMAN 或已废弃的 SYSTEM）时投影为
     // unsupported_message；带角色名的标题带 role 插值，空角色用通用文案。
     const withRole = buildThreadTimeline(
       [
         entry('weird', 'MESSAGE', { message: { role: 'HUMAN', contents: [{ type: 'text', text: 'x' }] } }),
-        entry('weird-custom', 'CUSTOM_MESSAGE', {
-          message: { role: 'HUMAN', contents: [{ type: 'text', text: 'y' }] },
+        entry('legacy-system', 'MESSAGE', {
+          message: { role: 'SYSTEM', contents: [{ type: 'text', text: 'y' }] },
         }),
       ],
       [],
@@ -762,7 +762,12 @@ describe('thread timeline edge branches', () => {
       {
         role: 'entry',
         kind: 'unsupported_message',
-        subjectEntryId: 'weird-custom',
+        title: '无法识别消息 Entry',
+        text: '暂不支持的消息角色：SYSTEM。原始 payload 可展开查看。',
+        rawPayloadJson: JSON.stringify({
+          message: { role: 'SYSTEM', contents: [{ type: 'text', text: 'y' }] },
+        }),
+        subjectEntryId: 'legacy-system',
       },
     ])
     const withoutRole = buildThreadTimeline(
@@ -854,6 +859,6 @@ function messagePayload(role: string, contents: Array<Record<string, unknown>>) 
   }
 }
 
-function customMessagePayload(role: 'SYSTEM' | 'USER', text: string) {
+function customMessagePayload(role: 'USER', text: string) {
   return { message: { role, contents: [{ type: 'text', text }] } }
 }

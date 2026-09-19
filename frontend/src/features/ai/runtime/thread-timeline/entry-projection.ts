@@ -121,13 +121,13 @@ export function projectDurableEntry(
   const message = asRecord(payload.message)
   const role = getString(message.role)
   const contents = getRecordList(message.contents)
-  if (role === 'USER' || role === 'SYSTEM') {
+  if (entryType === 'CUSTOM_MESSAGE' || role === 'USER') {
     const text = contents.map(contentText).filter(Boolean).join('\n')
     const attachments = contents.flatMap(toResourceAttachment)
     if (text || attachments.length > 0) {
       messages.push({
         id: entry.entryId,
-        role: role === 'USER' ? 'user' : 'system',
+        role: 'user',
         subjectEntryId: entry.entryId,
         text,
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -135,7 +135,7 @@ export function projectDurableEntry(
         status: 'done',
       })
     } else {
-      messages.push(projectEmptyMessageEntry(entry, role))
+      messages.push(projectEmptyMessageEntry(entry, role || 'USER'))
     }
     return
   }
