@@ -27,8 +27,6 @@ public class AgentDefinitionConverter {
     dto.setModel(
         new ModelRef(definition.getModelProviderName(), definition.getModelName()).toString());
     dto.setVariant(definition.getVariant());
-    dto.setEnvironmentId(
-        definition.getEnvironmentId() == null ? null : definition.getEnvironmentId().toString());
     dto.setConfig(configCodec.decode(definition.getConfigJson()));
     dto.setVersion(CatalogVersions.format(definition.getVersion()));
     dto.setCreateTime(definition.getCreateTime());

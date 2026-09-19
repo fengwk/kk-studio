@@ -5,8 +5,6 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 
-import java.util.UUID;
-
 /** 全局 Agent definition 仓库。 */
 public interface AgentDefinitionRepository {
 
@@ -18,9 +16,8 @@ public interface AgentDefinitionRepository {
 
   boolean existsReferencingSubagent(String name);
 
-  boolean existsReferencingSkillSource(UUID environmentId, UUID sourceId);
-
-  boolean existsByEnvironmentId(UUID environmentId);
+  /** 是否有任何 Agent 的 {@code config.skills} 引用该全局 Skill 名。 */
+  boolean existsReferencingSkill(String skillName);
 
   boolean create(AgentDefinition agentDefinition);
 

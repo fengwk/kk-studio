@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
@@ -21,6 +22,7 @@ public final class SystemPromptPreviewServiceFactory {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
+  private final SkillCatalogQueryService skillCatalogQueryService;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
 
@@ -30,6 +32,7 @@ public final class SystemPromptPreviewServiceFactory {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
+      SkillCatalogQueryService skillCatalogQueryService,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.agentDefinitionRepository =
@@ -40,6 +43,8 @@ public final class SystemPromptPreviewServiceFactory {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
+    this.skillCatalogQueryService =
+        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -52,6 +57,7 @@ public final class SystemPromptPreviewServiceFactory {
         environmentRegistry,
         environmentRepository,
         skillInventoryQueryService,
+        skillCatalogQueryService,
         promptComposer,
         clock);
   }

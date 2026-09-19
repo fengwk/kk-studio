@@ -108,6 +108,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -128,7 +130,6 @@ import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolType;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 
@@ -140,6 +141,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -442,11 +444,16 @@ class DatabaseTurnResolverTest {
     assertTrue(requestSpec.toolBindings().getFirst().environmentRequired());
     assertNull(requestSpec.toolBindings().getFirst().environmentId());
 
-    // Agent skills 仍要求当前 branch 选择 Environment；没有选择时精确拒绝。
-    Fixture skillsFixture = new Fixture(List.of(), List.of("dev"), List.of());
+    // Platform Skill 与 Environment 解耦：未选择 Environment 仍可冻结并声明 load_skill。
+    Fixture skillsFixture =
+        new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    ModelRequestSpec skillSpec =
+        skillsFixture.resolved(skillsFixture.path(unboundSettings("default")));
     assertEquals(
-        "agent skills require an environment but the branch has no environment",
-        skillsFixture.rejected(skillsFixture.path(unboundSettings("default"))).error().message());
+        List.of("dev"), skillSpec.skillBindings().stream().map(SkillBinding::name).toList());
+    assertEquals(
+        List.of("load_skill"),
+        skillSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
   }
 
   @Test
@@ -592,13 +599,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     assertEquals(
         List.of(
-            new SkillBinding(
-                ENV_A,
-                SKILL_SOURCE_ID,
-                "dev",
-                "dev description",
-                "/home/dev/skills/dev",
-                CONTENT_REVISION)),
+            new SkillBinding("dev", "test-package", "1.0.0", CONTENT_REVISION, "dev description")),
         requestSpec.skillBindings());
     assertTrue(preambleText(requestSpec).contains("- note: Persisted offline note"));
   }
@@ -654,12 +655,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(
             new SkillBinding(
-                ENV_B,
-                SKILL_SOURCE_ID,
-                "dev-b",
-                "dev-b description",
-                "/home/dev/skills/dev-b",
-                CONTENT_REVISION)),
+                "dev-b", "test-package", "1.0.0", CONTENT_REVISION, "dev-b description")),
         requestSpec.skillBindings());
   }
 
@@ -747,13 +743,7 @@ class DatabaseTurnResolverTest {
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
         List.of(
-            new SkillBinding(
-                ENV_A,
-                SKILL_SOURCE_ID,
-                "dev",
-                "dev description",
-                "/home/dev/skills/dev",
-                CONTENT_REVISION)),
+            new SkillBinding("dev", "test-package", "1.0.0", CONTENT_REVISION, "dev description")),
         requestSpec.skillBindings());
   }
 
@@ -770,36 +760,29 @@ class DatabaseTurnResolverTest {
     assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
     assertEquals(
         List.of(
-            new SkillBinding(
-                ENV_A,
-                SKILL_SOURCE_ID,
-                "dev",
-                "dev description",
-                "/home/dev/skills/dev",
-                CONTENT_REVISION)),
+            new SkillBinding("dev", "test-package", "1.0.0", CONTENT_REVISION, "dev description")),
         requestSpec.skillBindings());
 
-    // Environment 缺少该 skill：不静默丢弃，typed 拒绝。
+    // 全局目录缺少该 Skill：不静默丢弃，typed 拒绝。
     fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
     fixture.readyEnvironment(ENV_A, List.of());
+    fixture.missingGlobalSkills();
     assertEquals(
-        "skill ref not usable in environment " + ENV_A + ": " + SKILL_SOURCE_ID + "/dev",
+        "agent skill not found in the global catalog: dev",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
-  /** 测试意图：验证即使 Environment 中存在同名技能但来源于不同的 sourceId 时， 规划依然确定性拒绝，绝不跨 sourceId 静默匹配。 */
+  /** 测试意图：验证 Platform Skill 身份不再受 Environment sourceId 影响。 */
   @Test
-  void rejectsSameNameSkillFromDifferentSourceId() {
+  void ignoresLegacyEnvironmentSkillSourceIdentity() {
     Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
-    // usable inventory 中注册名为 dev 的技能，但来自于另一个 sourceId
     UUID otherSourceId = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     fixture.readyEnvironmentWithSourceSkills(
         ENV_A, otherSourceId, List.of(descriptor(otherSourceId, 1, "dev", "dev description")));
 
-    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     assertEquals(
-        "skill ref not usable in environment " + ENV_A + ": " + SKILL_SOURCE_ID + "/dev",
-        rejected.error().message());
+        List.of("dev"), requestSpec.skillBindings().stream().map(SkillBinding::name).toList());
   }
 
   @Test
@@ -2319,6 +2302,9 @@ class DatabaseTurnResolverTest {
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
     private final EnvironmentSkillInventoryQueryService skillInventoryQueryService =
         mock(EnvironmentSkillInventoryQueryService.class);
+    private final SkillCatalogQueryService skillCatalogQueryService =
+        mock(SkillCatalogQueryService.class);
+    private final Map<String, CurrentSkill> currentSkills = new LinkedHashMap<>();
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
@@ -2451,8 +2437,6 @@ class DatabaseTurnResolverTest {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
       agent.setConfigJson("agent-config");
-      // Agent 不再持有 Environment；branch settings 的 name 是唯一环境选择源。
-      agent.setEnvironmentId(null);
       when(agents.getByName("assistant")).thenReturn(agent);
 
       // 默认 branch 选择 ENV_A_NAME：解析为内部路由身份 ENV_A。
@@ -2473,10 +2457,14 @@ class DatabaseTurnResolverTest {
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
       agentConfig.setTools(List.copyOf(tools));
-      agentConfig.setSkills(
-          skills.stream().map(s -> new AgentSkillRefDTO(SKILL_SOURCE_ID.toString(), s)).toList());
+      agentConfig.setSkills(List.copyOf(skills));
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
+      for (String skill : skills) {
+        currentSkills.put(skill, currentSkill(skill, skill + " description"));
+      }
+      when(skillCatalogQueryService.currentSkillsByName())
+          .thenAnswer(invocation -> Map.copyOf(currentSkills));
       when(skillInventoryQueryService.listUsableSkills(ENV_MISSING))
           .thenThrow(new AiResourceNotFoundException("environment"));
 
@@ -2554,6 +2542,7 @@ class DatabaseTurnResolverTest {
               environmentRegistry,
               environmentRepository,
               skillInventoryQueryService,
+              skillCatalogQueryService,
               () -> new CompactionConfig(20_000, null),
               new AgentPromptComposer(() -> subagentConfig),
               roleToolSelector,
@@ -2641,6 +2630,10 @@ class DatabaseTurnResolverTest {
 
     private void failModelConfig(RuntimeException error) {
       when(modelConfigParser.parse("model-config")).thenThrow(error);
+    }
+
+    private void missingGlobalSkills() {
+      currentSkills.clear();
     }
 
     private void modelSupportsTools(boolean tools) {
@@ -2790,6 +2783,7 @@ class DatabaseTurnResolverTest {
 
     private void readyEnvironmentWithSourceSkills(
         EnvironmentId environmentId, UUID sourceId, List<DaemonSkillDescriptor> skills) {
+      publishGlobalSkills(skills);
       List<EnvironmentSkillDTO> dtos =
           skills.stream()
               .map(
@@ -2831,6 +2825,7 @@ class DatabaseTurnResolverTest {
         List<DaemonSkillDescriptor> skills,
         DaemonEnvironmentInfo environmentInfo,
         Instant lastSeenAt) {
+      publishGlobalSkills(skills);
       List<EnvironmentSkillDTO> dtos =
           skills.stream()
               .map(
@@ -2861,6 +2856,24 @@ class DatabaseTurnResolverTest {
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
       when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(true);
+    }
+
+    private void publishGlobalSkills(List<DaemonSkillDescriptor> skills) {
+      for (DaemonSkillDescriptor descriptor : skills) {
+        currentSkills.put(
+            descriptor.name(), currentSkill(descriptor.name(), descriptor.description()));
+      }
+    }
+
+    private CurrentSkill currentSkill(String name, String description) {
+      CurrentSkill skill = new CurrentSkill();
+      skill.setName(name);
+      skill.setPackageName("test-package");
+      skill.setPackageVersion("1.0.0");
+      skill.setDescription(description);
+      skill.setContentRevision(CONTENT_REVISION);
+      skill.setContent("# " + name);
+      return skill;
     }
   }
 }

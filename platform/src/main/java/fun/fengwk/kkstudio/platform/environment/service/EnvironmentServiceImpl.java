@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -46,7 +45,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
 
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentRegistry environmentRegistry;
-  private final AgentDefinitionRepository agentDefinitionRepository;
   private final JdbcTemplate jdbcTemplate;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
@@ -156,10 +154,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     if (environmentRegistry.hasActiveLease(id)) {
       throw new AiInUseException(
           RESOURCE, "cannot delete environment with an active connection lease");
-    }
-    if (agentDefinitionRepository.existsByEnvironmentId(id.value())) {
-      throw new AiInUseException(
-          RESOURCE, "cannot delete environment referenced by one or more agent definitions");
     }
     if (hasActiveWork(id)) {
       throw new AiInUseException(

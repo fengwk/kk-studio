@@ -38,7 +38,6 @@ final class InvocationCodecTestFixtures {
       EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000");
   static final EnvironmentId OTHER_ENVIRONMENT_ID =
       EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174001");
-  static final UUID SOURCE_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   static final String CONTENT_REVISION =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -48,15 +47,9 @@ final class InvocationCodecTestFixtures {
 
   private InvocationCodecTestFixtures() {}
 
-  /** 冻结的六字段 skill 事实：身份、描述与 contentRevision 全部必填。 */
+  /** 冻结的平台 Skill 包版本事实。 */
   static SkillBinding skillBinding(EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding(
-        sourceEnvironmentId,
-        SOURCE_ID,
-        "review",
-        "Review code",
-        "/home/dev/.agents/skills/review",
-        CONTENT_REVISION);
+    return new SkillBinding("review", "review-package", "1.0.0", CONTENT_REVISION, "Review code");
   }
 
   static ToolDescriptor descriptor() {

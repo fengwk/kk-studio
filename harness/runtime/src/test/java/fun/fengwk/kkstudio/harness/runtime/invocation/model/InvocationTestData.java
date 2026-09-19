@@ -34,21 +34,14 @@ import java.util.UUID;
 final class InvocationTestData {
 
   static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-  static final UUID SKILL_SOURCE_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   static final String SKILL_CONTENT_REVISION =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private InvocationTestData() {}
 
-  /** 冻结的六字段 skill binding fixture。 */
+  /** 冻结的平台 Skill 包版本 fixture。 */
   static SkillBinding skill(String name, String description, EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding(
-        sourceEnvironmentId,
-        SKILL_SOURCE_ID,
-        name,
-        description,
-        "/home/dev/.agents/skills/" + name,
-        SKILL_CONTENT_REVISION);
+    return new SkillBinding(name, "test-package", "1.0.0", SKILL_CONTENT_REVISION, description);
   }
 
   static ToolDescriptor toolDescriptor(String name) {

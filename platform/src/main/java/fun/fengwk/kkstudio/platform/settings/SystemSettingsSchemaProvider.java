@@ -206,14 +206,6 @@ public class SystemSettingsSchemaProvider {
                         FieldType.LONG,
                         false,
                         1,
-                        null),
-                    field(
-                        "tool.skillLoadTimeoutMillis",
-                        "settings.field.tool.skillLoadTimeoutMillis",
-                        null,
-                        FieldType.LONG,
-                        false,
-                        1,
                         null))),
             section(
                 "environment",

@@ -122,34 +122,31 @@ public final class ModelRequestSpecJsonCodec {
 
   private static ObjectNode encodeSkill(SkillBinding skill) {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
-    node.put("sourceEnvironmentId", skill.sourceEnvironmentId().toString());
-    node.put("sourceId", skill.sourceId().toString());
     node.put("name", skill.name());
-    node.put("description", skill.description());
-    node.put("baseDirectory", skill.baseDirectory());
+    node.put("packageName", skill.packageName());
+    node.put("packageVersion", skill.packageVersion());
     node.put("contentRevision", skill.contentRevision());
+    node.put("description", skill.description());
     return node;
   }
 
-  /** 严格解码：全部身份/描述字段必填，旧 tolerant 形状（缺少 sourceId/revision）被拒绝。 */
+  /** 严格解码：全部身份/描述字段必填，旧 tolerant 形状（缺少 package 身份或 revision）被拒绝。 */
   private static SkillBinding decodeSkill(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
     InvocationJsonSupport.requireFields(
         node,
         "skillBinding",
-        "sourceEnvironmentId",
-        "sourceId",
         "name",
-        "description",
-        "baseDirectory",
-        "contentRevision");
+        "packageName",
+        "packageVersion",
+        "contentRevision",
+        "description");
     return new SkillBinding(
-        InvocationJsonSupport.environmentId(node, "sourceEnvironmentId", "skillBinding"),
-        InvocationJsonSupport.requiredUuid(node, "sourceId", "skillBinding"),
         InvocationJsonSupport.text(node, "name", "skillBinding"),
-        InvocationJsonSupport.text(node, "description", "skillBinding"),
-        InvocationJsonSupport.text(node, "baseDirectory", "skillBinding"),
-        InvocationJsonSupport.text(node, "contentRevision", "skillBinding"));
+        InvocationJsonSupport.text(node, "packageName", "skillBinding"),
+        InvocationJsonSupport.text(node, "packageVersion", "skillBinding"),
+        InvocationJsonSupport.text(node, "contentRevision", "skillBinding"),
+        InvocationJsonSupport.text(node, "description", "skillBinding"));
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {

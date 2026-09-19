@@ -54,6 +54,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -67,9 +69,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -77,6 +77,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -114,6 +115,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
+  private final SkillCatalogQueryService skillCatalogQueryService;
   private final CompactionConfigProvider compactionConfigProvider;
   private final AgentPromptComposer promptComposer;
   private final ProjectRoleToolSelector roleToolSelector;
@@ -135,6 +137,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       EnvironmentSkillInventoryQueryService skillInventoryQueryService,
+      SkillCatalogQueryService skillCatalogQueryService,
       CompactionConfigProvider compactionConfigProvider,
       AgentPromptComposer promptComposer,
       ProjectRoleToolSelector roleToolSelector,
@@ -154,6 +157,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillInventoryQueryService =
         Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
+    this.skillCatalogQueryService =
+        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
@@ -233,7 +238,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Instant now = clock.instant();
     EnvironmentId environmentId = resolveEnvironmentId(settings.environmentName());
     CurrentEnvironmentContext currentEnvironment = resolveCurrentEnvironment(environmentId, now);
-    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills(), environmentId);
+    List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
     List<String> toolNames = resolveToolNames(agentConfig, threadId);
     List<ToolBinding> toolBindings = resolveTools(environmentId, toolNames);
@@ -524,52 +529,29 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * Agent skills 只从最新 Agent config 读取，且必须由当前 branch 选择的 Environment 持久可用 inventory 精确提供。
+   * Agent skills 只从最新 Agent config 读取，并按全局 Skill 目录解析为冻结事实。
    *
-   * <p>通过 {@link EnvironmentSkillInventoryQueryService#listUsableSkills} 查询持久事实，执行严格复合匹配 {@code
-   * (sourceId, name)}；离线时仍可成功规划，陈旧或缺失 ref 确定性拒绝。
+   * <p>通过 {@link SkillCatalogQueryService#currentSkillsByName()} 读取 Platform 自身的当前目录，按 canonical
+   * 名精确匹配； 缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    */
-  private List<SkillBinding> resolveSkills(
-      List<AgentSkillRefDTO> skillRefs, EnvironmentId environmentId) {
-    if (skillRefs == null || skillRefs.isEmpty()) {
+  private List<SkillBinding> resolveSkills(List<String> skillNames) {
+    if (skillNames == null || skillNames.isEmpty()) {
       return List.of();
     }
-    if (environmentId == null) {
-      throw rejection("agent skills require an environment but the branch has no environment");
-    }
-    List<EnvironmentSkillDTO> usable;
-    try {
-      usable = skillInventoryQueryService.listUsableSkills(environmentId);
-    } catch (AiResourceNotFoundException error) {
-      throw rejection("environment not found: " + environmentId);
-    }
-    List<SkillBinding> bindings = new ArrayList<>(skillRefs.size());
-    for (AgentSkillRefDTO ref : skillRefs) {
-      EnvironmentSkillDTO matched =
-          usable.stream()
-              .filter(
-                  candidate ->
-                      candidate.getSourceId().equals(ref.getSourceId())
-                          && candidate.getName().equals(ref.getName()))
-              .findFirst()
-              .orElse(null);
-      if (matched == null) {
-        throw rejection(
-            "skill ref not usable in environment "
-                + environmentId
-                + ": "
-                + ref.getSourceId()
-                + "/"
-                + ref.getName());
+    Map<String, CurrentSkill> catalog = skillCatalogQueryService.currentSkillsByName();
+    List<SkillBinding> bindings = new ArrayList<>(skillNames.size());
+    for (String skillName : skillNames) {
+      CurrentSkill skill = catalog.get(skillName);
+      if (skill == null) {
+        throw rejection("agent skill not found in the global catalog: " + skillName);
       }
       bindings.add(
           new SkillBinding(
-              environmentId,
-              UUID.fromString(matched.getSourceId()),
-              matched.getName(),
-              matched.getDescription(),
-              matched.getBaseDirectory(),
-              matched.getContentRevision()));
+              skill.getName(),
+              skill.getPackageName(),
+              skill.getPackageVersion(),
+              skill.getContentRevision(),
+              skill.getDescription()));
     }
     return List.copyOf(bindings);
   }

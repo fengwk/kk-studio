@@ -51,8 +51,7 @@ class ToolSettingsProviderTest {
                     true,
                     5_000L,
                     1_000L,
-                    5_000L,
-                    30_000L)));
+                    5_000L)));
     assertTrue(provider.get().defaultYolo());
     assertEquals(PermissionAction.DENY, provider.get().rulesFor("write").getFirst().action());
 

@@ -7,14 +7,12 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDiagnostic;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceType;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillSourceConfigValidator.NormalizedConfig;
 import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
 import fun.fengwk.kkstudio.platform.environment.skill.model.SkillSource;
 import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
-import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -43,7 +41,6 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
 
   private final EnvironmentRepository environmentRepository;
   private final SkillSourceRepository skillSourceRepository;
-  private final AgentDefinitionRepository agentDefinitionRepository;
 
   @Override
   public List<EnvironmentSkillSourceDTO> list(EnvironmentId environmentId) {
@@ -158,11 +155,6 @@ public class EnvironmentSkillSourceServiceImpl implements EnvironmentSkillSource
           SkillSourceConfigValidator.RESOURCE,
           expectedVersion,
           CatalogVersions.format(current.getVersion()));
-    }
-    if (agentDefinitionRepository.existsReferencingSkillSource(environmentId.value(), sourceId)) {
-      throw new AiInUseException(
-          SkillSourceConfigValidator.RESOURCE,
-          "skill source is referenced by an agent: " + sourceId);
     }
     if (!skillSourceRepository.deleteSourceByVersion(environmentId.value(), sourceId, expected)) {
       throw versionConflict(environmentId, sourceId, expectedVersion);

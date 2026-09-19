@@ -217,15 +217,14 @@ class ResolvedRequestValidatorTest {
                         ProviderCacheControl.none()))));
   }
 
-  /** 冻结的六字段 skill binding fixture：身份、描述、baseDirectory 与 revision 全部必填。 */
+  /** 冻结的平台 Skill 包版本 fixture。 */
   private static SkillBinding skillBinding(String name, EnvironmentId sourceEnvironmentId) {
     return new SkillBinding(
-        sourceEnvironmentId,
-        UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         name,
-        "developer rules",
-        "/home/dev/.agents/skills/" + name,
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        "test-package",
+        "1.0.0",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "developer rules");
   }
 
   private static void assertCompactionRejects(

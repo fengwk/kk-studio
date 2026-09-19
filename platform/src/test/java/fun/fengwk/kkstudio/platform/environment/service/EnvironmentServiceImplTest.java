@@ -113,7 +113,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -156,7 +156,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -194,7 +194,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -253,7 +253,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCardDTO single = service.get(EnvironmentId.of(ENV_ID));
     assertNull(single.getRegistrationToken());
@@ -300,7 +300,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -352,7 +352,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -385,7 +385,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentRegistrationTokenDTO first = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
     EnvironmentRegistrationTokenDTO second = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
@@ -417,7 +417,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     assertThrows(
         AiResourceNotFoundException.class,
@@ -452,7 +452,7 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     EnvironmentCardDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
 
@@ -463,7 +463,7 @@ class EnvironmentServiceImplTest {
   }
 
   @Test
-  void deleteChecksOnlineAgentRefsAndActiveWork() {
+  void deleteChecksOnlineLeaseAndActiveWork() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
@@ -484,23 +484,18 @@ class EnvironmentServiceImplTest {
 
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
-            repo, registry, agents, jdbc, snapshot, CLOCK, initializer, skillSources);
+            repo, registry, jdbc, snapshot, CLOCK, initializer, skillSources);
 
     // 1. Active lease in DB -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
-    // 2. No active lease but referenced by Agent -> rejects
+    // 2. Offline, but active work in harness_work -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
-    when(agents.existsByEnvironmentId(ENV_ID)).thenReturn(true);
-    assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
-
-    // 3. Offline, no agent ref, but active work in harness_work -> rejects
-    when(agents.existsByEnvironmentId(ENV_ID)).thenReturn(false);
     when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(1);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
-    // 4. All clear -> succeeds
+    // 3. All clear -> succeeds
     when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(0);
     service.delete(EnvironmentId.of(ENV_ID), "0");
     verify(repo).deleteById(ENV_ID, 0L);

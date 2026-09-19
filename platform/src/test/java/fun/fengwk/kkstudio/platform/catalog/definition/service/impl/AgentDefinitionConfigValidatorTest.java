@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -62,10 +61,7 @@ class AgentDefinitionConfigValidatorTest {
     try (Fixture fixture = new Fixture(List.of(hostTool("host_tool"), fixedEnvironmentTool))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of(ENVIRONMENT_TOOL_NAME, "host_tool", CUSTOM_TOOL_NAME));
-      config.setSkills(
-          List.of(
-              new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "dev"),
-              new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "ops")));
+      config.setSkills(List.of("dev", "ops"));
       config.setSubagents(List.of("reviewer"));
 
       assertDoesNotThrow(() -> fixture.validator.validate(config));
@@ -105,13 +101,12 @@ class AgentDefinitionConfigValidatorTest {
       String tooLong = "x".repeat(129);
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of());
-      config.setSkills(
-          List.of(new AgentSkillRefDTO("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", tooLong)));
+      config.setSkills(List.of(tooLong));
       config.setSubagents(List.of());
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
               .getMessage()
-              .contains("agent skill name must be <= 128 characters"));
+              .contains("invalid agent skill name"));
     }
   }
 

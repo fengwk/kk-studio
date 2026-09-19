@@ -24,6 +24,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -31,15 +33,14 @@ import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentSkillRefDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentSkillDTO;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -49,7 +50,6 @@ class SystemPromptPreviewServiceTest {
   private static final Instant NOW = Instant.parse("2026-08-17T00:00:00Z");
   private static final UUID THREAD_ID = new UUID(0L, 1L);
   private static final UUID SESSION_ID = new UUID(0L, 2L);
-  private static final String SOURCE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
   private static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
@@ -153,7 +153,7 @@ class SystemPromptPreviewServiceTest {
     assertTrue(preview.contains("- note: Local &lt;dev&gt; &amp; tools."), preview);
   }
 
-  /** 测试意图：验证即使 Daemon 处于离线状态，PreviewService 仍然能够通过持久可用 inventory 正常解析出技能提示词。 */
+  /** 测试意图：验证 Daemon 离线不影响从 Platform 全局目录预览 Skill。 */
   @Test
   void previewsSkillsFromDurableInventoryWhenDaemonIsOffline() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
@@ -162,6 +162,7 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
+    SkillCatalogQueryService skillCatalog = mock(SkillCatalogQueryService.class);
     EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
@@ -173,30 +174,25 @@ class SystemPromptPreviewServiceTest {
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of(new AgentSkillRefDTO(SOURCE_ID, "dev")));
+    config.setSkills(List.of("dev"));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
     // Daemon 离线
     when(environments.find(environmentId)).thenReturn(Optional.empty());
+    when(skillCatalog.currentSkillsByName())
+        .thenReturn(Map.of("dev", skill("dev", "Dev skill description")));
 
-    // 持久 inventory 中有此技能
-    EnvironmentSkillDTO skillDto = new EnvironmentSkillDTO();
-    skillDto.setSourceId(SOURCE_ID);
-    skillDto.setName("dev");
-    skillDto.setDescription("Dev skill description");
-    skillDto.setBaseDirectory("/home/dev/skills/dev");
-    skillDto.setContentRevision("0".repeat(64));
-    when(skillSources.listUsableSkills(environmentId)).thenReturn(List.of(skillDto));
-
-    String preview = service(runtime, agents, codec, environments, skillSources).preview(THREAD_ID);
+    String preview =
+        service(runtime, agents, codec, environments, skillSources, boundRepository(), skillCatalog)
+            .preview(THREAD_ID);
 
     assertTrue(preview.contains("<available_skills>"), preview);
     assertTrue(preview.contains("<name>dev</name>"), preview);
     assertTrue(preview.contains("<description>Dev skill description</description>"), preview);
   }
 
-  /** 测试意图：验证在预览时如果配置的技能在持久 inventory 中不存在或不可用，采取宽容忽略策略（只渲染有效技能，不导致预览失败）。 */
+  /** 测试意图：验证预览宽容忽略全局目录中不存在的 Skill。 */
   @Test
   void omitsMissingOrStaleSkillsLenientlyInPreview() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
@@ -205,6 +201,7 @@ class SystemPromptPreviewServiceTest {
     EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
     EnvironmentSkillInventoryQueryService skillSources =
         mock(EnvironmentSkillInventoryQueryService.class);
+    SkillCatalogQueryService skillCatalog = mock(SkillCatalogQueryService.class);
     EnvironmentId environmentId = ENVIRONMENT_ID;
 
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
@@ -216,23 +213,17 @@ class SystemPromptPreviewServiceTest {
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(
-        List.of(
-            new AgentSkillRefDTO(SOURCE_ID, "dev"), new AgentSkillRefDTO(SOURCE_ID, "missing")));
+    config.setSkills(List.of("dev", "missing"));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
     when(environments.find(environmentId)).thenReturn(Optional.empty());
+    when(skillCatalog.currentSkillsByName())
+        .thenReturn(Map.of("dev", skill("dev", "Dev skill description")));
 
-    EnvironmentSkillDTO skillDto = new EnvironmentSkillDTO();
-    skillDto.setSourceId(SOURCE_ID);
-    skillDto.setName("dev");
-    skillDto.setDescription("Dev skill description");
-    skillDto.setBaseDirectory("/home/dev/skills/dev");
-    skillDto.setContentRevision("0".repeat(64));
-    when(skillSources.listUsableSkills(environmentId)).thenReturn(List.of(skillDto));
-
-    String preview = service(runtime, agents, codec, environments, skillSources).preview(THREAD_ID);
+    String preview =
+        service(runtime, agents, codec, environments, skillSources, boundRepository(), skillCatalog)
+            .preview(THREAD_ID);
 
     assertTrue(preview.contains("<available_skills>"), preview);
     assertTrue(preview.contains("<name>dev</name>"), preview);
@@ -363,7 +354,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of(new AgentSkillRefDTO(SOURCE_ID, "dev")));
+    config.setSkills(List.of("dev"));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
@@ -423,7 +414,7 @@ class SystemPromptPreviewServiceTest {
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of(new AgentSkillRefDTO(SOURCE_ID, "code_search")));
+    config.setSkills(List.of("code_search"));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
@@ -490,7 +481,8 @@ class SystemPromptPreviewServiceTest {
         codec,
         mock(EnvironmentRegistry.class),
         mock(EnvironmentSkillInventoryQueryService.class),
-        boundRepository());
+        boundRepository(),
+        mock(SkillCatalogQueryService.class));
   }
 
   private static SystemPromptPreviewService service(
@@ -499,7 +491,14 @@ class SystemPromptPreviewServiceTest {
       AgentDefinitionConfigCodec codec,
       EnvironmentRegistry environmentRegistry,
       EnvironmentSkillInventoryQueryService skillSources) {
-    return service(runtime, agents, codec, environmentRegistry, skillSources, boundRepository());
+    return service(
+        runtime,
+        agents,
+        codec,
+        environmentRegistry,
+        skillSources,
+        boundRepository(),
+        mock(SkillCatalogQueryService.class));
   }
 
   private static SystemPromptPreviewService service(
@@ -509,6 +508,24 @@ class SystemPromptPreviewServiceTest {
       EnvironmentRegistry environmentRegistry,
       EnvironmentSkillInventoryQueryService skillSources,
       EnvironmentRepository environmentRepository) {
+    return service(
+        runtime,
+        agents,
+        codec,
+        environmentRegistry,
+        skillSources,
+        environmentRepository,
+        mock(SkillCatalogQueryService.class));
+  }
+
+  private static SystemPromptPreviewService service(
+      HarnessRuntime runtime,
+      AgentDefinitionRepository agents,
+      AgentDefinitionConfigCodec codec,
+      EnvironmentRegistry environmentRegistry,
+      EnvironmentSkillInventoryQueryService skillSources,
+      EnvironmentRepository environmentRepository,
+      SkillCatalogQueryService skillCatalog) {
     SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 7);
     return new SystemPromptPreviewServiceFactory(
             agents,
@@ -516,6 +533,7 @@ class SystemPromptPreviewServiceTest {
             environmentRegistry,
             environmentRepository,
             skillSources,
+            skillCatalog,
             new AgentPromptComposer(() -> subagentConfig),
             Clock.fixed(NOW, ZoneOffset.UTC))
         .create(runtime);
@@ -528,6 +546,17 @@ class SystemPromptPreviewServiceTest {
     environment.setName(ENV_NAME);
     when(repository.getByName(ENV_NAME)).thenReturn(environment);
     return repository;
+  }
+
+  private static CurrentSkill skill(String name, String description) {
+    CurrentSkill skill = new CurrentSkill();
+    skill.setName(name);
+    skill.setPackageName("test-package");
+    skill.setPackageVersion("1.0.0");
+    skill.setDescription(description);
+    skill.setContentRevision("0".repeat(64));
+    skill.setContent("# " + name);
+    return skill;
   }
 
   private static ThreadSnapshot snapshot() {
