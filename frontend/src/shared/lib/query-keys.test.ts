@@ -12,27 +12,20 @@ describe('queryKeys', () => {
   })
 
   /**
-   * 测试意图：验证 Skill 全局目录、Skill Packages 以及 Environment 管理操作具有确定性的查询键。
+   * 测试意图：验证 Skill 全局目录、Skill Packages、Environment 以及 MCP Server 具有确定性的查询键。
    */
-  it('builds deterministic query keys for Skills and Environment operations', () => {
+  it('builds deterministic query keys for Skills, Environments, and MCP servers', () => {
     expect(queryKeys.skills.all).toEqual(['skills'])
     expect(queryKeys.skills.list).toEqual(['skills', 'list'])
     expect(queryKeys.skills.packages).toEqual(['skills', 'packages'])
     expect(queryKeys.skills.packageDetail('pkg-1')).toEqual(['skills', 'packages', 'pkg-1'])
 
-    expect(queryKeys.environments.operations('env-1', 20)).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'operations',
-      20,
-    ])
-    expect(queryKeys.environments.operation('env-1', 'op-1')).toEqual([
-      'environments',
-      'detail',
-      'env-1',
-      'operations',
-      'op-1',
-    ])
+    expect(queryKeys.environments.all).toEqual(['environments'])
+    expect(queryKeys.environments.list).toEqual(['environments', 'list'])
+    expect(queryKeys.environments.detail('env-1')).toEqual(['environments', 'detail', 'env-1'])
+
+    expect(queryKeys.mcpServers.all).toEqual(['mcp-servers'])
+    expect(queryKeys.mcpServers.list(1, 50)).toEqual(['mcp-servers', 'list', 1, 50])
+    expect(queryKeys.mcpServers.detail('fs')).toEqual(['mcp-servers', 'detail', 'fs'])
   })
 })

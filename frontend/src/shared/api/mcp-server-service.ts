@@ -2,7 +2,6 @@ import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   McpServerConfigDTO,
   McpServerCreateDTO,
-  McpServerDiscoveryResponseDTO,
   McpServerDTO,
   McpServerUpdateDTO,
 } from '@/shared/api/contracts/ai-mcp'
@@ -13,37 +12,38 @@ export function createMcpServerService(client: HttpClient = apiClient) {
     pageServers: (pageNumber = 1, pageSize = 50): Promise<PageResult<McpServerDTO>> =>
       client.get('/ai/mcp-servers', { params: { pageNumber, pageSize } }),
 
-    getServer: (id: string): Promise<McpServerDTO> =>
-      client.get(`/ai/mcp-servers/${encodeURIComponent(id)}`),
+    getServer: (name: string): Promise<McpServerDTO> =>
+      client.get(`/ai/mcp-servers/${encodeURIComponent(name)}`),
 
     /**
-     * 按需读取当前完整配置 JSON（含连接与敏感参数，响应 no-store）。
+     * 按需读取当前完整配置（含 URL 与 headers，强制 Cache-Control: no-store）。
      * 仅在显式编辑时直读，绝不进入 React Query、LocalStorage 或 URL。
      */
-    getServerConfig: (id: string): Promise<McpServerConfigDTO> =>
-      client.get(`/ai/mcp-servers/${encodeURIComponent(id)}/config`),
+    getServerConfig: (name: string): Promise<McpServerConfigDTO> =>
+      client.get(`/ai/mcp-servers/${encodeURIComponent(name)}/config`, {
+        headers: { 'Cache-Control': 'no-store' },
+      }),
 
     createServer: (data: McpServerCreateDTO): Promise<McpServerDTO> =>
       client.post('/ai/mcp-servers', data),
 
-    updateServer: (id: string, data: McpServerUpdateDTO): Promise<McpServerDTO> =>
-      client.put(`/ai/mcp-servers/${encodeURIComponent(id)}`, data),
+    updateServer: (name: string, data: McpServerUpdateDTO): Promise<McpServerDTO> =>
+      client.put(`/ai/mcp-servers/${encodeURIComponent(name)}`, data),
 
     /**
-     * 触发 MCP Server 工具发现（HTTP 202 Accepted）。
-     * Remote 同步完成，Local 异步创建 EnvironmentOperation。
+     * 触发 MCP Server 工具发现（POST /ai/mcp-servers/{name}/discover?expectedVersion=...）。
      */
     discoverServer: (
-      id: string,
+      name: string,
       expectedVersion: string,
-    ): Promise<McpServerDiscoveryResponseDTO> =>
-      client.post(`/ai/mcp-servers/${encodeURIComponent(id)}/discover`, {
-        expectedVersion,
-      }),
+    ): Promise<McpServerDTO> =>
+      client.post(
+        `/ai/mcp-servers/${encodeURIComponent(name)}/discover?expectedVersion=${encodeURIComponent(expectedVersion)}`,
+      ),
 
-    deleteServer: (id: string, expectedVersion: string): Promise<void> =>
+    deleteServer: (name: string, expectedVersion: string): Promise<void> =>
       client.delete(
-        `/ai/mcp-servers/${encodeURIComponent(id)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
+        `/ai/mcp-servers/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
       ),
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw } from 'lucide-react'
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
@@ -10,20 +10,19 @@ import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLa
 import { ConfirmActionModal } from '@/shared/ui/console/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
-import { DEFAULT_OPERATION_LIMIT, environmentService } from '@/shared/api/environment-service'
 import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import {
-  formatMcpConfigJsonSafely,
-  isSemanticConfigEqual,
-  REMOTE_CONFIG_TEMPLATE,
-  validateMcpConfigJson,
-} from './mcp-config-json'
-import { McpConfigJsonEditor } from './McpConfigJsonEditor'
+  DEFAULT_TIMEOUT_MILLIS,
+  hasUnsavedChanges,
+  parseAndValidateHeaders,
+  validateMcpName,
+  validateMcpUrl,
+  validateTimeoutMillis,
+} from './mcp-utils'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {
   return date.toLocaleString(locale, {
@@ -68,7 +67,10 @@ function formatIsoTime(value: InstantTimestamp | undefined, locale: AppLocale): 
 
 interface CreateModalState {
   name: string
-  configJson: string
+  url: string
+  headersText: string
+  enabled: boolean
+  timeoutMillis: string | number
   error: string | null
 }
 
@@ -77,8 +79,16 @@ interface EditModalState {
   loading: boolean
   fetchError: string | null
   loadedVersion: string | null
-  loadedConfigJson: string | null
-  configJson: string
+  loadedConfig: {
+    url: string
+    headers: Record<string, string>
+    enabled: boolean
+    timeoutMillis: number
+  } | null
+  url: string
+  headersText: string
+  enabled: boolean
+  timeoutMillis: string | number
   error: string | null
   discoverPending: boolean
 }
@@ -93,7 +103,7 @@ export function McpServersPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
 
-  // 单调递增请求代际 token：关闭或重新打开同一 server 时递增，防止 ABA 覆写
+  // 单调递增请求代际 token：关闭或重新打开同一 server 时递增，防止迟到响应覆写
   const editRequestGenerationRef = useRef(0)
 
   useEffect(() => {
@@ -103,37 +113,27 @@ export function McpServersPage() {
     }
   }, [])
 
-  // 10s 轮询以支持 Local 发现任务的最终状态收敛
   const serversQuery = useQuery({
     queryKey: queryKeys.mcpServers.list(1, 100),
     queryFn: () => mcpServerService.pageServers(1, 100),
-    refetchInterval: 10_000,
-  })
-
-  const environmentsQuery = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => environmentService.listEnvironments(),
   })
 
   const servers: McpServerDTO[] = serversQuery.data?.results ?? []
-  const environments: EnvironmentCardDTO[] = useMemo(
-    () => environmentsQuery.data ?? [],
-    [environmentsQuery.data],
-  )
-
-  const environmentsMap = useMemo(() => {
-    const map = new Map<string, EnvironmentCardDTO>()
-    for (const env of environments) {
-      map.set(env.id, env)
-    }
-    return map
-  }, [environments])
 
   const createMutation = useMutation({
-    mutationFn: (data: { name: string; configJson: string }) =>
+    mutationFn: (data: {
+      name: string
+      url: string
+      headers: Record<string, string>
+      enabled: boolean
+      timeoutMillis: number
+    }) =>
       mcpServerService.createServer({
         name: data.name,
-        configJson: data.configJson,
+        url: data.url,
+        headers: data.headers,
+        enabled: data.enabled,
+        timeoutMillis: data.timeoutMillis,
       }),
     onSuccess: () => {
       setCreateModal(null)
@@ -151,10 +151,22 @@ export function McpServersPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: (data: { id: string; expectedVersion: string; configJson: string }) =>
-      mcpServerService.updateServer(data.id, {
-        expectedVersion: data.expectedVersion,
-        configJson: data.configJson,
+    mutationFn: (args: {
+      name: string
+      data: {
+        expectedVersion: string
+        url: string
+        headers: Record<string, string>
+        enabled: boolean
+        timeoutMillis: number
+      }
+    }) =>
+      mcpServerService.updateServer(args.name, {
+        expectedVersion: args.data.expectedVersion,
+        url: args.data.url,
+        headers: args.data.headers,
+        enabled: args.data.enabled,
+        timeoutMillis: args.data.timeoutMillis,
       }),
     onSuccess: () => {
       editRequestGenerationRef.current++
@@ -175,8 +187,8 @@ export function McpServersPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
-      mcpServerService.deleteServer(id, expectedVersion),
+    mutationFn: ({ name, expectedVersion }: { name: string; expectedVersion: string }) =>
+      mcpServerService.deleteServer(name, expectedVersion),
     onSuccess: () => {
       setDeleteTarget(null)
       setDeleteError(null)
@@ -198,7 +210,10 @@ export function McpServersPage() {
     setConflict(null)
     setCreateModal({
       name: '',
-      configJson: REMOTE_CONFIG_TEMPLATE,
+      url: '',
+      headersText: '',
+      enabled: true,
+      timeoutMillis: DEFAULT_TIMEOUT_MILLIS,
       error: null,
     })
   }
@@ -211,28 +226,43 @@ export function McpServersPage() {
       loading: true,
       fetchError: null,
       loadedVersion: null,
-      loadedConfigJson: null,
-      configJson: '',
+      loadedConfig: null,
+      url: '',
+      headersText: '',
+      enabled: server.enabled,
+      timeoutMillis: Number(server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS,
       error: null,
       discoverPending: false,
     })
 
     mcpServerService
-      .getServerConfig(server.id)
+      .getServerConfig(server.name)
       .then((config) => {
-        // 代际围栏检查：如果当前请求已被后续打开或关闭操作废弃，丢弃迟到的响应
         if (editRequestGenerationRef.current !== generation) {
           return
         }
-        const pretty = formatMcpConfigJsonSafely(config.configJson)
+        const rawHeaders = config.headers ?? {}
+        const headersText = Object.keys(rawHeaders).length > 0 ? JSON.stringify(rawHeaders, null, 2) : ''
+        const enabled = config.enabled ?? server.enabled
+        const timeoutMillis =
+          Number(config.timeoutMillis ?? server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS
+        const loadedConfig = {
+          url: config.url ?? '',
+          headers: rawHeaders,
+          enabled,
+          timeoutMillis,
+        }
         setEditModal((prev) => {
           if (!prev || editRequestGenerationRef.current !== generation) return null
           return {
             ...prev,
             loading: false,
             loadedVersion: config.version,
-            loadedConfigJson: pretty,
-            configJson: pretty,
+            loadedConfig,
+            url: config.url ?? '',
+            headersText,
+            enabled,
+            timeoutMillis,
           }
         })
       })
@@ -271,26 +301,37 @@ export function McpServersPage() {
   function handleCreateSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!createModal) return
-    const name = createModal.name.trim()
-    if (!name) {
-      setCreateModal({ ...createModal, error: t('ai.mcp.name') })
+
+    const nameVal = validateMcpName(createModal.name)
+    if (!nameVal.valid) {
+      setCreateModal({ ...createModal, error: nameVal.error ?? 'Invalid name' })
       return
     }
-    if (!/^[a-z][a-z0-9_]*$/.test(name) || name.length > 32) {
-      setCreateModal({
-        ...createModal,
-        error: 'Name must start with lowercase letter, contain only a-z, 0-9, _, and be <= 32 chars',
-      })
+
+    const urlVal = validateMcpUrl(createModal.url)
+    if (!urlVal.valid) {
+      setCreateModal({ ...createModal, error: urlVal.error ?? 'Invalid URL' })
       return
     }
-    const validation = validateMcpConfigJson(createModal.configJson)
-    if (!validation.valid) {
-      setCreateModal({ ...createModal, error: validation.error ?? 'Invalid JSON' })
+
+    const headersVal = parseAndValidateHeaders(createModal.headersText)
+    if (!headersVal.valid) {
+      setCreateModal({ ...createModal, error: headersVal.error ?? 'Invalid headers' })
       return
     }
+
+    const timeoutVal = validateTimeoutMillis(createModal.timeoutMillis)
+    if (!timeoutVal.valid) {
+      setCreateModal({ ...createModal, error: timeoutVal.error ?? 'Invalid timeout' })
+      return
+    }
+
     createMutation.mutate({
-      name,
-      configJson: createModal.configJson,
+      name: createModal.name.trim(),
+      url: createModal.url,
+      headers: headersVal.headers,
+      enabled: createModal.enabled,
+      timeoutMillis: timeoutVal.timeoutMillis,
     })
   }
 
@@ -298,16 +339,33 @@ export function McpServersPage() {
     e.preventDefault()
     if (!editModal || !editModal.loadedVersion) return
 
-    const validation = validateMcpConfigJson(editModal.configJson)
-    if (!validation.valid) {
-      setEditModal({ ...editModal, error: validation.error ?? 'Invalid JSON' })
+    const urlVal = validateMcpUrl(editModal.url)
+    if (!urlVal.valid) {
+      setEditModal({ ...editModal, error: urlVal.error ?? 'Invalid URL' })
+      return
+    }
+
+    const headersVal = parseAndValidateHeaders(editModal.headersText)
+    if (!headersVal.valid) {
+      setEditModal({ ...editModal, error: headersVal.error ?? 'Invalid headers' })
+      return
+    }
+
+    const timeoutVal = validateTimeoutMillis(editModal.timeoutMillis)
+    if (!timeoutVal.valid) {
+      setEditModal({ ...editModal, error: timeoutVal.error ?? 'Invalid timeout' })
       return
     }
 
     updateMutation.mutate({
-      id: editModal.server.id,
-      expectedVersion: editModal.loadedVersion,
-      configJson: editModal.configJson,
+      name: editModal.server.name,
+      data: {
+        expectedVersion: editModal.loadedVersion,
+        url: editModal.url,
+        headers: headersVal.headers,
+        enabled: editModal.enabled,
+        timeoutMillis: timeoutVal.timeoutMillis,
+      },
     })
   }
 
@@ -315,37 +373,42 @@ export function McpServersPage() {
     if (!editModal || !editModal.loadedVersion) return
     setConflict(null)
 
-    // 严禁发现未保存的语义修改：空白等格式差异不影响语义
-    const semanticallyEqual = isSemanticConfigEqual(
-      editModal.configJson,
-      editModal.loadedConfigJson ?? '',
-    )
-    if (!semanticallyEqual) {
+    const headersVal = parseAndValidateHeaders(editModal.headersText)
+    if (!headersVal.valid) {
       setEditModal((prev) =>
-        prev ? { ...prev, error: t('ai.mcp.unsavedDiscoverBlocked') } : null,
+        prev ? { ...prev, error: headersVal.error ?? 'Invalid headers' } : null,
       )
       return
     }
 
+    const timeoutVal = validateTimeoutMillis(editModal.timeoutMillis)
+    if (!timeoutVal.valid) {
+      setEditModal((prev) =>
+        prev ? { ...prev, error: timeoutVal.error ?? 'Invalid timeout' } : null,
+      )
+      return
+    }
+
+    if (editModal.loadedConfig) {
+      const currentFields = {
+        url: editModal.url,
+        headers: headersVal.headers,
+        enabled: editModal.enabled,
+        timeoutMillis: timeoutVal.timeoutMillis,
+      }
+      if (hasUnsavedChanges(currentFields, editModal.loadedConfig)) {
+        setEditModal((prev) =>
+          prev ? { ...prev, error: t('ai.mcp.unsavedDiscoverBlocked') } : null,
+        )
+        return
+      }
+    }
+
     setEditModal((prev) => (prev ? { ...prev, discoverPending: true, error: null } : null))
     try {
-      const res = await mcpServerService.discoverServer(
-        editModal.server.id,
-        editModal.loadedVersion,
-      )
+      await mcpServerService.discoverServer(editModal.server.name, editModal.loadedVersion)
       void queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all })
-      if (res.operation && res.operation.environmentId) {
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.environments.operations(
-            res.operation.environmentId,
-            DEFAULT_OPERATION_LIMIT,
-          ),
-        })
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.environments.detail(res.operation.environmentId),
-        })
-      }
       handleCloseEdit()
     } catch (err) {
       if (isConflictError(err)) {
@@ -384,16 +447,6 @@ export function McpServersPage() {
           />
           {servers.map((server: McpServerDTO) => {
             const updateTime = formatIsoTime(server.updateTime, locale)
-            const envName = server.environmentId
-              ? environmentsMap.get(server.environmentId)?.name ?? server.environmentId
-              : null
-
-            const typeLabel =
-              server.type === 'local'
-                ? t('ai.mcp.typeLocal')
-                : server.type === 'remote'
-                  ? t('ai.mcp.typeRemote')
-                  : String(server.type)
 
             const statusLabel =
               server.discoveryStatus === 'AVAILABLE'
@@ -404,13 +457,6 @@ export function McpServersPage() {
                     ? t('ai.mcp.statusUnverified')
                     : String(server.discoveryStatus)
 
-            const subtitle =
-              server.type === 'local'
-                ? envName
-                  ? `Local · ${envName}`
-                  : 'Local'
-                : 'Remote'
-
             const rows: Array<
               | [string, string]
               | { label: string; value: string; wrap?: boolean }
@@ -418,45 +464,33 @@ export function McpServersPage() {
             > = [
               {
                 pairs: [
-                  { label: t('ai.mcp.type'), value: typeLabel },
                   { label: t('ai.mcp.status'), value: statusLabel },
-                ],
-              },
-              ...(server.type === 'local' && envName
-                ? [{ label: t('ai.mcp.envSelect'), value: envName, wrap: true }]
-                : []),
-              {
-                pairs: [
                   { label: t('ai.mcp.toolCount'), value: String(server.toolCount) },
-                  { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
                 ],
               },
               {
                 pairs: [
                   { label: t('ai.mcp.version'), value: String(server.version) },
+                  { label: t('ai.catalog.card.timeout'), value: `${server.timeoutMillis}ms` },
+                ],
+              },
+              {
+                pairs: [
                   {
                     label: t('ai.mcp.enabledState'),
                     value: server.enabled ? t('ai.mcp.enabled') : t('ai.mcp.disabled'),
                   },
                 ],
               },
-              ...(server.discoveredVersion
-                ? [
-                    {
-                      label: t('ai.mcp.discoveredVersion'),
-                      value: String(server.discoveredVersion),
-                    },
-                  ]
-                : []),
               ...(updateTime ? [[t('ai.mcp.updated'), updateTime] as [string, string]] : []),
             ]
 
             return (
               <ResourceCardLayout
-                key={server.id}
+                key={server.name}
                 icon="server"
                 title={server.name}
-                subtitle={subtitle}
+                subtitle="Streamable HTTP"
                 rows={rows}
                 editAriaLabel={`${t('ai.mcp.edit')} ${server.name}`}
                 deleteAriaLabel={`${t('ai.mcp.delete')} ${server.name}`}
@@ -466,7 +500,7 @@ export function McpServersPage() {
                   setDeleteError(null)
                   setDeleteTarget(server)
                 }}
-                deletePending={deleteMutation.isPending && deleteTarget?.id === server.id}
+                deletePending={deleteMutation.isPending && deleteTarget?.name === server.name}
               />
             )
           })}
@@ -507,17 +541,70 @@ export function McpServersPage() {
                   </span>
                 </label>
 
-                <McpConfigJsonEditor
-                  value={createModal.configJson}
-                  onChange={(val) =>
-                    setCreateModal((prev) =>
-                      prev ? { ...prev, configJson: val, error: null } : null,
-                    )
-                  }
-                  environments={environments}
-                  disabled={createMutation.isPending}
-                  error={createModal.error}
-                />
+                <label className="form-group">
+                  <FieldLabel required>{t('ai.mcp.url')}</FieldLabel>
+                  <input
+                    value={createModal.url}
+                    onChange={(e) =>
+                      setCreateModal({ ...createModal, url: e.target.value, error: null })
+                    }
+                    placeholder="https://example.com/mcp"
+                    maxLength={2048}
+                    disabled={createMutation.isPending}
+                    required
+                  />
+                  <span className="inline-hint">
+                    Streamable HTTP endpoint URL (http:// or https://)
+                  </span>
+                </label>
+
+                <label className="form-group">
+                  <FieldLabel>{t('ai.mcp.headers')}</FieldLabel>
+                  <textarea
+                    className="code-textarea mcp-headers-textarea"
+                    value={createModal.headersText}
+                    onChange={(e) =>
+                      setCreateModal({ ...createModal, headersText: e.target.value, error: null })
+                    }
+                    placeholder={'{\n  "Authorization": "Bearer ${AUTH_TOKEN}"\n}'}
+                    disabled={createMutation.isPending}
+                    rows={4}
+                  />
+                  <span className="inline-hint">{t('ai.mcp.headersHint')}</span>
+                </label>
+
+                <label className="form-group">
+                  <FieldLabel>{t('ai.catalog.card.timeout')}</FieldLabel>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={createModal.timeoutMillis}
+                    onChange={(e) =>
+                      setCreateModal({ ...createModal, timeoutMillis: e.target.value, error: null })
+                    }
+                    placeholder="60000"
+                    disabled={createMutation.isPending}
+                  />
+                </label>
+
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={createModal.enabled}
+                    onChange={(e) =>
+                      setCreateModal({ ...createModal, enabled: e.target.checked, error: null })
+                    }
+                    disabled={createMutation.isPending}
+                  />
+                  <span>{t('ai.mcp.enabled')}</span>
+                </label>
+
+                {createModal.error && (
+                  <p className="field-error" role="alert">
+                    {createModal.error}
+                  </p>
+                )}
               </div>
 
               <div className="modal-footer">
@@ -548,7 +635,7 @@ export function McpServersPage() {
             className="modal-card mcp-modal-card"
             role="dialog"
             aria-modal="true"
-            aria-label={`${t('ai.mcp.edit')} ${editModal.server.name}`}
+            aria-label={`${t('ai.mcp.edit')} · ${editModal.server.name}`}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <ModalHeader
@@ -579,17 +666,75 @@ export function McpServersPage() {
             ) : (
               <form onSubmit={handleUpdateSubmit}>
                 <div className="modal-body">
-                  <McpConfigJsonEditor
-                    value={editModal.configJson}
-                    onChange={(val) =>
-                      setEditModal((prev) =>
-                        prev ? { ...prev, configJson: val, error: null } : null,
-                      )
-                    }
-                    environments={environments}
-                    disabled={updateMutation.isPending || editModal.discoverPending}
-                    error={editModal.error}
-                  />
+                  <label className="form-group">
+                    <FieldLabel>{t('ai.mcp.name')}</FieldLabel>
+                    <input
+                      value={editModal.server.name}
+                      disabled
+                      readOnly
+                    />
+                  </label>
+
+                  <label className="form-group">
+                    <FieldLabel required>{t('ai.mcp.url')}</FieldLabel>
+                    <input
+                      value={editModal.url}
+                      onChange={(e) =>
+                        setEditModal({ ...editModal, url: e.target.value, error: null })
+                      }
+                      placeholder="https://example.com/mcp"
+                      maxLength={2048}
+                      disabled={updateMutation.isPending || editModal.discoverPending}
+                      required
+                      autoFocus
+                    />
+                  </label>
+
+                  <label className="form-group">
+                    <FieldLabel>{t('ai.mcp.headers')}</FieldLabel>
+                    <textarea
+                      className="code-textarea mcp-headers-textarea"
+                      value={editModal.headersText}
+                      onChange={(e) =>
+                        setEditModal({ ...editModal, headersText: e.target.value, error: null })
+                      }
+                      disabled={updateMutation.isPending || editModal.discoverPending}
+                      rows={4}
+                    />
+                    <span className="inline-hint">{t('ai.mcp.headersHint')}</span>
+                  </label>
+
+                  <label className="form-group">
+                    <FieldLabel>{t('ai.catalog.card.timeout')}</FieldLabel>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={editModal.timeoutMillis}
+                      onChange={(e) =>
+                        setEditModal({ ...editModal, timeoutMillis: e.target.value, error: null })
+                      }
+                      disabled={updateMutation.isPending || editModal.discoverPending}
+                    />
+                  </label>
+
+                  <label className="checkbox-field">
+                    <input
+                      type="checkbox"
+                      checked={editModal.enabled}
+                      onChange={(e) =>
+                        setEditModal({ ...editModal, enabled: e.target.checked, error: null })
+                      }
+                      disabled={updateMutation.isPending || editModal.discoverPending}
+                    />
+                    <span>{t('ai.mcp.enabled')}</span>
+                  </label>
+
+                  {editModal.error && (
+                    <p className="field-error" role="alert">
+                      {editModal.error}
+                    </p>
+                  )}
                 </div>
 
                 <div className="modal-footer modal-footer-with-leading-action">
@@ -638,7 +783,7 @@ export function McpServersPage() {
             error: deleteError,
             onConfirm: () =>
               deleteMutation.mutate({
-                id: deleteTarget.id,
+                name: deleteTarget.name,
                 expectedVersion: deleteTarget.version,
               }),
           }}
