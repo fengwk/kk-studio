@@ -10,16 +10,14 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.mapper.McpServerMapper;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpServerDO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpToolDO;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
-/** 基于 PostgreSQL 的 MCP server 与工具仓库实现。 */
+/** 基于 PostgreSQL 的 MCP server 与当前发现结果仓库实现。 */
 @AllArgsConstructor
 @Repository
 public class PostgresqlMcpServerRepository implements McpServerRepository {
@@ -40,18 +38,13 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   }
 
   @Override
-  public Optional<McpServer> getById(UUID id) {
-    return Optional.ofNullable(convertServer(mapper.getById(id)));
-  }
-
-  @Override
-  public Optional<McpServer> getByIdForUpdate(UUID id) {
-    return Optional.ofNullable(convertServer(mapper.getByIdForUpdate(id)));
-  }
-
-  @Override
   public Optional<McpServer> getByName(String name) {
     return Optional.ofNullable(convertServer(mapper.getByName(name)));
+  }
+
+  @Override
+  public Optional<McpServer> getForUpdate(String name) {
+    return Optional.ofNullable(convertServer(mapper.getForUpdate(name)));
   }
 
   @Override
@@ -60,75 +53,49 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
   }
 
   @Override
-  public boolean updateById(McpServer server, long expectedVersion) {
-    return mapper.updateById(convertServer(server), expectedVersion) == 1;
+  public boolean update(McpServer server, long expectedVersion) {
+    return mapper.update(convertServer(server), expectedVersion) == 1;
   }
 
   @Override
-  public boolean updateDiscoveryResult(
-      UUID id, long expectedVersion, McpDiscoveryStatus discoveryStatus, Long discoveredVersion) {
-    return mapper.updateDiscoveryResult(
-            id, expectedVersion, discoveryStatus.name(), discoveredVersion)
-        == 1;
+  public boolean updateDiscoveryStatus(
+      String name, long expectedVersion, McpDiscoveryStatus status) {
+    return mapper.updateDiscoveryStatus(name, expectedVersion, status.name()) == 1;
   }
 
   @Override
-  public boolean deleteById(UUID id, long expectedVersion) {
-    return mapper.deleteById(id, expectedVersion) == 1;
+  public boolean delete(String name, long expectedVersion) {
+    return mapper.delete(name, expectedVersion) == 1;
   }
 
   @Override
-  public Optional<McpTool> getToolById(UUID toolId) {
-    return Optional.ofNullable(convertTool(mapper.getToolById(toolId)));
+  public Optional<McpTool> getTool(String name) {
+    return Optional.ofNullable(convertTool(mapper.getTool(name)));
   }
 
   @Override
-  public Optional<McpTool> getAvailableToolByModelName(String modelName) {
-    return Optional.ofNullable(convertTool(mapper.getAvailableToolByModelName(modelName)));
+  public List<McpTool> listTools(String serverName) {
+    return mapper.listTools(serverName).stream().map(this::convertTool).toList();
   }
 
   @Override
-  public List<McpTool> listTools(UUID serverId) {
-    return mapper.listTools(serverId).stream().map(this::convertTool).toList();
+  public List<McpTool> listAllTools() {
+    return mapper.listAllTools().stream().map(this::convertTool).toList();
   }
 
   @Override
-  public List<McpTool> listAvailableTools(UUID serverId) {
-    return mapper.listAvailableTools(serverId).stream().map(this::convertTool).toList();
+  public int countTools(String serverName) {
+    return mapper.countTools(serverName);
   }
 
   @Override
-  public List<McpTool> listAllAvailableTools() {
-    return mapper.listAllAvailableTools().stream().map(this::convertTool).toList();
-  }
-
-  @Override
-  public int countAvailableTools(UUID serverId) {
-    return mapper.countAvailableTools(serverId);
+  public void deleteTools(String serverName) {
+    mapper.deleteTools(serverName);
   }
 
   @Override
   public void insertTool(McpTool tool) {
     mapper.insertTool(convertTool(tool));
-  }
-
-  @Override
-  public void updateTool(McpTool tool) {
-    mapper.updateTool(convertTool(tool));
-  }
-
-  @Override
-  public void deleteTool(UUID serverId, String sourceName) {
-    mapper.deleteTool(serverId, sourceName);
-  }
-
-  @Override
-  public boolean isModelNameTaken(String modelName, UUID excludingToolId) {
-    long count =
-        excludingToolId == null
-            ? mapper.countByModelName(modelName)
-            : mapper.countByModelNameExcluding(modelName, excludingToolId);
-    return count > 0;
   }
 
   @Override
@@ -141,17 +108,13 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
       return null;
     }
     McpServerDO result = new McpServerDO();
-    result.setId(server.getId());
     result.setName(server.getName());
-    result.setConnectionType(
-        server.getConnectionType() == null ? null : server.getConnectionType().name());
-    result.setEnvironmentId(server.getEnvironmentId());
-    result.setConnectionConfig(server.getConnectionConfig());
+    result.setUrl(server.getUrl());
+    result.setHeadersJson(McpHeadersJson.encode(server.getHeaders()));
     result.setEnabled(server.isEnabled());
     result.setTimeoutMillis(server.getTimeoutMillis());
     result.setDiscoveryStatus(
         server.getDiscoveryStatus() == null ? null : server.getDiscoveryStatus().name());
-    result.setDiscoveredVersion(server.getDiscoveredVersion());
     result.setVersion(server.getVersion());
     result.setCreateTime(server.getCreateTime());
     result.setUpdateTime(server.getUpdateTime());
@@ -163,21 +126,15 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
       return null;
     }
     McpServer result = new McpServer();
-    result.setId(server.getId());
     result.setName(server.getName());
-    result.setConnectionType(
-        server.getConnectionType() == null
-            ? null
-            : McpConnectionType.valueOf(server.getConnectionType()));
-    result.setEnvironmentId(server.getEnvironmentId());
-    result.setConnectionConfig(server.getConnectionConfig());
+    result.setUrl(server.getUrl());
+    result.setHeaders(McpHeadersJson.decode(server.getHeadersJson()));
     result.setEnabled(server.isEnabled());
     result.setTimeoutMillis(server.getTimeoutMillis());
     result.setDiscoveryStatus(
         server.getDiscoveryStatus() == null
             ? null
             : McpDiscoveryStatus.valueOf(server.getDiscoveryStatus()));
-    result.setDiscoveredVersion(server.getDiscoveredVersion());
     result.setVersion(server.getVersion());
     result.setCreateTime(server.getCreateTime());
     result.setUpdateTime(server.getUpdateTime());
@@ -189,14 +146,11 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
       return null;
     }
     McpToolDO result = new McpToolDO();
-    result.setId(tool.getId());
-    result.setServerId(tool.getServerId());
+    result.setName(tool.getName());
+    result.setServerName(tool.getServerName());
     result.setSourceName(tool.getSourceName());
-    result.setModelName(tool.getModelName());
     result.setDescription(tool.getDescription());
     result.setInputSchemaJson(tool.getInputSchemaJson());
-    result.setSchemaRevision(tool.getSchemaRevision());
-    result.setAvailable(tool.isAvailable());
     return result;
   }
 
@@ -205,14 +159,11 @@ public class PostgresqlMcpServerRepository implements McpServerRepository {
       return null;
     }
     McpTool result = new McpTool();
-    result.setId(tool.getId());
-    result.setServerId(tool.getServerId());
+    result.setName(tool.getName());
+    result.setServerName(tool.getServerName());
     result.setSourceName(tool.getSourceName());
-    result.setModelName(tool.getModelName());
     result.setDescription(tool.getDescription());
     result.setInputSchemaJson(tool.getInputSchemaJson());
-    result.setSchemaRevision(tool.getSchemaRevision());
-    result.setAvailable(tool.isAvailable());
     return result;
   }
 }

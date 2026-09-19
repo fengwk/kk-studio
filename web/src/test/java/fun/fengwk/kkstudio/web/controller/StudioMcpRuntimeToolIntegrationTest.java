@@ -40,8 +40,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.catalog.mcp.McpStableIds;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
@@ -63,6 +63,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -120,56 +121,40 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         """;
     fakeServer.addTool("echo", "Echo text", schemaJson);
 
-    // 2. 通过 HTTP POST /api/ai/mcp-servers 创建 Server，触发显式发现并入库
+    // 2. 通过 HTTP POST /api/ai/mcp-servers 创建 Server，再显式发现入库
     String serverName = "mcp_prod_" + (System.currentTimeMillis() % 1_000_000_000L);
-    String configJson =
-        """
-        {
-          "type": "remote",
-          "url": "%s",
-          "headers": {
-            "Authorization": "Bearer secret-bearer-token-do-not-leak"
-          },
-          "timeoutMillis": 15000
-        }
-        """
-            .formatted(fakeServer.endpointUrl());
 
     McpServerCreateDTO createMcp = new McpServerCreateDTO();
     createMcp.setName(serverName);
-    createMcp.setConfigJson(configJson);
+    createMcp.setUrl(fakeServer.endpointUrl());
+    createMcp.setHeaders(Map.of("Authorization", "Bearer secret-bearer-token-do-not-leak"));
+    createMcp.setEnabled(true);
+    createMcp.setTimeoutMillis(15000L);
 
-    MvcResult createMcpResult =
-        mockMvc
-            .perform(
-                post("/api/ai/mcp-servers")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(objectMapper.writeValueAsString(createMcp)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.name").value(serverName))
-            .andExpect(jsonPath("$.data.version").value("0"))
-            .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"))
-            .andReturn();
-
-    String serverId = data(createMcpResult).get("id").asText();
-    assertNotNull(serverId);
-
-    // 触发显式发现入库
     mockMvc
         .perform(
-            post("/api/ai/mcp-servers/{id}/discover", serverId)
+            post("/api/ai/mcp-servers")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedVersion\":\"0\"}"))
-        .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.server.discoveryStatus").value("AVAILABLE"));
+                .content(objectMapper.writeValueAsString(createMcp)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.name").value(serverName))
+        .andExpect(jsonPath("$.data.version").value("0"))
+        .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"));
 
-    // 从数据库中查询已持久化的动态工具行；其模型可见 name 就是唯一 Agent 侧身份
-    List<McpTool> persistedTools = mcpServerRepository.listTools(UUID.fromString(serverId));
+    mockMvc
+        .perform(
+            post("/api/ai/mcp-servers/{name}/discover", serverName).param("expectedVersion", "0"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.discoveryStatus").value("AVAILABLE"))
+        .andExpect(jsonPath("$.data.toolCount").value(1));
+
+    // 从数据库中查询已持久化的动态工具行；其模型可见 name 就是唯一 Agent 侧身份与主键
+    List<McpTool> persistedTools = mcpServerRepository.listTools(serverName);
     assertEquals(1, persistedTools.size());
     McpTool persistedTool = persistedTools.get(0);
     assertEquals("echo", persistedTool.getSourceName());
-    String modelName = persistedTool.getModelName();
-    assertNotNull(modelName);
+    String modelName = persistedTool.getName();
+    assertEquals("mcp_" + serverName + "_echo", modelName);
 
     // 校验生产 RuntimeToolCatalog 也立即按该 name 查询到该工具
     assertTrue(runtimeToolCatalog.findTool(modelName).isPresent());
@@ -295,14 +280,14 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     assertEquals(modelName, mcpBinding.definition().descriptor().name());
     assertFalse(mcpBinding.environmentRequired());
     assertNull(mcpBinding.environmentId());
-    assertEquals(McpStableIds.CONTRIBUTOR_ID.value(), mcpBinding.contributor().contributorId());
-    assertEquals(
-        McpStableIds.localName(persistedTool.getId()), mcpBinding.contributor().localName());
+    // ContributionId 仅对模型可见 name 做 canonical 字符转换，不引入隐藏 UUID。
+    assertEquals(McpToolCatalog.CONTRIBUTOR_ID.value(), mcpBinding.contributor().contributorId());
+    assertEquals(McpToolCatalog.localName(modelName), mcpBinding.contributor().localName());
 
     // 6. 验证 Spring 装配的 ToolGateway 执行该动态 ToolBinding
     String callId = "call-" + UUID.randomUUID();
     String argumentsJson = "{\"message\":\"hello from full web runtime test\"}";
-    ToolCall toolCall = new ToolCall(callId, persistedTool.getModelName(), argumentsJson);
+    ToolCall toolCall = new ToolCall(callId, modelName, argumentsJson);
     ToolInvocationRequest invocationRequest = new ToolInvocationRequest(toolCall, mcpBinding);
     assertInstanceOf(ToolGateway.Allow.class, toolGateway.preflight(invocationRequest));
 

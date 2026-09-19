@@ -96,7 +96,6 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
@@ -985,34 +984,27 @@ class DatabaseTurnResolverTest {
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
-    UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
-    server.setId(serverId);
     server.setName("srv");
-    server.setConnectionType(McpConnectionType.REMOTE);
     server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setDiscoveredVersion(1L);
     server.setEnabled(true);
     server.setVersion(1L);
-    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setUrl("http://localhost:8080/mcp");
+    server.setHeaders(Map.of());
     server.setTimeoutMillis(5000L);
 
-    UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
-    mcpTool.setId(toolId);
-    mcpTool.setServerId(serverId);
+    mcpTool.setName("mcp_srv_echo");
+    mcpTool.setServerName("srv");
     mcpTool.setSourceName("echo");
-    mcpTool.setModelName("mcp_srv_echo");
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    mcpTool.setAvailable(true);
-    mcpTool.setSchemaRevision(1L);
 
-    when(repo.getAvailableToolByModelName("mcp_srv_echo")).thenReturn(Optional.of(mcpTool));
-    when(repo.getById(serverId)).thenReturn(Optional.of(server));
+    when(repo.getTool("mcp_srv_echo")).thenReturn(Optional.of(mcpTool));
+    when(repo.getByName("srv")).thenReturn(Optional.of(server));
     when(repo.listAllServers()).thenReturn(List.of(server));
-    when(repo.listAvailableTools(serverId)).thenReturn(List.of(mcpTool));
+    when(repo.listTools("srv")).thenReturn(List.of(mcpTool));
 
     HarnessContributor projectorContributor =
         HarnessContributor.of(

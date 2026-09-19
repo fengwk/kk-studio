@@ -12,18 +12,17 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.UUID;
 
 /**
- * MCP 表的数据库边界契约：server name 正则、timeout 正数、version 非负、updated_at ≥ created_at、
- * connection_type/discovery_status 枚举、connection_config JSONB object、LOCAL/REMOTE environment 校验、
- * tool 的 FK 级联硬删除、(server, source_name) 与 model_name 唯一性、description 非空白、input_schema 必须 JSON
- * object、 schema_revision 非负。
+ * MCP 表的数据库边界契约：server name 正则与唯一性、url 非空白、timeout 正数、version 非负、updated_at ≥ created_at、
+ * discovery_status 枚举、headers 必须 JSONB object、tool 的 FK 级联硬删除、(server_name, source_name) 唯一性、
+ * description 非空白、input_schema 必须 JSON object。
+ *
+ * <p>name 即主键，已不存在 UUID、connection_type、connection_config、discovered_version 与 schema_revision。
  */
 class McpSchemaBusinessTest extends PostgresSchemaSupport {
 
-  private UUID serverId;
-  private UUID envId;
+  private static final String SERVER_NAME = "tools";
 
   @BeforeEach
   void setup() throws SQLException {
@@ -31,11 +30,8 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
       resetDatabase(conn);
       applyBaseline(conn);
     }
-    serverId = UUID.randomUUID();
-    envId = UUID.randomUUID();
     try (Connection conn = newConnection()) {
-      insertEnvironment(conn, envId, "test-env");
-      insertServer(conn, serverId, "tools", 30000);
+      insertServer(conn, SERVER_NAME, "https://mcp.example.com/mcp", 30000);
     }
   }
 
@@ -43,13 +39,14 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
   void serverNameCheckEnforcesLowercaseIdentifier() throws SQLException {
     for (String invalid : new String[] {"Tools", "1tools", "to ols", "tools-x", ""}) {
       try (Connection conn = newConnection()) {
-        UUID id = UUID.randomUUID();
         assertTransactionConstraintViolation(
-            conn, "ck_mcp_server_name", () -> insertServer(conn, id, invalid, 30000));
+            conn,
+            "ck_mcp_server_name",
+            () -> insertServer(conn, invalid, "https://a.example.com", 1));
       }
     }
     try (Connection conn = newConnection()) {
-      insertServer(conn, UUID.randomUUID(), "tools_2", 1);
+      insertServer(conn, "tools_2", "https://a.example.com", 1);
     }
   }
 
@@ -59,63 +56,50 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
       assertTransactionConstraintViolation(
           conn,
           "ck_mcp_server_timeout_positive",
-          () -> insertServer(conn, UUID.randomUUID(), "zero", 0));
+          () -> insertServer(conn, "zero", "https://a.example.com", 0));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
           "ck_mcp_server_timeout_positive",
-          () -> insertServer(conn, UUID.randomUUID(), "negative", -5));
+          () -> insertServer(conn, "negative", "https://a.example.com", -5));
     }
   }
 
   @Test
-  void serverNameIsUnique() throws SQLException {
+  void serverNameIsPrimaryKeyAndUnique() throws SQLException {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn, "uk_mcp_server_name", () -> insertServer(conn, UUID.randomUUID(), "tools", 5));
+          conn,
+          "mcp_server_pkey",
+          () -> insertServer(conn, SERVER_NAME, "https://a.example.com", 5));
     }
   }
 
   @Test
-  void serverConnectionTypeAndConfigChecks() throws SQLException {
-    // Invalid connection type
+  void serverUrlHeadersAndStatusChecks() throws SQLException {
+    // url 不允许空白
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn,
-          "ck_mcp_server_connection_type",
-          () ->
-              insertServerRaw(
-                  conn,
-                  UUID.randomUUID(),
-                  "invalidtype",
-                  "UNKNOWN",
-                  null,
-                  "{\"url\":\"https://mcp.example.com\",\"headers\":{}}",
-                  30000,
-                  "UNVERIFIED",
-                  0));
+          conn, "ck_mcp_server_url_nonblank", () -> insertServer(conn, "badurl", "   ", 30000));
     }
-
-    // Connection config must be JSON object
+    // headers 必须是 JSONB object
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_mcp_server_connection_config_object",
+          "ck_mcp_server_headers_object",
           () ->
               insertServerRaw(
                   conn,
-                  UUID.randomUUID(),
-                  "badconfig",
-                  "REMOTE",
-                  null,
+                  "badheaders",
+                  "https://a.example.com",
                   "[\"array\"]",
                   30000,
                   "UNVERIFIED",
+                  true,
                   0));
     }
-
-    // Invalid discovery status
+    // discovery_status 枚举
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
@@ -123,85 +107,42 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
           () ->
               insertServerRaw(
                   conn,
-                  UUID.randomUUID(),
                   "badstatus",
-                  "REMOTE",
-                  null,
-                  "{\"url\":\"https://mcp.example.com\",\"headers\":{}}",
+                  "https://a.example.com",
+                  "{}",
                   30000,
                   "INVALID_STATUS",
+                  true,
                   0));
     }
   }
 
   @Test
-  void serverLocalEnvironmentCheck() throws SQLException {
-    // LOCAL without environment_id must fail
+  void serverTimeOrderAndVersionChecks() throws SQLException {
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_mcp_server_local_environment",
-          () ->
-              insertServerRaw(
-                  conn,
-                  UUID.randomUUID(),
-                  "localnoenv",
-                  "LOCAL",
-                  null,
-                  "{\"command\":[\"npx\"],\"cwd\":\"/tmp\",\"env\":{}}",
-                  30000,
-                  "UNVERIFIED",
-                  0));
+          "ck_mcp_server_time_order",
+          () -> {
+            try (Statement st = conn.createStatement()) {
+              st.execute(
+                  "insert into mcp_server (name, url, timeout_millis, created_at, updated_at)"
+                      + " values ('timeorder', 'https://a.example.com', 1,"
+                      + " current_timestamp + interval '1 hour', current_timestamp)");
+            }
+          });
     }
-
-    // REMOTE with environment_id must fail
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
-          "ck_mcp_server_local_environment",
-          () ->
-              insertServerRaw(
-                  conn,
-                  UUID.randomUUID(),
-                  "remotewithenv",
-                  "REMOTE",
-                  envId,
-                  "{\"url\":\"https://mcp.example.com\",\"headers\":{}}",
-                  30000,
-                  "UNVERIFIED",
-                  0));
-    }
-
-    // LOCAL with valid environment_id must succeed
-    try (Connection conn = newConnection()) {
-      insertServerRaw(
-          conn,
-          UUID.randomUUID(),
-          "localwithenv",
-          "LOCAL",
-          envId,
-          "{\"command\":[\"npx\"],\"cwd\":\"/tmp\",\"env\":{}}",
-          30000,
-          "UNVERIFIED",
-          0);
-    }
-
-    // LOCAL with unknown environment_id must fail FK
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "fk_mcp_server_environment",
-          () ->
-              insertServerRaw(
-                  conn,
-                  UUID.randomUUID(),
-                  "localunknownenv",
-                  "LOCAL",
-                  UUID.randomUUID(),
-                  "{\"command\":[\"npx\"],\"cwd\":\"/tmp\",\"env\":{}}",
-                  30000,
-                  "UNVERIFIED",
-                  0));
+          "ck_mcp_server_version_nonneg",
+          () -> {
+            try (Statement st = conn.createStatement()) {
+              st.execute(
+                  "insert into mcp_server (name, url, timeout_millis, version)"
+                      + " values ('negversion', 'https://a.example.com', 1, -1)");
+            }
+          });
     }
   }
 
@@ -211,22 +152,21 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
       assertTransactionConstraintViolation(
           conn,
           "fk_mcp_tool_server",
-          () -> insertTool(conn, UUID.randomUUID(), UUID.randomUUID(), "list", "mcp_tools_list"));
+          () -> insertTool(conn, "unknown_server", "list", "mcp_unknown_server_list"));
     }
-    UUID toolId = UUID.randomUUID();
     try (Connection conn = newConnection()) {
-      insertTool(conn, serverId, toolId, "list", "mcp_tools_list");
+      insertTool(conn, SERVER_NAME, "list", "mcp_tools_list");
     }
     // 级联硬删除：删除父 server 行后工具行物理消失。
     try (Connection conn = newConnection();
-        PreparedStatement ps = conn.prepareStatement("delete from mcp_server where id = ?")) {
-      ps.setObject(1, serverId);
+        PreparedStatement ps = conn.prepareStatement("delete from mcp_server where name = ?")) {
+      ps.setString(1, SERVER_NAME);
       assertEquals(1, ps.executeUpdate());
     }
     try (Connection conn = newConnection();
         PreparedStatement ps =
-            conn.prepareStatement("select count(*) from mcp_tool where id = ?")) {
-      ps.setObject(1, toolId);
+            conn.prepareStatement("select count(*) from mcp_tool where name = ?")) {
+      ps.setString(1, "mcp_tools_list");
       try (ResultSet rs = ps.executeQuery()) {
         assertTrue(rs.next());
         assertEquals(0, rs.getLong(1));
@@ -237,19 +177,19 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
   @Test
   void toolSourceNameAndModelNameAreUnique() throws SQLException {
     try (Connection conn = newConnection()) {
-      insertTool(conn, serverId, UUID.randomUUID(), "list", "mcp_tools_list");
+      insertTool(conn, SERVER_NAME, "list", "mcp_tools_list");
     }
+    // 同一 server 下 source_name 唯一
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
           "uk_mcp_tool_server_source_name",
-          () -> insertTool(conn, serverId, UUID.randomUUID(), "list", "mcp_tools_list_2"));
+          () -> insertTool(conn, SERVER_NAME, "list", "mcp_tools_list_2"));
     }
+    // 模型可见 name 是主键：全局唯一
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn,
-          "uk_mcp_tool_model_name",
-          () -> insertTool(conn, serverId, UUID.randomUUID(), "list2", "mcp_tools_list"));
+          conn, "mcp_tool_pkey", () -> insertTool(conn, SERVER_NAME, "list2", "mcp_tools_list"));
     }
   }
 
@@ -261,14 +201,7 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
           "ck_mcp_tool_description_nonblank",
           () ->
               insertToolWithSchema(
-                  conn,
-                  serverId,
-                  UUID.randomUUID(),
-                  "blank-desc",
-                  "mcp_tools_blank",
-                  "   ",
-                  "{}",
-                  0));
+                  conn, SERVER_NAME, "blank-desc", "mcp_tools_blank", "   ", "{}"));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
@@ -276,158 +209,71 @@ class McpSchemaBusinessTest extends PostgresSchemaSupport {
           "ck_mcp_tool_input_schema_object",
           () ->
               insertToolWithSchema(
-                  conn,
-                  serverId,
-                  UUID.randomUUID(),
-                  "array-schema",
-                  "mcp_tools_array",
-                  "desc",
-                  "[]",
-                  0));
+                  conn, SERVER_NAME, "array-schema", "mcp_tools_array", "desc", "[]"));
     }
     try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_mcp_tool_schema_revision_nonneg",
-          () ->
-              insertToolWithSchema(
-                  conn,
-                  serverId,
-                  UUID.randomUUID(),
-                  "neg-rev",
-                  "mcp_tools_neg_rev",
-                  "desc",
-                  "{}",
-                  -1));
-    }
-    try (Connection conn = newConnection()) {
-      insertToolWithSchema(
-          conn, serverId, UUID.randomUUID(), "ok", "mcp_tools_ok", "desc", "{}", 0);
+      insertToolWithSchema(conn, SERVER_NAME, "ok", "mcp_tools_ok", "desc", "{}");
     }
   }
 
-  @Test
-  void serverTimeOrderAndVersionChecks() throws SQLException {
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_mcp_server_time_order",
-          () -> {
-            try (Statement inner = conn.createStatement()) {
-              inner.execute(
-                  "insert into mcp_server (id, name, connection_type, connection_config, timeout_millis, created_at, updated_at)"
-                      + " values ('"
-                      + UUID.randomUUID()
-                      + "', 'timeorder', 'REMOTE',"
-                      + " '{\"url\":\"https://mcp.example.com\",\"headers\":{}}', 1,"
-                      + " current_timestamp + interval '1 hour', current_timestamp)");
-            }
-          });
-    }
-    try (Connection conn = newConnection()) {
-      assertTransactionConstraintViolation(
-          conn,
-          "ck_mcp_server_version_nonneg",
-          () -> {
-            try (Statement inner = conn.createStatement()) {
-              inner.execute(
-                  "insert into mcp_server (id, name, connection_type, connection_config, timeout_millis, version)"
-                      + " values ('"
-                      + UUID.randomUUID()
-                      + "', 'negversion', 'REMOTE',"
-                      + " '{\"url\":\"https://mcp.example.com\",\"headers\":{}}', 1, -1)");
-            }
-          });
-    }
-  }
-
-  private static void insertEnvironment(Connection conn, UUID id, String name) throws SQLException {
-    try (PreparedStatement ps =
-        conn.prepareStatement(
-            "insert into environment (id, name, registration_token) values (?, ?, ?)")) {
-      ps.setObject(1, id);
-      ps.setString(2, name);
-      ps.setString(3, "tok-" + name);
-      assertEquals(1, ps.executeUpdate());
-    }
-  }
-
-  private static void insertServer(Connection conn, UUID id, String name, long timeoutMillis)
+  private static void insertServer(Connection conn, String name, String url, long timeoutMillis)
       throws SQLException {
-    insertServerRaw(
-        conn,
-        id,
-        name,
-        "REMOTE",
-        null,
-        "{\"url\":\"https://mcp.example.com/mcp\",\"headers\":{}}",
-        timeoutMillis,
-        "UNVERIFIED",
-        0);
+    insertServerRaw(conn, name, url, "{}", timeoutMillis, "UNVERIFIED", true, 0);
   }
 
   private static void insertServerRaw(
       Connection conn,
-      UUID id,
       String name,
-      String connectionType,
-      UUID environmentId,
-      String connectionConfig,
+      String url,
+      String headers,
       long timeoutMillis,
       String discoveryStatus,
-      long discoveredVersion)
+      boolean enabled,
+      long version)
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into mcp_server (id, name, connection_type, environment_id, connection_config, timeout_millis, discovery_status, discovered_version)"
-                + " values (?, ?, ?, ?, cast(? as jsonb), ?, ?, ?)")) {
-      ps.setObject(1, id);
-      ps.setString(2, name);
-      ps.setString(3, connectionType);
-      ps.setObject(4, environmentId);
-      ps.setString(5, connectionConfig);
-      ps.setLong(6, timeoutMillis);
-      ps.setString(7, discoveryStatus);
-      ps.setLong(8, discoveredVersion);
+            "insert into mcp_server (name, url, headers, enabled, timeout_millis, discovery_status, version)"
+                + " values (?, ?, cast(? as jsonb), ?, ?, ?, ?)")) {
+      ps.setString(1, name);
+      ps.setString(2, url);
+      ps.setString(3, headers);
+      ps.setBoolean(4, enabled);
+      ps.setLong(5, timeoutMillis);
+      ps.setString(6, discoveryStatus);
+      ps.setLong(7, version);
       assertEquals(1, ps.executeUpdate());
     }
   }
 
   private static void insertTool(
-      Connection conn, UUID serverId, UUID toolId, String sourceName, String modelName)
-      throws SQLException {
+      Connection conn, String serverName, String sourceName, String modelName) throws SQLException {
     insertToolWithSchema(
         conn,
-        serverId,
-        toolId,
+        serverName,
         sourceName,
         modelName,
         "description",
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}",
-        0);
+        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}");
   }
 
   private static void insertToolWithSchema(
       Connection conn,
-      UUID serverId,
-      UUID toolId,
+      String serverName,
       String sourceName,
       String modelName,
       String description,
-      String inputSchema,
-      long schemaRevision)
+      String inputSchema)
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into mcp_tool (id, mcp_server_id, source_name, model_name, description, input_schema, schema_revision)"
-                + " values (?, ?, ?, ?, ?, cast(? as jsonb), ?)")) {
-      ps.setObject(1, toolId);
-      ps.setObject(2, serverId);
+            "insert into mcp_tool (name, server_name, source_name, description, input_schema)"
+                + " values (?, ?, ?, ?, cast(? as jsonb))")) {
+      ps.setString(1, modelName);
+      ps.setString(2, serverName);
       ps.setString(3, sourceName);
-      ps.setString(4, modelName);
-      ps.setString(5, description);
-      ps.setString(6, inputSchema);
-      ps.setLong(7, schemaRevision);
+      ps.setString(4, description);
+      ps.setString(5, inputSchema);
       assertEquals(1, ps.executeUpdate());
     }
   }

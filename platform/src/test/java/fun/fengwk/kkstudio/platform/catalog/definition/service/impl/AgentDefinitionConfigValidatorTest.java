@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpConnectionType;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
@@ -161,38 +160,31 @@ class AgentDefinitionConfigValidatorTest {
 
   @Test
   void acceptsDynamicMcpToolName() {
-    // 意图：验证动态 MCP 工具按 mcp_tool.model_name 聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
+    // 意图：验证动态 MCP 工具按 mcp_tool.name 聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
 
-    UUID serverId = UUID.randomUUID();
     McpServer server = new McpServer();
-    server.setId(serverId);
-    server.setName("test-server");
-    server.setConnectionType(McpConnectionType.REMOTE);
+    server.setName("test_server");
     server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setDiscoveredVersion(1L);
     server.setEnabled(true);
     server.setVersion(1L);
-    server.setConnectionConfig("{\"url\":\"http://localhost:8080\",\"headers\":{}}");
+    server.setUrl("http://localhost:8080/mcp");
+    server.setHeaders(Map.of());
     server.setTimeoutMillis(5000L);
 
-    UUID toolId = UUID.randomUUID();
     McpTool mcpTool = new McpTool();
-    mcpTool.setId(toolId);
-    mcpTool.setServerId(serverId);
+    mcpTool.setName("mcp_test_server_echo");
+    mcpTool.setServerName("test_server");
     mcpTool.setSourceName("echo");
-    mcpTool.setModelName("mcp_test_server_echo");
     mcpTool.setDescription("echo tool");
     mcpTool.setInputSchemaJson(
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
-    mcpTool.setAvailable(true);
-    mcpTool.setSchemaRevision(1L);
 
-    when(repo.getAvailableToolByModelName("mcp_test_server_echo")).thenReturn(Optional.of(mcpTool));
-    when(repo.getById(serverId)).thenReturn(Optional.of(server));
+    when(repo.getTool("mcp_test_server_echo")).thenReturn(Optional.of(mcpTool));
+    when(repo.getByName("test_server")).thenReturn(Optional.of(server));
     when(repo.listAllServers()).thenReturn(List.of(server));
-    when(repo.listAvailableTools(serverId)).thenReturn(List.of(mcpTool));
+    when(repo.listTools("test_server")).thenReturn(List.of(mcpTool));
 
     HarnessToolCatalogAdapter staticAdapter =
         new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()));
