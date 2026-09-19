@@ -15,6 +15,7 @@ import { parsePayload } from '@/features/ai/runtime/payload-json'
 export interface BranchDraft {
   agentName: string
   model: HarnessModelSelectionDTO
+  environmentName: string | null
   yoloEnabled: boolean
 }
 
@@ -47,6 +48,7 @@ export function materializeBlankBranchDraft(
       modelName: model.name,
       variant: variantId,
     },
+    environmentName: null,
     yoloEnabled,
   }
 }
@@ -68,12 +70,20 @@ export function materializeAgentBranchDraft(
   if (materialized == null) {
     return null
   }
-  if (existing == null || existing.model.providerName === '' || existing.model.modelName === '') {
+  if (existing == null) {
     return materialized
+  }
+  const environmentName = existing.environmentName
+  if (existing.model.providerName === '' || existing.model.modelName === '') {
+    return {
+      ...materialized,
+      environmentName,
+    }
   }
   return {
     ...materialized,
     model: { ...existing.model },
+    environmentName,
     yoloEnabled: existing.yoloEnabled,
   }
 }
@@ -94,6 +104,7 @@ export function branchDraftFromBranchSettings(
       modelName: settings.model.modelName,
       variant: settings.model.variant,
     },
+    environmentName: settings.environmentName,
     yoloEnabled,
   }
 }
@@ -103,11 +114,12 @@ export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolea
     && left.model.providerName === right.model.providerName
     && left.model.modelName === right.model.modelName
     && left.model.variant === right.model.variant
+    && left.environmentName === right.environmentName
     && left.yoloEnabled === right.yoloEnabled
 }
 
 /**
- * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_AGENT/SET_MODEL。
+ * 构建 effective base 与 draft 之间的最小 settings command diff，固定顺序为 SET_AGENT/SET_MODEL/SET_ENVIRONMENT。
  */
 export function buildBranchDiffCommands(
   base: BranchDraft,
@@ -127,6 +139,13 @@ export function buildBranchDiffCommands(
       type: 'SET_MODEL',
       idempotencyKey: createCommandId(),
       model: { ...draft.model },
+    })
+  }
+  if (base.environmentName !== draft.environmentName) {
+    commands.push({
+      type: 'SET_ENVIRONMENT',
+      idempotencyKey: createCommandId(),
+      environmentName: draft.environmentName,
     })
   }
   return commands
@@ -175,6 +194,17 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
             modelName: typeof record.modelName === 'string' ? record.modelName : base.model.modelName,
             variant: typeof record.variant === 'string' ? record.variant : base.model.variant,
           },
+        }
+      }
+      return base
+    }
+    case 'SET_ENVIRONMENT': {
+      if (Object.hasOwn(payload, 'environmentName')) {
+        if (typeof payload.environmentName === 'string') {
+          return { ...base, environmentName: payload.environmentName }
+        }
+        if (payload.environmentName === null) {
+          return { ...base, environmentName: null }
         }
       }
       return base

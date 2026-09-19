@@ -1319,7 +1319,7 @@ class DatabaseTurnResolverTest {
 
   /** BranchSettings 只保留 agent/model；Environment 来自 Agent definition。 */
   private static BranchSettings settings(String variant) {
-    return new BranchSettings("assistant", new ModelSelection("provider", "model", variant));
+    return new BranchSettings("assistant", new ModelSelection("provider", "model", variant), null);
   }
 
   private static EntryPath rootPath(BranchSettings settings) {

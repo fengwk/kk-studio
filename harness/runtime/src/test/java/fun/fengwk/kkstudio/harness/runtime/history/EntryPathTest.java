@@ -1280,6 +1280,6 @@ class EntryPathTest {
 
   private static BranchSettings settings(String agentName) {
     return new BranchSettings(
-        agentName, new ModelSelection("anthropic", "claude-sonnet", "default"));
+        agentName, new ModelSelection("anthropic", "claude-sonnet", "default"), null);
   }
 }

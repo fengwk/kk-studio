@@ -78,7 +78,7 @@ class HarnessOneShotServiceTest {
   }
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("h3-agent", new ModelSelection("provider", "model", "default"));
+      new BranchSettings("h3-agent", new ModelSelection("provider", "model", "default"), null);
 
   private HarnessRuntime runtime;
   private AgentBranchSettingsMaterializer materializer;

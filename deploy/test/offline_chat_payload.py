@@ -16,8 +16,9 @@ def build_offline_chat_batch_request(
 ) -> Dict[str, Any]:
     """Build a canonical NEW_SESSION command batch payload for Chat owner.
 
-    Branch settings only contain agentName and model; Environment 由 Agent 拥有，
-    Chat/root settings 不携带任何 workspace 或 environment 字段。
+    Branch settings 是精确三字段快照 agentName + model + environmentName；
+    environmentName 为 nullable canonical 名称，null 表示未选择 Environment。
+    Chat/root settings 不携带任何 workspace 字段。
     """
     return {
         "owner": {"type": "CHAT", "id": chat_id},
@@ -32,6 +33,7 @@ def build_offline_chat_batch_request(
                     "modelName": model_name,
                     "variant": variant,
                 },
+                "environmentName": None,
             },
             "yoloEnabled": False,
         },

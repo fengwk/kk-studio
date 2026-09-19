@@ -128,11 +128,12 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(
         "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
-            + "},\"subagentContext\":null}",
+            + ",\"environmentName\":null},\"subagentContext\":null}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}},"
+            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+            + ",\"environmentName\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
             + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null}",
@@ -241,10 +242,58 @@ class HistoryEntryPayloadJsonCodecTest {
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
                     + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"environmentName\":null,"
                     + "\"settings\":{\"agentName\":\"b\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"environmentName\":null}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{}} {}"));
+  }
+
+  /** 测试意图：三字段 branch settings 是唯一 durable 形态——旧的两字段 shape 与缺失 environmentName 必须严格拒绝。 */
+  @Test
+  void rejectsLegacyBranchSettingsShapeWithoutEnvironmentName() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{\"agentName\":\"a\",\"model\":{"
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}},"
+                    + "\"subagentContext\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{\"agentName\":\"a\",\"model\":{"
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
+                    + ",\"environmentName\":\" \"},\"subagentContext\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{\"agentName\":\"a\",\"model\":{"
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
+                    + ",\"environmentName\":\"env/a\"},\"subagentContext\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{\"agentName\":\"a\",\"model\":{"
+                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
+                    + ",\"environmentName\":5},\"subagentContext\":null}"));
+    // 正例：canonical 环境名往返，且 null 与文本都会被精确保留。
+    assertEquals(
+        new RootPayload(settings()),
+        CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(settings()))));
+    BranchSettings withEnvironment = settings().withEnvironmentName("local");
+    assertEquals("local", withEnvironment.environmentName());
+    assertEquals(
+        new RootPayload(withEnvironment),
+        CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(withEnvironment))));
   }
 
   @Test
@@ -746,6 +795,6 @@ class HistoryEntryPayloadJsonCodecTest {
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        "coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+        "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
   }
 }

@@ -26,7 +26,7 @@ import java.util.List;
 class CompactionTurnsTest {
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("p", "m", "v"));
+      new BranchSettings("agent", new ModelSelection("p", "m", "v"), null);
   private static final Instant NOW = Instant.EPOCH;
 
   @Test

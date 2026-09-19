@@ -390,8 +390,9 @@ placeholder，其余 `${...}` 与未闭合形式保持原文。
 调用 `skill.load` 读取，不会用当前 Agent 配置扩张已冻结调用。
 
 [AgentBranchSettingsMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentBranchSettingsMaterializer.java)
-为新建/恢复的 subagent 按最新 Agent/Model catalog 物化只含 `agentName` 与 model 的
-`BranchSettings`；环境由 Agent definition 决定，工具、skill 和 subagent binding 在每个
+为新建/恢复的 subagent 按最新 Agent/Model catalog 物化 `agentName` 与 model，
+`environmentName` 置 null；Environment 由调用方按 `inheritParentEnvironment` 单独决定，
+工具、skill 和 subagent binding 在每个
 live turn 重新解析。Task 的 agent name、description、parent/root/depth 和 invocation
 归属在 durable binding 中冻结，执行期间不因 Catalog 变更扩权。Compaction resolver 是
 窄路径：只解析 `CompactionPreparation.executionModel`，返回零 tools/skills/subagents 的

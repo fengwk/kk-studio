@@ -4,10 +4,13 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import {
+  branchDraftFromEntry,
+  branchDraftFromEntryPath,
   sessionSelectionItem,
   threadSelectionItem,
   useAgentPaneController,
 } from '@/features/ai/runtime/useAgentPaneController'
+import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -122,6 +125,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     branchSettings: {
       agentName: 'assistant',
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      environmentName: null,
     },
     createTime: null,
     updateTime: null,
@@ -1505,3 +1509,85 @@ function testCommand(
     ...overrides,
   }
 }
+
+describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay', () => {
+  const fallbackDraft: BranchDraft = {
+    agentName: 'assistant',
+    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    environmentName: 'initial-env',
+    yoloEnabled: false,
+  }
+
+  function createEntry(payload: Record<string, unknown>, entryId = 'e1', parentEntryId: string | null = null): HarnessSessionEntryDTO {
+    return {
+      entryId,
+      sessionId: 's1',
+      parentEntryId,
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify(payload),
+      createTime: '2026-01-01T00:00:00Z',
+    }
+  }
+
+  /**
+   * 测试意图：验证 branchDraftFromEntry 对 settings.environmentName 的重放防御规则：
+   * 1. 文本值选中该环境；
+   * 2. 显式 null 清除该环境；
+   * 3. 缺少该键时保留 fallback 环境；
+   * 4. 非字符串非空（如数值、对象、undefined）等不可信载荷保留 fallback 环境。
+   */
+  it('handles environmentName correctly on single entry replay', () => {
+    // 文本值选中
+    const selected = branchDraftFromEntry(
+      createEntry({ settings: { environmentName: 'custom-env' } }),
+      fallbackDraft,
+    )
+    expect(selected?.environmentName).toBe('custom-env')
+
+    // 显式 null 清除
+    const cleared = branchDraftFromEntry(
+      createEntry({ settings: { environmentName: null } }),
+      fallbackDraft,
+    )
+    expect(cleared?.environmentName).toBeNull()
+
+    // 缺少 environmentName 键：保留 fallback
+    const missingKey = branchDraftFromEntry(
+      createEntry({ settings: { agentName: 'coder' } }),
+      fallbackDraft,
+    )
+    expect(missingKey?.environmentName).toBe('initial-env')
+
+    // 畸形/不可信载荷：保留 fallback
+    for (const malformed of [123, true, {}, []]) {
+      const result = branchDraftFromEntry(
+        createEntry({ settings: { environmentName: malformed } }),
+        fallbackDraft,
+      )
+      expect(result?.environmentName).toBe('initial-env')
+    }
+  })
+
+  /**
+   * 测试意图：验证 branchDraftFromEntryPath 沿 entry 祖先链依序回放时，environmentName 的变更与清除能够正确链式传递。
+   */
+  it('replays environment changes sequentially along the entry path', () => {
+    const entries: HarnessSessionEntryDTO[] = [
+      createEntry({ settings: { agentName: 'a1', environmentName: 'env-1' } }, 'root', null),
+      createEntry({ settings: { agentName: 'a2' } }, 'child-1', 'root'),
+      createEntry({ settings: { environmentName: null } }, 'child-2', 'child-1'),
+    ]
+
+    // 到 root：环境为 env-1
+    const atRoot = branchDraftFromEntryPath(entries, 'root', fallbackDraft)
+    expect(atRoot?.environmentName).toBe('env-1')
+
+    // 到 child-1：未改动环境，继承 env-1
+    const atChild1 = branchDraftFromEntryPath(entries, 'child-1', fallbackDraft)
+    expect(atChild1?.environmentName).toBe('env-1')
+
+    // 到 child-2：显式 null，环境被清空
+    const atChild2 = branchDraftFromEntryPath(entries, 'child-2', fallbackDraft)
+    expect(atChild2?.environmentName).toBeNull()
+  })
+})

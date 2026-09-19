@@ -11,8 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -37,9 +35,12 @@ import java.util.UUID;
  */
 final class AcceptCommandsControl {
 
-  /** SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL，每类至多一次、全部在消息之前。 */
+  /** SET_* prefix 的固定顺序：SET_AGENT -&gt; SET_MODEL -&gt; SET_ENVIRONMENT，每类至多一次、全部在消息之前。 */
   private static final List<ThreadCommandType> SET_PREFIX_ORDER =
-      List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.SET_MODEL);
+      List.of(
+          ThreadCommandType.SET_AGENT,
+          ThreadCommandType.SET_MODEL,
+          ThreadCommandType.SET_ENVIRONMENT);
 
   private final HarnessStore store;
   private final Clock clock;
@@ -463,9 +464,9 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * THREAD 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）必须确定性拒绝。SET_AGENT / SET_MODEL
-   * 只入队、由 Reducer 于下一个 INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool 或有 queued 消息 /
-   * THREAD Work 也照常接受。
+   * THREAD 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）必须确定性拒绝。SET_*（含
+   * SET_ENVIRONMENT）只入队、由 Reducer 于下一个 INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool 或有
+   * queued 消息 / THREAD Work 也照常接受。
    */
   private static void validateThreadBatchAdmission(
       AcceptCommandsTarget.Thread target, ThreadState thread) {
@@ -480,10 +481,10 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL）、至多一次且全部出现在消息之前；初始 target
-   * 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE
-   * steering，要么是不含 SYSTEM CUSTOM_MESSAGE、<b>恰有一条</b>末尾 user-like 的用户 batch。非法 batch 是请求校验错误，抛
-   * {@link IllegalArgumentException} 而非业务冲突。
+   * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
+   * SET_ENVIRONMENT）、至多一次且全部出现在消息之前；初始 target 必须恰有一条 user-like message 结尾（SYSTEM CUSTOM_MESSAGE
+   * 只允许在前缀）；THREAD 要么是恰一条 SYSTEM CUSTOM_MESSAGE steering，要么是不含 SYSTEM CUSTOM_MESSAGE、<b>恰有一条</b>末尾
+   * user-like 的用户 batch。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
    */
   private static void validateBatchShape(
       AcceptCommandsTarget target, List<NewThreadCommand> commands) {
@@ -493,7 +494,7 @@ final class AcceptCommandsControl {
     boolean sawMessage = false;
     for (NewThreadCommand command : commands) {
       ThreadCommandPayload payload = command.payload();
-      if (payload instanceof SetAgentCommandPayload || payload instanceof SetModelCommandPayload) {
+      if (payload.type().isSetting()) {
         if (sawMessage) {
           throw invalidBatch(target, "SET_* commands must precede all messages");
         }

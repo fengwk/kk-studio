@@ -16,7 +16,7 @@ class TestDeploySmokeContract(unittest.TestCase):
     """Ensure deploy smoke offline chat request shape matches canonical runtime wire."""
 
     def test_offline_chat_batch_request_structure(self):
-        """Builder must produce a valid NEW_SESSION batch without workspace or environment fields."""
+        """Builder must produce a valid NEW_SESSION batch without any workspace field."""
         request = build_offline_chat_batch_request(
             chat_id="00000000-0000-0000-0000-000000000001",
             session_id="00000000-0000-0000-0000-000000000002",
@@ -32,11 +32,13 @@ class TestDeploySmokeContract(unittest.TestCase):
         self.assertEqual(target["threadId"], "00000000-0000-0000-0000-000000000003")
         self.assertFalse(target["yoloEnabled"])
 
-        # canonical root settings 只有 agentName 与 model：workspacePath 已随 W2-A 删除，
-        # Environment 归属 Agent，不再进入 branch settings。
+        # canonical root settings 精确为 agentName + model + environmentName 三字段：
+        # workspacePath 已随 W2-A 删除；environmentName 是 nullable 快照字段，
+        # null 表示未选择 Environment，不代表该字段被删除。
         root_settings = target["rootSettings"]
-        self.assertEqual(sorted(root_settings.keys()), ["agentName", "model"])
+        self.assertEqual(sorted(root_settings.keys()), ["agentName", "environmentName", "model"])
         self.assertEqual(root_settings["agentName"], "default-assistant")
+        self.assertIsNone(root_settings["environmentName"])
         self.assertEqual(
             root_settings["model"],
             {
@@ -45,7 +47,7 @@ class TestDeploySmokeContract(unittest.TestCase):
                 "variant": "default",
             },
         )
-        for removed in ["workspacePath", "environment", "environmentId", "environmentName"]:
+        for removed in ["workspacePath", "environment", "environmentId"]:
             self.assertNotIn(removed, root_settings)
 
         commands = request["commands"]

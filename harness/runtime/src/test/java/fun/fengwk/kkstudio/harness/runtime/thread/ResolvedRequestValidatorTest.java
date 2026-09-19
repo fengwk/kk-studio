@@ -49,7 +49,7 @@ import java.util.UUID;
 /** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn、压缩 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
   private static final EnvironmentId ENV_BINDING =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId OTHER_ENVIRONMENT_ID =

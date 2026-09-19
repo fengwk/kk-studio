@@ -86,7 +86,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final OwnerRef PROJECT_OWNER = new OwnerRef(OwnerType.PROJECT, PROJECT_ID);
   private static final OwnerRef ISSUE_RUN_OWNER = new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"));
+      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
 
   private ChatSessionRepository chatSessionRepository;
   private CanvasSessionRepository canvasSessionRepository;

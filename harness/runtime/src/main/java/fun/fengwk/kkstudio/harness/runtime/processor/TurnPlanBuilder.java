@@ -34,9 +34,9 @@ import java.util.function.Supplier;
  * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath 与 queued Command 快照构造完整合法 candidate
  * EntryPath，不接触 Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
- * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL）与 SYSTEM CUSTOM_MESSAGE（用于 task soft steering），保留
- * USER_MESSAGE 与 USER CUSTOM_MESSAGE；INPUT 只消费到首条 user-like message为止的命令前缀，并先做可选 history
- * normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加
+ * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT）与 SYSTEM CUSTOM_MESSAGE（用于 task
+ * soft steering），保留 USER_MESSAGE 与 USER CUSTOM_MESSAGE；INPUT 只消费到首条 user-like message为止的命令前缀，并先做可选
+ * history normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加
  * TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message；COMPACTION 只追加
  * TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的 {@link
  * CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
@@ -176,7 +176,7 @@ final class TurnPlanBuilder {
       return false;
     }
     return switch (command.type()) {
-      case SET_AGENT, SET_MODEL -> true;
+      case SET_AGENT, SET_MODEL, SET_ENVIRONMENT -> true;
       case CUSTOM_MESSAGE -> ((CustomMessageCommandPayload) command.payload()).message().role()
           == AgentMessageRole.SYSTEM;
       case USER_MESSAGE -> false;

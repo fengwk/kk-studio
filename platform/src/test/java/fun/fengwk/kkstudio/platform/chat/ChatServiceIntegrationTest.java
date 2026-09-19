@@ -154,7 +154,8 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
                       new RootPayload(
                           new BranchSettings(
                               "default-assistant",
-                              new ModelSelection("stub", "acceptance-stub", "default"))),
+                              new ModelSelection("stub", "acceptance-stub", "default"),
+                              null)),
                       Instant.parse("2026-08-02T00:00:00Z"))));
       TurnResolver.Result resolution = turnResolver.resolve(THREAD_ID, path, null);
       TurnResolver.Rejected rejected = assertInstanceOf(TurnResolver.Rejected.class, resolution);

@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -41,6 +42,33 @@ import java.util.UUID;
 class HarnessRuntimeRequestMapperTest {
 
   private static final String THREAD_ID = idText(1);
+
+  /** 测试意图：rootSettings 的 environmentName 必须是 nullable 映射——null 与 canonical 文本都要精确保留。 */
+  @Test
+  void mapsNullableEnvironmentNameFromRootSettings() {
+    HarnessCommandTargetDTO target = newSessionTarget();
+    target.getRootSettings().setEnvironmentName("local");
+    AcceptCommandsCommand withEnvironment =
+        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(target, userCommand("env")));
+    AcceptCommandsTarget.NewSession newSession =
+        assertInstanceOf(AcceptCommandsTarget.NewSession.class, withEnvironment.target());
+    assertEquals("local", newSession.rootSettings().environmentName());
+
+    AcceptCommandsCommand withoutEnvironment =
+        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+            request(newSessionTarget(), userCommand("no-env")));
+    AcceptCommandsTarget.NewSession cleared =
+        assertInstanceOf(AcceptCommandsTarget.NewSession.class, withoutEnvironment.target());
+    assertNull(cleared.rootSettings().environmentName());
+
+    HarnessCommandTargetDTO invalid = newSessionTarget();
+    invalid.getRootSettings().setEnvironmentName("a/b");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(invalid, userCommand("bad"))));
+  }
 
   @Test
   void mapsOwnerAndAllThreeTargets() {
@@ -112,13 +140,15 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void mapsFixedSetPrefixAndRawRequestHash() {
-    // 只允许稳定 SET_AGENT -> SET_MODEL 前缀，USER_MESSAGE raw hash 必须保持精确。
+    // 只允许稳定 SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
     HarnessCommandBatchDTO request = request(threadTarget(), userCommand("user"));
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
     HarnessCommandCreateDTO model = command("SET_MODEL", "model");
     model.setModel(modelSelection());
-    request.setCommands(List.of(agent, model, userCommand("user")));
+    HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "environment");
+    environment.setEnvironmentName("local");
+    request.setCommands(List.of(agent, model, environment, userCommand("user")));
 
     AcceptCommandsCommand mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
 
@@ -126,11 +156,62 @@ class HarnessRuntimeRequestMapperTest {
         List.of(
             ThreadCommandType.SET_AGENT,
             ThreadCommandType.SET_MODEL,
+            ThreadCommandType.SET_ENVIRONMENT,
             ThreadCommandType.USER_MESSAGE),
         mapped.commands().stream().map(command -> command.payload().type()).toList());
+    assertEquals(new SetEnvironmentCommandPayload("local"), mapped.commands().get(2).payload());
     assertEquals(
         ThreadCommandPayloadJsonCodec.requestHash(mapped.commands().getLast().payload()),
         mapped.commands().getLast().requestHash());
+  }
+
+  /** 测试意图：SET_ENVIRONMENT 必须显式携带 environmentName（显式 null 合法表示解除选择），其他命令携带即拒绝。 */
+  @Test
+  void environmentCommandRequiresExplicitNullableFieldAndRejectsCrossCommandFields() {
+    HarnessCommandCreateDTO cleared = command("SET_ENVIRONMENT", "clear");
+    cleared.setEnvironmentName(null);
+    HarnessCommandBatchDTO request = request(threadTarget(), cleared, userCommand("tail"));
+    AcceptCommandsCommand mapped = HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
+    assertEquals(new SetEnvironmentCommandPayload(null), mapped.commands().getFirst().payload());
+
+    // 字段缺失必须拒绝（无法区分「未选择」与「请求未携带」）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(
+                    threadTarget(), command("SET_ENVIRONMENT", "missing"), userCommand("tail"))));
+
+    for (String otherType : List.of("USER_MESSAGE", "SET_AGENT", "SET_MODEL")) {
+      HarnessCommandCreateDTO crossField;
+      if ("USER_MESSAGE".equals(otherType)) {
+        crossField = userCommand("with-environment");
+      } else if ("SET_AGENT".equals(otherType)) {
+        crossField = command("SET_AGENT", "with-environment");
+        crossField.setAgentName("default-assistant");
+      } else {
+        crossField = command("SET_MODEL", "with-environment");
+        crossField.setModel(modelSelection());
+      }
+      crossField.setEnvironmentName("local");
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                  request(threadTarget(), crossField, userCommand("tail"))),
+          otherType + " must reject environmentName");
+    }
+
+    // SET_ENVIRONMENT 与 SET_MODEL 的顺序必须固定：environment 不允许出现在 model 之前。
+    HarnessCommandCreateDTO model = command("SET_MODEL", "model-order");
+    model.setModel(modelSelection());
+    HarnessCommandCreateDTO environment = command("SET_ENVIRONMENT", "environment-order");
+    environment.setEnvironmentName("local");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(threadTarget(), environment, model, userCommand("tail"))));
   }
 
   @Test
@@ -308,18 +389,11 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsUnsupportedCommandTypes() {
-    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE/SET_ENVIRONMENT，也不接受未知 discriminator。
+    // 产品 HTTP surface 不开放 CUSTOM_MESSAGE，也不接受未知 discriminator。
     HarnessCommandCreateDTO custom = command("CUSTOM_MESSAGE", "custom");
     assertThrows(
         IllegalArgumentException.class,
         () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), custom)));
-
-    HarnessCommandCreateDTO legacyEnvironment = command("SET_ENVIRONMENT", "legacy-environment");
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
-                request(threadTarget(), legacyEnvironment, userCommand("tail"))));
 
     HarnessCommandCreateDTO unknown = command("UNKNOWN", "unknown");
     assertThrows(
@@ -372,7 +446,7 @@ class HarnessRuntimeRequestMapperTest {
 
   @Test
   void rejectsCrossCommandFieldsAndMissingPayloads() {
-    // 每个 command variant 只能携带自己的字段；已删除的 SET_ENVIRONMENT discriminator 必须拒绝。
+    // 每个 command variant 只能携带自己的字段（SET_ENVIRONMENT 只允许 environmentName）。
     HarnessCommandCreateDTO user = userCommand("user-with-agent");
     user.setAgentName("forbidden");
     assertCommandRejected(user);
@@ -387,7 +461,14 @@ class HarnessRuntimeRequestMapperTest {
     model.setAgentName("forbidden");
     assertCommandRejected(model);
 
-    assertCommandRejected(command("SET_ENVIRONMENT", "missing-workspace"));
+    // SET_ENVIRONMENT 必须携带 environmentName；缺失与跨字段都拒绝，canonical 约束由 domain payload 承担。
+    assertCommandRejected(command("SET_ENVIRONMENT", "missing-environment"));
+    HarnessCommandCreateDTO blankEnvironment = command("SET_ENVIRONMENT", "blank-environment");
+    blankEnvironment.setEnvironmentName(" ");
+    assertCommandRejected(blankEnvironment);
+    HarnessCommandCreateDTO slashEnvironment = command("SET_ENVIRONMENT", "slash-environment");
+    slashEnvironment.setEnvironmentName("a/b");
+    assertCommandRejected(slashEnvironment);
     assertCommandRejected(command("USER_MESSAGE", "missing-contents"));
 
     HarnessCommandCreateDTO blankAgent = command("SET_AGENT", "blank-agent");

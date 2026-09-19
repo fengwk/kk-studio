@@ -135,8 +135,10 @@ no-op），不产生 Command、Entry 或 Work。
   携带 `{sessionId, startEntryId, threadId, yoloEnabled}`，二者都不接 name 输入；
   Session 名由服务端从首个非空白用户文本派生，root Thread 名固定 `main`，新 Thread 名
   固定 `branch-<threadId 前 8 位>`）；product HTTP command 只允许
-  `SET_AGENT -> SET_MODEL` 前缀加一条位于末尾的 `USER_MESSAGE`，`CUSTOM_MESSAGE` 不开放
-  到 product HTTP surface；user content 只允许 `TEXT`、`ATTACHMENT`、`RESOURCE`，
+  `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT` 前缀加一条位于末尾的 `USER_MESSAGE`，
+  `CUSTOM_MESSAGE` 不开放
+  到 product HTTP surface；`SET_ENVIRONMENT` 必须显式携带可空 `environmentName`（null 表示清除），
+  其余命令禁止携带该字段；user content 只允许 `TEXT`、`ATTACHMENT`、`RESOURCE`，
   Attachment 由 Platform acceptance transaction 转成 durable Resource。
 - [HarnessRuntimeResponseMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeResponseMapper.java)
   把 Runtime snapshot 投影为严格 DTO，Entry/Command/AgentMessage/Model result/Model

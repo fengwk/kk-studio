@@ -490,7 +490,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled；NEW_SESSION rootSettings 携带 agentName/model branch draft；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled；NEW_SESSION rootSettings 携带 agentName/model/environmentName branch draft；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -505,7 +505,8 @@ registerCase({
         chat.agentName === agent.name
           && chat.yoloEnabled === false
           && !Object.hasOwn(chat, 'workspacePath')
-          && !Object.hasOwn(chat, 'environment'),
+          && !Object.hasOwn(chat, 'environment')
+          && !Object.hasOwn(chat, 'environmentName'),
         JSON.stringify(chat),
       )
       // 先创建 Thread（NEW_SESSION 初始创建），再更新 Chat 默认值，最后 reread 同一 Thread：
@@ -513,6 +514,7 @@ registerCase({
       const requested = {
         agentName: agent.name,
         model: modelSelectionFor(agent),
+        environmentName: null,
       }
       const threadId = cid()
       const accepted = await createNewSession(ctx, {
@@ -542,7 +544,8 @@ registerCase({
         updated.agentName === agent.name
           && updated.yoloEnabled === true
           && !Object.hasOwn(updated, 'workspacePath')
-          && !Object.hasOwn(updated, 'environment'),
+          && !Object.hasOwn(updated, 'environment')
+          && !Object.hasOwn(updated, 'environmentName'),
         JSON.stringify(updated),
       )
       // 同一 Thread reread：branchSettings 逐字段不变。

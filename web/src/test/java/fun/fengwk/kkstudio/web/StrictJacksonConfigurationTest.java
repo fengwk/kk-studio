@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -12,6 +15,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 
 import java.util.Date;
@@ -46,7 +50,7 @@ class StrictJacksonConfigurationTest {
         });
   }
 
-  /** 测试意图：验证禁用字母排序保留外层与嵌套 DTO 声明顺序，且 @JsonInclude(ALWAYS) 在 null 时仍显式输出。 */
+  /** 测试意图：验证禁用字母排序保留外层与嵌套 DTO 声明顺序，且 @JsonInclude(ALWAYS) 对 environmentName 的 null 仍显式输出。 */
   @Test
   void shouldPreserveDeclarationOrderAndHonorExplicitAlwaysInclude() {
     runner.run(
@@ -62,20 +66,75 @@ class StrictJacksonConfigurationTest {
           settings.setAgentName("code-assistant");
           settings.setModel(model);
 
-          String expected =
+          // 完整快照要求 environmentName 总是显式出现：全局 NON_NULL 必须被 @JsonInclude(ALWAYS) 覆盖。
+          String expectedWithNullEnvironment =
               "{\"agentName\":\"code-assistant\",\"model\":{"
                   + "\"providerName\":\"anthropic\","
                   + "\"modelName\":\"claude-3-5-sonnet\","
-                  + "\"variant\":\"default\"}}";
-          assertEquals(expected, mapper.writeValueAsString(settings));
+                  + "\"variant\":\"default\"},"
+                  + "\"environmentName\":null}";
+          assertEquals(expectedWithNullEnvironment, mapper.writeValueAsString(settings));
+
+          settings.setEnvironmentName("local");
+          String expectedWithEnvironment =
+              "{\"agentName\":\"code-assistant\",\"model\":{"
+                  + "\"providerName\":\"anthropic\","
+                  + "\"modelName\":\"claude-3-5-sonnet\","
+                  + "\"variant\":\"default\"},"
+                  + "\"environmentName\":\"local\"}";
+          assertEquals(expectedWithEnvironment, mapper.writeValueAsString(settings));
+
+          // 往返必须保留 null 与非 null 两种形态。
+          assertEquals(
+              null,
+              mapper
+                  .readValue(expectedWithNullEnvironment, HarnessBranchSettingsDTO.class)
+                  .getEnvironmentName());
+          assertEquals(
+              "local",
+              mapper
+                  .readValue(expectedWithEnvironment, HarnessBranchSettingsDTO.class)
+                  .getEnvironmentName());
+
           assertThrows(
               JacksonException.class,
               () ->
                   mapper.readValue(
                       "{\"workspacePath\":\"/workspace/project\",\"agentName\":\"code-assistant\","
                           + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":"
-                          + "\"claude-3-5-sonnet\",\"variant\":\"default\"}}",
+                          + "\"claude-3-5-sonnet\",\"variant\":\"default\"},"
+                          + "\"environmentName\":null}",
                       HarnessBranchSettingsDTO.class));
+        });
+  }
+
+  /** 测试意图：SET_ENVIRONMENT 命令的显式 null 必须在 wire 上保留，且请求字段出现性可被精确判定。 */
+  @Test
+  void shouldPreserveExplicitNullEnvironmentNameOnCommandDto() {
+    runner.run(
+        context -> {
+          JsonMapper mapper = context.getBean(JsonMapper.class);
+
+          String cleared =
+              "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\",\"environmentName\":null}";
+          HarnessCommandCreateDTO dto = mapper.readValue(cleared, HarnessCommandCreateDTO.class);
+          assertTrue(dto.hasEnvironmentNameField());
+          assertNull(dto.getEnvironmentName());
+
+          String selected =
+              "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\","
+                  + "\"environmentName\":\"local\"}";
+          HarnessCommandCreateDTO withName =
+              mapper.readValue(selected, HarnessCommandCreateDTO.class);
+          assertTrue(withName.hasEnvironmentNameField());
+          assertEquals("local", withName.getEnvironmentName());
+
+          HarnessCommandCreateDTO absent =
+              mapper.readValue(
+                  "{\"type\":\"SET_AGENT\",\"idempotencyKey\":\"id-1\",\"agentName\":\"a\"}",
+                  HarnessCommandCreateDTO.class);
+          assertFalse(absent.hasEnvironmentNameField());
+          assertEquals(cleared, mapper.writeValueAsString(dto));
         });
   }
 

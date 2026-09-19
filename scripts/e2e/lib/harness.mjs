@@ -28,7 +28,7 @@ import {
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
  * - NEW_THREAD{sessionId,startEntryId,threadId,yoloEnabled}：在既有 Session 既有 Entry 下开新 Thread
  * - THREAD{threadId,expectedHeadEntryId,expectedNextCommandSequence}：在既有 Thread 上继续
- * commands 必须是固定顺序 SET_AGENT,SET_MODEL 前缀 +
+ * commands 必须是固定顺序 SET_AGENT,SET_MODEL,SET_ENVIRONMENT 前缀 +
  * 恰一条末尾 USER_MESSAGE；CUSTOM_MESSAGE 在产品 HTTP 面被拒绝。
  */
 
@@ -92,10 +92,25 @@ export async function createChat(
   return chat
 }
 
-/** 由 Agent + Model 引用构造完整 branchSettings（当前契约精确为 agentName + model）。 */
-export function branchSettingsOf(agent, model) {
+/** 校验 nullable canonical Environment 名称：null 表示未选择；非 null 必须非 blank、无首尾空白、不含 '/' 且不超过 64 字符。 */
+export function canonicalEnvironmentName(value, field = 'environmentName') {
+  if (value === null) return null
+  assert(
+    typeof value === 'string',
+    `expected string or null for ${field}: ${JSON.stringify(value)}`,
+  )
+  assert(value.trim().length > 0, `${field} must not be blank`)
+  assert(value === value.trim(), `${field} must not contain surrounding whitespace`)
+  assert(!value.includes('/'), `${field} must not contain '/'`)
+  assert(value.length <= 64, `${field} must be <= 64 characters`)
+  return value
+}
+
+/** 由 Agent + Model + Environment 引用构造完整 branchSettings（当前契约精确为 agentName + model + environmentName）。 */
+export function branchSettingsOf(agent, model, environmentName = null) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  canonicalEnvironmentName(environmentName, 'environmentName')
   return {
     agentName: agent.name,
     model: {
@@ -103,6 +118,7 @@ export function branchSettingsOf(agent, model) {
       modelName: model.modelName,
       variant: model.variant,
     },
+    environmentName,
   }
 }
 
@@ -467,6 +483,16 @@ export function setModelCommand(model, idempotencyKey) {
   assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
   return { type: 'SET_MODEL', idempotencyKey, model }
+}
+
+export function setEnvironmentCommand(environmentName, idempotencyKey) {
+  assert(
+    arguments.length >= 2,
+    'setEnvironmentCommand requires explicit environmentName (string or null) and idempotencyKey',
+  )
+  canonicalEnvironmentName(environmentName, 'environmentName')
+  assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
+  return { type: 'SET_ENVIRONMENT', idempotencyKey, environmentName }
 }
 
 /**

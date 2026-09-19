@@ -73,7 +73,7 @@ class ModelRequestMaterializerTest {
   private static final UUID OWNER = id(1L);
   private static final Instant T0 = Instant.parse("2026-08-01T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
   private static final ModelRequestMaterializer MATERIALIZER = new ModelRequestMaterializer();
   private static final ModelRequestSpecJsonCodec CODEC = new ModelRequestSpecJsonCodec();
 

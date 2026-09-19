@@ -61,6 +61,7 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
   return {
     agentName: draft.agentName,
     model: { ...draft.model },
+    environmentName: draft.environmentName,
   }
 }
 

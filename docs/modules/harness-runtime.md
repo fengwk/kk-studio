@@ -37,9 +37,9 @@ ROOT                  TURN_START   MESSAGE      CUSTOM                MODEL_ATTE
 CUSTOM_MESSAGE        ASSISTANT_ERROR           ASSISTANT_ABORTED     COMPACTION           TURN_END
 ```
 
-`ROOT` 是唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)（`agentName` 与 `ModelSelection`）并可在派生子智能体时携带 `SubagentContext`；`TURN_START` 冻结该回合完整 settings、`ownerThreadId`、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION`）与解析出的上下文窗口和输出预算；`MODEL_ATTEMPT_FAILURE` 保存 provider-transparent 的重试审计；`CUSTOM` 是 Contributor 的分支透明状态，不参与 turn 文法也不默认投影；`ASSISTANT_ERROR` 与 `ASSISTANT_ABORTED` 是异常与中止屏障；`COMPACTION` 保存摘要；`TURN_END` 保存结果与 `continueModel` 延续义务。`providerReplayState` 只允许出现在 ASSISTANT `MESSAGE` 上。
+`ROOT` 是唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)（`agentName`、`ModelSelection` 与可空 `environmentName`）并可在派生子智能体时携带 `SubagentContext`；`TURN_START` 冻结该回合完整 settings、`ownerThreadId`、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION`）与解析出的上下文窗口和输出预算；`MODEL_ATTEMPT_FAILURE` 保存 provider-transparent 的重试审计；`CUSTOM` 是 Contributor 的分支透明状态，不参与 turn 文法也不默认投影；`ASSISTANT_ERROR` 与 `ASSISTANT_ABORTED` 是异常与中止屏障；`COMPACTION` 保存摘要；`TURN_END` 保存结果与 `continueModel` 延续义务。`providerReplayState` 只允许出现在 ASSISTANT `MESSAGE` 上。
 
-分支只冻结用户可见的 agent 与 model：环境由 Agent definition 决定，目录只由每次工具调用自己的 arguments 提供，因此 Entry 里没有环境或目录状态。
+分支冻结用户可见的 agent、model 与可空 Environment name：Environment 以全局唯一且不可变的 name 进入历史，每回合再解析为内部路由身份，目录只由每次工具调用自己的 arguments 提供，因此 Entry 里没有目录状态。
 
 [`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是从 `ROOT` 到当前 `head` 的不可变连续路径：同 Session、父链严格相接、ID 不重复、`createdAt` 不早于父节点、首节点是唯一 `ROOT`。[`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 在此之上校验 turn 文法：`CUSTOM` 透明（不打开也不关闭 turn）；非 `CUSTOM` 节点必须落在某个 open `TURN_START` 内，前一个 turn 未关闭时不得再开；`INPUT` 回合在 Assistant 结果前必须有至少一条 USER/CUSTOM 消息，`CONTINUATION` 偿还上一个 `continueModel=true` 且不消费用户消息，`COMPACTION` 消费零命令、绝不出现 USER/CUSTOM 且成功结果只能是 `COMPACTION`；Assistant 结果（ASSISTANT MESSAGE / `ASSISTANT_ERROR` / `ASSISTANT_ABORTED` / `COMPACTION`）每个 turn 至多一次；TOOL 消息必须紧随带 `ToolCall` 的 ASSISTANT 消息，`callIndex` 从 0 起严格连续前缀且 `toolCallId`/`toolName`/`assistantEntryId` 精确匹配；`TURN_END` 只能关闭当前 open 的 `TURN_START`，并按 [`TurnEndOutcome`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/TurnEndOutcome.java)（`COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`）校验前置条件。路径可以在任意前缀截断，用于恢复未闭合的回合。
 
@@ -62,7 +62,7 @@ yoloEnabled / nextCommandSequence / version / createdAt / updatedAt
 - `NEW_THREAD`：`KEY SHARE` 锁既有 Session（不串行化同 Session 的兄弟创建），校验 `startEntryId` 属于该 Session，插入 Thread + Commands + Work；不复制任何 Entry，新 Thread 的 head 直接指向该 Entry。
 - `THREAD`：先按 immutable `sessionId` 做 `KEY SHARE`，再 `FOR UPDATE` 锁 Thread；exact ordered replay 必须**先于**任何 cursor / preflight 准入，全新批次要求 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 精确匹配（否则 `STALE_COMMAND_CURSOR`），随后调用 preflight、预留连续 sequence、请求 THREAD Work。
 
-命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL`，每种至多一次；初始批次以恰一条 user-like message 结尾（可带 SYSTEM CUSTOM_MESSAGE 前缀），`THREAD` 批次要么是恰一条 SYSTEM CUSTOM_MESSAGE 引导，要么是禁止 SYSTEM 消息、以恰一条 user-like message 结尾的用户批次；非法批次是请求校验错误（`IllegalArgumentException`）。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
+命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；初始批次以恰一条 user-like message 结尾（可带 SYSTEM CUSTOM_MESSAGE 前缀），`THREAD` 批次要么是恰一条 SYSTEM CUSTOM_MESSAGE 引导，要么是禁止 SYSTEM 消息、以恰一条 user-like message 结尾的用户批次；非法批次是请求校验错误（`IllegalArgumentException`）。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
 
 状态由标记字段派生：无标记即 `QUEUED`；有 `appliedTurnStartEntryId` 即 `APPLIED`；`stopRequestId` 与 `cancelledAt` 成对存在且无 `appliedTurnStartEntryId` 即 `CANCELLED`。
 

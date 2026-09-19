@@ -30,7 +30,7 @@ import java.util.List;
 class CompactionResultEvaluatorTest {
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
   private static final Instant NOW = Instant.EPOCH;
 
   @Test

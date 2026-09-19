@@ -575,7 +575,7 @@ class ProjectHarnessSessionBootstrapServiceTest {
   }
 
   private static BranchSettings branchSettings(String agentName) {
-    return new BranchSettings(agentName, new ModelSelection("prov", "mod", "var"));
+    return new BranchSettings(agentName, new ModelSelection("prov", "mod", "var"), null);
   }
 
   private static AcceptedCommands stubAcceptedCommands(

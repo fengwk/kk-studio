@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,8 @@ class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
   private static final BranchSettings BASE =
-      new BranchSettings("coding", new ModelSelection("anthropic", "claude-sonnet", "default"));
+      new BranchSettings(
+          "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
   private final CommandHarvestReducer reducer = new CommandHarvestReducer();
 
   @Test
@@ -43,11 +45,34 @@ class CommandHarvestReducerTest {
                     5L,
                     new SetModelCommandPayload(
                         new ModelSelection("anthropic", "claude-opus", "thinking"))),
+                queued(id(6L), 6L, new SetEnvironmentCommandPayload("local")),
                 queued(id(8L), 8L, new CustomMessageCommandPayload(system("instruction")))));
 
     assertEquals(
-        new BranchSettings("agent-b", new ModelSelection("anthropic", "claude-opus", "thinking")),
+        new BranchSettings(
+            "agent-b", new ModelSelection("anthropic", "claude-opus", "thinking"), "local"),
         result.branchSettings());
+  }
+
+  /** 测试意图：SET_ENVIRONMENT 的显式 null 是「解除环境选择」，必须真实写回 settings 而不是被当作 no-op。 */
+  @Test
+  void environmentSelectionIsAtomicallySetAndClearedByNull() {
+    BranchSettings withEnvironment = BASE.withEnvironmentName("local");
+    CommandHarvestResult selected =
+        reducer.reduce(
+            id(7L), BASE, List.of(queued(id(1L), 1L, new SetEnvironmentCommandPayload("shared"))));
+    assertEquals("shared", selected.branchSettings().environmentName());
+
+    CommandHarvestResult cleared =
+        reducer.reduce(
+            id(7L),
+            withEnvironment,
+            List.of(queued(id(1L), 1L, new SetEnvironmentCommandPayload(null))));
+    assertNull(cleared.branchSettings().environmentName());
+
+    // 环境变更不得隐式影响 agent 与 model。
+    assertEquals(BASE.agentName(), cleared.branchSettings().agentName());
+    assertEquals(BASE.model(), cleared.branchSettings().model());
   }
 
   @Test

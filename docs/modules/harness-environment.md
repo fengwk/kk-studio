@@ -6,7 +6,7 @@
 
 [`EnvironmentId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java) 是规范 UUID 路由身份：构造与解析只接受 `UUID#toString()` 的小写 canonical 文本，空白、大小写变体与其它形状一律拒绝，`toString()` 也只输出该形式。
 
-Stable Environment 资源、daemon envelope 的 scope、分支执行派生的环境路由与 harness work 亲和性共用这一个身份。display 名称只是元数据，不参与路由，路由身份也没有第二份包装类型。分支历史只冻结用户可见的 `agentName` 与 model；环境由 Agent definition 决定，目录只由每次工具调用自己的 arguments 提供。
+Stable Environment 资源、daemon envelope 的 scope、分支执行派生的环境路由与 harness work 亲和性共用这一个身份。display 名称只是元数据，不参与路由，路由身份也没有第二份包装类型。分支历史冻结用户可见的 `agentName`、model 与可空 Environment name：Environment 以全局唯一且不可变的 name 进入历史，每回合再解析为上面的路由身份；目录只由每次工具调用自己的 arguments 提供。
 
 ## 原子能力目录
 

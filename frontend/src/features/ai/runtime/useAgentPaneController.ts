@@ -989,7 +989,7 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-function branchDraftFromEntry(
+export function branchDraftFromEntry(
   entry: HarnessSessionEntryDTO,
   fallback: BranchDraft | null,
 ): BranchDraft | null {
@@ -1002,6 +1002,14 @@ function branchDraftFromEntry(
     return cloneDraft(fallback)
   }
   const model = isRecord(settings.model) ? settings.model : null
+  let environmentName = fallback.environmentName
+  if (Object.hasOwn(settings, 'environmentName')) {
+    if (typeof settings.environmentName === 'string') {
+      environmentName = settings.environmentName
+    } else if (settings.environmentName === null) {
+      environmentName = null
+    }
+  }
   return {
     ...cloneDraft(fallback),
     agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
@@ -1014,10 +1022,11 @@ function branchDraftFromEntry(
         : fallback.model.modelName,
       variant: typeof model?.variant === 'string' ? model.variant : fallback.model.variant,
     },
+    environmentName,
   }
 }
 
-function branchDraftFromEntryPath(
+export function branchDraftFromEntryPath(
   entries: HarnessSessionEntryDTO[],
   targetEntryId: string,
   fallback: BranchDraft | null,

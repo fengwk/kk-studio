@@ -24,13 +24,15 @@ class ThreadCommandPayloadJsonCodecTest {
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
   @Test
-  void roundTripsAllFourCommandTypes() {
+  void roundTripsAllFiveCommandTypes() {
     List<ThreadCommandPayload> payloads =
         List.of(
             new UserMessageCommandPayload(user("hello")),
             new CustomMessageCommandPayload(system("system")),
             new SetAgentCommandPayload("coding"),
-            new SetModelCommandPayload(MODEL));
+            new SetModelCommandPayload(MODEL),
+            new SetEnvironmentCommandPayload("local"),
+            new SetEnvironmentCommandPayload(null));
 
     for (ThreadCommandPayload payload : payloads) {
       assertEquals(payload, codec.decode(payload.type(), codec.encode(payload)));
@@ -50,6 +52,60 @@ class ThreadCommandPayloadJsonCodecTest {
             + "\"variant\":\"default\"}}",
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
+    // SET_ENVIRONMENT 的 environmentName 必须显式存在：null 表示解除环境选择，不能省略。
+    assertEquals(
+        "{\"environmentName\":\"local\"}", codec.encode(new SetEnvironmentCommandPayload("local")));
+    assertEquals(
+        "{\"environmentName\":null}", codec.encode(new SetEnvironmentCommandPayload(null)));
+  }
+
+  /** 测试意图：SET_ENVIRONMENT 只接受 text 或 null；缺失字段、未知字段与错误类型都必须严格拒绝。 */
+  @Test
+  void setEnvironmentAcceptsOnlyTextOrNullAndRejectsLegacyShapes() {
+    assertEquals(
+        new SetEnvironmentCommandPayload("local"),
+        codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":\"local\"}"));
+    assertEquals(
+        new SetEnvironmentCommandPayload(null),
+        codec.decode(ThreadCommandType.SET_ENVIRONMENT, "{\"environmentName\":null}"));
+    for (String json :
+        List.of(
+            "{}",
+            "{\"environmentName\":5}",
+            "{\"environmentName\":[\"a\"]}",
+            "{\"environmentName\":{\"name\":\"a\"}}",
+            "{\"environmentName\":\" \"}",
+            "{\"environmentName\":\" a\"}",
+            "{\"environmentName\":\"a/b\"}",
+            "{\"environmentName\":\"" + "e".repeat(65) + "\"}",
+            "{\"environmentName\":null,\"extra\":1}",
+            "{\"workspacePath\":\"../outside\"}",
+            "{\"environmentName\":null}{\"environmentName\":null}")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> codec.decode(ThreadCommandType.SET_ENVIRONMENT, json),
+          "SET_ENVIRONMENT must reject: " + json);
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_ENVIRONMENT,
+                "{\"environmentName\":\"a\",\"environmentName\":\"b\"}"));
+  }
+
+  /** 测试意图：environmentName 进入 canonical request hash，因此同 id 的语义变更不会被误判为重放。 */
+  @Test
+  void requestHashIncludesEnvironmentName() {
+    String selected =
+        ThreadCommandPayloadJsonCodec.requestHash(new SetEnvironmentCommandPayload("a"));
+    String other = ThreadCommandPayloadJsonCodec.requestHash(new SetEnvironmentCommandPayload("b"));
+    String cleared =
+        ThreadCommandPayloadJsonCodec.requestHash(new SetEnvironmentCommandPayload(null));
+    assertFalse(selected.equals(other));
+    assertFalse(selected.equals(cleared));
+    assertEquals(
+        selected, ThreadCommandPayloadJsonCodec.requestHash(new SetEnvironmentCommandPayload("a")));
   }
 
   @Test
@@ -179,20 +235,20 @@ class ThreadCommandPayloadJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decode(ThreadCommandType.SET_AGENT, null));
   }
 
-  /** 已删除的 SET_ENVIRONMENT / workspacePath 形状不再被任何 command type 接受。 */
+  /** workspacePath 形状已整体删除，对任何 command type 都必须保持拒绝；SET_ENVIRONMENT 是当前唯一的第五类命令。 */
   @Test
   void rejectsLegacyWorkspacePathPayloadAcrossAllTypes() {
     for (ThreadCommandType type : ThreadCommandType.values()) {
       assertThrows(
           IllegalArgumentException.class,
           () -> codec.decode(type, "{\"workspacePath\":\"" + LEGACY_WORKSPACE_PATH + "\"}"),
-          "SET_ENVIRONMENT 形状必须对 " + type + " 保持拒绝");
+          "workspacePath 形状必须对 " + type + " 保持拒绝");
       assertThrows(
           IllegalArgumentException.class,
           () -> codec.decode(type, "{\"workspacePath\":null}"),
-          "SET_ENVIRONMENT 形状必须对 " + type + " 保持拒绝");
+          "workspacePath 形状必须对 " + type + " 保持拒绝");
     }
-    assertEquals(4, ThreadCommandType.values().length);
+    assertEquals(5, ThreadCommandType.values().length);
   }
 
   private static AgentMessage user(String text) {

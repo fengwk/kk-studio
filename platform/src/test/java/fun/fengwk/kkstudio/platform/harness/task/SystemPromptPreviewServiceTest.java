@@ -436,7 +436,7 @@ class SystemPromptPreviewServiceTest {
 
   private static ThreadSnapshot snapshot() {
     BranchSettings settings =
-        new BranchSettings("assistant", new ModelSelection("provider", "model", "default"));
+        new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
     EntryPath path =
         new EntryPath(
             List.of(new Entry(SESSION_ID, SESSION_ID, null, new RootPayload(settings), NOW)));

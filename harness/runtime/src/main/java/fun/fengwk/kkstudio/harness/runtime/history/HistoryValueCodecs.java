@@ -28,7 +28,8 @@ final class HistoryValueCodecs {
 
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> BRANCH_SETTINGS_FIELDS = orderedSet("agentName", "model");
+  private static final Set<String> BRANCH_SETTINGS_FIELDS =
+      orderedSet("agentName", "model", "environmentName");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -66,6 +67,12 @@ final class HistoryValueCodecs {
     ObjectNode node = NODES.objectNode();
     node.put("agentName", settings.agentName());
     node.set("model", encodeModelSelection(settings.model()));
+    // environmentName 是完整快照的一部分：null 必须显式输出，解码端据此区分「未选择」与旧的两字段 shape。
+    if (settings.environmentName() == null) {
+      node.putNull("environmentName");
+    } else {
+      node.put("environmentName", settings.environmentName());
+    }
     return node;
   }
 
@@ -74,7 +81,20 @@ final class HistoryValueCodecs {
     requireExactFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
         requiredText(node, "agentName", context),
-        decodeModelSelection(node.get("model"), context + ".model"));
+        decodeModelSelection(node.get("model"), context + ".model"),
+        nullableEnvironmentName(node, "environmentName", context));
+  }
+
+  /** 解码可空 Environment 名：text 或 null；其他类型拒绝，非 null 文本走 canonical 校验。 */
+  static String nullableEnvironmentName(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return BranchSettings.requireCanonicalEnvironmentName(value.textValue(), context + "." + field);
   }
 
   // ---------- ModelSelection ----------

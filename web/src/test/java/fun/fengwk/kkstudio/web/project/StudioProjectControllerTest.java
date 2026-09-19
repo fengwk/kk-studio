@@ -255,7 +255,8 @@ class StudioProjectControllerTest {
     RootPayload rootPayload = mock(RootPayload.class);
     when(rootPayload.type()).thenReturn(EntryType.ROOT);
     when(rootPayload.settings())
-        .thenReturn(new BranchSettings("coord", new ModelSelection("provider", "model", "var")));
+        .thenReturn(
+            new BranchSettings("coord", new ModelSelection("provider", "model", "var"), null));
 
     Entry rootEntry = mock(Entry.class);
     when(rootEntry.id()).thenReturn(rootEntryId);
@@ -287,7 +288,8 @@ class StudioProjectControllerTest {
     when(entryPath.root()).thenReturn(rootEntry);
     when(entryPath.head()).thenReturn(rootEntry);
     when(entryPath.baseSettings())
-        .thenReturn(new BranchSettings("coord", new ModelSelection("provider", "model", "var")));
+        .thenReturn(
+            new BranchSettings("coord", new ModelSelection("provider", "model", "var"), null));
     when(snapshot.entryPath()).thenReturn(entryPath);
     when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
 
@@ -331,7 +333,8 @@ class StudioProjectControllerTest {
     RootPayload rootPayload = mock(RootPayload.class);
     when(rootPayload.type()).thenReturn(EntryType.ROOT);
     when(rootPayload.settings())
-        .thenReturn(new BranchSettings("coord", new ModelSelection("provider", "model", "var")));
+        .thenReturn(
+            new BranchSettings("coord", new ModelSelection("provider", "model", "var"), null));
 
     Entry rootEntry = mock(Entry.class);
     when(rootEntry.id()).thenReturn(rootEntryId);
@@ -360,7 +363,8 @@ class StudioProjectControllerTest {
     when(entryPath.root()).thenReturn(rootEntry);
     when(entryPath.head()).thenReturn(rootEntry);
     when(entryPath.baseSettings())
-        .thenReturn(new BranchSettings("coord", new ModelSelection("provider", "model", "var")));
+        .thenReturn(
+            new BranchSettings("coord", new ModelSelection("provider", "model", "var"), null));
     when(snapshot.entryPath()).thenReturn(entryPath);
     when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
     when(orchestrator.accept(any(OwnerRef.class), any(AcceptCommandsCommand.class)))

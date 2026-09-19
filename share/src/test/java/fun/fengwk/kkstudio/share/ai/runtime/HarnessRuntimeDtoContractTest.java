@@ -191,7 +191,10 @@ class HarnessRuntimeDtoContractTest {
   }
 
   @Test
-  void branchSettingsDtoDoesNotExposeWorkspacePath() {
+  void branchSettingsDtoExposesNullableEnvironmentName() throws Exception {
+    // 三字段完整快照：environmentName 必须是显式 nullable String 字段，且旧 workspacePath 不得回归。
+    Field environmentName = HarnessBranchSettingsDTO.class.getDeclaredField("environmentName");
+    assertEquals(String.class, environmentName.getType());
     assertThrows(
         NoSuchFieldException.class,
         () -> HarnessBranchSettingsDTO.class.getDeclaredField("workspacePath"));

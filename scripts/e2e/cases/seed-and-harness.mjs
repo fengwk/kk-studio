@@ -274,7 +274,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
-  docs: 'agentName/model 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
+  docs: 'agentName/model/environmentName 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -286,6 +286,7 @@ registerCase({
     const requested = {
       agentName: ctx.vars.agent.name,
       model: modelSelectionOf(ctx),
+      environmentName: null,
     }
     const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
@@ -1300,7 +1301,7 @@ registerCase({
   id: 'thread.branch_settings_diff_commands',
   level: 'L1',
   title: 'SET_* 命令一个原子 batch 精确 wire 并消费投影',
-  docs: '前端固定顺序 SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；已删除的 SET_ENVIRONMENT discriminator 与 workspacePath 字段在任何 command type 上 => 400',
+  docs: '前端固定顺序 SET_AGENT,SET_MODEL,USER_MESSAGE 一个 batch（yolo 走直接控制面，绝不进入 mailbox）；SET_AGENT 使用 canonical 但不存在的名称，使 Resolver 在调用 Provider 前确定性 PLANNING_FAILED；等 quiescent 后 Thread branchSettings 精确投影、queue 清空、USER entry 与 AssistantError 可见，最终 TURN_END(FAILED, continueModel=false)；缺失 environmentName 的 SET_ENVIRONMENT 与 workspacePath 字段在任何 command type 上 => 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1375,6 +1376,7 @@ registerCase({
         modelName: modelSelection.modelName,
         variant: modelSelection.variant,
       },
+      environmentName: null,
     }
     assert(
       isDeepStrictEqual(finalSnapshot.thread.branchSettings, expectedSettings),
@@ -1454,8 +1456,8 @@ registerCase({
         }),
       { status: 400 },
     )
-    // 已删除的 SET_ENVIRONMENT discriminator 必须按 unknown command type 拒绝（authoritative W2-A
-    // HarnessRuntimeRequestMapperTest.rejectsUnsupportedCommandTypes 同形）。
+    // SET_ENVIRONMENT 必须显式携带 nullable environmentName 字段；缺失该字段必须 400 拒绝
+    // （detail 包含 explicit nullable environmentName 提示）。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -1467,7 +1469,59 @@ registerCase({
           }),
           commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid() }],
         }),
+      {
+        status: 400,
+        messageIncludes: /SET_ENVIRONMENT requires an explicit nullable environmentName field/i,
+      },
+    )
+    // 真正未知的 command type 仍按 unknown command type 拒绝。
+    await expectHttpError(
+      () =>
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
+          commands: [{ type: 'UNKNOWN_COMMAND', idempotencyKey: cid() }],
+        }),
       { status: 400, messageIncludes: /unknown command type/i },
+    )
+    // SET_ENVIRONMENT 携带非法 canonical name（含 '/'）必须 400 拒绝。
+    await expectHttpError(
+      () =>
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
+          commands: [{ type: 'SET_ENVIRONMENT', idempotencyKey: cid(), environmentName: 'bad/name' }],
+        }),
+      { status: 400, messageIncludes: /environmentName/i },
+    )
+    // 其他 command type 不允许携带 environmentName 字段。
+    await expectHttpError(
+      () =>
+        acceptCommandBatch(ctx, {
+          owner: chatOwner(chat.id),
+          target: threadTarget({
+            threadId,
+            expectedHeadEntryId: fresh.thread.headEntryId,
+            expectedNextCommandSequence: fresh.thread.nextCommandSequence,
+          }),
+          commands: [
+            {
+              type: 'SET_AGENT',
+              idempotencyKey: cid(),
+              agentName: 'x',
+              environmentName: 'local',
+            },
+          ],
+        }),
+      { status: 400, messageIncludes: /environmentName/i },
     )
     // 其他 discriminator 即使显式传 workspacePath 也必须按 unknown HTTP command field 拒绝。
     await expectHttpError(

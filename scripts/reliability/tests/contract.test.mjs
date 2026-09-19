@@ -44,7 +44,7 @@ test('run-agent-matrix contract: NEW_SESSION request is atomic', () => {
   assert.deepEqual(request.commands[0].contents, [{ type: 'TEXT', text: prompt }])
 })
 
-test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentName and model', () => {
+test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentName, model, and environmentName', () => {
   const chat = fakeChat()
   const agent = fakeAgent()
   const model = fakeModel()
@@ -55,7 +55,9 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentN
     prompt: 'investigate this case',
   })
   assert.deepEqual(request.rootSettings, branchSettingsOf(agent, model))
-  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'model'])
+  assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environmentName', 'model'])
+  // 未选择 Environment 时必须显式携带 null，而不是省略字段。
+  assert.equal(request.rootSettings.environmentName, null)
   // 产品 Workspace 已删除：root settings 不得再携带任何目录/环境覆盖字段。
   assert.equal(Object.hasOwn(request.rootSettings, 'workspacePath'), false)
   assert.equal(Object.hasOwn(request.rootSettings, 'environmentId'), false)

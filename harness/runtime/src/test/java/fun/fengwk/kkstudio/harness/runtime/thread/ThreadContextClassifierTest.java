@@ -911,7 +911,7 @@ class ThreadContextClassifierTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"));
+    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
   }
 
   private static List<String> callIds(List<ToolCallMessageContent> calls) {
