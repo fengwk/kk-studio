@@ -714,6 +714,69 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("function_call_output", input.get(2).path("type").asText());
   }
 
+  /** 验证 refusal content block 可按原生形态回放，并与 durable 可见文本严格校验。 */
+  @Test
+  void test_refusalReplayPreservesNativeShape() throws Exception {
+    ProviderDescriptor desc = createDescriptor();
+    ArrayNode priorInput = MAPPER.createArrayNode();
+    ObjectNode firstUserWire = priorInput.addObject();
+    firstUserWire.put("type", "message").put("role", "user");
+    firstUserWire
+        .putArray("content")
+        .addObject()
+        .put("type", "input_text")
+        .put("text", "unsafe request");
+    String prefixHash =
+        OpenAiResponsesPrefixHasher.calculateHash(MAPPER.createArrayNode(), priorInput);
+
+    ObjectNode payload = MAPPER.createObjectNode();
+    ObjectNode message = payload.putArray("output").addObject();
+    message.put("type", "message");
+    message.put("role", "assistant");
+    ObjectNode refusalBlock = message.putArray("content").addObject();
+    refusalBlock.put("type", "refusal");
+    refusalBlock.put("refusal", "I cannot help with that.");
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            desc.affinity("gpt-5.4-mini"),
+            prefixHash,
+            payload);
+
+    ProviderMessage firstUser =
+        new ProviderMessage(
+            ProviderMessageRole.USER, List.of(new ProviderTextBlock("unsafe request")));
+    ProviderMessage refusal =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("I cannot help with that.")),
+            replayState);
+    ProviderMessage nextUser =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Why?")));
+
+    JsonNode root =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(List.of(firstUser, refusal, nextUser)),
+                    desc,
+                    OpenAiResponsesConfig.defaultConfig())
+                .bodyUtf8Bytes());
+    JsonNode replayedBlock = root.path("input").get(1).path("content").get(0);
+    assertEquals("refusal", replayedBlock.path("type").asText());
+    assertEquals("I cannot help with that.", replayedBlock.path("refusal").asText());
+
+    ProviderMessage mismatchedRefusal =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("different text")),
+            replayState);
+    ProviderRequest invalidRequest = request(List.of(firstUser, mismatchedRefusal, nextUser));
+    assertThrows(
+        ProviderException.class,
+        () -> encoder.encode(invalidRequest, desc, OpenAiResponsesConfig.defaultConfig()));
+  }
+
   /** 测试意图：非 OPENAI_RESPONSES format 必须回退到语义编码（semantic fallback），不抛出异常。 */
   @Test
   void test_replayState_nonOpenAiFormatFallbackToSemantic() throws Exception {

@@ -162,6 +162,60 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(" World", ((ProviderStreamEvent.TextDelta) emittedEvents.get(1)).text());
   }
 
+  /** 意图：refusal 是正常完成的可见助手文本，终态不得与流式 delta 重复，且原生形态可回放。 */
+  @Test
+  void test_refusalStreamProducesVisibleCompletedTextWithoutDuplication() throws Exception {
+    List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            emittedEvents::add);
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_refusal\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.refusal.delta\",\"item_id\":\"msg_refusal\","
+                + "\"output_index\":0,\"content_index\":0,\"delta\":\"I cannot\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.refusal.delta\",\"item_id\":\"msg_refusal\","
+                + "\"output_index\":0,\"content_index\":0,\"delta\":\" help with that.\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.refusal.done\",\"item_id\":\"msg_refusal\","
+                + "\"output_index\":0,\"content_index\":0,\"refusal\":\"I cannot help with that.\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\","
+                + "\"content\":[{\"type\":\"refusal\",\"refusal\":\"I cannot help with that.\"}]}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refusal\","
+                + "\"status\":\"completed\",\"output\":[{\"id\":\"msg_refusal\","
+                + "\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"refusal\","
+                + "\"refusal\":\"I cannot help with that.\"}]}]}}"));
+
+    ProviderResponse response = accumulator.response();
+    assertEquals("I cannot help with that.", response.text());
+    assertEquals(GenerationStopReason.COMPLETE, response.stopReason());
+    assertEquals(2, emittedEvents.size());
+    assertEquals("I cannot", ((ProviderStreamEvent.TextDelta) emittedEvents.get(0)).text());
+    assertEquals(" help with that.", ((ProviderStreamEvent.TextDelta) emittedEvents.get(1)).text());
+
+    JsonNode replayContent =
+        accumulator.replayState().payload().path("output").get(0).path("content").get(0);
+    assertEquals("refusal", replayContent.path("type").asText());
+    assertEquals("I cannot help with that.", replayContent.path("refusal").asText());
+  }
+
   /** 意图：验证如果未收到终态事件而过早结束流，finish 明确抛出 INVALID_RESPONSE。 */
   @Test
   void test_prematureEofThrowsInvalidResponse() throws Exception {

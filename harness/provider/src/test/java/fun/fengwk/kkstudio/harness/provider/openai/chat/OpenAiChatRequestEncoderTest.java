@@ -669,6 +669,77 @@ class OpenAiChatRequestEncoderTest {
     assertFalse(fallbackAsstNode.has("reasoning_content"));
   }
 
+  /** 验证 refusal replay 与 durable 可见文本一致时原位回放，不一致时严格拒绝。 */
+  @Test
+  void testAssistantRefusalReplay() throws Exception {
+    ProviderMessage firstUser =
+        new ProviderMessage(
+            ProviderMessageRole.USER, List.of(new ProviderTextBlock("unsafe request")));
+    OpenAiChatEncodedRequest firstRequest =
+        encoder.encode(
+            new ProviderRequest(
+                modelDesc,
+                defaultVariant,
+                1024,
+                List.of(firstUser),
+                List.of(),
+                ProviderCacheControl.none()),
+            descriptor,
+            OpenAiChatConfiguration.defaults());
+
+    ObjectNode replayPayload = MAPPER.createObjectNode();
+    replayPayload.put("role", "assistant");
+    replayPayload.put("refusal", "I cannot help with that.");
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity(modelDesc.modelId()),
+            firstRequest.sourcePrefixHash(),
+            replayPayload);
+    ProviderMessage refusal =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("I cannot help with that.")),
+            replayState);
+    ProviderMessage nextUser =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Why?")));
+
+    ProviderRequest nextRequest =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(firstUser, refusal, nextUser),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode root =
+        MAPPER.readTree(
+            encoder
+                .encode(nextRequest, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+
+    JsonNode replayedRefusal = root.path("messages").get(1);
+    assertEquals("I cannot help with that.", replayedRefusal.path("refusal").asText());
+    assertFalse(replayedRefusal.has("content"));
+
+    ProviderMessage mismatchedRefusal =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("different text")),
+            replayState);
+    ProviderRequest invalidRequest =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            List.of(firstUser, mismatchedRefusal, nextUser),
+            List.of(),
+            ProviderCacheControl.none());
+    assertThrows(
+        ProviderException.class,
+        () -> encoder.encode(invalidRequest, descriptor, OpenAiChatConfiguration.defaults()));
+  }
+
   @Test
   @DisplayName("三种 Prompt Cache 模式验证：AUTOMATIC, LEGACY, GPT_5_6_EXPLICIT")
   void testPromptCacheModes() throws Exception {

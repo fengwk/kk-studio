@@ -60,7 +60,7 @@ final class OpenAiChatRequestEncoder {
   }
 
   private static final Set<String> ALLOWED_REPLAY_FIELDS =
-      Set.of("role", "content", "tool_calls", "reasoning_content", "reasoning_details");
+      Set.of("role", "content", "refusal", "tool_calls", "reasoning_content", "reasoning_details");
   private static final Set<String> ALLOWED_TOOL_CALL_FIELDS = Set.of("id", "type", "function");
   private static final Set<String> ALLOWED_TOOL_FUNCTION_FIELDS = Set.of("name", "arguments");
 
@@ -355,6 +355,9 @@ final class OpenAiChatRequestEncoder {
         if (payload.has("content") && !payload.get("content").isNull()) {
           msgNode.set("content", payload.get("content").deepCopy());
         }
+        if (payload.has("refusal") && !payload.get("refusal").isNull()) {
+          msgNode.set("refusal", payload.get("refusal").deepCopy());
+        }
         if (payload.has("tool_calls") && payload.get("tool_calls").isArray()) {
           msgNode.set("tool_calls", payload.get("tool_calls").deepCopy());
         }
@@ -437,6 +440,16 @@ final class OpenAiChatRequestEncoder {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "invalid OpenAI chat assistant replay payload: illegal content type");
+      }
+    }
+
+    // 校验 refusal 类型
+    if (payload.has("refusal")) {
+      JsonNode refusalNode = payload.get("refusal");
+      if (!refusalNode.isNull() && !refusalNode.isTextual()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "invalid OpenAI chat assistant replay payload: illegal refusal type");
       }
     }
 
@@ -563,11 +576,14 @@ final class OpenAiChatRequestEncoder {
       }
     }
 
-    String payloadText =
-        (payload.has("content") && payload.get("content").isTextual())
-            ? payload.get("content").textValue()
-            : "";
-    if (!payloadText.equals(durableText.toString())) {
+    StringBuilder payloadText = new StringBuilder();
+    if (payload.has("content") && payload.get("content").isTextual()) {
+      payloadText.append(payload.get("content").textValue());
+    }
+    if (payload.has("refusal") && payload.get("refusal").isTextual()) {
+      payloadText.append(payload.get("refusal").textValue());
+    }
+    if (!payloadText.toString().equals(durableText.toString())) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "invalid OpenAI chat assistant replay payload: mismatch with durable contents");

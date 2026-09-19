@@ -53,6 +53,8 @@ final class OpenAiResponsesStreamAccumulator {
       Set.of(
           "response.created",
           "response.output_text.delta",
+          "response.refusal.delta",
+          "response.refusal.done",
           "response.reasoning_text.delta",
           "response.reasoning_summary_text.delta",
           "response.output_item.added",
@@ -196,7 +198,10 @@ final class OpenAiResponsesStreamAccumulator {
 
     switch (type) {
       case "response.created" -> handleCreated(node);
-      case "response.output_text.delta" -> handleTextDelta(node);
+      case "response.output_text.delta", "response.refusal.delta" -> handleTextDelta(node);
+      case "response.refusal.done" -> {
+        // delta 与 terminal output 已分别承担实时展示和权威终态，done 仅表示该 content part 完成。
+      }
       case "response.reasoning_text.delta",
           "response.reasoning_summary_text.delta" -> handleThinkingDelta(node);
       case "response.output_item.added" -> handleOutputItemAdded(node);
@@ -536,18 +541,7 @@ final class OpenAiResponsesStreamAccumulator {
           if ("function_call".equals(itemType)) {
             syncToolFromItem(item);
           } else if ("message".equals(itemType)) {
-            JsonNode content = item.get("content");
-            if (content != null) {
-              if (content.isArray()) {
-                for (JsonNode c : content) {
-                  if (c.isObject() && "output_text".equals(c.path("type").asText())) {
-                    textBuffer.append(c.path("text").asText(""));
-                  }
-                }
-              } else if (content.isTextual()) {
-                textBuffer.append(content.asText());
-              }
-            }
+            appendMessageContent(item.get("content"));
           } else if ("reasoning".equals(itemType)) {
             terminalReasoningItemSeen = true;
             JsonNode summary = item.get("summary");
@@ -610,12 +604,8 @@ final class OpenAiResponsesStreamAccumulator {
         String itemType = item.path("type").asText();
         if ("message".equals(itemType)) {
           JsonNode content = item.get("content");
-          if (content != null && content.isArray() && textBuffer.isEmpty()) {
-            for (JsonNode c : content) {
-              if ("output_text".equals(c.path("type").asText())) {
-                textBuffer.append(c.path("text").asText(""));
-              }
-            }
+          if (content != null && textBuffer.isEmpty()) {
+            appendMessageContent(content);
           }
         } else if ("reasoning".equals(itemType)) {
           JsonNode summary = item.get("summary");
@@ -793,6 +783,10 @@ final class OpenAiResponsesStreamAccumulator {
                 ObjectNode textNode = contentArr.addObject();
                 textNode.put("type", "output_text");
                 textNode.put("text", c.path("text").asText(""));
+              } else if (c.isObject() && "refusal".equals(c.path("type").asText())) {
+                ObjectNode refusalNode = contentArr.addObject();
+                refusalNode.put("type", "refusal");
+                refusalNode.put("refusal", c.path("refusal").asText(""));
               }
             }
           } else if (srcContent != null && srcContent.isTextual()) {
@@ -921,6 +915,30 @@ final class OpenAiResponsesStreamAccumulator {
     }
 
     return array;
+  }
+
+  private void appendMessageContent(JsonNode content) {
+    if (content == null || content.isNull()) {
+      return;
+    }
+    if (content.isTextual()) {
+      textBuffer.append(content.asText());
+      return;
+    }
+    if (!content.isArray()) {
+      return;
+    }
+    for (JsonNode block : content) {
+      if (!block.isObject()) {
+        continue;
+      }
+      String type = block.path("type").asText();
+      if ("output_text".equals(type)) {
+        textBuffer.append(block.path("text").asText(""));
+      } else if ("refusal".equals(type)) {
+        textBuffer.append(block.path("refusal").asText(""));
+      }
+    }
   }
 
   /**
