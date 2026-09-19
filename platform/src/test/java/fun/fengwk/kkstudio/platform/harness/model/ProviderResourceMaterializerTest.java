@@ -288,11 +288,12 @@ class ProviderResourceMaterializerTest {
 
   // ---------- 角色边界 ----------
 
+  /** 意图：媒体内联只允许 USER 与 native TOOL 结果两个位置；其他角色（如 ASSISTANT）的 Resource 一律文本回退， 绝不读取内容或产生预签名 URL。 */
   @ParameterizedTest
   @EnumSource(
       value = ProviderMessageRole.class,
-      names = {"SYSTEM", "ASSISTANT"})
-  void systemAndAssistantResourcesAlwaysFallBackToText(ProviderMessageRole role) {
+      names = {"ASSISTANT"})
+  void assistantResourcesAlwaysFallBackToText(ProviderMessageRole role) {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
@@ -748,8 +749,6 @@ class ProviderResourceMaterializerTest {
     List<ProviderMessage> materialized =
         materialize(
             List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("s"))),
                 new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("u"))),
                 new ProviderMessage(
                     ProviderMessageRole.ASSISTANT,
@@ -759,8 +758,7 @@ class ProviderResourceMaterializerTest {
             ProviderMediaCapabilities.NONE);
 
     assertNull(materialized.get(0).replayState());
-    assertNull(materialized.get(1).replayState());
-    assertSame(replayState, materialized.get(2).replayState());
+    assertSame(replayState, materialized.get(1).replayState());
   }
 
   /** 意图：无 replay state 的 assistant 消息物化后仍必须保持无 replay state，绝不伪造 thinking 或 replay。 */

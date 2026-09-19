@@ -37,7 +37,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -260,7 +262,10 @@ class IssueHarnessControllerTest {
         systemCommand.idempotencyKey());
     CustomMessageCommandPayload systemPayload =
         (CustomMessageCommandPayload) systemCommand.payload();
-    assertEquals("Continue working on issue #7.", text(systemPayload.message()));
+    // 内部 steering 以 durable USER 提醒形态进入历史，精确包裹在 system-reminder 定界符中。
+    assertEquals(AgentMessageRole.USER, systemPayload.message().role());
+    assertEquals(
+        SystemReminder.wrap("Continue working on issue #7."), text(systemPayload.message()));
   }
 
   @Test
@@ -326,7 +331,10 @@ class IssueHarnessControllerTest {
     NewThreadCommand command = commandCaptor.getValue().commands().getFirst();
     assertEquals(key, command.idempotencyKey());
     CustomMessageCommandPayload payload = (CustomMessageCommandPayload) command.payload();
-    assertEquals("Issue #7 run entered WAITING_HUMAN: Need a decision", text(payload.message()));
+    assertEquals(AgentMessageRole.USER, payload.message().role());
+    assertEquals(
+        SystemReminder.wrap("Issue #7 run entered WAITING_HUMAN: Need a decision"),
+        text(payload.message()));
   }
 
   @Test

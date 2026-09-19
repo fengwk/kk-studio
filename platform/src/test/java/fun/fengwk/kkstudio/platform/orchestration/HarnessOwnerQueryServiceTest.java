@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -32,7 +33,10 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SettingsReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestResult;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
@@ -61,6 +65,7 @@ class HarnessOwnerQueryServiceTest {
   private static final Instant T2 = Instant.parse("2026-01-01T00:00:02Z");
   private static final Instant T3 = Instant.parse("2026-01-01T00:00:03Z");
   private static final Instant T4 = Instant.parse("2026-01-01T00:00:04Z");
+  private static final Instant T5 = Instant.parse("2026-01-01T00:00:05Z");
   private static final BranchSettings ROOT_SETTINGS =
       new BranchSettings(
           "assistant", new ModelSelection("provider", "root-model", "default"), null);
@@ -254,9 +259,10 @@ class HarnessOwnerQueryServiceTest {
     assertThrows(HarnessRuntimeNotFoundException.class, () -> service.listCanvasSessions(canvasId));
   }
 
+  /** 预览必须跳过 durable USER {@code <system-reminder>}：注入的上下文提醒不是用户发言。 */
   @Test
-  void threadSummariesProjectDurableNameTypedStatusModelAndLatestNonSystemMessage() {
-    // 名称来自 durable ThreadState；Snapshot 使用真实 classifier 输入：SYSTEM head 被跳过，最近 USER 文本成为预览。
+  void threadSummariesSkipDurableUserReminderAndPreviewLatestUserText() {
+    // 名称来自 durable ThreadState；head 是注入的 USER 提醒，因此预览回到最近的用户发言文本。
     UUID sessionId = id(30);
     UUID threadId = id(31);
     BranchSettings turnSettings =
@@ -270,19 +276,26 @@ class HarnessOwnerQueryServiceTest {
             new TurnStartPayload(TurnStartReason.INPUT, turnSettings, threadId),
             T1);
     Entry user = userText(sessionId, id(503), turnStart.id(), T2, "latest user");
-    Entry system =
+    Entry reminder =
         new Entry(
             id(504),
             sessionId,
             user.id(),
             new CustomMessagePayload(
-                "core", "message", "message", AgentMessage.system("hidden system"), "{}"),
+                "core",
+                "message",
+                "message",
+                settingsReminder(
+                    new BranchSettings(
+                        "assistant", new ModelSelection("provider", "turn-model", "fast"), null)),
+                "{}"),
             T3);
-    ThreadState thread = thread(threadId, sessionId, system.id(), T0, T4);
+    Entry afterReminder = userText(sessionId, id(505), reminder.id(), T4, "after reminder");
+    ThreadState thread = thread(threadId, sessionId, afterReminder.id(), T0, T5);
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
             thread,
-            new EntryPath(List.of(root, turnStart, user, system)),
+            new EntryPath(List.of(root, turnStart, user, reminder, afterReminder)),
             List.of(),
             null,
             List.of(),
@@ -299,7 +312,23 @@ class HarnessOwnerQueryServiceTest {
     assertEquals("provider", summary.getModel().getProviderName());
     assertEquals("turn-model", summary.getModel().getModelName());
     assertEquals("fast", summary.getModel().getVariant());
-    assertEquals("latest user", summary.getHeadMessagePreview());
+    assertEquals("after reminder", summary.getHeadMessagePreview());
+
+    // head 恰为提醒本身时，预览回退到更早的真实用户发言，提醒文本绝不泄漏到用户可见摘要。
+    ThreadState reminderHead = thread(threadId, sessionId, reminder.id(), T0, T5);
+    when(runtime.getThreadSnapshot(threadId))
+        .thenReturn(
+            new ThreadSnapshot(
+                reminderHead,
+                new EntryPath(List.of(root, turnStart, user, reminder)),
+                List.of(),
+                null,
+                List.of(),
+                List.of()));
+    String reminderHeadPreview =
+        service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
+    assertEquals("latest user", reminderHeadPreview);
+    assertFalse(reminderHeadPreview.contains("system-reminder"), reminderHeadPreview);
   }
 
   @Test
@@ -369,6 +398,12 @@ class HarnessOwnerQueryServiceTest {
         0L,
         createdAt,
         updatedAt);
+  }
+
+  /** 用生产 {@link SettingsReminder} 构造一条 SET_MODEL 生效提醒，测试因此跟随真实提醒正文格式，而非自造字符串。 */
+  private static AgentMessage settingsReminder(BranchSettings settings) {
+    return SettingsReminder.message(
+        new CommandHarvestResult.SettingsChange(ThreadCommandType.SET_MODEL, settings));
   }
 
   private static UUID id(long value) {
