@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -66,7 +66,7 @@ final class AgentDefinitionReferenceResolver {
   /**
    * 锁定并校验 Agent 选中的全局 Skill 名。
    *
-   * <p>按 {@code name} 升序对全部选中名取当前 Skill 行锁，与 package 替换/删除的锁顺序一致，因此 Agent 的引用不会在并发 package
+   * <p>按 {@code name} 升序对全部选中名取活跃 Skill 行锁，与 package 替换/删除的锁顺序一致，因此 Agent 的引用不会在并发 package
    * 变更中被静默悬空；任一名称不存在于全局目录时确定性拒绝。Agent 不再需要 Environment 参与。
    */
   void requireCurrentSkills(List<String> skillNames) {
@@ -75,7 +75,7 @@ final class AgentDefinitionReferenceResolver {
     }
     Set<String> names = new TreeSet<>(skillNames);
     Set<String> locked = new TreeSet<>();
-    for (CurrentSkill skill : skillCatalogRepository.lockCurrentSkillsByNames(names)) {
+    for (Skill skill : skillCatalogRepository.lockActiveSkillsByNames(names)) {
       locked.add(skill.getName());
     }
     List<String> missing = names.stream().filter(name -> !locked.contains(name)).sorted().toList();

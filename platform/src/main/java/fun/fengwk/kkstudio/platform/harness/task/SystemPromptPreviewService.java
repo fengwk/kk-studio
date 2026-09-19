@@ -13,15 +13,12 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -36,8 +33,8 @@ import java.util.UUID;
  * 按当前 root-to-head branch 的最新 Agent / Environment / skills / subagents 现算系统提示词。
  *
  * <p>只读预览：不冻结 ModelInvocation，不校验 Tool catalog；Environment 只按当前 {@link
- * BranchSettings#environmentName()} 解析（name 无法解析时宽容回退为空环境上下文，绝不失败），skills 无法解析时省略该段，保证 environment
- * 块始终可见。
+ * BranchSettings#environmentName()} 解析（name 无法解析时宽容回退为空环境上下文，绝不失败），宿主 metadata 只取连接行保留的最近一次 READY
+ * payload，skills 无法解析时省略该段，保证 environment 块始终可见。
  */
 public final class SystemPromptPreviewService {
 
@@ -46,7 +43,6 @@ public final class SystemPromptPreviewService {
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
-  private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final SkillCatalogQueryService skillCatalogQueryService;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
@@ -57,7 +53,6 @@ public final class SystemPromptPreviewService {
       AgentDefinitionConfigCodec agentConfigCodec,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
-      EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       SkillCatalogQueryService skillCatalogQueryService,
       AgentPromptComposer promptComposer,
       Clock clock) {
@@ -68,8 +63,6 @@ public final class SystemPromptPreviewService {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.skillInventoryQueryService =
-        Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.skillCatalogQueryService =
         Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
@@ -115,35 +108,15 @@ public final class SystemPromptPreviewService {
       return new CurrentEnvironmentContext(
           null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
+    // 宿主 metadata 只来自连接行保留的最近一次 READY payload；从未 READY 时按空环境上下文。
     EnvironmentConnection liveEnvironment = environmentRegistry.find(environmentId).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
             : liveEnvironment.daemonCapabilities().environment();
-    EnvironmentInventoryDTO inventory = null;
-    if (environmentInfo == null) {
-      try {
-        inventory = skillInventoryQueryService.getInventory(environmentId);
-      } catch (AiResourceNotFoundException ignored) {
-        // 离线且环境/inventory不存在时按预览宽容契约忽略
-      }
-    }
     DaemonOperatingSystem os = environmentInfo != null ? environmentInfo.operatingSystem() : null;
     String note = environmentInfo != null ? environmentInfo.note() : null;
-    if (os == null && inventory != null && inventory.getOperatingSystem() != null) {
-      try {
-        os = DaemonOperatingSystem.fromWireValue(inventory.getOperatingSystem());
-      } catch (IllegalArgumentException ignored) {
-        os = null;
-      }
-    }
-    if (note == null && inventory != null) {
-      note = inventory.getNote();
-    }
-    String timeZone =
-        environmentInfo != null
-            ? environmentInfo.timeZone()
-            : (inventory != null ? inventory.getTimeZone() : null);
+    String timeZone = environmentInfo != null ? environmentInfo.timeZone() : null;
     ZoneId zone;
     if (timeZone != null) {
       try {
@@ -166,22 +139,21 @@ public final class SystemPromptPreviewService {
     if (skillNames == null || skillNames.isEmpty()) {
       return List.of();
     }
-    Map<String, CurrentSkill> catalog;
+    Map<String, Skill> catalog;
     try {
-      catalog = skillCatalogQueryService.currentSkillsByName();
+      catalog = skillCatalogQueryService.activeSkillsByName();
     } catch (RuntimeException error) {
       return List.of();
     }
     List<SkillBinding> bindings = new ArrayList<>();
     for (String skillName : skillNames) {
-      CurrentSkill skill = catalog.get(skillName);
+      Skill skill = catalog.get(skillName);
       if (skill != null) {
         bindings.add(
             new SkillBinding(
                 skill.getName(),
                 skill.getPackageName(),
                 skill.getPackageVersion(),
-                skill.getContentRevision(),
                 skill.getDescription()));
       }
     }

@@ -217,14 +217,9 @@ class ResolvedRequestValidatorTest {
                         ProviderCacheControl.none()))));
   }
 
-  /** 冻结的平台 Skill 包版本 fixture。 */
+  /** 冻结的平台 Skill 包身份 fixture。 */
   private static SkillBinding skillBinding(String name, EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding(
-        name,
-        "test-package",
-        "1.0.0",
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        "developer rules");
+    return new SkillBinding(name, "test-package", "1.0.0", "developer rules");
   }
 
   private static void assertCompactionRejects(

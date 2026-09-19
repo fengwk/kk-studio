@@ -114,7 +114,7 @@ result status 对齐。
 | Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|commands|snapshot` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 Coordinator Harness command |
 | Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/status|dependencies|inputs|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、六态迁移、依赖、追加输入、Run 人工动作与归档 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/skill-sources/...`、`/{id}/inventory`、`/{id}/operations/...` | Environment Card 创建/查询/删除、token 轮换、Skill 来源、持久 inventory 与异步操作；`name` 是不可变身份（无改名端点），无目录浏览端点 |
+| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/operations/...` | Environment Card 创建/查询/删除、token 轮换、异步操作；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息直接随 Card 返回 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 

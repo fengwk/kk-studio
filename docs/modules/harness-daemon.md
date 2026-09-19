@@ -12,7 +12,6 @@ Environment Daemon 是运行在目标宿主上的独立 JVM 进程。它把 Plat
 CLI -> DaemonConfig
    -> DaemonDataDirectory.open(dataDir)          # owner-only 布局 + daemon.lock
    -> CodingToolsConfig.fromCli(environmentRoot, dataDir/resources, ...)
-   -> DaemonSkillRegistry.open(dataDir, userHome)
    -> DaemonRuntime.create
    -> shutdown hook -> start -> awaitTermination
 ```
@@ -27,13 +26,12 @@ CLI -> DaemonConfig
 
 ## 能力注册表
 
-[`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在运行时构造完成时冻结，运行期能力集合不可变。注册的 15 项能力与 [Harness Environment](harness-environment.md) 的目录逐项对齐，descriptor 的版本与 schema 都从 catalog 取用：
+[`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在运行时构造完成时冻结，运行期能力集合不可变。注册的 11 项能力与 [Harness Environment](harness-environment.md) 的目录逐项对齐，descriptor 的版本与 schema 都从 catalog 取用：
 
 - [`CodingCapabilities`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java) 注册 9 项编码能力：`fs.read`、`fs.write`、`fs.edit`、`process.exec`、`fs.grep`、`fs.find`、`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
-- [`SkillLoadCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapability.java) 注册 `skill.load`，[`McpLocalCallCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalCallCapability.java) 注册 `mcp.local.call`；
-- 三个 [`DaemonSkillSourceCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillSourceCapability.java) 实例注册 `skill.source.refresh`/`install`/`update`，[`McpLocalDiscoverCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalDiscoverCapability.java) 注册 `mcp.local.discover`。
+- [`McpLocalCallCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalCallCapability.java) 注册模型可见的 `mcp.local.call`，[`McpLocalDiscoverCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalDiscoverCapability.java) 注册管理专用的 `mcp.local.discover`。
 
-四项管理能力只复用 INVOKE/CANCEL/终态通道，不注册为模型 Tool。
+`mcp.local.discover` 只复用 INVOKE/CANCEL/终态通道，不注册为模型 Tool。
 
 ## 执行调度与连接生命周期
 
@@ -73,7 +71,7 @@ journal 的 `start` 原子去重、`complete` 只允许 `RUNNING` 到终态的�
 
 ## 本地存储与文本输出
 
-Daemon 不维护本地内容寻址资源库。数据目录下的本地状态分两类：命令输出的 durable 全文，以及 Skill 快照。
+Daemon 不维护本地内容寻址资源库，也不持久化任何 Skill 目录或来源快照；数据目录下的唯一本地状态是命令输出的 durable 全文。
 
 `process.exec`/`grep`/`find` 的超阈值文本经 [`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 写入 `<data-dir>/resources/staging/*.part`（0600）后原子发布为 `<data-dir>/resources/text/*.log`（durable，永不隐式删除）。终态无论大小都只返回一个 `TextResultContent`：小输出完整内联，大输出为有界 head/tail 预览加绝对路径、总字节/行数与 read/grep 指引，同一事实写入 `detailsJson.textOutput`（`totalBytes`、`totalLines`、`capturedBytes`、`captureTruncated`、`captureFailed`，可发布时另有 `path` 与 `readHint`）。
 
@@ -111,33 +109,6 @@ Daemon 不维护本地内容寻址资源库。数据目录下的本地状态分�
 
 编码能力的参数只有一个配置来源：[`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java) 由 `DaemonMain` 用 CLI 取值与数据目录资源根构建，不再读取任何 `kkstudio.daemon.*` 系统属性。其中 `previewMaxLines = 2000` 与 `previewMaxBytes = 51200` 是固定常量，`bashExecutable`、`javapExecutable` 与可选的 `lspBridgeCommand` 由对应 CLI 选项覆盖。
 
-## Skill 来源与加载
-
-[`DaemonSkillRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java) 是进程内的 Skill 目录事实源，持久事实位于 `--data-dir/skills`：
-
-```text
-manifest.json                          当前成功发布的来源快照与 retained 索引
-bodies/<contentRevision>.md            不可变正文 blob
-checkouts/<sourceId>/<commit>/         去除 .git 后的不可变 Git checkout
-staging/                               每次 Git 操作的独立临时目录
-```
-
-来源配置只通过三个管理能力进入 Daemon，三者共享同一严格 schema，且都不接受 `workdir`：
-
-| 能力 | 语义 |
-| --- | --- |
-| `skill.source.refresh` | PATH 来源按配置重新扫描；GIT 来源只扫描已持久化的 `currentlyAppliedRevision`，不联网 |
-| `skill.source.install` | 仅适用于 GIT：在独立 staging 中用宿主 `git` 获取并固定 commit，扫描成功后发布 |
-| `skill.source.update` | 仅适用于 GIT：无显式 ref 时重新解析远端默认 HEAD，显式 tag/commit/ref 始终固定到 commit |
-
-PATH 来源接受目标宿主绝对路径或 `~/`（仅在来源配置中按 Daemon HOME 展开）；默认来源目录不存在时发布空快照，显式来源不存在则失败。扫描以根 `SKILL.md` 表示单个 Skill，否则递归发现；进入 Skill 根后停止下探，并跳过 `.git` 与常见依赖、缓存目录。单个坏 Skill 形成有界诊断，跨来源同名冲突、陈旧 `sourceVersion`/`sourceSetVersion` 或完整候选不合法则拒绝整个发布。
-
-发布在进程内串行完成：先验证 READY 规模（至多 512 个来源、4096 个 Skill）、全局名称唯一性与 retained 一致性，再写不可变正文，最后以同目录原子 move 替换 manifest；文件系统不支持原子 move 时 fail-closed。每来源 publication ticket 只裁决同一 `sourceVersion` 的重叠操作，更高 `sourceVersion` 始终优先；全局 `sourceSetVersion` 防止延迟操作裁剪更新的来源集合。当前快照中的每个 descriptor 必须保留在 retained 索引中（非当前历史记录上限为 2048），因此失败不会改变当前 READY 快照，启动也能从 manifest 恢复；任一 retained body 缺失或不可读时拒绝 READY。
-
-READY 读取 `DaemonSkillRegistry.inventory()`：它在发布锁内一次性取出集合版本与来源快照，因此报告中的 `sourceSetVersion` 与 `skillSources` 必然来自同一次发布，不会出现「新版本号配旧快照」。
-
-`skill.load` 的 arguments 固定为 `{sourceId, name, revision}`，成功结果为 `{body, baseDirectory}`；正文按 SKILL.md 原始字节的 SHA-256 revision 保留，请求只精确匹配冻结 revision，不可用时以 `RESOURCE_CHANGED` 结束，绝不回退到同名当前版本。扫描前会验证成功结果能落入通用 JSON 内容 1 MiB 的 wire 上限。Skill 加载与来源管理都不依赖会话目录。
-
 ## Local MCP
 
 Local MCP 以 stdio 子进程形式在绑定的目标 Environment Daemon 内执行，配置由 Platform 通过 `mcp.local.call` / `mcp.local.discover` 下发。[`DaemonLocalMcpParser`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpParser.java) 严格解析配置：`type=local`、`environmentId`、`command` 与 `cwd` 必填，`env`、`enabled`、`timeoutMillis`（默认 60 秒）可选；整值 `${VAR}` 由 Daemon 运行时经 `System.getenv` 解析，`cwd` 只要求本机 `Path` 视图下的绝对路径，受信任执行且没有路径白名单。请求声明的 `environmentId` 一旦与当前绑定不一致即 fail-closed。
@@ -171,7 +142,6 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 | `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只解析本次调用 arguments 中的显式绝对 `workdir`，绝不把它当作文件系统沙箱或会话默认目录；大文本经 `TextOutputStore` 落盘为本地 durable 日志，二进制结果不落本地存储而是由终态编码阶段直传对象存储；调用之间不继承目录。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 invocation 的 `RUNNING` 与终态，以原子操作保证单次执行并记录终态结果；重连后的重复 `INVOKE` 幂等重放 `STARTED` 或终态报文。日志在进程整个生命周期内有效，连接断开不改变执行状态。 |
 | `fun.fengwk.kkstudio.harness.daemon.mcp` | Local stdio MCP 的配置解析、client 代际与子进程生命周期。按 `(serverId, configVersion)` 共享实例，新版本 fencing 旧版本并在活动调用归零后排空，支持单调用精确取消；对外注册管理专用 `mcp.local.discover` 与模型运行时 `mcp.local.call`。 |
-| `fun.fengwk.kkstudio.harness.daemon.skill` | Platform 受管 PATH/GIT Skill 来源的发现、持久化与精确加载。完整候选快照经校验后原子发布到 `--data-dir/skills`；READY 按来源通告版本、revision、Skill 描述与诊断；`skill.load` 按 `(sourceId, name, revision)` 返回正文与基目录；不接受会话 `workdir`。 |
 | `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 OkHttp WebSocket 的生产实现。提供连接管理、文本帧收发与传输监听，强制协商 `permessage-deflate`，并对单消息累积体积与二进制帧执行策略违规关闭。 |
 
 ## 源码与测试
@@ -179,7 +149,7 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 源码入口按包分组（包职责见上表）：
 
 - 进程与运行时：[`daemon/DaemonMain.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonMain.java)、[`DaemonConfig.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java)、[`DaemonDataDirectory.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectory.java)、[`DaemonRuntime.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java)、[`DaemonCapabilityRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java)、[`DaemonResourceTransferClient.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonResourceTransferClient.java)。
-- 能力实现与本地状态：[`CodingCapabilities.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java)、[`EnvironmentPaths.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java)、[`DaemonSkillRegistry.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistry.java)、[`DaemonLocalMcpManager.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpManager.java)。
+- 能力实现与本地状态：[`CodingCapabilities.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java)、[`EnvironmentPaths.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java)、[`DaemonLocalMcpManager.java`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpManager.java)。
 
 测试守卫：
 
@@ -190,7 +160,6 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 - [`OkHttpWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransportTest.java)：`permessage-deflate` 协商门禁、文本帧传输、二进制拦截与超限关闭。
 - [`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)：显式 workdir 语义、编码能力端到端行为、`.gitignore` 检索、LSP 有效超时与取消终止进程树。
 - [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`ChildProcessRunnerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunnerTest.java)：内联与落盘阈值、预览字符边界与重叠去重、行数一致性、捕获预算与磁盘失败降级、原子发布、stdout 完整保留与 stderr 有界诊断。
-- [`DaemonSkillRegistryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonSkillRegistryTest.java)、[`DaemonGitManagerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/DaemonGitManagerTest.java)、[`SkillLoadCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillLoadCapabilityTest.java)：来源扫描与持久恢复、版本围栏、Git ref 固定与取消、精确 revision 加载与 `RESOURCE_CHANGED`。
 - [`DaemonLocalMcpParserTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpParserTest.java)、[`DaemonLocalMcpManagerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/DaemonLocalMcpManagerTest.java)、[`McpLocalCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/mcp/McpLocalCapabilityTest.java)：配置严格解析与 `${VAR}` 解析、代际 fencing 与排空、单一 deadline 与取消不打断并发调用。
 
 ---

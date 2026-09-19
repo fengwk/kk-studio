@@ -4,15 +4,15 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** {@code skill_revision} 行映射：不可变的 Skill 内容版本。 */
+/** {@code skill} 行映射：一个 Skill 的精确内容事实。 */
 @Data
-public class SkillRevisionDO {
+public class SkillDO {
 
   private String packageName;
   private String packageVersion;
   private String name;
   private String description;
   private String content;
-  private String contentRevision;
+  private Boolean active;
   private Instant createTime;
 }

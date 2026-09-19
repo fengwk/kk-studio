@@ -335,23 +335,14 @@ export function agentConfigMatrix() {
       }),
     },
     {
-      id: 'invalid.duplicate_skill_ref',
+      id: 'invalid.duplicate_skill_name',
       ok: false,
       expectStatus: 400,
       messageIncludes: /duplicate|skill/i,
-      title: '复合 skill ref 重复',
+      title: '全局 Skill 名称重复',
       build: () => ({
         tools: [],
-        skills: [
-          {
-            sourceId: '11111111-1111-4111-8111-111111111111',
-            name: 'a',
-          },
-          {
-            sourceId: '11111111-1111-4111-8111-111111111111',
-            name: 'a',
-          },
-        ],
+        skills: ['a', 'a'],
         subagents: [],
         inheritParentEnvironment: true,
       }),

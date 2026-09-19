@@ -29,21 +29,16 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityB
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfig;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceConfigCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceType;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -104,7 +99,7 @@ class EnvironmentOperationDispatcherTest {
 
   private ClaimedOperation createClaimedOperation(UUID specificOpId) {
     return createClaimedOperation(
-        specificOpId, EnvironmentOperationType.SKILL_REFRESH, null, Duration.ofSeconds(30));
+        specificOpId, EnvironmentOperationType.MCP_SERVER_DISCOVER, null, Duration.ofSeconds(30));
   }
 
   private ClaimedOperation createClaimedOperation(
@@ -133,23 +128,7 @@ class EnvironmentOperationDispatcherTest {
       UUID resourceId,
       String customArguments,
       Duration remainingTimeout) {
-    String arguments = customArguments;
-    if (arguments == null) {
-      DaemonSkillSourceConfig config =
-          new DaemonSkillSourceConfig(
-              sourceId,
-              1L,
-              2L,
-              DaemonSkillSourceType.PATH,
-              "/skills/path",
-              false,
-              null,
-              null,
-              null,
-              null,
-              Set.of(sourceId));
-      arguments = new DaemonSkillSourceConfigCodec().encode(config);
-    }
+    String arguments = customArguments != null ? customArguments : discoverArguments(resourceId);
     Duration timeout = remainingTimeout != null ? remainingTimeout : Duration.ofSeconds(30);
 
     EnvironmentOperation op =
@@ -162,7 +141,7 @@ class EnvironmentOperationDispatcherTest {
             EnvironmentOperationStatus.RUNNING,
             1L,
             arguments,
-            "{\"type\":\"PATH\"}",
+            "{\"type\":\"local\"}",
             Instant.now().plusSeconds(60),
             nodeId,
             leaseToken,
@@ -174,6 +153,26 @@ class EnvironmentOperationDispatcherTest {
             Instant.now(),
             Instant.now());
     return new ClaimedOperation(op, timeout);
+  }
+
+  /**
+   * 构造一条满足 {@code mcp.local.discover} inputSchema 的默认 arguments：只有参数能通过构造期校验，才能让测试真正到达
+   * 分发路径，而不是被确定性的 schema 校验失败短路。
+   */
+  private String discoverArguments(UUID serverId) {
+    return """
+        {
+          "serverId": "%s",
+          "configVersion": 1,
+          "config": {
+            "type": "local",
+            "environmentId": "%s",
+            "command": ["node", "server.js"],
+            "cwd": "/tmp"
+          }
+        }
+        """
+        .formatted(serverId, envId);
   }
 
   /** 测试意图：验证 dispatcher start() 之前 wake() 是纯 no-op，绝不认领或分发任何操作；start() 之后方可正常分发。 */
@@ -891,10 +890,10 @@ class EnvironmentOperationDispatcherTest {
     ArgumentCaptor<EnvironmentCapabilityExecutionRequest> requestCaptor =
         ArgumentCaptor.forClass(EnvironmentCapabilityExecutionRequest.class);
 
-    // 传入超大超时（100天），而 SKILL_REFRESH 描述符有界超时通常远小于该值
+    // 传入超大超时（100天），而 MCP_SERVER_DISCOVER 描述符有界超时通常远小于该值
     ClaimedOperation op =
         createClaimedOperation(
-            opId, EnvironmentOperationType.SKILL_REFRESH, null, Duration.ofDays(100));
+            opId, EnvironmentOperationType.MCP_SERVER_DISCOVER, null, Duration.ofDays(100));
 
     when(repository.claimPendingWithTimeout(eq(nodeId), eq(50)))
         .thenReturn(List.of(op))
@@ -914,46 +913,6 @@ class EnvironmentOperationDispatcherTest {
     EnvironmentCapabilityExecutionRequest captured = requestCaptor.getValue();
     assertNotNull(captured);
     assertTrue(captured.timeout().compareTo(Duration.ofDays(1)) < 0, "请求超时必须被截断在描述符界限内");
-  }
-
-  /** 测试意图：验证 SKILL_INSTALL 与 SKILL_UPDATE 操作类型正确映射到底层能力标识。 */
-  @Test
-  void executeOperation_skillInstallAndSkillUpdate_mapsCorrectCapabilityIds() throws Exception {
-    CountDownLatch invoked = new CountDownLatch(2);
-    ArgumentCaptor<EnvironmentCapabilityExecutionRequest> requestCaptor =
-        ArgumentCaptor.forClass(EnvironmentCapabilityExecutionRequest.class);
-
-    ClaimedOperation installOp =
-        createClaimedOperation(
-            UUID.randomUUID(),
-            EnvironmentOperationType.SKILL_INSTALL,
-            null,
-            Duration.ofSeconds(30));
-    ClaimedOperation updateOp =
-        createClaimedOperation(
-            UUID.randomUUID(), EnvironmentOperationType.SKILL_UPDATE, null, Duration.ofSeconds(30));
-
-    when(repository.claimPendingWithTimeout(eq(nodeId), eq(50)))
-        .thenReturn(List.of(installOp, updateOp))
-        .thenReturn(List.of());
-
-    when(transport.invoke(any(), requestCaptor.capture(), any()))
-        .thenAnswer(
-            invocation -> {
-              invoked.countDown();
-              return mock(EnvironmentCapabilityExecutionHandle.class);
-            });
-
-    dispatcher.start();
-    dispatcher.wake();
-    assertTrue(invoked.await(5, TimeUnit.SECONDS));
-
-    List<EnvironmentCapabilityExecutionRequest> allRequests = requestCaptor.getAllValues();
-    assertEquals(2, allRequests.size());
-    Set<EnvironmentCapabilityId> capIds =
-        Set.of(allRequests.get(0).descriptor().id(), allRequests.get(1).descriptor().id());
-    assertTrue(capIds.contains(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL));
-    assertTrue(capIds.contains(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE));
   }
 
   /** 测试意图：验证 MCP_SERVER_DISCOVER 使用已注册的管理专用 descriptor 分发给 Daemon。 */
@@ -1016,7 +975,10 @@ class EnvironmentOperationDispatcherTest {
 
     ClaimedOperation badOp =
         createClaimedOperation(
-            opId, EnvironmentOperationType.SKILL_REFRESH, "not-valid-json", Duration.ofSeconds(30));
+            opId,
+            EnvironmentOperationType.MCP_SERVER_DISCOVER,
+            "not-valid-json",
+            Duration.ofSeconds(30));
 
     when(repository.claimPendingWithTimeout(eq(nodeId), eq(50)))
         .thenReturn(List.of(badOp))
@@ -1040,8 +1002,8 @@ class EnvironmentOperationDispatcherTest {
             eq(opId),
             eq(nodeId),
             eq(leaseToken),
-            eq(EnvironmentOperationType.SKILL_REFRESH),
-            eq(EnvironmentOperationResourceType.SKILL_SOURCE),
+            eq(EnvironmentOperationType.MCP_SERVER_DISCOVER),
+            eq(EnvironmentOperationResourceType.MCP_SERVER),
             eq(sourceId),
             eq(1L),
             eq("not-valid-json"));
@@ -1142,8 +1104,8 @@ class EnvironmentOperationDispatcherTest {
             eq(opId),
             eq(nodeId),
             eq(leaseToken),
-            eq(EnvironmentOperationType.SKILL_REFRESH),
-            eq(EnvironmentOperationResourceType.SKILL_SOURCE),
+            eq(EnvironmentOperationType.MCP_SERVER_DISCOVER),
+            eq(EnvironmentOperationResourceType.MCP_SERVER),
             eq(sourceId),
             eq(1L),
             any());

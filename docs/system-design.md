@@ -76,7 +76,7 @@ Agent、Model 与 Environment 收敛到当前目标设置。
 
 Skill 是 Platform 全局名称资源，与 Environment inventory 解耦。Package 负责安装和原子
 升级，Agent 与 `load_skill` 只使用全局唯一 Skill name；一次 Model invocation 会冻结
-Package 版本和内容 revision。MCP 同样属于 Platform 全局 Tool catalog，Backend 只通过
+`(packageName, packageVersion, name)` 三元组身份。MCP 同样属于 Platform 全局 Tool catalog，Backend 只通过
 Streamable HTTP 连接 Server，不在 Environment Daemon 内启动 stdio 子进程。
 
 ## 系统组成

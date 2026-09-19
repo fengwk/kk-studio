@@ -25,10 +25,19 @@ public class EnvironmentCardDTO {
   /** 最近活跃时间。 */
   private Instant lastSeen;
 
+  /** 最近一次被接受的 READY 宿主 OS wire 值：windows/wsl/linux/macos；从未 READY 时为 null。 */
+  private String operatingSystem;
+
+  /** 最近一次被接受的 READY 宿主 IANA 时区 ID；从未 READY 时为 null。 */
+  private String timeZone;
+
+  /** 最近一次被接受的 READY 宿主备注；从未 READY 时为 null。 */
+  private String note;
+
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;
 
-  /** daemon 实际 root display path。 */
+  /** 最近一次被接受的 READY 宿主 canonical root；从未 READY 时为 null。 */
   private String rootPath;
 
   /** CAS 版本。 */

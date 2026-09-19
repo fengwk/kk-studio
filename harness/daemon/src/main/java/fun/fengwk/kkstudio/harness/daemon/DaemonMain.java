@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
-import fun.fengwk.kkstudio.harness.daemon.skill.DaemonSkillRegistry;
 
 import java.io.PrintStream;
-import java.nio.file.Path;
 import java.util.Objects;
 
 /** Environment Daemon 独立进程入口。 */
@@ -29,8 +27,8 @@ public final class DaemonMain {
         --note <text>                    Single-line note shown to the model; at most once
         --environment-root <path>        Existing directory reported as the environment root
                                          (default: canonical user HOME)
-        --data-dir <path>                Absolute daemon data directory holding the process lock,
-                                         published text output and skill state
+        --data-dir <path>                Absolute daemon data directory holding the process lock
+                                         and published text output
                                          (default: ~/.kk-studio)
 
       Local executables:
@@ -49,7 +47,7 @@ public final class DaemonMain {
   private DaemonMain() {}
 
   /**
-   * 使用 CLI 参数启动带本地 coding capabilities 与持久 Skill 目录的 Daemon。
+   * 使用 CLI 参数启动带本地 coding capabilities 的 Daemon。
    *
    * <p>权威参数：{@code --registration-token-file}、可选且唯一 {@code --note}、唯一 {@code --environment-root}、可选
    * {@code --data-dir} 与三个可选的本地执行程序参数；连接参数见 {@link DaemonConfig#fromArgs(String[])}。HELLO 携带从
@@ -57,8 +55,6 @@ public final class DaemonMain {
    *
    * <p>数据目录在启动期以 owner-only 权限创建并持有 {@code daemon.lock}：同一目录上的第二个 Daemon
    * 立即失败，而不是并发写同一份本地数据；该锁在进程整个生命周期内持有。
-   *
-   * <p>Skill 来源由 Platform 的受管配置决定：启动只恢复数据目录中上次成功发布的目录，不扫描任何本地默认目录。
    *
    * <p>单个 {@code --help}/{@code -h} 或 {@code --version} 是纯信息命令：在打开数据目录或建立连接之前输出并直接返回；其余情况（含
    * 混用与多余参数）一律交给 {@link DaemonConfig#fromArgs(String[])} 解析并失败关闭。
@@ -77,10 +73,7 @@ public final class DaemonMain {
               daemonConfig.bashExecutable(),
               daemonConfig.lspBridgeCommand(),
               daemonConfig.javapExecutable());
-      DaemonSkillRegistry skillRegistry =
-          DaemonSkillRegistry.open(
-              daemonConfig.dataDir(), Path.of(System.getProperty("user.home")));
-      DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig, skillRegistry);
+      DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig);
       Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
       runtime.start();
       DaemonRuntimeState finalState = runtime.awaitTermination();

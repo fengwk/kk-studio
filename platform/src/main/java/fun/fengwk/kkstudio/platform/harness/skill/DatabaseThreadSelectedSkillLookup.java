@@ -16,7 +16,7 @@ import java.util.UUID;
  * 从与已 claim 的 Model invocation 一起持久化的不可变请求中解析选中的 skills。
  *
  * <p>用 {@link ModelRequestSpecJsonCodec} 解码冻结请求并直接返回其中的 canonical {@link SelectedSkill}：全部身份字段
- * （name/packageName/packageVersion/contentRevision）都来自冻结调用，绝不按名称重新解析当前版本。
+ * （name/packageName/packageVersion）都来自冻结调用，绝不按名称重新解析当前版本。
  */
 @Component
 public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSkillLookup {
@@ -47,7 +47,6 @@ public final class DatabaseThreadSelectedSkillLookup implements ThreadSelectedSk
                     skill.name(),
                     skill.packageName(),
                     skill.packageVersion(),
-                    skill.contentRevision(),
                     skill.description()));
   }
 }

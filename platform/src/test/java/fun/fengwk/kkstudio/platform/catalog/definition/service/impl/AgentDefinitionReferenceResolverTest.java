@@ -16,7 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
@@ -62,7 +62,7 @@ class AgentDefinitionReferenceResolverTest {
     ordered.verify(definitions).getByNameForUpdate("omega");
   }
 
-  /** Skill 统一按名称排序后一次加 KEY SHARE 锁，缺失任一名称都 fail closed。 */
+  /** Skill 统一按名称排序后一次加锁，缺失任一名称都 fail closed。 */
   @Test
   void locksSkillsInCanonicalOrderAndRejectsMissingNames() {
     SkillCatalogRepository skills = mock(SkillCatalogRepository.class);
@@ -70,12 +70,12 @@ class AgentDefinitionReferenceResolverTest {
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class), mock(AgentModelRepository.class), skills);
 
-    when(skills.lockCurrentSkillsByNames(Set.of("dev", "ops")))
+    when(skills.lockActiveSkillsByNames(Set.of("dev", "ops")))
         .thenReturn(List.of(entry("dev"), entry("ops")));
     assertDoesNotThrow(() -> resolver.requireCurrentSkills(List.of("ops", "dev")));
-    verify(skills).lockCurrentSkillsByNames(Set.of("dev", "ops"));
+    verify(skills).lockActiveSkillsByNames(Set.of("dev", "ops"));
 
-    when(skills.lockCurrentSkillsByNames(Set.of("dev", "missing")))
+    when(skills.lockActiveSkillsByNames(Set.of("dev", "missing")))
         .thenReturn(List.of(entry("dev")));
     assertThrows(
         AiValidationException.class,
@@ -90,11 +90,11 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentDefinitionRepository.class), mock(AgentModelRepository.class), skills);
 
     assertDoesNotThrow(() -> resolver.requireCurrentSkills(List.of()));
-    verify(skills, never()).lockCurrentSkillsByNames(List.of());
+    verify(skills, never()).lockActiveSkillsByNames(List.of());
   }
 
-  private static CurrentSkill entry(String name) {
-    CurrentSkill skill = new CurrentSkill();
+  private static Skill entry(String name) {
+    Skill skill = new Skill();
     skill.setName(name);
     skill.setPackageName("package");
     skill.setPackageVersion("1.0.0");

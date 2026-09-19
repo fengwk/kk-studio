@@ -16,7 +16,7 @@ import java.util.Set;
 /** 固定 atomic capability ID、descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 11 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 10 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -30,7 +30,6 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
-            EnvironmentCapabilityIds.SKILL_LOAD,
             EnvironmentCapabilityIds.MCP_LOCAL_CALL);
 
     assertEquals("1", EnvironmentCapabilityCatalog.version());
@@ -45,7 +44,6 @@ class EnvironmentCapabilityCatalogTest {
             "lsp.goto-definition",
             "lsp.workspace-symbols",
             "lsp.java-decompile",
-            "skill.load",
             "mcp.local.call"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
@@ -71,7 +69,6 @@ class EnvironmentCapabilityCatalogTest {
             .map(EnvironmentCapabilityDescriptor::id)
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
-    assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.SKILL_LOAD));
     assertFalse(
         EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.MCP_LOCAL_CALL));
   }
@@ -82,13 +79,8 @@ class EnvironmentCapabilityCatalogTest {
    * <p>它们复用 INVOKE/CANCEL/结果通道，但绝不进入模型工具目录，因此 descriptor 列表与 management 列表必须严格区分。
    */
   @Test
-  void exposesManagementOnlySkillSourceCapabilities() {
-    List<EnvironmentCapabilityId> expected =
-        List.of(
-            EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH,
-            EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL,
-            EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE,
-            EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER);
+  void exposesManagementOnlyMcpDiscoverCapability() {
+    List<EnvironmentCapabilityId> expected = List.of(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER);
 
     assertEquals(
         expected,
@@ -108,15 +100,6 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.managementDescriptors()) {
       assertEquals("1", descriptor.version(), descriptor.id().value());
     }
-    // 前三个管理能力共享同一份冻结来源配置 schema，禁止出现第二份 wire 形状。
-    assertEquals(
-        1,
-        EnvironmentCapabilityCatalog.managementDescriptors().stream()
-            .limit(3)
-            .map(EnvironmentCapabilityDescriptor::inputSchema)
-            .distinct()
-            .count());
-    // 第四个为 local MCP 发现能力 schema。
     assertTrue(
         EnvironmentCapabilityCatalog.find(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER).isPresent());
   }

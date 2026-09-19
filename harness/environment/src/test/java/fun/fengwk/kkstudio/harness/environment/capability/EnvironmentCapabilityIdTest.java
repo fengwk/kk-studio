@@ -16,7 +16,7 @@ class EnvironmentCapabilityIdTest {
     assertEquals("fs.find", new EnvironmentCapabilityId("fs.find").value());
     assertEquals("process.exec", new EnvironmentCapabilityId("process.exec").value());
     assertEquals("lsp.goto-definition", new EnvironmentCapabilityId("lsp.goto-definition").value());
-    assertEquals("skill.load", new EnvironmentCapabilityId("skill.load").toString());
+    assertEquals("mcp.local.call", new EnvironmentCapabilityId("mcp.local.call").toString());
   }
 
   /** 验证 null、空值和超过 128 字符的身份被拒绝。 */

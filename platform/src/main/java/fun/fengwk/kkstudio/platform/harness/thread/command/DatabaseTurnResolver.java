@@ -55,13 +55,11 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.CurrentSkill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
@@ -69,7 +67,6 @@ import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInventoryDTO;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -88,15 +85,14 @@ import java.util.UUID;
  *
  * <p>输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection} / 可空
  * environmentName）；实现按这些精确引用读取最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的
- * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。 Environment 只由
+ * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 只由
  * {@link BranchSettings#environmentName()} 在每轮 turn 开始时按全局唯一且不可变的 name 解析出当时 的内部路由身份（{@link
  * EnvironmentId}）：要求环境的工具一律按解析出的环境绑定，未选择环境的 branch 仍能规划并保持完整工具声明（调用时才以 {@code
- * ENVIRONMENT_NOT_SELECTED} 失败），name 无法解析时确定性拒绝规划； Agent skills 解析自持久化的可用库存（{@link
- * fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillInventoryQueryService#listUsableSkills(EnvironmentId)}），
- * 规划成功时冻结 SkillBinding 的完整事实，不依赖 live daemon 连接或 READY 租约。当 live daemon
- * 离线时，环境上下文回退至持久化元数据（OS、时区、note）； 引用缺失或失效时确定性拒绝规划（返回 {@link Result.Rejected}，稳定 error code {@value
- * #REJECTION_CODE}）。 只有 repository / registry 等基础设施异常向上传播， 由 ThreadProcessor reschedule。YOLO 不进入
- * spec。非工具元数据（context projectors）从保留的 {@link HarnessCatalog} 提取。
+ * ENVIRONMENT_NOT_SELECTED} 失败），name 无法解析时确定性拒绝规划；Agent skills 解析自 {@link SkillCatalogQueryService}
+ * 的 Platform 全局目录，规划成功时冻结 {@link SkillBinding} 的完整事实，不依赖 live daemon 连接或 READY
+ * 租约。环境上下文（OS、时区、note）只来自连接行保留的最近一次 READY 宿主 payload；引用缺失或失效时确定性拒绝规划 （返回 {@link Result.Rejected}，稳定
+ * error code {@value #REJECTION_CODE}）。只有 repository / registry 等基础设施异常向上传播， 由 ThreadProcessor
+ * reschedule。YOLO 不进入 spec。非工具元数据（context projectors）从保留的 {@link HarnessCatalog} 提取。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -114,7 +110,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final HarnessCatalog harnessCatalog;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
-  private final EnvironmentSkillInventoryQueryService skillInventoryQueryService;
   private final SkillCatalogQueryService skillCatalogQueryService;
   private final CompactionConfigProvider compactionConfigProvider;
   private final AgentPromptComposer promptComposer;
@@ -136,7 +131,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       HarnessCatalog harnessCatalog,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
-      EnvironmentSkillInventoryQueryService skillInventoryQueryService,
       SkillCatalogQueryService skillCatalogQueryService,
       CompactionConfigProvider compactionConfigProvider,
       AgentPromptComposer promptComposer,
@@ -155,8 +149,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.skillInventoryQueryService =
-        Objects.requireNonNull(skillInventoryQueryService, "skillInventoryQueryService");
     this.skillCatalogQueryService =
         Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
     this.compactionConfigProvider =
@@ -531,17 +523,17 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * Agent skills 只从最新 Agent config 读取，并按全局 Skill 目录解析为冻结事实。
    *
-   * <p>通过 {@link SkillCatalogQueryService#currentSkillsByName()} 读取 Platform 自身的当前目录，按 canonical
+   * <p>通过 {@link SkillCatalogQueryService#activeSkillsByName()} 读取 Platform 自身的活跃目录，按 canonical
    * 名精确匹配； 缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    */
   private List<SkillBinding> resolveSkills(List<String> skillNames) {
     if (skillNames == null || skillNames.isEmpty()) {
       return List.of();
     }
-    Map<String, CurrentSkill> catalog = skillCatalogQueryService.currentSkillsByName();
+    Map<String, Skill> catalog = skillCatalogQueryService.activeSkillsByName();
     List<SkillBinding> bindings = new ArrayList<>(skillNames.size());
     for (String skillName : skillNames) {
-      CurrentSkill skill = catalog.get(skillName);
+      Skill skill = catalog.get(skillName);
       if (skill == null) {
         throw rejection("agent skill not found in the global catalog: " + skillName);
       }
@@ -550,7 +542,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
               skill.getName(),
               skill.getPackageName(),
               skill.getPackageVersion(),
-              skill.getContentRevision(),
               skill.getDescription()));
     }
     return List.copyOf(bindings);
@@ -563,34 +554,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
           null, null, now.atZone(clock.getZone()).toLocalDate(), null);
     }
     EnvironmentConnection liveEnvironment = environmentRegistry.find(environmentId).orElse(null);
+    // 宿主 metadata 只来自连接行保留的最近一次 READY payload；从未 READY 时按空环境上下文。
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
             : liveEnvironment.daemonCapabilities().environment();
-    EnvironmentInventoryDTO inventory = null;
-    if (environmentInfo == null) {
-      try {
-        inventory = skillInventoryQueryService.getInventory(environmentId);
-      } catch (AiResourceNotFoundException ex) {
-        throw rejection(ex.getMessage());
-      }
-    }
     DaemonOperatingSystem os = environmentInfo != null ? environmentInfo.operatingSystem() : null;
     String note = environmentInfo != null ? environmentInfo.note() : null;
-    if (os == null && inventory != null && inventory.getOperatingSystem() != null) {
-      try {
-        os = DaemonOperatingSystem.fromWireValue(inventory.getOperatingSystem());
-      } catch (IllegalArgumentException ignored) {
-        os = null;
-      }
-    }
-    if (note == null && inventory != null) {
-      note = inventory.getNote();
-    }
-    String timeZone =
-        environmentInfo != null
-            ? environmentInfo.timeZone()
-            : (inventory != null ? inventory.getTimeZone() : null);
+    String timeZone = environmentInfo != null ? environmentInfo.timeZone() : null;
     ZoneId zone;
     if (timeZone != null) {
       try {

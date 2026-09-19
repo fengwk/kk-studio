@@ -5,9 +5,8 @@ import java.util.Objects;
 /**
  * Platform 全局 Skill 目录的 canonical 文本契约。
  *
- * <p>Skill 身份是全局唯一的 {@code name}；{@code packageName}/{@code packageVersion} 唯一确定不可变 package 版本，
- * {@code contentRevision} 精确确定该 Skill 的内容版本。这些规则同时是持久化列约束、HTTP 边界与冻结 binding 的唯一事实，
- * 因此集中在这里，避免各处各写一套。
+ * <p>Skill 身份是全局唯一的 {@code name}；{@code packageName}/{@code packageVersion} 与 {@code name} 共同构成
+ * 内容的三元组身份。这些规则同时是持久化列约束、HTTP 边界与冻结 binding 的唯一事实，因此集中在这里，避免各处各写一套。
  */
 public final class SkillNames {
 
@@ -19,9 +18,6 @@ public final class SkillNames {
 
   /** Skill description 的最大字符数。 */
   public static final int MAX_DESCRIPTION_CHARS = 1024;
-
-  /** contentRevision / packageRevision 的 SHA-256 十六进制字符数。 */
-  public static final int CONTENT_REVISION_CHARS = 64;
 
   /** 与既有模型可见短名契约一致的保留字符。 */
   private static final char[] FORBIDDEN_NAME_CHARS = {':', '/', '@', '\\'};
@@ -72,22 +68,6 @@ public final class SkillNames {
     }
     if (value.indexOf('\u0000') >= 0) {
       throw new IllegalArgumentException("content must not contain NUL characters");
-    }
-    return value;
-  }
-
-  /** 校验内容 revision：必须是小写十六进制 SHA-256 文本，拒绝空、长度错误与非十六进制字符。 */
-  public static String contentRevision(String value) {
-    if (value == null || value.length() != CONTENT_REVISION_CHARS) {
-      throw new IllegalArgumentException("contentRevision must be a SHA-256 hex string");
-    }
-    for (int index = 0; index < value.length(); index++) {
-      char ch = value.charAt(index);
-      boolean hex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
-      if (!hex) {
-        throw new IllegalArgumentException(
-            "contentRevision must be a lowercase SHA-256 hex string");
-      }
     }
     return value;
   }
