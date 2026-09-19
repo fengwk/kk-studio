@@ -270,7 +270,6 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
-                null,
                 (registry, executor, scheduler) -> registry.register(new TestCapability())));
   }
 
@@ -319,7 +318,6 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
-                null,
                 (registry, executor, scheduler) -> {
                   executorRef.set(executor);
                   schedulerRef.set(scheduler);
