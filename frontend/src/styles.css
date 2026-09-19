@@ -6556,15 +6556,13 @@ select.settings-input option {
   color: var(--fg-dim);
 }
 
-.env-sources-list,
-.env-operations-list {
+.env-sources-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.env-source-card,
-.env-op-item {
+.env-source-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -6574,8 +6572,7 @@ select.settings-input option {
   background: var(--surface-raised);
 }
 
-.env-source-card-header,
-.env-op-header {
+.env-source-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6583,15 +6580,13 @@ select.settings-input option {
   gap: 8px;
 }
 
-.env-source-card-badges,
-.env-op-badges {
+.env-source-card-badges {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.env-source-id,
-.env-op-id {
+.env-source-id {
   font-family: monospace;
   font-size: 12px;
   color: var(--fg-dim);
@@ -6645,8 +6640,7 @@ select.settings-input option {
   word-break: break-all;
 }
 
-.env-diag-error,
-.env-op-failure {
+.env-diag-error {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   background: rgba(255, 96, 96, 0.1);
@@ -6708,46 +6702,6 @@ select.settings-input option {
 .env-host-meta-card .val {
   font-size: 13px;
   word-break: break-all;
-}
-
-.env-op-header-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.env-op-details {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.env-op-times .val {
-  font-size: 12px;
-  color: var(--fg-dim);
-}
-
-.env-op-result-box {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.env-op-result-box .lbl {
-  font-size: 11px;
-  color: var(--fg-dim);
-}
-
-.env-op-result-json {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  font-family: monospace;
-  font-size: 11px;
-  max-height: 160px;
-  overflow: auto;
 }
 
 .env-source-modal-card {
@@ -7451,35 +7405,16 @@ select.settings-input option {
   }
 }
 
-/* MCP Server JSON-only editor & Environment operations */
+/* MCP Server HTTP modal & headers textarea */
 .mcp-modal-card {
   width: min(640px, 100%);
 }
 
-.mcp-json-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.mcp-config-json-textarea {
-  min-height: 240px !important;
+.mcp-headers-textarea {
+  min-height: 120px !important;
+  font-family: monospace;
+  font-size: 12px;
   resize: vertical;
-}
-
-.mcp-validation-msg {
-  margin-top: 6px;
-  font-size: 13px;
-}
-
-.mcp-validation-msg.is-success {
-  color: var(--success, #10b981);
-}
-
-.mcp-validation-msg.is-error {
-  color: var(--danger, #ef4444);
 }
 
 .meta-chip.is-resource {
