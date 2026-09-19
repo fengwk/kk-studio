@@ -3,10 +3,12 @@ package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.skill.SkillDefinitionDTO;
@@ -14,35 +16,35 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillDefinitionDTO;
 import java.util.Arrays;
 import java.util.List;
 
-/** Skill package 请求规范化与服务端 revision 计算测试。 */
+/** Skill package 请求规范化：canonical 校验、package 内唯一名与正文精确字节。 */
 class SkillPackageMutationFactoryTest {
 
   private final SkillPackageMutationFactory factory =
       new SkillPackageMutationFactory(new AgentEditableSupport(new ObjectMapper()));
 
-  /** 意图：规范化结果保留正文精确字节，并为 package 与每个 Skill 计算确定性 SHA-256。 */
+  /** 意图：规范化结果保留正文精确字节（含纯空白正文），并把 package 三元组下发给每个 Skill 内容行。 */
   @Test
-  void normalizesPackageAndComputesRevisions() {
-    SkillPackageMutationFactory.Mutation first =
+  void normalizesPackageAndKeepsExactContentBytes() {
+    SkillPackageMutationFactory.Mutation mutation =
         factory.newMutation(
             "core",
-            "1",
+            "1.0.0",
             "  ",
             List.of(skill("dev", "Development", "hello"), skill("ops", "Operations", "  ")));
-    SkillPackageMutationFactory.Mutation second =
-        factory.newMutation(
-            "core",
-            "1",
-            null,
-            List.of(skill("dev", "Development", "hello"), skill("ops", "Operations", "  ")));
 
-    assertNull(first.skillPackage().getDescription());
-    assertEquals(
-        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-        first.revisions().get(0).getContentRevision());
-    assertEquals("  ", first.revisions().get(1).getContent());
-    assertEquals(
-        first.skillPackage().getPackageRevision(), second.skillPackage().getPackageRevision());
+    assertNull(mutation.skillPackage().getDescription());
+    assertEquals("core", mutation.skillPackage().getPackageName());
+    assertEquals("1.0.0", mutation.skillPackage().getPackageVersion());
+
+    List<Skill> skills = mutation.skills();
+    assertEquals(List.of("dev", "ops"), skills.stream().map(Skill::getName).toList());
+    assertEquals("hello", skills.get(0).getContent());
+    // 正文按提交的精确字节保存：不做 trim，也不做任何内容标识计算。
+    assertEquals("  ", skills.get(1).getContent());
+    for (Skill skill : skills) {
+      assertEquals("core", skill.getPackageName());
+      assertEquals("1.0.0", skill.getPackageVersion());
+    }
   }
 
   /** 意图：请求边界统一拒绝非法 package 身份、空列表、空元素与 package 内重复名称。 */
@@ -79,6 +81,19 @@ class SkillPackageMutationFactoryTest {
     assertThrows(
         AiValidationException.class,
         () -> factory.newMutation("core", "1", null, List.of(skill("dev", "D", ""))));
+  }
+
+  /** 意图：校验失败必须是带 package 资源标签的 typed 领域错误，并指明出错的 Skill。 */
+  @Test
+  void reportsTypedValidationErrorWithPackageResource() {
+    AiValidationException invalidContent =
+        assertThrows(
+            AiValidationException.class,
+            () -> factory.newMutation("core", "1", null, List.of(skill("dev", "D", ""))));
+
+    assertEquals(SkillPackageMutationFactory.RESOURCE, invalidContent.resource());
+    assertTrue(invalidContent.getMessage().contains("dev"), invalidContent.getMessage());
+    assertTrue(invalidContent.getMessage().contains("content"), invalidContent.getMessage());
   }
 
   private static SkillDefinitionDTO skill(String name, String description, String content) {

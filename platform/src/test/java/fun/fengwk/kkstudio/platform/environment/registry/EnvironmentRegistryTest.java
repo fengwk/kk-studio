@@ -40,9 +40,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
-          0,
-          List.of());
+              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();
@@ -145,6 +143,36 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertTrue(ready.isReady(Instant.now(), LEASE_DURATION));
   }
 
+  /**
+   * 测试意图：验证 markReady 在与 READY 推进的同一条语句内把最近一次被接受的宿主 metadata 写入 {@code
+   * environment_connection.runtime_info}：
+   *
+   * <ol>
+   *   <li>围栏失效（错误 leaseToken）时既不推进状态也不写入保留 metadata；
+   *   <li>围栏成立时 metadata 与 READY 原子同生；
+   *   <li>同环境再次 READY 时同一行被整体覆盖，绝不累积第二行。
+   * </ol>
+   */
+  @Test
+  void markReadyAtomicallyRecordsHostMetadataUnderLeaseFence() {
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token1 = ((LeaseBindResult.Acquired) r1).leaseToken();
+
+    // 围栏失效：既不能推进 READY，也不能写入任何保留事实。
+    assertFalse(registry1.markReady(DEV, UUID.randomUUID(), CAPABILITIES, LEASE_DURATION));
+    assertNull(registry1.find(DEV).orElseThrow().daemonCapabilities());
+    assertEquals(LiveEnvironmentStatus.CONNECTING, registry1.find(DEV).orElseThrow().status());
+
+    // 围栏成立：保留 metadata 与 READY 原子同生。
+    assertTrue(registry1.markReady(DEV, token1, CAPABILITIES, LEASE_DURATION));
+    EnvironmentConnection ready = registry1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.READY, ready.status());
+    assertEquals(CAPABILITIES, ready.daemonCapabilities());
+    Integer rows =
+        jdbcTemplate.queryForObject("select count(1) from environment_connection", Integer.class);
+    assertEquals(1, rows);
+  }
+
   /** 测试意图：验证心跳刷新仅允许当前租约持有者在有效期内推进。 */
   @Test
   void heartbeatFencedUpdate() {
@@ -161,7 +189,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertTrue(registry1.heartbeat(DEV, token1, LEASE_DURATION));
   }
 
-  /** 测试意图：验证 disconnect 保留重连宽限期，将状态回退为 CONNECTING。 */
+  /** 测试意图：验证 disconnect 保留重连宽限期，将状态回退为 CONNECTING，同时保留最近一次被接受的宿主 metadata（断线不清空）。 */
   @Test
   void disconnectFencedUpdatePreservesGraceLease() {
     LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
@@ -172,11 +200,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertFalse(registry1.disconnect(DEV, UUID.randomUUID(), LEASE_DURATION));
     assertEquals(LiveEnvironmentStatus.READY, registry1.find(DEV).orElseThrow().status());
 
-    // 正确 token 断开 -> 状态回退为 CONNECTING，capabilities 置空，但行仍然保留
+    // 正确 token 断开 -> 状态回退为 CONNECTING，保留的宿主 metadata 与租约行都仍在
     assertTrue(registry1.disconnect(DEV, token1, LEASE_DURATION));
     EnvironmentConnection env = registry1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, env.status());
-    assertNull(env.daemonCapabilities());
+    assertEquals(CAPABILITIES, env.daemonCapabilities());
     assertEquals(token1, env.leaseToken());
   }
 

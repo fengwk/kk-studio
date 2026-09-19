@@ -8,14 +8,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSourceInitializer;
-import fun.fengwk.kkstudio.platform.environment.skill.model.EnvironmentInventory;
-import fun.fengwk.kkstudio.platform.environment.skill.repo.SkillSourceRepository;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -48,8 +45,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   private final JdbcTemplate jdbcTemplate;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
-  private final EnvironmentSkillSourceInitializer skillSourceInitializer;
-  private final SkillSourceRepository skillSourceRepository;
 
   @Override
   @Transactional
@@ -72,8 +67,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(RESOURCE, "environment name already exists: " + name, error);
     }
-    // 同一事务内补齐 inventory 头与缺省 PATH 来源：任一失败都回滚整个 Environment 创建，避免出现没有 inventory 身份的环境。
-    skillSourceInitializer.initialize(env.getId(), UUID.randomUUID());
     Environment created = environmentRepository.getById(env.getId());
     return toCardDto(created, true);
   }
@@ -216,42 +209,38 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setUpdateTime(env.getUpdateTime());
 
     EnvironmentId envId = EnvironmentId.of(env.getId());
-    EnvironmentInventory inventory = skillSourceRepository.getInventory(env.getId());
     Optional<EnvironmentConnection> connOpt = environmentRegistry.find(envId);
-    if (connOpt.isPresent()) {
-      EnvironmentConnection conn = connOpt.get();
-      dto.setStatus(conn.status().name());
-      dto.setReady(
-          conn.isReady(
-              clock.instant(),
-              Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
-      dto.setLastSeen(conn.lastSeenAt());
-      // 连接状态与能力列表是 live 事实；宿主 root 展示路径由持久 inventory 兜底，离线时仍然可读。
-      dto.setRootPath(
-          conn.status() == LiveEnvironmentStatus.READY && conn.daemonCapabilities() != null
-              ? conn.rootPath()
-              : reportedRootPath(inventory));
-      dto.setCapabilities(
-          conn.capabilities().stream()
-              .map(
-                  c -> {
-                    LiveEnvironmentCapabilityDTO cdto = new LiveEnvironmentCapabilityDTO();
-                    cdto.setId(c.id().value());
-                    cdto.setVersion(c.version());
-                    return cdto;
-                  })
-              .toList());
-    } else {
+    if (connOpt.isEmpty()) {
+      // 无连接行：从未连接过，无任何已保留的宿主 metadata。
       dto.setStatus("OFFLINE");
       dto.setReady(false);
-      dto.setRootPath(reportedRootPath(inventory));
       dto.setCapabilities(List.of());
+      return dto;
     }
+    // 连接状态、就绪判定、能力列表与 lastSeen 都是 live 事实；宿主 metadata 是连接行保留的最近一次 READY 事实。
+    EnvironmentConnection conn = connOpt.get();
+    dto.setStatus(conn.status().name());
+    dto.setReady(
+        conn.isReady(
+            clock.instant(),
+            Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())));
+    dto.setLastSeen(conn.lastSeenAt());
+    DaemonEnvironmentInfo host =
+        conn.daemonCapabilities() == null ? null : conn.daemonCapabilities().environment();
+    dto.setOperatingSystem(host == null ? null : host.operatingSystem().wireValue());
+    dto.setTimeZone(host == null ? null : host.timeZone());
+    dto.setNote(host == null ? null : host.note());
+    dto.setRootPath(host == null ? null : host.rootPath());
+    dto.setCapabilities(
+        conn.capabilities().stream()
+            .map(
+                c -> {
+                  LiveEnvironmentCapabilityDTO cdto = new LiveEnvironmentCapabilityDTO();
+                  cdto.setId(c.id().value());
+                  cdto.setVersion(c.version());
+                  return cdto;
+                })
+            .toList());
     return dto;
-  }
-
-  /** 最近一次被接受 READY 报告的宿主 root 展示路径；从未报告过时为 null。只用于展示，不参与任何路径解析。 */
-  private static String reportedRootPath(EnvironmentInventory inventory) {
-    return inventory == null ? null : inventory.getRootPath();
   }
 }

@@ -1,20 +1,12 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
 /**
- * Environment Capability 结果中使用的稳定错误码。
+ * Environment Capability 结果中使用的稳定错误码语法。
  *
- * <p>错误码进入结果 details 的结构化字段，用于跨进程的确定性判定（例如 Platform 把不可加载的 Skill 标记为配置错误）；它不是本地错误消息的
- * 替代品，也不携带任何本地事实。码只允许 {@code UPPER_SNAKE} 形状，因此可以安全地进入 wire 与调用方判定。
+ * <p>错误码进入结果 details 的结构化字段，用于跨进程的确定性判定；它不是本地错误消息的替代品，也不携带任何本地事实。码只允许 {@code UPPER_SNAKE}
+ * 形状，因此可以安全地进入 wire 与调用方判定。
  */
 public final class EnvironmentCapabilityResultCodes {
-
-  /**
-   * 请求的冻结资源版本在本 Environment 上已不可用。
-   *
-   * <p>典型场景：{@code skill.load} 请求的 {@code (sourceId, name, revision)} 已不再保留。调用方必须把该结果视为资源已变化，
-   * 绝不能把当前版本的内容冒充为被请求的旧版本。
-   */
-  public static final String RESOURCE_CHANGED = "RESOURCE_CHANGED";
 
   /** 错误码的字符数上限。 */
   public static final int MAX_CODE_CHARS = 64;

@@ -3,9 +3,10 @@
 # Rebuild the shared kk-studio database from the repository's single V1 baseline.
 #
 # The operation preserves only durable Catalog and Environment configuration:
-#   environment -> environment_skill_source -> environment_skill
-#               -> environment_inventory
-#   agent_provider -> agent_model -> agent_definition
+#   environment
+#   agent_provider -> agent_model
+#   skill_package -> skill
+#   agent_definition
 #
 # Runtime leases and transient product data are intentionally not restored.
 # system_setting is recreated from the canonical V1 default.
@@ -32,11 +33,10 @@ STAMP=$(date -u +%Y%m%d_%H%M%S)
 
 PRESERVED_TABLES=(
   environment
-  environment_skill_source
-  environment_inventory
-  environment_skill
   agent_provider
   agent_model
+  skill_package
+  skill
   agent_definition
 )
 
@@ -89,8 +89,8 @@ Options:
   -h, --help         Show this help
 
 Preserved tables:
-  environment  environment_skill_source  environment_inventory
-  environment_skill  agent_provider  agent_model  agent_definition
+  environment
+  agent_provider  agent_model  skill_package  skill  agent_definition
 
 Not preserved:
   chat / canvas / project / issue / harness / storage

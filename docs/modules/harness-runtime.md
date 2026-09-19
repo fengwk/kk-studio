@@ -89,7 +89,7 @@ providerType / providerConnectionGenerationId / model / variant / outputTokens
 preambleMessages / toolBindings / skillBindings / subagentBindings / cacheControl
 ```
 
-工具、Skill、Subagent 名各自唯一，且所有环境绑定工具与 Skill 必须共享同一 `EnvironmentId`。完整历史、可由 bindings 派生的 Provider tools、branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合改为专用 SYSTEM + USER 摘要提示词，工具列表为空）。
+工具、Skill、Subagent 名各自唯一；需要环境的 Tool binding 共享 Branch 冻结的 `EnvironmentId`，Skill binding 则独立冻结 Platform 全局 `(packageName, packageVersion, name)` 三元组。完整历史、可由 bindings 派生的 Provider tools、branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合改为专用 SYSTEM + USER 摘要提示词，工具列表为空）。
 
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 是 `harness_tool_invocation` 行的当前状态：冻结的 `ToolCall` 参数、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、`assistantEntryId`、`callIndex`、审批记录、结果、副作用批次与错误描述。
 

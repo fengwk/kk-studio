@@ -660,8 +660,7 @@ class EnvironmentDaemonServerTest {
   }
 
   /**
-   * 测试意图：coding 能力的 workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验——缺失、相对与跨 OS 形态都拒绝且不产生 INVOKE 帧；而
-   * skill.load 不要求 workdir，照常发送。
+   * 测试意图：coding 能力的 workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验——缺失、相对与跨 OS 形态都拒绝且不产生 INVOKE 帧。
    */
   @Test
   void validatesWorkdirAgainstReadyOperatingSystemBeforeFrameSend() {
@@ -696,23 +695,26 @@ class EnvironmentDaemonServerTest {
         List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
   }
 
-  /** 测试意图：skill.load 不属于 workdir 能力，缺少 workdir 也必须照常发送 INVOKE（身份三字段仍需齐全）。 */
+  /** 测试意图：不要求 workdir 的本地 MCP 能力缺少 workdir 也必须照常发送 INVOKE（身份三字段仍需齐全）。 */
   @Test
-  void skillLoadDoesNotRequireWorkdir() {
+  void mcpLocalCallDoesNotRequireWorkdir() {
     Fixture fixture = new Fixture();
-    FakeChannel channel = fixture.connectReady("channel-skill-load");
-    EnvironmentCapabilityDescriptor skillLoad =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_LOAD);
+    FakeChannel channel = fixture.connectReady("channel-mcp-local-call");
+    EnvironmentCapabilityDescriptor mcpLocalCall =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.MCP_LOCAL_CALL);
 
     fixture.server.invoke(
         ENVIRONMENT_ID,
         new EnvironmentCapabilityExecutionRequest(
-            skillLoad,
+            mcpLocalCall,
             new EnvironmentCapabilityCall(
                 CALL_ONE.toString(),
-                "{\"sourceId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
-                    + "\"name\":\"dev\",\"revision\":\""
-                    + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}"),
+                "{\"serverId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\","
+                    + "\"configVersion\":0,"
+                    + "\"toolName\":\"echo\",\"arguments\":{},"
+                    + "\"config\":{\"type\":\"local\","
+                    + "\"environmentId\":\"11111111-1111-1111-1111-111111111111\","
+                    + "\"command\":[\"node\",\"server.js\"],\"cwd\":\"/srv/repo\"}}"),
             Duration.ofSeconds(5)),
         new RecordingListener());
 

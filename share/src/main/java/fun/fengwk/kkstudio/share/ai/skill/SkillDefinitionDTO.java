@@ -6,7 +6,7 @@ import lombok.Data;
 /**
  * Package 编辑请求体中的单个 Skill 定义。
  *
- * <p>这是客户端提交的原始内容：{@code contentRevision} 由服务端按 {@code content} 的精确 UTF-8 字节计算，绝不接受客户端提供的 revision。
+ * <p>这是客户端提交的原始内容：描述与正文由服务端按精确字节保存，客户端不参与任何内容标识的计算。
  */
 @Data
 public class SkillDefinitionDTO {
@@ -17,7 +17,7 @@ public class SkillDefinitionDTO {
   /** Skill 描述（必填、非空、≤1024，允许 LF 换行）。 */
   private String description;
 
-  /** Skill 正文（必填、非空，长度不设上限）；contentRevision 由服务端据此计算。 */
+  /** Skill 正文（必填、非空，长度不设上限，精确按提交字节保存）。 */
   private String content;
 
   @JsonAnySetter

@@ -144,10 +144,10 @@ create index idx_agent_definition_model
 -- -----------------------------------------------------------------------------
 -- Platform 全局 Skill 目录
 --
--- Skill 是 Platform 自身的全局资源：身份是全局唯一的 name，内容由一个不可变的
--- package 版本承载。package 版本与 revision 行一经写入永不修改、永不物理删除，
--- 因此任何已冻结的 (package_name, package_version, name, content_revision) 都能
--- 永久精确取回；删除一个 package 只把它置为非活跃并清空其当前 skill 目录行。
+-- Skill 是 Platform 自身的全局资源：身份是全局唯一的 name，版本身份是
+-- (package_name, package_version, name)。package 更新是一次完整替换，写入一个新的 package
+-- 版本；历史版本行永不修改、永不物理删除，只有 active 标记可以变更，因此任何已冻结的三元组
+-- 都能永久精确取回内容。删除一个 package 只把当前版本与其 Skill 行置为非活跃。
 --
 -- canonical 文本规则与 SkillNames 一致：无环绕空白、无控制字符、不含 : / @ \。
 -- -----------------------------------------------------------------------------
@@ -156,7 +156,6 @@ create table skill_package (
     package_name     varchar(128)  not null,
     package_version  varchar(128)  not null,
     description      text,
-    package_revision char(64)      not null,
     active           boolean       not null,
     create_time      timestamptz(3) not null default current_timestamp,
     constraint pk_skill_package primary key (package_name, package_version),
@@ -177,16 +176,14 @@ create table skill_package (
     constraint ck_skill_package_description check (
         description is null
         or (description = btrim(description) and char_length(description) > 0)
-    ),
-    constraint ck_skill_package_revision check (package_revision ~ '^[0-9a-f]{64}$')
+    )
 );
 
-comment on table skill_package is 'Platform 全局 Skill package 的不可变版本：每个 (name, version) 恰一行，旧版本的 active=false 永久保留';
+comment on table skill_package is 'Platform 全局 Skill package 版本：每个 (name, version) 恰一行，旧版本的 active=false 永久保留';
 comment on column skill_package.package_name is 'package 名（非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
 comment on column skill_package.package_version is 'package 版本（非空白、无环绕空白、无控制字符、≤128）；一经写入永不复用';
 comment on column skill_package.description is '可空 package 描述；null 表示未填写';
-comment on column skill_package.package_revision is '该版本内容的确定性聚合 SHA-256（小写 64 位十六进制）';
-comment on column skill_package.active is '是否为该 package 名当前的活跃版本；删除 package 时仅置 false 并清空当前 skill 行';
+comment on column skill_package.active is '是否为该 package 名当前的活跃版本；删除 package 时仅置 false 并同时停用其 Skill 行';
 comment on column skill_package.create_time is '创建时间（毫秒精度）';
 
 -- 每个 package 名至多一个活跃版本：并发安装由该唯一索引收敛。
@@ -196,52 +193,17 @@ create unique index uk_skill_package_active
 
 comment on index uk_skill_package_active is '每个 package 名至多一个活跃版本';
 
-create table skill_revision (
+create table skill (
     package_name     varchar(128)  not null,
     package_version  varchar(128)  not null,
     name             varchar(128)  not null,
     description      text          not null,
     content          text          not null,
-    content_revision char(64)      not null,
+    active           boolean       not null,
     create_time      timestamptz(3) not null default current_timestamp,
-    constraint pk_skill_revision primary key (package_name, package_version, name),
-    constraint fk_skill_revision_package foreign key (package_name, package_version)
+    constraint pk_skill primary key (package_name, package_version, name),
+    constraint fk_skill_package foreign key (package_name, package_version)
         references skill_package (package_name, package_version) on delete restrict,
-    constraint ck_skill_revision_name check (
-        name = btrim(name)
-        and char_length(name) > 0
-        and name !~ '[[:cntrl:]]'
-        and position(':' in name) = 0
-        and position('/' in name) = 0
-        and position('@' in name) = 0
-        and position('\' in name) = 0
-    ),
-    constraint ck_skill_revision_description check (
-        description = btrim(description)
-        and char_length(description) > 0
-        and char_length(description) <= 1024
-        and translate(description, chr(10), '') !~ '[[:cntrl:]]'
-    ),
-    constraint ck_skill_revision_content check (content <> ''),
-    constraint ck_skill_revision_content_revision check (content_revision ~ '^[0-9a-f]{64}$')
-);
-
-comment on table skill_revision is '不可变 Skill 内容版本：行一经写入永不修改、永不删除，正文的精确 UTF-8 SHA-256 保存在 content_revision';
-comment on column skill_revision.package_name is '所属 package 名（与 package_version 一起指向不可变 package 版本）';
-comment on column skill_revision.package_version is '所属 package 版本';
-comment on column skill_revision.name is 'Skill canonical 名（该 package 版本内唯一）';
-comment on column skill_revision.description is 'Skill 描述（非空、无环绕空白、≤1024、仅允许 LF 换行）';
-comment on column skill_revision.content is 'Skill 完整正文（非空，长度不设人为上限）';
-comment on column skill_revision.content_revision is '正文精确 UTF-8 字节的 SHA-256（小写 64 位十六进制）';
-comment on column skill_revision.create_time is '创建时间（毫秒精度）';
-
--- 当前全局 Skill 目录：name 全局唯一，指向承载它的不可变 revision。
-create table skill (
-    name             varchar(128)  primary key,
-    package_name     varchar(128)  not null,
-    package_version  varchar(128)  not null,
-    constraint fk_skill_revision foreign key (package_name, package_version, name)
-        references skill_revision (package_name, package_version, name) on delete restrict,
     constraint ck_skill_name check (
         name = btrim(name)
         and char_length(name) > 0
@@ -250,18 +212,31 @@ create table skill (
         and position('/' in name) = 0
         and position('@' in name) = 0
         and position('\' in name) = 0
-    )
+    ),
+    constraint ck_skill_description check (
+        description = btrim(description)
+        and char_length(description) > 0
+        and char_length(description) <= 1024
+        and translate(description, chr(10), '') !~ '[[:cntrl:]]'
+    ),
+    constraint ck_skill_content check (content <> '')
 );
 
-comment on table skill is '当前生效的全局 Skill 目录：name 全局唯一，指向承载它的不可变 skill_revision 行';
-comment on column skill.name is 'Skill canonical 名（全局唯一）';
-comment on column skill.package_name is '承载该 Skill 的 package 名';
-comment on column skill.package_version is '承载该 Skill 的不可变 package 版本';
+comment on table skill is 'Platform 全局 Skill 内容：身份是 (package_name, package_version, name)，历史版本行永不修改、永不删除，只有 active 标记可变';
+comment on column skill.package_name is '所属 package 名（与 package_version 一起指向 package 版本）';
+comment on column skill.package_version is '所属 package 版本；更新 package 时换用从未使用过的新版本';
+comment on column skill.name is 'Skill canonical 名（同一 package 版本内唯一，全局至多一个活跃同名 Skill）';
+comment on column skill.description is 'Skill 描述（非空、无环绕空白、≤1024、仅允许 LF 换行）';
+comment on column skill.content is 'Skill 完整正文（非空，长度不设人为上限，精确按提交字节保存）';
+comment on column skill.active is '是否为该 Skill 名当前生效的行；package 替换或删除时随版本切换';
+comment on column skill.create_time is '创建时间（毫秒精度）';
 
-create index idx_skill_package
-    on skill (package_name, package_version);
+-- 每个 Skill 名至多一个活跃行：并发替换由该唯一索引收敛。
+create unique index uk_skill_active
+    on skill (name)
+    where active;
 
-comment on index idx_skill_package is '按 package 定位当前 Skill 目录行';
+comment on index uk_skill_active is '每个 Skill 名至多一个活跃行';
 
 -- Platform MCP Server 配置。name 是产品侧唯一路由身份且创建后不可变；
 -- connection_config 只保存与 connection_type 对应的传输参数。
@@ -663,7 +638,7 @@ create table chat (
 create index idx_chat_modified on chat (updated_at, created_at);
 
 ------------------------------------------------------------------------------
--- 1b. Environment connections, Skill inventory and operations
+-- 1b. Environment connections and operations
 ------------------------------------------------------------------------------
 
 create table environment_connection (
@@ -680,9 +655,10 @@ create table environment_connection (
         status in ('CONNECTING', 'READY')
     ),
     constraint ck_environment_connection_runtime_info check (
-        status not in ('CONNECTING', 'READY')
-        or (status = 'CONNECTING' and runtime_info is null)
-        or (status = 'READY' and runtime_info is not null and jsonb_typeof(runtime_info) = 'object')
+        runtime_info is null or jsonb_typeof(runtime_info) = 'object'
+    ),
+    constraint ck_environment_connection_ready_runtime_info check (
+        status <> 'READY' or (runtime_info is not null and jsonb_typeof(runtime_info) = 'object')
     ),
     constraint ck_environment_connection_lease check (
         lease_until > last_seen_at
@@ -694,7 +670,7 @@ comment on column environment_connection.environment_id is 'Environment 的全�
 comment on column environment_connection.owner_node_id is '当前持有该连接路由的 App 节点实例 UUID';
 comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
 comment on column environment_connection.status is '路由状态：CONNECTING / READY';
-comment on column environment_connection.runtime_info is 'READY 状态下 daemon 通告的 JSON 运行信息与能力对象；CONNECTING 为 null';
+comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
 comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
 comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
 
@@ -703,280 +679,6 @@ create index idx_environment_connection_lease_until
 
 create index idx_environment_connection_owner
     on environment_connection (owner_node_id);
-
--- -----------------------------------------------------------------------------
--- Environment inventory
---
--- 每个 Environment 恰一行当前事实（不是历史头）：source_set_version 是 Platform 期望的
--- 活跃来源集合代际，只有它前进后才会把该代际下发给 Daemon；applied_source_set_version 是
--- 最近一次被围栏接受的 READY 集合版本，永远不超过期望值。报告列（capabilities/OS/时区/备注/
--- root/持有节点/租约/上报时间）同生同灭：没有已接受报告时全空，有报告时全非空。
--- -----------------------------------------------------------------------------
-
-create table environment_inventory (
-    environment_id              uuid          primary key,
-    source_set_version          bigint        not null default 0,
-    applied_source_set_version  bigint,
-    capabilities_version        integer,
-    operating_system            varchar(16),
-    time_zone                   varchar(64),
-    note                        varchar(512),
-    root_path                   varchar(4096),
-    owner_node_id               uuid,
-    lease_token                 uuid,
-    reported_at                 timestamptz(3),
-    created_at                  timestamptz(3) not null default current_timestamp,
-    updated_at                  timestamptz(3) not null default current_timestamp,
-    constraint fk_environment_inventory_environment foreign key (environment_id)
-        references environment (id) on delete cascade,
-    constraint ck_environment_inventory_versions_nonneg check (
-        source_set_version >= 0
-        and (applied_source_set_version is null or applied_source_set_version >= 0)
-    ),
-    constraint ck_environment_inventory_applied_fence check (
-        applied_source_set_version is null
-        or applied_source_set_version <= source_set_version
-    ),
-    constraint ck_environment_inventory_report_shape check (
-        case
-            when applied_source_set_version is null then
-                capabilities_version is null
-                and operating_system is null
-                and time_zone is null
-                and note is null
-                and root_path is null
-                and owner_node_id is null
-                and lease_token is null
-                and reported_at is null
-            else
-                capabilities_version = 1
-                and operating_system in ('windows', 'wsl', 'linux', 'macos')
-                and time_zone is not null
-                and time_zone = btrim(time_zone)
-                and char_length(time_zone) > 0
-                and note is not null
-                and note = btrim(note)
-                and char_length(note) > 0
-                and root_path is not null
-                and root_path = btrim(root_path)
-                and char_length(root_path) > 0
-                and owner_node_id is not null
-                and lease_token is not null
-                and reported_at is not null
-        end
-    ),
-    constraint ck_environment_inventory_time_order check (
-        updated_at >= created_at
-        and (reported_at is null or reported_at >= created_at)
-    )
-);
-
-comment on table environment_inventory is '每个 Environment 恰一行的 Skill inventory 期望/已应用事实：期望来源集合代际与最近一次被围栏接受的 READY 报告（Platform 独占写入）';
-comment on column environment_inventory.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
-comment on column environment_inventory.source_set_version is 'Platform 期望的活跃来源集合代际（非负，从 0 开始，每次来源集合变更 +1）';
-comment on column environment_inventory.applied_source_set_version is '最近一次被 READY 围栏接受的来源集合代际；必须不超过 source_set_version';
-comment on column environment_inventory.capabilities_version is '已接受 READY 的 capabilities 协议版本（当前恒为 1）';
-comment on column environment_inventory.operating_system is '已接受 READY 报告的宿主系统 wire 值：windows/wsl/linux/macos';
-comment on column environment_inventory.time_zone is '已接受 READY 报告的 IANA 时区 ID（非空白、无环绕空白）';
-comment on column environment_inventory.note is '已接受 READY 报告的可信操作者备注（非空白、无环绕空白）';
-comment on column environment_inventory.root_path is '已接受 READY 报告的 Daemon canonical Environment root（仅展示）';
-comment on column environment_inventory.owner_node_id is '接受该报告的 App 节点实例 UUID';
-comment on column environment_inventory.lease_token is '接受该报告时的路由租约代币，用于识别陈旧报告';
-comment on column environment_inventory.reported_at is '该 READY 报告被接受的时间（毫秒精度）';
-comment on column environment_inventory.created_at is '创建时间（毫秒精度）';
-comment on column environment_inventory.updated_at is '最后更新时间（毫秒精度），应用侧维护';
-
--- -----------------------------------------------------------------------------
--- Environment Skill sources
---
--- Platform 唯一的来源配置事实。version 同时承担两个职责：行级 CAS 乐观锁，以及下发给
--- Daemon 的 sourceVersion；不存在第二个版本维度。default_source 每个 Environment 至多一个。
--- applied_* 三元组只在来源被 Daemon 成功应用后出现，因此 UNAPPLIED 允许保留旧的已应用事实
--- （配置刚改、Daemon 还没重新应用），但绝不允许残留 last error。
--- -----------------------------------------------------------------------------
-
-create table environment_skill_source (
-    source_id           uuid          primary key,
-    environment_id      uuid          not null,
-    source_type         varchar(16)   not null,
-    path                varchar(4096),
-    default_source      boolean       not null default false,
-    git_url             varchar(4096),
-    git_ref             varchar(1024),
-    scan_path           varchar(4096),
-    version             bigint        not null default 0,
-    status              varchar(16)   not null default 'UNAPPLIED',
-    applied_version     bigint,
-    applied_revision    varchar(64),
-    diagnostics         jsonb         not null default '[]',
-    last_error_code     varchar(64),
-    last_error_message  text,
-    last_applied_at     timestamptz(3),
-    created_at          timestamptz(3) not null default current_timestamp,
-    updated_at          timestamptz(3) not null default current_timestamp,
-    constraint uk_environment_skill_source_environment unique (environment_id, source_id),
-    constraint fk_environment_skill_source_environment foreign key (environment_id)
-        references environment (id) on delete cascade,
-    constraint ck_environment_skill_source_type check (
-        source_type in ('path', 'git')
-    ),
-    constraint ck_environment_skill_source_type_shape check (
-        (
-            source_type = 'path'
-            and path is not null
-            and git_url is null
-            and git_ref is null
-            and scan_path is null
-        )
-        or (
-            source_type = 'git'
-            and path is null
-            and default_source = false
-            and git_url is not null
-        )
-    ),
-    constraint ck_environment_skill_source_path check (
-        path is null or (path = btrim(path) and char_length(path) > 0)
-    ),
-    constraint ck_environment_skill_source_git_url check (
-        git_url is null or (git_url = btrim(git_url) and char_length(git_url) > 0)
-    ),
-    constraint ck_environment_skill_source_git_ref check (
-        git_ref is null or (git_ref = btrim(git_ref) and char_length(git_ref) > 0)
-    ),
-    constraint ck_environment_skill_source_scan_path check (
-        scan_path is null or (scan_path = btrim(scan_path) and char_length(scan_path) > 0)
-    ),
-    constraint ck_environment_skill_source_version_nonneg check (
-        version >= 0 and (applied_version is null or applied_version >= 0)
-    ),
-    constraint ck_environment_skill_source_applied_fence check (
-        applied_version is null or applied_version <= version
-    ),
-    constraint ck_environment_skill_source_applied_tuple check (
-        (
-            applied_version is null
-            and applied_revision is null
-            and last_applied_at is null
-        )
-        or (
-            applied_version is not null
-            and applied_revision is not null
-            and last_applied_at is not null
-        )
-    ),
-    constraint ck_environment_skill_source_applied_revision check (
-        applied_revision is null
-        or applied_revision ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
-    ),
-    constraint ck_environment_skill_source_diagnostics check (
-        jsonb_typeof(diagnostics) = 'array'
-    ),
-    constraint ck_environment_skill_source_status check (
-        status in ('UNAPPLIED', 'READY', 'FAILED')
-    ),
-    constraint ck_environment_skill_source_state check (
-        (status = 'UNAPPLIED' and last_error_code is null and last_error_message is null)
-        or (
-            status = 'READY'
-            and applied_version is not null
-            and applied_version = version
-            and last_error_code is null
-            and last_error_message is null
-        )
-        or (
-            status = 'FAILED'
-            and last_error_code is not null
-            and last_error_code = btrim(last_error_code)
-            and char_length(last_error_code) > 0
-            and last_error_message is not null
-            and last_error_message = btrim(last_error_message)
-            and char_length(last_error_message) > 0
-        )
-    ),
-    constraint ck_environment_skill_source_time_order check (
-        updated_at >= created_at
-        and (last_applied_at is null or last_applied_at >= created_at)
-    )
-);
-
-comment on table environment_skill_source is 'Platform 唯一的 Skill 来源配置：每个来源一行，version 既是 CAS 乐观锁也是下发给 Daemon 的 sourceVersion';
-comment on column environment_skill_source.source_id is '来源的全局唯一 UUID（应用生成，永不变更）';
-comment on column environment_skill_source.environment_id is '所属 Environment 的全局唯一 UUID（FK cascade）';
-comment on column environment_skill_source.source_type is '来源类型 wire 值：path / git';
-comment on column environment_skill_source.path is 'PATH 来源的宿主目录（仅 path 类型非空；Daemon 以自己的文件系统解析）';
-comment on column environment_skill_source.default_source is '是否该 Environment 的缺省来源；每个 Environment 至多一个（仅 path 类型可为 true）';
-comment on column environment_skill_source.git_url is 'GIT 来源的仓库 URL（仅 git 类型非空；绝不回显到错误或列表摘要）';
-comment on column environment_skill_source.git_ref is 'GIT 来源可选 ref：为空表示跟踪远端默认 HEAD，非空固定到该 ref';
-comment on column environment_skill_source.scan_path is 'GIT 来源可选的仓库内相对扫描目录（仅 git 类型可非空）';
-comment on column environment_skill_source.version is '行版本与 Daemon sourceVersion（非负，从 0 开始，每次配置更新 +1）';
-comment on column environment_skill_source.status is '应用状态：UNAPPLIED / READY / FAILED';
-comment on column environment_skill_source.applied_version is '最近一次成功应用的配置版本；必须不超过 version';
-comment on column environment_skill_source.applied_revision is '最近一次成功应用的内容 revision（小写 40 位 SHA-1 commit 或 64 位 SHA-256 聚合）';
-comment on column environment_skill_source.diagnostics is '最近一次扫描的有界诊断（JSON array，可为空数组）';
-comment on column environment_skill_source.last_error_code is 'FAILED 状态下的失败分类码（非空、无环绕空白）';
-comment on column environment_skill_source.last_error_message is 'FAILED 状态下的失败描述（非空、无环绕空白）';
-comment on column environment_skill_source.last_applied_at is '最近一次成功应用的时间（毫秒精度，与 applied_version/revision 成对）';
-comment on column environment_skill_source.created_at is '创建时间（毫秒精度）';
-comment on column environment_skill_source.updated_at is '最后更新时间（毫秒精度），应用侧维护';
-
--- 每个 Environment 至多一个缺省来源：缺省发现不能有两个权威目录。
-create unique index uk_environment_skill_source_default
-    on environment_skill_source (environment_id)
-    where default_source;
-
-comment on index uk_environment_skill_source_default is '每个 Environment 至多一个缺省 PATH 来源';
-
--- -----------------------------------------------------------------------------
--- Environment Skill inventory
---
--- 每个来源最新一次成功扫描的持久 inventory，正文永不入库（正文由 Daemon 按 revision 持有）。
--- 复合 FK 让来源删除级联清理其 inventory；同一 Environment 内 Skill name 全局唯一，因此
--- Platform 无需优先级即可唯一定位目标。
--- -----------------------------------------------------------------------------
-
-create table environment_skill (
-    environment_id    uuid          not null,
-    source_id         uuid          not null,
-    name              varchar(128)  not null,
-    source_version    bigint        not null,
-    description       varchar(1024) not null,
-    base_directory    varchar(4096) not null,
-    content_revision  char(64)      not null,
-    discovered_at     timestamptz(3) not null,
-    constraint pk_environment_skill primary key (source_id, name),
-    constraint uk_environment_skill_environment_name unique (environment_id, name),
-    constraint fk_environment_skill_source foreign key (environment_id, source_id)
-        references environment_skill_source (environment_id, source_id) on delete cascade,
-    constraint ck_environment_skill_name check (
-        name = btrim(name) and char_length(name) > 0
-    ),
-    constraint ck_environment_skill_description check (
-        description = btrim(description) and char_length(description) > 0
-    ),
-    constraint ck_environment_skill_base_directory check (
-        base_directory = btrim(base_directory) and char_length(base_directory) > 0
-    ),
-    constraint ck_environment_skill_source_version_nonneg check (source_version >= 0),
-    constraint ck_environment_skill_content_revision check (
-        content_revision ~ '^[0-9a-f]{64}$'
-    )
-);
-
-comment on table environment_skill is '每个来源最新一次成功扫描的持久 Skill inventory；正文永不入库，只保存可唯一定位的身份与描述';
-comment on column environment_skill.environment_id is '所属 Environment（与 source_id 一起构成指向来源配置的复合 FK）';
-comment on column environment_skill.source_id is '所属来源的全局唯一 UUID';
-comment on column environment_skill.name is 'Skill canonical 名（同一 Environment 内全局唯一）';
-comment on column environment_skill.source_version is '发现该 Skill 时的来源行版本（对齐 Daemon READY 的 sourceVersion）';
-comment on column environment_skill.description is 'Skill 描述（非空、无环绕空白；正文不在此表）';
-comment on column environment_skill.base_directory is 'Daemon 宿主上的 Skill 目录（仅事实记录，不在 SQL 解析路径）';
-comment on column environment_skill.content_revision is '内容 revision（小写 64 位 SHA-256）';
-comment on column environment_skill.discovered_at is '最近一次发现该 Skill 的时间（毫秒精度）';
-
-create index idx_environment_skill_source
-    on environment_skill (environment_id, source_id);
-
-comment on index idx_environment_skill_source is '按 Environment 与来源列出持久 inventory';
 
 -- -----------------------------------------------------------------------------
 -- Environment operations
@@ -1010,14 +712,10 @@ create table environment_operation (
     constraint fk_environment_operation_environment foreign key (environment_id)
         references environment (id) on delete cascade,
     constraint ck_environment_operation_type check (
-        operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE', 'MCP_SERVER_DISCOVER')
+        operation_type in ('MCP_SERVER_DISCOVER')
     ),
     constraint ck_environment_operation_resource_type check (
-        resource_type in ('SKILL_SOURCE', 'MCP_SERVER')
-    ),
-    constraint ck_environment_operation_type_resource_pair check (
-        (operation_type in ('SKILL_REFRESH', 'SKILL_INSTALL', 'SKILL_UPDATE') and resource_type = 'SKILL_SOURCE')
-        or (operation_type = 'MCP_SERVER_DISCOVER' and resource_type = 'MCP_SERVER')
+        resource_type in ('MCP_SERVER')
     ),
     constraint ck_environment_operation_status check (
         status in ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'CANCELLED')
@@ -1120,9 +818,9 @@ create table environment_operation (
 comment on table environment_operation is '跨节点管理操作信箱与不可变历史：PENDING 可被任一合格节点认领，终态不可回退；resource_id 故意不建 FK 以保留资源删除后的历史';
 comment on column environment_operation.id is '操作 UUID（调用方生成，永不重用）';
 comment on column environment_operation.environment_id is '目标 Environment 的全局唯一 UUID（FK cascade）';
-comment on column environment_operation.resource_type is '目标资源类型：SKILL_SOURCE / MCP_SERVER';
+comment on column environment_operation.resource_type is '目标资源类型：MCP_SERVER';
 comment on column environment_operation.resource_id is '目标资源的全局唯一 UUID（故意不建 FK：资源删除后操作历史仍然存在）';
-comment on column environment_operation.operation_type is '操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER';
+comment on column environment_operation.operation_type is '操作类型：MCP_SERVER_DISCOVER';
 comment on column environment_operation.status is '生命周期：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED';
 comment on column environment_operation.resource_version is '发起时的目标资源版本；过期操作必须收敛为 RESOURCE_CHANGED';
 comment on column environment_operation.arguments is '冻结的私有调用参数（JSON object；错误与列表摘要绝不回显）';

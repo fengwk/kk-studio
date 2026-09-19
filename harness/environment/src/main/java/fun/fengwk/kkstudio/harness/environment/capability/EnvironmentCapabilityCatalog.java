@@ -32,9 +32,6 @@ public final class EnvironmentCapabilityCatalog {
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
 
-  /** 三个管理能力共享的 arguments schema 资源名。 */
-  private static final String SHARED_SOURCE_SCHEMA = "skill.source.schema.json";
-
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
   private static final Set<EnvironmentCapabilityId> WORKDIR_CAPABILITY_IDS =
       Set.of(
@@ -90,21 +87,16 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.SKILL_LOAD, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.MCP_LOCAL_CALL, Duration.ofHours(1)));
   }
 
   /**
    * 管理专用能力：只复用 INVOKE/CANCEL/终态通道，不注册为模型 Tool，也不接受 workdir。
    *
-   * <p>refresh 只扫描本地已发布 revision；install/update 允许一次普通 Git 获取，执行时间预算高于普通读取。
+   * <p>目前只有 local MCP 发现：它由 Platform 的异步管理操作派发，模型不可直接调用。
    */
   private static List<EnvironmentCapabilityDescriptor> createManagementDescriptors() {
-    return List.of(
-        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH, Duration.ofMinutes(5)),
-        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL, Duration.ofMinutes(30)),
-        descriptor(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE, Duration.ofMinutes(30)),
-        descriptor(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER, Duration.ofMinutes(5)));
+    return List.of(descriptor(EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER, Duration.ofMinutes(5)));
   }
 
   /** 全部已注册 descriptor：模型可见能力在前，管理专用能力在后。 */
@@ -147,14 +139,7 @@ public final class EnvironmentCapabilityCatalog {
   }
 
   private static InputSchema loadSchema(EnvironmentCapabilityId id) {
-    // 三个 skill.source 管理能力共用同一份冻结来源配置 arguments schema：它们只差执行语义，不差 wire 形状。
-    String fileName =
-        (id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH)
-                || id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL)
-                || id.equals(EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE))
-            ? SHARED_SOURCE_SCHEMA
-            : id.value() + ".schema.json";
-    return CODEC.decode(loadText(fileName));
+    return CODEC.decode(loadText(id.value() + ".schema.json"));
   }
 
   private static String loadText(String fileName) {

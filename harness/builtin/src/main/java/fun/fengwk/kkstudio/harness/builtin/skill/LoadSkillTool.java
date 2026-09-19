@@ -79,8 +79,7 @@ public final class LoadSkillTool implements Tool {
       }
       SelectedSkill skill = selected.get();
       String content =
-          contentLoader.load(
-              skill.packageName(), skill.packageVersion(), skill.name(), skill.contentRevision());
+          contentLoader.load(skill.packageName(), skill.packageVersion(), skill.name());
       return complete(
           listener, new ToolResult(callId, List.of(new TextResultContent(content)), false, "{}"));
     } catch (RuntimeException error) {
