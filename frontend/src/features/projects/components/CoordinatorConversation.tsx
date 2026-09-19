@@ -15,7 +15,7 @@ export interface CoordinatorConversationProps {
 
 interface DisplayMessage {
   id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant'
   text: string
   createdAt?: string
 }
@@ -86,17 +86,15 @@ export function CoordinatorConversation({
 
       for (const entry of threadSnapshot.entries) {
         if (entry.entryType === 'MESSAGE' || entry.entryType === 'CUSTOM_MESSAGE') {
-          let role: 'user' | 'assistant' | 'system' = 'assistant'
+          let role: 'user' | 'assistant' = 'assistant'
           try {
             const parsed = JSON.parse(entry.payloadJson) as {
               message?: { role?: string }
               role?: string
             }
             const r = (parsed.message?.role || parsed.role || '').toUpperCase()
-            if (r === 'USER') {
+            if (r === 'USER' || entry.entryType === 'CUSTOM_MESSAGE') {
               role = 'user'
-            } else if (r === 'SYSTEM') {
-              role = 'system'
             }
           } catch {
             // Keep default role

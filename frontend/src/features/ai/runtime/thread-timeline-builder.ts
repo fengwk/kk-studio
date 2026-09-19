@@ -71,7 +71,7 @@ export function buildThreadTimeline(
     if (command.state !== 'QUEUED') {
       continue
     }
-    const queuedMessage = extractQueuedMessage(command.payloadJson, command.type)
+    const queuedMessage = extractQueuedMessage(command.payloadJson)
     if (!queuedMessage) {
       continue
     }
@@ -383,21 +383,13 @@ function toolCallOrdinal(messageId: string): number {
 
 function extractQueuedMessage(
   payloadJson: string,
-  commandType: string,
-): { role: 'user' | 'system'; text: string } | null {
+): { role: 'user'; text: string } | null {
   const payload = parsePayload(payloadJson)
   const message = asRecord(payload.message)
   const contents = getRecordList(message.contents)
   const text = contents.map(contentText).filter(Boolean).join('\n')
   if (!text) {
     return null
-  }
-  const role = getString(message.role)
-  if (commandType === 'CUSTOM_MESSAGE' && role === 'SYSTEM') {
-    return { role: 'system', text }
-  }
-  if (commandType === 'CUSTOM_MESSAGE' && role === 'USER') {
-    return { role: 'user', text }
   }
   return { role: 'user', text }
 }
