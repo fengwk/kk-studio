@@ -57,7 +57,6 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
           set owner_node_id = excluded.owner_node_id,
               lease_token = excluded.lease_token,
               status = 'CONNECTING',
-              runtime_info = null,
               last_seen_at = statement_timestamp(),
               lease_until = statement_timestamp() + (? * interval '1 millisecond')
           where environment_connection.lease_until <= statement_timestamp()
@@ -77,6 +76,12 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       where not exists (select 1 from tried_upsert)
       """;
 
+  /**
+   * 围栏式登记 READY 并把最近一次被接受的宿主 metadata 写入 {@code environment_connection.runtime_info}。
+   *
+   * <p>只有当前 owner + lease 且未过期的连接行才能推进 READY；围栏失效时既不推进状态也不改写 runtime_info。离线或重新 CONNECTING
+   * 都不清空该保留事实。
+   */
   private static final String MARK_READY_SQL =
       """
       update environment_connection
@@ -105,7 +110,6 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       update environment_connection
       set status = 'CONNECTING',
-          runtime_info = null,
           last_seen_at = statement_timestamp(),
           lease_until = statement_timestamp() + (? * interval '1 millisecond')
       where environment_id = ?
@@ -236,7 +240,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 将环境标记为 READY 并写入 daemon 版本化能力与运行信息对象。
+   * 将环境标记为 READY 并写入 daemon 版本化宿主 metadata。
    *
    * @return 围栏校验成功且更新 1 行返回 true；若租约已被夺取（0 行）返回 false
    */
@@ -283,7 +287,9 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 连接断开时，围栏式将状态回退为 CONNECTING，清空 runtime_info 并保留重连宽限租约。
+   * 连接断开时，围栏式将状态回退为 CONNECTING 并保留重连宽限租约。
+   *
+   * <p>{@code runtime_info} 保留最近一次被接受的 READY 宿主 metadata，断线不清空。
    *
    * @return 围栏校验成功返回 true
    */
@@ -387,11 +393,10 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       UUID owner = (UUID) rs.getObject("owner_node_id");
       UUID leaseToken = (UUID) rs.getObject("lease_token");
       LiveEnvironmentStatus status = LiveEnvironmentStatus.valueOf(rs.getString("status"));
+      // 保留事实：任何非 null 的 runtime_info 都可解码，与当前 status 无关。
       String runtimeInfoJson = rs.getString("runtime_info");
-      DaemonCapabilities capabilities = null;
-      if (status == LiveEnvironmentStatus.READY && runtimeInfoJson != null) {
-        capabilities = capabilitiesCodec.decode(runtimeInfoJson);
-      }
+      DaemonCapabilities capabilities =
+          runtimeInfoJson == null ? null : capabilitiesCodec.decode(runtimeInfoJson);
       Instant lastSeenAt = rs.getObject("last_seen_at", OffsetDateTime.class).toInstant();
       Instant leaseUntil = rs.getObject("lease_until", OffsetDateTime.class).toInstant();
       return new EnvironmentConnection(

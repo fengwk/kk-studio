@@ -125,27 +125,19 @@ public final class ModelRequestSpecJsonCodec {
     node.put("name", skill.name());
     node.put("packageName", skill.packageName());
     node.put("packageVersion", skill.packageVersion());
-    node.put("contentRevision", skill.contentRevision());
     node.put("description", skill.description());
     return node;
   }
 
-  /** 严格解码：全部身份/描述字段必填，旧 tolerant 形状（缺少 package 身份或 revision）被拒绝。 */
+  /** 严格解码：全部身份/描述字段必填，旧 tolerant 形状（缺少 package 身份）被拒绝。 */
   private static SkillBinding decodeSkill(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
     InvocationJsonSupport.requireFields(
-        node,
-        "skillBinding",
-        "name",
-        "packageName",
-        "packageVersion",
-        "contentRevision",
-        "description");
+        node, "skillBinding", "name", "packageName", "packageVersion", "description");
     return new SkillBinding(
         InvocationJsonSupport.text(node, "name", "skillBinding"),
         InvocationJsonSupport.text(node, "packageName", "skillBinding"),
         InvocationJsonSupport.text(node, "packageVersion", "skillBinding"),
-        InvocationJsonSupport.text(node, "contentRevision", "skillBinding"),
         InvocationJsonSupport.text(node, "description", "skillBinding"));
   }
 

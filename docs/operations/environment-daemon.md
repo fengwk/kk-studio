@@ -76,8 +76,8 @@ java -jar ~/.local/lib/kk-studio/kk-studio-daemon.jar \
 ```
 
 注册成功后进程保持前台运行，连接断开时按退避自动重连；`Ctrl-C` 结束进程。启动或注册失败时
-进程向 stderr 输出原因并以非零状态码退出。Studio 页面转为 `READY` 后，编辑 Agent、绑定该
-Environment 并选择需要的 Tools 或 Skills。
+进程向 stderr 输出原因并以非零状态码退出。Studio 页面转为 `READY` 后，可在对话分支选择该
+Environment，并为 Agent 选择需要的 Environment Tools；Skill 由 Platform 全局目录独立管理。
 
 `--help`、`-h` 和 `--version` 只在作为唯一参数时生效，打印后直接退出，不打开数据目录也不建立
 连接。
@@ -135,14 +135,10 @@ journalctl --user -u kk-studio-daemon.service -n 50 --no-pager
   daemon.lock                 # 进程独占锁
   resources/text/*.log        # 命令输出 durable 全文
   resources/staging/*.part    # 写入中的中转文件，启动时清理
-  skills/manifest.json        # 最近一次成功发布的 Skill 来源快照
-  skills/bodies/*.md          # 不可变 Skill 正文
-  skills/checkouts/           # 不可变 Git checkout
-  skills/staging/             # Skill 操作临时目录
 ```
 
 `resources/text/*.log` 是命令输出的 durable 全文，Daemon 不会自动删除，必须由运维按保留策略
-显式清理；删除整个数据目录会同时移除 Skill 快照与 checkout。
+显式清理；删除整个数据目录会移除进程锁与本机命令输出。
 
 ## 升级
 
@@ -153,8 +149,8 @@ journalctl --user -u kk-studio-daemon.service -n 50 --no-pager
 systemctl --user restart kk-studio-daemon.service
 ```
 
-进程内 Invocation journal 不跨进程保留，重启会中断正在执行的工具调用；数据目录与已发布的
-Skill 保持不变。
+进程内 Invocation journal 不跨进程保留，重启会中断正在执行的工具调用；已落盘的命令输出
+保持不变。
 
 ## 卸载
 

@@ -1738,7 +1738,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 11 个模型可见 capabilities + skills + rootPath（daemon canonical Environment Root），11 个 capability 均为 version=1，且不公开管理 capabilities、旧 tools 或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 10 个模型可见 capabilities + rootPath（daemon canonical Environment Root），capability 均为 version=1，且不公开管理 capabilities、产品目录或 READY environment metadata',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1759,7 +1759,6 @@ registerCase({
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',
-      'skill.load',
       'mcp.local.call',
     ]
     const expectedCapabilities = modelCapabilityIds.map((id) => ({ id, version: '1' }))
@@ -1773,9 +1772,9 @@ registerCase({
     assert(!ids.includes('fs.list-directory'), safeDiagnosticJson(actualCapabilities))
     assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
     assert(!ids.includes('mcp.local.discover'), safeDiagnosticJson(actualCapabilities))
-    assert(Array.isArray(match.skills), safeDiagnosticJson(match))
     assert(
       !Object.hasOwn(match, 'tools')
+        && !Object.hasOwn(match, 'skills')
         && !Object.hasOwn(match, 'mcpServers')
         && !Object.hasOwn(match, 'operatingSystem')
         && !Object.hasOwn(match, 'workingDirectory')

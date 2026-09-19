@@ -28,12 +28,7 @@ class AgentPromptComposerTest {
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
 
   private static SkillBinding skill(String name, String description) {
-    return new SkillBinding(
-        name,
-        "test-package",
-        "1.0.0",
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-        description);
+    return new SkillBinding(name, "test-package", "1.0.0", description);
   }
 
   /** 空正文 + 无 Environment 只保留有值的 date，不输出 none 字段。 */

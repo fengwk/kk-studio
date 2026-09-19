@@ -41,9 +41,7 @@ class ModelRequestSpecJsonCodecTest {
             + ",\"preambleMessages\":[],\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
             + "],\"skillBindings\":[{\"name\":\"review\",\"packageName\":\"review-package\","
-            + "\"packageVersion\":\"1.0.0\","
-            + "\"contentRevision\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\","
-            + "\"description\":\"Review code\"}],"
+            + "\"packageVersion\":\"1.0.0\",\"description\":\"Review code\"}],"
             + "\"subagentBindings\":[],\"cacheControl\":"
             + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
             + "}";
@@ -145,8 +143,8 @@ class ModelRequestSpecJsonCodecTest {
     toolsType.putObject("toolBindings");
     assertInvalid(toolsType);
 
-    // Skill binding 的包身份与内容 revision 全部必填，缺失时必须严格拒绝。
-    for (String field : List.of("packageName", "packageVersion", "contentRevision")) {
+    // Skill binding 的包身份全部必填，缺失时必须严格拒绝。
+    for (String field : List.of("packageName", "packageVersion", "name", "description")) {
       ObjectNode missingSkillField = encodedNode();
       ObjectNode skill = (ObjectNode) missingSkillField.path("skillBindings").get(0);
       skill.remove(field);

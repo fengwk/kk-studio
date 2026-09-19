@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -62,9 +61,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
-          0,
-          List.of());
+              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
 
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
 
@@ -318,8 +315,12 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     assertTrue(conn1.closed);
   }
 
+  /**
+   * 测试意图：断开连接只回退 status 并保留宽限租约，最近一次被接受的宿主 metadata 仍随连接行保留，Card 与 Prompt 据此可继续投影 OS、时区、备注与 root
+   * path。
+   */
   @Test
-  void disconnectPreservesConnectingWithGracePeriod() {
+  void disconnectPreservesConnectingWithGracePeriodAndRetainsHostMetadata() {
     FakeConnection conn1 = new FakeConnection("conn-1");
     serverNode1.open(conn1);
     serverNode1.receive(conn1.connectionId(), hello(REGISTRATION_TOKEN));
@@ -333,7 +334,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     EnvironmentConnection disconnectedEnv = registryNode1.find(DEV).orElseThrow();
     assertEquals(LiveEnvironmentStatus.CONNECTING, disconnectedEnv.status());
-    assertNull(disconnectedEnv.daemonCapabilities());
+    assertEquals(readyEnv.daemonCapabilities(), disconnectedEnv.daemonCapabilities());
     assertEquals(readyEnv.leaseToken(), disconnectedEnv.leaseToken());
     assertEquals(node1, disconnectedEnv.ownerNodeId());
   }

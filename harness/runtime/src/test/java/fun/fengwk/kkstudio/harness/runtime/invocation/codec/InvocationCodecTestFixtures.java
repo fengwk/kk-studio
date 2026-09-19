@@ -38,18 +38,15 @@ final class InvocationCodecTestFixtures {
       EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000");
   static final EnvironmentId OTHER_ENVIRONMENT_ID =
       EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174001");
-  static final String CONTENT_REVISION =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
   private static final ToolDescriptorJsonCodec TOOL_DESCRIPTOR_CODEC =
       new ToolDescriptorJsonCodec();
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
   private InvocationCodecTestFixtures() {}
 
-  /** 冻结的平台 Skill 包版本事实。 */
+  /** 冻结的平台 Skill 包身份事实。 */
   static SkillBinding skillBinding(EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding("review", "review-package", "1.0.0", CONTENT_REVISION, "Review code");
+    return new SkillBinding("review", "review-package", "1.0.0", "Review code");
   }
 
   static ToolDescriptor descriptor() {

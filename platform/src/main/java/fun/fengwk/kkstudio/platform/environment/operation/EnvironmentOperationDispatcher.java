@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Platform 侧异步 Environment Skill 来源管理操作分发器。
+ * Platform 侧异步 Environment 管理操作分发器。
  *
  * <p>基于虚拟线程实现无配额分发，负责认领 PENDING 操作、分发至 Daemon 会话核心、协调执行终态与清扫超期操作。 作为 Spring Bean
  * 暴露，但默认不自动启动，由宿主生命周期或测试显式管理 {@link #start()} / {@link #stop()}。
@@ -444,9 +444,6 @@ public class EnvironmentOperationDispatcher {
 
   private static EnvironmentCapabilityId capabilityIdFor(EnvironmentOperationType type) {
     return switch (type) {
-      case SKILL_REFRESH -> EnvironmentCapabilityIds.SKILL_SOURCE_REFRESH;
-      case SKILL_INSTALL -> EnvironmentCapabilityIds.SKILL_SOURCE_INSTALL;
-      case SKILL_UPDATE -> EnvironmentCapabilityIds.SKILL_SOURCE_UPDATE;
       case MCP_SERVER_DISCOVER -> EnvironmentCapabilityIds.MCP_LOCAL_DISCOVER;
     };
   }

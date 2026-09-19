@@ -21,13 +21,13 @@ public class EnvironmentOperationDTO {
   /** 所属 Environment UUID。 */
   private String environmentId;
 
-  /** 目标资源类型：SKILL_SOURCE / MCP_SERVER。 */
+  /** 目标资源类型：MCP_SERVER。 */
   private String resourceType;
 
   /** 目标资源 UUID。 */
   private String resourceId;
 
-  /** 操作类型：SKILL_REFRESH / SKILL_INSTALL / SKILL_UPDATE / MCP_SERVER_DISCOVER。 */
+  /** 操作类型：MCP_SERVER_DISCOVER。 */
   private String operationType;
 
   /** 生命周期状态：PENDING / RUNNING / SUCCEEDED / FAILED / UNKNOWN / CANCELLED。 */
@@ -36,7 +36,7 @@ public class EnvironmentOperationDTO {
   /** 冻结的目标资源版本（canonical 非负十进制字符串）。 */
   private String resourceVersion;
 
-  /** 操作参数的安全结构化摘要（仅含来源类型等结构属性，绝不回显 URL、凭证或文件路径）。 */
+  /** 操作参数的安全结构化摘要（绝不回显 URL、凭证或文件路径）。 */
   private Map<String, Object> parameterSummary;
 
   /** 截止时间戳（PostgreSQL statement_timestamp 判定）。 */
@@ -48,7 +48,7 @@ public class EnvironmentOperationDTO {
   /** 终态完成时间戳；未终结时为 null。 */
   private Instant finishedAt;
 
-  /** 执行成功后的结构化结果摘要（仅含 revision 与 skill/diagnostic 计数）；未成功时为 null。 */
+  /** 执行成功后的安全结构化结果摘要；未成功时为 null。 */
   private Map<String, Object> resultSummary;
 
   /** 失败或未知状态下的分类错误码；成功或活动状态下为 null。 */

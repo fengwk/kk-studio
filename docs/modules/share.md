@@ -40,9 +40,10 @@
 | 包 | 当前 wire |
 | --- | --- |
 | [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、Model、Agent、ModelRef、Tool catalog |
+| [ai.skill](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/skill/) | Platform 全局 Skill、不可变 package 版本与完整替换请求 |
 | [ai.mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/mcp/) | MCP Server 安全 DTO、全量配置 DTO、创建/更新与统一发现 DTO |
 | [ai.chat](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/chat/) | Chat 与 Chat defaults |
-| [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、live capability 投影、Skill 来源与通用管理操作 DTO |
+| [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、最近一次 READY runtime 投影与通用管理操作 DTO |
 | [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
 | [canvas](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/) | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
 | [comfyui](../../share/src/main/java/fun/fengwk/kkstudio/share/comfyui/) | Workflow API 与运行请求/结果 |

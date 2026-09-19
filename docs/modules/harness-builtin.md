@@ -2,7 +2,7 @@
 
 Harness 需要一个可直接使用的工具集：读文件、执行命令、查符号、加载 Skill、委派 Subagent、维护当前目标。这些工具如果各自散落在不同模块里注册，就会出现身份不统一、副作用标注不一致、模型可见列表随装配方式漂移的问题。本模块把第一方能力收拢到唯一入口 [`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java)（`ContributorId` 为 `builtin`），通过 [`harness-contributor-api`](harness-contributor-api.md) 的统一 SPI 一次性注册 14 个工具、`goal.state` 自定义条目类型与一个上下文投影器；模型可见的工具集合因此由代码确定，而不是由容器的装配顺序决定。
 
-模块只负责「这些工具做什么」：实现委托、参数与领域校验、以及要追加什么分支状态。校验 ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](harness-runtime.md) 与 Contributor 目录承担；环境能力的网络传输、Skill 来源管理与子进程执行由 [`harness-environment`](harness-environment.md) 与 [`harness-daemon`](harness-daemon.md) 承担。生产依赖见 [`pom.xml`](../../harness/builtin/pom.xml)，由 [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java) 守卫。
+模块只负责「这些工具做什么」：实现委托、参数与领域校验、以及要追加什么分支状态。校验 ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](harness-runtime.md) 与 Contributor 目录承担；环境能力的网络传输与子进程执行由 [`harness-environment`](harness-environment.md) 与 [`harness-daemon`](harness-daemon.md) 承担，Skill 正文由 Platform 全局目录直接加载。生产依赖见 [`pom.xml`](../../harness/builtin/pom.xml)，由 [`BuiltinModuleArchitectureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinModuleArchitectureTest.java) 守卫。
 
 ## 包架构
 
@@ -11,7 +11,7 @@ Harness 需要一个可直接使用的工具集：读文件、执行命令、查
 | `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor` 与完成态句柄 | 集中注册 14 个工具、Goal 自定义类型与投影器；网络传输与持久化调度在外层模块 |
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 环境能力工具实现 `EnvironmentCapabilityTool` 与 prompt 模板加载 | 委托执行期注入的 `BoundEnvironment`；传输协议与宿主进程管理由 Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | Goal 工具（`create_goal`、`get_goal`、`update_goal`）、投影器 `GoalContextProjector`、快照模型 `GoalState` 与确定性编解码器 `GoalStateCodec` | 状态依托通用 `harness_entry` 的 CUSTOM 载荷，通过 `AppendCustomEntry` 由 Runtime 原子追加 |
-| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具 `LoadSkillTool`、选中 Skill 元数据 `SelectedSkill` 与查找契约 `ThreadSelectedSkillLookup` | 只加载当前 Thread Agent 已选中的 Skill；校验来源 Environment 一致后调用 `skill.load` 能力 |
+| `fun.fengwk.kkstudio.harness.builtin.skill` | 内部 Skill 加载工具 `LoadSkillTool`、选中 Skill 元数据 `SelectedSkill`、正文端口 `SkillContentLoader` 与查找契约 `ThreadSelectedSkillLookup` | 只加载当前 Thread Agent 已冻结的 Platform 全局 Skill 三元组，不依赖 Environment |
 | `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部委派工具 `TaskTool`、任务请求 `SubagentTaskRequest`、执行端口 `SubagentRunner` 与配置接入 | 只做参数解析与转发；多轮调度、并发上限与持久化状态机由运行时负责 |
 
 ## 注册清单
@@ -29,7 +29,7 @@ Harness 需要一个可直接使用的工具集：读文件、执行命令、查
 | `environment.lsp-goto-definition` | `lsp_goto_definition` | Environment | SELECTABLE | `lsp.goto-definition`，READ_ONLY |
 | `environment.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | `lsp.workspace-symbols`，READ_ONLY |
 | `environment.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | `lsp.java-decompile`，READ_ONLY |
-| `runtime.load-skill` | `load_skill` | Environment | INTERNAL | 按冻结身份加载 Skill 正文 |
+| `runtime.load-skill` | `load_skill` | Platform Skill catalog | INTERNAL | 按冻结 package/version/name 加载 Skill 正文 |
 | `runtime.task` | `task` | 无 | INTERNAL | 委派 Subagent 任务 |
 | `goal.create` | `create_goal` | WRITE(`goal.state`) | SELECTABLE | 创建 Goal 快照 |
 | `goal.get` | `get_goal` | READ(`goal.state`) | SELECTABLE | 读取 Goal 快照 |
@@ -65,7 +65,7 @@ createdAt / updatedAt: 毫秒截断，updatedAt >= createdAt
 
 ## Skill 与 Subagent 桥接
 
-[`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java) 以 `INTERNAL` 注册，模型看不到它；它声明 `ToolRequirements.environment()`，要求上下文里已绑定环境。执行时先由 [`ThreadSelectedSkillLookup`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/ThreadSelectedSkillLookup.java) 解析当前 Thread 冻结的 [`SelectedSkill`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/SelectedSkill.java)，校验其 `sourceEnvironmentId` 与当前绑定环境一致——不一致就拒绝，绝不跨环境取正文；随后直接用 `{sourceId, name, revision}` 三个身份字段经 `BoundEnvironment.execute` 调用 `skill.load`。`skill.load` 不要求 workdir，Skill 按身份与来源定位而不是按会话目录，所以不存在「用当前配置扩张已冻结调用」或按名称回退到同名新版本的可能。加载超时从注入的 `Supplier<Duration>` 现读，由 Platform 从 `tool.skillLoadTimeoutMillis` 快照提供（见 [`BuiltinHarnessContributorConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/BuiltinHarnessContributorConfiguration.java)）。
+[`LoadSkillTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java) 以 `INTERNAL` 注册，不能被 Agent 手工选择；当 Agent 配置了 Skill 时，Platform 自动把它加入该次模型工具面。它声明 `ToolRequirements.none()`，执行时由 [`ThreadSelectedSkillLookup`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/ThreadSelectedSkillLookup.java) 解析当前 Model invocation 冻结的 [`SelectedSkill`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/SelectedSkill.java)，再经 [`SkillContentLoader`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/SkillContentLoader.java) 按 `(packageName, packageVersion, name)` 精确读取正文。加载不依赖 Environment、workdir 或独立超时，也不会按名称回退到当前新版本。
 
 [`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 同样以 `INTERNAL` 注册，本身不携带环境需求。它把 arguments 解析为 [`SubagentTaskRequest`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java) 后交给 [`SubagentRunner`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)：`subagent_type` 与 `prompt` 必填非空白，`maxTurns` 若给出必须为正整数，`session_id` 若给出必须是规范 UUID 文本（大小写与格式都必须与原值逐字一致，用于恢复既有 Session）。参数被拒或 Runner 抛异常都收敛为错误结果，返回的句柄原样承接取消。多轮调度、深度与并发限制、会话与 Thread 的创建或恢复都在 Runner 实现侧。
 
@@ -77,7 +77,7 @@ createdAt / updatedAt: 毫秒截断，updatedAt >= createdAt
 - Goal：[`GoalState.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalState.java)、[`GoalStateCodec.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodec.java)、[`GoalToolSupport.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalToolSupport.java)、[`GoalContextProjector.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalContextProjector.java)、[`GoalPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalPrompts.java)
 - 环境工具：[`EnvironmentCapabilityTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java)、[`EnvironmentPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentPrompts.java)
 - Skill 与 Subagent：[`LoadSkillTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillTool.java)、[`TaskTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)、[`SubagentConfig.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java)
-- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定完整的 14 工具清单、capability 映射与 descriptor schema/timeout 随 capability 同步，并断言 MCP 类能力不会被自动注册成模型工具；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java) 覆盖分支最新快照、fork/sibling 隔离、替换保留 `createdAt`、终态不可再更新与投影器静默；[`GoalStateCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodecTest.java)、[`LoadSkillToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillToolTest.java)、[`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java) 分别锁定严格 codec、来源环境不匹配拒绝与委派参数校验。
+- [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java) 锁定完整的 14 工具清单、capability 映射与 descriptor schema/timeout 随 capability 同步，并断言 MCP 类能力不会被自动注册成模型工具；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java) 覆盖分支最新快照、fork/sibling 隔离、替换保留 `createdAt`、终态不可再更新与投影器静默；[`GoalStateCodecTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStateCodecTest.java)、[`LoadSkillToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/skill/LoadSkillToolTest.java)、[`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java) 分别锁定严格 codec、冻结三元组精确加载与委派参数校验。
 
 ---
 

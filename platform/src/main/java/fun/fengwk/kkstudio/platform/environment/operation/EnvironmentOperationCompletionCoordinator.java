@@ -4,7 +4,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 
 import java.util.UUID;
 
-/** 协调 Daemon Capability 执行结果并原子终结操作记录与发布 Skill inventory（包内私有）。 */
+/** 协调 Daemon Capability 执行结果并原子终结操作记录（包内私有）。 */
 interface EnvironmentOperationCompletionCoordinator {
 
   /** 协调 Capability 执行返回结果（包括正常返回的成功与错误响应）。 */

@@ -29,28 +29,21 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillDescriptor;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonSkillSourceSnapshot;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 真实 {@link WebEnvironment#RANDOM_PORT} 端到端验证 Daemon WebSocket 适配器能容忍超过 Tomcat 8 KiB 默认文本缓冲区的
- * {@code READY}（skills）帧。
- *
- * <p>若未调高缓冲区配置，内嵌 Tomcat 在收到超长帧时会立刻以 close code 1009 关闭连接，导致实时注册表永远无法进入 READY。本测试发送一个携带远超默认阈值的厚重
- * skills payload 的 {@code READY} 帧，并断言 {@link EnvironmentRegistry#hasReadyLease(EnvironmentId)}
- * 在截止时间内变为 {@code true}。任何未来删除或弱化缓冲区初始化逻辑的改动都会在此处暴露，表现为注册表始终不进入 READY 且伴随 close code 1009。
+ * 真实 {@link WebEnvironment#RANDOM_PORT} 端到端验证 Daemon WebSocket 适配器在握手进入 READY 状态时，
+ * 能够正确处理严格宿主环境元数据（{version, environment:{operatingSystem,timeZone,note,rootPath}}）， 成功在注册表中建立 READY
+ * 租约，并断言注册表能力为纯 MCP 目录且绝不触发 close code 1009。
  */
 class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPostgresTestSupport {
 
@@ -62,8 +55,6 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
-  private static final UUID FAT_SOURCE_ID = UUID.fromString("99999999-9999-9999-9999-999999999999");
-  private static final String REVISION = "a".repeat(64);
 
   @LocalServerPort private int port;
 
@@ -85,16 +76,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   /** 远大于 8 KiB 的 {@code READY} skills 帧被内嵌容器接受，握手进入 READY；绝不能观察到 close code 1009。 */
   @Test
   void largeCapabilitiesFrameReachesReadyWithoutClose1009() throws Exception {
-    int minBytes = TOMCAT_DEFAULT_TEXT_BUFFER_BYTES + 4 * 1024;
-    String readyPayloadJson = largeSkillsReadyPayload(minBytes);
-    assertTrue(
-        readyPayloadJson.length() >= minBytes,
-        "test READY skills payload must exceed the configured buffer threshold");
-
+    String readyPayloadJson = readyPayload();
     String readyEnvelope = ENVELOPE_CODEC.encode(readyEnvelope(readyPayloadJson));
-    assertTrue(
-        readyEnvelope.length() > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
-        "test wire frame must exceed the default 8 KiB Tomcat text buffer");
 
     FrameListener listener = new FrameListener();
     OkHttpClient client = new OkHttpClient();
@@ -130,6 +113,19 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
       assertTrue(
           16L * 1024 * 1024 > TOMCAT_DEFAULT_TEXT_BUFFER_BYTES,
           "premise: gateway buffer limit must be raised above the 8 KiB default");
+
+      EnvironmentConnection connection = registry.find(ENVIRONMENT_ID).orElseThrow();
+      assertEquals(DaemonCapabilities.VERSION, connection.daemonCapabilities().version());
+      assertEquals(
+          DaemonOperatingSystem.LINUX,
+          connection.daemonCapabilities().environment().operatingSystem());
+      assertEquals("UTC", connection.daemonCapabilities().environment().timeZone());
+      assertEquals("Linux environment.", connection.daemonCapabilities().environment().note());
+      assertEquals("/home/dev", connection.daemonCapabilities().environment().rootPath());
+      assertEquals("/home/dev", connection.rootPath());
+      assertTrue(
+          connection.capabilities().stream().noneMatch(c -> c.id().value().startsWith("skill.")),
+          "registry capabilities must be MCP and platform catalog only, without legacy skill capabilities");
     } finally {
       client.dispatcher().executorService().shutdown();
       client.connectionPool().evictAll();
@@ -164,42 +160,12 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
     return URI.create("ws://localhost:" + port + EnvironmentDaemonWebSocketHandler.PATH);
   }
 
-  /**
-   * 生成超过 {@code minBytes} 的合法 READY payload。
-   *
-   * <p>厚帧必须由真实来源快照构成：descriptor 要携带完整身份（sourceId/sourceVersion/baseDirectory/revision）， 否则严格 codec
-   * 会拒绝。单条 description 被限制在 {@link DaemonSkillDescriptor#MAX_DESCRIPTION_CHARS}，因此厚度来自多个合规
-   * Skill，而不是一条超长描述。
-   */
-  private static String largeSkillsReadyPayload(int minBytes) {
-    for (int skillCount = 64; skillCount <= 4096; skillCount += 64) {
-      String payload = fatSkillsReadyPayload(skillCount);
-      if (payload.length() >= minBytes) {
-        return payload;
-      }
-    }
-    throw new IllegalStateException("cannot build a READY payload of " + minBytes + " bytes");
-  }
-
-  private static String fatSkillsReadyPayload(int skillCount) {
-    List<DaemonSkillDescriptor> skills = new ArrayList<>(skillCount);
-    for (int index = 0; index < skillCount; index++) {
-      skills.add(
-          new DaemonSkillDescriptor(
-              FAT_SOURCE_ID,
-              1,
-              "fat-skill-" + index,
-              "Fat skill " + index + " description.",
-              "/home/dev/skills/fat-" + index,
-              REVISION));
-    }
+  private static String readyPayload() {
     return CAPABILITIES_CODEC.encode(
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
-            1,
-            List.of(new DaemonSkillSourceSnapshot(FAT_SOURCE_ID, 1, REVISION, skills, List.of()))));
+                DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev")));
   }
 
   private static DaemonEnvelope helloEnvelope() {
