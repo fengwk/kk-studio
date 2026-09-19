@@ -98,7 +98,7 @@ class HarnessOneShotServiceTest {
   }
 
   @Test
-  void submitsSystemAndStructuredUserInOneBatchWithNoTools() {
+  void submitsSingleUserCommandCarryingTrustedReminderPrefixAndNoTools() {
     stubAcceptAsNewSession(id(3));
     UUID threadId =
         service.submit(
@@ -114,13 +114,36 @@ class HarnessOneShotServiceTest {
     verify(runtime).acceptCommands(accept.capture(), any(AcceptancePreflight.class));
     AcceptCommandsCommand command = accept.getValue();
     AcceptCommandsTarget.NewSession target = (AcceptCommandsTarget.NewSession) command.target();
-    assertEquals(2, command.commands().size());
+    // admission 只接受恰一条末尾 USER 命令：可信 system 文本必须并入该 USER 消息。
+    assertEquals(1, command.commands().size());
+    AgentMessage submitted =
+        ((CustomMessageCommandPayload) command.commands().getFirst().payload()).message();
+    assertEquals(AgentMessageRole.USER, submitted.role());
+    assertEquals(3, submitted.contents().size());
+    // 可信文本被包进 <system-reminder> 并与调用方内容同处一条 USER 消息。
     assertEquals(
-        AgentMessageRole.SYSTEM,
-        ((CustomMessageCommandPayload) command.commands().get(0).payload()).message().role());
-    assertEquals(
-        AgentMessageRole.USER,
-        ((CustomMessageCommandPayload) command.commands().get(1).payload()).message().role());
+        "<system-reminder>\nsystem\n</system-reminder>\n\n",
+        ((TextMessageContent) submitted.contents().getFirst()).text());
+    assertEquals("user", ((TextMessageContent) submitted.contents().get(1)).text());
+    assertEquals(" media", ((TextMessageContent) submitted.contents().get(2)).text());
+  }
+
+  /** 空白 system 文本不得伪造提醒段，调用方消息原样提交。 */
+  @Test
+  void omitsReminderWhenTrustedSystemTextIsBlank() {
+    stubAcceptAsNewSession(id(3));
+    service.submit(
+        "h3-agent",
+        "   ",
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("user"))));
+
+    ArgumentCaptor<AcceptCommandsCommand> accept =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(runtime).acceptCommands(accept.capture(), any(AcceptancePreflight.class));
+    AgentMessage submitted =
+        ((CustomMessageCommandPayload) accept.getValue().commands().getFirst().payload()).message();
+    assertEquals(1, submitted.contents().size());
+    assertEquals("user", ((TextMessageContent) submitted.contents().getFirst()).text());
   }
 
   @Test
