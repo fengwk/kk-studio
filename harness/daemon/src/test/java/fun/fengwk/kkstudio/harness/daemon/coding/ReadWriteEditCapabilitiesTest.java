@@ -93,6 +93,23 @@ class ReadWriteEditCapabilitiesTest {
     }
   }
 
+  /** 验证绝对本地路径可省略 workdir，而相对路径仍必须显式声明解析目录。 */
+  @Test
+  void readAcceptsAbsolutePathWithoutWorkdirAndRejectsRelativePathWithoutIt() throws Exception {
+    Path textFile = workdir.resolve("absolute.txt");
+    Files.writeString(textFile, "content\n");
+    ReadCapability read = new ReadCapability(config(), executor);
+
+    EnvironmentCapabilityResult absolute =
+        invoke(read, "{\"path\":" + json(textFile.toString()) + "}");
+    assertFalse(absolute.error());
+    assertTrue(text(absolute).contains("1|content"));
+
+    EnvironmentCapabilityResult relative = invoke(read, "{\"path\":\"absolute.txt\"}");
+    assertTrue(relative.error());
+    assertTrue(text(relative).contains("workdir is required"));
+  }
+
   /** 验证 ReadCapability 读取目录的分页、边界越界提示与展示格式。 */
   @Test
   void readDirectoryPaginationAndBoundaries() throws Exception {

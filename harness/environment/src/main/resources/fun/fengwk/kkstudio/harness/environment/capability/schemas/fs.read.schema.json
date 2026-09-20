@@ -7,7 +7,7 @@
     },
     "workdir": {
       "type": "string",
-      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Optional absolute directory used to resolve a relative local path. It is never inherited from another call, a session default, cwd, or home directory. Omit it for kkstudio: resources or absolute local paths. Provide an expanded absolute path (no '~' or environment-variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "offset": {
       "type": "integer",
@@ -23,8 +23,7 @@
     }
   },
   "required": [
-    "path",
-    "workdir"
+    "path"
   ],
   "additionalProperties": false
 }

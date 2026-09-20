@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 
 import java.util.List;
+import java.util.Set;
 
 /** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
@@ -61,12 +62,17 @@ class EnvironmentCapabilityCatalogTest {
     }
     // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。
     assertEquals(
-        expected,
+        expected.subList(1, expected.size()),
         EnvironmentCapabilityCatalog.descriptors().stream()
             .map(EnvironmentCapabilityDescriptor::id)
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
-    assertTrue(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
+    assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
+    assertEquals(
+        Set.of("path"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ)
+            .inputSchema()
+            .required());
   }
 
   /** descriptor 是 execution 的唯一事实源；可通过 find 与 require 查询。 */
