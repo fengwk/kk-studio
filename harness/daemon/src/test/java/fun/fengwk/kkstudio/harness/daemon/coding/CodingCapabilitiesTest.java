@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -83,7 +84,7 @@ class CodingCapabilitiesTest {
         () ->
             request(
                 read, "{\"path\":\"x\",\"workdir\":\"" + workspaceRoot + "\",\"unknown\":true}"));
-    assertThrows(IllegalArgumentException.class, () -> request(read, "{\"path\":\"x\"}"));
+    assertDoesNotThrow(() -> request(read, "{\"path\":\"x\"}"));
   }
 
   /** 越出 workdir 的相对遍历与符号链接目标都是普通路径：读取照常解析，写入落到符号链接指向的真实目录。 */

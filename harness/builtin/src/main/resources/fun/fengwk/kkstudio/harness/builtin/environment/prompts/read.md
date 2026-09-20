@@ -10,12 +10,16 @@ Usage:
 - Lines longer than 2000 code points are bounded to at most 2000 code points per read. The numbered body contains only exact file content (never synthetic truncation markers); metadata outside the numbered body reports the selected column range and the next-call hint.
 - Use `column_offset` with `limit=1` to read subsequent fragments of a long line.
 - Use `read` on directories instead of `bash ls`.
-- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
+- `path` may be a `kkstudio:` resource URI or a local path in the selected Environment.
+- Use `workdir` only to resolve a relative local path. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, cwd, or home directory.
+- Omit `workdir` for `kkstudio:` URIs and absolute local paths.
 
 Examples:
 - `read({ path: "src/example.ts", workdir: "/srv/project/packages/web" })`
 - `read({ path: "src/example.ts", workdir: "/srv/project/services/api", offset: 120, limit: 40 })`
 - `read({ path: "src/bundle.js", workdir: "/srv/project", offset: 1, limit: 1, column_offset: 2001 })`
+- `read({ path: "kkstudio:/skills/review/checklist/SKILL.md" })`
+- `read({ path: "/var/log/app.log", offset: 120, limit: 40 })`
 - `read({ path: ".", workdir: "/srv/project" })`
 - `read({ path: "src/", workdir: "C:/src/project" })`
 - `read({ path: "screenshot.png", workdir: "/tmp/agent-artifacts" })`

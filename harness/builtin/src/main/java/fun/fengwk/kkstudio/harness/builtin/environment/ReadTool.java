@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
-import fun.fengwk.kkstudio.harness.builtin.skill.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;

@@ -2,8 +2,8 @@
  * 内置 Environment capability 工具适配与 Prompt 资源加载。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.builtin.environment.ReadTool} 是统一读取入口，声明 {@link
- * fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements#optionalEnvironment()}， 将读取请求委托至注入的
- * {@link fun.fengwk.kkstudio.harness.builtin.skill.ReadToolExecutor}。 其余 8 个宿主环境工具基于 {@link
+ * fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements#optionalEnvironment()}，将读取请求委托至注入的
+ * {@link fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor}。其余 8 个宿主环境工具基于 {@link
  * fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool}，声明 {@link
  * fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements#environment()}（即 REQUIRED），
  * 将文件写编辑、搜索、进程执行与 LSP 等宿主操作委托至执行期绑定的 {@link

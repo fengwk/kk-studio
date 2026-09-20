@@ -233,7 +233,7 @@ class CodingCapabilitiesEdgeTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> EnvironmentPaths.existing("missing", nested.toRealPath()));
-    assertThrows(NullPointerException.class, () -> EnvironmentPaths.existing("file.txt", null));
+    assertThrows(IllegalArgumentException.class, () -> EnvironmentPaths.existing("file.txt", null));
     assertThrows(
         IllegalArgumentException.class,
         () -> EnvironmentPaths.existing("\u0000", nested.toRealPath()));

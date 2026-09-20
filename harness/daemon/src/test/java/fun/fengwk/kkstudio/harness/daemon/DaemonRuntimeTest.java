@@ -504,8 +504,7 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * 测试意图：coding capability 的 workdir 只来自该次调用 arguments，缺失时在请求构造期被 schema 确定性拒绝（因此没有 STARTED），且绝不回退到
-   * 任何默认路径。
+   * 测试意图：相对本地路径的 workdir 只来自该次调用 arguments，缺失时在 capability 执行期确定性拒绝，且绝不回退到任何默认路径。
    *
    * <p>用真实 {@link ReadCapability}：临时目录下放置同名文件；若实现发生回退，capability 就能读到该文件并在 COMPLETED
    * 内容中出现其文本，从而被本测试捕获。
@@ -527,11 +526,11 @@ class DaemonRuntimeTest {
       completeHandshake();
       transport.takeMessages(2);
 
-      // 省略 workdir：schema 必填校验在构造执行请求时失败 → 直接 FAILED，绝不发出 STARTED。
+      // 相对 path 省略 workdir：请求形状合法，但执行期拒绝且绝不回退到任何默认目录。
       transport.receive(invoke("missing-workdir", "fs.read", "1", 100, "{\"path\":\"local.txt\"}"));
-      List<DaemonEnvelope> missing = transport.takeMessages(1);
-      assertMessageTypes(missing, DaemonMessageType.FAILED);
-      String failure = missing.get(0).payloadJson();
+      List<DaemonEnvelope> missing = transport.takeMessages(2);
+      assertMessageTypes(missing, STARTED, DaemonMessageType.COMPLETED);
+      String failure = missing.get(1).payloadJson();
       assertTrue(failure.contains("workdir"), failure);
       assertFalse(failure.contains("from-local-dir"), failure);
 

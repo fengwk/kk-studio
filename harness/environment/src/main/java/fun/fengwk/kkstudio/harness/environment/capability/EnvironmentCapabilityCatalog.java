@@ -33,7 +33,6 @@ public final class EnvironmentCapabilityCatalog {
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
   private static final Set<EnvironmentCapabilityId> WORKDIR_CAPABILITY_IDS =
       Set.of(
-          EnvironmentCapabilityIds.FS_READ,
           EnvironmentCapabilityIds.FS_WRITE,
           EnvironmentCapabilityIds.FS_EDIT,
           EnvironmentCapabilityIds.PROCESS_EXEC,
@@ -104,7 +103,7 @@ public final class EnvironmentCapabilityCatalog {
     return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), defaultTimeout);
   }
 
-  /** 该能力是否要求具体 arguments 携带目标 Daemon 上的显式绝对 workdir。 */
+  /** 该能力是否要求 arguments 携带目标 Daemon 上的显式绝对 workdir。 */
   public static boolean requiresWorkdir(EnvironmentCapabilityId id) {
     require(id);
     return WORKDIR_CAPABILITY_IDS.contains(id);

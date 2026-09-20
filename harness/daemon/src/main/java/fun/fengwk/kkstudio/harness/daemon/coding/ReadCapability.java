@@ -46,7 +46,8 @@ public final class ReadCapability extends AbstractCodingCapability {
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
-    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    String rawWorkdir = optionalString(args, "workdir");
+    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
     Path path = EnvironmentPaths.existing(rawPath, workdir);
     String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
     Integer columnOffset = parseOptionalPositiveInt(args, "column_offset");

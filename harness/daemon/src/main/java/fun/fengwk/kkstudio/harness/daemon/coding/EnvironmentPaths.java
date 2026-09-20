@@ -11,8 +11,9 @@ import java.util.Objects;
 /**
  * coding capability 的本地 workdir 与参数路径解析。
  *
- * <p>workdir 是本次调用 arguments 中的必填字段，指目标 Daemon 上的显式绝对目录。Daemon 用自身 {@code Path} 校验它必须绝对、现存且为目录， 不做
- * {@code ~}/环境变量展开、不自动 mkdir、不回退到 Environment Root 或任何会话默认值。每次调用独立解析，调用之间不继承目录。
+ * <p>相对路径必须由本次调用 arguments 中的显式绝对 workdir 解析。Daemon 用自身 {@code Path} 校验 workdir 必须绝对、现存且为目录， 不做
+ * {@code ~}/环境变量展开、不自动 mkdir、不回退到 cwd、HOME 或任何会话默认值。{@code read} 的绝对路径不需要 workdir；每次调用独立解析，
+ * 调用之间不继承目录。
  *
  * <p>workdir 不是文件系统沙箱：绝对路径与越出 workdir 的相对路径只要底层文件系统支持就照常解析，符号链接照常跟随。命令与文件系统的业务授权属于 Platform
  * permission。
@@ -46,7 +47,7 @@ final class EnvironmentPaths {
 
   /** 解析已存在的文件或目录，返回其真实路径。 */
   static Path existing(String rawPath, Path workdir) {
-    Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
+    Path candidate = resolve(rawPath, workdir, "path");
     if (!Files.exists(candidate)) {
       throw new IllegalArgumentException("path does not exist: " + display(rawPath));
     }
@@ -83,7 +84,14 @@ final class EnvironmentPaths {
   private static Path resolve(String raw, Path base, String name) {
     requirePath(raw, name);
     Path requested = parse(raw, name);
-    return (requested.isAbsolute() ? requested : base.resolve(requested)).normalize();
+    if (requested.isAbsolute()) {
+      return requested.normalize();
+    }
+    if (base == null) {
+      throw new IllegalArgumentException(
+          "workdir is required when " + name + " is a relative path: " + raw);
+    }
+    return requireWorkdir(base).resolve(requested).normalize();
   }
 
   private static Path parse(String raw, String name) {

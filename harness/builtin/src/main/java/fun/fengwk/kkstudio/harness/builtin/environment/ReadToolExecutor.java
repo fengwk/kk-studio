@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.builtin.skill;
+package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;

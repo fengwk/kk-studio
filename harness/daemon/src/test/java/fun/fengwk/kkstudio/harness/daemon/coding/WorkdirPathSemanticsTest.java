@@ -27,9 +27,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 显式 workdir 语义契约：workdir 是每次调用 arguments 中的必填绝对目录，不是会话状态、不是沙箱，也没有任何默认值。
+ * 显式 workdir 语义契约：相对本地路径必须在每次调用 arguments 中携带绝对 workdir；workdir 不是会话状态、不是沙箱，也没有任何默认值。
  *
- * <p>证明：省略 workdir 一律拒绝且绝不回退到 Environment Root；相对 path 以该次调用的 workdir 为基准；workdir 之外的绝对路径与
+ * <p>证明：相对 path 省略 workdir 会拒绝且绝不回退到任何默认目录；相对 path 以该次调用的 workdir 为基准；workdir 之外的绝对路径与
  * 越界相对遍历都是普通路径；非法或不存在的 workdir 在执行前确定性拒绝；每次调用独立解析、互不继承。
  */
 class WorkdirPathSemanticsTest {
@@ -47,25 +47,19 @@ class WorkdirPathSemanticsTest {
     executor.shutdownNow();
   }
 
-  /**
-   * 省略 workdir 必须被拒绝，且绝不回退到默认路径。
-   *
-   * <p>workdir 是 schema 必填字段，因此拒绝发生在执行请求构造期（即永远不会进入 capability 执行），这是比“执行后报错”更强的 保证：在 workspace
-   * 下放置同名文件也无法被读取。
-   */
+  /** 相对 path 省略 workdir 必须在执行期被拒绝，且绝不回退到默认路径；绝对 path 与 Platform URI 的可选 workdir 契约由各自路由处理。 */
   @Test
   void omittedWorkdirIsRejectedWithoutDefaultFallback() throws Exception {
     Files.writeString(workdir.resolve("local.txt"), "from-explicit-workdir\n");
     Files.writeString(workspaceRoot.resolve("local.txt"), "from-workspace-root\n");
 
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> invoke(new ReadCapability(config(), executor), "{\"path\":\"local.txt\"}"));
+    EnvironmentCapabilityResult result =
+        invoke(new ReadCapability(config(), executor), "{\"path\":\"local.txt\"}");
 
-    assertTrue(error.getMessage().contains("workdir"), error.getMessage());
-    assertFalse(error.getMessage().contains("from-workspace-root"));
-    assertFalse(error.getMessage().contains("from-explicit-workdir"));
+    assertTrue(result.error());
+    assertTrue(text(result).contains("workdir"), text(result));
+    assertFalse(text(result).contains("from-workspace-root"));
+    assertFalse(text(result).contains("from-explicit-workdir"));
   }
 
   /** 非绝对 workdir（相对形态）同样在构造期被 schema 接受形状但随后被词法校验拒绝，不能按 Backend cwd 或任何基准解析。 */
