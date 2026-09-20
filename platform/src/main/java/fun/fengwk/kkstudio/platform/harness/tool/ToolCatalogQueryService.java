@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 
 import java.util.List;
@@ -30,8 +31,11 @@ public class ToolCatalogQueryService {
     ToolCatalogEntryDTO dto = new ToolCatalogEntryDTO();
     dto.setName(descriptor.name());
     dto.setDescription(descriptor.description());
-    dto.setEnvironmentRequired(requirements != null && requirements.environmentRequired());
-    dto.setEnvironmentId(
+    dto.setEnvironmentSupport(
+        requirements == null
+            ? EnvironmentSupportDTO.NONE
+            : EnvironmentSupportDTO.valueOf(requirements.environmentSupport().name()));
+    dto.setRequiredEnvironmentId(
         requirements != null && requirements.requiredEnvironmentId() != null
             ? requirements.requiredEnvironmentId().value().toString()
             : null);

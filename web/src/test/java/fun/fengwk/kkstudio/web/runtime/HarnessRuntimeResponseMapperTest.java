@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledUserMessage;
@@ -613,15 +614,17 @@ class HarnessRuntimeResponseMapperTest {
     return new ToolBinding(
         new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
-        true,
-        EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
+        EnvironmentSupport.REQUIRED,
+        EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
+        "test-env");
   }
 
   private static ToolBinding hostToolBinding() {
     return new ToolBinding(
         new AgentToolDefinition(descriptor(), ToolVisibility.SELECTABLE),
         new ContributorBinding("test", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

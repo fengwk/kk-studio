@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
@@ -27,8 +26,9 @@ class AgentPromptComposerTest {
   private final AgentPromptComposer composer =
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, Duration.ZERO, DEFAULT_MAX_TURNS));
 
-  private static SkillBinding skill(String name, String description) {
-    return new SkillBinding(name, "test-package", "1.0.0", description);
+  private static SkillPromptEntry skill(String name, String description) {
+    return new SkillPromptEntry(
+        name, description, "kkstudio:/skills/test-package/" + name + "/SKILL.md");
   }
 
   /** 空正文 + 无 Environment 只保留有值的 date，不输出 none 字段。 */
@@ -61,7 +61,7 @@ class AgentPromptComposerTest {
     assertTrue(
         body >= 0 && currentEnvironment > body && skills > currentEnvironment && subagents > skills,
         result);
-    assertTrue(result.contains("load_skill"), result);
+    assertTrue(result.contains("read"), result);
     assertFalse(result.contains("${skills}"), result);
     assertFalse(result.contains("${subagents}"), result);
   }
@@ -92,6 +92,8 @@ class AgentPromptComposerTest {
         result.contains(
             "<description>uses &lt;angle&gt; and &quot;quotes&quot; and &apos;apos&apos;</description>"),
         result);
+    assertTrue(
+        result.contains("<path>kkstudio:/skills/test-package/a&amp;b/SKILL.md</path>"), result);
     assertTrue(result.contains("<name>x&lt;y&gt;</name>"), result);
     assertTrue(result.contains("<description>desc &amp; more</description>"), result);
   }

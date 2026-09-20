@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -308,7 +309,8 @@ class ToolExecutionGatewayAdmissionTest {
             new ToolBinding(
                 new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("goal", "tool", List.of()),
-                false,
+                EnvironmentSupport.NONE,
+                null,
                 null));
     return ToolGatewayTestSupport.execution(request);
   }

@@ -1,10 +1,14 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -12,6 +16,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -128,8 +133,8 @@ final class ToolGatewayTestSupport {
 
   private ToolGatewayTestSupport() {}
 
-  static Tool dummyLoadSkillTool() {
-    return new FakeTool(hostDescriptor("load_skill"));
+  static ReadTool dummyReadTool() {
+    return new ReadTool(mock(ReadToolExecutor.class));
   }
 
   static Tool dummyTaskTool() {
@@ -137,7 +142,7 @@ final class ToolGatewayTestSupport {
   }
 
   static BuiltinHarnessContributor builtinContributor() {
-    return new BuiltinHarnessContributor(dummyLoadSkillTool(), dummyTaskTool());
+    return new BuiltinHarnessContributor(dummyReadTool(), dummyTaskTool());
   }
 
   static HarnessCatalog defaultCatalog(Tool... tools) {
@@ -174,7 +179,8 @@ final class ToolGatewayTestSupport {
         new ToolBinding(
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "host-tool", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null));
   }
 
@@ -196,7 +202,12 @@ final class ToolGatewayTestSupport {
             List.of());
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", argumentsJson),
-        new ToolBinding(bashContribution.definition(), contributor, true, environmentId));
+        new ToolBinding(
+            bashContribution.definition(),
+            contributor,
+            EnvironmentSupport.REQUIRED,
+            environmentId,
+            "test-env"));
   }
 
   /** branch 未选择 Environment 的环境工具请求：environmentRequired=true 但路由身份为 null。 */
@@ -208,9 +219,15 @@ final class ToolGatewayTestSupport {
             bashContribution.id().contributorId().value(),
             bashContribution.id().localName(),
             List.of());
+    ToolBinding binding = mock(ToolBinding.class);
+    when(binding.definition()).thenReturn(bashContribution.definition());
+    when(binding.descriptor()).thenReturn(bashContribution.definition().descriptor());
+    when(binding.contributor()).thenReturn(contributor);
+    when(binding.environmentSupport()).thenReturn(EnvironmentSupport.REQUIRED);
+    when(binding.environmentId()).thenReturn(null);
+    when(binding.environmentName()).thenReturn(null);
     return new ToolInvocationRequest(
-        new ToolCall(callId, "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"),
-        new ToolBinding(bashContribution.definition(), contributor, true, null));
+        new ToolCall(callId, "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"), binding);
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {

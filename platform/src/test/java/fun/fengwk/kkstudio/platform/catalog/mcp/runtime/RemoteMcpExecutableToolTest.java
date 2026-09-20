@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -75,7 +76,7 @@ class RemoteMcpExecutableToolTest {
 
     assertEquals(descriptor, tool.descriptor());
     assertNotNull(tool.requirements());
-    assertFalse(tool.requirements().environmentRequired());
+    assertEquals(EnvironmentSupport.NONE, tool.requirements().environmentSupport());
     assertNull(tool.requirements().requiredEnvironmentId());
   }
 

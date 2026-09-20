@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -209,7 +210,8 @@ public final class HarnessRuntimeTestFixtures {
             new ToolBinding(
                 new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("test", "web-search", List.of()),
-                false,
+                EnvironmentSupport.NONE,
+                null,
                 null));
     return new ToolInvocation(
         id(100),

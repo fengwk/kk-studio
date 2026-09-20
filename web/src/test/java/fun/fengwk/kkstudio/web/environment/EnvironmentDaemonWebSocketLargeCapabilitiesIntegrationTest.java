@@ -121,8 +121,10 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
           connection.daemonCapabilities().environment().operatingSystem());
       assertEquals("UTC", connection.daemonCapabilities().environment().timeZone());
       assertEquals("Linux environment.", connection.daemonCapabilities().environment().note());
-      assertEquals("/home/dev", connection.daemonCapabilities().environment().rootPath());
-      assertEquals("/home/dev", connection.rootPath());
+      assertEquals("dev", connection.daemonCapabilities().environment().userName());
+      assertEquals("/home/dev", connection.daemonCapabilities().environment().homeDirectory());
+      assertEquals("dev", connection.userName());
+      assertEquals("/home/dev", connection.homeDirectory());
       assertTrue(
           connection.capabilities().stream().noneMatch(c -> c.id().value().startsWith("skill.")),
           "registry capabilities must be MCP and platform catalog only, without legacy skill capabilities");
@@ -165,7 +167,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev")));
+                DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment.")));
   }
 
   private static DaemonEnvelope helloEnvelope() {

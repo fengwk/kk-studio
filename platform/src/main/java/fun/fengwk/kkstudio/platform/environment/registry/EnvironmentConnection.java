@@ -37,8 +37,14 @@ public record EnvironmentConnection(
     return EnvironmentCapabilityCatalog.descriptors();
   }
 
-  public String rootPath() {
-    return daemonCapabilities == null ? null : daemonCapabilities.environment().rootPath();
+  /** 连接行保留的最近一次 READY 宿主用户名；从未 READY 时为 null。 */
+  public String userName() {
+    return daemonCapabilities == null ? null : daemonCapabilities.environment().userName();
+  }
+
+  /** 连接行保留的最近一次 READY 宿主 canonical home 目录；从未 READY 时为 null。 */
+  public String homeDirectory() {
+    return daemonCapabilities == null ? null : daemonCapabilities.environment().homeDirectory();
   }
 
   public boolean isReady(Instant now, Duration heartbeatTimeout) {

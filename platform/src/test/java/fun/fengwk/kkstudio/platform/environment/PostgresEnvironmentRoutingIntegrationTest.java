@@ -61,7 +61,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
+              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
 
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
 

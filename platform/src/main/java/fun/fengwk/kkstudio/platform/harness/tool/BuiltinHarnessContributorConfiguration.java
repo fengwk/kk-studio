@@ -9,9 +9,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
-import fun.fengwk.kkstudio.harness.builtin.skill.SkillContentLoader;
-import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
@@ -32,7 +31,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 装配第一方内置工具（{@code load_skill} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
+ * 装配第一方内置工具（{@code read} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
  *
  * <p>核心内置装配为无条件装配（不使用 {@code @ConditionalOnBean}），确保缺失必要依赖时在启动期明确失败， 而不会静默降级并丢失最小功能集。
  */
@@ -42,10 +41,8 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public LoadSkillTool loadSkillTool(
-      ThreadSelectedSkillLookup skillLookup, SkillContentLoader skillContentLoader) {
-    // Skill 正文由 Platform 全局目录直接按冻结 revision 提供，不经 Daemon，也不需要独立超时预算。
-    return new LoadSkillTool(skillLookup, skillContentLoader);
+  public ReadTool readTool(ReadToolExecutor readToolExecutor) {
+    return new ReadTool(readToolExecutor);
   }
 
   /**
@@ -114,8 +111,7 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public BuiltinHarnessContributor builtinHarnessContributor(
-      LoadSkillTool loadSkillTool, TaskTool taskTool) {
-    return new BuiltinHarnessContributor(loadSkillTool, taskTool);
+  public BuiltinHarnessContributor builtinHarnessContributor(ReadTool readTool, TaskTool taskTool) {
+    return new BuiltinHarnessContributor(readTool, taskTool);
   }
 }

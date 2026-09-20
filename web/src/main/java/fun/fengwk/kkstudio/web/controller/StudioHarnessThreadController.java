@@ -20,9 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSystemPromptPreviewDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadDTO;
@@ -50,14 +48,10 @@ import java.util.function.Supplier;
 @RequestMapping("/api/harness/threads")
 public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
-  private final SystemPromptPreviewService systemPromptPreviewService;
 
   /** 创建 Thread API Controller。 */
-  public StudioHarnessThreadController(
-      HarnessRuntime runtime, SystemPromptPreviewService systemPromptPreviewService) {
+  public StudioHarnessThreadController(HarnessRuntime runtime) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
-    this.systemPromptPreviewService =
-        Objects.requireNonNull(systemPromptPreviewService, "systemPromptPreviewService");
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
@@ -85,19 +79,6 @@ public class StudioHarnessThreadController {
                       HarnessRuntimeRequestMapper.toRenameThreadCommand(threadId, request));
               return HarnessRuntimeResponseMapper.toThreadDto(
                   runtime.getThreadSnapshot(updated.id()));
-            }));
-  }
-
-  /** 按当前 branch 最新 Agent / Environment 现算系统提示词预览。进入 Debug 与 turn 结束后由前端按需读取。 */
-  @GetMapping("/{threadId}/system-prompt")
-  public Result<HarnessSystemPromptPreviewDTO> getSystemPrompt(@PathVariable String threadId) {
-    return Results.ok(
-        withRuntimeTranslation(
-            () -> {
-              UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
-              HarnessSystemPromptPreviewDTO dto = new HarnessSystemPromptPreviewDTO();
-              dto.setText(systemPromptPreviewService.preview(id));
-              return dto;
             }));
   }
 

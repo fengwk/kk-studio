@@ -44,8 +44,8 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
-  public boolean existsReferencingSkill(String skillName) {
-    return agentDefinitionMapper.existsReferencingSkill(skillName);
+  public boolean existsReferencingSkill(String packageName, String skillName) {
+    return agentDefinitionMapper.existsReferencingSkill(packageName, skillName);
   }
 
   @Override

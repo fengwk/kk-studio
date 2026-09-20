@@ -4,7 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -12,19 +13,19 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import java.util.Collection;
 import java.util.List;
 
-/** Skill package 的查找与引用保护检查。 */
+/** Skill Package 的查找与 Agent 引用保护检查。 */
 @AllArgsConstructor
 @Component
 final class SkillPackageGuard {
 
-  private static final String RESOURCE = SkillPackageMutationFactory.RESOURCE;
+  static final String RESOURCE = "skill_package";
 
-  private final SkillCatalogRepository skillCatalogRepository;
+  private final SkillPackageRepository skillPackageRepository;
   private final AgentDefinitionRepository agentDefinitionRepository;
 
-  /** 以 {@code FOR UPDATE} 锁定某 package 名当前的活跃版本；缺失则 404。 */
-  SkillPackage requireActivePackageForUpdate(String packageName) {
-    SkillPackage skillPackage = skillCatalogRepository.lockActivePackage(packageName);
+  /** 以 {@code FOR UPDATE} 锁定某 Package；缺失则 404。 */
+  SkillPackage requirePackageForUpdate(String packageName) {
+    SkillPackage skillPackage = skillPackageRepository.lockPackage(packageName);
     if (skillPackage == null) {
       throw new AiResourceNotFoundException(RESOURCE);
     }
@@ -32,28 +33,31 @@ final class SkillPackageGuard {
   }
 
   /**
-   * 按 {@code name} 升序 {@code FOR UPDATE} 锁定给定名称的活跃 Skill 行。
+   * 拒绝让仍被任何 Agent {@code SkillRef} 引用的 Skill 从 Package 中消失。
    *
-   * <p>与 Agent 创建/更新的选择校验共用同一把行锁顺序，因此“校验引用”与“停用 Skill”严格串行，不存在并发悬空引用。
+   * <p>引用保护按精确的 {@code (packageName, name)} 判定：保留同名 Skill（内容随 commit 变化）不构成移除。
    */
-  void lockActiveSkills(Collection<String> names) {
-    skillCatalogRepository.lockActiveSkillsByNames(names);
-  }
-
-  /**
-   * 拒绝停用仍被任何 Agent 引用的 Skill。
-   *
-   * <p>只有从活跃目录真正消失的名称才算移除；保留同名 Skill（内容可变更）不构成移除。
-   */
-  void ensureRemovable(Collection<String> removedNames) {
+  void ensureSkillsRemovable(String packageName, Collection<String> removedSkillNames) {
     List<String> referenced =
-        removedNames.stream()
-            .filter(agentDefinitionRepository::existsReferencingSkill)
+        removedSkillNames.stream()
+            .filter(name -> agentDefinitionRepository.existsReferencingSkill(packageName, name))
             .sorted()
             .toList();
     if (!referenced.isEmpty()) {
       throw new AiInUseException(
-          RESOURCE, "skills are still referenced by agents: " + String.join(", ", referenced));
+          RESOURCE,
+          "skills are still referenced by agents: "
+              + packageName
+              + "/"
+              + String.join(", ", referenced));
     }
+  }
+
+  /** 从 manifest 中提取全部 Skill 名。 */
+  static List<String> manifestNames(List<SkillManifestEntry> skills) {
+    if (skills == null) {
+      return List.of();
+    }
+    return skills.stream().map(SkillManifestEntry::name).toList();
   }
 }

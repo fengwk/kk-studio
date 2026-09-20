@@ -16,6 +16,7 @@ import org.mockito.ArgumentCaptor;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderRequest;
@@ -73,7 +74,8 @@ class CatalogToolHistoryActionResolverTest {
     CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     assertThrows(NullPointerException.class, () -> resolver.resolve(null, call));
@@ -100,7 +102,8 @@ class CatalogToolHistoryActionResolverTest {
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -129,7 +132,8 @@ class CatalogToolHistoryActionResolverTest {
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -157,7 +161,8 @@ class CatalogToolHistoryActionResolverTest {
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     Optional<String> action = resolver.resolve(binding, new ToolCall("call-1", TOOL_NAME, "{}"));
 
     assertTrue(action.isEmpty());
@@ -184,7 +189,8 @@ class CatalogToolHistoryActionResolverTest {
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
     // Binding 中冻结的是 builtin.environment
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -214,7 +220,8 @@ class CatalogToolHistoryActionResolverTest {
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
     // Binding 中 localName 为 read
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -249,7 +256,8 @@ class CatalogToolHistoryActionResolverTest {
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
     ToolBinding binding =
-        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, frozenDescriptor, false, null, null);
+        createBinding(
+            CONTRIBUTOR_ID, LOCAL_NAME, frozenDescriptor, EnvironmentSupport.NONE, null, null);
     Optional<String> action = resolver.resolve(binding, new ToolCall("call-1", TOOL_NAME, "{}"));
 
     assertTrue(action.isEmpty());
@@ -265,7 +273,8 @@ class CatalogToolHistoryActionResolverTest {
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.empty());
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -283,7 +292,8 @@ class CatalogToolHistoryActionResolverTest {
         .thenThrow(new RuntimeException("Catalog lookup failed"));
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -309,7 +319,8 @@ class CatalogToolHistoryActionResolverTest {
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -339,7 +350,8 @@ class CatalogToolHistoryActionResolverTest {
 
     String envName = "production-cluster";
     ToolBinding binding =
-        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, true, ENV_ID, envName);
+        createBinding(
+            CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.REQUIRED, ENV_ID, envName);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{\"path\":\"/workspace/test.txt\"}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -376,7 +388,8 @@ class CatalogToolHistoryActionResolverTest {
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
     when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
 
-    ToolBinding binding = createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, false, null, null);
+    ToolBinding binding =
+        createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
     Optional<String> action = resolver.resolve(binding, call);
@@ -417,12 +430,12 @@ class CatalogToolHistoryActionResolverTest {
       String contributorId,
       String localName,
       ToolDescriptor descriptor,
-      boolean environmentRequired,
+      EnvironmentSupport environmentSupport,
       EnvironmentId environmentId,
       String environmentName) {
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     ContributorBinding contributor = new ContributorBinding(contributorId, localName, List.of());
     return new ToolBinding(
-        definition, contributor, environmentRequired, environmentId, environmentName);
+        definition, contributor, environmentSupport, environmentId, environmentName);
   }
 }

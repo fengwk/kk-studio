@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -278,7 +279,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
             .findFirst()
             .orElseThrow();
     assertEquals(modelName, mcpBinding.definition().descriptor().name());
-    assertFalse(mcpBinding.environmentRequired());
+    assertEquals(EnvironmentSupport.NONE, mcpBinding.environmentSupport());
     assertNull(mcpBinding.environmentId());
     // ContributionId 仅对模型可见 name 做 canonical 字符转换，不引入隐藏 UUID。
     assertEquals(McpToolCatalog.CONTRIBUTOR_ID.value(), mcpBinding.contributor().contributorId());

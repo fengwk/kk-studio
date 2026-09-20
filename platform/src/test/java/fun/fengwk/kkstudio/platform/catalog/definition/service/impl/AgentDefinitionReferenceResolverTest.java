@@ -15,15 +15,16 @@ import org.mockito.InOrder;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.util.List;
-import java.util.Set;
 
-/** Agent 引用解析必须在写入前锁定全局 Agent、Model 与 Skill。 */
+/** Agent 引用解析必须在写入前校验全局 Agent、Model 与 Skill 引用。 */
 class AgentDefinitionReferenceResolverTest {
 
   @Test
@@ -32,7 +33,7 @@ class AgentDefinitionReferenceResolverTest {
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
             mock(AgentModelRepository.class),
-            mock(SkillCatalogRepository.class));
+            mock(SkillCatalogQueryService.class));
 
     assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent("missing"));
     assertThrows(
@@ -50,7 +51,7 @@ class AgentDefinitionReferenceResolverTest {
     when(definitions.getByNameForUpdate("omega")).thenReturn(omega);
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
-            definitions, mock(AgentModelRepository.class), mock(SkillCatalogRepository.class));
+            definitions, mock(AgentModelRepository.class), mock(SkillCatalogQueryService.class));
 
     assertSame(
         target,
@@ -62,42 +63,58 @@ class AgentDefinitionReferenceResolverTest {
     ordered.verify(definitions).getByNameForUpdate("omega");
   }
 
-  /** Skill 统一按名称排序后一次加锁，缺失任一名称都 fail closed。 */
+  /** 测试意图：Skill 引用校验：查询 package 及其 manifest，任一 Package 或 Skill 缺失都 fail closed。 */
   @Test
-  void locksSkillsInCanonicalOrderAndRejectsMissingNames() {
-    SkillCatalogRepository skills = mock(SkillCatalogRepository.class);
+  void validatesSkillReferencesAndRejectsMissingOnes() {
+    SkillCatalogQueryService skillQueryService = mock(SkillCatalogQueryService.class);
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class), mock(AgentModelRepository.class), skills);
+            mock(AgentDefinitionRepository.class),
+            mock(AgentModelRepository.class),
+            skillQueryService);
 
-    when(skills.lockActiveSkillsByNames(Set.of("dev", "ops")))
-        .thenReturn(List.of(entry("dev"), entry("ops")));
-    assertDoesNotThrow(() -> resolver.requireCurrentSkills(List.of("ops", "dev")));
-    verify(skills).lockActiveSkillsByNames(Set.of("dev", "ops"));
+    SkillPackage pkg = new SkillPackage();
+    pkg.setPackageName("tools");
+    pkg.setSkills(
+        List.of(
+            new SkillManifestEntry("dev", "dev desc"), new SkillManifestEntry("ops", "ops desc")));
+    when(skillQueryService.getPackage("tools")).thenReturn(pkg);
 
-    when(skills.lockActiveSkillsByNames(Set.of("dev", "missing")))
-        .thenReturn(List.of(entry("dev")));
+    assertDoesNotThrow(
+        () ->
+            resolver.requireCurrentSkills(
+                List.of(skillRef("tools", "ops"), skillRef("tools", "dev"))));
+
+    // 缺少 skill
     assertThrows(
         AiValidationException.class,
-        () -> resolver.requireCurrentSkills(List.of("missing", "dev")));
+        () ->
+            resolver.requireCurrentSkills(
+                List.of(skillRef("tools", "missing"), skillRef("tools", "dev"))));
+
+    // 缺少 package
+    assertThrows(
+        AiValidationException.class,
+        () -> resolver.requireCurrentSkills(List.of(skillRef("missing-pkg", "dev"))));
   }
 
   @Test
-  void emptySkillSelectionDoesNotAcquireLocks() {
-    SkillCatalogRepository skills = mock(SkillCatalogRepository.class);
+  void emptySkillSelectionDoesNotQueryCatalog() {
+    SkillCatalogQueryService skillQueryService = mock(SkillCatalogQueryService.class);
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
-            mock(AgentDefinitionRepository.class), mock(AgentModelRepository.class), skills);
+            mock(AgentDefinitionRepository.class),
+            mock(AgentModelRepository.class),
+            skillQueryService);
 
     assertDoesNotThrow(() -> resolver.requireCurrentSkills(List.of()));
-    verify(skills, never()).lockActiveSkillsByNames(List.of());
+    verify(skillQueryService, never()).getPackage(null);
   }
 
-  private static Skill entry(String name) {
-    Skill skill = new Skill();
-    skill.setName(name);
-    skill.setPackageName("package");
-    skill.setPackageVersion("1.0.0");
-    return skill;
+  private static SkillRefDTO skillRef(String packageName, String name) {
+    SkillRefDTO ref = new SkillRefDTO();
+    ref.setPackageName(packageName);
+    ref.setName(name);
+    return ref;
   }
 }

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -143,7 +144,8 @@ class ToolExecutionGatewayPreflightTest {
                     new ToolBinding(
                         new AgentToolDefinition(unknown, ToolVisibility.SELECTABLE),
                         new ContributorBinding("test", "missing", List.of()),
-                        false,
+                        EnvironmentSupport.NONE,
+                        null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertEquals(
@@ -159,7 +161,8 @@ class ToolExecutionGatewayPreflightTest {
                     new ToolBinding(
                         hostDefinition(mismatched),
                         new ContributorBinding("test", "host-tool", List.of()),
-                        false,
+                        EnvironmentSupport.NONE,
+                        null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertEquals(
@@ -331,7 +334,12 @@ class ToolExecutionGatewayPreflightTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
-            new ToolBinding(contribution.definition(), contributor, true, environmentId));
+            new ToolBinding(
+                contribution.definition(),
+                contributor,
+                EnvironmentSupport.OPTIONAL,
+                environmentId,
+                "test-env"));
     return gateway.preflight(request);
   }
 
@@ -357,7 +365,8 @@ class ToolExecutionGatewayPreflightTest {
             new ToolBinding(
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
-                false,
+                EnvironmentSupport.NONE,
+                null,
                 null));
     return gateway.preflight(request);
   }
@@ -392,7 +401,8 @@ class ToolExecutionGatewayPreflightTest {
             new ToolBinding(
                 hostDefinition(descriptor),
                 new ContributorBinding("test", "host-tool", List.of()),
-                false,
+                EnvironmentSupport.NONE,
+                null,
                 null));
     return gateway.preflight(request);
   }
@@ -451,7 +461,8 @@ class ToolExecutionGatewayPreflightTest {
                     contribution.id().contributorId().value(),
                     contribution.id().localName(),
                     List.of()),
-                false,
+                EnvironmentSupport.NONE,
+                null,
                 null));
 
     ToolGateway.PreflightResult result = gateway.preflight(request);

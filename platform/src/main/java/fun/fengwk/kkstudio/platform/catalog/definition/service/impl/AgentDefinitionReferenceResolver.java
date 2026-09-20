@@ -7,17 +7,18 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.TreeSet;
 
-/** 解析全局 Agent definition、model 与 Skill 名引用。 */
+/** 解析全局 Agent definition、model 与 Skill 引用。 */
 @AllArgsConstructor
 @Component
 final class AgentDefinitionReferenceResolver {
@@ -28,7 +29,7 @@ final class AgentDefinitionReferenceResolver {
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
-  private final SkillCatalogRepository skillCatalogRepository;
+  private final SkillCatalogQueryService skillCatalogQueryService;
 
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
@@ -64,24 +65,30 @@ final class AgentDefinitionReferenceResolver {
   }
 
   /**
-   * 锁定并校验 Agent 选中的全局 Skill 名。
+   * 校验 Agent 选中的全局 Skill 引用必须存在。
    *
-   * <p>按 {@code name} 升序对全部选中名取活跃 Skill 行锁，与 package 替换/删除的锁顺序一致，因此 Agent 的引用不会在并发 package
-   * 变更中被静默悬空；任一名称不存在于全局目录时确定性拒绝。Agent 不再需要 Environment 参与。
+   * <p>对每个引用读取 Package 权威事实与其当前 manifest；任一 Package 或 Skill 缺失时确定性拒绝。 不再需要行锁，因为 Package 的 current
+   * commit 与 manifest 是单表行的原子事实。
    */
-  void requireCurrentSkills(List<String> skillNames) {
-    if (skillNames == null || skillNames.isEmpty()) {
+  void requireCurrentSkills(List<SkillRefDTO> skills) {
+    if (skills == null || skills.isEmpty()) {
       return;
     }
-    Set<String> names = new TreeSet<>(skillNames);
-    Set<String> locked = new TreeSet<>();
-    for (Skill skill : skillCatalogRepository.lockActiveSkillsByNames(names)) {
-      locked.add(skill.getName());
+    List<String> missing = new ArrayList<>();
+    for (SkillRefDTO ref : skills) {
+      String identity = ref == null ? "null" : ref.getPackageName() + "/" + ref.getName();
+      SkillPackage pkg =
+          ref == null ? null : skillCatalogQueryService.getPackage(ref.getPackageName());
+      if (pkg == null || pkg.findSkill(ref.getName()) == null) {
+        if (!missing.contains(identity)) {
+          missing.add(identity);
+        }
+      }
     }
-    List<String> missing = names.stream().filter(name -> !locked.contains(name)).sorted().toList();
     if (!missing.isEmpty()) {
+      missing.sort(String::compareTo);
       throw new AiValidationException(
-          SKILL_RESOURCE, "unknown agent skill names: " + String.join(", ", missing));
+          SKILL_RESOURCE, "unknown agent skills: " + String.join(", ", missing));
     }
   }
 

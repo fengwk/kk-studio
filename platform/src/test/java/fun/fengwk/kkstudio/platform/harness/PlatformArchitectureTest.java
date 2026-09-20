@@ -140,31 +140,6 @@ class PlatformArchitectureTest {
         "EnvironmentDaemonGateway must use Environment Capability terminology");
   }
 
-  /**
-   * path pattern 的 gitignore 语义只在 harness-runtime 的 {@code PermissionPathPattern} 内部持有；platform
-   * 永远不直接 import JGit。
-   */
-  @Test
-  void platformNeverImportsJGitDirectly() throws IOException {
-    Path main = locatePlatformMainJava();
-    List<String> violations = new ArrayList<>();
-    try (Stream<Path> paths = Files.walk(main)) {
-      List<Path> javaFiles = paths.filter(c -> c.toString().endsWith(".java")).toList();
-      for (Path path : javaFiles) {
-        for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
-          String trimmed = line.trim();
-          if (trimmed.startsWith("import ")
-              && normalizeImport(trimmed).startsWith("org.eclipse.jgit")) {
-            violations.add(relative(main, path) + ": " + trimmed);
-          }
-        }
-      }
-    }
-    assertTrue(
-        violations.isEmpty(),
-        () -> "Platform JGit imports must not exist:\n" + String.join("\n", violations));
-  }
-
   private static void assertCanvasInfraIsTestScoped(String pomText) {
     Matcher matcher =
         Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(pomText);

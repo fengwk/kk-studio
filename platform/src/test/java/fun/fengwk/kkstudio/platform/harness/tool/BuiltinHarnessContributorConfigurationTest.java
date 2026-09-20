@@ -10,7 +10,8 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -123,26 +124,28 @@ class BuiltinHarnessContributorConfigurationTest {
 
   @Test
   void builtinHarnessContributorRegistersInternalAndSelectableTools() {
-    LoadSkillTool loadSkill = mock(LoadSkillTool.class);
-    when(loadSkill.descriptor()).thenReturn(descriptor("load_skill"));
-    when(loadSkill.requirements()).thenReturn(ToolRequirements.none());
+    ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     TaskTool task = mock(TaskTool.class);
     when(task.descriptor()).thenReturn(descriptor("task"));
     when(task.requirements()).thenReturn(ToolRequirements.none());
 
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributorConfiguration().builtinHarnessContributor(loadSkill, task);
+        new BuiltinHarnessContributorConfiguration().builtinHarnessContributor(readTool, task);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
-    assertEquals(
-        ToolVisibility.INTERNAL,
-        catalog.findTool(LoadSkillTool.NAME).orElseThrow().definition().visibility());
     assertEquals(
         ToolVisibility.INTERNAL,
         catalog.findTool(TaskTool.NAME).orElseThrow().definition().visibility());
     assertEquals(
         ToolVisibility.SELECTABLE,
-        catalog.findTool("read").orElseThrow().definition().visibility());
+        catalog.findTool(ReadTool.NAME).orElseThrow().definition().visibility());
+  }
+
+  @Test
+  void readToolBeanInstantiatesWithExecutor() {
+    ReadToolExecutor executor = mock(ReadToolExecutor.class);
+    ReadTool tool = new BuiltinHarnessContributorConfiguration().readTool(executor);
+    assertEquals(ReadTool.NAME, tool.descriptor().name());
   }
 
   private static ToolDescriptor descriptor(String name) {
