@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -108,18 +107,89 @@ class WebModuleArchitectureTest {
         () -> "web pom harness dependency violations:\n" + String.join("\n", pomViolations));
   }
 
+  private static final List<String> FORBIDDEN_MAIN_SOURCE_TOKENS =
+      List.of(
+          "TrustedJarContributorLoader",
+          "URLClassLoader",
+          "ServiceLoader",
+          "kk-studio.harness.contributors.directory",
+          "KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY");
+
+  private static final String FORBIDDEN_PLUGIN_IMPORT_PREFIX = "fun.fengwk.kkstudio.plugin.";
+
+  /**
+   * Plugin 部署配置的 wire 名：运维只承诺这些环境变量，因此 application.yml 必须显式把它们映射到 canonical 属性。
+   *
+   * <p>刷新节奏刻意不使用 relaxed binding：Spring 会把环境变量里的下划线当作层级分隔，{@code
+   * KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY} 不会直接命中 {@code refresh.poll-delay}，只有 yml 里的显式占位符能让它生效。
+   */
+  private static final List<String> REQUIRED_PLUGIN_CONFIGURATION_LINES =
+      List.of(
+          "credential-key-file: ${KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE:}",
+          "poll-delay: ${KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY:1h}",
+          "lease-duration: ${KK_STUDIO_PLUGINS_REFRESH_LEASE_DURATION:2m}");
+
   @Test
-  void trustedJarLoaderStaysInWebCompositionRootWithoutTransportOrFlyway() throws IOException {
-    Path loader =
-        locateWebMainJava()
-            .resolve("fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java")
-            .normalize();
-    assertTrue(Files.isRegularFile(loader), "trusted JAR loader must live under web runtime");
-    String source = Files.readString(loader, StandardCharsets.UTF_8);
-    for (String forbidden :
-        List.of("org.springframework", "org.flywaydb", "HttpClient", "WebClient")) {
-      assertFalse(source.contains(forbidden), "trusted JAR loader must not reference " + forbidden);
+  void pluginDeploymentConfigurationKeepsDocumentedEnvironmentNames() throws IOException {
+    Path applicationYml = locateWebApplicationYml();
+    String yml = Files.readString(applicationYml, StandardCharsets.UTF_8);
+    List<String> violations = new ArrayList<>();
+    for (String line : REQUIRED_PLUGIN_CONFIGURATION_LINES) {
+      if (!yml.contains(line)) {
+        violations.add("application.yml must declare exactly: " + line);
+      }
     }
+    assertTrue(
+        violations.isEmpty(),
+        () -> "plugin deployment configuration violations:\n" + String.join("\n", violations));
+  }
+
+  @Test
+  void webMainSourcesContainNoTrustedJarRemnantsOrPluginImplementationImports() throws IOException {
+    Path main = locateWebMainJava();
+    assertTrue(Files.isDirectory(main), "web main sources must exist: " + main);
+    List<String> tokenViolations = new ArrayList<>();
+    List<String> pluginImportViolations = new ArrayList<>();
+
+    try (Stream<Path> stream = Files.walk(main)) {
+      stream
+          .filter(path -> path.toString().endsWith(".java"))
+          .filter(path -> !isGeneratedOrTarget(path))
+          .forEach(
+              path -> {
+                try {
+                  String source = Files.readString(path, StandardCharsets.UTF_8);
+                  for (String token : FORBIDDEN_MAIN_SOURCE_TOKENS) {
+                    if (source.contains(token)) {
+                      tokenViolations.add(
+                          relative(main, path) + " contains forbidden remnant: " + token);
+                    }
+                  }
+                  for (String line : source.split("\\R")) {
+                    String trimmed = line.trim();
+                    if (trimmed.startsWith("import ")) {
+                      String imported = normalizeImport(trimmed);
+                      if (imported.startsWith(FORBIDDEN_PLUGIN_IMPORT_PREFIX)) {
+                        pluginImportViolations.add(relative(main, path) + ": " + trimmed);
+                      }
+                    }
+                  }
+                } catch (IOException error) {
+                  throw new IllegalStateException(error);
+                }
+              });
+    }
+
+    assertTrue(
+        tokenViolations.isEmpty(),
+        () ->
+            "web main sources must not contain trusted JAR remnants:\n"
+                + String.join("\n", tokenViolations));
+    assertTrue(
+        pluginImportViolations.isEmpty(),
+        () ->
+            "web main sources must not import plugin implementations:\n"
+                + String.join("\n", pluginImportViolations));
   }
 
   @Test
@@ -245,6 +315,15 @@ class WebModuleArchitectureTest {
       }
     }
     throw new IllegalStateException("cannot locate web main sources from " + cwd);
+  }
+
+  private static Path locateWebApplicationYml() {
+    Path main = locateWebMainJava();
+    Path resources = main.getParent().resolve("resources/application.yml").normalize();
+    if (!Files.isRegularFile(resources)) {
+      throw new IllegalStateException("cannot locate web application.yml from " + main);
+    }
+    return resources;
   }
 
   private static Path locateWebPom(Path mainJava) {
