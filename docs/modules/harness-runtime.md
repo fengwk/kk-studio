@@ -86,10 +86,18 @@ RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 
 ```text
 providerType / providerConnectionGenerationId / model / variant / outputTokens
-systemInstruction / toolBindings / skillBindings / subagentBindings / cacheControl
+systemInstruction / toolBindings / subagentBindings / cacheControl
 ```
 
-工具、Skill、Subagent 名各自唯一；需要环境的 Tool binding 共享 Branch 冻结的 `EnvironmentId` 与用户可见 `environmentName`（后者是历史投影判定 native 资格的 durable 事实），Skill binding 则独立冻结 Platform 全局 `(packageName, packageVersion, name)` 三元组。完整历史、可由 bindings 派生的 Provider tools、branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`（压缩回合使用专用 summarization systemInstruction 与单个 USER 摘要提示词，工具列表为空）。
+工具与 Subagent 名各自唯一；携带环境的 Tool binding 共享 Branch 冻结的
+`EnvironmentId` 与用户可见 `environmentName`，后者是历史投影判定 native 资格的
+durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
+`systemInstruction`，Runtime 不再维护第二份 Skill binding。完整历史、可由 bindings
+派生的 Provider tools、Branch settings 选择的环境、YOLO、上下文窗口、凭证与端点都留在
+各自的事实源里；[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java)
+每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建中立的 `ProviderRequest`
+（压缩回合使用专用 summarization systemInstruction 与单个 USER 摘要提示词，工具列表
+为空）。
 
 [`ProviderMessageProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ProviderMessageProjector.java) 将语义 Context 投影为与 Provider SDK 无关的 `ProviderMessage`：
 
@@ -110,7 +118,14 @@ DISPATCHING -> RUNNING / READY（RetryLater）/ FAILED / UNKNOWN
 RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 ```
 
-`ToolBinding` 把工具定义、Contributor 归属、`environmentRequired` 与冻结的 `environmentId` / `environmentName` 绑在一起。不变量是**单向**的：`environmentRequired=false` 时 `environmentId` 与 `environmentName` 必须为空，声明不需要环境的工具不得携带环境身份；而 `environmentRequired=true` 允许二者为空，表示 branch 尚未选择 Environment——工具声明完整保留，调用时才以 `ENVIRONMENT_NOT_SELECTED` 确定性失败。执行端不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolEffectBatch.java) 最多携带 16 条 CUSTOM 副作用，且只在 `SUCCEEDED` 状态允许非空；终态 Tool 行只表示结果已产出，物化为历史 Entry 由 ThreadProcessor 在同一事务里完成，同时物理删除 Tool 行与父 ModelInvocation。
+`ToolBinding` 把工具定义、Contributor 归属、`EnvironmentSupport` 与冻结的
+`environmentId` / `environmentName` 绑在一起。`NONE` 不得携带环境，`OPTIONAL` 可以携带
+当前选择，`REQUIRED` 的正常规划结果必须携带环境；无选择的 `REQUIRED` 工具在
+ModelRequestSpec 构造前已被过滤。Gateway 对陈旧或伪造 binding 继续 fail closed。执行端
+不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolEffectBatch.java)
+最多携带 16 条 CUSTOM 副作用，且只在 `SUCCEEDED` 状态允许非空；终态 Tool 行只表示
+结果已产出，物化为历史 Entry 由 ThreadProcessor 在同一事务里完成，同时物理删除 Tool
+行与父 ModelInvocation。
 
 `Work` 是调度邮箱的持久化当前状态，每个 target 一行：`target = (THREAD|MODEL|TOOL, targetId)`、`availableAt`、`wakeVersion`、`leaseToken`、`leaseUntil` 与可选的环境路由标记 `requiredEnvironmentId`。所有跃迁都是返回新状态的纯函数（`initial` / `request` / `claim` / `renew` / `complete` / `reschedule`）：`request` 把 `availableAt` 提前到最早值并把 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除该行、被新 wake 推进时只清空租约保留行，`reschedule` 清空租约并重设 `availableAt`。`leaseToken` + `wakeVersion` 共同构成所有权围栏，让迟到的旧执行体无法提交或删除更新的 wake。
 
@@ -158,7 +173,13 @@ Stop 在 Thread 锁内校验归属、version 与客户端 `stopRequestId`：活�
 
 审批由 `decideToolApproval` 驱动，只在 Thread 处于 `ToolActive` 且目标工具处于 `WAITING_APPROVAL` 时接受：`ALLOWED` 转 `READY` 并安排 TOOL Work，`DENIED` 标记 `FAILED` 并唤醒 THREAD Work，两者都推进一次 Thread version；相同决策幂等重放，不同决策抛 `APPROVAL_DECISION_MISMATCH`。
 
-[`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java) 按有序规则产出 Allow / Ask / Deny 候选：规则键是全局 `*` 或合法模型可见 tool name，按全局到具体工具的顺序求值，数组声明顺序即求值顺序；文件路径只按该次调用 `arguments.workdir` 词法解析为相对 POSIX 路径，再交给 JGit gitignore 语义匹配，不读取 Backend 的 cwd 或 HOME，没有 `workdir` 语义的工具（如 `load_skill`、MCP）不会获得隐藏默认目录。这里只生成策略候选，真实文件边界、符号链接检查与进程隔离由 Environment Daemon 在执行入口落实。
+[`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java)
+按有序规则产出 Allow / Ask / Deny 候选：规则键是全局 `*` 或合法模型可见 tool name，
+按全局到具体工具的顺序求值，数组声明顺序即求值顺序；文件路径只按该次调用显式
+`arguments.workdir` 词法解析为相对 POSIX 路径，再交给 JGit gitignore 语义匹配，不读取
+Backend 的 cwd 或 HOME。没有 `workdir` 语义的 Platform/MCP 工具不会获得隐藏默认目录。
+这里只生成策略候选，真实文件边界、符号链接检查与进程隔离由 Environment Daemon 在
+执行入口落实。
 
 子智能体会话由内部 `task` 工具驱动，复用同一套运行时协议：创建时校验父级 ModelInvocation 冻结的绑定参数，以 `NEW_SESSION` + `SubagentContext(parentThreadId, rootThreadId, taskInvocationId, depth)` 建立标准持久化子线程；恢复已有会话要求同属当前父级与同一根线程且子线程已静止。父级通过 [`HarnessThreadChangeSource`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessThreadChangeSource.java) 订阅「可能发生变化」的唤醒信号，[`ChangeGate`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ChangeGate.java) 按 `version` / `descendants` / `cancel` 三类计数合并唤醒并避免先 signal 后 wait 丢失。并发槽位、`maxDepth`、`idleTimeout` 与 `maxTurns` 策略属于 [Harness Builtin](harness-builtin.md) 与 [Platform](platform.md)；`maxTurns` 到期只是软提醒，`idleTimeout` 到期取消当前子执行并保留 Session 以便恢复。
 

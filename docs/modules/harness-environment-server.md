@@ -1,6 +1,11 @@
 # Harness Environment Server
 
-`harness-environment-server` 是 Environment 链路中 Platform 一侧的会话核心：它把 protocol v1 的消息流推进为可观察状态，独占连接代际、`environment_connection` 路由租约围栏与按 `invocationId` 的在途调用生命周期，并向上层暴露传输、持久化与票据三类窄端口。协议形状、字段语义与大小约束由 [Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；宿主进程侧的对应实现见 [Harness Daemon](harness-daemon.md)。
+`harness-environment-server` 是 Environment 链路中 Platform 一侧的会话核心：它把
+protocol v1 的消息流推进为可观察状态，独占连接代际、`environment_connection`
+路由租约围栏与按 `invocationId` 的在途调用生命周期，并向上层暴露传输、持久化与票据
+三类窄端口。协议形状、字段语义与大小约束由
+[Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；
+宿主进程侧的对应实现见 [Harness Daemon](harness-daemon.md)。
 
 它是一个纯 Java 模块：生产依赖只有 `harness-common`、`harness-environment` 与 Jackson，不感知 Spring、JDBC、Servlet、JSR-356 或任何产品 DTO，因此整个会话状态机可以在普通单元测试里用内存 fake 完整驱动。宿主的装配位置见 [Platform](platform.md) 与 [Web](web.md)。
 
@@ -35,7 +40,7 @@ close(connectionId)
 调用只按 `(environmentId, invocationId)` 关联。同一 Environment 的多个 invocation 立即发送并并发持有，不存在 per-Environment 并发槽位、队列或容量配置。`invoke` 的前置条件按固定顺序执行：
 
 1. 校验 capability descriptor 与 [`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 完全一致，并要求 `call.id` 是 canonical UUID；
-2. 只对 `requiresWorkdir` 的能力，按该连接 READY 时冻结的目标 OS 做 arguments.workdir 词法校验；
+2. arguments 携带 `workdir` 时，按该连接 READY 时冻结的目标 OS 做词法校验；是否必填由各能力 input schema 决定；
 3. 读取本节点 READY 连接与其 `leaseToken`，没有 READY 连接即判定环境不可用；
 4. 在核心锁外调用 `leaseStore.holdsReadyLease` 复核归属，存储不可用同样判定环境不可用；
 5. 登记 `ActiveInvocation` 并递交 INVOKE，把 [`DaemonOfferResult`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java) 的三态映射为调用结果。
@@ -104,7 +109,11 @@ COMPLETED
 
 构造器只接收五个依赖：`DaemonLeaseStore`、`DaemonRegistrationDirectory`、`EnvironmentSessionListener`、`DaemonResourceTicketService` 与 `Supplier<EnvironmentServerSettings>`。
 
-[`EnvironmentServerSettings`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java) 携带心跳超时与资源字节上限，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即生效，核心不缓存配置。[`EnvironmentSessionListener`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java) 在每次 READY 后于锁外唤醒宿主（生产装配用于唤醒 Harness Work dispatcher），实现抛出的异常不影响会话状态。
+[`EnvironmentServerSettings`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentServerSettings.java)
+携带心跳超时与资源字节上限，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
+生效，核心不缓存配置。[`EnvironmentSessionListener`](../../harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)
+在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
+异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。
 
 持久化实现（连接注册、租约、上传行与对象存储）与 WebSocket 传输实现在 `platform` 与 `web` 模块完成适配；本模块只定义窄端口语义，不感知 SQL、bucket、对象 key 或 Spring。
 

@@ -13,7 +13,7 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 | `fun.fengwk.kkstudio.harness.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 六类 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.harness.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
-| `fun.fengwk.kkstudio.harness.common.skill` | Platform 全局 Skill/package 名称、版本、描述与正文的 canonical 文本规则 | 只定义跨层共享的纯文本约束；Catalog 持久化、版本替换与正文加载由 Platform 承接 |
+| `fun.fengwk.kkstudio.harness.common.skill` | Skill package/name、Git commit、描述与稳定逻辑路径的 canonical 文本规则 | 只定义跨层共享的纯文本约束；Catalog、Git I/O 与 Daemon 安装由外层承接 |
 
 ## Prompt 模板
 

@@ -33,6 +33,12 @@
 
 后端绝不知道 S3 的 bucket 与对象 key：Storage DTO 只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，[canvas 的预签名端点](canvas-core.md)同理。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；[`EnvironmentRegistrationTokenDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentRegistrationTokenDTO.java) 是唯一的显式读取端点，不进通用投影，响应禁止缓存。[`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描各 DTO 的字段名，任何 secret / bootstrap 名称（key、token、instanceId、endpoint、文件系统路径）出现即失败。
 
+Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、状态、到期/刷新时间和有界
+错误；`PluginAuthCompleteRequestDTO.callbackUrl` 是 `WRITE_ONLY`，不出现在任何响应、
+`toString` 或通用日志。`PluginAuthPrepareDTO.loginUrl` 只能是 Plugin 声明的固定公开 origin。
+认证交互只允许 sealed `DEEP_LINK` 类型及固定的 `{region}` / `{callbackUrl}` DTO，不承载
+任意 Plugin schema；所有 auth 响应由 Web 额外设置 `Cache-Control: no-store`。
+
 ## DTO 组织
 
 源码按公共领域分包，包名就是客户端的领域划分：
@@ -40,10 +46,11 @@
 | 包 | 当前 wire |
 | --- | --- |
 | [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、Model、Agent、ModelRef、Tool catalog |
-| [ai.skill](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/skill/) | Platform 全局 Skill、不可变 package 版本与完整替换请求 |
+| [ai.skill](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
 | [ai.mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
+| ai.plugin | 已安装构建期 Plugin、安全认证状态，以及 prepare/complete/refresh 请求与响应 |
 | [ai.chat](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/chat/) | Chat 与 Chat defaults |
-| [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token 与最近一次 READY runtime 投影 |
+| [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
 | [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
 | [canvas](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/) | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
 | [comfyui](../../share/src/main/java/fun/fengwk/kkstudio/share/comfyui/) | Workflow API 与运行请求/结果 |
@@ -53,6 +60,11 @@
 
 只有出现在 HTTP 边界上的值才进 DTO。Canvas Snapshot/Patch 把 document version、实体 UPSERT/REMOVE 与 Function Run 投影组成前端可渲染的聚合；Harness Snapshot 包含 root-to-head entries、queued commands、活跃 invocation、tool siblings 与未物化的 attempt failure；Settings DTO 包含完整六 section 与 `expectedVersion`，[`SystemSettingsSchemaDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsSchemaDTO.java) 提供 UI 的 ordered sections/groups/fields。
 
+Thread Debug 使用结构化 `HarnessModelRequestDebugDTO`，而不是把 Tool/Skill 再塞进一段
+展示文本。DTO 同时携带下一次请求预览、候选 Tool 的发送/过滤状态、Skill 稳定路径与可空
+的活动 frozen request；完整 schema/request JSON 仍按字符串原样展示，secret 与 Base64
+正文不进入 DTO。
+
 严格程度按用途区分：请求体与对外投影显式拒绝未知字段，纯响应投影（如 `CanvasSnapshotDTO`）与内部嵌套结构不需要重复声明。领域身份使用 sealed interface / record 表达封闭集合（命令、patch 项），普通数据用 Lombok `@Data`。
 
 ## 不变量
@@ -60,6 +72,8 @@
 - 未知字段、重复 JSON 键、错误的 union `type`/`op`、非 canonical UUID 或非规范数字都在 wire 边界失败，不会进入领域服务。
 - required-nullable 字段即使为 `null` 也必须序列化，避免客户端把「未返回」当成「无值」。
 - durable 版本与序号在 wire 上永远是十进字符串；`ModelRef` 是 `providerName/modelName`，只在第一个 `/` 处分割，因此模型名本身可以包含斜杠。
+- Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED`
+  枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
 - 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。
 - DTO 不回显 credential、secret 或对象存储内部标识；Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
 

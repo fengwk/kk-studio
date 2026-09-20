@@ -32,11 +32,12 @@ classloader 由 web 的
 | [harness/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | `RuntimeToolCatalog`、`CompositeRuntimeToolCatalog`、`ToolCatalogQueryService`、`ToolExecutionGateway`、`ToolResultFinalizer` | 静态 + 动态工具目录聚合与 Tool 执行 |
 | [harness/thread/command](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` | 每个 live turn 的 Agent/Model/Environment/skill/subagent 解析 |
 | [harness/task](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | `AgentPromptComposer`、`AgentBranchSettingsMaterializer` | system prompt 拼接与分支设置物化 |
-| [harness/skill](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/skill) | `DatabaseThreadSelectedSkillLookup`、`DatabaseSkillContentLoader` | 冻结 Skill binding 解析与不可变正文加载 |
+| [harness/skill](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/skill) | Skill Git cache、稳定 URI 读取、Daemon 同步状态与 Prompt path 解析 | Package current commit 是读取与同步坐标；模型只看到稳定 path |
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`SessionDeletionOrchestrator`、`PlatformCanvasCommandService`、`OwnerType` | 跨 owner 的 Harness 命令接受、深删除与 Canvas command |
 | [chat](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat) | `ChatServiceImpl` | Chat CRUD 与深删除 |
 | [project](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project) | `ProjectServiceImpl`、`IssueServiceImpl`、`IssueRunServiceImpl`、`IssueControllerDispatcher`、`IssueReconciler`、`ProjectHarnessContributor` | Project/Issue 生命周期与确定性 Coordinator |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
+| plugin | `StudioPluginRegistry`、`PluginCredentialStore`、`PluginResourceGateway` | 构建期 Plugin 发现、安全管理面、加密凭据与 Session Resource 桥接 |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration` | Environment Card、Daemon 会话装配与宿主元数据保留 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `PlatformCanvasResourceLifecycle`、`CanvasBlobResourceMaterializer`、Canvas Function adapters | Canvas Resource 生命周期与 Function adapter |
@@ -82,16 +83,219 @@ Agent 的严格 `config` 保存 `tools`、`skills`、`subagents` 与
   严格解析 `limit`、`abilities`、`variants`、`defaultVariant`、`pricing`；context/output、
   variant id、temperature、reasoning effort 不满足约束即拒绝。
 - [AgentDefinitionConfigCodec](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/definition/configuration/AgentDefinitionConfigCodec.java)
-  严格解析去重的 `tools`、skill 与 subagent 配置；`tools` 必须是合法模型可见
-  tool name（旧 wire 字段 `toolIds` 被严格拒绝）且只能引用运行时目录中的 selectable
-  entry；`skills` 是有序、唯一的 Platform 全局 canonical Skill name，并在保存事务中按
-  name 升序锁定当前 `skill` 目录行，缺失名称确定性拒绝。
+  严格解析去重的 `tools`、`SkillRef(packageName, name)` 与 subagent 配置；`tools`
+  必须是合法模型可见 tool name（旧 wire 字段 `toolIds` 被严格拒绝）且只能引用运行时
+  目录中的 selectable entry；每个 SkillRef 必须命中对应 Package 当前 `skills` 快照。
+
+### Git Skill Package
+
+Skill Package 以不可变 `packageName` 键控一个不可变 repository URL。Branch 只用于检查
+候选更新，当前发布内容由人工确认的 exact commit 决定；每个 Git 仓库根目录的一级子目录
+对应同名 Skill：
+
+```text
+<repository>/
+├── dev/
+│   ├── SKILL.md
+│   ├── references/
+│   ├── scripts/
+│   └── assets/
+└── chatgpt-agent/
+    └── SKILL.md
+```
+
+数据库的一行 Package 同时保存 `currentCommit`、最近检查到的
+`observedHeadCommit`、检查时间/错误与从当前 commit 派生的 `skills` JSON。JSON 元素只含
+name 和 description，按 name 确定性排序；正文和目录树只存在于 Git。Create 会读取并
+发布当时的 branch HEAD；修改 branch 只改变后续检查来源；repository URL 创建后不可改，
+更换仓库要使用新的 Package。
+
+Card 状态只由这组事实派生：从未检查为 `UNCHECKED`，观察值等于当前值为
+`UP_TO_DATE`，两者不同为 `UPDATE_AVAILABLE`，最近检查错误非空为 `CHECK_FAILED`。
+检查失败始终保留 current commit、skills 与上一次成功观察值，Agent 使用不受影响。
+
+扫描只接受仓库根目录的 `<name>/SKILL.md`。每个文件必须含可解析的 YAML frontmatter，
+其中 `name` 与目录 basename 完全一致、`description` 非空且不超过 1024 字符；其它标准 frontmatter 字段不
+进入 Catalog。Package 内 name 不得重复，目录和符号链接都不得越出仓库树。repository URL
+不得携带 userinfo，第一阶段要求仓库可由 Platform 与 Daemon 直接读取，不设计凭据分发。
+
+远端检查与内容发布是两个 API 语义：
+
+```text
+Check
+  -> ls-remote branch
+  -> 只更新 observedHeadCommit / checkedAt / bounded error
+
+Update(targetCommit, expectedVersion)
+  -> fetch exact commit
+  -> 校验全部 <name>/SKILL.md 与 Agent 引用
+  -> CAS 原子替换 currentCommit + skills
+  -> 通知 Platform cache 与在线 Daemon
+```
+
+HTTP 面保持同一 Package 资源：
+
+```text
+POST   /api/ai/catalog/skill-packages
+GET    /api/ai/catalog/skill-packages
+GET    /api/ai/catalog/skill-packages/{name}
+PUT    /api/ai/catalog/skill-packages/{name}         # description / branch + expectedVersion
+DELETE /api/ai/catalog/skill-packages/{name}         # expectedVersion
+POST   /api/ai/catalog/skill-packages/{name}/check
+POST   /api/ai/catalog/skill-packages/{name}/update  # targetCommit + expectedVersion
+```
+
+Create 请求只接收 name、description、repositoryUrl 与 branch，并把当时解析出的 exact HEAD
+作为首个 current commit 发布。Update 必须使用 Card 已展示的完整 target commit；即使
+branch 随后又前进，也不会暗中切换到用户未确认的 HEAD。删除 Package 或发布移除 Skill
+的 commit 前必须拒绝仍被 Agent `SkillRef` 引用的目标。服务端要求 target commit 等于
+该 `expectedVersion` 快照中的 `observedHeadCommit`；后台 Check、编辑、删除和发布都只在
+实际事实变化时推进同一个 Package version，陈旧 Card 统一返回 version conflict。
+
+Platform 启动只确保 bare cache 包含每个 `currentCommit`，并异步执行 Check；不会把
+observed HEAD 自动发布。Platform cache 使用 `<skill-cache-root>/<package>.git`，稳定 URI
+`kkstudio:/skills/<package>/<skill>/...` 每次都读取 Package 当前 commit。Agent Prompt
+使用稳定 path，不携带 commit，也没有 per-Turn Skill binding。
+
+Package 发布事务发送 `skill_package_changed` PostgreSQL 提示；每个 App 节点收到后回读
+Package 权威行、补齐自身 exact commit cache，并只同步连接在本节点的 Daemons。通知只作
+唤醒：listener 建连/重连时全量对账，Platform `read` 发现 current commit 尚未物化时也
+只按该 exact commit 补 cache，绝不解析或发布 branch HEAD。
 
 Provider type 的唯一 runtime enum 是
 [ProviderType](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)，
 wire value 分别是 `openai`、`openai_response`、`anthropic`、`google`；`fromWireValue`
 不 trim、不折叠大小写，未支持的 wire value 直接失败。Catalog API 只暴露结构化 config、
 名称和版本，不暴露 credential。
+
+## 构建期 Plugin
+
+`plugins` 是独立于 `platform` 的 Maven aggregator，每个子模块是一个可选的 Spring Boot
+auto-configuration JAR。Plugin implementation 可以依赖 Platform 与
+`harness-contributor-api`，反向依赖禁止；`web` 只以 runtime scope 选择 JAR，不在源码中
+import Plugin implementation。每个 JAR 只通过
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+声明入口，不依赖 Web component scan：
+
+```text
+platform <- plugins/minimax-mavis <-runtime- web
+                    |
+                    +-> StudioPlugin
+                    +-> HarnessContributor
+```
+
+`StudioPluginRegistry` 收集 Spring 容器中的 `StudioPlugin` bean，以全局唯一、不可变的
+`pluginId` 冻结安装目录；相同 id 启动失败。安全投影只包含 id、名称、版本、认证状态、
+到期/刷新时间与有界错误。Plugin 是否安装完全取决于 classpath：没有对应 JAR 就没有
+descriptor、管理动作、后台任务或 Tool，不在数据库维护第二个 enabled 开关，也不支持
+运行时安装与 classloader 热更新。
+
+统一管理 API 为：
+
+```text
+GET    /api/plugins
+GET    /api/plugins/{pluginId}
+POST   /api/plugins/{pluginId}/auth/prepare
+POST   /api/plugins/{pluginId}/auth/complete
+DELETE /api/plugins/{pluginId}/auth
+```
+
+Registry 只路由到已安装 Plugin；未安装 id 返回 not found。认证响应统一设置
+`Cache-Control: no-store`，不含 access token、callback URL、加密正文或签名参数。
+管理面不接受任意 Plugin JSON schema：当前唯一认证类型是 `DEEP_LINK`，descriptor 只声明
+固定 region 候选；`prepare` 请求精确为 `{region}`，`complete` 请求精确为
+`{callbackUrl}`。无该能力的 Plugin 不开放 auth 动作。新增认证交互必须先扩展 sealed auth
+type、共享 DTO 与静态前端，不能从 JAR 下载或执行动态 UI 代码。
+
+### Plugin credential
+
+`PluginCredentialStore` 是唯一凭据持久化入口。它用部署级 owner-only 32-byte 主密钥对
+Plugin opaque JSON 做 AES-256-GCM 认证加密；每次写入使用新的 96-bit 随机 nonce，二进制
+envelope 保存格式版本、nonce 与 ciphertext，AAD 绑定 `pluginId + region + formatVersion`，
+防止密文被换行复用。主密钥不进 PostgreSQL、SystemSettings、DTO 或日志，多节点必须挂载
+同一份 key file。Plugin 未认证时没有行；删除认证即删除行。密文读写、CAS 与 refresh
+lease 属于 Platform，Plugin 只能拿到本次调用需要的解密快照，不能取得 repository 或加密
+主密钥。key file 缺失、长度错误或认证解密失败时状态投影为 `KEY_UNAVAILABLE`，读取和写入
+fail closed；没有 credential 行时仍允许应用启动。
+
+刷新 dispatcher 启动后立即扫描，随后默认每小时 fixed-delay 扫描
+`next_refresh_at`，且只领取当前 JVM 已安装 Plugin 的行；未安装 Plugin 的密文保持 dormant。
+每行通过短事务 claim `refresh_lease_token / refresh_lease_until`，外部 renewal 在事务外
+只发送一次，终态再以 lease token 与 version 围栏写回：
+
+```text
+due row
+  -> short transaction: claim refresh lease
+  -> external refresh exactly once
+  -> short transaction:
+       success -> replace encrypted payload + expiry + nextRefreshAt
+       auth rejection -> REAUTH_REQUIRED
+       definitely not sent -> REFRESH_FAILED + bounded delayed retry
+       sent but no definitive response -> REFRESH_UNCERTAIN
+expired in-flight lease -> REFRESH_UNCERTAIN, never reclaim-and-send
+```
+
+lease 只解决多节点互斥，不承诺外部 exactly-once：节点在 HTTP 前后崩溃时，其他节点无法
+证明请求是否已经发送，因此过期的 in-flight lease 必须收敛为 `REFRESH_UNCERTAIN`，不能
+重新 claim。claim 后新的 Tool credential resolution 暂停或返回可重试的
+`AUTH_REFRESHING`，不与可能使旧 token 失效的 renewal 并发；已经取得快照的调用允许自然
+结束。确定性认证拒绝、token 过期、`REFRESH_UNCERTAIN` 都 fail closed 并要求重新登录。
+请求发送后的网络断开或超时不能证明服务端未签发新 token，因此当前 claim 和以后定时扫描
+都不重放该 credential 的 renewal。
+
+### MiniMax Mavis
+
+`plugins/minimax-mavis` 注册 `minimax-mavis` Studio Plugin 与同名
+`HarnessContributor`。它固定使用 CN/EN 两个官方 origin，不接受自定义 base URL。配置页
+先按 region 返回 SSO URL；用户完成登录后把 deep link 粘贴给 `auth/complete`。完成端点：
+
+1. 限制 callback 总长与 query 字段数；
+2. 只接受 scheme 为 `minimax-cn` / `minimax` 且 authority 精确为 `auth-callback` 的 URI，
+   拒绝 path、fragment、重复/空 `accessToken` 与未知 region；
+3. 从 JWT 读取数值 `exp` 并拒绝已过期或即将过期的 token；未验签 claim 只用于本地上限，
+   不能作为身份事实；
+4. 用只读 Mavis capability catalog 在线验证；
+5. 生成稳定 client UUID，把 token、client UUID 与取得时间作为一个加密 payload 原子保存。
+
+MiniMax 没有 OAuth `refresh_token`。刷新使用当前 access token 调一次 renewal，严格校验
+HTTP、业务状态与新 JWT 后才替换原密文。默认
+`nextRefreshAt = min(lastSuccess + 7d, token lifetime midpoint)`，dispatcher 默认每小时检查
+一次；`401` / `1004` 进入 `REAUTH_REQUIRED`。callback 与 renewal URL 可能直接携带秘密，
+HTTP diagnostics 必须先按敏感 query/header 名去敏，禁止打印原始 request URI、request
+body 或响应 token。
+
+模型只看到 15 个静态、可选择的 Tool：
+
+```text
+mavis_web_search        mavis_extract_web
+mavis_image_search      mavis_reverse_image
+mavis_understand_image  mavis_understand_audio  mavis_understand_video
+mavis_asr               mavis_list_voices
+mavis_tts               mavis_tts_batch
+mavis_generate_image    mavis_generate_music
+mavis_submit_video      mavis_query_video
+```
+
+它们都使用 `EnvironmentSupport.NONE`。认证、capability catalog、临时 CDN 上传与兼容的
+同步视频端点不进入模型工具面；媒体准备由调用工具内部完成。理解/生成类输入接受公开
+HTTP(S) URL 或当前 Tool invocation 所属 Session 有权访问的
+`kkstudio:/resources/<blobId>`。Plugin 通过 `PluginResourceGateway` 把 Resource 解析为
+受控短期下载或流，把 Mavis 结果按硬上限流式暂存为既有
+`blob-upload:<uploadId>` ResourceRef；统一 ToolResult finalizer 再校验并把 upload owner
+原子转移为当前 Session 的 Blob 引用。成功历史只保存稳定 Resource 与有界 JSON，不返回
+本地 path 或临时 CDN URL；取消、失败或 finalization 回滚留下的 upload 由既有 Storage
+maintenance 回收。
+
+15 个 Tool 在 Catalog 中静态注册，应用启动不访问 Mavis。调用时以短 TTL 缓存的 capability
+catalog 把稳定 Tool 映射到当前 provider endpoint；能力缺失返回确定性的
+`MAVIS_CAPABILITY_UNAVAILABLE`，不能动态增删 Tool 或改变 schema，以保持 Agent 配置和
+Prompt Cache 稳定。
+
+搜索、提取、理解、ASR、音色列表与视频查询声明 `READ_ONLY`；TTS、图片/音乐生成和视频
+提交声明 `NON_IDEMPOTENT`。Studio Plugin 为后者提供 baseline `ASK`；PermissionEvaluator
+按「Plugin baseline → SystemSettings global rules → SystemSettings tool rules」覆盖，
+因此用户显式 DENY/ASK/ALLOW 仍具有最终优先级。批量结果逐项保留 success/failure，部分
+成功不能伪装成整体成功；任何生成调用的断连或超时都返回 uncertain failure，不自动重放。
 
 ## MCP server 与运行时工具目录
 
@@ -260,7 +464,9 @@ wake，同时以 fixed-delay poll 驱动 upload expire 与 DELETING blob sweep�
 
 Tool 终态结果由
 [ToolResultFinalizer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolResultFinalizer.java)
-先对完整投影做无副作用 plan 与 hard-limit 校验。普通 Backend Tool 的 Binary/Resource
+统一对所有工具的完整投影做无副作用 plan 与 hard-limit 校验，不按工具名建立旁路。超过
+50 KiB 或 2000 行的 Platform 文本结果转为有界 preview 加全局 Blob；模型投影给出
+`kkstudio:/resources/<blobId>`，后续由 `read` 分页读取。普通 Backend Tool 的 Binary/Resource
 按 plan 写入 `ResourceStore`，返回引用必须与 plan 完全一致，已有 Resource 也必须经同一
 Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocation-scoped
 `RESOURCE_UPLOAD_REQUEST/TICKET/COMMIT` 取得预签名 PUT 并由 Daemon 直传 S3，WebSocket
@@ -274,6 +480,16 @@ Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocat
 `retain session_blob_ref -> delete upload owner` 原子转移引用，durable 名称取上传行。
 两条路径最终都只把 `blobId`、权威名称与有界 preview 写入 Harness history；任何一步
 失败都使调用方事务回滚。
+
+Platform Plugin 不借 `ResourceStore` 的 `byte[]` 接口搬运大媒体。
+`PluginResourceGateway` 用 Thread 解析当前 Session，并在签发输入前校验
+`session_blob_ref`；远端输出以有界 multipart stream 写入 Storage upload，边传输边做
+MIME sniff、size budget 与 SHA-256，Tool terminal 返回 `blob-upload:<uploadId>`。之后仍由
+同一个 `ToolResultFinalizer` 和
+`GlobalStorageToolResultHistoryMaterializer` 完成全量校验与 owner 原子转移，不建立
+Plugin 旁路。第三方下载固定禁用自动 redirect；每一跳都必须是 HTTPS、通过 DNS/IP
+private-network 拒绝并受 response/time/size budget 约束。这样 2K 视频和长音频不进入 JVM
+大数组，也不会把短期第三方 URL 写进历史。
 
 ## Environment
 
@@ -300,9 +516,22 @@ Platform 侧的产品适配器只做映射，不持有会话状态：[Environmen
 （`name` 是不可变身份，不存在改名入口）。每次 READY 在同一条 owner/lease 围栏 SQL 中
 推进连接状态并覆盖连接行保留的宿主 metadata（`environment_connection.runtime_info`）；
 断开或重新 CONNECTING 只回退状态、绝不清空该保留事实，因此 Daemon 离线后系统提示词
-和管理页面仍可读取最后一次已接受的 OS、时区、备注与 root path。
-Skill 正文不经过 Daemon：内部工具 `load_skill` 经 `DatabaseSkillContentLoader` 按冻结的
-`(packageName, packageVersion, name)` 从不可变 `skill` 行精确读取正文。
+和管理页面仍可读取最后一次已接受的 OS、时区、进程用户、HOME 与可选备注。
+
+每次 READY 与 Package 发布都会异步调用内部 `skill.sync` capability。Daemon 返回每个
+Package 的 installed commit 与稳定本地根目录；Platform 只在 installed commit 等于
+Package `currentCommit` 时向 Prompt 注入
+`<data-dir>/skills/<package>/<skill>/SKILL.md`，否则注入 Platform URI。同步失败不阻塞
+Environment 的其它能力，也不回退或覆盖 Daemon 已安装的旧包。
+同步按 Package 独立调用并使用固定 deadline：HTTP 发布在数据库提交后立即返回，不等待
+任何 Daemon；离线 Environment 跳过，单包失败继续其它包，下次 READY 或显式重试再次
+收敛。
+
+同步结果按 owner/lease fence 写入 `environment_connection.skill_state`。连接、READY、
+断开与同步开始/成功/失败同时追加到该行有界的 `recent_events`，只记录结构化、去敏的
+运维事实，不转发 Daemon stdout。Environment Card 读取最近一条 WARN/ERROR，详情端点
+`GET /api/harness/environments/{id}/events` 返回最近 200 条；打开详情时轮询即可，不为
+低频诊断引入独立实时协议。
 
 每个 Environment 的调用只按 `invocationId` 关联：同一 Environment 允许任意数量
 capability 并发在途，不同能力之间没有共享槽位，也不存在环境级容量或排队，唯一拒绝
@@ -406,39 +635,57 @@ externalization，第一个 terminal 后任何迟到信号、其余 Resource 写
    输出上限补齐为 Model 全局 `limit.output`；
 2. 当前 Environment context：只按 `BranchSettings.environmentName()` 查全局唯一且不可变的
    name 得到路由身份，name 无法解析时确定性返回 `PLANNING_FAILED`；
-3. Agent config 中的每个工具 ID 都通过 `RuntimeToolCatalog.findTool(id)` 查找并校验
-   `visibility() == ToolVisibility.SELECTABLE`；`environmentRequired()` 为 true 但该
-   branch 未选择 Environment 时仍绑定为 null 并保留完整工具声明（调用时才以
-   `ENVIRONMENT_NOT_SELECTED` 失败，绝不阻止规划）；`requiredEnvironmentId` 与已选环境
-   冲突时在 planning 阶段确定性返回 `AssistantError.code=PLANNING_FAILED`；
-4. skills、subagents 和内部 `load_skill` / `task`；
+3. Agent config 中的每个工具 name 都通过 `RuntimeToolCatalog.findTool(name)` 查找并
+   校验 selectable；`NONE` 与 `OPTIONAL` 始终保留，`REQUIRED` 在 Branch 未选择
+   Environment 时从最终模型工具列表过滤；`requiredEnvironmentId` 与已选环境冲突时在
+   planning 阶段确定性返回 `AssistantError.code=PLANNING_FAILED`；
+4. SkillRefs、subagents 与内部 `task`；配置 Skill 时确定性注入 `read`；
 5. Contributor context projector、system instruction、cache control、context window 与
    output budget。
 
-每个 tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor；Skill 严格按全局 name 从
-Platform 当前目录解析并冻结 `(packageName, packageVersion, name, description)`，与
-Branch Environment 无关；名称缺失返回 `PLANNING_FAILED`。
+每个 Tool 都从 `RuntimeToolCatalog` 精确恢复 descriptor。SkillRef 按
+`(packageName, name)` 从 Package 当前 JSON 快照解析；缺失引用返回 `PLANNING_FAILED`。
+根据当前 Environment 的 installed commit 选择本地稳定路径或 Platform URI，并构造仅供
+Prompt 渲染的 name、description、path 三元组。
 [AgentPromptComposer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposer.java)
-拼接正文、当前 Environment、skill 和 subagent sections，并只替换已知的 `${date}`
+拼接正文、当前 Environment、Skill 和 Subagent sections，并只替换已知的 `${date}`
 placeholder，其余 `${...}` 与未闭合形式保持原文。Platform 将其与 Project 角色上下文、
 Contributor context projector 片段用空行确定性拼接为单条非空 `systemInstruction` 冻结进
 `ModelRequestSpec`，会话历史中绝不作为系统消息注入。
-[DatabaseThreadSelectedSkillLookup](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/skill/DatabaseThreadSelectedSkillLookup.java)
-从冻结的 ModelRequestSpec 读取 Skill binding，正文由 `load_skill` 经
-`DatabaseSkillContentLoader` 按精确的三元组读取，不会用当前 Agent
-配置或当前 Skill 目录扩张已冻结调用。
+Skill 内容由统一 `read` 按稳定 path 读取当前安装版本；ModelRequestSpec 不再保存重复的
+Skill binding。
+
+统一 `read` 根据 `path` 路由：`kkstudio:/skills/<package>/<skill>/...` 从 Platform
+bare Git cache 的 Package 当前 commit 读取，`kkstudio:/resources/<blobId>` 在校验当前
+Session 引用后读取 Blob 文本，本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
+路径要求显式 `workdir`；`workdir` 只参与同一地址空间内的相对解析，不提供隐藏默认值。
+Platform URI 不接受任意 HTTP(S) 透传。
+
+Debug 预览与正式 Turn 复用相同的 Agent/Environment/Tool/Skill 解析纯函数。结构化投影
+同时返回最终 systemInstruction、有效与过滤 Tool、Skill 交付路径和 planning error；
+活动 ModelInvocation 还可从冻结 Spec 与 request head 物化 canonical ProviderRequest。
+已结束 Turn 的 Invocation 行会被删除，因此重新计算的当前预览必须明确标记，不能冒充
+历史请求。
+
+`GET /api/harness/threads/{threadId}/model-request-debug` 返回
+`HarnessModelRequestDebugDTO`：`NEXT_REQUEST_PREVIEW`、生成时间、model/environment、
+systemInstruction、全部候选 Tool（`SENT` / `FILTERED` 与原因）、Skills、Subagents、
+cache control、planning error，以及可空的活动 `FROZEN_INVOCATION` canonical request。
+该查询不检查 branch HEAD、不发布 Package、不触发 Daemon sync，也不回显 credential 或
+Base64 正文。
 
 [AgentBranchSettingsMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentBranchSettingsMaterializer.java)
 为普通 root 按最新 Agent/Model catalog 物化 `agentName` 与 model，并固定
 `environmentName=null`；为新建或恢复的 subagent 额外读取被调用 Agent 的
 `inheritParentEnvironment`，决定是否采用父 Model invocation 已冻结的
 `environmentName`。恢复会话以 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> USER`
-命令前缀收敛完整目标设置。工具、skill 和 subagent binding 在每个 live turn 重新解析；
+命令前缀收敛完整目标设置。工具、Skill Prompt 输入和 subagent binding 在每个 live turn
+重新解析；
 非空 `subagents` 始终声明 `task` 并冻结 allowlist，递归深度上限只在实际调用时返回稳定
 Tool error，不动态裁剪工具面。Task 的 agent name、description、parent/root/depth 和
 invocation 归属在 durable binding 中冻结，执行期间不因 Catalog 变更扩权。Compaction
 resolver 是窄路径：只解析 `CompactionPreparation.executionModel`，返回零
-tools/skills/subagents 的 ModelRequestSpec。
+tools/subagents 的 ModelRequestSpec。
 
 ## Canvas 与 ComfyUI 适配
 
@@ -575,7 +822,7 @@ Function dispatcher claim + RUNNING lease
 
 | section | 主要字段与默认值 | 应用时点 |
 | --- | --- | --- |
-| `tool` | permission 默认 `write`/`edit`/`bash` 各 `* -> ask`，`defaultYolo=false`，Model Busy retry 5s、Tool Busy retry 1s、Tool overload retry 5s、skill load 30s | admission/permission 读取点 live |
+| `tool` | permission 默认 `write`/`edit`/`bash` 各 `* -> ask`，`defaultYolo=false`，Model Busy retry 5s、Tool Busy retry 1s、Tool overload retry 5s | admission/permission 读取点 live |
 | `aiRuntime` | retry 3 次、EXPONENTIAL、base 2s、max 60s、compaction keep 20000 tokens、subagent depth 2 / per-parent concurrency 10 / maxTurns 50 | retry、resolver、subagent 配置读取点 |
 | `environment` | resource 16 MiB、heartbeat 60s | Environment 单项/聚合上传资源上限与心跳超时读取点 |
 | `integrations.comfyui` | disabled；connect 10s、read 30s、WebSocket 1800s、input 50 MiB | client topology 由启动快照决定 |
@@ -594,10 +841,12 @@ token 或 OpenCLI instance identity。
 | --- | --- | --- |
 | `kk-studio.harness.dispatcher.*` | platform | Work claim/handoff 租约、轮询、拒绝退避与 bounded worker 容量；默认 `64/30s/1s/1s/16/64`（maxDispatchTasks/lease/poll/rejection/worker/queue） |
 | `kk-studio.harness.execution-admission.{model,tool,subagent}` | platform | 进程级容量，默认 `16/64/10` |
-| `kk-studio.harness.runtime.{workers-enabled,resource-root}` | platform | worker 开关与内容寻址 Resource 存储根（默认 `<cwd>/.kkstudio/resources`） |
+| `kk-studio.harness.runtime.{workers-enabled,resource-root,skill-cache-root}` | platform | worker 开关、内容寻址 Resource 存储根与 bare Skill Git cache 根（默认位于 `<cwd>/.kkstudio/`） |
 | `kk-studio.project.controller.*` | platform | Issue Controller lease 30s、poll 1s、retry 5s、blocked 60s、run 30m、continuation 10、worker `8 + queue 64` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | platform | S3/MinIO 服务端与 presign endpoint；bucket 只能由服务端配置 |
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | platform | maintenance 轮询与 cleanup lease，默认 `30s/5m` |
+| `kk-studio.plugins.credential-key-file` | platform | Plugin credential AES-256-GCM 主密钥的 owner-only 绝对文件；各 App 节点内容必须一致，不进入数据库 |
+| `kk-studio.plugins.refresh.{poll-delay,lease-duration}` | platform | Plugin credential refresh 扫描与互斥 lease，默认 `1h/2m` |
 | `kk-studio.canvas.resource.{ffprobe-binary,ffmpeg-binary,temp-dir}` | platform | 媒体处理本地路径 |
 | `kk-studio.comfyui.api-key` | platform | ComfyUI secret，非 SystemSettings |
 | `kk-studio.opencli-hub.instance-id` | platform | OpenCLI Hub 部署身份 |
