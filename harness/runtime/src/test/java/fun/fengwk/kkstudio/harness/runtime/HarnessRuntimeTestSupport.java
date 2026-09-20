@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
@@ -918,7 +919,11 @@ final class HarnessRuntimeTestSupport {
     for (String name : toolNames) {
       bindings.add(
           new ToolBinding(
-              toolDefinition(name), new ContributorBinding("core", name, List.of()), false, null));
+              toolDefinition(name),
+              new ContributorBinding("core", name, List.of()),
+              EnvironmentSupport.NONE,
+              null,
+              null));
     }
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -928,7 +933,6 @@ final class HarnessRuntimeTestSupport {
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
         List.of(),
         ProviderCacheControl.none());
   }
@@ -985,7 +989,6 @@ final class HarnessRuntimeTestSupport {
         provider.variant(),
         1024,
         "Test system instruction.",
-        List.of(),
         List.of(),
         List.of(),
         provider.cacheControl());
@@ -1063,7 +1066,11 @@ final class HarnessRuntimeTestSupport {
 
   private static ToolBinding hostBinding() {
     return new ToolBinding(
-        toolDefinition("bash"), new ContributorBinding("core", "bash", List.of()), false, null);
+        toolDefinition("bash"),
+        new ContributorBinding("core", "bash", List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   private static ToolDescriptor toolDescriptor(String name) {

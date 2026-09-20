@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
@@ -32,7 +33,7 @@ public final class ToolBindingJsonCodec {
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
     node.set("definition", DEFINITION_CODEC.encodeNode(binding.definition()));
     node.set("contributor", encodeContributor(binding.contributor()));
-    node.put("environmentRequired", binding.environmentRequired());
+    node.put("environmentSupport", binding.environmentSupport().name());
     InvocationJsonSupport.putNullable(node, "environmentId", binding.environmentId());
     InvocationJsonSupport.putNullable(node, "environmentName", binding.environmentName());
     return node;
@@ -49,19 +50,22 @@ public final class ToolBindingJsonCodec {
         CONTEXT,
         "definition",
         "contributor",
-        "environmentRequired",
+        "environmentSupport",
         "environmentId",
         "environmentName");
     AgentToolDefinition definition =
         DEFINITION_CODEC.decodeNode(InvocationJsonSupport.required(node, "definition", CONTEXT));
     ContributorBinding contributor =
         decodeContributor(InvocationJsonSupport.required(node, "contributor", CONTEXT));
-    boolean environmentRequired = InvocationJsonSupport.bool(node, "environmentRequired", CONTEXT);
+    EnvironmentSupport environmentSupport =
+        InvocationJsonSupport.requiredEnum(
+            node, "environmentSupport", EnvironmentSupport.class, CONTEXT);
     EnvironmentId environmentId =
         InvocationJsonSupport.nullableEnvironmentId(node, "environmentId", CONTEXT);
     String environmentName = InvocationJsonSupport.nullableText(node, "environmentName", CONTEXT);
+    // 非法组合（NONE 携带环境、REQUIRED 缺少环境、id/name 不成对）由 ToolBinding 构造边界 fail closed。
     return new ToolBinding(
-        definition, contributor, environmentRequired, environmentId, environmentName);
+        definition, contributor, environmentSupport, environmentId, environmentName);
   }
 
   private static ObjectNode encodeContributor(ContributorBinding contributor) {

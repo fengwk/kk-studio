@@ -10,7 +10,7 @@ import java.util.Objects;
 public record DaemonCapabilities(int version, DaemonEnvironmentInfo environment) {
 
   /** READY capabilities 协议版本；与 {@link DaemonCapabilitiesCodec} 共享。 */
-  public static final int VERSION = 1;
+  public static final int VERSION = 2;
 
   public DaemonCapabilities {
     if (version != VERSION) {

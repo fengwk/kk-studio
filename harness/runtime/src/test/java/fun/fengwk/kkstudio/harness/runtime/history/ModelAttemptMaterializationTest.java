@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -904,7 +905,6 @@ class ModelAttemptMaterializationTest {
         "Test system instruction.",
         List.of(),
         List.of(),
-        List.of(),
         ProviderCacheControl.none());
   }
 
@@ -971,7 +971,8 @@ class ModelAttemptMaterializationTest {
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -981,7 +982,6 @@ class ModelAttemptMaterializationTest {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(),
         List.of(),
         ProviderCacheControl.none());
   }

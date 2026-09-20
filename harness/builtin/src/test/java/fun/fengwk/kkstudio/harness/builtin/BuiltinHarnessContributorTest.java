@@ -5,14 +5,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
@@ -40,7 +44,7 @@ import java.util.stream.Collectors;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (14 tools: 9 environment + 2 internal + 3 goal),
+ * <p>验证 exact inventory (13 tools: 1 read + 8 environment + 1 internal task + 3 goal),
  * visibility/requirements/capability 映射, 稳定模型可见 name, goal state ownership/projector, 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
@@ -48,9 +52,7 @@ class BuiltinHarnessContributorTest {
   @Test
   void contributorDescriptorMatchesSpecification() {
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributor(
-            stubTool("load_skill", ToolRequirements.environment()),
-            stubTool("task", ToolRequirements.none()));
+        new BuiltinHarnessContributor(stubReadTool(), stubTool("task", ToolRequirements.none()));
     ContributorDescriptor descriptor = contributor.descriptor();
 
     assertEquals(new ContributorId("builtin"), descriptor.id());
@@ -65,44 +67,56 @@ class BuiltinHarnessContributorTest {
         NullPointerException.class,
         () -> new BuiltinHarnessContributor(null, stubTool("task", ToolRequirements.none())));
     assertThrows(
-        NullPointerException.class,
-        () ->
-            new BuiltinHarnessContributor(
-                stubTool("load_skill", ToolRequirements.environment()), null));
+        NullPointerException.class, () -> new BuiltinHarnessContributor(stubReadTool(), null));
   }
 
   @Test
   void constructorRejectsIncorrectOrSwappedTools() {
-    // Swapped tools
+    // 传错 readTool 名字
+    ReadTool badReadTool = mock(ReadTool.class);
+    ToolDescriptor badReadDesc =
+        new ToolDescriptor(
+            "other",
+            "desc",
+            "other",
+            new InputSchema(null, Map.of(), Set.of(), false),
+            ToolSideEffect.READ_ONLY,
+            Duration.ZERO);
+    when(badReadTool.descriptor()).thenReturn(badReadDesc);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new BuiltinHarnessContributor(
-                stubTool("task", ToolRequirements.none()),
-                stubTool("load_skill", ToolRequirements.environment())));
+            new BuiltinHarnessContributor(badReadTool, stubTool("task", ToolRequirements.none())));
 
-    // Wrong load_skill name
+    // readTool descriptor 为 null
+    ReadTool nullDescReadTool = mock(ReadTool.class);
+    when(nullDescReadTool.descriptor()).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BuiltinHarnessContributor(
-                stubTool("other", ToolRequirements.environment()),
-                stubTool("task", ToolRequirements.none())));
+                nullDescReadTool, stubTool("task", ToolRequirements.none())));
 
-    // Wrong task name
+    // 传错 taskTool 名字
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BuiltinHarnessContributor(
-                stubTool("load_skill", ToolRequirements.environment()),
-                stubTool("other", ToolRequirements.none())));
+                stubReadTool(), stubTool("other", ToolRequirements.none())));
+
+    // taskTool descriptor 为 null
+    Tool nullDescTask = mock(Tool.class);
+    when(nullDescTask.descriptor()).thenReturn(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new BuiltinHarnessContributor(stubReadTool(), nullDescTask));
   }
 
   @Test
-  void catalogFreezesExactInventoryOf14ToolsAndAssociatedCapabilities() {
-    Tool loadSkill = stubTool("load_skill", ToolRequirements.environment());
+  void catalogFreezesExactInventoryOf13ToolsAndAssociatedCapabilities() {
+    ReadTool readTool = stubReadTool();
     Tool task = stubTool("task", ToolRequirements.none());
-    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(loadSkill, task);
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(readTool, task);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
@@ -111,22 +125,18 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertTrue(catalog.findDescriptor(new ContributorId("builtin")).isPresent());
 
-    // Tools inventory: exactly 14 tools
+    // Tools inventory: exactly 13 tools
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(14, tools.size(), "exact total 14 tools expected");
+    assertEquals(13, tools.size(), "exact total 13 tools expected");
 
-    // Selectable tools: 9 environment + 3 goal = 12 tools (load_skill and task are INTERNAL)
+    // Selectable tools: 1 read + 8 environment + 3 goal = 12 tools (task is INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
     assertEquals(12, selectables.size(), "exact 12 selectable tools expected");
 
-    // 9 Environment Capability tools
-    assertEnvironmentTool(
-        catalog,
-        "read",
-        "environment.read",
-        EnvironmentCapabilityIds.FS_READ,
-        ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(1));
+    // 统一 read 工具（SELECTABLE, localName=read, name=read, OPTIONAL, ReadTool 实例）
+    assertReadTool(catalog);
+
+    // 8 个 Environment Capability 工具（SELECTABLE, REQUIRED, EnvironmentCapabilityTool 实例）
     assertEnvironmentTool(
         catalog,
         "write",
@@ -184,11 +194,10 @@ class BuiltinHarnessContributorTest {
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(2));
 
-    // 2 Internal tools (INTERNAL visibility)
-    assertInternalTool(catalog, "load_skill", "runtime.load-skill", ToolRequirements.environment());
+    // 1 个 Internal 工具 (INTERNAL visibility, NONE requirements)
     assertInternalTool(catalog, "task", "runtime.task", ToolRequirements.none());
 
-    // 3 Goal tools (SELECTABLE visibility)
+    // 3 个 Goal 工具 (SELECTABLE visibility, NONE requirements + state access)
     assertGoalTool(
         catalog, "create_goal", "goal.create", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
     assertGoalTool(catalog, "get_goal", "goal.get", ToolSideEffect.READ_ONLY, StateMode.READ);
@@ -221,20 +230,20 @@ class BuiltinHarnessContributorTest {
   }
 
   /**
-   * 验证 BuiltinHarnessContributor 只注册固定的 9 个环境能力工具，绝不泄漏任何 MCP 相关工具身份。
+   * 验证 BuiltinHarnessContributor 只注册固定的环境相关能力工具，绝不泄漏任何 MCP 相关工具身份。
    *
    * <p>环境能力目录本身已不含 MCP：Platform 只通过 Streamable HTTP 在 Backend 内实现 MCP，因此内置 contributor
-   * 的模型工具集合必须恰好等于工作目录语义的 9 项能力。
+   * 的模型工具集合必须恰好等于工作目录与文件读取相关的 9 项能力（统一 read + 8 个宿主能力）。
    */
   @Test
-  void builtinToolsAreExactlyTheNineEnvironmentCapabilities() {
+  void builtinToolsAreExactlyReadPlusTheEightHostCapabilities() {
     assertTrue(
         EnvironmentCapabilityCatalog.descriptors().stream()
             .noneMatch(descriptor -> descriptor.id().value().contains("mcp")));
 
-    Tool loadSkill = stubTool("load_skill", ToolRequirements.environment());
+    ReadTool readTool = stubReadTool();
     Tool task = stubTool("task", ToolRequirements.none());
-    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(loadSkill, task);
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(readTool, task);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
@@ -249,9 +258,8 @@ class BuiltinHarnessContributorTest {
           "Registered tool rendererKey must not contain mcp: " + descriptor.rendererKey());
     }
 
-    Set<EnvironmentCapabilityId> expectedCapabilityIds =
+    Set<EnvironmentCapabilityId> expectedHostCapabilityIds =
         Set.of(
-            EnvironmentCapabilityIds.FS_READ,
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.PROCESS_EXEC,
@@ -268,14 +276,14 @@ class BuiltinHarnessContributorTest {
             .map(EnvironmentCapabilityTool.class::cast)
             .toList();
 
-    assertEquals(9, envTools.size(), "Environment capability backed tools count must be exactly 9");
+    assertEquals(8, envTools.size(), "Environment capability backed tools count must be exactly 8");
 
     Set<EnvironmentCapabilityId> registeredCapabilityIds =
         envTools.stream().map(tool -> tool.capability().id()).collect(Collectors.toSet());
 
-    assertEquals(expectedCapabilityIds, registeredCapabilityIds);
+    assertEquals(expectedHostCapabilityIds, registeredCapabilityIds);
 
-    // 2. 断言已注册的环境工具模型可见 name 集合恰好等于固定的 9 个内置环境工具名
+    // 2. 断言已注册的环境工具模型可见 name 集合恰好等于固定的 9 个内置工具名（1 个 read + 8 个宿主能力）
     Set<String> expectedToolNames =
         Set.of(
             "read",
@@ -290,11 +298,35 @@ class BuiltinHarnessContributorTest {
 
     Set<String> registeredToolNames =
         catalog.tools().stream()
-            .filter(t -> t.tool() instanceof EnvironmentCapabilityTool)
+            .filter(
+                t -> t.tool() instanceof EnvironmentCapabilityTool || t.tool() instanceof ReadTool)
             .map(t -> t.definition().descriptor().name())
             .collect(Collectors.toSet());
 
     assertEquals(expectedToolNames, registeredToolNames);
+  }
+
+  private static void assertReadTool(HarnessCatalog catalog) {
+    ToolContribution tool = catalog.findTool("read").orElseThrow();
+    assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
+    assertEquals(new ContributionId(new ContributorId("builtin"), "read"), tool.id());
+    assertEquals(ToolRequirements.optionalEnvironment(), tool.requirements());
+    assertEquals(EnvironmentSupport.OPTIONAL, tool.requirements().environmentSupport());
+
+    assertInstanceOf(ReadTool.class, tool.tool());
+
+    ToolDescriptor descriptor = tool.definition().descriptor();
+    assertEquals("read", descriptor.name());
+    assertEquals("read", descriptor.rendererKey());
+    assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
+
+    EnvironmentCapabilityDescriptor fsRead =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
+    assertEquals(fsRead.inputSchema(), descriptor.inputSchema());
+    assertEquals(fsRead.defaultTimeout(), descriptor.defaultTimeout());
+    assertFalse(descriptor.description().isBlank());
+
+    assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
   private static void assertEnvironmentTool(
@@ -308,6 +340,7 @@ class BuiltinHarnessContributorTest {
     assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
     assertEquals(ToolRequirements.environment(), tool.requirements());
+    assertEquals(EnvironmentSupport.REQUIRED, tool.requirements().environmentSupport());
 
     assertInstanceOf(EnvironmentCapabilityTool.class, tool.tool());
     EnvironmentCapabilityTool envCapabilityTool = (EnvironmentCapabilityTool) tool.tool();
@@ -358,7 +391,8 @@ class BuiltinHarnessContributorTest {
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
     assertEquals(
         new ToolRequirements(
-            false, List.of(new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, mode))),
+            EnvironmentSupport.NONE,
+            List.of(new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, mode))),
         tool.requirements());
 
     ToolDescriptor descriptor = tool.definition().descriptor();
@@ -369,6 +403,10 @@ class BuiltinHarnessContributorTest {
     assertFalse(descriptor.description().isBlank());
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
+  }
+
+  private static ReadTool stubReadTool() {
+    return new ReadTool((request, listener) -> null);
   }
 
   private static Tool stubTool(String name, ToolRequirements requirements) {

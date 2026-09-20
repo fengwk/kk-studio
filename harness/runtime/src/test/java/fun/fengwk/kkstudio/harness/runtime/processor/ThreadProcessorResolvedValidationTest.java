@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -58,7 +59,7 @@ import java.util.UUID;
 class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
 
   @Test
-  void environmentRequiredToolBindsDirectEnvironmentIdOnBranchWithoutDirectory() {
+  void environmentBoundToolBindsDirectEnvironmentIdOnBranchWithoutDirectory() {
     // branch 不再持有目录：environment-required tool 的 environmentId 与 branch 事实不构成冲突，正常落库。
     Fixture fixture = fixture();
     var baseline = seedBaseline(fixture.store);
@@ -140,8 +141,9 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("base", "fs", List.of()),
-            true,
-            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"));
+            EnvironmentSupport.REQUIRED,
+            EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
+            "dev");
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
@@ -168,7 +170,6 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
         1024,
         "Test system instruction.",
         List.of(environmentTool),
-        List.of(),
         List.of(),
         ProviderCacheControl.none());
   }

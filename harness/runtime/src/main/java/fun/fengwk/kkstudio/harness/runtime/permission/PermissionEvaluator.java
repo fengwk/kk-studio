@@ -53,7 +53,7 @@ public final class PermissionEvaluator {
    * relativize，相对 target 基于该 workdir 解析。全过程不读取 Backend cwd/HOME，Environment root 与 Backend 文件系统都不参与
    * pattern 坐标。
    *
-   * <p>workdir 只能来自本次调用的 {@code arguments.workdir}：没有该字段的调用（例如 {@code load_skill}）不会获得隐藏默认目录。
+   * <p>workdir 只能来自本次调用的 {@code arguments.workdir}：没有该字段的调用（例如 {@code task}）不会获得隐藏默认目录。
    */
   PathTarget describePathTarget(String rawPath, String workdir) {
     boolean directory = rawPath.endsWith("/") || rawPath.endsWith("\\");
@@ -160,7 +160,7 @@ public final class PermissionEvaluator {
     return action;
   }
 
-  /** prompt preview 只展示该调用真实携带的 workdir：没有该字段的工具（{@code load_skill}、MCP 等）不显示任何虚构默认目录。 */
+  /** prompt preview 只展示该调用真实携带的 workdir：没有该字段的工具（{@code task}、MCP 等）不显示任何虚构默认目录。 */
   private PermissionPromptPreview promptPreview(
       PermissionEvaluationContext context, JsonNode input) {
     JsonNode workdirNode = input.get("workdir");

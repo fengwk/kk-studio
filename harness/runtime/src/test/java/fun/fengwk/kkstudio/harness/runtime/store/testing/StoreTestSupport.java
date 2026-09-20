@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -522,8 +523,9 @@ final class StoreTestSupport {
                     descriptor.defaultTimeout()),
                 definition.visibility()),
             invocation.binding().contributor(),
-            invocation.binding().environmentRequired(),
-            invocation.binding().environmentId());
+            invocation.binding().environmentSupport(),
+            invocation.binding().environmentId(),
+            invocation.binding().environmentName());
     return new ToolInvocation(
         invocation.id(),
         invocation.modelInvocationId(),
@@ -556,7 +558,6 @@ final class StoreTestSupport {
         "Test system instruction.",
         List.of(),
         List.of(),
-        List.of(),
         provider.cacheControl());
   }
 
@@ -571,7 +572,6 @@ final class StoreTestSupport {
         1024,
         "Test system instruction.",
         List.of(hostBinding()),
-        List.of(),
         List.of(),
         base.cacheControl());
   }
@@ -649,7 +649,8 @@ final class StoreTestSupport {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

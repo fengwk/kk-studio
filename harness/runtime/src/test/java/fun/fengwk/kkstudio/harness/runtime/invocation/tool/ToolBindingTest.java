@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -17,62 +18,82 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 
-/**
- * ToolBinding 的 definition/contributor/environmentRequired/environmentId/environmentName 契约与不变式。
- */
+/** ToolBinding 的 definition/contributor/environmentSupport/environmentId/environmentName 契约与不变式。 */
 class ToolBindingTest {
 
   private static final EnvironmentId ENV_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   @Test
-  void exposesOnlyDefinitionContributorEnvironmentRequiredAndEnvironmentComponents() {
+  void exposesOnlyDefinitionContributorEnvironmentSupportAndEnvironmentComponents() {
     // 反射契约锁定 durable binding 的五个组件（environmentName 是历史投影判定 native 资格的冻结事实）。
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(
         List.of(
-            "definition", "contributor", "environmentRequired", "environmentId", "environmentName"),
+            "definition", "contributor", "environmentSupport", "environmentId", "environmentName"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(AgentToolDefinition.class, components[0].getType());
     assertEquals(ContributorBinding.class, components[1].getType());
-    assertEquals(boolean.class, components[2].getType());
+    assertEquals(EnvironmentSupport.class, components[2].getType());
     assertEquals(EnvironmentId.class, components[3].getType());
     assertEquals(String.class, components[4].getType());
   }
 
+  /** 测试意图：验证三种 EnvironmentSupport 级别与其允许的环境路由形态均能正确构造。 */
   @Test
-  void acceptsValidEnvironmentRequiredAndUnrequiredBindingShapes() {
-    // 验证 environmentRequired=false/true（含未选择环境的 null 路由）三种合法形态均能正确构造。
+  void acceptsValidEnvironmentSupportAndRouteBindingShapes() {
+    // NONE 必须不带环境
     ToolBinding host =
         new ToolBinding(
-            definition("bash"), contributorProvenance("core", "bash", List.of()), false, null);
+            definition("bash"),
+            contributorProvenance("core", "bash", List.of()),
+            EnvironmentSupport.NONE,
+            null,
+            null);
     assertEquals("bash", host.descriptor().name());
-    assertFalse(host.environmentRequired());
+    assertEquals(EnvironmentSupport.NONE, host.environmentSupport());
     assertNull(host.environmentId());
+    assertNull(host.environmentName());
     assertEquals("core", host.contributor().contributorId());
 
+    // REQUIRED 必须携带成对的 environmentId 与 environmentName
     ToolBinding environment =
         new ToolBinding(
             definition("fs"),
             contributorProvenance("base", "read", List.of()),
-            true,
+            EnvironmentSupport.REQUIRED,
             ENV_ID,
             "dev");
     assertEquals("fs", environment.descriptor().name());
-    assertTrue(environment.environmentRequired());
+    assertEquals(EnvironmentSupport.REQUIRED, environment.environmentSupport());
     assertEquals(ENV_ID, environment.environmentId());
     assertEquals("dev", environment.environmentName());
     assertEquals("base", environment.contributor().contributorId());
 
-    // branch 未选择 Environment：工具保持 environmentRequired，但路由身份为 null，调用时才失败。
-    ToolBinding unselected =
+    // OPTIONAL 可以携带成对的环境
+    ToolBinding optionalWithEnv =
         new ToolBinding(
-            definition("fs"), contributorProvenance("base", "read", List.of()), true, null);
-    assertTrue(unselected.environmentRequired());
-    assertNull(unselected.environmentId());
-    // 非环境工具与未提供环境名的路径共用同一 4 参便捷构造：冻结名为 null。
-    assertNull(unselected.environmentName());
+            definition("custom"),
+            contributorProvenance("base", "custom", List.of()),
+            EnvironmentSupport.OPTIONAL,
+            ENV_ID,
+            "dev");
+    assertEquals(EnvironmentSupport.OPTIONAL, optionalWithEnv.environmentSupport());
+    assertEquals(ENV_ID, optionalWithEnv.environmentId());
+    assertEquals("dev", optionalWithEnv.environmentName());
+
+    // OPTIONAL 也可以不携带环境
+    ToolBinding optionalWithoutEnv =
+        new ToolBinding(
+            definition("custom"),
+            contributorProvenance("base", "custom", List.of()),
+            EnvironmentSupport.OPTIONAL,
+            null,
+            null);
+    assertEquals(EnvironmentSupport.OPTIONAL, optionalWithoutEnv.environmentSupport());
+    assertNull(optionalWithoutEnv.environmentId());
+    assertNull(optionalWithoutEnv.environmentName());
   }
 
   @Test
@@ -80,40 +101,100 @@ class ToolBindingTest {
     // 允许 stateAccesses 与 environment 在同一 binding 中并存。
     ContributorBinding statefulContributor = declarativeProvenance();
     ToolBinding combined =
-        new ToolBinding(definition("state_tool"), statefulContributor, true, ENV_ID);
-    assertTrue(combined.environmentRequired());
+        new ToolBinding(
+            definition("state_tool"),
+            statefulContributor,
+            EnvironmentSupport.REQUIRED,
+            ENV_ID,
+            "dev");
+    assertEquals(EnvironmentSupport.REQUIRED, combined.environmentSupport());
     assertEquals(ENV_ID, combined.environmentId());
     assertEquals(statefulContributor, combined.contributor());
     assertFalse(combined.contributor().stateAccesses().isEmpty());
 
     ToolBinding stateWithoutEnv =
-        new ToolBinding(definition("state_tool"), statefulContributor, false, null);
-    assertFalse(stateWithoutEnv.environmentRequired());
+        new ToolBinding(
+            definition("state_tool"), statefulContributor, EnvironmentSupport.NONE, null, null);
+    assertEquals(EnvironmentSupport.NONE, stateWithoutEnv.environmentSupport());
     assertNull(stateWithoutEnv.environmentId());
     assertEquals(statefulContributor, stateWithoutEnv.contributor());
   }
 
+  /**
+   * 测试意图：严格校验 EnvironmentSupport 与环境属性组合不变式： NONE 带环境被拒；REQUIRED 缺 id 或缺 name 被拒；OPTIONAL id/name
+   * 不同步被拒；blank 名称被拒；必要字段非空。
+   */
   @Test
-  void enforcesEnvironmentRequiredInvariant() {
+  void enforcesEnvironmentSupportInvariants() {
     ContributorBinding contributor = contributorProvenance("core", "bash", List.of());
 
-    // environmentRequired 为 false 时 environment 必须为 null
+    // NONE 携带 environmentId 或 environmentName 必须被拒绝
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolBinding(definition("host-env"), contributor, false, ENV_ID));
-    // environmentRequired 为 false 时 environmentName 同样必须为 null
+        () ->
+            new ToolBinding(
+                definition("host"), contributor, EnvironmentSupport.NONE, ENV_ID, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolBinding(definition("host-env"), contributor, false, null, "dev"));
-    // environmentName 只能是 null 或非空白
+        () ->
+            new ToolBinding(definition("host"), contributor, EnvironmentSupport.NONE, null, "dev"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolBinding(definition("fs"), contributor, true, ENV_ID, " "));
+        () ->
+            new ToolBinding(
+                definition("host"), contributor, EnvironmentSupport.NONE, ENV_ID, "dev"));
 
-    // definition 和 contributor 必须非空
-    assertThrows(NullPointerException.class, () -> new ToolBinding(null, contributor, false, null));
+    // REQUIRED 缺少 environmentId 或缺少 environmentName 必须被拒绝
     assertThrows(
-        NullPointerException.class, () -> new ToolBinding(definition("bash"), null, false, null));
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("fs"), contributor, EnvironmentSupport.REQUIRED, null, "dev"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("fs"), contributor, EnvironmentSupport.REQUIRED, ENV_ID, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("fs"), contributor, EnvironmentSupport.REQUIRED, null, null));
+
+    // OPTIONAL 必须成对出现或成对缺失：只带 id 或只带 name 必须被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("opt"), contributor, EnvironmentSupport.OPTIONAL, ENV_ID, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("opt"), contributor, EnvironmentSupport.OPTIONAL, null, "dev"));
+
+    // environmentName 只能是 null 或非空白字符串
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("fs"), contributor, EnvironmentSupport.REQUIRED, ENV_ID, " "));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolBinding(
+                definition("opt"), contributor, EnvironmentSupport.OPTIONAL, ENV_ID, "   "));
+
+    // definition、contributor 与 environmentSupport 必须非空
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolBinding(null, contributor, EnvironmentSupport.NONE, null, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolBinding(definition("bash"), null, EnvironmentSupport.NONE, null, null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolBinding(definition("bash"), contributor, null, null, null));
   }
 
   @Test
@@ -124,7 +205,9 @@ class ToolBindingTest {
             "goal",
             "create",
             List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
-    ToolBinding binding = new ToolBinding(definition("create_goal"), contributor, false, null);
+    ToolBinding binding =
+        new ToolBinding(
+            definition("create_goal"), contributor, EnvironmentSupport.NONE, null, null);
     assertEquals(contributor, binding.contributor());
     assertThrows(
         IllegalArgumentException.class,

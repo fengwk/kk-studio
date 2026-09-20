@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
@@ -387,7 +388,7 @@ class ModelRequestMaterializerTest {
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "fs.read", List.of()),
-        true,
+        EnvironmentSupport.REQUIRED,
         new EnvironmentId(id(9L)),
         environmentName);
   }
@@ -443,7 +444,6 @@ class ModelRequestMaterializerTest {
         "Test system instruction.",
         List.of(binding),
         List.of(),
-        List.of(),
         ProviderCacheControl.none());
   }
 
@@ -455,7 +455,6 @@ class ModelRequestMaterializerTest {
         variant(),
         1024,
         "Test system instruction.",
-        List.of(),
         List.of(),
         List.of(),
         ProviderCacheControl.none());
@@ -478,7 +477,8 @@ class ModelRequestMaterializerTest {
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

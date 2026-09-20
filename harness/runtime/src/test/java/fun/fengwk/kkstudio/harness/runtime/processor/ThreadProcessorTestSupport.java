@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -832,7 +833,6 @@ final class ThreadProcessorTestSupport {
         "Test system instruction.",
         bindings,
         List.of(),
-        List.of(),
         ProviderCacheControl.none());
   }
 
@@ -845,7 +845,6 @@ final class ThreadProcessorTestSupport {
         new ModelVariant(settings.model().variant()),
         1024,
         "Test system instruction.",
-        List.of(),
         List.of(),
         List.of(),
         ProviderCacheControl.none());
@@ -865,7 +864,6 @@ final class ThreadProcessorTestSupport {
         new ModelVariant(preparation.executionModel().variant()),
         1024,
         "Test system instruction.",
-        List.of(),
         List.of(),
         List.of(),
         ProviderCacheControl.none());
@@ -1089,7 +1087,11 @@ final class ThreadProcessorTestSupport {
 
   private static ToolBinding hostBinding(String name) {
     return new ToolBinding(
-        toolDefinition(name), new ContributorBinding("core", name, List.of()), false, null);
+        toolDefinition(name),
+        new ContributorBinding("core", name, List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   /** 构造带自定义输入 schema 的 host binding，用于验证 terminal Model apply 的参数边界。 */
@@ -1104,7 +1106,11 @@ final class ThreadProcessorTestSupport {
             Duration.ofSeconds(30));
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     return new ToolBinding(
-        definition, new ContributorBinding("core", name, List.of()), false, null);
+        definition,
+        new ContributorBinding("core", name, List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   static ToolBinding declarativeBinding(
@@ -1112,7 +1118,8 @@ final class ThreadProcessorTestSupport {
     return new ToolBinding(
         toolDefinition(name),
         new ContributorBinding(contributorId, localName, accesses),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

@@ -1,12 +1,8 @@
 /**
- * 内置 Skill 加载 Tool 实现与 Prompt 资源加载。
+ * 统一 {@code read} 工具执行窄端口与 Skill 稳定地址交互契约。
  *
- * <p>{@link fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool} 作为内部（{@code
- * ToolVisibility.INTERNAL}）工具注册，依据 {@link
- * fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup} 校验当前 Thread Agent 的冻结选择，再通过
- * {@link fun.fengwk.kkstudio.harness.builtin.skill.SkillContentLoader} 按冻结的精确 revision 加载 Platform
- * 全局 Skill 正文。
- *
- * <p>本包不依赖 Environment、Daemon 或宿主文件系统路径：Skill 正文是 Platform 自身的目录事实。
+ * <p>{@link fun.fengwk.kkstudio.harness.builtin.skill.ReadToolExecutor} 作为统一 {@code read}
+ * 的执行窄端口，Platform（{@code kkstudio:} 地址）与可选 {@link
+ * fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment}（本地路径）的路由由实现方承担，本模块不注册专用模型工具。
  */
 package fun.fengwk.kkstudio.harness.builtin.skill;

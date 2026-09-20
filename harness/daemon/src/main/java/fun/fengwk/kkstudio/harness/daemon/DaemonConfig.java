@@ -3,9 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
-import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Objects;
@@ -13,18 +11,17 @@ import java.util.Objects;
 /**
  * Daemon 独立进程的连接与本地执行配置。
  *
- * <p>连接、身份、说明、本地执行程序、environment root 与数据目录的唯一配置来源是 CLI：{@code --registration-token-file}、gateway
- * 连接参数、可选且唯一 {@code --note}、唯一 {@code --environment-root}、 可选 {@code --data-dir} 与三个可选的本地执行程序
- * {@code --bash-executable}、{@code --lsp-bridge-command}、 {@code --javap-executable}。已删除的 {@code
- * --tool-timeout} 作为未知参数 fail closed：执行超时只由 Tool definition 默认值与调用显式值决定。
+ * <p>连接、身份、说明、本地执行程序与数据目录的唯一配置来源是 CLI：{@code --registration-token-file}、gateway 连接参数、可选且唯一 {@code
+ * --note}、可选 {@code --data-dir} 与三个可选的本地执行程序 {@code --bash-executable}、{@code
+ * --lsp-bridge-command}、 {@code --javap-executable}。已删除的 {@code --tool-timeout} 作为未知参数 fail
+ * closed：执行超时只由 Tool definition 默认值与调用显式值决定。
  *
  * <p>{@code --registration-token-file} 指向 owner-only 普通文件：凭证文本只存在于该文件，进程参数、环境变量与日志都不携带它；本 record
  * 只保存路径，因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。已删除的 {@code
  * --registration-token} 作为未知参数 fail closed，不提供兼容回退。
  *
  * <p>{@code --data-dir} 承载本地大文本输出与 daemon 进程锁；省略时为 {@link #defaultDataDir()}。二进制结果不落本地 Resource
- * 仓库，而是由 Daemon 直传对象存储。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。environment
- * root 默认启动用户 canonical HOME，只是宿主展示元数据，不构成任何工具的默认目录。
+ * 仓库，而是由 Daemon 直传对象存储。Daemon 不配置也不持有 Environment UUID，连接建立后由 Gateway 在 WELCOME 消息中下发。
  *
  * <p>{@code --note} 会进入受信任的模型 SYSTEM Prompt，只能由可信操作者设置，禁止放入凭证、秘密或不可信外部文本。
  */
@@ -35,7 +32,6 @@ public record DaemonConfig(
     Duration initialReconnectDelay,
     Duration maxReconnectDelay,
     String note,
-    Path environmentRoot,
     Path dataDir,
     String bashExecutable,
     String lspBridgeCommand,
@@ -60,7 +56,6 @@ public record DaemonConfig(
       throw new IllegalArgumentException("initialReconnectDelay must not exceed maxReconnectDelay");
     }
     note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
-    environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
     dataDir = requireAbsoluteDirectory(dataDir);
     bashExecutable = blankToDefault(bashExecutable, DEFAULT_BASH_EXECUTABLE, "bashExecutable");
     lspBridgeCommand = blankToNull(lspBridgeCommand);
@@ -75,7 +70,6 @@ public record DaemonConfig(
       Duration initialReconnectDelay,
       Duration maxReconnectDelay,
       String note,
-      Path environmentRoot,
       Path dataDir) {
     this(
         gatewayUri,
@@ -84,7 +78,6 @@ public record DaemonConfig(
         initialReconnectDelay,
         maxReconnectDelay,
         note,
-        environmentRoot,
         dataDir,
         DEFAULT_BASH_EXECUTABLE,
         null,
@@ -99,7 +92,6 @@ public record DaemonConfig(
     String heartbeat = null;
     String reconnectInitial = null;
     String reconnectMax = null;
-    String environmentRoot = null;
     String note = null;
     String dataDir = null;
     String bashExecutable = null;
@@ -129,12 +121,6 @@ public record DaemonConfig(
           }
           note = requireArgValue(args, ++index, arg);
         }
-        case "--environment-root" -> {
-          if (environmentRoot != null) {
-            throw new IllegalArgumentException("--environment-root may only be specified once");
-          }
-          environmentRoot = requireArgValue(args, ++index, arg);
-        }
         case "--data-dir" -> {
           if (dataDir != null) {
             throw new IllegalArgumentException("--data-dir may only be specified once");
@@ -152,16 +138,10 @@ public record DaemonConfig(
         parseDuration(reconnectInitial, Duration.ofSeconds(1)),
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
         note,
-        environmentRoot == null ? defaultEnvironmentRoot() : Path.of(environmentRoot),
         dataDir == null ? defaultDataDir() : Path.of(dataDir),
         bashExecutable,
         lspBridgeCommand,
         javapExecutable);
-  }
-
-  /** 默认 Environment Root：启动用户 HOME 的 canonical 目录。 */
-  public static Path defaultEnvironmentRoot() {
-    return canonicalDirectory(Path.of(System.getProperty("user.home")), "user.home");
   }
 
   /** 默认数据目录：启动用户 HOME 下的 {@code .kk-studio}。 */
@@ -249,18 +229,6 @@ public record DaemonConfig(
 
   private static String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value;
-  }
-
-  private static Path canonicalDirectory(Path value, String name) {
-    try {
-      Path path = Objects.requireNonNull(value, name).toRealPath();
-      if (!Files.isDirectory(path)) {
-        throw new IllegalArgumentException(name + " must be an existing directory");
-      }
-      return path;
-    } catch (IOException error) {
-      throw new IllegalArgumentException(name + " must be an existing directory", error);
-    }
   }
 
   /** 数据目录可省略，但一旦显式给出就必须绝对；不必预先存在，Daemon 会创建它。 */

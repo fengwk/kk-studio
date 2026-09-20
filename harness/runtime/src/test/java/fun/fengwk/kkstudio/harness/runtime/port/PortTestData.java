@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -44,7 +45,6 @@ final class PortTestData {
         "Test system instruction.",
         List.of(),
         List.of(),
-        List.of(),
         ProviderCacheControl.none());
   }
 
@@ -67,7 +67,8 @@ final class PortTestData {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

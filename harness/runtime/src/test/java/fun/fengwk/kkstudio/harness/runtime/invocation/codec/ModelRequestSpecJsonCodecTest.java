@@ -42,9 +42,7 @@ class ModelRequestSpecJsonCodecTest {
             + requestSpec.systemInstruction()
             + "\",\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
-            + "],\"skillBindings\":[{\"name\":\"review\",\"packageName\":\"review-package\","
-            + "\"packageVersion\":\"1.0.0\",\"description\":\"Review code\"}],"
-            + "\"subagentBindings\":[],\"cacheControl\":"
+            + "],\"subagentBindings\":[],\"cacheControl\":"
             + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
             + "}";
 
@@ -68,7 +66,6 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             "Test system instruction.",
             base.toolBindings(),
-            base.skillBindings(),
             List.of(new SubagentBinding("reviewer", "Review changes")),
             base.cacheControl());
 
@@ -95,7 +92,6 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             "Test system instruction.",
             base.toolBindings(),
-            base.skillBindings(),
             List.of(new SubagentBinding("reviewer", longDescription)),
             base.cacheControl());
 
@@ -117,7 +113,6 @@ class ModelRequestSpecJsonCodecTest {
             "outputTokens",
             "systemInstruction",
             "toolBindings",
-            "skillBindings",
             "subagentBindings",
             "cacheControl"),
         fieldNames);
@@ -140,7 +135,6 @@ class ModelRequestSpecJsonCodecTest {
             base.outputTokens(),
             instruction,
             base.toolBindings(),
-            base.skillBindings(),
             base.subagentBindings(),
             base.cacheControl());
 
@@ -175,6 +169,11 @@ class ModelRequestSpecJsonCodecTest {
     extra.put("extra", true);
     assertInvalid(extra);
 
+    // 未知字段包含旧的 skillBindings 必须被拒绝
+    ObjectNode legacySkills = encodedNode();
+    legacySkills.putArray("skillBindings");
+    assertInvalid(legacySkills);
+
     ObjectNode missing = encodedNode();
     missing.remove("toolBindings");
     assertInvalid(missing);
@@ -191,12 +190,40 @@ class ModelRequestSpecJsonCodecTest {
     toolsType.putObject("toolBindings");
     assertInvalid(toolsType);
 
-    // Skill binding 的包身份全部必填，缺失时必须严格拒绝。
-    for (String field : List.of("packageName", "packageVersion", "name", "description")) {
-      ObjectNode missingSkillField = encodedNode();
-      ObjectNode skill = (ObjectNode) missingSkillField.path("skillBindings").get(0);
-      skill.remove(field);
-      assertInvalid(missingSkillField);
+    // toolBindings 内部包含旧字段 environmentRequired 必须被拒绝
+    ObjectNode legacyTool = encodedNode();
+    ObjectNode firstTool = (ObjectNode) legacyTool.path("toolBindings").get(0);
+    firstTool.put("environmentRequired", true);
+    assertInvalid(legacyTool);
+
+    // toolBindings 内部缺失 environmentSupport 或使用未知枚举值必须被拒绝
+    ObjectNode missingSupport = encodedNode();
+    ((ObjectNode) missingSupport.path("toolBindings").get(0)).remove("environmentSupport");
+    assertInvalid(missingSupport);
+
+    ObjectNode invalidSupport = encodedNode();
+    ((ObjectNode) invalidSupport.path("toolBindings").get(0))
+        .put("environmentSupport", "UNKNOWN_SUPPORT");
+    assertInvalid(invalidSupport);
+
+    // Subagent binding 的 name 与 description 全部必填，缺失时必须严格拒绝。
+    ModelRequestSpec base = hostModelRequest();
+    ModelRequestSpec specWithSubagent =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            List.of(new SubagentBinding("reviewer", "review")),
+            base.cacheControl());
+    for (String field : List.of("name", "description")) {
+      ObjectNode missingSubagentField = codec.encodeNode(specWithSubagent);
+      ObjectNode subagent = (ObjectNode) missingSubagentField.path("subagentBindings").get(0);
+      subagent.remove(field);
+      assertInvalid(missingSubagentField);
     }
   }
 

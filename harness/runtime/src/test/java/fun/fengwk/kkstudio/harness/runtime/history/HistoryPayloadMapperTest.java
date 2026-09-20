@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
@@ -83,7 +84,8 @@ class HistoryPayloadMapperTest {
                 new ToolBinding(
                     definition("grep"),
                     new ContributorBinding("core", "grep", List.of()),
-                    false,
+                    EnvironmentSupport.NONE,
+                    null,
                     null)));
     assertEquals(4, payload.message().contents().size());
     assertEquals(
@@ -223,7 +225,8 @@ class HistoryPayloadMapperTest {
                 new ToolBinding(
                     definition("grep"),
                     new ContributorBinding("core", "grep", List.of()),
-                    false,
+                    EnvironmentSupport.NONE,
+                    null,
                     null)));
     ToolCallMessageContent unboundCall =
         (ToolCallMessageContent) unbound.message().contents().get(0);
@@ -253,7 +256,7 @@ class HistoryPayloadMapperTest {
         new ToolBinding(
             definition("fs_read"),
             new ContributorBinding("core", "fs.read", List.of()),
-            true,
+            EnvironmentSupport.REQUIRED,
             new EnvironmentId(id(1)),
             "dev");
 
@@ -532,7 +535,11 @@ class HistoryPayloadMapperTest {
 
   private static ToolBinding binding() {
     return new ToolBinding(
-        definition("bash"), new ContributorBinding("core", "bash", List.of()), false, null);
+        definition("bash"),
+        new ContributorBinding("core", "bash", List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   private static AgentToolDefinition definition(String name) {

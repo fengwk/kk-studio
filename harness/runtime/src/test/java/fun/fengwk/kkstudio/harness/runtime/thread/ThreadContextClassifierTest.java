@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -841,7 +842,6 @@ class ThreadContextClassifierTest {
         "Test system instruction.",
         List.of(),
         List.of(),
-        List.of(),
         ProviderCacheControl.none());
   }
 
@@ -857,7 +857,8 @@ class ThreadContextClassifierTest {
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

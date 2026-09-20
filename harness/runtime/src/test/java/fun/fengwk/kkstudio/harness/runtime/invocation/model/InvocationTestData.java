@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -37,11 +38,6 @@ final class InvocationTestData {
 
   private InvocationTestData() {}
 
-  /** 冻结的平台 Skill 包身份 fixture。 */
-  static SkillBinding skill(String name, String description, EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding(name, "test-package", "1.0.0", description);
-  }
-
   static ToolDescriptor toolDescriptor(String name) {
     return new ToolDescriptor(
         name,
@@ -54,7 +50,11 @@ final class InvocationTestData {
 
   static ToolBinding host(String name) {
     return new ToolBinding(
-        definition(name), new ContributorBinding("core", name, List.of()), false, null);
+        definition(name),
+        new ContributorBinding("core", name, List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   static ToolBinding environment(String name) {
@@ -63,7 +63,11 @@ final class InvocationTestData {
 
   static ToolBinding environment(String name, EnvironmentId environment) {
     return new ToolBinding(
-        definition(name), new ContributorBinding("base", name, List.of()), true, environment);
+        definition(name),
+        new ContributorBinding("base", name, List.of()),
+        EnvironmentSupport.REQUIRED,
+        environment,
+        "dev");
   }
 
   private static AgentToolDefinition definition(String name) {
@@ -147,7 +151,6 @@ final class InvocationTestData {
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
         List.of(),
         provider.cacheControl());
   }

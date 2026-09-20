@@ -4,13 +4,14 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTes
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.environment;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.host;
 import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.modelDescriptor;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.model.InvocationTestData.skill;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -36,11 +37,10 @@ class ModelRequestSpecTest {
 
   @Test
   void freezesProviderModelVariantAndOrderedBindings() {
-    // 验证 invocation 只冻结实际 Provider 请求契约，不携带 history/compaction 派生事实。
+    // 验证 invocation 只冻结实际 Provider 请求契约，不接受 skill 事实，不携带 history/compaction 派生事实。
     ModelRequestSpec spec =
         spec(
             List.of(host("bash"), environment("fs")),
-            List.of(skill("web", "Web search", ENV_ID)),
             List.of(new SubagentBinding("reviewer", "Review changes")));
 
     assertEquals(ProviderType.OPENAI, spec.providerType());
@@ -48,7 +48,6 @@ class ModelRequestSpecTest {
     assertEquals("provider", spec.model().providerName());
     assertEquals("v1", spec.variant().id());
     assertEquals(List.of("bash", "fs"), names(spec.toolBindings()));
-    assertEquals(List.of("web"), skillNames(spec.skillBindings()));
     assertEquals(List.of("reviewer"), subagentNames(spec.subagentBindings()));
     assertEquals("Test system instruction.", spec.systemInstruction());
   }
@@ -57,7 +56,6 @@ class ModelRequestSpecTest {
   void defensivelyCopiesFrozenLists() {
     // 修改调用方列表不能改变 durable request，返回列表也不可变。
     List<ToolBinding> tools = new ArrayList<>(List.of(host("bash")));
-    List<SkillBinding> skills = new ArrayList<>(List.of(skill("web", "Web search", ENV_ID)));
     List<SubagentBinding> subagents =
         new ArrayList<>(List.of(new SubagentBinding("reviewer", "Review changes")));
     ModelRequestSpec spec =
@@ -69,16 +67,13 @@ class ModelRequestSpecTest {
             1024,
             "Test system instruction.",
             tools,
-            skills,
             subagents,
             ProviderCacheControl.none());
 
     tools.add(host("extra"));
-    skills.add(skill("extra", "Extra", ENV_ID));
     subagents.add(new SubagentBinding("extra", "Extra"));
 
     assertEquals(List.of("bash"), names(spec.toolBindings()));
-    assertEquals(List.of("web"), skillNames(spec.skillBindings()));
     assertEquals(List.of("reviewer"), subagentNames(spec.subagentBindings()));
     assertThrows(UnsupportedOperationException.class, () -> spec.toolBindings().add(host("x")));
   }
@@ -98,7 +93,6 @@ class ModelRequestSpecTest {
                 "",
                 List.of(),
                 List.of(),
-                List.of(),
                 ProviderCacheControl.none()));
     assertThrows(
         IllegalArgumentException.class,
@@ -110,7 +104,6 @@ class ModelRequestSpecTest {
                 variant(),
                 1024,
                 "   ",
-                List.of(),
                 List.of(),
                 List.of(),
                 ProviderCacheControl.none()));
@@ -126,7 +119,6 @@ class ModelRequestSpecTest {
                 null,
                 List.of(),
                 List.of(),
-                List.of(),
                 ProviderCacheControl.none()));
   }
 
@@ -135,64 +127,96 @@ class ModelRequestSpecTest {
     // 每类 binding 名称都是其调用内身份，重复名称必须在构造时失败。
     assertThrows(
         IllegalArgumentException.class,
-        () -> spec(List.of(host("bash"), environment("bash")), List.of(), List.of()));
+        () -> spec(List.of(host("bash"), environment("bash")), List.of()));
     // 不同 contributor 提供的同名工具同样拒绝：模型可见 tool name 唯一。
     ToolBinding tool1 =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null);
     ToolBinding tool2 =
         new ToolBinding(
             new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
             new ContributorBinding("other", "bash", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null);
-    assertThrows(
-        IllegalArgumentException.class, () -> spec(List.of(tool1, tool2), List.of(), List.of()));
+    assertThrows(IllegalArgumentException.class, () -> spec(List.of(tool1, tool2), List.of()));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
             spec(
-                List.of(),
-                List.of(skill("web", "first", ENV_ID), skill("web", "second", ENV_ID)),
-                List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            spec(
-                List.of(),
                 List.of(),
                 List.of(
                     new SubagentBinding("reviewer", "first"),
                     new SubagentBinding("reviewer", "second"))));
   }
 
+  /** 测试意图：不同 environmentId 的 carrying binding 混用必须被严格拒绝。 */
   @Test
   void requiresMatchingEnvironmentToolRoutes() {
     // Environment tool 必须落在同一 environment，避免一次请求混用多个 workspace。
     EnvironmentId other = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            spec(
-                List.of(environment("fs", ENV_ID), environment("other", other)),
-                List.of(),
-                List.of()));
+        () -> spec(List.of(environment("fs", ENV_ID), environment("other", other)), List.of()));
+
+    // REQUIRED 与携带不同环境的 OPTIONAL 混用必须被拒绝
+    ToolBinding optionalWithDifferentEnv =
+        new ToolBinding(
+            new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "optional", List.of()),
+            EnvironmentSupport.OPTIONAL,
+            other,
+            "other-env");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> spec(List.of(environment("fs", ENV_ID), optionalWithDifferentEnv), List.of()));
+
+    // 两个携带不同环境的 OPTIONAL 混用也必须被拒绝
+    ToolBinding optionalWithEnv1 =
+        new ToolBinding(
+            new AgentToolDefinition(toolDescriptor("optional1"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "opt1", List.of()),
+            EnvironmentSupport.OPTIONAL,
+            ENV_ID,
+            "dev");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> spec(List.of(optionalWithEnv1, optionalWithDifferentEnv), List.of()));
   }
 
+  /** 测试意图：OPTIONAL 带环境与 REQUIRED 共享同一环境合法，无环境的 NONE 和未带环境的 OPTIONAL 同样可以共存。 */
   @Test
-  void permitsUnrequiredToolsAlongsideEnvironmentRequiredTools() {
-    // 无环境需求的工具（environmentRequired=false）不影响有环境工具的一致性检查。
-    ModelRequestSpec spec =
-        spec(
-            List.of(host("bash"), environment("fs", ENV_ID)),
-            List.of(skill("web", "Web search", ENV_ID)),
-            List.of());
-    assertEquals(2, spec.toolBindings().size());
-    assertEquals(1, spec.skillBindings().size());
+  void permitsConsistentEnvironmentCombinationsAcrossSupportTypes() {
+    ToolBinding optionalWithSameEnv =
+        new ToolBinding(
+            new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "optional", List.of()),
+            EnvironmentSupport.OPTIONAL,
+            ENV_ID,
+            "dev");
+    ToolBinding optionalWithoutEnv =
+        new ToolBinding(
+            new AgentToolDefinition(toolDescriptor("optional_unbound"), ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "unbound", List.of()),
+            EnvironmentSupport.OPTIONAL,
+            null,
+            null);
+
+    // REQUIRED + OPTIONAL(同一环境) + OPTIONAL(无环境) + NONE 全部合法共存
+    assertDoesNotThrow(
+        () ->
+            spec(
+                List.of(
+                    host("bash"),
+                    environment("fs", ENV_ID),
+                    optionalWithSameEnv,
+                    optionalWithoutEnv),
+                List.of()));
   }
 
   @Test
@@ -210,7 +234,6 @@ class ModelRequestSpecTest {
                 "Test system instruction.",
                 List.of(),
                 List.of(),
-                List.of(),
                 ProviderCacheControl.none()));
     assertThrows(
         NullPointerException.class,
@@ -222,7 +245,6 @@ class ModelRequestSpecTest {
                 variant(),
                 1024,
                 "Test system instruction.",
-                List.of(),
                 List.of(),
                 List.of(),
                 ProviderCacheControl.none()));
@@ -238,7 +260,6 @@ class ModelRequestSpecTest {
                 "Test system instruction.",
                 List.of(),
                 List.of(),
-                List.of(),
                 ProviderCacheControl.none()));
     assertThrows(
         NullPointerException.class,
@@ -252,12 +273,23 @@ class ModelRequestSpecTest {
                 "Test system instruction.",
                 null,
                 List.of(),
+                ProviderCacheControl.none()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ModelRequestSpec(
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
                 List.of(),
+                null,
                 ProviderCacheControl.none()));
   }
 
-  private static ModelRequestSpec spec(
-      List<ToolBinding> tools, List<SkillBinding> skills, List<SubagentBinding> subagents) {
+  private static ModelRequestSpec spec(List<ToolBinding> tools, List<SubagentBinding> subagents) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         CONNECTION_GENERATION_ID,
@@ -266,7 +298,6 @@ class ModelRequestSpecTest {
         1024,
         "Test system instruction.",
         tools,
-        skills,
         subagents,
         ProviderCacheControl.none());
   }
@@ -287,10 +318,6 @@ class ModelRequestSpecTest {
 
   private static List<String> names(List<ToolBinding> bindings) {
     return bindings.stream().map(binding -> binding.descriptor().name()).toList();
-  }
-
-  private static List<String> skillNames(List<SkillBinding> bindings) {
-    return bindings.stream().map(SkillBinding::name).toList();
   }
 
   private static List<String> subagentNames(List<SubagentBinding> bindings) {

@@ -243,7 +243,7 @@ class PermissionEvaluatorTest {
         () -> evaluateRaw(WRITE, "{\"workdir\":\" \",\"path\":\"src/Main.java\"}", settings));
   }
 
-  /** 没有 path/command 的工具（例如 load_skill、MCP）preview 不带 workdir，也不做任何目录推断。 */
+  /** 没有 path/command 的工具（例如 MCP 工具）preview 不带 workdir，也不做任何目录推断。 */
   @Test
   void previewOmitsWorkdirWhenInvocationHasNone() {
     PermissionEvaluator.Evaluation evaluation =

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -2388,7 +2389,8 @@ class ModelExecutionStreamFlushTest {
         new ToolBinding(
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null);
     return spec(List.of(binding));
   }
@@ -2402,7 +2404,6 @@ class ModelExecutionStreamFlushTest {
         1024,
         "Test system instruction.",
         bindings,
-        List.of(),
         List.of(),
         ProviderCacheControl.none());
   }

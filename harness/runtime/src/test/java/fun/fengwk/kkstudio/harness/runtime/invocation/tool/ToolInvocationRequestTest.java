@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -51,7 +52,8 @@ class ToolInvocationRequestTest {
         new ToolBinding(
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "read", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null);
     ToolCall durable = new ToolCall("call-1", "read", "{\"path\":null,\"offset\":\"10\"}");
 

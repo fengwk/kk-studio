@@ -230,7 +230,6 @@ class ProviderReplayStateJsonCodecTest {
                 "Test system instruction.",
                 List.of(),
                 List.of(),
-                List.of(),
                 ProviderCacheControl.none()),
             ModelInvocationStatus.SUCCEEDED,
             1,

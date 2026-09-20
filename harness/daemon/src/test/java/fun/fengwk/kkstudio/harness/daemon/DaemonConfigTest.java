@@ -72,10 +72,9 @@ class DaemonConfigTest {
     assertEquals(TOKEN_TEXT, valid.registrationToken());
   }
 
-  /** CLI 是 daemon 连接、身份、environment root 与本地数据目录的唯一配置来源。 */
+  /** CLI 是 daemon 连接、身份与本地数据目录的唯一配置来源。 */
   @Test
   void readsCliArguments(@TempDir Path root) throws Exception {
-    Path environmentRoot = Files.createDirectories(root.resolve("home"));
     Path dataDir = root.resolve("data");
     Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
     DaemonConfig config =
@@ -93,8 +92,6 @@ class DaemonConfigTest {
               "PT3S",
               "--note",
               "Custom local environment.",
-              "--environment-root",
-              environmentRoot.toString(),
               "--data-dir",
               dataDir.toString()
             });
@@ -107,8 +104,28 @@ class DaemonConfigTest {
     assertEquals(Duration.ZERO, config.initialReconnectDelay());
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
     assertEquals("Custom local environment.", config.note());
-    assertEquals(environmentRoot.toRealPath(), config.environmentRoot());
     assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
+  }
+
+  /** 已删除的配置参数必须作为未知参数 fail closed，不提供任何兼容回退。 */
+  @Test
+  void rejectsRemovedEnvironmentRootArgument(@TempDir Path root) throws Exception {
+    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
+    String removedArg = "--environment-root";
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri",
+                      "ws://gateway.example/daemon",
+                      "--registration-token-file",
+                      tokenFile.toString(),
+                      removedArg,
+                      root.toString()
+                    }));
+    assertTrue(error.getMessage().contains("unknown argument: " + removedArg));
   }
 
   /** 已删除的 {@code --registration-token} 必须作为未知参数 fail closed，不提供任何兼容回退。 */
@@ -457,7 +474,6 @@ class DaemonConfigTest {
   void systemPropertiesAreNoLongerAConfigurationSource(@TempDir Path root) throws Exception {
     Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
     String[] removed = {
-      "kkstudio.daemon.environment-root",
       "kkstudio.daemon.resource-directory",
       "kkstudio.daemon.max-resource-bytes",
       "kkstudio.daemon.bash"
@@ -478,7 +494,6 @@ class DaemonConfigTest {
               });
       // 唯一权威来源是 CLI：被删除的属性既不能改写 bash，也不能改写任何其它取值。
       assertEquals(DaemonConfig.DEFAULT_BASH_EXECUTABLE, config.bashExecutable());
-      assertEquals(DaemonConfig.defaultEnvironmentRoot(), config.environmentRoot());
     } finally {
       for (int index = 0; index < removed.length; index++) {
         if (previous[index] == null) {
@@ -504,66 +519,6 @@ class DaemonConfigTest {
             });
 
     assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
-  }
-
-  /** 未显式配置时，Environment Root 使用启动用户 HOME 的 canonical 目录。 */
-  @Test
-  void defaultsEnvironmentRootToCanonicalUserHome(@TempDir Path root) throws Exception {
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String oldHome = System.getProperty("user.home");
-    try {
-      Path home = Files.createDirectories(root.resolve("home"));
-      System.setProperty("user.home", home.toString());
-      DaemonConfig config =
-          DaemonConfig.fromArgs(
-              new String[] {
-                "--gateway-uri", "ws://gateway.example/daemon",
-                "--registration-token-file", tokenFile.toString(),
-                "--data-dir", root.resolve("data").toString()
-              });
-
-      assertEquals(home.toRealPath(), config.environmentRoot());
-    } finally {
-      System.setProperty("user.home", oldHome);
-    }
-  }
-
-  /** 显式 Environment Root 必须是唯一、已存在的目录，并在解析时 canonical 化。 */
-  @Test
-  void validatesExplicitEnvironmentRoot(@TempDir Path root) throws Exception {
-    Path file = Files.writeString(root.resolve("file.txt"), "x");
-    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
-    String dataDir = root.resolve("data").toString();
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--gateway-uri",
-                  "ws://gateway.example/daemon",
-                  "--registration-token-file",
-                  tokenFile.toString(),
-                  "--data-dir",
-                  dataDir,
-                  "--environment-root",
-                  file.toString()
-                }));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            DaemonConfig.fromArgs(
-                new String[] {
-                  "--gateway-uri",
-                  "ws://gateway.example/daemon",
-                  "--registration-token-file",
-                  tokenFile.toString(),
-                  "--data-dir",
-                  dataDir,
-                  "--environment-root",
-                  root.toString(),
-                  "--environment-root",
-                  root.toString()
-                }));
   }
 
   /** {@code --note} 可省略或显式覆盖默认值，但显式值必须唯一、单行、无控制、无首尾空白且有界。 */
@@ -698,7 +653,6 @@ class DaemonConfigTest {
         initialReconnectDelay,
         maxReconnectDelay,
         null,
-        DaemonConfig.defaultEnvironmentRoot(),
         dataDir);
   }
 

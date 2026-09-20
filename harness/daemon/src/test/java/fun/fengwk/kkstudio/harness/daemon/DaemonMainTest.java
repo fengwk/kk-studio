@@ -42,7 +42,6 @@ class DaemonMainTest {
             "--reconnect-initial",
             "--reconnect-max",
             "--note",
-            "--environment-root",
             "--data-dir",
             "--bash-executable",
             "--lsp-bridge-command",
@@ -51,6 +50,8 @@ class DaemonMainTest {
           }) {
         assertTrue(usage.contains(option), "usage must document " + option);
       }
+      assertFalse(
+          usage.contains("--environment-root"), "usage must not document removed environment root");
       // 默认值也是契约的一部分：操作者必须能从这里读出省略参数时的行为。
       for (String documentedDefault :
           new String[] {"PT15S", "PT1S", "PT30S", "~/.kk-studio", "bash", "javap"}) {
