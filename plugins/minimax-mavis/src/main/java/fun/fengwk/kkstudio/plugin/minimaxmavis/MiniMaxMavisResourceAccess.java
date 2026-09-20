@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -60,14 +61,20 @@ public final class MiniMaxMavisResourceAccess {
   /**
    * 把参数里的 {@code kkstudio:} 资源就地解析为受控短期 URL，其余取值原样保留。
    *
-   * @throws PluginResourceUnavailableException 需要资源但没有网关，或资源无法在契约内解析
+   * @param threadId 本次调用的 Harness Thread id（来自 Tool invocation context）；它是资源鉴权的唯一身份来源，因此缺失时 {@code
+   *     kkstudio:} 资源必须确定性失败而不是退化为未鉴权访问
+   * @throws PluginResourceUnavailableException 需要资源但没有网关、拿不到调用上下文，或资源无法在契约内解析
    */
-  public JsonNode resolveInputs(JsonNode arguments) {
+  public JsonNode resolveInputs(UUID threadId, JsonNode arguments) {
     if (!containsSessionResource(arguments)) {
       return arguments;
     }
     requireGateway("the request references a session resource");
-    return resolve(arguments);
+    if (threadId == null) {
+      throw new PluginResourceUnavailableException(
+          "session resource access requires an invocation thread id");
+    }
+    return resolve(threadId, arguments);
   }
 
   /**
@@ -171,36 +178,37 @@ public final class MiniMaxMavisResourceAccess {
     return false;
   }
 
-  private JsonNode resolve(JsonNode node) {
+  private JsonNode resolve(UUID threadId, JsonNode node) {
     if (node.isTextual()) {
       String value = node.textValue();
       if (!value.startsWith(SESSION_RESOURCE_SCHEME)) {
         return node;
       }
-      return TextNode.valueOf(resolveSessionResource(value));
+      return TextNode.valueOf(resolveSessionResource(threadId, value));
     }
     if (node.isArray()) {
       ArrayNode resolved = ((ArrayNode) node).arrayNode(node.size());
       for (JsonNode child : node) {
-        resolved.add(resolve(child));
+        resolved.add(resolve(threadId, child));
       }
       return resolved;
     }
     if (node.isObject()) {
       ObjectNode resolved = ((ObjectNode) node).objectNode();
       node.fields()
-          .forEachRemaining(entry -> resolved.set(entry.getKey(), resolve(entry.getValue())));
+          .forEachRemaining(
+              entry -> resolved.set(entry.getKey(), resolve(threadId, entry.getValue())));
       return resolved;
     }
     return node;
   }
 
-  private String resolveSessionResource(String resourceUri) {
+  private String resolveSessionResource(UUID threadId, String resourceUri) {
     if (!SESSION_RESOURCE.matcher(resourceUri).matches()) {
       throw new PluginResourceUnavailableException(
           "unsupported session resource reference: " + describe(resourceUri));
     }
-    URI resolved = gateway.resolveSessionResource(resourceUri);
+    URI resolved = gateway.resolveSessionResource(threadId, resourceUri);
     requireUsableDownloadUri(resolved);
     return resolved.toASCIIString();
   }

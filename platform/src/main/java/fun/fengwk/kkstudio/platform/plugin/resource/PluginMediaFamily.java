@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.resource;
 
+import java.util.Locale;
+
 /**
  * Plugin 声明要暂存的媒体族。
  *
@@ -18,5 +20,23 @@ public enum PluginMediaFamily {
   VIDEO,
 
   /** 文档或其他非媒体字节流。 */
-  DOCUMENT
+  DOCUMENT;
+
+  /**
+   * 嗅探出的权威 media type 是否属于本族。
+   *
+   * <p>族只在调用方无法知道精确 subtype 时代替「声明一个具体类型」；判定始终由实现用嗅探结果执行，因此声明本身不是信任来源。
+   */
+  public boolean accepts(String mediaType) {
+    if (mediaType == null || mediaType.isBlank()) {
+      return false;
+    }
+    String normalized = mediaType.toLowerCase(Locale.ROOT);
+    return switch (this) {
+      case IMAGE -> normalized.startsWith("image/");
+      case AUDIO -> normalized.startsWith("audio/");
+      case VIDEO -> normalized.startsWith("video/");
+      case DOCUMENT -> !normalized.isEmpty() && normalized.indexOf('/') > 0;
+    };
+  }
 }

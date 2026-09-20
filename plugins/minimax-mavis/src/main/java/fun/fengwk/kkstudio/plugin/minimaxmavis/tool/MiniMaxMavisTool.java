@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
@@ -37,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -207,7 +209,8 @@ public final class MiniMaxMavisTool implements Tool {
             CODE_RESOURCE_UNAVAILABLE,
             "this deployment cannot stage MiniMax Mavis media output");
       }
-      arguments = resourceAccess.resolveInputs(arguments);
+      // 资源鉴权身份只来自本次 invocation context：没有它就绝不发送引用会话资源的请求。
+      arguments = resourceAccess.resolveInputs(threadId(request), arguments);
     } catch (PluginResourceUnavailableException error) {
       return failed(listener, toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage());
     } catch (JsonProcessingException | IllegalArgumentException error) {
@@ -272,6 +275,12 @@ public final class MiniMaxMavisTool implements Tool {
             }
           }
         });
+  }
+
+  /** 调用上下文里的 Harness Thread id；框架直调（无 context）时为空。 */
+  private static UUID threadId(ToolExecutionRequest request) {
+    ToolExecutionContext context = request.context();
+    return context == null ? null : context.threadId();
   }
 
   private ToolResult invoke(JsonNode arguments, String toolCallId) {
