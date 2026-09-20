@@ -1999,6 +1999,54 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
+  void toolBindingEnvironmentNameReflectsBranchEnvironmentSelection() {
+    // 1. branch 选择了环境：environmentRequired 的工具冻结环境名，非环境工具冻结 null
+    Fixture fixture =
+        new Fixture(
+            List.of("bash", "create_goal", "read"),
+            List.of(),
+            List.of(hostDescriptor("create_goal")));
+    fixture.readyEnvironment(ENV_A);
+
+    ModelRequestSpec boundSpec = fixture.resolved(fixture.path(settings("default")));
+    List<ToolBinding> boundTools = boundSpec.toolBindings();
+    assertEquals(3, boundTools.size());
+    // bash (environmentRequired) -> ENV_A_NAME
+    assertTrue(boundTools.get(0).environmentRequired());
+    assertEquals(ENV_A_NAME, boundTools.get(0).environmentName());
+    // create_goal (not environmentRequired) -> null
+    assertFalse(boundTools.get(1).environmentRequired());
+    assertNull(boundTools.get(1).environmentName());
+    // read (environmentRequired) -> ENV_A_NAME
+    assertTrue(boundTools.get(2).environmentRequired());
+    assertEquals(ENV_A_NAME, boundTools.get(2).environmentName());
+
+    // 2. branch 未选择环境：environment-required 工具保持声明但环境名冻结为 null
+    ModelRequestSpec unboundSpec = fixture.resolved(fixture.path(unboundSettings("default")));
+    List<ToolBinding> unboundTools = unboundSpec.toolBindings();
+    assertEquals(3, unboundTools.size());
+    assertTrue(unboundTools.get(0).environmentRequired());
+    assertNull(unboundTools.get(0).environmentName());
+    assertFalse(unboundTools.get(1).environmentRequired());
+    assertNull(unboundTools.get(1).environmentName());
+    assertTrue(unboundTools.get(2).environmentRequired());
+    assertNull(unboundTools.get(2).environmentName());
+
+    // 3. 环境已被清除（历史 turn 选择了环境，最新 turn 未选择环境）：environment-required 工具 binding 的 environmentName 冻结为
+    // null
+    ModelRequestSpec clearedSpec =
+        fixture.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
+    List<ToolBinding> clearedTools = clearedSpec.toolBindings();
+    assertEquals(3, clearedTools.size());
+    assertTrue(clearedTools.get(0).environmentRequired());
+    assertNull(clearedTools.get(0).environmentName());
+    assertFalse(clearedTools.get(1).environmentRequired());
+    assertNull(clearedTools.get(1).environmentName());
+    assertTrue(clearedTools.get(2).environmentRequired());
+    assertNull(clearedTools.get(2).environmentName());
+  }
+
+  @Test
   void projectRoleThreadsInjectExactRoleTools() {
     // 1. Coordinator: 包含所有 Coordinator 工具
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());

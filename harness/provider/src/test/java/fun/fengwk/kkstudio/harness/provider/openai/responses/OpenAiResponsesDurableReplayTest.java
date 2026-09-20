@@ -182,7 +182,7 @@ class OpenAiResponsesDurableReplayTest {
                     "{}")));
     // 只有当前请求绑定的 native 工具名才保持 provider 原生结构，否则回放与 native tool 结果都会被降级
     List<ProviderMessage> projected =
-        new ProviderMessageProjector(Set.of("query"))
+        ProviderMessageProjector.byNames(Set.of("query"))
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(
@@ -219,7 +219,7 @@ class OpenAiResponsesDurableReplayTest {
 
     // 只有当前请求绑定的 native 工具名才保持 provider 原生结构，否则回放与 native tool 结果都会被降级
     List<ProviderMessage> projected =
-        new ProviderMessageProjector(Set.of("query"))
+        ProviderMessageProjector.byNames(Set.of("query"))
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(

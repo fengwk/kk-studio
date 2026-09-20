@@ -32,7 +32,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentRequired\":true"
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
-            + "}";
+            + ",\"environmentName\":\"dev\"}";
     assertEquals(environmentJson, codec.encode(environment));
     assertEquals(environment, codec.decode(environmentJson));
     assertEquals(environment, codec.decodeNode(codec.encodeNode(environment)));
@@ -44,7 +44,8 @@ class ToolBindingJsonCodecTest {
             + ",\"contributor\":"
             + "{\"contributorId\":\"core\",\"localName\":\"bash\",\"stateAccesses\":[]}"
             + ",\"environmentRequired\":false"
-            + ",\"environmentId\":null}";
+            + ",\"environmentId\":null"
+            + ",\"environmentName\":null}";
     assertEquals(hostJson, codec.encode(host));
     assertEquals(host, codec.decode(hostJson));
     assertFalse(codec.decode(hostJson).environmentRequired());
@@ -58,7 +59,8 @@ class ToolBindingJsonCodecTest {
             + "{\"contributorId\":\"goal\",\"localName\":\"create\","
             + "\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"WRITE\"}]}"
             + ",\"environmentRequired\":false"
-            + ",\"environmentId\":null}";
+            + ",\"environmentId\":null"
+            + ",\"environmentName\":null}";
     assertEquals(declarativeJson, codec.encode(declarative));
     assertEquals(declarative, codec.decode(declarativeJson));
 
@@ -72,7 +74,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentRequired\":true"
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
-            + "}";
+            + ",\"environmentName\":\"dev\"}";
     assertEquals(stateWithEnvJson, codec.encode(stateWithEnv));
     assertEquals(stateWithEnv, codec.decode(stateWithEnvJson));
     assertTrue(codec.decode(stateWithEnvJson).environmentRequired());
@@ -98,7 +100,7 @@ class ToolBindingJsonCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
   }
 
-  /** 顶层字段必须恰好是 definition/contributor/environmentRequired/environmentId。 */
+  /** 顶层字段必须恰好是 definition/contributor/environmentRequired/environmentId/environmentName。 */
   @Test
   void rejectsUnknownMissingAndWrongTypeTopLevelFields() {
     ToolBinding environment = binding(true);
@@ -110,7 +112,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentRequired\":true"
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
-            + "}";
+            + ",\"environmentName\":\"dev\"}";
 
     // 未知字段
     assertThrows(
@@ -136,6 +138,9 @@ class ToolBindingJsonCodecTest {
         () ->
             codec.decode(
                 valid.replace(",\"environmentId\":" + environmentJson(ENVIRONMENT_ID), "")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(valid.replace(",\"environmentName\":\"dev\"", "")));
 
     // 字段类型错误
     assertThrows(
@@ -156,6 +161,9 @@ class ToolBindingJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace(environmentJson(ENVIRONMENT_ID), "1")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(valid.replace("\"environmentName\":\"dev\"", "\"environmentName\":1")));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(valid.replace("\"definition\":" + definition, "\"definition\":null")));
@@ -183,7 +191,8 @@ class ToolBindingJsonCodecTest {
                     + definition
                     + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[],\"unknown\":true}"
                     + ",\"environmentRequired\":false"
-                    + ",\"environmentId\":null}"));
+                    + ",\"environmentId\":null"
+                    + ",\"environmentName\":null}"));
 
     // 缺少 stateAccesses
     assertThrows(
@@ -194,7 +203,8 @@ class ToolBindingJsonCodecTest {
                     + definition
                     + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\"}"
                     + ",\"environmentRequired\":false"
-                    + ",\"environmentId\":null}"));
+                    + ",\"environmentId\":null"
+                    + ",\"environmentName\":null}"));
 
     // stateAccesses 元素格式非法
     assertThrows(
@@ -205,10 +215,11 @@ class ToolBindingJsonCodecTest {
                     + definition
                     + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[{\"customType\":\"state\",\"mode\":\"INVALID\"}]}"
                     + ",\"environmentRequired\":false"
-                    + ",\"environmentId\":null}"));
+                    + ",\"environmentId\":null"
+                    + ",\"environmentName\":null}"));
   }
 
-  /** 解码边界必须重新校验 environmentRequired 与 environmentId 的一致性。 */
+  /** 解码边界必须重新校验 environmentRequired 与 environmentId/environmentName 的一致性。 */
   @Test
   void rejectsMismatchedEnvironmentRequiredAndEnvironmentCombinations() {
     ToolBinding host = binding(false);
@@ -224,9 +235,11 @@ class ToolBindingJsonCodecTest {
                 + ",\"contributor\":"
                 + emptyContributorJson
                 + ",\"environmentRequired\":true"
-                + ",\"environmentId\":null}");
+                + ",\"environmentId\":null"
+                + ",\"environmentName\":null}");
     assertTrue(unselected.environmentRequired());
     assertNull(unselected.environmentId());
+    assertNull(unselected.environmentName());
 
     // environmentRequired 为 false 但 environment 非 null
     assertThrows(
@@ -240,7 +253,20 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentRequired\":false"
                     + ",\"environmentId\":"
                     + environmentJson(ENVIRONMENT_ID)
-                    + "}"));
+                    + ",\"environmentName\":null}"));
+
+    // environmentRequired 为 false 但 environmentName 非 null
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"definition\":"
+                    + definition
+                    + ",\"contributor\":"
+                    + emptyContributorJson
+                    + ",\"environmentRequired\":false"
+                    + ",\"environmentId\":null"
+                    + ",\"environmentName\":\"dev\"}"));
   }
 
   private static String environmentJson(EnvironmentId environmentId) {

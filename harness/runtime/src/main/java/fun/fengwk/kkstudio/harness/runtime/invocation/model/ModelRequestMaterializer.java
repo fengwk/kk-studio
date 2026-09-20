@@ -25,10 +25,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -38,8 +36,8 @@ import java.util.UUID;
  * EntryPath 末尾 owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed
  * Invocation 后仍可从 Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
  *
- * <p>历史 native 资格按次判定：只有 toolName 在当前 {@code toolBindings} 中的 tool call / result 才保持 native
- * provider 结构，其余在投影时降级为文本，durable Entry 永不被改写。
+ * <p>历史 native 资格按次判定：toolName 必须在当前 {@code toolBindings} 中，且环境工具冻结的 Environment 名必须与当前 binding
+ * 一致；其余调用及结果在投影时降级为 USER 自然语言上下文，durable Entry 永不被改写。
  */
 public final class ModelRequestMaterializer {
 
@@ -107,11 +105,13 @@ public final class ModelRequestMaterializer {
   }
 
   private ProviderMessageProjector projector(List<ToolBinding> toolBindings) {
-    Set<String> nativeToolNames = new HashSet<>();
+    List<ProviderMessageProjector.NativeTool> nativeTools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {
-      nativeToolNames.add(binding.descriptor().name());
+      nativeTools.add(
+          new ProviderMessageProjector.NativeTool(
+              binding.descriptor().name(), binding.environmentName()));
     }
-    return new ProviderMessageProjector(nativeToolNames);
+    return new ProviderMessageProjector(nativeTools);
   }
 
   /**

@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -19,6 +21,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 以普通 durable Harness Thread 运行隔离 Subagent 的内部 task 工具适配器。 */
@@ -51,6 +54,12 @@ public final class TaskTool implements Tool {
   @Override
   public ToolDescriptor descriptor() {
     return DESCRIPTOR;
+  }
+
+  /** 历史动作：委派给了哪个子代理；maxTurns / session_id / prompt 由结果表达，不属于动作语义。 */
+  @Override
+  public Optional<ToolHistoryRenderer> historyRenderer() {
+    return Optional.of(BuiltinHistoryRenderers.task());
   }
 
   @Override

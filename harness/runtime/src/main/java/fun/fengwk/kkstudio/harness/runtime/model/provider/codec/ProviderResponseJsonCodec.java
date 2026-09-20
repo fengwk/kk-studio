@@ -50,7 +50,8 @@ public final class ProviderResponseJsonCodec {
           "serviceTier",
           "rawUsageJson",
           "toolCallDiagnostics");
-  private static final Set<String> TOOL_CALL_FIELDS = orderedSet("id", "name", "argumentsJson");
+  private static final Set<String> TOOL_CALL_FIELDS =
+      orderedSet("id", "name", "argumentsJson", "historyAction");
   private static final Set<String> DIAGNOSTIC_FIELDS =
       orderedSet("callIndex", "id", "name", "partialArguments", "message");
   private static final Set<String> USAGE_FIELDS =
@@ -205,6 +206,11 @@ public final class ProviderResponseJsonCodec {
     node.put("id", call.id());
     node.put("name", call.name());
     node.put("argumentsJson", requireJsonObject(call.argumentsJson(), "argumentsJson"));
+    if (call.historyAction() == null) {
+      node.putNull("historyAction");
+    } else {
+      node.put("historyAction", call.historyAction());
+    }
     return node;
   }
 
@@ -212,7 +218,10 @@ public final class ProviderResponseJsonCodec {
     ObjectNode node = object(value, "toolCall");
     requireFields(node, TOOL_CALL_FIELDS, "toolCall");
     return new ProviderToolCall(
-        text(node, "id"), text(node, "name"), jsonObjectText(node, "argumentsJson"));
+        text(node, "id"),
+        text(node, "name"),
+        jsonObjectText(node, "argumentsJson"),
+        decodeNullableText(node, "historyAction"));
   }
 
   private ObjectNode encodeUsage(ModelUsage usage) {

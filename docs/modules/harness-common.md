@@ -29,6 +29,8 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 - `requireJsonObject(json)` / `requireJsonObject(json, name)` 额外要求顶层为 object，并把 `null` 或空白规范化为 `"{}"`，第二个参数用于定制异常里的字段名；
 - `readTree` / `write` 提供同一套严格性的树读写。
 
+[`ToolArguments`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java) 是 Tool 历史 action 渲染器的只读 arguments 读取器：`parse` 把 arguments 文本解析为 JSON object（畸形、非 object 或空白返回 `null`），`text` / `flag` 按语义字段名取用并把缺失、类型不符或空白视为「未提供」。它对所有畸形输入都返回中性结果而不是抛出，因为渲染器只描述历史、绝不改写 durable 事实，无法形成动作时由 Runtime 回退。
+
 [`BoundedJsonWriter`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java) 在流式写入时累计 UTF-8 字节数，一旦超过 `maxBytes` 立即中止并返回 `null`，不会先在内存里物化超限内容；`fits(node, maxBytes)` 用同一套边界只做判定、不保留字节。这两个方法服务于「先判断能否放下、再决定是否序列化」的场景，例如 Daemon 报文的 16 MiB 预算。
 
 ## Resource 引用与 URI 校验
@@ -65,7 +67,7 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 ## 源码与测试
 
 - Prompt：[`PromptTemplate.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplate.java)、[`PromptTemplateLoader.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt/PromptTemplateLoader.java)
-- JSON：[`JsonValues.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java)、[`BoundedJsonWriter.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java)
+- JSON：[`JsonValues.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/JsonValues.java)、[`BoundedJsonWriter.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/BoundedJsonWriter.java)、[`ToolArguments.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/json/ToolArguments.java)
 - Resource：[`ResourceRef.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java)、[`ResourceUriValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java)
 - Result：[`ResultContent.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/ResultContent.java)、[`TextArtifactMetadata.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/result/TextArtifactMetadata.java)
 - Schema：[`InputSchema.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputSchema.java)、[`InputValidator.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputValidator.java)、[`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java)、[`SchemaJsonCodec.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/SchemaJsonCodec.java)

@@ -17,7 +17,9 @@ import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
 
-/** ToolBinding 的 definition/contributor/environmentRequired/environment 契约与不变式。 */
+/**
+ * ToolBinding 的 definition/contributor/environmentRequired/environmentId/environmentName 契约与不变式。
+ */
 class ToolBindingTest {
 
   private static final EnvironmentId ENV_ID =
@@ -25,16 +27,18 @@ class ToolBindingTest {
 
   @Test
   void exposesOnlyDefinitionContributorEnvironmentRequiredAndEnvironmentComponents() {
-    // 反射契约锁定 durable binding 的四个组件。
+    // 反射契约锁定 durable binding 的五个组件（environmentName 是历史投影判定 native 资格的冻结事实）。
     assertTrue(ToolBinding.class.isRecord());
     RecordComponent[] components = ToolBinding.class.getRecordComponents();
     assertEquals(
-        List.of("definition", "contributor", "environmentRequired", "environmentId"),
+        List.of(
+            "definition", "contributor", "environmentRequired", "environmentId", "environmentName"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(AgentToolDefinition.class, components[0].getType());
     assertEquals(ContributorBinding.class, components[1].getType());
     assertEquals(boolean.class, components[2].getType());
     assertEquals(EnvironmentId.class, components[3].getType());
+    assertEquals(String.class, components[4].getType());
   }
 
   @Test
@@ -50,10 +54,15 @@ class ToolBindingTest {
 
     ToolBinding environment =
         new ToolBinding(
-            definition("fs"), contributorProvenance("base", "read", List.of()), true, ENV_ID);
+            definition("fs"),
+            contributorProvenance("base", "read", List.of()),
+            true,
+            ENV_ID,
+            "dev");
     assertEquals("fs", environment.descriptor().name());
     assertTrue(environment.environmentRequired());
     assertEquals(ENV_ID, environment.environmentId());
+    assertEquals("dev", environment.environmentName());
     assertEquals("base", environment.contributor().contributorId());
 
     // branch 未选择 Environment：工具保持 environmentRequired，但路由身份为 null，调用时才失败。
@@ -62,6 +71,8 @@ class ToolBindingTest {
             definition("fs"), contributorProvenance("base", "read", List.of()), true, null);
     assertTrue(unselected.environmentRequired());
     assertNull(unselected.environmentId());
+    // 非环境工具与未提供环境名的路径共用同一 4 参便捷构造：冻结名为 null。
+    assertNull(unselected.environmentName());
   }
 
   @Test
@@ -90,6 +101,14 @@ class ToolBindingTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ToolBinding(definition("host-env"), contributor, false, ENV_ID));
+    // environmentRequired 为 false 时 environmentName 同样必须为 null
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolBinding(definition("host-env"), contributor, false, null, "dev"));
+    // environmentName 只能是 null 或非空白
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolBinding(definition("fs"), contributor, true, ENV_ID, " "));
 
     // definition 和 contributor 必须非空
     assertThrows(NullPointerException.class, () -> new ToolBinding(null, contributor, false, null));

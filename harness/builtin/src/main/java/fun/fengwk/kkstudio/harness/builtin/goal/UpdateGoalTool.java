@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
@@ -9,6 +10,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -18,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** 把当前 branch Goal 更新为 complete 或 blocked 全量快照。 */
 public final class UpdateGoalTool implements Tool {
@@ -45,6 +48,12 @@ public final class UpdateGoalTool implements Tool {
   @Override
   public ToolRequirements requirements() {
     return REQUIREMENTS;
+  }
+
+  /** 更新 Goal 的历史动作：终态与原因。 */
+  @Override
+  public Optional<ToolHistoryRenderer> historyRenderer() {
+    return Optional.of(BuiltinHistoryRenderers.updateGoal());
   }
 
   @Override

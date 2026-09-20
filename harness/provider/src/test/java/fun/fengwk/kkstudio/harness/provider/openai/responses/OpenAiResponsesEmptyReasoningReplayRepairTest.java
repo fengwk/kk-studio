@@ -199,7 +199,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertEquals(historicalReplay, durableReplay);
 
     List<ProviderMessage> projected =
-        new ProviderMessageProjector(Set.of())
+        ProviderMessageProjector.byNames(Set.of())
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(

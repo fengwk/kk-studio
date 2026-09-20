@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
@@ -61,6 +62,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private final UUID threadId;
   private final int attempt;
   private final boolean compaction;
+  private final List<ToolBinding> bindings;
   private final ModelProcessorConfig config;
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
@@ -97,6 +99,7 @@ final class ModelExecution implements ModelGateway.Listener {
       UUID threadId,
       int attempt,
       boolean compaction,
+      List<ToolBinding> bindings,
       ModelProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
@@ -110,6 +113,7 @@ final class ModelExecution implements ModelGateway.Listener {
     this.threadId = threadId;
     this.attempt = attempt;
     this.compaction = compaction;
+    this.bindings = List.copyOf(Objects.requireNonNull(bindings, "bindings"));
     this.config = Objects.requireNonNull(config, "config");
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
@@ -536,13 +540,23 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private Applied processSucceeded(ProviderCompletion completion) {
+    // Renderer 属于可插拔 Tool 代码；即使目录与实现都应为内存纯函数，也不能在 execution
+    // monitor 内调用。terminal CAS 与 drainLock 已阻止后续 Provider 信号，渲染期间若丢失
+    // lease，abandon 可立即取得 monitor，随后下方围栏会拒绝提交。
+    ProviderResponse responseWithHistoryActions =
+        ToolHistoryActions.freeze(
+            completion.response(), bindings, config.toolHistoryActionResolver());
+    ProviderCompletion durableCompletion =
+        responseWithHistoryActions == completion.response()
+            ? completion
+            : new ProviderCompletion(responseWithHistoryActions, completion.replayState());
     List<Publish> publishes = new ArrayList<>();
     Applied applied;
     synchronized (monitor) {
       if (abandoned.get()) {
         return Applied.LOST;
       }
-      applied = finishSuccessLocked(completion, publishes);
+      applied = finishSuccessLocked(durableCompletion, publishes);
     }
     if (applied == Applied.LOST) {
       return Applied.LOST;

@@ -21,29 +21,62 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * 将语义 Context 投影为与 Provider SDK 无关的 ProviderMessage。
  *
- * <p>历史工具调用的 native 资格按次判定：只有当调用名在当前请求的 {@code nativeToolNames} 中时，assistant tool call 与 其 TOOL
- * 结果才按 native provider 结构投影。其余调用降级为 assistant 文本（描述调用与逐字 arguments），其结果降级为 USER 内容，绝不产生 TOOL
- * 消息。降级只发生在投影结果中，durable Entry 与 callIndex 永不被改写。
+ * <p>历史工具调用的 native 资格按次判定：调用名必须在当前请求的工具列表中，且该调用冻结时的 Environment 名必须与当前同名工具的 Environment
+ * 名一致。任一条件不满足（工具未绑定、Environment 已切换、未知工具）即降级：调用不再出现在 ASSISTANT wire 消息中，与其 后续 ToolResult 配对，并在本
+ * batch 的 native TOOL 结果之后合并为单条 USER 自然语言上下文。降级输出绝不暴露 toolCallId、绝不使用 “Tool call / Tool result”
+ * 伪协议，也不产生额外的 TOOL 结果。降级只发生在投影结果中，durable Entry 与 callIndex 永不被改写。
  *
- * <p>同一 assistant 之后的 native TOOL 结果先于降级 USER 结果输出，以保证 provider 要求的 tool-call adjacency；组内保持相对顺序。
- * 被降级改写的 assistant 消息不再携带 {@link ProviderReplayState}（native payload 已与投影内容不一致），未被改写的消息保留。
+ * <p>同一 assistant 之后的 native TOOL 结果先于该 USER 上下文输出，以保证 provider 要求的 tool-call adjacency；组内保持相对顺序。被
+ * 降级改写的 assistant 消息不再携带 {@link ProviderReplayState}（native payload 已与投影内容不一致），未被改写的消息保留。
+ *
+ * <p>USER 上下文中每一项的动作来自调用冻结时的 Tool 语义 action（{@link
+ * fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent#historyAction()}）；缺失 action
+ * 的调用使用确定性中性回退 {@code external operation} 加逐字 arguments 围栏，因此投影永不猜测第三方工具的语义，也永不需要重新调用 Tool 代码。
  *
  * <p>对当前连续 Tool chain 中未配对的 native ToolCall，在角色切换或 Context 结束前合成 error ToolResult：{@code No result
- * provided}；降级调用只在文本中体现，不合成结果。Synthetic result 只存在于本次 Provider request，不写 Session Entry。
+ * provided}；未被任何结果配对的降级调用在同一 USER 上下文中以 {@code No result provided} 表达，不合成 TOOL 结果。Synthetic result
+ * 只存在于本次 Provider request，不写 Session Entry。
  */
 public final class ProviderMessageProjector {
+
   private static final String ORPHAN_RESULT_TEXT = "No result provided";
+
+  /** 降级 USER 上下文的唯一前缀，用于与真实用户输入明确区分。 */
+  private static final String CONTEXT_HEADER = "Previous context:";
+
+  /** 无 Tool 语义映射时的确定性中性回退动作：不暴露 toolName，逐字保留全部 arguments。 */
+  private static final String FALLBACK_ACTION = "external operation";
+
+  private static final String SUCCESS_MARKER = ":";
+
+  private static final String FAILURE_MARKER = " failed:";
 
   /** 动态围栏的最小反引号数；内容中的任意反引号连续段都会被安全包含。 */
   private static final int MIN_FENCE_LENGTH = 3;
+
+  /** 当前请求中单个工具贡献的 native 资格事实：模型可见名与其绑定的 Environment 名（null 表示不绑定 Environment）。 */
+  public record NativeTool(String name, String environmentName) {
+
+    public NativeTool {
+      if (name == null || name.isBlank()) {
+        throw new IllegalArgumentException("name must not be blank");
+      }
+      if (environmentName != null && environmentName.isBlank()) {
+        throw new IllegalArgumentException("environmentName must be null or non-blank");
+      }
+    }
+  }
 
   public record ProjectedMessage(AgentMessage message, ProviderReplayState replayState) {
     public ProjectedMessage {
@@ -62,13 +95,20 @@ public final class ProviderMessageProjector {
     }
   }
 
-  private final Set<String> nativeToolNames;
+  private final List<NativeTool> nativeTools;
 
   /**
-   * @param nativeToolNames 当前请求实际绑定的工具名；历史调用只有名字在此集合中时才保持 native
+   * @param nativeTools 当前请求实际绑定的工具及其冻结 Environment 名；历史调用按名字与 Environment 逐次判定 native
    */
-  public ProviderMessageProjector(Set<String> nativeToolNames) {
-    this.nativeToolNames = Set.copyOf(Objects.requireNonNull(nativeToolNames, "nativeToolNames"));
+  public ProviderMessageProjector(List<NativeTool> nativeTools) {
+    this.nativeTools = List.copyOf(Objects.requireNonNull(nativeTools, "nativeTools"));
+  }
+
+  /** 只按工具名判定 native 资格的便捷构造：适用于不绑定 Environment 的工具（静态无环境工具与 wire 夹具）。 */
+  public static ProviderMessageProjector byNames(Collection<String> nativeToolNames) {
+    Objects.requireNonNull(nativeToolNames, "nativeToolNames");
+    return new ProviderMessageProjector(
+        nativeToolNames.stream().map(name -> new NativeTool(name, null)).toList());
   }
 
   public List<ProviderMessage> project(List<AgentMessage> messages) {
@@ -83,12 +123,12 @@ public final class ProviderMessageProjector {
     for (ProjectedMessage source : sources) {
       AgentMessage message = source.message();
       if (message.role() == AgentMessageRole.TOOL) {
-        batch.add(projectToolResult((ToolResultMessageContent) message.contents().get(0)));
+        batch.addResult(projectToolResult((ToolResultMessageContent) message.contents().get(0)));
         continue;
       }
       batch.flush(result);
       if (message.role() == AgentMessageRole.ASSISTANT) {
-        result.add(projectAssistant(message, source.replayState(), batch));
+        projectAssistant(message, source.replayState(), batch, result);
         continue;
       }
       result.add(
@@ -98,76 +138,70 @@ public final class ProviderMessageProjector {
     return List.copyOf(result);
   }
 
-  /** 一条 assistant 消息的投影结果：内容块，以及是否因降级改写过（决定 replay state 是否保留）。 */
-  private ProviderMessage projectAssistant(
-      AgentMessage message, ProviderReplayState replayState, Batch batch) {
+  /**
+   * 一条 assistant 消息的投影：native 调用保留为 wire 调用块并登记待配对，降级调用从消息中移除并登记进 batch 的 USER 上下文；全部内容
+   * 都是降级调用时整条消息不再输出（其语义已完整进入 USER 上下文）。
+   */
+  private void projectAssistant(
+      AgentMessage message,
+      ProviderReplayState replayState,
+      Batch batch,
+      List<ProviderMessage> result) {
     List<ProviderContentBlock> contents = new ArrayList<>(message.contents().size());
     boolean downgraded = false;
     for (AgentMessageContent content : message.contents()) {
-      if (content instanceof ToolCallMessageContent call
-          && !nativeToolNames.contains(call.toolName())) {
-        contents.add(new ProviderTextBlock(describeDowngradedCall(call)));
-        downgraded = true;
+      if (content instanceof ToolCallMessageContent call) {
+        if (isNative(call)) {
+          ProviderToolCallBlock block = toolCallBlock(call);
+          batch.openNativeCalls.add(block);
+          contents.add(block);
+        } else {
+          batch.downgradeCall(call);
+          downgraded = true;
+        }
         continue;
       }
-      ProviderContentBlock block = projectContent(content);
-      if (block instanceof ProviderToolCallBlock toolCall) {
-        batch.openNativeCalls.add(toolCall);
-      }
-      contents.add(block);
+      contents.add(projectContent(content));
     }
-    return new ProviderMessage(
-        ProviderMessageRole.ASSISTANT, contents, downgraded ? null : replayState);
+    if (contents.isEmpty()) {
+      return;
+    }
+    result.add(
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, contents, downgraded ? null : replayState));
   }
 
-  /** 一条 TOOL 结果要么保持 native，要么降级为 USER 内容。 */
-  private PendingResult projectToolResult(ToolResultMessageContent content) {
-    ProviderToolResultBlock nativeResult =
-        new ProviderToolResultBlock(
-            content.toolCallId(),
-            content.toolName(),
-            projectContents(content.contents()),
-            content.error(),
-            content.detailsJson());
-    if (nativeToolNames.contains(content.toolName())) {
-      return new PendingResult.Native(nativeResult);
-    }
-    return new PendingResult.Downgraded(downgradeResult(nativeResult));
+  private ProviderToolResultBlock projectToolResult(ToolResultMessageContent content) {
+    return new ProviderToolResultBlock(
+        content.toolCallId(),
+        content.toolName(),
+        projectContents(content.contents()),
+        content.error(),
+        content.detailsJson());
   }
 
-  /** 降级 TOOL 结果：可读文本包进动态围栏；无法表示为文本的 durable resource 块作为显式说明后的 USER 块保留。 */
-  private static List<ProviderContentBlock> downgradeResult(ProviderToolResultBlock result) {
-    List<ProviderContentBlock> blocks = new ArrayList<>();
-    StringBuilder text = new StringBuilder();
-    text.append("Tool result for `")
-        .append(result.toolName())
-        .append("` (call id `")
-        .append(result.toolCallId())
-        .append("`)")
-        .append(result.error() ? " failed" : "")
-        .append(":\n");
-    List<ProviderContentBlock> resources = new ArrayList<>();
-    for (ProviderContentBlock nested : result.contents()) {
-      if (nested instanceof ProviderTextBlock textBlock) {
-        text.append(fence(textBlock.text())).append('\n');
-      } else if (nested instanceof ProviderJsonBlock jsonBlock) {
-        text.append(fence(jsonBlock.json())).append('\n');
-      } else if (nested instanceof ProviderResourceBlock resourceBlock) {
-        resources.add(resourceBlock);
+  /** 当前请求的绑定中是否存在同名、且 Environment 名与调用冻结值一致的工具。 */
+  private boolean isNative(ToolCallMessageContent call) {
+    for (NativeTool nativeTool : nativeTools) {
+      if (nativeTool.name().equals(call.toolName())) {
+        return Objects.equals(nativeTool.environmentName(), call.environmentName());
       }
     }
-    blocks.add(new ProviderTextBlock(text.toString().stripTrailing()));
-    blocks.addAll(resources);
-    return List.copyOf(blocks);
+    return false;
   }
 
-  private static String describeDowngradedCall(ToolCallMessageContent call) {
-    return "Tool call `"
-        + call.toolName()
-        + "` (call id `"
-        + call.toolCallId()
-        + "`) is not available in this context. Arguments:\n"
-        + fence(call.argumentsJson());
+  private boolean isNativeToolName(String toolName) {
+    for (NativeTool nativeTool : nativeTools) {
+      if (nativeTool.name().equals(toolName)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static ProviderToolCallBlock toolCallBlock(ToolCallMessageContent call) {
+    return new ProviderToolCallBlock(
+        new ProviderToolCall(call.toolCallId(), call.toolName(), call.argumentsJson()));
   }
 
   /** 动态围栏：反引号数取 {@code max(3, 内容中最长反引号连续段 + 1)}，不带语言标识，因此逐字 payload 中的反引号与空白都不会被 误读。 */
@@ -185,62 +219,6 @@ public final class ProviderMessageProjector {
     }
     String ticks = "`".repeat(Math.max(MIN_FENCE_LENGTH, longestRun + 1));
     return ticks + "\n" + payload + "\n" + ticks;
-  }
-
-  /** 一次 assistant 消息与其后续 TOOL 结果组成的 batch：native 结果先于降级 USER 结果输出。 */
-  private static final class Batch {
-    private final List<ProviderToolCallBlock> openNativeCalls = new ArrayList<>();
-    private final List<ProviderToolResultBlock> nativeResults = new ArrayList<>();
-    private final List<ProviderContentBlock> downgradedResults = new ArrayList<>();
-
-    private void add(PendingResult pending) {
-      switch (pending) {
-        case PendingResult.Native nativeResult -> {
-          openNativeCalls.removeIf(
-              open -> open.toolCall().id().equals(nativeResult.block().toolCallId()));
-          nativeResults.add(nativeResult.block());
-        }
-        case PendingResult.Downgraded downgraded -> downgradedResults.addAll(downgraded.blocks());
-      }
-    }
-
-    private void flush(List<ProviderMessage> result) {
-      for (ProviderToolResultBlock nativeResult : nativeResults) {
-        result.add(new ProviderMessage(ProviderMessageRole.TOOL, List.of(nativeResult)));
-      }
-      List<ProviderContentBlock> synthetic = syntheticOrphanResults();
-      if (!synthetic.isEmpty()) {
-        for (ProviderContentBlock block : synthetic) {
-          result.add(new ProviderMessage(ProviderMessageRole.TOOL, List.of(block)));
-        }
-      }
-      if (!downgradedResults.isEmpty()) {
-        result.add(new ProviderMessage(ProviderMessageRole.USER, List.copyOf(downgradedResults)));
-      }
-      openNativeCalls.clear();
-      nativeResults.clear();
-      downgradedResults.clear();
-    }
-
-    private List<ProviderContentBlock> syntheticOrphanResults() {
-      List<ProviderContentBlock> synthetic = new ArrayList<>(openNativeCalls.size());
-      for (ProviderToolCallBlock toolCall : openNativeCalls) {
-        synthetic.add(
-            new ProviderToolResultBlock(
-                toolCall.toolCall().id(),
-                toolCall.toolCall().name(),
-                List.of(new ProviderTextBlock(ORPHAN_RESULT_TEXT)),
-                true,
-                null));
-      }
-      return synthetic;
-    }
-  }
-
-  private sealed interface PendingResult {
-    record Native(ProviderToolResultBlock block) implements PendingResult {}
-
-    record Downgraded(List<ProviderContentBlock> blocks) implements PendingResult {}
   }
 
   private List<ProviderContentBlock> projectContents(List<AgentMessageContent> contents) {
@@ -264,16 +242,10 @@ public final class ProviderMessageProjector {
       return new ProviderJsonBlock(value.json());
     }
     if (content instanceof ToolCallMessageContent value) {
-      return new ProviderToolCallBlock(
-          new ProviderToolCall(value.toolCallId(), value.toolName(), value.argumentsJson()));
+      return toolCallBlock(value);
     }
     if (content instanceof ToolResultMessageContent value) {
-      return new ProviderToolResultBlock(
-          value.toolCallId(),
-          value.toolName(),
-          projectContents(value.contents()),
-          value.error(),
-          value.detailsJson());
+      return projectToolResult(value);
     }
     if (content instanceof ResourceMessageContent value) {
       // durable blob 引用原样投影；Provider attempt 物化（platform ProviderResourceMaterializer）在每次
@@ -287,4 +259,142 @@ public final class ProviderMessageProjector {
     }
     throw new IllegalArgumentException("unsupported agent message content: " + content.getClass());
   }
+
+  /** 一次 assistant 消息与其后续 TOOL 结果组成的 batch：native 结果先于降级 USER 上下文输出。 */
+  private final class Batch {
+    private final List<ProviderToolCallBlock> openNativeCalls = new ArrayList<>();
+    private final List<ProviderToolResultBlock> nativeResults = new ArrayList<>();
+    private final List<DowngradedCall> downgradedCalls = new ArrayList<>();
+    private final Deque<ProviderToolResultBlock> downgradedResults = new ArrayDeque<>();
+
+    private void downgradeCall(ToolCallMessageContent call) {
+      boolean mapped = call.historyAction() != null;
+      downgradedCalls.add(
+          new DowngradedCall(
+              call.toolCallId(),
+              mapped ? call.historyAction() : FALLBACK_ACTION,
+              mapped ? null : fence(call.argumentsJson())));
+    }
+
+    private void addResult(ProviderToolResultBlock resultBlock) {
+      if (isNativeResult(resultBlock)) {
+        openNativeCalls.removeIf(open -> open.toolCall().id().equals(resultBlock.toolCallId()));
+        nativeResults.add(resultBlock);
+        return;
+      }
+      downgradedResults.add(resultBlock);
+    }
+
+    /**
+     * 结果资格沿用本 batch 已判定的调用：其调用被降级即为降级结果；调用缺失（如压缩截断）时按工具名兜底。没有任何降级调用与之配对的降级结果不会 进入 USER
+     * 上下文——它已失去本次请求内的调用身份与动作语义。
+     */
+    private boolean isNativeResult(ProviderToolResultBlock resultBlock) {
+      for (DowngradedCall call : downgradedCalls) {
+        if (call.toolCallId().equals(resultBlock.toolCallId())) {
+          return false;
+        }
+      }
+      return isNativeToolName(resultBlock.toolName());
+    }
+
+    private void flush(List<ProviderMessage> result) {
+      for (ProviderToolResultBlock nativeResult : nativeResults) {
+        result.add(new ProviderMessage(ProviderMessageRole.TOOL, List.of(nativeResult)));
+      }
+      for (ProviderContentBlock block : syntheticOrphanResults()) {
+        result.add(new ProviderMessage(ProviderMessageRole.TOOL, List.of(block)));
+      }
+      if (!downgradedCalls.isEmpty()) {
+        result.add(buildPreviousContext());
+      }
+      openNativeCalls.clear();
+      nativeResults.clear();
+      downgradedCalls.clear();
+      downgradedResults.clear();
+    }
+
+    /**
+     * 全部降级调用与其结果合并为单条 USER 上下文：一个 {@code Previous context:} 前缀，随后每个调用一项，形如 {@code <action>:} （失败时
+     * {@code <action> failed:}）后紧跟该结果的可读内容：
+     *
+     * <ul>
+     *   <li>有 Tool 语义映射：动作来自 Tool 拥有者冻结的 action；
+     *   <li>无 Tool 语义映射：动作恒为该调用的中性回退 {@code external operation}，后紧跟逐字 arguments 围栏（不臆测省略项）；
+     *   <li>无对应结果（orphan）：动作行之后是本调用的 {@code No result provided}。
+     * </ul>
+     *
+     * 无法表示为文本的 durable resource 块按序追加在文本之后。
+     */
+    private ProviderMessage buildPreviousContext() {
+      StringBuilder text = new StringBuilder(CONTEXT_HEADER);
+      List<ProviderContentBlock> resources = new ArrayList<>();
+      for (DowngradedCall call : downgradedCalls) {
+        ProviderToolResultBlock result = takeResult(call.toolCallId());
+        boolean failed = result != null && result.error();
+        text.append('\n').append(call.action()).append(failed ? FAILURE_MARKER : SUCCESS_MARKER);
+        if (call.argumentsFence() != null) {
+          text.append('\n').append(call.argumentsFence());
+        }
+        if (result == null) {
+          text.append('\n').append(ORPHAN_RESULT_TEXT);
+          continue;
+        }
+        appendResultContents(text, result, resources);
+      }
+      List<ProviderContentBlock> blocks = new ArrayList<>(resources.size() + 1);
+      blocks.add(new ProviderTextBlock(text.toString()));
+      blocks.addAll(resources);
+      return new ProviderMessage(ProviderMessageRole.USER, List.copyOf(blocks));
+    }
+
+    /** 按 toolCallId 取出第一个尚未消费的降级结果；无匹配返回 null（orphan 调用）。 */
+    private ProviderToolResultBlock takeResult(String toolCallId) {
+      Iterator<ProviderToolResultBlock> iterator = downgradedResults.iterator();
+      while (iterator.hasNext()) {
+        ProviderToolResultBlock candidate = iterator.next();
+        if (candidate.toolCallId().equals(toolCallId)) {
+          iterator.remove();
+          return candidate;
+        }
+      }
+      return null;
+    }
+
+    /** Text/JSON 结果逐字围栏化；durable resource 块保留为显式 USER 块，而不是丢弃内容。 */
+    private void appendResultContents(
+        StringBuilder text, ProviderToolResultBlock result, List<ProviderContentBlock> resources) {
+      for (ProviderContentBlock nested : result.contents()) {
+        if (nested instanceof ProviderTextBlock textBlock) {
+          text.append('\n').append(fence(textBlock.text()));
+        } else if (nested instanceof ProviderJsonBlock jsonBlock) {
+          text.append('\n').append(fence(jsonBlock.json()));
+        } else if (nested instanceof ProviderResourceBlock resourceBlock) {
+          resources.add(resourceBlock);
+        }
+      }
+    }
+
+    private List<ProviderContentBlock> syntheticOrphanResults() {
+      List<ProviderContentBlock> synthetic = new ArrayList<>(openNativeCalls.size());
+      for (ProviderToolCallBlock toolCall : openNativeCalls) {
+        synthetic.add(
+            new ProviderToolResultBlock(
+                toolCall.toolCall().id(),
+                toolCall.toolCall().name(),
+                List.of(new ProviderTextBlock(ORPHAN_RESULT_TEXT)),
+                true,
+                null));
+      }
+      return synthetic;
+    }
+  }
+
+  /**
+   * 降级调用：durable 顺序下与结果按 toolCallId 配对。
+   *
+   * @param action 该调用的动作行文本：Tool 拥有的语义 action，或中性回退动作
+   * @param argumentsFence 中性回退时的逐字 arguments 围栏；有语义 action 时为 null
+   */
+  private record DowngradedCall(String toolCallId, String action, String argumentsFence) {}
 }

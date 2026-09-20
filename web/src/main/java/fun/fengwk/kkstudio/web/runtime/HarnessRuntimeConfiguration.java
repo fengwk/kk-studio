@@ -22,11 +22,13 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
+import fun.fengwk.kkstudio.harness.runtime.processor.StreamFlushConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -166,12 +168,15 @@ public class HarnessRuntimeConfiguration {
   public ModelProcessorConfig modelProcessorConfig(
       ProcessorLeaseConfig leaseConfig,
       InvocationRetryPolicyProvider retryPolicyProvider,
-      SystemSettingsSnapshot systemSettingsSnapshot) {
+      SystemSettingsSnapshot systemSettingsSnapshot,
+      ToolHistoryActionResolver toolHistoryActionResolver) {
     return new ModelProcessorConfig(
         leaseConfig,
         retryPolicyProvider,
         Duration.ofMillis(
-            systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()));
+            systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
+        StreamFlushConfig.DEFAULT,
+        toolHistoryActionResolver);
   }
 
   @Bean

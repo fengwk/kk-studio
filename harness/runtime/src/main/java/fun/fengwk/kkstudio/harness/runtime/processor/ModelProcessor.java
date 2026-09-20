@@ -203,6 +203,7 @@ public final class ModelProcessor implements AutoCloseable {
             dispatched.threadId(),
             proposedAttempt,
             dispatched.compaction(),
+            dispatched.request().toolBindings(),
             config,
             clock,
             scheduler,

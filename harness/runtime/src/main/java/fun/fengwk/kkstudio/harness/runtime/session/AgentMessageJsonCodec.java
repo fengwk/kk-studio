@@ -43,7 +43,14 @@ public final class AgentMessageJsonCodec {
   private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
   private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_FIELDS =
-      orderedSet("type", "toolCallId", "toolName", "rendererKey", "argumentsJson");
+      orderedSet(
+          "type",
+          "toolCallId",
+          "toolName",
+          "rendererKey",
+          "argumentsJson",
+          "historyAction",
+          "environmentName");
   private static final Set<String> TOOL_RESULT_FIELDS =
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
@@ -158,6 +165,8 @@ public final class AgentMessageJsonCodec {
         node.put("toolName", value.toolName());
         node.put("rendererKey", value.rendererKey());
         node.put("argumentsJson", value.argumentsJson());
+        putNullableText(node, "historyAction", value.historyAction());
+        putNullableText(node, "environmentName", value.environmentName());
       }
       case ToolResultMessageContent value -> {
         validateStrictJsonObject(value.detailsJson(), "content.detailsJson");
@@ -219,7 +228,9 @@ public final class AgentMessageJsonCodec {
             requiredText(node, "toolCallId", "content"),
             requiredText(node, "toolName", "content"),
             requiredText(node, "rendererKey", "content"),
-            requiredStrictJsonObjectString(node, "argumentsJson", "content"));
+            requiredStrictJsonObjectString(node, "argumentsJson", "content"),
+            nullableText(node, "historyAction", "content"),
+            nullableText(node, "environmentName", "content"));
       }
       case "tool_result" -> {
         requireExactFields(node, TOOL_RESULT_FIELDS, "content");
