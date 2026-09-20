@@ -1119,7 +1119,7 @@ class DatabaseTurnResolverTest {
         assertEquals(
             McpToolCatalog.CONTRIBUTOR_ID.value(), echoBinding.contributor().contributorId());
         assertEquals("mcp-srv-echo", echoBinding.contributor().localName());
-        assertEquals(5000L, echoBinding.definition().descriptor().timeout().toMillis());
+        assertEquals(5000L, echoBinding.definition().descriptor().defaultTimeout().toMillis());
         ToolBinding siblingBinding = spec.toolBindings().get(2);
         assertEquals("mcp-srv-sibling", siblingBinding.contributor().localName());
       }

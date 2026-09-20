@@ -234,7 +234,7 @@ class BuiltinHistoryRenderersTest {
             "read",
             fsReadDesc.inputSchema(),
             ToolSideEffect.READ_ONLY,
-            fsReadDesc.timeout());
+            fsReadDesc.defaultTimeout());
     Tool envTool = new EnvironmentCapabilityTool(envToolDesc, fsReadDesc);
 
     // 构造 2: CreateGoalTool

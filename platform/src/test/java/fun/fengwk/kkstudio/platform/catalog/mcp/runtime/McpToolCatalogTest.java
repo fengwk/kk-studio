@@ -115,7 +115,7 @@ class McpToolCatalogTest {
 
         assertEquals(toolName, contribution.definition().descriptor().name());
         assertEquals("mcp-srv-tool", contribution.id().localName());
-        assertEquals(15000L, contribution.definition().descriptor().timeout().toMillis());
+        assertEquals(15000L, contribution.definition().descriptor().defaultTimeout().toMillis());
       }
     }
 
@@ -141,7 +141,7 @@ class McpToolCatalogTest {
     ToolContribution unavailableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
     assertEquals(availableFace.id(), unavailableFace.id());
     assertEquals(availableFace.definition(), unavailableFace.definition());
-    assertEquals(15000L, unavailableFace.definition().descriptor().timeout().toMillis());
+    assertEquals(15000L, unavailableFace.definition().descriptor().defaultTimeout().toMillis());
   }
 
   @Test
