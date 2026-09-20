@@ -65,6 +65,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
@@ -506,6 +507,105 @@ class ModelProcessorTest {
     assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("hel"), new ProviderStreamEvent.TextDelta("lo")),
         deltas.stream().filter(delta -> delta instanceof ProviderStreamEvent.TextDelta).toList());
+  }
+
+  /**
+   * 意图：Tool-owned 历史 action 必须在 terminal ProviderResponse 成为 durable 事实之前冻结——`onSucceeded` 返回时
+   * durable ModelInvocation 结果已携带 action；渲染器缺失、失败或抛异常都只让该调用保持 null，completion 仍然
+   * SUCCEEDED，绝不因此让模型请求 失败。
+   */
+  @Test
+  void freezesToolHistoryActionIntoDurableResponseBeforeCommit() {
+    Fixture fixture =
+        new Fixture(
+            NO_RETRY, requestWithTool(), (binding, call) -> Optional.of("run bash " + call.id()));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+
+    listener.onSucceeded(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}")));
+
+    ModelInvocation terminal = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
+    assertEquals("run bash call_1", terminal.result().toolCalls().getFirst().historyAction());
+    assertEquals("{}", terminal.result().toolCalls().getFirst().argumentsJson());
+
+    // 渲染器抛异常：durable response 的 action 保持 null，completion 仍然成功。
+    Fixture failing =
+        new Fixture(
+            NO_RETRY,
+            requestWithTool(),
+            (binding, call) -> {
+              throw new IllegalStateException("renderer exploded");
+            });
+    failing.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        failing.processor.process(claim(failing.store, failing.invocationId, NOW)));
+    failing
+        .gateway
+        .listener(failing.invocationId)
+        .onSucceeded(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}")));
+
+    ModelInvocation failedRender = model(failing.store, failing.invocationId);
+    assertEquals(ModelInvocationStatus.SUCCEEDED, failedRender.status());
+    assertNull(failedRender.result().toolCalls().getFirst().historyAction());
+  }
+
+  /** 意图：Tool-owned renderer 阻塞时不得占用 execution monitor；close/lease-loss 必须仍可立即 abandon。 */
+  @Test
+  void toolHistoryRenderingDoesNotHoldExecutionMonitor() throws Exception {
+    CountDownLatch rendererEntered = new CountDownLatch(1);
+    CountDownLatch releaseRenderer = new CountDownLatch(1);
+    Fixture fixture =
+        new Fixture(
+            NO_RETRY,
+            requestWithTool(),
+            (binding, call) -> {
+              rendererEntered.countDown();
+              try {
+                if (!releaseRenderer.await(5, TimeUnit.SECONDS)) {
+                  throw new IllegalStateException("renderer release timed out");
+                }
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("renderer interrupted", interrupted);
+              }
+              return Optional.of("run bash");
+            });
+    FakeHandle handle = new FakeHandle();
+    fixture.gateway.queue(new ModelGateway.Started(handle));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+
+    Thread terminalThread =
+        new Thread(
+            () ->
+                fixture
+                    .gateway
+                    .listener(fixture.invocationId)
+                    .onSucceeded(
+                        toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}"))),
+            "blocked-history-renderer");
+    terminalThread.start();
+    assertTrue(rendererEntered.await(2, TimeUnit.SECONDS));
+
+    Thread closeThread = new Thread(fixture.processor::close, "model-processor-close");
+    closeThread.start();
+    closeThread.join(2_000);
+    boolean closeCompletedWithoutRenderer = !closeThread.isAlive();
+
+    releaseRenderer.countDown();
+    terminalThread.join(2_000);
+    closeThread.join(2_000);
+
+    assertTrue(closeCompletedWithoutRenderer, "close must not wait for the history renderer");
+    assertFalse(terminalThread.isAlive());
+    assertFalse(closeThread.isAlive());
+    assertTrue(handle.isCancelled());
   }
 
   @Test
@@ -3136,6 +3236,31 @@ class ModelProcessorTest {
         TurnStartReason reason,
         StreamFlushConfig flushConfig,
         Executor flushExecutor) {
+      this(retryPolicy, requestSpec, scheduler, reason, flushConfig, flushExecutor, null);
+    }
+
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        ModelRequestSpec requestSpec,
+        ToolHistoryActionResolver toolHistoryActionResolver) {
+      this(
+          retryPolicy,
+          requestSpec,
+          newScheduler(),
+          TurnStartReason.INPUT,
+          StreamFlushConfig.DEFAULT,
+          Runnable::run,
+          toolHistoryActionResolver);
+    }
+
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        ModelRequestSpec requestSpec,
+        ScheduledExecutorService scheduler,
+        TurnStartReason reason,
+        StreamFlushConfig flushConfig,
+        Executor flushExecutor,
+        ToolHistoryActionResolver toolHistoryActionResolver) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
       this.baseline = seedBaseline(store, NOW, reason);
@@ -3146,7 +3271,11 @@ class ModelProcessorTest {
               gateway,
               sink,
               new ModelProcessorConfig(
-                  LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY, flushConfig),
+                  LEASE_CONFIG,
+                  () -> retryPolicy,
+                  FALLBACK_DELAY,
+                  flushConfig,
+                  toolHistoryActionResolver),
               clock,
               scheduler,
               Runnable::run,

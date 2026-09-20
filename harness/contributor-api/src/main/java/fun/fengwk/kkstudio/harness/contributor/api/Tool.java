@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 工具实现 SPI；Runtime 负责权限、持久化和执行调度。
@@ -34,6 +35,15 @@ public interface Tool {
   default Duration resolveTimeout(ToolCall call) {
     Objects.requireNonNull(call, "call");
     return descriptor().defaultTimeout();
+  }
+
+  /**
+   * 返回本 Tool 拥有的可选历史 action 渲染器；默认 absent，表示 Runtime 使用通用自然语言回退。
+   *
+   * <p>渲染器必须是无副作用纯函数：Runtime 在成功 ProviderResponse 冻结前调用它，并容忍其返回 empty / 抛出异常。
+   */
+  default Optional<ToolHistoryRenderer> historyRenderer() {
+    return Optional.empty();
   }
 
   /**

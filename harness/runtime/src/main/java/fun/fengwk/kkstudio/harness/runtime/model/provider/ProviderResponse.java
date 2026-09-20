@@ -81,6 +81,21 @@ public record ProviderResponse(
         List.of());
   }
 
+  /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/cost）原样保留。 */
+  public ProviderResponse withToolCalls(List<ProviderToolCall> value) {
+    return new ProviderResponse(
+        text,
+        thinking,
+        value,
+        stopReason,
+        usage,
+        cost,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics);
+  }
+
   private static String optionalNonBlank(String value, String name) {
     if (value != null && value.isBlank()) {
       throw new IllegalArgumentException(name + " must be null or non-blank");

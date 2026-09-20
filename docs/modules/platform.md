@@ -129,7 +129,9 @@ name 语法且 ≤64 字符，超长或同批发现内冲突都直接拒绝，�
 目录不缓存动态工具，按静态在前、动态在后的固定顺序返回可选项，任何重复模型可见
 name（无论 `ContributionId` 是否一致）都 fail closed；`ToolCatalogQueryService`、
 `AgentDefinitionConfigValidator`、`DatabaseTurnResolver` 和 `ToolExecutionGateway`
-只通过它列出或查找工具。
+只通过它列出或查找工具。历史投影使用的 `CatalogToolHistoryActionResolver` 只通过
+`HarnessToolCatalogAdapter` 按冻结 `ContributionId` 读取静态贡献，以便在持久化前冻结
+Tool-owned action；动态 MCP 没有 renderer，该路径不访问数据库。
 
 [McpToolCatalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog.java)
 每次调用现读 DB，并把「可选面」与「查找面」分开：`selectableTools()` 是 UI/配置选择入口，只选拔
@@ -198,6 +200,11 @@ review；`ProjectThreadOwnerResolver` 从 Thread 的唯一 owner relation 解析
 模型自报。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或 UNKNOWN Run，再按
 controller work -> Run Sessions -> reviewer/executor Runs -> inputs/dependencies/
 Issues -> Coordinator Session -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
+这些工具通过
+[ProjectHistoryRenderers](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHistoryRenderers.java)
+提供历史语义动作：只保留动作与相关 issue/status/dependency 身份，省略
+`expected_version` 与 `observed_*` 并发游标、`description`/`summary` 等长正文；无法形成
+有意义动作时返回 absent，由 Runtime 中性回退。
 
 ## SystemSettings
 

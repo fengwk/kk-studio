@@ -1410,7 +1410,7 @@ class AnthropicRequestEncoderTest {
     AgentMessage userAgentMsg =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent("What is the weather?")));
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
     List<ProviderMessage> projectedMessages =
         projector.project(List.of(userAgentMsg, asstAgentMsg));
 

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -31,25 +32,26 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector.NativeTool;
 
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * Provider 投影契约：native 资格按调用名在<b>当前 bindings</b> 中逐次判定；未命中者降级为 assistant 文本 / USER 内容，durable Entry
- * 与 callIndex 永不被改写；同一 assistant 之后 native TOOL 结果先于降级 USER 结果输出；被降级改写的 assistant 不再保留 replay
- * state。
+ * Provider 投影契约：native 资格按「调用名在当前 bindings + 冻结 Environment 名与当前同名工具一致」逐次判定；未命中者从 ASSISTANT wire
+ * 移除，与其结果配对后合并为单条 USER 自然语言上下文（含 Tool 冻结的 action、中性回退、orphan 文本）。durable Entry 与 callIndex 永不被改写；
+ * 同一 assistant 之后 native TOOL 结果先于该 USER 上下文输出；被降级改写的 assistant 不再保留 replay state。
  */
 class ProviderMessageProjectorTest {
 
-  private static final Set<String> ALL_NATIVE = Set.of("lookup");
+  private static final String CONTEXT_HEADER = "Previous context:";
 
   /** 全部调用名都在当前 bindings 中：保留 native tool call / TOOL result，且 replay state 保留。 */
   @Test
   void allNativeCallsKeepNativeStructureAndReplayState() {
     ProviderReplayState replayState = sampleReplayState();
-    ProviderMessageProjector projector = new ProviderMessageProjector(ALL_NATIVE);
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
     List<ProviderMessage> projected =
         projector.projectSources(
@@ -62,8 +64,8 @@ class ProviderMessageProjectorTest {
                             new TextMessageContent("answer"),
                             new ThinkingMessageContent("reasoning"),
                             new JsonMessageContent("{\"answer\":true}"),
-                            new ToolCallMessageContent(
-                                "call-1", "lookup", "lookup", "{\"key\":\"value\"}"))),
+                            toolCall(
+                                "call-1", "lookup", "lookup", "{\"key\":\"value\"}", null, null))),
                     replayState),
                 ProviderMessageProjector.ProjectedMessage.of(
                     new AgentMessage(
@@ -107,11 +109,235 @@ class ProviderMessageProjectorTest {
         projected.get(2).contents());
   }
 
-  /** 全部调用名都不在当前 bindings 中：assistant tool call 与 TOOL 结果一并降级，绝不产生 TOOL 消息。 */
+  /** 冻结 Environment 与当前同名工具一致：即使调用携带 environmentName 也保持 native 结构。 */
   @Test
-  void allDowngradedCallsNeverProduceToolMessages() {
+  void environmentBoundCallStaysNativeWhenEnvironmentMatches() {
+    ProviderMessageProjector projector =
+        new ProviderMessageProjector(List.of(new NativeTool("fs_read", "dev")));
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                toolCallAssistant("call-1", "fs_read", "{\"path\":\"a.txt\"}", null, "dev"),
+                toolResult("call-1", "fs_read", "file body")));
+
+    assertEquals(
+        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
+        projected.stream().map(ProviderMessage::role).toList());
+    assertEquals(
+        new ProviderToolCallBlock(
+            new ProviderToolCall("call-1", "fs_read", "{\"path\":\"a.txt\"}")),
+        projected.get(0).contents().get(0));
+    assertEquals("call-1", toolResultOf(projected.get(1)).toolCallId());
+  }
+
+  /**
+   * Environment 切换：冻结时绑定的 Environment 名与当前同名工具不同，调用必须降级——既从 ASSISTANT wire 移除，也不产生 TOOL 结果，只在 USER
+   * 上下文中以自然语言出现（这里使用了冻结 action）。
+   */
+  @Test
+  void environmentSwitchDowngradesCallsBoundToPreviousEnvironment() {
+    ProviderMessageProjector projector =
+        new ProviderMessageProjector(List.of(new NativeTool("fs_read", "prod")));
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                toolCallAssistant("call-1", "fs_read", "{\"path\":\"a.txt\"}", "read a.txt", "dev"),
+                toolResult("call-1", "fs_read", "file body")));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    assertEquals(CONTEXT_HEADER + "\nread a.txt:\n```\nfile body\n```", textOf(projected.get(0)));
+  }
+
+  /** 当前 bindings 中不存在的工具名（Tool 已被移除）：降级为单条 USER 上下文。 */
+  @Test
+  void unbindableToolNamesDowngradeIntoUserContext() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("bash"));
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                toolCallAssistant("call-1", "lookup", "{\"key\":\"value\"}", "look up key", null),
+                toolResult("call-1", "lookup", "tool output")));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    assertEquals(
+        CONTEXT_HEADER + "\nlook up key:\n```\ntool output\n```", textOf(projected.get(0)));
+  }
+
+  /** 降级调用携带 Tool 冻结的 action：成功项为 {@code <action>:} + 结果；失败项为 {@code <action> failed:} + 结果。 */
+  @Test
+  void frozenActionsRenderSuccessAndFailureMarkers() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        toolCall(
+                            "call-1", "lookup", "lookup", "{\"key\":\"a\"}", "read key a", null),
+                        toolCall(
+                            "call-2", "lookup", "lookup", "{\"key\":\"b\"}", "read key b", null))),
+                toolResult("call-1", "lookup", "ok", false),
+                toolResult("call-2", "lookup", "boom", true)));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    assertEquals(
+        CONTEXT_HEADER + "\nread key a:\n```\nok\n```" + "\nread key b failed:\n```\nboom\n```",
+        textOf(projected.get(0)));
+  }
+
+  /** 没有冻结 action 的调用（缺渲染器 / 渲染失败 / 定义已变化）使用确定性中性回退：不暴露 toolName / callId，逐字保留全部 arguments。 */
+  @Test
+  void callsWithoutFrozenActionUseNeutralVerbatimFallback() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                toolCallAssistant("call-1", "mcp__search", "{\"q\":\"x\",\"topK\":3}", null, null),
+                toolResult("call-1", "mcp__search", "hits")));
+
+    String text = textOf(projected.get(0));
+    assertEquals(
+        CONTEXT_HEADER
+            + "\nexternal operation:\n```\n{\"q\":\"x\",\"topK\":3}\n```\n```\nhits\n```",
+        text);
+    // 回退绝不猜测语义：既不出现工具名，也不出现 call id，更不出现伪 Tool 协议。
+    assertFalse(text.contains("mcp__search"), text);
+    assertFalse(text.contains("call-1"), text);
+    assertFalse(text.contains("Tool call"), text);
+    assertFalse(text.contains("Tool result"), text);
+  }
+
+  /** 中性回退的失败调用同样以 {@code <action> failed:} 表达，且围栏内仍是逐字 arguments。 */
+  @Test
+  void fallbackCallWithFailedResultCarriesFailureMarker() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                toolCallAssistant("call-1", "mcp__search", "{\"q\":\"x\"}", null, null),
+                toolResult("call-1", "mcp__search", "connection reset", true)));
+
+    String text = textOf(projected.get(0));
+    assertTrue(text.startsWith(CONTEXT_HEADER + "\nexternal operation failed:\n"), text);
+    assertTrue(text.contains("```\nconnection reset\n```"), text);
+  }
+
+  /** 无结果配对的降级调用以 {@code No result provided} 表达，与 native orphan 的合成 TOOL 结果严格区分。 */
+  @Test
+  void orphanDowngradedCallsUseNoResultProvidedText() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                toolCallAssistant("call-1", "mcp__search", "{\"q\":\"x\"}", "search for x", null),
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("steer")))));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER, ProviderMessageRole.USER),
+        projected.stream().map(ProviderMessage::role).toList());
+    assertEquals(CONTEXT_HEADER + "\nsearch for x:\nNo result provided", textOf(projected.get(0)));
+    assertEquals(List.of(new ProviderTextBlock("steer")), projected.get(1).contents());
+  }
+
+  /** 降级结果按 toolCallId 与调用配对（而非按到达顺序），并保持 durable 调用顺序。 */
+  @Test
+  void downgradedResultsPairByCallIdAndKeepCallOrder() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        toolCall("call-1", "mcp__a", "mcp__a", "{\"a\":1}", "first action", null),
+                        toolCall(
+                            "call-2", "mcp__b", "mcp__b", "{\"b\":2}", "second action", null))),
+                toolResult("call-2", "mcp__b", "second output", false),
+                toolResult("call-1", "mcp__a", "first output", false)));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    assertEquals(
+        CONTEXT_HEADER
+            + "\nfirst action:\n```\nfirst output\n```"
+            + "\nsecond action:\n```\nsecond output\n```",
+        textOf(projected.get(0)));
+  }
+
+  /**
+   * 混合 batch：同一 assistant 之后的 native TOOL 结果必须先于降级 USER 上下文输出，以满足 provider 的 tool-call adjacency；
+   * 降级调用从 ASSISTANT wire 中移除，组内相对顺序保持不变。
+   */
+  @Test
+  void mixedBatchEmitsNativeToolResultsBeforeDowngradedUserContext() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        toolCall("call-native", "lookup", "lookup", "{}", null, null),
+                        toolCall("call-legacy", "bash", "bash", "{}", "run bash", null))),
+                toolResult("call-legacy", "bash", "legacy output", false),
+                toolResult("call-native", "lookup", "native output", false)));
+
+    assertEquals(
+        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL, ProviderMessageRole.USER),
+        projected.stream().map(ProviderMessage::role).toList());
+    // ASSISTANT wire 只保留 native 调用块：降级调用不再以任何形式出现在 assistant 消息中。
+    assertEquals(1, projected.get(0).contents().size());
+    assertEquals(
+        new ProviderToolCallBlock(new ProviderToolCall("call-native", "lookup", "{}")),
+        projected.get(0).contents().get(0));
+    // 先 native TOOL 结果（即便它排在降级结果之后到达），并保持其调用身份。
+    ProviderToolResultBlock nativeResult = toolResultOf(projected.get(1));
+    assertEquals("call-native", nativeResult.toolCallId());
+    assertEquals("native output", textOf(nativeResult.contents().get(0)));
+    // 再降级 USER 上下文。
+    assertEquals(CONTEXT_HEADER + "\nrun bash:\n```\nlegacy output\n```", textOf(projected.get(2)));
+  }
+
+  /** assistant 消息只有降级调用时整条消息不再输出：没有空 ASSISTANT 消息，也没有被改写的 replay state 泄漏。 */
+  @Test
+  void assistantWithOnlyDowngradedCallsIsDroppedWithItsReplayState() {
     ProviderReplayState replayState = sampleReplayState();
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of("bash"));
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
+
+    List<ProviderMessage> projected =
+        projector.projectSources(
+            List.of(
+                ProviderMessageProjector.ProjectedMessage.of(
+                    assistantToolCall("call-1", "bash", "{}"), replayState),
+                ProviderMessageProjector.ProjectedMessage.of(
+                    toolResult("call-1", "bash", "output"), null)));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    assertNull(projected.get(0).replayState());
+    assertTrue(
+        textOf(projected.get(0)).startsWith(CONTEXT_HEADER + "\nexternal operation:\n"),
+        textOf(projected.get(0)));
+  }
+
+  /** 部分降级改写保留 assistant 消息本身（仍有文本内容），但清除 replay state。 */
+  @Test
+  void partiallyDowngradedAssistantKeepsContentWithoutReplayState() {
+    ProviderReplayState replayState = sampleReplayState();
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
     List<ProviderMessage> projected =
         projector.projectSources(
@@ -121,95 +347,22 @@ class ProviderMessageProjectorTest {
                         AgentMessageRole.ASSISTANT,
                         List.of(
                             new TextMessageContent("answer"),
-                            new ToolCallMessageContent(
-                                "call-1", "lookup", "lookup", "{\"key\":\"value\"}"))),
+                            toolCall("call-1", "bash", "bash", "{}", "run bash", null))),
                     replayState),
                 ProviderMessageProjector.ProjectedMessage.of(
-                    new AgentMessage(
-                        AgentMessageRole.TOOL,
-                        List.of(
-                            new ToolResultMessageContent(
-                                "call-1",
-                                "lookup",
-                                "lookup",
-                                List.of(new TextMessageContent("tool output")),
-                                false,
-                                "{}"))),
-                    null)));
+                    toolResult("call-1", "bash", "output"), null)));
 
     assertEquals(
         List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.USER),
         projected.stream().map(ProviderMessage::role).toList());
-    ProviderMessage assistant = projected.get(0);
-    assertEquals(2, assistant.contents().size());
-    assertEquals(new ProviderTextBlock("answer"), assistant.contents().get(0));
-    // 降级文本逐字携带调用身份与 arguments。
-    String downgradedCall = ((ProviderTextBlock) assistant.contents().get(1)).text();
-    assertTrue(downgradedCall.contains("`lookup`"), downgradedCall);
-    assertTrue(downgradedCall.contains("`call-1`"), downgradedCall);
-    assertTrue(downgradedCall.contains("```\n{\"key\":\"value\"}\n```"), downgradedCall);
-    // 被降级改写的 assistant 不再携带 replay state（native payload 已与投影内容不一致）。
-    assertNull(assistant.replayState());
-    String resultText = ((ProviderTextBlock) projected.get(1).contents().get(0)).text();
-    assertTrue(resultText.startsWith("Tool result for `lookup` (call id `call-1`):"), resultText);
-    assertTrue(resultText.contains("```\ntool output\n```"), resultText);
-  }
-
-  /**
-   * 混合 batch：同一 assistant 之后的 native 结果必须先于降级 USER 结果输出，以满足 provider 的 tool-call
-   * adjacency；组内相对顺序保持不变。
-   */
-  @Test
-  void mixedBatchEmitsNativeToolResultsBeforeDowngradedUserResults() {
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of("lookup"));
-
-    List<ProviderMessage> projected =
-        projector.project(
-            List.of(
-                new AgentMessage(
-                    AgentMessageRole.ASSISTANT,
-                    List.of(
-                        new ToolCallMessageContent("call-native", "lookup", "lookup", "{}"),
-                        new ToolCallMessageContent("call-legacy", "bash", "bash", "{}"))),
-                new AgentMessage(
-                    AgentMessageRole.TOOL,
-                    List.of(
-                        new ToolResultMessageContent(
-                            "call-legacy",
-                            "bash",
-                            "bash",
-                            List.of(new TextMessageContent("legacy output")),
-                            false,
-                            "{}"))),
-                new AgentMessage(
-                    AgentMessageRole.TOOL,
-                    List.of(
-                        new ToolResultMessageContent(
-                            "call-native",
-                            "lookup",
-                            "lookup",
-                            List.of(new TextMessageContent("native output")),
-                            false,
-                            "{}")))));
-
-    assertEquals(
-        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL, ProviderMessageRole.USER),
-        projected.stream().map(ProviderMessage::role).toList());
-    // 先 native TOOL 结果（即便它排在降级结果之后到达），并保持其调用身份。
-    ProviderToolResultBlock nativeResult =
-        (ProviderToolResultBlock) projected.get(1).contents().get(0);
-    assertEquals("call-native", nativeResult.toolCallId());
-    assertEquals("native output", textOf(nativeResult.contents().get(0)));
-    // 再降级 USER 结果。
-    String downgradedText = ((ProviderTextBlock) projected.get(2).contents().get(0)).text();
-    assertTrue(downgradedText.contains("`call-legacy`"), downgradedText);
-    assertTrue(downgradedText.contains("```\nlegacy output\n```"), downgradedText);
+    assertEquals(List.of(new ProviderTextBlock("answer")), projected.get(0).contents());
+    assertNull(projected.get(0).replayState());
   }
 
   /** 同一 assistant 后的多条 native 结果必须保持投影相对顺序。 */
   @Test
   void nativeResultsKeepRelativeOrder() {
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of("lookup"));
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
     List<ProviderMessage> projected =
         projector.project(
@@ -217,24 +370,18 @@ class ProviderMessageProjectorTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        new ToolCallMessageContent("call-1", "lookup", "lookup", "{}"),
-                        new ToolCallMessageContent("call-2", "lookup", "lookup", "{}"))),
+                        toolCall("call-1", "lookup", "lookup", "{}", null, null),
+                        toolCall("call-2", "lookup", "lookup", "{}", null, null))),
                 toolResult("call-1", "lookup", "first"),
                 toolResult("call-2", "lookup", "second")));
 
     assertEquals(
         List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL, ProviderMessageRole.TOOL),
         projected.stream().map(ProviderMessage::role).toList());
-    assertEquals(
-        "call-1", ((ProviderToolResultBlock) projected.get(1).contents().get(0)).toolCallId());
-    assertEquals(
-        "call-2", ((ProviderToolResultBlock) projected.get(2).contents().get(0)).toolCallId());
-    assertEquals(
-        "first",
-        textOf(((ProviderToolResultBlock) projected.get(1).contents().get(0)).contents().get(0)));
-    assertEquals(
-        "second",
-        textOf(((ProviderToolResultBlock) projected.get(2).contents().get(0)).contents().get(0)));
+    assertEquals("call-1", toolResultOf(projected.get(1)).toolCallId());
+    assertEquals("call-2", toolResultOf(projected.get(2)).toolCallId());
+    assertEquals("first", textOf(toolResultOf(projected.get(1)).contents().get(0)));
+    assertEquals("second", textOf(toolResultOf(projected.get(2)).contents().get(0)));
   }
 
   /** 动态围栏规则：反引号数取 {@code max(3, 最长连续段 + 1)}，不带语言标识。 */
@@ -247,11 +394,11 @@ class ProviderMessageProjectorTest {
     assertEquals("`````\n````\n`````", ProviderMessageProjector.fence("````"));
   }
 
-  /** 围栏内逐字保留 payload 原始空白，不做 strip / 折叠。 */
+  /** 围栏内逐字保留 payload 原始空白，不做 strip / 折叠；动态围栏同样作用于 arguments 回退。 */
   @Test
   void downgradedPayloadsPreserveWhitespaceVerbatim() {
     String payload = "  keep leading and trailing  \n```\ninner fence\n```\n  ";
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
 
     List<ProviderMessage> projected =
         projector.project(
@@ -259,16 +406,16 @@ class ProviderMessageProjectorTest {
                 assistantToolCall("call-1", "lookup", "{\"q\":\"x\"}"),
                 toolResult("call-1", "lookup", payload)));
 
-    String downgradedText = ((ProviderTextBlock) projected.get(1).contents().get(0)).text();
-    assertTrue(downgradedText.contains("````\n" + payload + "\n````"), downgradedText);
-    assertTrue(downgradedText.contains(payload), downgradedText);
+    String text = textOf(projected.get(0));
+    assertTrue(text.contains("````\n" + payload + "\n````"), text);
+    assertTrue(text.contains("```\n{\"q\":\"x\"}\n```"), text);
   }
 
-  /** 无法表示为文本的 durable resource 块保留为显式说明后的 USER 块，而不是丢弃内容。 */
+  /** 无法表示为文本的 durable resource 块保留为 USER 块（在文本之后、按序），而不是丢弃内容。 */
   @Test
   void durableResourcesInDowngradedResultsStayExplicitUserBlocks() {
     UUID blobId = new UUID(0L, 7L);
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
 
     List<ProviderMessage> projected =
         projector.project(
@@ -288,18 +435,17 @@ class ProviderMessageProjectorTest {
                             "{}")))));
 
     assertEquals(
-        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.USER),
-        projected.stream().map(ProviderMessage::role).toList());
-    List<ProviderContentBlock> blocks = projected.get(1).contents();
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    List<ProviderContentBlock> blocks = projected.get(0).contents();
     assertEquals(2, blocks.size());
-    assertTrue(((ProviderTextBlock) blocks.get(0)).text().contains("```\nattached\n```"));
+    assertTrue(textOf(blocks.get(0)).contains("```\nattached\n```"));
     assertEquals(ProviderResourceBlock.media(blobId, "scan.png", "tiny preview"), blocks.get(1));
   }
 
-  /** 未被调用名覆盖的调用只降级为文本，不合成结果；native 未配对调用才合成 error ToolResult。 */
+  /** 只有未被结果配对的 native 调用才合成 error ToolResult；降级调用只用 USER 文本表达 orphan。 */
   @Test
   void onlyUnpairedNativeCallsGetSyntheticOrphanResults() {
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of("lookup"));
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
     List<ProviderMessage> projected =
         projector.project(
@@ -307,25 +453,24 @@ class ProviderMessageProjectorTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(
-                        new ToolCallMessageContent("call-native", "lookup", "lookup", "{}"),
-                        new ToolCallMessageContent("call-legacy", "bash", "bash", "{}")))));
+                        toolCall("call-native", "lookup", "lookup", "{}", null, null),
+                        toolCall("call-legacy", "bash", "bash", "{}", "run bash", null)))));
 
-    // assistant + 仅 native 调用的合成 error ToolResult；降级调用不合成结果。
     assertEquals(
-        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
+        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL, ProviderMessageRole.USER),
         projected.stream().map(ProviderMessage::role).toList());
-    ProviderToolResultBlock synthetic =
-        (ProviderToolResultBlock) projected.get(1).contents().get(0);
+    ProviderToolResultBlock synthetic = toolResultOf(projected.get(1));
     assertEquals("call-native", synthetic.toolCallId());
     assertEquals("lookup", synthetic.toolName());
     assertTrue(synthetic.error());
     assertEquals("No result provided", textOf(synthetic.contents().get(0)));
+    assertEquals(CONTEXT_HEADER + "\nrun bash:\nNo result provided", textOf(projected.get(2)));
   }
 
   /** 同一 toolCallId 在后续再次出现时，各自独立修复 orphan，不跨出现位置共享状态。 */
   @Test
   void synthesizesErrorForEachSubsequentOrphanWithTheSameToolCallId() {
-    ProviderMessageProjector projector = new ProviderMessageProjector(ALL_NATIVE);
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
     List<ProviderMessage> projected =
         projector.project(
@@ -349,7 +494,7 @@ class ProviderMessageProjectorTest {
   /** 纯 durable resource 块（不经降级路径）投影为 durable-safe 的 ProviderResourceBlock。 */
   @Test
   void projectsDurableResourceBlocksPreservingBlobFacts() {
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
 
     List<ProviderMessage> projected =
         projector.project(
@@ -369,7 +514,7 @@ class ProviderMessageProjectorTest {
 
   @Test
   void projectExternalizedTextResourceCarriesStructureFacts() {
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of());
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
     List<ProviderMessage> projected =
         projector.project(
             List.of(
@@ -401,7 +546,7 @@ class ProviderMessageProjectorTest {
                 new ToolResultMessageContent(
                     "call-1", "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}")));
     List<AgentMessage> durable = List.of(assistant, result);
-    ProviderMessageProjector projector = new ProviderMessageProjector(Set.of("lookup"));
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
     projector.project(durable);
 
@@ -413,18 +558,52 @@ class ProviderMessageProjectorTest {
     assertFalse(assistant.contents().isEmpty());
   }
 
+  /** NativeTool 拒绝 blank 工具名与 blank Environment 名：这两者是 durable 判定输入，不能是空串。 */
+  @Test
+  void nativeToolRejectsBlankIdentity() {
+    assertThrows(IllegalArgumentException.class, () -> new NativeTool(" ", null));
+    assertThrows(IllegalArgumentException.class, () -> new NativeTool("fs_read", " "));
+  }
+
   private static AgentMessage assistantToolCall(String toolCallId) {
     return assistantToolCall(toolCallId, "lookup", "{}");
   }
 
   private static AgentMessage assistantToolCall(
       String toolCallId, String toolName, String argumentsJson) {
+    return toolCallAssistant(toolCallId, toolName, argumentsJson, null, null);
+  }
+
+  private static AgentMessage toolCallAssistant(
+      String toolCallId,
+      String toolName,
+      String argumentsJson,
+      String historyAction,
+      String environmentName) {
     return new AgentMessage(
         AgentMessageRole.ASSISTANT,
-        List.of(new ToolCallMessageContent(toolCallId, toolName, toolName, argumentsJson)));
+        List.of(
+            toolCall(
+                toolCallId, toolName, toolName, argumentsJson, historyAction, environmentName)));
+  }
+
+  private static ToolCallMessageContent toolCall(
+      String toolCallId,
+      String toolName,
+      String rendererKey,
+      String argumentsJson,
+      String historyAction,
+      String environmentName) {
+    return new ToolCallMessageContent(
+        toolCallId, toolName, rendererKey, argumentsJson, historyAction, environmentName);
   }
 
   private static AgentMessage toolResult(String toolCallId, String toolName, String text) {
+    return toolResult(toolCallId, toolName, text, false);
+  }
+
+  private static AgentMessage toolResult(
+      String toolCallId, String toolName, String text, boolean error) {
     return new AgentMessage(
         AgentMessageRole.TOOL,
         List.of(
@@ -433,7 +612,7 @@ class ProviderMessageProjectorTest {
                 toolName,
                 toolName,
                 List.of(new TextMessageContent(text)),
-                false,
+                error,
                 "{}")));
   }
 
@@ -441,14 +620,22 @@ class ProviderMessageProjectorTest {
     return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
   }
 
+  /** USER 上下文项文本必然落在唯一文本块中；resource 块只会追加在其后。 */
+  private static String textOf(ProviderMessage message) {
+    return textOf(message.contents().get(0));
+  }
+
   private static String textOf(Object block) {
     return ((ProviderTextBlock) block).text();
   }
 
+  private static ProviderToolResultBlock toolResultOf(ProviderMessage message) {
+    return (ProviderToolResultBlock) message.contents().get(0);
+  }
+
   private static void assertSyntheticOrphanResult(ProviderMessage message) {
     assertEquals(1, message.contents().size());
-    assertTrue(message.contents().get(0) instanceof ProviderToolResultBlock);
-    ProviderToolResultBlock result = (ProviderToolResultBlock) message.contents().get(0);
+    ProviderToolResultBlock result = toolResultOf(message);
     assertEquals("call-1", result.toolCallId());
     assertEquals("lookup", result.toolName());
     assertTrue(result.error());

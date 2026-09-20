@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
@@ -28,6 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -43,6 +46,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
@@ -53,6 +57,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -286,6 +292,104 @@ class ModelRequestMaterializerTest {
         request.messages().get(3).hasReplayState(),
         "post-compaction assistant entry's replay state must be preserved");
     assertEquals(newReplayState, request.messages().get(3).replayState());
+  }
+
+  /**
+   * 意图：ProviderRequest 的 native 资格由 spec 冻结的 binding 决定——冻结 Environment 与当前同名工具一致的调用保持 native tool
+   * adjacency（assistant call block + TOOL 结果）；Environment 切换后旧调用必须从 ASSISTANT wire 移除、其结果不再产生 TOOL
+   * 消息，而与 结果配对后合并为单条 USER {@code Previous context:} 自然语言上下文。
+   */
+  @Test
+  void environmentSwitchDowngradesFrozenToolHistoryInProviderRequest() {
+    EntryPath path = toolHistoryPath();
+
+    ProviderRequest sameEnvironment =
+        MATERIALIZER.materialize(path, liveSpec(environmentBinding("dev")));
+    assertEquals(
+        List.of(ProviderMessageRole.USER, ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
+        sameEnvironment.messages().stream().map(ProviderMessage::role).toList());
+    assertEquals(1, sameEnvironment.messages().get(1).contents().size());
+
+    ProviderRequest switchedEnvironment =
+        MATERIALIZER.materialize(path, liveSpec(environmentBinding("prod")));
+    assertEquals(
+        List.of(ProviderMessageRole.USER, ProviderMessageRole.USER),
+        switchedEnvironment.messages().stream().map(ProviderMessage::role).toList());
+    assertEquals(
+        "Previous context:\nread a.txt:\n```\nfile body\n```",
+        textOf(switchedEnvironment.messages().get(1)));
+  }
+
+  private static EntryPath toolHistoryPath() {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("go")));
+    entries.add(
+        entry(
+            4,
+            3,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(
+                        new ToolCallMessageContent(
+                            "call-1",
+                            "fs_read",
+                            "fs.read",
+                            "{\"path\":\"a.txt\"}",
+                            "read a.txt",
+                            "dev"))),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+                    new ModelCost(
+                        "USD",
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO)),
+                null)));
+    entries.add(
+        entry(
+            5,
+            4,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "fs_read",
+                            "fs.read",
+                            List.of(new TextMessageContent("file body")),
+                            false,
+                            "{}"))),
+                null,
+                new ToolResultMetadata(
+                    id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null))));
+    return new EntryPath(entries);
+  }
+
+  /** 冻结了 Environment 名的 fs_read binding：environmentName 是历史投影判定 native 资格的 durable 事实。 */
+  private static ToolBinding environmentBinding(String environmentName) {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new ToolDescriptor(
+                "fs_read",
+                "read a file",
+                "fs.read",
+                new InputSchema("arguments", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE),
+        new ContributorBinding("core", "fs.read", List.of()),
+        true,
+        new EnvironmentId(id(9L)),
+        environmentName);
   }
 
   private static ProviderReplayState sampleReplayState() {

@@ -230,7 +230,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     List<SkillBinding> skillBindings = resolveSkills(agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
     List<String> toolNames = resolveToolNames(agentConfig, threadId);
-    List<ToolBinding> toolBindings = resolveTools(environmentId, toolNames);
+    List<ToolBinding> toolBindings =
+        resolveTools(environmentId, settings.environmentName(), toolNames);
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -476,7 +477,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * 未选择环境时绑定 null，工具保持声明并在调用时以 {@code ENVIRONMENT_NOT_SELECTED} 确定性失败，绝不拒绝规划。贡献声明的固定 {@code
    * requiredEnvironmentId} 只在 branch 已选择另一个非 null 环境时确定性拒绝。缺失能力仍立即拒绝，绝不静默跳过。
    */
-  private List<ToolBinding> resolveTools(EnvironmentId environmentId, List<String> toolNames) {
+  private List<ToolBinding> resolveTools(
+      EnvironmentId environmentId, String environmentName, List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
     for (String toolName : toolNames) {
       ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
@@ -510,9 +512,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + environmentId);
       }
       EnvironmentId boundEnvironmentId = environmentRequired ? environmentId : null;
+      // 只有 environment-required 的 binding 才冻结环境名：它是历史投影判定 native 资格的 durable 事实。
+      String boundEnvironmentName = environmentRequired ? environmentName : null;
       bindings.add(
           new ToolBinding(
-              contribution.definition(), contributor, environmentRequired, boundEnvironmentId));
+              contribution.definition(),
+              contributor,
+              environmentRequired,
+              boundEnvironmentId,
+              boundEnvironmentName));
     }
     return List.copyOf(bindings);
   }

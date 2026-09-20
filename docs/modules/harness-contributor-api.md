@@ -59,8 +59,9 @@ findDescriptor / findCustomEntryType(contributorId, customType) / findContextPro
 
 ```java
 ToolDescriptor descriptor();
-default ToolRequirements requirements();                     // 默认 ToolRequirements.none()
-default Duration resolveTimeout(ToolCall call);              // 默认返回 descriptor.defaultTimeout()
+default ToolRequirements requirements();                  // 默认 ToolRequirements.none()
+default Duration resolveTimeout(ToolCall call);           // 默认返回 descriptor.defaultTimeout()
+default Optional<ToolHistoryRenderer> historyRenderer();  // 默认 absent：Runtime 使用通用回退
 ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener);
 ```
 
@@ -71,6 +72,12 @@ ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener 
 [`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 携带最终 descriptor、已归一化并通过 schema 校验的 `ToolCall`（构造期调用 `validateFor`）、已解析的 `timeout` 与可选的 `ToolExecutionContext`。`timeout` 就是 `resolveTimeout` 的结果，执行层不得二次解析。请求不携带 workdir：目录只存在于具体工具的 arguments 中，框架既不把它提升为通用执行状态，也不提供隐藏默认目录。
 
 [`ToolExecutionListener`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java) 接收 `onPartial(ToolResult)*` 与互斥的 `onComplete(ToolOutcome)` / `onError(Throwable)`：终态至多一次，重复或迟到的回调由运行时侧适配层过滤，实现无需自己防御。
+
+### 历史语义渲染
+
+[`ToolHistoryRenderer`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java) 是 Tool 拥有的可选能力：当 Provider 无法再承载原生长 Tool 历史（工具已不在本次请求的绑定中，或调用的 Environment 已被切换）时，Runtime 用渲染出的自然语言动作替代那次调用，使模型仍能理解过去发生过什么。输入是刻意最小的 [`ToolHistoryRenderRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderRequest.java)：已按 schema 归一化的 `ToolCall` 与调用冻结时的 Environment 名（可空），不含 durable Entry、callIndex 或 Provider 协议结构。
+
+渲染器必须是无副作用的确定性纯函数，并只描述动作本身：保留动作、核心目标与作用域，省略 timeout、limit、offset、分页、`maxTurns`、并发版本（`expected_version`、`observed_*`）等执行控制参数，以及已由结果表达的长正文。渲染结果不得暴露 toolCallId，也不得模拟 Tool 协议文本。Runtime 在成功响应持久化前调用它；返回 absent、blank 或抛异常一律按「未提供映射」处理，回退到逐字保留全部 arguments 的中性描述——缺失渲染器绝不让模型请求失败，也绝不猜测工具语义。冻结、回退与投影由 [`harness-runtime`](harness-runtime.md) 承担；MCP 与其它第三方 Tool 保持默认 absent。
 
 ## Environment 能力
 
@@ -86,7 +93,7 @@ stateAccesses[]          该工具访问的 branch custom state 集合（同一 
 
 需要环境的工具在 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 中拿到 `invocationId`、`threadId`、`executedAt`、`branch` 与可选的 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 是刻意窄的接口——只有 `environmentId()` 与 `execute(capability, request, listener)`，工具据此执行一个 `EnvironmentCapabilityDescriptor`，而连接注册、路由与协议细节由 Platform 的适配器承担。
 
-环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java) 要求 `environmentRequired=false` 时 `environmentId` 必须为空；`environmentRequired=true` 而 `environmentId` 为空表示 branch 未选择 Environment，工具声明保留到调用时才失败。Platform 的 [`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java) 在执行前用冻结的 definition、Contributor provenance 与 `requiredEnvironmentId` 逐项比对当前目录：未选择 Environment 的环境工具在权限判定前即以稳定的 `ENVIRONMENT_NOT_SELECTED` 拒绝，其余不一致也确定性拒绝执行，绝不按当前配置静默重解释。
+环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java) 要求 `environmentRequired=false` 时 `environmentId` 与 `environmentName` 必须为空；`environmentRequired=true` 而 `environmentId` 为空表示 branch 未选择 Environment，工具声明保留到调用时才失败。`environmentName` 与 `environmentId` 同源，是后续历史投影判定 native 资格的 durable 事实。Platform 的 [`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java) 在执行前用冻结的 definition、Contributor provenance 与 `requiredEnvironmentId` 逐项比对当前目录：未选择 Environment 的环境工具在权限判定前即以稳定的 `ENVIRONMENT_NOT_SELECTED` 拒绝，其余不一致也确定性拒绝执行，绝不按当前配置静默重解释。
 
 ## 分支状态与副作用
 
@@ -101,7 +108,7 @@ stateAccesses[]          该工具访问的 branch custom state 集合（同一 
 ## 扩展一个 Contributor
 
 1. 实现 `HarnessContributor`（多用 `of` 工厂），给出 canonical `ContributorId`、版本与 `requires`。
-2. 在 `contribute` 中注册工具：实现 `Tool` 的 `descriptor()` / `requirements()` / `execute()`，选择 `ToolVisibility` 与 priority；需要环境能力就声明 `environment()`，需要精确绑定就声明 `environment(EnvironmentId)`。
+2. 在 `contribute` 中注册工具：实现 `Tool` 的 `descriptor()` / `requirements()` / `execute()`，选择 `ToolVisibility` 与 priority；需要环境能力就声明 `environment()`，需要精确绑定就声明 `environment(EnvironmentId)`；希望历史降级时仍保留语义就 override `historyRenderer()`。
 3. 要维护分支状态时，先 `registerCustomEntryType(localName, customType, priority)`，再在 `ToolRequirements.stateAccesses` 中声明 READ 或 WRITE；状态载荷与 `AppendCustomEntry` 使用同一个 customType。
 4. 要注入模型上下文时注册 `ContextProjector`，只依据 `BranchView` 计算文本。
 5. 装配到组合根：组件注册进 Spring 容器或受信任 JAR，由组合根统一交给 `HarnessCatalog.from`。
@@ -109,7 +116,7 @@ stateAccesses[]          该工具访问的 branch custom state 集合（同一 
 ## 源码与测试
 
 - 冻结与校验：[`HarnessCatalog.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog.java)、[`HarnessRegistrar.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java)、[`HarnessContributor.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java)、[`Identifiers.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Identifiers.java)
-- 执行 SPI：[`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolExecutionRequest.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java)、[`ToolExecutionListener.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java)、[`ToolExecutionHandle.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java)
+- 执行 SPI：[`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolExecutionRequest.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java)、[`ToolExecutionListener.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java)、[`ToolExecutionHandle.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java)、[`ToolHistoryRenderer.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java)
 - 环境与状态：[`ToolRequirements.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java)、[`BoundEnvironment.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)、[`BranchView.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java)、[`AppendCustomEntry.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)、[`ContextProjector.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java)
 - 改动冻结逻辑先跑 [`HarnessCatalogTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java)，它覆盖 DAG、排序、唯一性、freeze 不可变与 registrar 越界拒绝；[`HarnessContractTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContractTest.java) 覆盖 SPI 契约与请求归一化，[`BranchViewTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/BranchViewTest.java) 覆盖 contributor-scoped 状态可见性。参考实现见 [`harness-builtin`](harness-builtin.md)。
 

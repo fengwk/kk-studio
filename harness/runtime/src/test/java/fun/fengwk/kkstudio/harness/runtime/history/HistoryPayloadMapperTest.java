@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -227,6 +228,45 @@ class HistoryPayloadMapperTest {
     ToolCallMessageContent unboundCall =
         (ToolCallMessageContent) unbound.message().contents().get(0);
     assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
+  }
+
+  /**
+   * 意图：durable ToolCall 内容必须完整携带成功响应冻结的 historyAction 与 binding 冻结的 environmentName——前者是 Tool 拥有的
+   * 语义，后者是后续投影判定 native 资格的事实；未冻结 action 时保持 null，投影回退到中性描述，绝不丢弃 arguments。
+   */
+  @Test
+  void assistantPayloadFreezesHistoryActionAndEnvironmentName() {
+    ProviderResponse response =
+        new ProviderResponse(
+            "",
+            "",
+            List.of(
+                new ProviderToolCall("call-1", "fs_read", "{\"path\":\"a.txt\"}", "read a.txt"),
+                new ProviderToolCall("call-2", "fs_read", "{\"path\":\"b.txt\"}")),
+            GenerationStopReason.COMPLETE,
+            usage(),
+            cost(),
+            null,
+            null,
+            "{}");
+    ToolBinding environmentBinding =
+        new ToolBinding(
+            definition("fs_read"),
+            new ContributorBinding("core", "fs.read", List.of()),
+            true,
+            new EnvironmentId(id(1)),
+            "dev");
+
+    MessagePayload payload = MAPPER.assistantPayload(response, List.of(environmentBinding));
+
+    ToolCallMessageContent frozen = (ToolCallMessageContent) payload.message().contents().get(0);
+    assertEquals("read a.txt", frozen.historyAction());
+    assertEquals("dev", frozen.environmentName());
+    assertEquals("{\"path\":\"a.txt\"}", frozen.argumentsJson());
+    ToolCallMessageContent unfrozen = (ToolCallMessageContent) payload.message().contents().get(1);
+    assertNull(unfrozen.historyAction());
+    assertEquals("dev", unfrozen.environmentName());
+    assertEquals("{\"path\":\"b.txt\"}", unfrozen.argumentsJson());
   }
 
   @Test

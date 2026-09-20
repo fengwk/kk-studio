@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.model.provider.codec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -60,6 +61,9 @@ class ProviderResponseJsonCodecTest {
         decoded.toolCalls().stream().map(ProviderToolCall::id).toList());
     assertEquals(FIRST_ARGUMENTS, decoded.toolCalls().get(0).argumentsJson());
     assertEquals(SECOND_ARGUMENTS, decoded.toolCalls().get(1).argumentsJson());
+    // 冻结的历史 action 是 durable 事实：非空 action 与 null（无 Tool 语义映射）都必须无损往返。
+    assertEquals("look up the capital of paris", decoded.toolCalls().get(0).historyAction());
+    assertNull(decoded.toolCalls().get(1).historyAction());
     assertEquals(RAW_USAGE, decoded.rawUsageJson());
     assertEquals(new BigDecimal("0.000911250000"), decoded.cost().total());
   }
@@ -143,6 +147,9 @@ class ProviderResponseJsonCodecTest {
         root -> toolCall(root).put("extra", true),
         root -> toolCall(root).remove("name"),
         root -> toolCall(root).set("argumentsJson", NODES.objectNode()));
+    // historyAction 是严格字段：缺失与非文本同样必须在 boundary 上被拒绝。
+    assertRejected(root -> toolCall(root).remove("historyAction"));
+    assertRejected(root -> toolCall(root).put("historyAction", 1));
     assertStrictLayer(
         root -> usage(root).put("extra", true),
         root -> usage(root).remove("inputTokens"),
@@ -224,7 +231,8 @@ class ProviderResponseJsonCodecTest {
         "The capital of France is Paris.",
         "user asked geography",
         List.of(
-            new ProviderToolCall("call-1", "lookup", FIRST_ARGUMENTS),
+            new ProviderToolCall(
+                "call-1", "lookup", FIRST_ARGUMENTS, "look up the capital of paris"),
             new ProviderToolCall("call-2", "weather", SECOND_ARGUMENTS)),
         GenerationStopReason.COMPLETE,
         new ModelUsage(100, 20, 0, 50, 0, 5, 175),

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
@@ -7,6 +8,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -15,6 +17,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** 读取当前 branch 最新 Goal 快照。 */
 public final class GetGoalTool implements Tool {
@@ -42,6 +45,12 @@ public final class GetGoalTool implements Tool {
   @Override
   public ToolRequirements requirements() {
     return REQUIREMENTS;
+  }
+
+  /** 读取 Goal 的历史动作：无参数，动作恒定。 */
+  @Override
+  public Optional<ToolHistoryRenderer> historyRenderer() {
+    return Optional.of(BuiltinHistoryRenderers.getGoal());
   }
 
   @Override

@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -48,6 +49,12 @@ public final class ProjectRoleTool implements Tool {
   @Override
   public ToolDescriptor descriptor() {
     return type.descriptor();
+  }
+
+  /** 历史动作由 {@link ProjectHistoryRenderers} 按工具类型生成：只保留动作与相关 issue/status/dependency 身份。 */
+  @Override
+  public Optional<ToolHistoryRenderer> historyRenderer() {
+    return Optional.of(ProjectHistoryRenderers.of(type));
   }
 
   @Override

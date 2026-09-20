@@ -2,8 +2,8 @@
   "text": "The capital of France is Paris.",
   "thinking": "user asked geography",
   "toolCalls": [
-    {"id": "call-1", "name": "lookup", "argumentsJson": "{\n  \"q\":\"paris\"\n}"},
-    {"id": "call-2", "name": "weather", "argumentsJson": "{\"city\":\"Paris\", \"units\":\"metric\"}"}
+    {"id": "call-1", "name": "lookup", "argumentsJson": "{\n  \"q\":\"paris\"\n}", "historyAction": "look up the capital of paris"},
+    {"id": "call-2", "name": "weather", "argumentsJson": "{\"city\":\"Paris\", \"units\":\"metric\"}", "historyAction": null}
   ],
   "stopReason": "COMPLETE",
   "usage": {

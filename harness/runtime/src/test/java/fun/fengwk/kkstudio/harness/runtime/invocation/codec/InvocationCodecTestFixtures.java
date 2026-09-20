@@ -79,7 +79,8 @@ final class InvocationCodecTestFixtures {
         definition(environmentRequired ? "fs" : "bash"),
         contributor,
         environmentRequired,
-        environmentRequired ? ENVIRONMENT_ID : null);
+        environmentRequired ? ENVIRONMENT_ID : null,
+        environmentRequired ? "dev" : null);
   }
 
   private static AgentToolDefinition definition(String name) {

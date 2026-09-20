@@ -57,7 +57,11 @@ public final class HistoryPayloadMapper {
   private final ProviderToolCallDiagnosticJsonCodec diagnosticCodec =
       new ProviderToolCallDiagnosticJsonCodec();
 
-  /** ASSISTANT MESSAGE payload：ToolCall 的 rendererKey 来自本次 ModelInvocation 冻结的 Tool binding。 */
+  /**
+   * ASSISTANT MESSAGE payload：ToolCall 的 rendererKey 来自本次 ModelInvocation 冻结的 Tool
+   * binding；historyAction 与 environmentName 同样来自该 binding（renderer 返回的 action 与冻结 Environment
+   * 名在响应持久化前已写入 ProviderToolCall）。
+   */
   public MessagePayload assistantPayload(ProviderResponse response, List<ToolBinding> bindings) {
     Objects.requireNonNull(response, "response");
     Objects.requireNonNull(bindings, "bindings");
@@ -80,9 +84,15 @@ public final class HistoryPayloadMapper {
         contents.add(new JsonMessageContent(diagnosticCodec.encode(diagnostic)));
       } else {
         ProviderToolCall call = response.toolCalls().get(toolCallIndex++);
+        ToolBinding binding = boundedBinding(call.name(), bindings);
         contents.add(
             new ToolCallMessageContent(
-                call.id(), call.name(), rendererKey(call.name(), bindings), call.argumentsJson()));
+                call.id(),
+                call.name(),
+                binding == null ? UNBOUND_RENDERER_KEY : binding.descriptor().rendererKey(),
+                call.argumentsJson(),
+                call.historyAction(),
+                binding == null ? null : binding.environmentName()));
       }
     }
     if (contents.isEmpty()) {
@@ -284,12 +294,12 @@ public final class HistoryPayloadMapper {
   }
 
   /** ToolCall 的 rendererKey：优先 frozen binding；unknown tool 槽位 fallback 固定为 {@code tool}。 */
-  private static String rendererKey(String toolName, List<ToolBinding> bindings) {
+  private static ToolBinding boundedBinding(String toolName, List<ToolBinding> bindings) {
     for (ToolBinding binding : bindings) {
       if (binding.descriptor().name().equals(toolName)) {
-        return binding.descriptor().rendererKey();
+        return binding;
       }
     }
-    return UNBOUND_RENDERER_KEY;
+    return null;
   }
 }
