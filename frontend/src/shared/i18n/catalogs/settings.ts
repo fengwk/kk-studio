@@ -41,6 +41,106 @@ export const settingsCatalog = {
     'en-US': 'General',
     'zh-CN': '常规',
   },
+  'settings.tabs.plugins': {
+    'en-US': 'Plugins',
+    'zh-CN': '插件',
+  },
+  'plugins.title': {
+    'en-US': 'Installed Plugins',
+    'zh-CN': '已安装插件',
+  },
+  'plugins.empty': {
+    'en-US': 'No plugins installed',
+    'zh-CN': '未安装任何插件',
+  },
+  'plugins.connect': {
+    'en-US': 'Connect',
+    'zh-CN': '连接',
+  },
+  'plugins.reconnect': {
+    'en-US': 'Reconnect',
+    'zh-CN': '重新连接',
+  },
+  'plugins.disconnect': {
+    'en-US': 'Disconnect',
+    'zh-CN': '断开连接',
+  },
+  'plugins.disconnectConfirm': {
+    'en-US': 'Are you sure you want to disconnect plugin "{name}"? Active credentials will be deleted.',
+    'zh-CN': '确认断开插件 “{name}” 的连接？当前凭据将被删除。',
+  },
+  'plugins.status.NOT_CONNECTED': {
+    'en-US': 'Not Connected',
+    'zh-CN': '未连接',
+  },
+  'plugins.status.CONNECTED': {
+    'en-US': 'Connected',
+    'zh-CN': '已连接',
+  },
+  'plugins.status.KEY_UNAVAILABLE': {
+    'en-US': 'Master Key Unavailable',
+    'zh-CN': '主密钥不可用',
+  },
+  'plugins.status.REFRESH_FAILED': {
+    'en-US': 'Refresh Failed',
+    'zh-CN': '刷新失败',
+  },
+  'plugins.status.REFRESH_UNCERTAIN': {
+    'en-US': 'Refresh Uncertain (Reauth Required)',
+    'zh-CN': '刷新状态不确定（需重新认证）',
+  },
+  'plugins.status.REAUTH_REQUIRED': {
+    'en-US': 'Reauth Required',
+    'zh-CN': '需重新认证',
+  },
+  'plugins.region': {
+    'en-US': 'Region',
+    'zh-CN': '区域',
+  },
+  'plugins.tokenExpiresAt': {
+    'en-US': 'Token Expires At',
+    'zh-CN': 'Token 到期时间',
+  },
+  'plugins.nextRefreshAt': {
+    'en-US': 'Next Refresh At',
+    'zh-CN': '下次刷新时间',
+  },
+  'plugins.lastRefreshedAt': {
+    'en-US': 'Last Refreshed At',
+    'zh-CN': '最近刷新时间',
+  },
+  'plugins.lastRefreshError': {
+    'en-US': 'Last Error',
+    'zh-CN': '最近错误',
+  },
+  'plugins.connectDialog.title': {
+    'en-US': 'Connect Plugin: {name}',
+    'zh-CN': '连接插件：{name}',
+  },
+  'plugins.connectDialog.step1': {
+    'en-US': '1. Select Region and Open Login Page',
+    'zh-CN': '1. 选择区域并打开登录页面',
+  },
+  'plugins.connectDialog.openLogin': {
+    'en-US': 'Open Login Page',
+    'zh-CN': '打开官方登录页面',
+  },
+  'plugins.connectDialog.step2': {
+    'en-US': '2. Paste Callback Deep Link',
+    'zh-CN': '2. 粘贴回调 Deep Link',
+  },
+  'plugins.connectDialog.callbackPlaceholder': {
+    'en-US': 'Paste callback URL (e.g. minimax-cn://auth-callback?...)',
+    'zh-CN': '粘贴回调地址（例如 minimax-cn://auth-callback?...）',
+  },
+  'plugins.connectDialog.complete': {
+    'en-US': 'Complete Connection',
+    'zh-CN': '完成连接',
+  },
+  'plugins.connectDialog.keyUnavailableHint': {
+    'en-US': 'Deployment master key is unavailable. Credential operations are locked.',
+    'zh-CN': '部署主密钥不可用，凭据操作已锁定。',
+  },
   'settings.tabs.aiRuntime': {
     'en-US': 'AI Runtime',
     'zh-CN': 'AI 运行时',

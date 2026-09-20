@@ -85,18 +85,18 @@ describe('harnessService', () => {
   })
 
   /**
-   * 测试意图：验证系统提示词预览、YOLO 策略切换与 Thread 终止的端点，
-   * 保持 system-prompt/compact/yolo/stop 子路径不变并在 /harness/threads/{id} 下。
+   * 测试意图：验证结构化模型请求调试、YOLO 策略切换与 Thread 终止的端点，
+   * 保持 model-request-debug/compact/yolo/stop 子路径不变并在 /harness/threads/{id} 下。
    */
-  it('handles thread system-prompt preview, yolo policy update and thread stopping', async () => {
+  it('handles thread model-request-debug, yolo policy update and thread stopping', async () => {
     const http = createClient()
     const service = createHarnessService(http)
 
-    await service.getSystemPromptPreview('thread /1')
+    await service.getModelRequestDebug('thread /1')
     await service.setThreadYolo('thread /1', { expectedVersion: '1', yoloEnabled: true })
     await service.stopThread('thread /1', { stopRequestId: 'req-1', expectedVersion: '2' })
 
-    expect(http.get).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/system-prompt')
+    expect(http.get).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/model-request-debug')
     expect(http.put).toHaveBeenCalledWith('/harness/threads/thread%20%2F1/yolo', {
       expectedVersion: '1',
       yoloEnabled: true,

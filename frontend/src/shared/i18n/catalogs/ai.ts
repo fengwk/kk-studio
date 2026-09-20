@@ -2121,6 +2121,42 @@ export const aiCatalog = {
     'en-US': 'Duplicate skill name: {name}',
     'zh-CN': '存在重复的 Skill 名称：{name}',
   },
+  'ai.skillPackages.repositoryUrl': {
+    'en-US': 'Repository URL',
+    'zh-CN': 'Git 仓库地址',
+  },
+  'ai.skillPackages.branch': {
+    'en-US': 'Branch',
+    'zh-CN': '分支',
+  },
+  'ai.skillPackages.currentCommit': {
+    'en-US': 'Current Commit',
+    'zh-CN': '当前发布 Commit',
+  },
+  'ai.skillPackages.observedHeadCommit': {
+    'en-US': 'Observed Branch HEAD',
+    'zh-CN': '最近观察到的分支 HEAD',
+  },
+  'ai.skillPackages.checkStatus': {
+    'en-US': 'Status',
+    'zh-CN': '状态',
+  },
+  'ai.skillPackages.check': {
+    'en-US': 'Check',
+    'zh-CN': '检查更新',
+  },
+  'ai.skillPackages.update': {
+    'en-US': 'Update',
+    'zh-CN': '发布更新',
+  },
+  'ai.skillPackages.repoRequired': {
+    'en-US': 'Repository URL is required',
+    'zh-CN': 'Git 仓库地址不能为空',
+  },
+  'ai.skillPackages.branchRequired': {
+    'en-US': 'Branch is required',
+    'zh-CN': '分支不能为空',
+  },
   'ai.mcp.title': {
     'en-US': 'MCP Servers',
     'zh-CN': 'MCP 服务',

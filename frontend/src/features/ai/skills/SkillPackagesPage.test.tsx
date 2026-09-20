@@ -4,17 +4,15 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SkillPackagesPage } from '@/features/ai/skills/SkillPackagesPage'
 import { agentService } from '@/shared/api/agent-service'
-import type {
-  SkillPackageDetailDTO,
-  SkillPackageDTO,
-} from '@/shared/api/contracts/ai-catalog'
+import type { SkillPackageDTO } from '@/shared/api/contracts/ai-catalog'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listSkillPackages: vi.fn(),
-    getSkillPackage: vi.fn(),
     createSkillPackage: vi.fn(),
-    updateSkillPackage: vi.fn(),
+    editSkillPackage: vi.fn(),
+    checkSkillPackage: vi.fn(),
+    publishSkillPackage: vi.fn(),
     deleteSkillPackage: vi.fn(),
   },
 }))
@@ -25,36 +23,20 @@ vi.mock('@/platform/workbench/WorkbenchSlots', () => ({
 
 function samplePackage(overrides: Partial<SkillPackageDTO> = {}): SkillPackageDTO {
   return {
-    name: 'core-tools',
-    packageVersion: '1.0.0',
+    packageName: 'core-tools',
     description: 'Core developer skills',
+    repositoryUrl: 'https://github.com/example/skills.git',
+    branch: 'main',
+    currentCommit: '1111111111111111111111111111111111111111',
+    observedHeadCommit: null,
+    headCheckedAt: null,
+    headCheckError: null,
+    checkStatus: 'UNCHECKED',
     skills: [
-      {
-        name: 'dev',
-        description: 'dev skill',
-        packageName: 'core-tools',
-        packageVersion: '1.0.0',
-      },
-      {
-        name: 'bash',
-        description: 'bash runner',
-        packageName: 'core-tools',
-        packageVersion: '1.0.0',
-      },
+      { name: 'dev', description: 'dev skill' },
+      { name: 'bash', description: 'bash runner' },
     ],
-    ...overrides,
-  }
-}
-
-function sampleDetail(overrides: Partial<SkillPackageDetailDTO> = {}): SkillPackageDetailDTO {
-  return {
-    name: 'core-tools',
-    packageVersion: '1.0.0',
-    description: 'Core developer skills',
-    skills: [
-      { name: 'dev', description: 'dev skill', content: 'Run dev workflows' },
-      { name: 'bash', description: 'bash runner', content: 'Execute commands' },
-    ],
+    version: '1',
     createTime: '2026-07-20T00:00:00.000Z',
     updateTime: '2026-07-20T01:00:00.000Z',
     ...overrides,
@@ -74,9 +56,10 @@ describe('SkillPackagesPage', () => {
     })
 
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([samplePackage()])
-    vi.mocked(agentService.getSkillPackage).mockResolvedValue(sampleDetail())
-    vi.mocked(agentService.createSkillPackage).mockResolvedValue(sampleDetail())
-    vi.mocked(agentService.updateSkillPackage).mockResolvedValue(sampleDetail({ packageVersion: '1.1.0' }))
+    vi.mocked(agentService.createSkillPackage).mockResolvedValue(samplePackage())
+    vi.mocked(agentService.editSkillPackage).mockResolvedValue(samplePackage({ version: '2' }))
+    vi.mocked(agentService.checkSkillPackage).mockResolvedValue(samplePackage())
+    vi.mocked(agentService.publishSkillPackage).mockResolvedValue(samplePackage({ version: '3' }))
     vi.mocked(agentService.deleteSkillPackage).mockResolvedValue(undefined)
   })
 
@@ -95,8 +78,8 @@ describe('SkillPackagesPage', () => {
   it('renders skill packages list and filters via search', async () => {
     const user = userEvent.setup()
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([
-      samplePackage({ name: 'core-tools', description: 'developer skills' }),
-      samplePackage({ name: 'browser-tools', description: 'web navigation' }),
+      samplePackage({ packageName: 'core-tools', description: 'developer skills' }),
+      samplePackage({ packageName: 'browser-tools', description: 'web navigation' }),
     ])
 
     renderPage()
@@ -113,7 +96,7 @@ describe('SkillPackagesPage', () => {
     expect(screen.getByText('browser-tools')).toBeInTheDocument()
   })
 
-  it('creates a new skill package with dynamic skill definitions', async () => {
+  it('creates a new skill package without editing skills body or commit', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -121,68 +104,67 @@ describe('SkillPackagesPage', () => {
       expect(screen.getByText('core-tools')).toBeInTheDocument()
     })
 
-    // Click create card
     const createBtn = screen.getByRole('button', { name: /创建 Package|Create Package/i })
     await user.click(createBtn)
 
     const modal = screen.getByRole('dialog', { name: /创建 Package|Create Package/i })
     expect(modal).toBeInTheDocument()
 
-    // Fill form
-    const nameInput = within(modal).getByPlaceholderText('core-tools')
+    const nameInput = within(modal).getByPlaceholderText('my-skills')
     await user.type(nameInput, 'custom-pkg')
 
-    const skillNameInput = within(modal).getByPlaceholderText('browse-web')
-    await user.type(skillNameInput, 'search-skill')
+    const repoInput = within(modal).getByPlaceholderText('https://github.com/org/repo.git')
+    await user.type(repoInput, 'https://github.com/myorg/skills.git')
 
-    const skillDescriptionInput = within(modal).getByPlaceholderText('Skill description')
-    await user.type(skillDescriptionInput, 'Search the web')
-
-    const skillContentInput = within(modal).getByPlaceholderText(/Instructions or prompt content/i)
-    await user.type(skillContentInput, '  Search instructions  ')
-
-    // Submit
-    const submitBtn = within(modal).getByRole('button', { name: /保存|Save/i })
+    const submitBtn = within(modal).getByRole('button', { name: /确认创建|Confirm Create/i })
     await user.click(submitBtn)
 
     await waitFor(() => {
       expect(agentService.createSkillPackage).toHaveBeenCalledWith({
-        name: 'custom-pkg',
-        packageVersion: '1.0.0',
-        description: undefined,
-        skills: [
-          {
-            name: 'search-skill',
-            description: 'Search the web',
-            content: '  Search instructions  ',
-          },
-        ],
+        packageName: 'custom-pkg',
+        description: null,
+        repositoryUrl: 'https://github.com/myorg/skills.git',
+        branch: 'main',
       })
     })
   })
 
-  it('rejects a blank skill description before creating the package', async () => {
+  it('checks branch HEAD and updates exact observed commit', async () => {
     const user = userEvent.setup()
+    const pkgWithUpdate = samplePackage({
+      packageName: 'core-tools',
+      checkStatus: 'UPDATE_AVAILABLE',
+      currentCommit: '1111111111111111111111111111111111111111',
+      observedHeadCommit: '2222222222222222222222222222222222222222',
+      version: '1',
+    })
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([pkgWithUpdate])
+
     renderPage()
 
-    await screen.findByText('core-tools')
-    await user.click(screen.getByRole('button', { name: /创建 Package|Create Package/i }))
+    await waitFor(() => {
+      expect(screen.getByText('core-tools')).toBeInTheDocument()
+    })
 
-    const modal = screen.getByRole('dialog', { name: /创建 Package|Create Package/i })
-    await user.type(within(modal).getByPlaceholderText('core-tools'), 'custom-pkg')
-    await user.type(within(modal).getByPlaceholderText('browse-web'), 'search-skill')
-    await user.type(within(modal).getByPlaceholderText('Skill description'), '   ')
-    await user.type(
-      within(modal).getByPlaceholderText(/Instructions or prompt content/i),
-      'Search instructions',
-    )
-    await user.click(within(modal).getByRole('button', { name: /保存|Save/i }))
+    // Check button
+    const checkBtn = screen.getByRole('button', { name: /检查更新.*core-tools|Check.*core-tools/i })
+    await user.click(checkBtn)
 
-    expect(agentService.createSkillPackage).not.toHaveBeenCalled()
-    expect(within(modal).getByRole('alert')).toHaveTextContent(/Skill 描述|Skill description/i)
+    expect(agentService.checkSkillPackage).toHaveBeenCalledWith('core-tools', {
+      expectedVersion: '1',
+    })
+
+    // Update button is present because observedHeadCommit !== currentCommit
+    const updateBtn = screen.getByRole('button', { name: /发布更新.*core-tools|Update.*core-tools/i })
+    await user.click(updateBtn)
+
+    expect(agentService.publishSkillPackage).toHaveBeenCalledWith('core-tools', {
+      expectedVersion: '1',
+      targetCommit: '2222222222222222222222222222222222222222',
+    })
   })
 
-  it('edits a package with full replacement and immutable package name', async () => {
+  it('edits only description and branch with expectedVersion', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -190,42 +172,32 @@ describe('SkillPackagesPage', () => {
       expect(screen.getByText('core-tools')).toBeInTheDocument()
     })
 
-    // Click edit
     const editBtn = screen.getByRole('button', { name: /编辑.*core-tools|Edit.*core-tools/i })
     await user.click(editBtn)
 
-    await waitFor(() => {
-      expect(agentService.getSkillPackage).toHaveBeenCalledWith('core-tools')
-    })
-
     const modal = await screen.findByRole('dialog')
 
-    // Package name is immutable (readOnly and disabled)
+    // Package name and repo are read-only
     const nameInput = within(modal).getByDisplayValue('core-tools')
     expect(nameInput).toBeDisabled()
 
-    // Enter new package version
-    const newVersionInput = within(modal).getByPlaceholderText('1.1.0')
-    await user.type(newVersionInput, '1.1.0')
+    const branchInput = within(modal).getByDisplayValue('main')
+    await user.clear(branchInput)
+    await user.type(branchInput, 'develop')
 
-    // Submit edit
-    const submitBtn = within(modal).getByRole('button', { name: /保存|Save/i })
+    const submitBtn = within(modal).getByRole('button', { name: /保存修改|Save Changes/i })
     await user.click(submitBtn)
 
     await waitFor(() => {
-      expect(agentService.updateSkillPackage).toHaveBeenCalledWith('core-tools', {
-        expectedPackageVersion: '1.0.0',
-        newPackageVersion: '1.1.0',
+      expect(agentService.editSkillPackage).toHaveBeenCalledWith('core-tools', {
+        expectedVersion: '1',
         description: 'Core developer skills',
-        skills: [
-          { name: 'dev', description: 'dev skill', content: 'Run dev workflows' },
-          { name: 'bash', description: 'bash runner', content: 'Execute commands' },
-        ],
+        branch: 'develop',
       })
     })
   })
 
-  it('deletes a package with expectedPackageVersion confirmation', async () => {
+  it('deletes a package with CAS expectedVersion confirmation', async () => {
     const user = userEvent.setup()
     renderPage()
 
@@ -233,7 +205,6 @@ describe('SkillPackagesPage', () => {
       expect(screen.getByText('core-tools')).toBeInTheDocument()
     })
 
-    // Click delete
     const deleteBtn = screen.getByRole('button', { name: /删除.*core-tools|Delete.*core-tools/i })
     await user.click(deleteBtn)
 
@@ -244,7 +215,7 @@ describe('SkillPackagesPage', () => {
     await user.click(confirmBtn)
 
     await waitFor(() => {
-      expect(agentService.deleteSkillPackage).toHaveBeenCalledWith('core-tools', '1.0.0')
+      expect(agentService.deleteSkillPackage).toHaveBeenCalledWith('core-tools', '1')
     })
   })
 })

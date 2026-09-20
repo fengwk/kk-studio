@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Edit2, Package, Plus, Trash2 } from 'lucide-react'
+import { ArrowUpCircle, Edit2, Package, RefreshCw, Trash2 } from 'lucide-react'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
 import { CreateCard } from '@/shared/ui/console/AiConsoleCommonCards'
 import { ModalBackdrop, ModalHeader } from '@/shared/ui/console/AiConsoleModalLayout'
@@ -10,23 +10,30 @@ import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import type {
+  SkillPackageCheckStatus,
   SkillPackageCreateDTO,
   SkillPackageDTO,
-  SkillPackageDetailDTO,
-  SkillPackageUpdateDTO,
+  SkillPackageEditDTO,
 } from '@/shared/api/contracts/ai-catalog'
 
-interface PackageSkillDraft {
-  name: string
-  description: string
-  content: string
+function formatCommit(commit: string | null | undefined): string {
+  if (!commit) {
+    return '—'
+  }
+  return commit.length > 10 ? commit.slice(0, 10) : commit
 }
 
-function emptySkillDraft(): PackageSkillDraft {
-  return {
-    name: '',
-    description: '',
-    content: '',
+function checkStatusPillClass(status: SkillPackageCheckStatus): string {
+  switch (status) {
+    case 'UP_TO_DATE':
+      return 'status-pill is-ready'
+    case 'UPDATE_AVAILABLE':
+      return 'status-pill is-warning'
+    case 'CHECK_FAILED':
+      return 'status-pill is-error'
+    case 'UNCHECKED':
+    default:
+      return 'status-pill is-offline'
   }
 }
 
@@ -40,6 +47,9 @@ export function SkillPackagesPage() {
   const [editTarget, setEditTarget] = useState<SkillPackageDTO | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<SkillPackageDTO | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [checkingPackage, setCheckingPackage] = useState<string | null>(null)
+  const [updatingPackage, setUpdatingPackage] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Query packages
   const packagesQuery = useQuery({
@@ -47,17 +57,53 @@ export function SkillPackagesPage() {
     queryFn: () => agentService.listSkillPackages(),
   })
 
-  // Query package detail when editing
-  const detailQuery = useQuery({
-    queryKey: queryKeys.skills.packageDetail(editTarget?.name ?? ''),
-    queryFn: () => agentService.getSkillPackage(editTarget!.name),
-    enabled: !!editTarget,
+  // Mutations
+  const checkMutation = useMutation({
+    mutationFn: ({ name, expectedVersion }: { name: string; expectedVersion: string }) =>
+      agentService.checkSkillPackage(name, { expectedVersion }),
+    onMutate: ({ name }) => {
+      setCheckingPackage(name)
+      setActionError(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.skills.all })
+    },
+    onError: (err: unknown) => {
+      setActionError(err instanceof Error ? err.message : String(err))
+    },
+    onSettled: () => {
+      setCheckingPackage(null)
+    },
   })
 
-  // Delete mutation
+  const publishMutation = useMutation({
+    mutationFn: ({
+      name,
+      expectedVersion,
+      targetCommit,
+    }: {
+      name: string
+      expectedVersion: string
+      targetCommit: string
+    }) => agentService.publishSkillPackage(name, { expectedVersion, targetCommit }),
+    onMutate: ({ name }) => {
+      setUpdatingPackage(name)
+      setActionError(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.skills.all })
+    },
+    onError: (err: unknown) => {
+      setActionError(err instanceof Error ? err.message : String(err))
+    },
+    onSettled: () => {
+      setUpdatingPackage(null)
+    },
+  })
+
   const deleteMutation = useMutation({
-    mutationFn: ({ name, expectedPackageVersion }: { name: string; expectedPackageVersion: string }) =>
-      agentService.deleteSkillPackage(name, expectedPackageVersion),
+    mutationFn: ({ name, expectedVersion }: { name: string; expectedVersion: string }) =>
+      agentService.deleteSkillPackage(name, expectedVersion),
     onSuccess: () => {
       setDeleteTarget(null)
       setDeleteError(null)
@@ -76,8 +122,9 @@ export function SkillPackagesPage() {
     }
     return packages.filter(
       (pkg) =>
-        pkg.name.toLowerCase().includes(term) ||
-        (pkg.description && pkg.description.toLowerCase().includes(term)),
+        pkg.packageName.toLowerCase().includes(term) ||
+        (pkg.description && pkg.description.toLowerCase().includes(term)) ||
+        pkg.repositoryUrl.toLowerCase().includes(term),
     )
   }, [packagesQuery.data, search])
 
@@ -88,57 +135,156 @@ export function SkillPackagesPage() {
         subtitle={t('ai.skillPackages.description')}
         onClick={() => setCreateModalOpen(true)}
       />
-      {filteredPackages.map((pkg) => (
-        <article key={pkg.name} className="info-card skill-package-card">
-          <div className="chat-card-head">
-            <div className="lead">
-              <span className="card-glyph" aria-hidden="true">
-                <Package />
+      {filteredPackages.map((pkg) => {
+        const isChecking = checkingPackage === pkg.packageName
+        const isUpdating = updatingPackage === pkg.packageName
+        const hasUpdate =
+          Boolean(pkg.observedHeadCommit) && pkg.observedHeadCommit !== pkg.currentCommit
+
+        return (
+          <article
+            key={pkg.packageName}
+            className="info-card skill-package-card"
+            data-testid={`skill-package-card-${pkg.packageName}`}
+          >
+            <div className="chat-card-head">
+              <div className="lead">
+                <span className="card-glyph" aria-hidden="true">
+                  <Package />
+                </span>
+                <div className="text-content">
+                  <h3 title={pkg.packageName}>{pkg.packageName}</h3>
+                  <p title={pkg.description || ''}>{pkg.description || '—'}</p>
+                </div>
+              </div>
+              <span
+                className={checkStatusPillClass(pkg.checkStatus)}
+                data-testid="check-status-pill"
+              >
+                {pkg.checkStatus}
               </span>
-              <div className="text-content">
-                <h3 title={pkg.name}>{pkg.name}</h3>
-                <p title={pkg.description || ''}>
-                  {pkg.description || '—'}
-                </p>
+            </div>
+
+            <div className="meta-block">
+              <div className="meta-row">
+                <span className="lbl">{t('ai.skillPackages.repositoryUrl')}</span>
+                <span className="val" title={pkg.repositoryUrl}>
+                  {pkg.repositoryUrl}
+                </span>
+              </div>
+              <div className="meta-row">
+                <span className="lbl">{t('ai.skillPackages.branch')}</span>
+                <span className="val">{pkg.branch}</span>
+              </div>
+              <div className="meta-row">
+                <span className="lbl">{t('ai.skillPackages.currentCommit')}</span>
+                <span className="val" title={pkg.currentCommit}>
+                  <code>{formatCommit(pkg.currentCommit)}</code>
+                </span>
+              </div>
+              <div className="meta-row">
+                <span className="lbl">{t('ai.skillPackages.observedHeadCommit')}</span>
+                <span className="val" title={pkg.observedHeadCommit || undefined}>
+                  <code>{formatCommit(pkg.observedHeadCommit)}</code>
+                </span>
+              </div>
+              {pkg.headCheckError ? (
+                <div className="meta-row" role="alert">
+                  <span className="lbl" style={{ color: 'var(--color-danger, #ef4444)' }}>
+                    Error
+                  </span>
+                  <span className="val" style={{ color: 'var(--color-danger, #ef4444)' }}>
+                    {pkg.headCheckError}
+                  </span>
+                </div>
+              ) : null}
+              <div className="meta-row">
+                <span className="lbl">{t('ai.skillPackages.skillsCount')}</span>
+                <span className="val">{pkg.skills.length}</span>
+              </div>
+              {pkg.skills.length > 0 ? (
+                <div className="meta-row">
+                  <span className="lbl">Skills</span>
+                  <span className="val" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {pkg.skills.map((s) => (
+                      <code key={s.name} title={s.description}>
+                        {s.name}
+                      </code>
+                    ))}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="chat-card-foot split">
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="action-enter-btn"
+                  aria-label={`${t('ai.skillPackages.check')} ${pkg.packageName}`}
+                  disabled={isChecking || isUpdating}
+                  onClick={() =>
+                    checkMutation.mutate({
+                      name: pkg.packageName,
+                      expectedVersion: pkg.version,
+                    })
+                  }
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={isChecking ? 'animate-spin' : undefined}
+                  />
+                  {t('ai.skillPackages.check')}
+                </button>
+                {hasUpdate ? (
+                  <button
+                    type="button"
+                    className="action-enter-btn"
+                    style={{ color: 'var(--color-primary, #3b82f6)' }}
+                    aria-label={`${t('ai.skillPackages.update')} ${pkg.packageName}`}
+                    disabled={isChecking || isUpdating}
+                    onClick={() =>
+                      publishMutation.mutate({
+                        name: pkg.packageName,
+                        expectedVersion: pkg.version,
+                        targetCommit: pkg.observedHeadCommit!,
+                      })
+                    }
+                  >
+                    <ArrowUpCircle aria-hidden="true" />
+                    {t('ai.skillPackages.update')}
+                  </button>
+                ) : null}
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  type="button"
+                  className="action-enter-btn"
+                  aria-label={`${t('ai.skillPackages.edit')} ${pkg.packageName}`}
+                  disabled={isChecking || isUpdating}
+                  onClick={() => setEditTarget(pkg)}
+                >
+                  <Edit2 aria-hidden="true" />
+                  {t('ai.skillPackages.edit')}
+                </button>
+                <button
+                  type="button"
+                  className="action-enter-btn danger"
+                  aria-label={`${t('ai.skillPackages.delete')} ${pkg.packageName}`}
+                  disabled={isChecking || isUpdating}
+                  onClick={() => {
+                    setDeleteError(null)
+                    setDeleteTarget(pkg)
+                  }}
+                >
+                  <Trash2 aria-hidden="true" />
+                  {t('ai.skillPackages.delete')}
+                </button>
               </div>
             </div>
-            <span className="status-pill is-ready">
-              v{pkg.packageVersion}
-            </span>
-          </div>
-
-          <div className="meta-block">
-            <div className="meta-row">
-              <span className="lbl">{t('ai.skillPackages.skillsCount')}</span>
-              <span className="val">{pkg.skills.length}</span>
-            </div>
-          </div>
-
-          <div className="chat-card-foot split">
-            <button
-              type="button"
-              className="action-enter-btn"
-              aria-label={`${t('ai.skillPackages.edit')} ${pkg.name}`}
-              onClick={() => setEditTarget(pkg)}
-            >
-              <Edit2 aria-hidden="true" />
-              {t('ai.skillPackages.edit')}
-            </button>
-            <button
-              type="button"
-              className="action-enter-btn danger"
-              aria-label={`${t('ai.skillPackages.delete')} ${pkg.name}`}
-              onClick={() => {
-                setDeleteError(null)
-                setDeleteTarget(pkg)
-              }}
-            >
-              <Trash2 aria-hidden="true" />
-              {t('ai.skillPackages.delete')}
-            </button>
-          </div>
-        </article>
-      ))}
+          </article>
+        )
+      })}
     </div>
   )
 
@@ -148,7 +294,7 @@ export function SkillPackagesPage() {
       onSearchChange={setSearch}
       busy={packagesQuery.isLoading}
       error={packagesQuery.error}
-      mutationError={null}
+      mutationError={actionError ? new Error(actionError) : null}
       content={content}
     >
       {createModalOpen && (
@@ -164,9 +310,6 @@ export function SkillPackagesPage() {
       {editTarget && (
         <EditPackageModal
           target={editTarget}
-          detail={detailQuery.data ?? null}
-          loading={detailQuery.isLoading}
-          error={detailQuery.error ? String(detailQuery.error) : null}
           onClose={() => setEditTarget(null)}
           onSuccess={() => {
             setEditTarget(null)
@@ -179,14 +322,14 @@ export function SkillPackagesPage() {
         <ConfirmActionModal
           modal={{
             title: t('ai.skillPackages.delete'),
-            description: t('ai.skillPackages.deleteConfirm', { name: deleteTarget.name }),
+            description: t('ai.skillPackages.deleteConfirm', { name: deleteTarget.packageName }),
             confirmLabel: t('ai.skillPackages.delete'),
             tone: 'danger',
             error: deleteError,
             onConfirm: () => {
               deleteMutation.mutate({
-                name: deleteTarget.name,
-                expectedPackageVersion: deleteTarget.packageVersion,
+                name: deleteTarget.packageName,
+                expectedVersion: deleteTarget.version,
               })
             },
           }}
@@ -209,10 +352,10 @@ function CreatePackageModal({
   onSuccess: () => void
 }) {
   const { t } = useI18n()
-  const [name, setName] = useState('')
-  const [packageVersion, setPackageVersion] = useState('1.0.0')
+  const [packageName, setPackageName] = useState('')
   const [description, setDescription] = useState('')
-  const [skills, setSkills] = useState<PackageSkillDraft[]>([emptySkillDraft()])
+  const [repositoryUrl, setRepositoryUrl] = useState('')
+  const [branch, setBranch] = useState('main')
   const [formError, setFormError] = useState<string | null>(null)
 
   const createMutation = useMutation({
@@ -224,89 +367,63 @@ function CreatePackageModal({
   })
 
   function validate(): string | null {
-    if (!name.trim()) {
+    const trimmedName = packageName.trim()
+    if (!trimmedName) {
       return t('ai.skillPackages.nameRequired')
     }
-    if (!packageVersion.trim()) {
-      return t('ai.skillPackages.versionRequired')
+    if (/[:/@\\]/.test(trimmedName)) {
+      return 'Package name cannot contain : / @ \\'
     }
-    if (skills.length === 0) {
-      return t('ai.skillPackages.atLeastOneSkill')
+    if (!repositoryUrl.trim()) {
+      return t('ai.skillPackages.repoRequired')
     }
-    const skillNames = new Set<string>()
-    for (const skill of skills) {
-      const sName = skill.name.trim()
-      if (!sName) {
-        return t('ai.skillPackages.skillNameRequired')
-      }
-      if (!skill.description.trim()) {
-        return t('ai.skillPackages.skillDescriptionRequired')
-      }
-      if (skill.content.length === 0) {
-        return t('ai.skillPackages.skillContentRequired')
-      }
-      if (skillNames.has(sName)) {
-        return t('ai.skillPackages.duplicateSkillName', { name: sName })
-      }
-      skillNames.add(sName)
+    if (!branch.trim()) {
+      return t('ai.skillPackages.branchRequired')
     }
     return null
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setFormError(null)
-    const err = validate()
-    if (err) {
-      setFormError(err)
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    const error = validate()
+    if (error) {
+      setFormError(error)
       return
     }
-
+    setFormError(null)
     createMutation.mutate({
-      name: name.trim(),
-      packageVersion: packageVersion.trim(),
-      description: description.trim() || undefined,
-      skills: skills.map((s) => ({
-        name: s.name.trim(),
-        description: s.description.trim(),
-        content: s.content,
-      })),
+      packageName: packageName.trim(),
+      description: description.trim() || null,
+      repositoryUrl: repositoryUrl.trim(),
+      branch: branch.trim(),
     })
   }
 
   return (
     <ModalBackdrop onClose={onClose}>
       <div
-        className="modal-card skill-package-editor-modal"
+        className="modal-card resource-modal-card"
         role="dialog"
         aria-modal="true"
         aria-label={t('ai.skillPackages.create')}
-        onMouseDown={(e) => e.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        <ModalHeader
-          title={t('ai.skillPackages.create')}
-          onClose={onClose}
-          closeDisabled={createMutation.isPending}
-        />
-        <form onSubmit={handleSubmit}>
-          <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        <ModalHeader title={t('ai.skillPackages.create')} onClose={onClose} />
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="modal-body">
+            {formError ? (
+              <div className="form-error-banner" role="alert">
+                {formError}
+              </div>
+            ) : null}
+
             <label className="form-group">
               <FieldLabel required>{t('ai.skillPackages.name')}</FieldLabel>
               <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="core-tools"
-                required
-                autoFocus
-              />
-            </label>
-
-            <label className="form-group">
-              <FieldLabel required>{t('ai.skillPackages.version')}</FieldLabel>
-              <input
-                value={packageVersion}
-                onChange={(e) => setPackageVersion(e.target.value)}
-                placeholder="1.0.0"
+                type="text"
+                value={packageName}
+                placeholder="my-skills"
+                onChange={(event) => setPackageName(event.target.value)}
                 required
               />
             </label>
@@ -315,39 +432,46 @@ function CreatePackageModal({
               <FieldLabel>{t('ai.skillPackages.descriptionLabel')}</FieldLabel>
               <textarea
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                placeholder={t('ai.catalog.form.descriptionPlaceholder')}
                 rows={2}
+                onChange={(event) => setDescription(event.target.value)}
               />
             </label>
 
-            <SkillDefinitionsEditor
-              skills={skills}
-              onChange={setSkills}
-              disabled={createMutation.isPending}
-            />
+            <label className="form-group">
+              <FieldLabel required>{t('ai.skillPackages.repositoryUrl')}</FieldLabel>
+              <input
+                type="text"
+                value={repositoryUrl}
+                placeholder="https://github.com/org/repo.git"
+                onChange={(event) => setRepositoryUrl(event.target.value)}
+                required
+              />
+            </label>
 
-            {formError && (
-              <p className="field-error" role="alert">
-                {formError}
-              </p>
-            )}
+            <label className="form-group">
+              <FieldLabel required>{t('ai.skillPackages.branch')}</FieldLabel>
+              <input
+                type="text"
+                value={branch}
+                placeholder="main"
+                onChange={(event) => setBranch(event.target.value)}
+                required
+              />
+            </label>
           </div>
 
           <div className="modal-footer">
             <button
               type="button"
-              className="ghost-btn"
+              className="ghost-inline-btn"
               onClick={onClose}
               disabled={createMutation.isPending}
             >
-              {t('shared.cancel')}
+              Cancel
             </button>
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={createMutation.isPending}
-            >
-              {createMutation.isPending ? t('shared.saving') : t('shared.save')}
+            <button type="submit" className="btn-primary" disabled={createMutation.isPending}>
+              {createMutation.isPending ? '...' : t('ai.catalog.action.confirmCreate')}
             </button>
           </div>
         </form>
@@ -358,43 +482,21 @@ function CreatePackageModal({
 
 function EditPackageModal({
   target,
-  detail,
-  loading,
-  error,
   onClose,
   onSuccess,
 }: {
   target: SkillPackageDTO
-  detail: SkillPackageDetailDTO | null
-  loading: boolean
-  error: string | null
   onClose: () => void
   onSuccess: () => void
 }) {
   const { t } = useI18n()
-  const [newPackageVersion, setNewPackageVersion] = useState('')
-  const [description, setDescription] = useState('')
-  const [skills, setSkills] = useState<PackageSkillDraft[]>([])
+  const [description, setDescription] = useState(target.description ?? '')
+  const [branch, setBranch] = useState(target.branch)
   const [formError, setFormError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (detail) {
-      setDescription(detail.description || '')
-      setSkills(
-        detail.skills.length > 0
-          ? detail.skills.map((s) => ({
-              name: s.name,
-              description: s.description || '',
-              content: s.content || '',
-            }))
-          : [emptySkillDraft()],
-      )
-    }
-  }, [detail])
-
-  const updateMutation = useMutation({
-    mutationFn: (data: SkillPackageUpdateDTO) =>
-      agentService.updateSkillPackage(target.name, data),
+  const editMutation = useMutation({
+    mutationFn: (data: SkillPackageEditDTO) =>
+      agentService.editSkillPackage(target.packageName, data),
     onSuccess,
     onError: (err: unknown) => {
       setFormError(err instanceof Error ? err.message : String(err))
@@ -402,256 +504,93 @@ function EditPackageModal({
   })
 
   function validate(): string | null {
-    if (!newPackageVersion.trim()) {
-      return t('ai.skillPackages.versionRequired')
-    }
-    if (skills.length === 0) {
-      return t('ai.skillPackages.atLeastOneSkill')
-    }
-    const skillNames = new Set<string>()
-    for (const skill of skills) {
-      const sName = skill.name.trim()
-      if (!sName) {
-        return t('ai.skillPackages.skillNameRequired')
-      }
-      if (!skill.description.trim()) {
-        return t('ai.skillPackages.skillDescriptionRequired')
-      }
-      if (skill.content.length === 0) {
-        return t('ai.skillPackages.skillContentRequired')
-      }
-      if (skillNames.has(sName)) {
-        return t('ai.skillPackages.duplicateSkillName', { name: sName })
-      }
-      skillNames.add(sName)
+    if (!branch.trim()) {
+      return t('ai.skillPackages.branchRequired')
     }
     return null
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setFormError(null)
-    const err = validate()
-    if (err) {
-      setFormError(err)
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    const error = validate()
+    if (error) {
+      setFormError(error)
       return
     }
-
-    updateMutation.mutate({
-      expectedPackageVersion: target.packageVersion,
-      newPackageVersion: newPackageVersion.trim(),
-      description: description.trim() || undefined,
-      skills: skills.map((s) => ({
-        name: s.name.trim(),
-        description: s.description.trim(),
-        content: s.content,
-      })),
+    setFormError(null)
+    editMutation.mutate({
+      expectedVersion: target.version,
+      description: description.trim() || null,
+      branch: branch.trim(),
     })
   }
 
   return (
     <ModalBackdrop onClose={onClose}>
       <div
-        className="modal-card skill-package-editor-modal"
+        className="modal-card resource-modal-card"
         role="dialog"
         aria-modal="true"
-        aria-label={`${t('ai.skillPackages.edit')} - ${target.name}`}
-        onMouseDown={(e) => e.stopPropagation()}
+        aria-label={t('ai.skillPackages.edit')}
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <ModalHeader
-          title={`${t('ai.skillPackages.edit')} - ${target.name}`}
+          title={`${t('ai.skillPackages.edit')}: ${target.packageName}`}
           onClose={onClose}
-          closeDisabled={updateMutation.isPending}
         />
-        {loading ? (
+        <form onSubmit={handleSubmit} noValidate>
           <div className="modal-body">
-            <div className="state-block">{t('ai.skillPackages.loading')}</div>
-          </div>
-        ) : error ? (
-          <div className="modal-body">
-            <div className="state-block error">{error}</div>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-              <label className="form-group">
-                <FieldLabel>{t('ai.skillPackages.name')}</FieldLabel>
-                <input value={target.name} disabled readOnly />
-              </label>
+            {formError ? (
+              <div className="form-error-banner" role="alert">
+                {formError}
+              </div>
+            ) : null}
 
-              <label className="form-group">
-                <FieldLabel>{t('ai.skillPackages.version')}</FieldLabel>
-                <input value={target.packageVersion} disabled readOnly />
-              </label>
+            <label className="form-group">
+              <FieldLabel>{t('ai.skillPackages.name')}</FieldLabel>
+              <input type="text" value={target.packageName} disabled readOnly />
+            </label>
 
-              <label className="form-group">
-                <FieldLabel required>{t('ai.skillPackages.newVersion')}</FieldLabel>
-                <input
-                  value={newPackageVersion}
-                  onChange={(e) => setNewPackageVersion(e.target.value)}
-                  placeholder="1.1.0"
-                  required
-                  autoFocus
-                />
-              </label>
+            <label className="form-group">
+              <FieldLabel>{t('ai.skillPackages.repositoryUrl')}</FieldLabel>
+              <input type="text" value={target.repositoryUrl} disabled readOnly />
+            </label>
 
-              <label className="form-group">
-                <FieldLabel>{t('ai.skillPackages.descriptionLabel')}</FieldLabel>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={2}
-                />
-              </label>
-
-              <SkillDefinitionsEditor
-                skills={skills}
-                onChange={setSkills}
-                disabled={updateMutation.isPending}
+            <label className="form-group">
+              <FieldLabel required>{t('ai.skillPackages.branch')}</FieldLabel>
+              <input
+                type="text"
+                value={branch}
+                onChange={(event) => setBranch(event.target.value)}
+                required
               />
+            </label>
 
-              {formError && (
-                <p className="field-error" role="alert">
-                  {formError}
-                </p>
-              )}
-            </div>
+            <label className="form-group">
+              <FieldLabel>{t('ai.skillPackages.descriptionLabel')}</FieldLabel>
+              <textarea
+                value={description}
+                rows={2}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </label>
+          </div>
 
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={onClose}
-                disabled={updateMutation.isPending}
-              >
-                {t('shared.cancel')}
-              </button>
-              <button
-                type="submit"
-                className="btn-primary"
-                disabled={updateMutation.isPending}
-              >
-                {updateMutation.isPending ? t('shared.saving') : t('shared.save')}
-              </button>
-            </div>
-          </form>
-        )}
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="ghost-inline-btn"
+              onClick={onClose}
+              disabled={editMutation.isPending}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary" disabled={editMutation.isPending}>
+              {editMutation.isPending ? '...' : t('ai.catalog.action.saveChanges')}
+            </button>
+          </div>
+        </form>
       </div>
     </ModalBackdrop>
-  )
-}
-
-function SkillDefinitionsEditor({
-  skills,
-  onChange,
-  disabled = false,
-}: {
-  skills: PackageSkillDraft[]
-  onChange: (skills: PackageSkillDraft[]) => void
-  disabled?: boolean
-}) {
-  const { t } = useI18n()
-
-  function updateSkill(index: number, patch: Partial<PackageSkillDraft>) {
-    const next = [...skills]
-    next[index] = { ...next[index]!, ...patch }
-    onChange(next)
-  }
-
-  function addSkill() {
-    onChange([...skills, emptySkillDraft()])
-  }
-
-  function removeSkill(index: number) {
-    if (skills.length <= 1) {
-      return
-    }
-    onChange(skills.filter((_, i) => i !== index))
-  }
-
-  return (
-    <fieldset className="form-group skill-definitions-editor" style={{ marginTop: 16 }}>
-      <legend style={{ fontWeight: 600, marginBottom: 8 }}>
-        {t('ai.skillPackages.skillsSection')}
-      </legend>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {skills.map((skill, index) => (
-          <div
-            key={index}
-            className="skill-definition-row"
-            style={{
-              padding: 12,
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--surface-raised, var(--surface))',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <span style={{ fontWeight: 600, fontSize: 13 }}>
-                #{index + 1}
-              </span>
-              {skills.length > 1 && (
-                <button
-                  type="button"
-                  className="action-enter-btn danger btn-sm"
-                  onClick={() => removeSkill(index)}
-                  disabled={disabled}
-                  aria-label={`${t('ai.skillPackages.removeSkill')} #${index + 1}`}
-                >
-                  <Trash2 aria-hidden="true" />
-                  {t('ai.skillPackages.removeSkill')}
-                </button>
-              )}
-            </div>
-
-            <label className="form-group" style={{ marginBottom: 8 }}>
-              <FieldLabel required>{t('ai.skillPackages.skillName')}</FieldLabel>
-              <input
-                value={skill.name}
-                onChange={(e) => updateSkill(index, { name: e.target.value })}
-                placeholder="browse-web"
-                disabled={disabled}
-                required
-              />
-            </label>
-
-            <label className="form-group" style={{ marginBottom: 8 }}>
-              <FieldLabel required>{t('ai.skillPackages.skillDescription')}</FieldLabel>
-              <input
-                value={skill.description}
-                onChange={(e) => updateSkill(index, { description: e.target.value })}
-                placeholder="Skill description"
-                disabled={disabled}
-                required
-              />
-            </label>
-
-            <label className="form-group" style={{ marginBottom: 0 }}>
-              <FieldLabel required>{t('ai.skillPackages.skillContent')}</FieldLabel>
-              <textarea
-                value={skill.content}
-                onChange={(e) => updateSkill(index, { content: e.target.value })}
-                rows={4}
-                placeholder="Instructions or prompt content for this skill"
-                disabled={disabled}
-                required
-              />
-            </label>
-          </div>
-        ))}
-
-        <button
-          type="button"
-          className="ghost-btn"
-          style={{ alignSelf: 'flex-start' }}
-          onClick={addSkill}
-          disabled={disabled}
-        >
-          <Plus aria-hidden="true" />
-          {t('ai.skillPackages.addSkill')}
-        </button>
-      </div>
-    </fieldset>
   )
 }

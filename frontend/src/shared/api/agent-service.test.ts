@@ -137,40 +137,46 @@ describe('agentService', () => {
   /**
    * 测试意图：验证 Skill 全局目录与 Skill Package 的增删改查端点。
    */
-  it('maps skills and skill package endpoints correctly', async () => {
+  it('maps skill package endpoints correctly', async () => {
     const client = createClient()
     const service = createAgentService(client)
 
-    await service.listSkills()
-    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/catalog/skills')
-
     await service.listSkillPackages()
-    expect(client.get).toHaveBeenNthCalledWith(2, '/ai/catalog/skill-packages')
-
-    await service.getSkillPackage('core skills')
-    expect(client.get).toHaveBeenNthCalledWith(3, '/ai/catalog/skill-packages/core%20skills')
+    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages')
 
     const createPkg = {
-      name: 'core',
-      packageVersion: '1.0.0',
+      packageName: 'core',
       description: 'Core skills',
-      skills: [{ name: 'read', description: 'Read file', content: 'content' }],
+      repositoryUrl: 'https://example.com/repo.git',
+      branch: 'main',
     }
     await service.createSkillPackage(createPkg)
     expect(client.post).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages', createPkg)
 
-    const updatePkg = {
-      expectedPackageVersion: '1.0.0',
-      newPackageVersion: '1.1.0',
+    const editPkg = {
+      expectedVersion: '1',
       description: 'Updated core skills',
-      skills: [{ name: 'read', description: 'Read file updated', content: 'new content' }],
+      branch: 'main',
     }
-    await service.updateSkillPackage('core', updatePkg)
-    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages/core', updatePkg)
+    await service.editSkillPackage('core', editPkg)
+    expect(client.put).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages/core', editPkg)
 
-    await service.deleteSkillPackage('core', '1.1.0')
+    const checkPkg = {
+      expectedVersion: '2',
+    }
+    await service.checkSkillPackage('core', checkPkg)
+    expect(client.post).toHaveBeenNthCalledWith(2, '/ai/catalog/skill-packages/core/check', checkPkg)
+
+    const publishPkg = {
+      expectedVersion: '3',
+      targetCommit: '0123456789012345678901234567890123456789',
+    }
+    await service.publishSkillPackage('core', publishPkg)
+    expect(client.post).toHaveBeenNthCalledWith(3, '/ai/catalog/skill-packages/core/update', publishPkg)
+
+    await service.deleteSkillPackage('core', '4')
     expect(client.delete).toHaveBeenNthCalledWith(1, '/ai/catalog/skill-packages/core', {
-      params: { expectedPackageVersion: '1.1.0' },
+      params: { expectedVersion: '4' },
     })
   })
 })

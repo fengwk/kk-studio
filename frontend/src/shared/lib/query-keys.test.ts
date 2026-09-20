@@ -14,11 +14,12 @@ describe('queryKeys', () => {
   /**
    * 测试意图：验证 Skill 全局目录、Skill Packages、Environment 以及 MCP Server 具有确定性的查询键。
    */
-  it('builds deterministic query keys for Skills, Environments, and MCP servers', () => {
+  it('builds deterministic query keys for Skills, Environments, MCP servers, and Plugins', () => {
     expect(queryKeys.skills.all).toEqual(['skills'])
-    expect(queryKeys.skills.list).toEqual(['skills', 'list'])
     expect(queryKeys.skills.packages).toEqual(['skills', 'packages'])
-    expect(queryKeys.skills.packageDetail('pkg-1')).toEqual(['skills', 'packages', 'pkg-1'])
+
+    expect(queryKeys.plugins.all).toEqual(['plugins'])
+    expect(queryKeys.plugins.list).toEqual(['plugins', 'list'])
 
     expect(queryKeys.environments.all).toEqual(['environments'])
     expect(queryKeys.environments.list).toEqual(['environments', 'list'])

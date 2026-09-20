@@ -1,10 +1,11 @@
-import type { RefObject } from 'react'
+import { useState, type RefObject } from 'react'
 import {
   ThreadEventView,
   useThreadPanelViewState,
   type ThreadPanelMainView,
 } from '@/features/ai/runtime/thread-panel'
-import { useSystemPromptPreview } from '@/features/ai/runtime/useSystemPromptPreview'
+import { useModelRequestDebug } from '@/features/ai/runtime/useModelRequestDebug'
+import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import type {
   ChatPanelLabels,
@@ -28,14 +29,21 @@ export function useBoundThreadPanelViews(
 ) {
   const {
     mode,
-    switchMode,
+    switchMode: internalSwitchMode,
     selectedEventId,
     selectEvent,
     eventsBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop,
   } = useThreadPanelViewState(threadId, controller.bodyRef, controller.events)
-  const systemPrompt = useSystemPromptPreview(threadId, mode === 'debug', controller.working)
+  const { debug } = useModelRequestDebug(threadId, mode === 'debug', controller.working)
+  const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
+
+  const switchMode = (nextMode: 'conversation' | 'debug') => {
+    setDebugSelection(null)
+    internalSwitchMode(nextMode)
+  }
+
   const selectedRecord =
     selectedEventId == null
       ? null
@@ -46,10 +54,21 @@ export function useBoundThreadPanelViews(
         <ThreadEventView
           events={controller.events}
           selectedEventId={selectedEventId}
-          onSelectedEventIdChange={selectEvent}
+          onSelectedEventIdChange={(id) => {
+            if (id != null) {
+              setDebugSelection(null)
+            }
+            selectEvent(id)
+          }}
           bodyRef={eventsBodyRef}
           initialScrollTop={initialEventsScrollTop}
-          systemPrompt={systemPrompt}
+          debug={debug}
+          onSelectInspector={(selection) => {
+            if (selection != null) {
+              selectEvent(null)
+            }
+            setDebugSelection(selection)
+          }}
         />
       ) : undefined,
   }
@@ -61,7 +80,9 @@ export function useBoundThreadPanelViews(
     eventsBodyRef,
     initialConversationScrollTop,
     initialEventsScrollTop,
-    systemPrompt,
+    debug,
+    debugSelection,
+    setDebugSelection,
     selectedRecord,
     mainView,
   }

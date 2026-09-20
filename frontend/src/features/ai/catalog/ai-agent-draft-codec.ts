@@ -4,6 +4,7 @@ import type {
   AgentDefinitionDTO,
   AgentDefinitionEditablePropertiesDTO,
   AgentModelDTO,
+  SkillRefDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { modelRef } from '@/features/ai/catalog/AgentModelView'
@@ -19,7 +20,7 @@ function normalizeNames(items: string[] | null | undefined): string[] {
 
 function normalizeCapabilityValues(
   items: string[] | null | undefined,
-  kind: 'tools' | 'skills' | 'subagents',
+  kind: 'tools' | 'subagents',
 ): string[] {
   const values = normalizeNames(items)
   const seen = new Set<string>()
@@ -41,11 +42,43 @@ function normalizeCapabilityValues(
   return values
 }
 
+function normalizeSkills(items: SkillRefDTO[] | null | undefined): SkillRefDTO[] {
+  if (!items?.length) {
+    return []
+  }
+  const result: SkillRefDTO[] = []
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const item of items) {
+    const packageName = item.packageName?.trim()
+    const name = item.name?.trim()
+    if (!packageName || !name) {
+      continue
+    }
+    const key = `${packageName}:${name}`
+    const displayName = `${packageName} / ${name}`
+    if (seen.has(key)) {
+      duplicates.add(displayName)
+    }
+    seen.add(key)
+    result.push({ packageName, name })
+  }
+  if (duplicates.size > 0) {
+    throw new Error(
+      translate('ai.catalog.validation.capabilityDuplicate', {
+        kind: 'skills',
+        names: [...duplicates].join(', '),
+      }),
+    )
+  }
+  return result
+}
+
 function toConfig(draft: AgentDraft): AgentDefinitionConfigDTO {
   return {
     inheritParentEnvironment: draft.inheritParentEnvironment,
     tools: normalizeCapabilityValues(draft.tools, 'tools'),
-    skills: normalizeCapabilityValues(draft.skills, 'skills'),
+    skills: normalizeSkills(draft.skills),
     subagents: normalizeCapabilityValues(draft.subagents, 'subagents'),
   }
 }
@@ -75,7 +108,10 @@ export function toAgentDraft(agent: AgentDefinitionDTO): AgentDraft {
     variant: agent.variant?.trim() || '',
     inheritParentEnvironment: config.inheritParentEnvironment,
     tools: normalizeNames(config.tools),
-    skills: normalizeNames(config.skills),
+    skills: (config.skills || []).map((s) => ({
+      packageName: s.packageName.trim(),
+      name: s.name.trim(),
+    })),
     subagents: normalizeNames(config.subagents),
   }
 }

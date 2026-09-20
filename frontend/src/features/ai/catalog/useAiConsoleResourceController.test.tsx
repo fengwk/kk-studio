@@ -17,7 +17,7 @@ vi.mock('@/shared/api/agent-service', () => ({
     listModels: vi.fn(),
     listAgents: vi.fn(),
     listTools: vi.fn(),
-    listSkills: vi.fn(async () => []),
+    listSkillPackages: vi.fn(async () => []),
     createProvider: vi.fn(),
     updateProvider: vi.fn(),
     deleteProvider: vi.fn(),
@@ -51,7 +51,7 @@ describe('useAiConsoleResourceController', () => {
     vi.mocked(agentService.deleteModel).mockResolvedValue(undefined)
     vi.mocked(agentService.createAgent).mockResolvedValue(currentAgent)
     vi.mocked(agentService.deleteAgent).mockResolvedValue(undefined)
-    vi.mocked(agentService.listSkills).mockResolvedValue([])
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([])
     vi.mocked(agentService.updateProvider).mockImplementation(async (_name, data) => {
       currentProvider = { ...currentProvider, ...data, name: data.name ?? currentProvider.name }
       currentModel = { ...currentModel, providerName: currentProvider.name }
@@ -310,19 +310,25 @@ describe('useAiConsoleResourceController', () => {
   })
 
   it('queries global skills and reflects loading and error states into resourceEditorModal', async () => {
-    vi.mocked(agentService.listSkills).mockResolvedValue([
+    vi.mocked(agentService.listSkillPackages).mockResolvedValue([
       {
-        name: 'dev',
-        description: 'dev skill',
         packageName: 'core',
-        packageVersion: '1.0.0',
+        repositoryUrl: 'https://github.com/example/core.git',
+        branch: 'main',
+        currentCommit: '1111111111111111111111111111111111111111',
+        observedHeadCommit: '1111111111111111111111111111111111111111',
+        headCheckedAt: '2026-09-21T00:00:00.000Z',
+        headCheckError: null,
+        checkStatus: 'IDLE',
+        skills: [{ name: 'dev', description: 'dev skill', path: 'dev/SKILL.md' }],
+        version: '1',
       },
     ])
 
     renderHarness()
     await ready()
 
-    expect(agentService.listSkills).toHaveBeenCalled()
+    expect(agentService.listSkillPackages).toHaveBeenCalled()
     expect(screen.getByTestId('skills-count')).toHaveTextContent('1')
   })
 })

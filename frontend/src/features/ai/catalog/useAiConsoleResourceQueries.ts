@@ -15,7 +15,7 @@ export interface AiConsoleResourceQueries {
   models: AgentModelView[]
   agents: Awaited<ReturnType<typeof agentService.listAgents>>['results']
   toolCatalog: Awaited<ReturnType<typeof agentService.listTools>>
-  skills: Awaited<ReturnType<typeof agentService.listSkills>>
+  skills: Awaited<ReturnType<typeof agentService.listSkillPackages>>
   environments: Awaited<ReturnType<typeof environmentService.listEnvironments>>
 }
 
@@ -56,8 +56,8 @@ export function useAiConsoleResourceQueries(
   })
 
   const skillsQuery = useQuery({
-    queryKey: queryKeys.skills.list,
-    queryFn: () => agentService.listSkills(),
+    queryKey: queryKeys.skills.packages,
+    queryFn: () => agentService.listSkillPackages(),
     enabled: Boolean(enabled.skills),
   })
 

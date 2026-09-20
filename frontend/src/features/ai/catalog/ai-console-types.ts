@@ -1,6 +1,7 @@
 import type {
   AgentModelInputModality,
   AgentProviderType,
+  SkillRefDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { CatalogVersion } from '@/shared/api/contracts/base'
 
@@ -73,7 +74,7 @@ export interface AgentDraft {
   variant: string
   inheritParentEnvironment: boolean
   tools: string[]
-  skills: string[]
+  skills: SkillRefDTO[]
   subagents: string[]
 }
 

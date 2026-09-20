@@ -46,7 +46,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
     systemPrompt: ' prompt ',
     variant: 'quality',
     tools: [' read ', 'bash'],
-    skills: [' dev '],
+    skills: [{ packageName: 'core', name: 'dev' }],
     subagents: [' helper '],
     ...overrides,
   }
@@ -59,19 +59,21 @@ describe('ai-agent-draft-codec', () => {
       variant: '',
       inheritParentEnvironment: true,
       subagents: [],
+      skills: [],
     })
     expect(emptyAgentDraft()).toMatchObject({
       model: '',
       variant: '',
       inheritParentEnvironment: true,
       subagents: [],
+      skills: [],
     })
   })
 
   it('normalizes tool names, skills, and capability names and rejects collisions in create payloads', () => {
     expect(toEditableAgent(draft()).config).toMatchObject({
       tools: ['read', 'bash'],
-      skills: ['dev'],
+      skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['helper'],
     })
     expect(() => toEditableAgent(draft({ tools: ['read', 'read'] }))).toThrow(
@@ -83,7 +85,10 @@ describe('ai-agent-draft-codec', () => {
     expect(() =>
       toEditableAgent(
         draft({
-          skills: ['dev', 'dev'],
+          skills: [
+            { packageName: 'core', name: 'dev' },
+            { packageName: 'core', name: 'dev' },
+          ],
         }),
       ),
     ).toThrow(/名称不能重复/)
@@ -99,7 +104,7 @@ describe('ai-agent-draft-codec', () => {
       config: {
         inheritParentEnvironment: false,
         tools: [' read ', ''],
-        skills: [' dev ', ''],
+        skills: [{ packageName: ' core ', name: ' dev ' }],
         subagents: [' writer ', ''],
       },
       version: '1',
@@ -115,7 +120,7 @@ describe('ai-agent-draft-codec', () => {
       variant: 'quality',
       inheritParentEnvironment: false,
       tools: ['read'],
-      skills: ['dev'],
+      skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['writer'],
     })
 
@@ -137,7 +142,7 @@ describe('ai-agent-draft-codec', () => {
       config: {
         inheritParentEnvironment: true,
         tools: ['read', 'bash'],
-        skills: ['dev'],
+        skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
       },
     }
@@ -150,7 +155,7 @@ describe('ai-agent-draft-codec', () => {
       config: {
         inheritParentEnvironment: true,
         tools: ['read', 'bash'],
-        skills: ['dev'],
+        skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
       },
     })
@@ -165,7 +170,7 @@ describe('ai-agent-draft-codec', () => {
       config: {
         inheritParentEnvironment: true,
         tools: ['read', 'bash'],
-        skills: ['dev'],
+        skills: [{ packageName: 'core', name: 'dev' }],
         subagents: ['helper'],
       },
     })
@@ -185,7 +190,7 @@ describe('ai-agent-draft-codec', () => {
     [{ name: ' ' }, /name/],
     [{ model: ' ' }, /model/],
     [{ tools: ['read', 'read'] }, /tools/],
-    [{ skills: ['dev', 'dev'] }, /skills/],
+    [{ skills: [{ packageName: 'core', name: 'dev' }, { packageName: 'core', name: 'dev' }] }, /skills/],
     [{ subagents: ['helper', 'helper'] }, /subagents/],
   ] as Array<[Partial<AgentDraft>, RegExp]>)(
     'rejects invalid complete bodies %#',
@@ -201,7 +206,7 @@ describe('ai-agent-draft-codec', () => {
     expect(toEditableAgent(draft()).config).toEqual({
       inheritParentEnvironment: true,
       tools: ['read', 'bash'],
-      skills: ['dev'],
+      skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['helper'],
     })
   })

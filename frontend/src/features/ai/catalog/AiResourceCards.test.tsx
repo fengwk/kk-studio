@@ -106,7 +106,11 @@ describe('AI resource cards', () => {
           config: {
             inheritParentEnvironment: true,
             tools: [],
-            skills: ['skill-alpha', 'skill-beta', 'skill-gamma'],
+            skills: [
+              { packageName: 'pkg-a', name: 'skill-alpha' },
+              { packageName: 'pkg-b', name: 'skill-beta' },
+              { packageName: 'pkg-c', name: 'skill-gamma' },
+            ],
             subagents: [],
           },
         })}
@@ -116,9 +120,9 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('skill-alpha')).toBeInTheDocument()
-    expect(screen.getByText('skill-beta')).toBeInTheDocument()
-    expect(screen.queryByText('skill-gamma')).not.toBeInTheDocument()
+    expect(screen.getByText('pkg-a / skill-alpha')).toBeInTheDocument()
+    expect(screen.getByText('pkg-b / skill-beta')).toBeInTheDocument()
+    expect(screen.queryByText('pkg-c / skill-gamma')).not.toBeInTheDocument()
     expect(screen.getByText('+1')).toBeInTheDocument()
   })
 

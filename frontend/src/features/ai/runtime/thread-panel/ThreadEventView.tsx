@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, type KeyboardEvent, type RefObject } from 'react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
-import { ThreadSystemPromptPreview } from '@/features/ai/runtime/thread-panel/ThreadSystemPromptPreview'
+import { ThreadModelRequestDebug } from '@/features/ai/runtime/thread-panel/ThreadModelRequestDebug'
+import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
+import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
 
@@ -37,14 +39,16 @@ export function ThreadEventView({
   onSelectedEventIdChange,
   initialScrollTop = null,
   bodyRef: bodyRefProp,
-  systemPrompt,
+  debug,
+  onSelectInspector = () => {},
 }: {
   events: ThreadEventRecord[]
   selectedEventId: string | null
   onSelectedEventIdChange: (eventId: string | null) => void
   initialScrollTop?: number | null
   bodyRef?: RefObject<HTMLDivElement | null>
-  systemPrompt?: string
+  debug?: HarnessModelRequestDebugDTO | null
+  onSelectInspector?: (selection: DebugInspectorSelection | null) => void
 }) {
   const { t } = useI18n()
   const internalBodyRef = useRef<HTMLDivElement>(null)
@@ -107,8 +111,8 @@ export function ThreadEventView({
 
   return (
     <div className="thread-events-shell">
-      {systemPrompt ? (
-        <ThreadSystemPromptPreview text={systemPrompt} label={t('ai.runtime.event.systemPrompt')} />
+      {debug ? (
+        <ThreadModelRequestDebug debug={debug} onSelectInspector={onSelectInspector} />
       ) : null}
       <div
         ref={bodyRef}

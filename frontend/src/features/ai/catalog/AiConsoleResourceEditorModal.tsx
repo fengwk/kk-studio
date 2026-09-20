@@ -8,7 +8,7 @@ import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
-  SkillDTO,
+  SkillPackageDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
@@ -39,7 +39,7 @@ export function ResourceEditorModal({
   models: AgentModelView[]
   agents?: AgentDefinitionDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
-  skills?: SkillDTO[]
+  skills?: SkillPackageDTO[]
   skillsLoading?: boolean
   skillsError?: unknown
   providerDraft: ProviderDraft

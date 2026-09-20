@@ -76,16 +76,28 @@ describe('ThreadEventView', () => {
     expect(options.every((option) => !option.className.includes('active'))).toBe(true)
   })
 
-  it('pins a 10-line system prompt preview above the independently scrolling event list', () => {
+  it('pins a next request preview above the independently scrolling event list', () => {
     render(
       <ThreadEventView
         events={[record('e1')]}
         selectedEventId={null}
         onSelectedEventIdChange={vi.fn()}
-        systemPrompt={'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11'}
+        debug={{
+          kind: 'NEXT_REQUEST_PREVIEW',
+          generatedAt: '2026-09-21T00:00:00.000Z',
+          model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+          environmentName: null,
+          systemInstruction: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11',
+          tools: [],
+          skills: [],
+          subagents: [],
+          cacheControl: null,
+          planningError: null,
+          frozenInvocation: null,
+        }}
       />,
     )
-    const preview = screen.getByLabelText('系统提示词')
+    const preview = screen.getByLabelText('Next Request Preview')
     expect(preview).toHaveTextContent('line1')
     expect(preview).toHaveTextContent('line11')
     expect(preview.querySelector('.thread-system-prompt-body')).not.toBeNull()
