@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 测试专用的轻量级 Streamable HTTP MCP Server Mock。
  *
- * <p>支持现代协议探测与传统降级握手（initialize / initialized / tools/list / tools/call）， 记录收到请求的 Authorization
- * header 与调用次数。
+ * <p>支持现代协议探测与传统降级握手（initialize / initialized / tools/list / tools/call）， 记录收到的 HTTP 请求总数、
+ * Authorization header 与工具调用次数。请求总数让测试可以断言「完全没有网络 I/O」，而不只是「没有 tools/call」。
  */
 public final class FakeStreamableHttpMcpServer implements AutoCloseable {
 
@@ -32,6 +32,7 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
   private final List<String> receivedAuthHeaders = new CopyOnWriteArrayList<>();
   private final List<String> receivedToolCallNames = new CopyOnWriteArrayList<>();
   private final AtomicInteger toolCallCount = new AtomicInteger(0);
+  private final AtomicInteger requestCount = new AtomicInteger(0);
   private volatile boolean failDiscovery = false;
   private volatile boolean failToolCall = false;
 
@@ -44,6 +45,7 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
         new HttpHandler() {
           @Override
           public void handle(HttpExchange exchange) throws IOException {
+            requestCount.incrementAndGet();
             String auth = exchange.getRequestHeaders().getFirst("Authorization");
             if (auth != null) {
               receivedAuthHeaders.add(auth);
@@ -214,6 +216,11 @@ public final class FakeStreamableHttpMcpServer implements AutoCloseable {
 
   public int toolCallCount() {
     return toolCallCount.get();
+  }
+
+  /** 收到的 HTTP 请求总数（含探测、握手与 tools/call），用于断言「完全没有网络 I/O」。 */
+  public int requestCount() {
+    return requestCount.get();
   }
 
   private static void sendJson(HttpExchange exchange, int statusCode, JsonNode json)
