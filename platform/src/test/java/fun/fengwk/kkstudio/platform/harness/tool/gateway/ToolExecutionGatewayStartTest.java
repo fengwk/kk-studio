@@ -64,7 +64,8 @@ class ToolExecutionGatewayStartTest {
       ToolExecutionRequest executed = tool.requests.get(0);
       assertEquals(DESCRIPTOR, executed.descriptor());
       assertSame(request.call(), executed.call());
-      assertEquals(Duration.ZERO, executed.timeout());
+      // host 工具没有 arguments 级超时契约：解析结果就是 definition 默认值。
+      assertEquals(DESCRIPTOR.defaultTimeout(), executed.timeout());
       assertEquals(ToolGatewayTestSupport.INVOCATION_ID, executed.context().invocationId());
       assertEquals(ToolGatewayTestSupport.THREAD_ID, executed.context().threadId());
       assertTrue(transport.invocations.isEmpty());
@@ -110,13 +111,138 @@ class ToolExecutionGatewayStartTest {
       assertEquals(
           EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
           transport.invocations.get(0).request().descriptor());
-      assertEquals(Duration.ZERO, transport.invocations.get(0).request().timeout());
+      // bash 未携带 timeout_seconds：解析结果就是 capability definition 的默认超时。
+      assertEquals(
+          EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC)
+              .defaultTimeout(),
+          transport.invocations.get(0).request().timeout());
       assertTrue(
           transport.invocations.get(0).request().call().argumentsJson().contains("workdir"),
           transport.invocations.get(0).request().call().argumentsJson());
     } finally {
       executor.shutdownNow();
     }
+  }
+
+  /** 显式 timeout_seconds 严格覆盖 capability 默认超时：更短与更长都必须原样传到 transport，且解析只在 Gateway 发生一次。 */
+  @Test
+  void environmentRouteResolvesExplicitTimeoutOverridingDefault() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      ToolExecutionGateway gateway =
+          ToolGatewayTestSupport.gateway(
+              ToolGatewayTestSupport.defaultCatalog(), transport, store, executor);
+
+      // 默认：bash 未携带 timeout_seconds，解析结果为 capability definition 默认值。
+      ToolInvocationRequest defaulted =
+          ToolGatewayTestSupport.environmentRequest(
+              "call-default",
+              ToolGatewayTestSupport.ENV_A,
+              "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}");
+      // 显式更短
+      ToolInvocationRequest shorter =
+          ToolGatewayTestSupport.environmentRequest(
+              "call-short",
+              ToolGatewayTestSupport.ENV_A,
+              "{\"command\":\"ls\",\"workdir\":\"/home/dev\",\"timeout_seconds\":7}");
+      // 显式更长（7200 秒）：不得被默认值截断，也不存在产品上限
+      ToolInvocationRequest longer =
+          ToolGatewayTestSupport.environmentRequest(
+              "call-long",
+              ToolGatewayTestSupport.ENV_A,
+              "{\"command\":\"ls\",\"workdir\":\"/home/dev\",\"timeout_seconds\":7200}");
+
+      activate(gateway, defaulted);
+      activate(gateway, shorter);
+      activate(gateway, longer);
+      awaitSize(transport.invocations, 3);
+
+      Duration capabilityDefault =
+          EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC)
+              .defaultTimeout();
+      assertEquals(capabilityDefault, transport.invocations.get(0).request().timeout());
+      assertEquals(Duration.ofSeconds(7), transport.invocations.get(1).request().timeout());
+      assertEquals(Duration.ofSeconds(7200), transport.invocations.get(2).request().timeout());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  private static void activate(ToolExecutionGateway gateway, ToolInvocationRequest request) {
+    ToolGateway.StartResult started =
+        gateway.start(
+            ToolGatewayTestSupport.execution(request),
+            new ToolGatewayTestSupport.RecordingListener());
+    assertInstanceOf(ToolGateway.Started.class, started).handle().activate();
+  }
+
+  /** 超时只在执行前解析一次：句柄 activate 之前解析已完成，且该精确 Duration 原样交给工具实现。 */
+  @Test
+  void hostRouteResolvesTimeoutExactlyOnceBeforeExecution() {
+    ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
+    tool.resolvedTimeout = Duration.ofSeconds(7200);
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(tool),
+            new ToolGatewayTestSupport.FakeTransport(),
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            executor);
+
+    ToolGateway.StartResult started =
+        gateway.start(
+            ToolGatewayTestSupport.execution(
+                ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)),
+            new ToolGatewayTestSupport.RecordingListener());
+    assertInstanceOf(ToolGateway.Started.class, started);
+    // 执行尚未开始（句柄未 activate），解析已经完成且只发生一次。
+    assertTrue(tool.requests.isEmpty());
+    assertEquals(1, tool.resolveTimeoutCalls.get());
+
+    assertInstanceOf(ToolGateway.Started.class, started).handle().activate();
+    executor.drain();
+    assertEquals(1, tool.requests.size());
+    assertEquals(Duration.ofSeconds(7200), tool.requests.get(0).timeout());
+    // 执行阶段不再二次解析。
+    assertEquals(1, tool.resolveTimeoutCalls.get());
+  }
+
+  /** 非正数的 arguments 级超时 fail closed：确定性 INVALID_REQUEST 拒绝，既不提交 executor 也不触碰 transport。 */
+  @Test
+  void nonPositiveExplicitTimeoutIsRejectedBeforeExecution() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.DirectQueueExecutor executor =
+        new ToolGatewayTestSupport.DirectQueueExecutor();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            transport,
+            new ToolGatewayTestSupport.FakeResourceStore(),
+            executor);
+    // 构造期已用探针任务校验过 executor，这里只比较拒绝前后的队列长度。
+    int queuedBefore = executor.queued.size();
+
+    for (String arguments :
+        List.of(
+            "{\"command\":\"ls\",\"workdir\":\"/home/dev\",\"timeout_seconds\":0}",
+            "{\"command\":\"ls\",\"workdir\":\"/home/dev\",\"timeout_seconds\":-5}")) {
+      ToolGateway.Rejected rejected =
+          assertInstanceOf(
+              ToolGateway.Rejected.class,
+              gateway.start(
+                  ToolGatewayTestSupport.execution(
+                      ToolGatewayTestSupport.environmentRequest(
+                          "call-invalid", ToolGatewayTestSupport.ENV_A, arguments)),
+                  new ToolGatewayTestSupport.RecordingListener()));
+      assertEquals(ToolExecutionGateway.INVALID_REQUEST_KIND, rejected.error().kind());
+      assertTrue(
+          rejected.error().message().contains("must be positive"), rejected.error().message());
+    }
+    assertEquals(queuedBefore, executor.queued.size());
+    assertTrue(transport.invocations.isEmpty());
   }
 
   @Test

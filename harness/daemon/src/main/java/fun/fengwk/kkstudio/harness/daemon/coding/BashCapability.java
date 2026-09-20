@@ -42,9 +42,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class BashCapability implements EnvironmentCapability {
 
-  static final int DEFAULT_TIMEOUT_SECONDS = 120;
-  static final int MAX_TIMEOUT_SECONDS = 3600;
-
   /** 单条 live partial 的文本上界：远低于 256 KiB 的单条 partial 协议上限。 */
   static final int LIVE_PARTIAL_UTF8_BYTES = 64 * 1024;
 
@@ -94,9 +91,8 @@ public final class BashCapability implements EnvironmentCapability {
       JsonNode args = AbstractCodingCapability.arguments(request);
       String command = AbstractCodingCapability.string(args, "command");
       Path workdir = EnvironmentPaths.workdir(AbstractCodingCapability.string(args, "workdir"));
-      int timeoutSeconds = requestedTimeoutSeconds(args);
-      Duration processTimeout =
-          effectiveProcessTimeout(request.effectiveTimeout(), Duration.ofSeconds(timeoutSeconds));
+      // 有效超时在 Platform 侧解析完成；这里只消费 request.timeout()，0 表示不设 deadline。
+      Duration processTimeout = request.timeout();
       Process process =
           new ProcessBuilder(config.bashExecutable(), "-lc", command)
               .directory(workdir.toFile())
@@ -106,21 +102,24 @@ public final class BashCapability implements EnvironmentCapability {
       if (handle.cancelled.get()) {
         handle.stopProcessTree();
       }
-      handle.timeoutFuture =
-          scheduler.schedule(
-              () -> {
-                if (handle.timedOut.compareAndSet(false, true)) {
-                  try {
-                    executor.execute(handle::stopProcessTree);
-                  } catch (RejectedExecutionException ignored) {
-                    // runtime shutdown 会同步 cancel handle 并终止进程；scheduler 不执行阻塞等待。
+      // 0 表示没有执行 deadline：绝不能退化为立即超时。
+      if (!processTimeout.isZero()) {
+        handle.timeoutFuture =
+            scheduler.schedule(
+                () -> {
+                  if (handle.timedOut.compareAndSet(false, true)) {
+                    try {
+                      executor.execute(handle::stopProcessTree);
+                    } catch (RejectedExecutionException ignored) {
+                      // runtime shutdown 会同步 cancel handle 并终止进程；scheduler 不执行阻塞等待。
+                    }
                   }
-                }
-              },
-              processTimeout.toMillis(),
-              TimeUnit.MILLISECONDS);
-      if (handle.terminal.get()) {
-        handle.timeoutFuture.cancel(false);
+                },
+                processTimeout.toMillis(),
+                TimeUnit.MILLISECONDS);
+        if (handle.terminal.get()) {
+          handle.timeoutFuture.cancel(false);
+        }
       }
       EnvironmentCapabilityResult res = drain(request, listener, handle, process);
       handle.complete(listener, res);
@@ -167,19 +166,6 @@ public final class BashCapability implements EnvironmentCapability {
       }
       return output.finish(failed);
     }
-  }
-
-  static int requestedTimeoutSeconds(JsonNode args) {
-    return AbstractCodingCapability.optionalPositiveInt(
-        args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
-  }
-
-  static Duration effectiveProcessTimeout(Duration invocationTimeout, Duration requestedTimeout) {
-    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
-    Objects.requireNonNull(requestedTimeout, "requestedTimeout");
-    return invocationTimeout.compareTo(requestedTimeout) <= 0
-        ? invocationTimeout
-        : requestedTimeout;
   }
 
   /** live partial 的 details 形状：模式、精确字节区间与已观测总量。 */

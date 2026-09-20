@@ -15,17 +15,21 @@ final class SearchControl {
   private final String capabilityName;
   private final LongSupplier nanoTime;
 
+  /** 没有 deadline：{@link #check()} 只检查中断与取消。 */
+  private static final long NO_DEADLINE_NANOS = Long.MAX_VALUE;
+
   SearchControl(
       Duration timeout, BooleanSupplier cancelled, String capabilityName, LongSupplier nanoTime) {
     Objects.requireNonNull(timeout, "timeout");
-    if (timeout.isNegative() || timeout.isZero()) {
-      throw new IllegalArgumentException("timeout must be positive");
+    if (timeout.isNegative()) {
+      throw new IllegalArgumentException("timeout must not be negative");
     }
     this.cancelled = Objects.requireNonNull(cancelled, "cancelled");
     this.capabilityName = Objects.requireNonNull(capabilityName, "capabilityName");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     startedNanos = nanoTime.getAsLong();
-    timeoutNanos = timeout.toNanos();
+    // timeout 为 0 表示没有执行 deadline：绝不能退化为「立即超时」。
+    timeoutNanos = timeout.isZero() ? NO_DEADLINE_NANOS : timeout.toNanos();
     timeoutMillis = timeout.toMillis();
   }
 
@@ -38,6 +42,9 @@ final class SearchControl {
   void check() throws InterruptedException {
     if (Thread.currentThread().isInterrupted() || cancelled.getAsBoolean()) {
       throw new InterruptedException();
+    }
+    if (timeoutNanos == NO_DEADLINE_NANOS) {
+      return;
     }
     if (nanoTime.getAsLong() - startedNanos >= timeoutNanos) {
       throw new IllegalArgumentException(

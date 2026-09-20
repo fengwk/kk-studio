@@ -18,7 +18,7 @@ CLI -> DaemonConfig
 
 单个 `--help`/`-h` 或 `--version` 是纯信息命令，在打开数据目录之前输出并直接返回；混用或多余参数一律交给配置解析并失败关闭。注册被拒时进程进入 FAILED，向 stderr 输出原因并以非零状态码退出。
 
-[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 的完整选项、默认值与安装方式只在 [Environment Daemon 安装与运行](../operations/environment-daemon.md) 维护；进程侧只需要知道三条约束：`--gateway-uri` 与 `--registration-token-file` 必填，`--reconnect-initial` / `--reconnect-max` / `--heartbeat` / `--tool-timeout` 决定重连、心跳与能力调用预算，`--environment-root` 只作 READY 展示元数据。
+[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 的完整选项、默认值与安装方式只在 [Environment Daemon 安装与运行](../operations/environment-daemon.md) 维护；进程侧只需要知道三条约束：`--gateway-uri` 与 `--registration-token-file` 必填，`--reconnect-initial` / `--reconnect-max` / `--heartbeat` 决定重连与心跳，`--environment-root` 只作 READY 展示元数据。
 
 注册凭证只以 owner-only 普通文件存在：CLI 只接收路径，配置对象不保存凭证文本，因此 `equals`/`hashCode`/`toString` 与日志都不会扩散秘密，凭证在每次 HELLO 前按需读取。[`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 要求绝对路径、现存普通文件（拒绝符号链接与目录）与 owner-only 权限，并忽略两端空白。未知选项（包括历史遗留的 `--registration-token`、`--skill-dir`）一律启动失败，没有兼容回退。
 
@@ -51,11 +51,11 @@ Daemon 不注册任何 MCP 能力：MCP 是 Platform 在 Backend 进程内的能
 
 1. `journal.start(invocationId)` 原子去重，已存在则重放既有条目并结束；
 2. 能力标识未知、或 `capabilityVersion` 与 descriptor 不匹配，都直接以 `FAILED` 终态结束，不发送 `STARTED`；
-3. 解析有效超时，优先级为「请求指定值 → descriptor 声明值 → Daemon 默认值」；
+3. 采用 wire 的 `timeoutMillis` 作为本次调用的唯一有效超时（Platform 已在执行前解析完成，Daemon 不回落也不截断）；
 4. 构造按 schema 校验的执行请求，抢占本地执行资源；
 5. 全部预检通过后才发送 `STARTED`，随后执行能力并调度超时。
 
-参数非法、报文超限、资源持久化失败或流式事件包含非法内容，同样以确定性 `FAILED` 终态收敛。超时由调度器触发，抢占终态标记并取消底层句柄；收到 `CANCEL` 时，运行中的调用回复 `CANCELLED` 并取消句柄，已终结的调用重放既有终态。协议载荷非法或作用域不匹配时运行时回复 `ERROR` 并保留 journal；`REGISTRATION_REJECTED` 使进程进入 FAILED、停止重连并以非零状态退出，`RETRY_LATER` 触发断线与退避。
+参数非法、报文超限、资源持久化失败或流式事件包含非法内容，同样以确定性 `FAILED` 终态收敛。非零超时由调度器触发，抢占终态标记并取消底层句柄；`timeoutMillis` 为 0 表示没有 execution deadline，不调度任何超时终态；收到 `CANCEL` 时，运行中的调用回复 `CANCELLED` 并取消句柄，已终结的调用重放既有终态。协议载荷非法或作用域不匹配时运行时回复 `ERROR` 并保留 journal；`REGISTRATION_REJECTED` 使进程进入 FAILED、停止重连并以非零状态退出，`RETRY_LATER` 触发断线与退避。
 
 ### 实例身份与重连恢复
 
@@ -130,7 +130,7 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 
 | 包路径 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.daemon` | 进程启动入口与运行时编排。解析启动配置（`DaemonConfig`、`DaemonTokenFile`、`DaemonDataDirectory`）、冻结能力注册表（`DaemonCapabilityRegistry`）、持有双线程池资源、驱动握手与重连状态机、解析调用超时并按 message type 校验入站报文。 |
+| `fun.fengwk.kkstudio.harness.daemon` | 进程启动入口与运行时编排。解析启动配置（`DaemonConfig`、`DaemonTokenFile`、`DaemonDataDirectory`）、冻结能力注册表（`DaemonCapabilityRegistry`）、持有双线程池资源、驱动握手与重连状态机、按 wire 有效超时裁决能力调用 deadline 并按 message type 校验入站报文。 |
 | `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只解析本次调用 arguments 中的显式绝对 `workdir`，绝不把它当作文件系统沙箱或会话默认目录；大文本经 `TextOutputStore` 落盘为本地 durable 日志，二进制结果不落本地存储而是由终态编码阶段直传对象存储；调用之间不继承目录。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 invocation 的 `RUNNING` 与终态，以原子操作保证单次执行并记录终态结果；重连后的重复 `INVOKE` 幂等重放 `STARTED` 或终态报文。日志在进程整个生命周期内有效，连接断开不改变执行状态。 |
 | `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 OkHttp WebSocket 的生产实现。提供连接管理、文本帧收发与传输监听，强制协商 `permessage-deflate`，并对单消息累积体积与二进制帧执行策略违规关闭。 |

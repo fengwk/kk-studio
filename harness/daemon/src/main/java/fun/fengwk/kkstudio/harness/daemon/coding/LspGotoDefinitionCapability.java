@@ -44,6 +44,6 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
     return success(
         request.call().id(),
         bridge.gotoDefinition(
-            workdir, path, line, character, request.effectiveTimeout(), execution::isCancelled));
+            workdir, path, line, character, request.timeout(), execution::isCancelled));
   }
 }

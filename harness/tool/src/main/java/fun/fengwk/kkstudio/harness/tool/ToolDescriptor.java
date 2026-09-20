@@ -6,14 +6,19 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
-/** 可向模型声明并由执行器实现的工具描述。 */
+/**
+ * 可向模型声明并由执行器实现的工具描述。
+ *
+ * <p>{@code defaultTimeout} 是 definition 自己的唯一默认执行超时；{@link Duration#ZERO} 表示该工具没有执行 deadline。 工具
+ * arguments 中的显式超时严格覆盖该默认值，两者不合并：有效超时 = 显式值 orElse definition 默认值。
+ */
 public record ToolDescriptor(
     String name,
     String description,
     String rendererKey,
     InputSchema inputSchema,
     ToolSideEffect sideEffect,
-    Duration timeout) {
+    Duration defaultTimeout) {
 
   /** 模型可见工具名的全局上限，与 {@code agent_definition.name}、{@code mcp_tool.model_name} 等持久化列一致。 */
   public static final int NAME_MAX_LENGTH = 64;
@@ -35,9 +40,9 @@ public record ToolDescriptor(
     }
     inputSchema = Objects.requireNonNull(inputSchema, "inputSchema");
     sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
-    timeout = Objects.requireNonNull(timeout, "timeout");
-    if (timeout.isNegative()) {
-      throw new IllegalArgumentException("timeout must not be negative");
+    defaultTimeout = Objects.requireNonNull(defaultTimeout, "defaultTimeout");
+    if (defaultTimeout.isNegative()) {
+      throw new IllegalArgumentException("defaultTimeout must not be negative");
     }
   }
 

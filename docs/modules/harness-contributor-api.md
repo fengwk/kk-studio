@@ -59,13 +59,16 @@ findDescriptor / findCustomEntryType(contributorId, customType) / findContextPro
 
 ```java
 ToolDescriptor descriptor();
-default ToolRequirements requirements();      // 默认 ToolRequirements.none()
+default ToolRequirements requirements();                     // 默认 ToolRequirements.none()
+default Duration resolveTimeout(ToolCall call);              // 默认返回 descriptor.defaultTimeout()
 ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener);
 ```
 
 `execute` 必须启动式、快速返回：实现可以在调用线程触发同步回调，但调用状态持久化为 `RUNNING` 之前回调会被门控缓冲，因此执行状态转换始终有序；返回的 [`ToolExecutionHandle`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java) 提供幂等 `cancel()` 与 `isCancelled()`。
 
-[`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 携带最终 descriptor、已归一化并通过 schema 校验的 `ToolCall`（构造期调用 `validateFor`）、覆盖超时与可选的 `ToolExecutionContext`。超时为零时用 `effectiveTimeout()` 回落到 descriptor 声明的默认值。请求不携带 workdir：目录只存在于具体工具的 arguments 中，框架既不把它提升为通用执行状态，也不提供隐藏默认目录。
+`resolveTimeout` 是执行前唯一的超时解析点：入参是已归一化并通过 schema 校验的 `ToolCall`，默认实现返回 definition 的 `defaultTimeout()`，只有真正拥有 arguments 级超时契约的工具才覆盖它。返回值必须是原样的最终结果：`Duration.ZERO` 表示没有 execution deadline，下游不得再回落实现默认值或施加上限；非法 arguments 级超时必须抛出 `IllegalArgumentException` 而不是退回默认值，Gateway 会把它收敛为确定性的 `INVALID_REQUEST` 拒绝。
+
+[`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 携带最终 descriptor、已归一化并通过 schema 校验的 `ToolCall`（构造期调用 `validateFor`）、已解析的 `timeout` 与可选的 `ToolExecutionContext`。`timeout` 就是 `resolveTimeout` 的结果，执行层不得二次解析。请求不携带 workdir：目录只存在于具体工具的 arguments 中，框架既不把它提升为通用执行状态，也不提供隐藏默认目录。
 
 [`ToolExecutionListener`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java) 接收 `onPartial(ToolResult)*` 与互斥的 `onComplete(ToolOutcome)` / `onError(Throwable)`：终态至多一次，重复或迟到的回调由运行时侧适配层过滤，实现无需自己防御。
 

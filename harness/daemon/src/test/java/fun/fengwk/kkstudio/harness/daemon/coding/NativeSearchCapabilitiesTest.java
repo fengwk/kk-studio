@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -372,6 +373,26 @@ class NativeSearchCapabilitiesTest {
     SearchControl cancelled =
         new SearchControl(Duration.ofSeconds(1), () -> true, "find", System::nanoTime);
     assertThrows(InterruptedException.class, cancelled::check);
+  }
+
+  /**
+   * timeout 为 0 表示没有 execution deadline：即使时钟前进任意长，{@link SearchControl#check()} 也绝不触发超时终态，只保留取消检查。
+   */
+  @Test
+  void searchControlTreatsZeroTimeoutAsNoDeadline() {
+    AtomicLong clock = new AtomicLong();
+    SearchControl noDeadline = new SearchControl(Duration.ZERO, () -> false, "grep", clock::get);
+    clock.set(Long.MAX_VALUE);
+    assertDoesNotThrow(noDeadline::check);
+
+    // 没有 deadline 不代表没有取消：取消仍必须在同一次检查中被观察到。
+    SearchControl cancelledNoDeadline =
+        new SearchControl(Duration.ZERO, () -> true, "find", clock::get);
+    assertThrows(InterruptedException.class, cancelledNoDeadline::check);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new SearchControl(Duration.ofSeconds(-1), () -> false, "grep", clock::get));
   }
 
   private CodingToolsConfig config() {

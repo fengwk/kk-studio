@@ -602,7 +602,8 @@ public final class DaemonRuntime implements AutoCloseable {
             "capabilityVersion does not match environment descriptor: "
                 + payload.capabilityVersion());
       }
-      Duration timeout = resolveTimeout(payload.timeout(), descriptor);
+      // wire 的 timeoutMillis 是 Platform 已解析完成的唯一有效超时：Daemon 原样使用，不再回落或截断。
+      Duration timeout = payload.timeout();
       EnvironmentCapabilityExecutionRequest request =
           new EnvironmentCapabilityExecutionRequest(
               descriptor,
@@ -690,8 +691,17 @@ public final class DaemonRuntime implements AutoCloseable {
     }
   }
 
+  /**
+   * 为调用登记执行 deadline。
+   *
+   * <p>timeout 为 0 表示「没有 deadline」：绝不能调度一个立即触发的定时终态，调用只由 CANCEL、连接停机或能力自身终态收敛。
+   */
   private void scheduleTimeout(RunningInvocation invocation, Duration timeout) {
     if (!isRunning(invocation.invocationId()) || invocation.isTerminal()) {
+      return;
+    }
+    if (timeout.isZero()) {
+      invocation.setDeadlineNanos(Long.MAX_VALUE);
       return;
     }
     invocation.setDeadlineNanos(deadlineNanos(timeout));
@@ -770,17 +780,6 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private String errorPayload(Throwable error) {
     return "{\"message\":" + quote(safeFailureMessage(error)) + "}";
-  }
-
-  /** 按 requested -> descriptor -> daemon default 三层规则解析有效执行超时。 */
-  private Duration resolveTimeout(
-      Duration requestedTimeout, EnvironmentCapabilityDescriptor descriptor) {
-    Objects.requireNonNull(requestedTimeout, "requestedTimeout");
-    Objects.requireNonNull(descriptor, "descriptor");
-    if (!requestedTimeout.isZero()) {
-      return requestedTimeout;
-    }
-    return descriptor.timeout().isZero() ? config.defaultToolTimeout() : descriptor.timeout();
   }
 
   private static String safeFailureMessage(Throwable error) {

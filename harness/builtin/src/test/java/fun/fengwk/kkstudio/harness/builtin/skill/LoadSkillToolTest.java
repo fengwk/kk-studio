@@ -54,7 +54,7 @@ class LoadSkillToolTest {
     assertEquals(LoadSkillTool.NAME, descriptor.name());
     assertEquals(LoadSkillTool.NAME, descriptor.rendererKey());
     assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
-    assertEquals(Duration.ofMinutes(1), descriptor.timeout());
+    assertEquals(Duration.ofMinutes(1), descriptor.defaultTimeout());
     assertEquals(ToolRequirements.none(), tool.requirements());
 
     InputSchema schema = descriptor.inputSchema();

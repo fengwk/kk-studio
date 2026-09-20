@@ -25,7 +25,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -128,16 +127,9 @@ public final class RemoteMcpExecutableTool implements Tool {
       return staleConfiguration(request, listener);
     }
 
-    Duration serverTimeout = Duration.ofMillis(server.getTimeoutMillis());
-    Duration requestTimeout = request.timeout();
-    Duration effectiveBudget =
-        (requestTimeout.isZero()
-                || requestTimeout.isNegative()
-                || requestTimeout.compareTo(serverTimeout) > 0)
-            ? serverTimeout
-            : requestTimeout;
-
-    McpDeadline deadline = McpDeadline.of(effectiveBudget);
+    // MCP 工具没有 arguments 级超时契约：有效超时即 definition 默认值（Server timeout 配置），
+    // 已由 Tool SPI 在执行前解析一次；这里不再与 DB 当前值做二次 min clamp。
+    McpDeadline deadline = McpDeadline.of(request.timeout());
     McpCancellationToken token = new McpCancellationToken();
     AtomicBoolean completed = new AtomicBoolean(false);
 

@@ -149,7 +149,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
             toolName,
             capability.inputSchema(),
             sideEffect,
-            capability.timeout());
+            capability.defaultTimeout());
     Tool tool = new EnvironmentCapabilityTool(descriptor, capability);
     registrar.registerTool(localName, tool, ToolVisibility.SELECTABLE, 0);
   }

@@ -49,6 +49,6 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
     return success(
         request.call().id(),
         bridge.workspaceSymbols(
-            workdir, path, query, limit, request.effectiveTimeout(), execution::isCancelled));
+            workdir, path, query, limit, request.timeout(), execution::isCancelled));
   }
 }

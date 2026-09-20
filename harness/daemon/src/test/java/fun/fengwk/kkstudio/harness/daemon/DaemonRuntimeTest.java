@@ -260,7 +260,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             ENVIRONMENT_ROOT,
             dataDir());
@@ -283,7 +282,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             ENVIRONMENT_ROOT,
             dataDir());
@@ -306,7 +304,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             ENVIRONMENT_ROOT,
             dataDir());
@@ -358,7 +355,6 @@ class DaemonRuntimeTest {
                 Duration.ofMinutes(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
-                Duration.ofSeconds(10),
                 null,
                 ENVIRONMENT_ROOT,
                 dataDir())
@@ -812,7 +808,6 @@ class DaemonRuntimeTest {
                   Duration.ofMinutes(1),
                   Duration.ZERO,
                   Duration.ofSeconds(1),
-                  Duration.ofSeconds(10),
                   null,
                   root,
                   dataDir()),
@@ -855,44 +850,9 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** 缺省 timeoutMillis 表示不覆盖，必须优先使用 Tool descriptor timeout。 */
+  /** wire 的 timeoutMillis 是 Platform 解析完成的唯一有效超时：Daemon 原样消费，不再回落 descriptor 或 daemon 默认值。 */
   @Test
-  void omittedTimeoutUsesDescriptorTimeout() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    TestCapability tool = new TestCapability();
-    runtime = runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(30));
-
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake();
-    transport.takeMessages(2);
-    transport.receive(invokeWithoutTimeout("omitted-descriptor-timeout", "test", "1.0.0"));
-    transport.takeMessages(1);
-
-    assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
-  }
-
-  /** timeoutMillis 缺省且 descriptor 为 0 时，必须回退 daemon 默认 timeout。 */
-  @Test
-  void omittedTimeoutFallsBackToDaemonDefault() throws InterruptedException {
-    FakeTransport transport = new FakeTransport();
-    DefaultTimeoutCapability tool = new DefaultTimeoutCapability();
-    runtime = runtime(transport, tool, Duration.ofMinutes(1), Duration.ofSeconds(12));
-
-    runtime.start();
-    transport.awaitConnections(1);
-    completeHandshake();
-    transport.takeMessages(2);
-    transport.receive(invokeWithoutTimeout("omitted-default-timeout", "fallback", "1.0.0"));
-    transport.takeMessages(1);
-
-    assertEquals(Duration.ofSeconds(12), tool.request.effectiveTimeout());
-  }
-
-  /** 0 timeout 使用 descriptor timeout，完成或取消时 deadline 必须被撤销。 */
-  @Test
-  void resolvesZeroTimeoutAndCancelsDeadlineAfterCompletionOrCancellation()
-      throws InterruptedException {
+  void usesWireTimeoutVerbatimWithoutDescriptorFallback() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     TestCapability tool = new TestCapability();
     runtime = runtime(transport, tool);
@@ -903,20 +863,33 @@ class DaemonRuntimeTest {
     transport.takeMessages(2);
     transport.receive(invoke("zero-timeout", "test", "1.0.0", 0));
     transport.takeMessages(1);
-    assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
-    tool.complete(new EnvironmentCapabilityResult("zero-timeout", List.of(), false, "{}"));
-    assertMessageTypes(transport.takeMessages(1), COMPLETED);
 
-    transport.receive(invoke("cancel-before-timeout", "test", "1.0.0", 30));
-    transport.takeMessages(1);
-    transport.receive(cancel("cancel-before-timeout"));
-    assertMessageTypes(transport.takeMessages(1), CANCELLED);
-    assertFalse(transport.awaitMessage(Duration.ofMillis(80)));
+    assertEquals(Duration.ZERO, tool.request.timeout());
   }
 
-  /** descriptor 也为 0 时必须回退 daemon 默认 timeout，仍不能产生无限执行。 */
+  /** 显式超时可以远大于 descriptor 默认值：Daemon 不做 min clamp，也不施加任何产品上限。 */
   @Test
-  void fallsBackToDaemonTimeoutWhenRequestAndDescriptorAreZero() throws InterruptedException {
+  void explicitTimeoutMayExceedDescriptorDefault() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    // TestCapability 的 descriptor 默认超时为 10 秒；这里显式要求 7200 秒且必须原样传入。
+    transport.receive(invoke("long-timeout", "test", "1.0.0", 7_200_000L, "{}"));
+    transport.takeMessages(1);
+
+    assertEquals(Duration.ofSeconds(7200), tool.request.timeout());
+    tool.complete(new EnvironmentCapabilityResult("long-timeout", List.of(), false, "{}"));
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+  }
+
+  /** timeout 为 0 表示没有执行 deadline：绝不能调度一个立即触发的超时终态，调用只能由 CANCEL 或自身终态收敛。 */
+  @Test
+  void zeroTimeoutMeansNoDeadlineAndIsNotAnImmediateTimeout() throws InterruptedException {
     FakeTransport transport = new FakeTransport();
     DefaultTimeoutCapability tool = new DefaultTimeoutCapability();
     runtime = runtime(transport, tool);
@@ -925,12 +898,39 @@ class DaemonRuntimeTest {
     transport.awaitConnections(1);
     completeHandshake();
     transport.takeMessages(2);
-    transport.receive(invoke("default-timeout", "fallback", "1.0.0", 0));
+    transport.receive(invoke("no-deadline", "fallback", "1.0.0", 0));
     transport.takeMessages(1);
 
-    assertEquals(Duration.ofSeconds(10), tool.request.effectiveTimeout());
+    assertEquals(Duration.ZERO, tool.request.timeout());
+    // 若 0 被误当成「立即超时」，这里会先收到 FAILED。
+    assertFalse(transport.awaitMessage(Duration.ofMillis(150)));
+
     tool.complete();
     assertMessageTypes(transport.takeMessages(1), COMPLETED);
+  }
+
+  /** 正常完成或主动取消后 deadline 必须被撤销，不再产生迟到终态。 */
+  @Test
+  void cancelsDeadlineAfterCompletionOrCancellation() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    TestCapability tool = new TestCapability();
+    runtime = runtime(transport, tool);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("complete-before-deadline", "test", "1.0.0", 500));
+    transport.takeMessages(1);
+    tool.complete(
+        new EnvironmentCapabilityResult("complete-before-deadline", List.of(), false, "{}"));
+    assertMessageTypes(transport.takeMessages(1), COMPLETED);
+
+    transport.receive(invoke("cancel-before-timeout", "test", "1.0.0", 30));
+    transport.takeMessages(1);
+    transport.receive(cancel("cancel-before-timeout"));
+    assertMessageTypes(transport.takeMessages(1), CANCELLED);
+    assertFalse(transport.awaitMessage(Duration.ofMillis(80)));
   }
 
   /** complete 抢先终态后 deadline 必须失效且不能 cancel handle。 */
@@ -1794,7 +1794,6 @@ class DaemonRuntimeTest {
                 Duration.ofMinutes(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
-                Duration.ofSeconds(10),
                 null,
                 ENVIRONMENT_ROOT,
                 dataDir()),
@@ -1840,7 +1839,6 @@ class DaemonRuntimeTest {
                 Duration.ofMillis(20),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
-                Duration.ofSeconds(10),
                 null,
                 ENVIRONMENT_ROOT,
                 dataDir()),
@@ -1918,7 +1916,24 @@ class DaemonRuntimeTest {
 
   private DaemonRuntime runtime(
       FakeTransport transport, EnvironmentCapability capability, Duration heartbeatInterval) {
-    return runtime(transport, capability, heartbeatInterval, Duration.ofSeconds(10));
+    handshakeTransport = transport;
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            registrationTokenFile(),
+            heartbeatInterval,
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            null,
+            ENVIRONMENT_ROOT,
+            dataDir()),
+        transport,
+        registry,
+        new InMemoryDaemonInvocationJournal(),
+        Executors.newSingleThreadScheduledExecutor(),
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   private DaemonRuntime runtime(
@@ -1933,7 +1948,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             note,
             ENVIRONMENT_ROOT,
             dataDir()),
@@ -1956,7 +1970,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             environmentRoot,
             dataDir()),
@@ -1977,7 +1990,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             environmentRoot,
             dataDir()),
@@ -2002,7 +2014,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             ENVIRONMENT_ROOT,
             dataDir()),
@@ -2027,7 +2038,6 @@ class DaemonRuntimeTest {
             Duration.ofMinutes(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(10),
             null,
             ENVIRONMENT_ROOT,
             dataDir()),
@@ -2035,32 +2045,6 @@ class DaemonRuntimeTest {
         registry,
         new InMemoryDaemonInvocationJournal(),
         scheduler,
-        Executors.newVirtualThreadPerTaskExecutor());
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport,
-      EnvironmentCapability capability,
-      Duration heartbeatInterval,
-      Duration defaultToolTimeout) {
-    handshakeTransport = transport;
-    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-    registry.register(capability);
-    return new DaemonRuntime(
-        new DaemonConfig(
-            URI.create("ws://localhost/gateway"),
-            registrationTokenFile(),
-            heartbeatInterval,
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            defaultToolTimeout,
-            null,
-            ENVIRONMENT_ROOT,
-            dataDir()),
-        transport,
-        registry,
-        new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor(),
         Executors.newVirtualThreadPerTaskExecutor());
   }
 
@@ -2131,20 +2115,6 @@ class DaemonRuntimeTest {
         .replace("\r", "\\r")
         .replace("\t", "\\t")
         .replace("\u0007", "\\u0007");
-  }
-
-  private DaemonEnvelope invokeWithoutTimeout(
-      String invocationId, String capabilityId, String capabilityVersion) {
-    return new DaemonEnvelope(
-        DaemonProtocol.VERSION,
-        DaemonMessageType.INVOKE,
-        ENVIRONMENT_ID,
-        invocationId,
-        "{\"capabilityId\":\""
-            + capabilityId
-            + "\",\"capabilityVersion\":\""
-            + capabilityVersion
-            + "\",\"arguments\":{},\"timeoutMillis\":0}");
   }
 
   private DaemonEnvelope invoke(

@@ -807,91 +807,55 @@ class CodingCapabilitiesTest {
         "发布文件必须是输出的前缀");
   }
 
+  /** bash 只消费已解析的 request.timeout：显式短超时必须在 deadline 内终止命令，且请求值是唯一来源。 */
   @Test
-  void bashTimeoutParameterDefaultsAndNeverExceedsInvocationDeadline() throws Exception {
-    var missing = AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"command\":\"true\"}");
-    var explicit =
-        AbstractCodingCapability.OBJECT_MAPPER.readTree(
-            "{\"command\":\"true\",\"timeout_seconds\":7}");
-    assertEquals(120, BashCapability.requestedTimeoutSeconds(missing));
-    assertEquals(7, BashCapability.requestedTimeoutSeconds(explicit));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            BashCapability.requestedTimeoutSeconds(
-                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            BashCapability.requestedTimeoutSeconds(
-                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
-
-    assertEquals(
-        Duration.ofSeconds(120),
-        BashCapability.effectiveProcessTimeout(Duration.ofHours(1), Duration.ofSeconds(120)));
-    assertEquals(
-        Duration.ofSeconds(2),
-        BashCapability.effectiveProcessTimeout(Duration.ofSeconds(2), Duration.ofSeconds(120)));
-    assertEquals(
-        Duration.ofSeconds(7),
-        BashCapability.effectiveProcessTimeout(Duration.ofSeconds(30), Duration.ofSeconds(7)));
-
-    // 显式的短 timeout 必须在外部 request deadline 到来之前终止命令。
+  void bashConsumesResolvedRequestTimeout() throws Exception {
+    // 显式 1 秒 deadline 必须在命令自然结束前终止它。
     RecordingListener timed =
         invokeAsync(
             bash(config()),
-            "{\"command\":\"sleep 2\",\"timeout_seconds\":1,\"workdir\":"
-                + json(environmentRoot.toString())
-                + "}",
-            Duration.ofSeconds(5));
+            "{\"command\":\"sleep 2\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ofSeconds(1));
     assertTrue(timed.await());
-    assertTrue(text(timed.result).contains("Command timed out"));
+    assertTrue(text(timed.result).contains("Command timed out"), text(timed.result));
+
+    // 0 表示没有 deadline：命令必须自然跑完，不能被退化为立即超时。
+    RecordingListener noDeadline =
+        invokeAsync(
+            bash(config()),
+            "{\"command\":\"echo done\",\"workdir\":" + json(environmentRoot.toString()) + "}",
+            Duration.ZERO);
+    assertTrue(noDeadline.await());
+    assertFalse(noDeadline.result.error(), text(noDeadline.result));
+    assertTrue(text(noDeadline.result).contains("done"), text(noDeadline.result));
   }
 
-  /** grep 保持 15 秒默认值；find 只受调用 deadline 或显式 timeout 约束。 */
+  /** grep/find 使用 definition 默认超时（1 分钟），并原样消费 request.timeout：显式超时严格生效，0 表示无 deadline。 */
   @Test
-  void searchTimeoutsMatchPiDefaultsAndRespectInvocationDeadlines() throws Exception {
-    var absent = AbstractCodingCapability.OBJECT_MAPPER.readTree("{}");
-    var explicit = AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":7}");
+  void searchCapabilitiesConsumeResolvedRequestTimeout() throws Exception {
+    assertEquals(Duration.ofMinutes(1), grep(config()).descriptor().defaultTimeout());
+    assertEquals(Duration.ofMinutes(1), find(config()).descriptor().defaultTimeout());
 
-    assertEquals(Duration.ofHours(1), grep(config()).descriptor().timeout());
-    assertEquals(Duration.ofHours(1), find(config()).descriptor().timeout());
-    assertEquals(15, GrepCapability.requestedTimeoutSeconds(absent));
-    assertEquals(7, GrepCapability.requestedTimeoutSeconds(explicit));
-    assertEquals(
-        Duration.ofSeconds(15),
-        GrepCapability.effectiveSearchTimeout(
-            Duration.ofHours(1), GrepCapability.requestedTimeoutSeconds(absent)));
-    assertEquals(
-        Duration.ofSeconds(2),
-        GrepCapability.effectiveSearchTimeout(
-            Duration.ofSeconds(2), GrepCapability.requestedTimeoutSeconds(absent)));
-    assertEquals(
-        Duration.ofSeconds(7),
-        GrepCapability.effectiveSearchTimeout(
-            Duration.ofSeconds(30), GrepCapability.requestedTimeoutSeconds(explicit)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            GrepCapability.requestedTimeoutSeconds(
-                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":3601}")));
+    // 显式短 deadline 必须立即生效，且错误信息报告的就是该 request 值。
+    EnvironmentCapabilityResult timed =
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"a\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ofNanos(1));
+    assertTrue(timed.error(), text(timed));
+    assertTrue(text(timed).contains("grep timed out"), text(timed));
 
-    assertEquals(Duration.ofHours(1), FindCapability.effectiveSearchTimeout(Duration.ZERO, absent));
-    assertEquals(
-        Duration.ofMinutes(2),
-        FindCapability.effectiveSearchTimeout(Duration.ofMinutes(2), absent));
-    assertEquals(
-        Duration.ofSeconds(7),
-        FindCapability.effectiveSearchTimeout(Duration.ofMinutes(2), explicit));
-    assertEquals(
-        Duration.ofSeconds(2),
-        FindCapability.effectiveSearchTimeout(Duration.ofSeconds(2), explicit));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            FindCapability.effectiveSearchTimeout(
-                Duration.ofMinutes(2),
-                AbstractCodingCapability.OBJECT_MAPPER.readTree("{\"timeout_seconds\":0}")));
+    // 0 表示没有 execution deadline：搜索必须自然完成，而不是被当成立即超时。
+    EnvironmentCapabilityResult noDeadline =
+        invoke(
+            grep(config()),
+            "{\"pattern\":\"a\",\"path\":\".\",\"workdir\":"
+                + json(environmentRoot.toString())
+                + "}",
+            Duration.ZERO);
+    assertFalse(noDeadline.error(), text(noDeadline));
   }
 
   private CodingToolsConfig config() {
@@ -939,7 +903,12 @@ class CodingCapabilitiesTest {
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)
       throws Exception {
-    RecordingListener listener = invokeAsync(capability, arguments, Duration.ZERO);
+    return invoke(capability, arguments, Duration.ZERO);
+  }
+
+  private EnvironmentCapabilityResult invoke(
+      EnvironmentCapability capability, String arguments, Duration timeout) throws Exception {
+    RecordingListener listener = invokeAsync(capability, arguments, timeout);
     assertTrue(listener.await());
     assertNotNull(listener.result);
     return listener.result;

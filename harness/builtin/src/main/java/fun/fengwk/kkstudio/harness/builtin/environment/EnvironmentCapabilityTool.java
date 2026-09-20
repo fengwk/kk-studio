@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -10,15 +11,20 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 /** 委托至 BoundEnvironment 执行的具体环境能力 Tool 实现。 */
 public final class EnvironmentCapabilityTool implements Tool {
+
+  /** Environment capability arguments 中的显式超时字段；它是该调用唯一被识别的显式超时来源。 */
+  static final String TIMEOUT_SECONDS_ARGUMENT = "timeout_seconds";
 
   private final ToolDescriptor descriptor;
   private final EnvironmentCapabilityDescriptor capability;
@@ -31,8 +37,9 @@ public final class EnvironmentCapabilityTool implements Tool {
       throw new IllegalArgumentException(
           "descriptor inputSchema does not match capability inputSchema");
     }
-    if (!Objects.equals(descriptor.timeout(), capability.timeout())) {
-      throw new IllegalArgumentException("descriptor timeout does not match capability timeout");
+    if (!Objects.equals(descriptor.defaultTimeout(), capability.defaultTimeout())) {
+      throw new IllegalArgumentException(
+          "descriptor defaultTimeout does not match capability defaultTimeout");
     }
   }
 
@@ -48,6 +55,27 @@ public final class EnvironmentCapabilityTool implements Tool {
   @Override
   public ToolRequirements requirements() {
     return ToolRequirements.environment();
+  }
+
+  /**
+   * 只有本工具声明了 arguments 级超时契约：归一化 arguments 携带显式 {@code timeout_seconds} 时严格使用该值，缺省时使用 capability
+   * 的默认超时。显式值可以比默认值更短或更长，两者不取最小值，也不存在产品上限。
+   *
+   * <p>{@code timeout_seconds} 按 schema 声明必须是正数：非正数既不是合法覆盖，也不表示「无 deadline」，而是 fail closed 的非法 请求，由
+   * Gateway 收敛为确定性的 {@code INVALID_REQUEST} 失败。
+   */
+  @Override
+  public Duration resolveTimeout(ToolCall call) {
+    Objects.requireNonNull(call, "call");
+    var explicit = JsonValues.readTree(call.argumentsJson()).get(TIMEOUT_SECONDS_ARGUMENT);
+    if (explicit == null || explicit.isNull()) {
+      return capability.defaultTimeout();
+    }
+    long seconds = explicit.longValue();
+    if (seconds <= 0) {
+      throw new IllegalArgumentException("timeout_seconds must be positive: " + seconds);
+    }
+    return Duration.ofSeconds(seconds);
   }
 
   @Override

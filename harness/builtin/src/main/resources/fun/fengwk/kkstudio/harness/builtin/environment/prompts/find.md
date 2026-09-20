@@ -12,4 +12,4 @@ Usage:
 Examples:
 - `find({ pattern: "*.ts", path: "src", workdir: "/srv/project/packages/web" })`
 - `find({ pattern: "*.java", path: "src", workdir: "/srv/project/services/java", limit: 200 })`
-- `find({ pattern: "*.md", path: "docs", workdir: "C:/src/project", timeout_seconds: 30 })`
+- `find({ pattern: "*.md", path: "docs", workdir: "C:/src/project", timeout_seconds: 120 })`

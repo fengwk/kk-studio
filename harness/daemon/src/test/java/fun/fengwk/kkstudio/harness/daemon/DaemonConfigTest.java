@@ -47,7 +47,6 @@ class DaemonConfigTest {
                 Duration.ofSeconds(1),
                 Duration.ZERO,
                 Duration.ofSeconds(1),
-                Duration.ofSeconds(1),
                 tokenFile,
                 root.resolve("data-a")));
     assertThrows(
@@ -57,7 +56,6 @@ class DaemonConfigTest {
                 URI.create("ws://localhost/gateway"),
                 Duration.ZERO,
                 Duration.ZERO,
-                Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 tokenFile,
                 root.resolve("data-b")));
@@ -69,13 +67,12 @@ class DaemonConfigTest {
             Duration.ofSeconds(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(1),
             tokenFile,
             root.resolve("data-c"));
     assertEquals(TOKEN_TEXT, valid.registrationToken());
   }
 
-  /** CLI 是 daemon 连接、身份、超时、environment root 与本地数据目录的唯一配置来源。 */
+  /** CLI 是 daemon 连接、身份、environment root 与本地数据目录的唯一配置来源。 */
   @Test
   void readsCliArguments(@TempDir Path root) throws Exception {
     Path environmentRoot = Files.createDirectories(root.resolve("home"));
@@ -94,8 +91,6 @@ class DaemonConfigTest {
               "PT0S",
               "--reconnect-max",
               "PT3S",
-              "--tool-timeout",
-              "PT4S",
               "--note",
               "Custom local environment.",
               "--environment-root",
@@ -111,7 +106,6 @@ class DaemonConfigTest {
     assertEquals(Duration.ofSeconds(2), config.heartbeatInterval());
     assertEquals(Duration.ZERO, config.initialReconnectDelay());
     assertEquals(Duration.ofSeconds(3), config.maxReconnectDelay());
-    assertEquals(Duration.ofSeconds(4), config.defaultToolTimeout());
     assertEquals("Custom local environment.", config.note());
     assertEquals(environmentRoot.toRealPath(), config.environmentRoot());
     assertEquals(dataDir.toAbsolutePath().normalize(), config.dataDir());
@@ -164,7 +158,6 @@ class DaemonConfigTest {
             Duration.ofSeconds(1),
             Duration.ZERO,
             Duration.ofSeconds(1),
-            Duration.ofSeconds(1),
             tokenA,
             root.resolve("data"));
     DaemonConfig second =
@@ -172,7 +165,6 @@ class DaemonConfigTest {
             URI.create("ws://localhost/gateway"),
             Duration.ofSeconds(1),
             Duration.ZERO,
-            Duration.ofSeconds(1),
             Duration.ofSeconds(1),
             tokenB,
             root.resolve("data"));
@@ -400,6 +392,29 @@ class DaemonConfigTest {
                       root.toString()
                     }));
     assertTrue(error.getMessage().contains("unknown argument"), error.getMessage());
+  }
+
+  /** 已删除的 {@code --tool-timeout} 必须作为未知参数失败：执行超时只由 definition 默认值与调用显式值决定。 */
+  @Test
+  void rejectsRemovedToolTimeoutArgument(@TempDir Path root) throws Exception {
+    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri",
+                      "ws://gateway.example/daemon",
+                      "--registration-token-file",
+                      tokenFile.toString(),
+                      "--data-dir",
+                      root.resolve("data").toString(),
+                      "--tool-timeout",
+                      "PT5M"
+                    }));
+    assertTrue(error.getMessage().contains("unknown argument"), error.getMessage());
+    assertTrue(error.getMessage().contains("--tool-timeout"), error.getMessage());
   }
 
   /** 三个本地执行程序参数都有默认值，显式给出时覆盖默认值。 */
@@ -674,7 +689,6 @@ class DaemonConfigTest {
       Duration heartbeatInterval,
       Duration initialReconnectDelay,
       Duration maxReconnectDelay,
-      Duration defaultToolTimeout,
       Path registrationTokenFile,
       Path dataDir) {
     return new DaemonConfig(
@@ -683,7 +697,6 @@ class DaemonConfigTest {
         heartbeatInterval,
         initialReconnectDelay,
         maxReconnectDelay,
-        defaultToolTimeout,
         null,
         DaemonConfig.defaultEnvironmentRoot(),
         dataDir);

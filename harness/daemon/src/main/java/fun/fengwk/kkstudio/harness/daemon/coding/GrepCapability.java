@@ -18,15 +18,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** 使用 RE2/J 正则搜索 environment 文件，并遵守分层 {@code .gitignore}。 */
 public final class GrepCapability extends AbstractCodingCapability {
 
   private static final int MAX_DISPLAY_LINE_CHARS = 500;
-  static final int DEFAULT_TIMEOUT_SECONDS = 15;
-  static final int MAX_TIMEOUT_SECONDS = 3600;
 
   /** 只有多行模式需要整文件视图；单行模式流式扫描，因此不受此上界限制。 */
   private static final long MAX_MULTILINE_FILE_BYTES = 64 * 1024 * 1024L;
@@ -43,8 +40,8 @@ public final class GrepCapability extends AbstractCodingCapability {
     Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
     Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 100, 100_000);
-    Duration timeout =
-        effectiveSearchTimeout(request.effectiveTimeout(), requestedTimeoutSeconds(args));
+    // 有效超时在 Platform 侧解析完成（definition 默认值或显式 timeout_seconds）；这里只消费它。
+    Duration timeout = request.timeout();
     SearchControl control = SearchControl.start(timeout, execution, "grep");
     boolean multiline = optionalBoolean(args, "multiline");
     control.check();
@@ -336,19 +333,6 @@ public final class GrepCapability extends AbstractCodingCapability {
       sb.append(" ... (line truncated to 500 chars)");
     }
     return sb.toString();
-  }
-
-  static int requestedTimeoutSeconds(JsonNode args) {
-    return optionalPositiveInt(
-        args, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
-  }
-
-  static Duration effectiveSearchTimeout(Duration invocationTimeout, int requestedTimeoutSeconds) {
-    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
-    Duration requestedTimeout = Duration.ofSeconds(requestedTimeoutSeconds);
-    return invocationTimeout.isZero() || invocationTimeout.compareTo(requestedTimeout) > 0
-        ? requestedTimeout
-        : invocationTimeout;
   }
 
   private static Pattern compilePattern(

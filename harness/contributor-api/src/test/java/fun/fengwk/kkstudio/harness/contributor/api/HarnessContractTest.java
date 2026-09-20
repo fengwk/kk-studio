@@ -290,9 +290,13 @@ class HarnessContractTest {
     assertFalse(handle.isCancelled());
   }
 
-  /** 验证 ToolExecutionRequest 构造、有效超时以及参数静默归一化行为。 */
+  /**
+   * 验证 ToolExecutionRequest 参数静默归一化，以及 timeout 是已解析值原样保存、不做二次回落。
+   *
+   * <p>默认 Tool 的 {@link Tool#resolveTimeout} 只返回 descriptor.defaultTimeout()，因此 0 与显式值都按原样进入请求。
+   */
   @Test
-  void toolExecutionRequestNormalizesAndResolvesTimeout() {
+  void toolExecutionRequestNormalizesAndKeepsResolvedTimeout() {
     ToolCall rawCall =
         new ToolCall("call-1", "test_tool", "{\"offset\":\"20\",\"path\":\"README.md\"}");
     ToolExecutionRequest request = new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ZERO);
@@ -306,18 +310,41 @@ class HarnessContractTest {
             new ToolCall("call-2", "test_tool", "{\"offset\":null,\"path\":\"README.md\"}"),
             Duration.ZERO);
     assertEquals("{\"path\":\"README.md\"}", nullOptionalRequest.call().argumentsJson());
-    // 请求超时为 ZERO 时使用 descriptor 的默认超时
-    assertEquals(Duration.ofSeconds(30), request.effectiveTimeout());
+    // timeout 是执行前解析完成的唯一结果：请求原样保存，0 表示没有 deadline。
+    assertEquals(Duration.ZERO, request.timeout());
+    assertEquals(
+        Duration.ofSeconds(5),
+        new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(5)).timeout());
 
-    // 覆盖超时
-    ToolExecutionRequest customTimeoutReq =
-        new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(5));
-    assertEquals(Duration.ofSeconds(5), customTimeoutReq.effectiveTimeout());
+    // 默认 resolveTimeout 只返回 definition 默认值，不读取 arguments。
+    Tool defaultTimeoutTool = tool(DESCRIPTOR, ToolRequirements.none());
+    assertEquals(Duration.ofSeconds(30), defaultTimeoutTool.resolveTimeout(rawCall));
 
     // 拒绝负数超时
     assertThrows(
         IllegalArgumentException.class,
         () -> new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(-1)));
+  }
+
+  /** 构造仅覆盖 descriptor/requirements 的匿名 Tool，用于验证默认 SPI 行为。 */
+  private static Tool tool(ToolDescriptor descriptor, ToolRequirements requirements) {
+    return new Tool() {
+      @Override
+      public ToolDescriptor descriptor() {
+        return descriptor;
+      }
+
+      @Override
+      public ToolRequirements requirements() {
+        return requirements;
+      }
+
+      @Override
+      public ToolExecutionHandle execute(
+          ToolExecutionRequest request, ToolExecutionListener listener) {
+        return dummyHandle();
+      }
+    };
   }
 
   /** 验证 ToolContribution 单一 record 构造与契约校验（descriptor 与 requirements 一致性）。 */
