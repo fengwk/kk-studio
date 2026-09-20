@@ -39,8 +39,9 @@ import java.util.function.Function;
 /**
  * Streamable HTTP MCP 工具可执行实现。
  *
- * <p>发送前必须按模型可见工具名重新读取当前 DB 行并比对 Server 可选拔状态；使用单一 McpDeadline 覆盖初始化与调用； 错误信息绝不泄露 URL、敏感 headers
- * 或系统内部异常栈。
+ * <p>发送前必须按模型可见工具名重新读取当前 DB 行并比对 Server 可选拔状态；server 行或工具行缺失、server 被禁用或非 {@code
+ * AVAILABLE}、工具归属漂移，都在这里终结为本次调用的脱敏错误结果，且不产生任何网络 I/O。可用性只在此判定， 因此它既不改变已持久化定义的 planning，也不影响其他工具；使用单一
+ * McpDeadline 覆盖初始化与调用； 错误信息绝不泄露 URL、敏感 headers 或系统内部异常栈。
  */
 @Slf4j
 public final class RemoteMcpExecutableTool implements Tool {

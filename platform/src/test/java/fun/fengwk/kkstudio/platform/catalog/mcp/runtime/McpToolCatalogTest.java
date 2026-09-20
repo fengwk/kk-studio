@@ -26,7 +26,8 @@ import java.util.concurrent.ExecutorService;
  * 动态 MCP 运行时工具目录测试。
  *
  * <p>验证从 Repository 现读 MCP 工具数据并映射为符合契约的 {@link ToolContribution}：模型可见工具名就是 ContributionId 的
- * localName，且只有 enabled 的 AVAILABLE server 下的工具可被选择。
+ * localName；可选面（{@code selectableTools}）只包含 enabled 的 AVAILABLE server 下的工具，而查找面（{@code findTool}）
+ * 只要求持久化行存在，不按 server 可用性过滤。
  */
 class McpToolCatalogTest {
 
@@ -47,7 +48,6 @@ class McpToolCatalogTest {
 
     when(repository.listAllServers()).thenReturn(List.of(server));
     when(repository.listTools("github")).thenReturn(List.of(tool));
-    when(repository.getByName("github")).thenReturn(Optional.of(server));
 
     List<ToolContribution> tools = catalog.selectableTools();
     assertEquals(1, tools.size());
@@ -77,23 +77,83 @@ class McpToolCatalogTest {
     ToolContribution contribution = catalog.findTool("mcp_brave_search").orElseThrow();
     assertEquals("mcp_brave_search", contribution.definition().descriptor().name());
     assertEquals("mcp-brave-search", contribution.id().localName());
-    assertTrue(catalog.findTool("mcp_brave_missing").isEmpty());
   }
 
   @Test
-  void excludesToolsOfDisabledOrUnverifiedServers() {
-    // 意图：只有 enabled 且 AVAILABLE 的 server 下的工具进入运行时目录
+  void selectableToolsExcludesDisabledOrNonAvailableServers() {
+    // 意图：可选面（UI/配置选择）只包含 enabled 且 AVAILABLE 的 server 下的工具；三种不可用形态都不进入该面
     McpServer disabled = server("disabled", McpDiscoveryStatus.AVAILABLE, false);
     McpServer unverified = server("unverified", McpDiscoveryStatus.UNVERIFIED, true);
     McpServer failed = server("failed", McpDiscoveryStatus.FAILED, true);
-    McpTool tool = tool("mcp_disabled_tool", "disabled", "tool", "Tool");
 
     when(repository.listAllServers()).thenReturn(List.of(disabled, unverified, failed));
     assertTrue(catalog.selectableTools().isEmpty());
+  }
 
-    when(repository.getTool("mcp_disabled_tool")).thenReturn(Optional.of(tool));
-    when(repository.getByName("disabled")).thenReturn(Optional.of(disabled));
-    assertTrue(catalog.findTool("mcp_disabled_tool").isEmpty());
+  @Test
+  void findToolResolvesPersistedDefinitionOfDisabledUnverifiedAndFailedServers() {
+    // 意图：规划/查找面只要求持久化定义存在。server 被禁用、未验证或发现失败都不再让已持久化工具变成 tool-not-found，
+    // 可用性由调用期的 RemoteMcpExecutableTool 按同一 DB 行 fail closed。
+    for (McpDiscoveryStatus status : McpDiscoveryStatus.values()) {
+      for (boolean enabled : List.of(true, false)) {
+        String toolName = "mcp_srv_tool";
+        McpServer server = server("srv", status, enabled);
+        McpTool tool = tool(toolName, "srv", "tool", "Tool");
+        when(repository.getTool(toolName)).thenReturn(Optional.of(tool));
+        when(repository.getByName("srv")).thenReturn(Optional.of(server));
+
+        ToolContribution contribution =
+            catalog
+                .findTool(toolName)
+                .orElseThrow(
+                    () ->
+                        new AssertionError(
+                            "persisted tool must resolve for status="
+                                + status
+                                + " enabled="
+                                + enabled));
+
+        assertEquals(toolName, contribution.definition().descriptor().name());
+        assertEquals("mcp-srv-tool", contribution.id().localName());
+        assertEquals(15000L, contribution.definition().descriptor().timeout().toMillis());
+      }
+    }
+
+    // 同一 server 的可用性不影响兄弟工具：两种状态都能各自解析出精确定义，且与可选面无耦合。
+    McpServer available = server("srv", McpDiscoveryStatus.AVAILABLE, true);
+    McpTool sibling = tool("mcp_srv_sibling", "srv", "sibling", "Sibling");
+    when(repository.getByName("srv")).thenReturn(Optional.of(available));
+    when(repository.getTool("mcp_srv_sibling")).thenReturn(Optional.of(sibling));
+    assertEquals(
+        "mcp_srv_sibling",
+        catalog.findTool("mcp_srv_sibling").orElseThrow().definition().descriptor().name());
+
+    // 定义与可用性解耦：同一工具行在可用与不可用 server 下解析出的贡献身份与冻结定义完全一致，
+    // 因此 planning 期冻结的绑定不会因 server 后来被禁用或发现失败而在调用期 preflight 漂移，
+    // 且定义中的 timeout 始终取自 server 行，不因可用性被改写。
+    McpTool defined = tool("mcp_srv_defined", "srv", "defined", "Defined");
+    when(repository.getTool("mcp_srv_defined")).thenReturn(Optional.of(defined));
+    when(repository.getByName("srv"))
+        .thenReturn(Optional.of(server("srv", McpDiscoveryStatus.AVAILABLE, true)));
+    ToolContribution availableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
+    when(repository.getByName("srv"))
+        .thenReturn(Optional.of(server("srv", McpDiscoveryStatus.FAILED, false)));
+    ToolContribution unavailableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
+    assertEquals(availableFace.id(), unavailableFace.id());
+    assertEquals(availableFace.definition(), unavailableFace.definition());
+    assertEquals(15000L, unavailableFace.definition().descriptor().timeout().toMillis());
+  }
+
+  @Test
+  void findToolStaysEmptyForMissingToolOrServerRow() {
+    // 意图：查找面仍然 fail closed：工具行不存在，或工具行的 server 行不存在时一律返回空，绝不合成定义
+    when(repository.getTool("mcp_missing_tool")).thenReturn(Optional.empty());
+    assertTrue(catalog.findTool("mcp_missing_tool").isEmpty());
+
+    McpTool orphan = tool("mcp_orphan_tool", "ghost", "tool", "Tool");
+    when(repository.getTool("mcp_orphan_tool")).thenReturn(Optional.of(orphan));
+    when(repository.getByName("ghost")).thenReturn(Optional.empty());
+    assertTrue(catalog.findTool("mcp_orphan_tool").isEmpty());
   }
 
   private static McpServer server(String name, McpDiscoveryStatus status, boolean enabled) {

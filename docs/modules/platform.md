@@ -132,8 +132,11 @@ name（无论 `ContributionId` 是否一致）都 fail closed；`ToolCatalogQuer
 只通过它列出或查找工具。
 
 [McpToolCatalog](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/McpToolCatalog.java)
-每次调用现读 DB，只选拔 `enabled=true` 且 `AVAILABLE` 的 server 行与它们的工具行，按
-模型可见名升序返回。
+每次调用现读 DB，并把「可选面」与「查找面」分开：`selectableTools()` 是 UI/配置选择入口，只选拔
+`enabled=true` 且 `AVAILABLE` 的 server 行与它们的工具行，按模型可见名升序返回；`findTool(name)`
+是规划/查找入口，只要求 `mcp_tool` 行与其所属 `mcp_server` 行存在，不按 `enabled` 或发现状态过滤。
+因此 server 可用性不会把已持久化定义提前变成 planning 期的 tool-not-found：被禁用、`UNVERIFIED` 或
+`FAILED` 的 server 只是不再出现在可选面，其工具行仍是可规划、可冻结的完整定义，失败被推迟到调用期。
 [`RemoteMcpExecutableTool`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/runtime/RemoteMcpExecutableTool.java)
 在受管 `toolGatewayExecutor` 中以 per-call client 执行，`ToolRequirements` 为 none
 （不绑定任何 Environment），side effect 是 `NON_IDEMPOTENT`。发送前按工具名重读当前行

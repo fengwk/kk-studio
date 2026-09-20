@@ -1059,6 +1059,126 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
+  void plansPersistedMcpToolsOfUnavailableServersAndIsolatesOnlyThatServer() {
+    // 意图：MCP 持久化定义与 server 可用性解耦。server 被禁用、未验证或发现失败时，其已持久化工具仍必须
+    // 规划为冻结 ToolBinding（而不是 PLANNING_FAILED / tool-not-found）；可用性只留到调用期 fail closed。
+    // 同一 Agent 的兄弟工具（同一不可用 server 下的另一个工具，以及静态工具 read）不受影响。
+    HarnessCatalog staticCatalog =
+        HarnessCatalog.from(List.of(defaultBuiltinContributor(), defaultProjectContributor()));
+
+    for (McpDiscoveryStatus status : McpDiscoveryStatus.values()) {
+      for (boolean enabled : List.of(true, false)) {
+        McpServer unavailableServer = mcpServer(status, enabled);
+        McpTool echo = mcpTool("mcp_srv_echo", "echo");
+        McpTool sibling = mcpTool("mcp_srv_sibling", "sibling");
+
+        McpServerRepository repo = mock(McpServerRepository.class);
+        when(repo.getByName("srv")).thenReturn(Optional.of(unavailableServer));
+        when(repo.getTool("mcp_srv_echo")).thenReturn(Optional.of(echo));
+        when(repo.getTool("mcp_srv_sibling")).thenReturn(Optional.of(sibling));
+        when(repo.listAllServers()).thenReturn(List.of(unavailableServer));
+        when(repo.listTools("srv")).thenReturn(List.of(echo, sibling));
+
+        McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
+        RuntimeToolCatalog composite =
+            new CompositeRuntimeToolCatalog(
+                List.of(new HarnessToolCatalogAdapter(staticCatalog), mcpCatalog));
+
+        // 可选面（UI/配置选择）仍严格按 enabled + AVAILABLE 收窄：该 server 不满足时两个工具都不可见，
+        // 但它们依然在下面的 planning 中被解析并冻结。
+        boolean selectable = enabled && status == McpDiscoveryStatus.AVAILABLE;
+        assertEquals(
+            selectable ? List.of("mcp_srv_echo", "mcp_srv_sibling") : List.of(),
+            mcpCatalog.selectableTools().stream()
+                .map(contribution -> contribution.definition().descriptor().name())
+                .toList(),
+            "status=" + status + " enabled=" + enabled);
+
+        Fixture fixture =
+            new Fixture(
+                List.of("mcp_srv_echo", "read", "mcp_srv_sibling"),
+                List.of(),
+                List.of(),
+                Set.of(),
+                ProviderType.OPENAI,
+                ProviderType.OPENAI,
+                PromptCacheCapability.unsupported(),
+                true,
+                staticCatalog,
+                composite,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        fixture.readyEnvironment(ENV_A);
+
+        ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+        assertEquals(
+            List.of("mcp_srv_echo", "read", "mcp_srv_sibling"),
+            spec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
+            "status=" + status + " enabled=" + enabled);
+        ToolBinding echoBinding = spec.toolBindings().get(0);
+        assertEquals(
+            McpToolCatalog.CONTRIBUTOR_ID.value(), echoBinding.contributor().contributorId());
+        assertEquals("mcp-srv-echo", echoBinding.contributor().localName());
+        assertEquals(5000L, echoBinding.definition().descriptor().timeout().toMillis());
+        ToolBinding siblingBinding = spec.toolBindings().get(2);
+        assertEquals("mcp-srv-sibling", siblingBinding.contributor().localName());
+      }
+    }
+
+    // 反例边界：工具行真正不存在时 planning 仍必须 fail closed，绝不因可用性与定义解耦而合成任何定义。
+    McpServerRepository emptyRepo = mock(McpServerRepository.class);
+    when(emptyRepo.getTool("mcp_srv_echo")).thenReturn(Optional.empty());
+    RuntimeToolCatalog emptyComposite =
+        new CompositeRuntimeToolCatalog(
+            List.of(
+                new HarnessToolCatalogAdapter(staticCatalog),
+                new McpToolCatalog(emptyRepo, mock(ExecutorService.class))));
+    Fixture missingToolFixture =
+        new Fixture(
+            List.of("mcp_srv_echo"),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheCapability.unsupported(),
+            true,
+            staticCatalog,
+            emptyComposite,
+            Clock.fixed(NOW, ZoneOffset.UTC));
+    missingToolFixture.readyEnvironment(ENV_A);
+    assertEquals(
+        "tool not found: mcp_srv_echo",
+        missingToolFixture
+            .rejected(missingToolFixture.path(settings("default")))
+            .error()
+            .message());
+  }
+
+  private static McpServer mcpServer(McpDiscoveryStatus status, boolean enabled) {
+    McpServer server = new McpServer();
+    server.setName("srv");
+    server.setDiscoveryStatus(status);
+    server.setEnabled(enabled);
+    server.setVersion(1L);
+    server.setUrl("http://localhost:8080/mcp");
+    server.setHeaders(Map.of());
+    server.setTimeoutMillis(5000L);
+    return server;
+  }
+
+  private static McpTool mcpTool(String name, String sourceName) {
+    McpTool tool = new McpTool();
+    tool.setName(name);
+    tool.setServerName("srv");
+    tool.setSourceName(sourceName);
+    tool.setDescription(sourceName + " tool");
+    tool.setInputSchemaJson(
+        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    return tool;
+  }
+
+  @Test
   void escapesXmlInAvailableSkillsSection() {
     Fixture fixture =
         new Fixture(List.of(), List.of("a&b<c>"), List.of(hostDescriptor("load_skill")));

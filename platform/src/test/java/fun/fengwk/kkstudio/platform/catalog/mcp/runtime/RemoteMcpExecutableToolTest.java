@@ -147,8 +147,10 @@ class RemoteMcpExecutableToolTest {
   }
 
   @Test
-  void failsClosedWhenServerIsMissingDisabledOrUnverified() throws Exception {
-    // 意图：发送前重新读取 DB，server 缺失/禁用/非 AVAILABLE 时返回脱敏失败且不发起网络调用
+  void failsClosedAtInvocationWhenServerOrToolIsMissingDisabledOrUnavailable() throws Exception {
+    // 意图：发送前重新读取 DB，server 缺失/禁用/非 AVAILABLE 时返回脱敏失败且不发起网络调用。
+    // 这里同时覆盖目录查找不再按可用性过滤后的反例：即使 tool 行已由 McpToolCatalog.findTool 解析出来，
+    // 调用期仍必须按当前 DB 行 fail closed。
     ToolDescriptor descriptor = SampleDescriptors.tool(TOOL_NAME);
     RemoteMcpExecutableTool tool =
         new RemoteMcpExecutableTool(
@@ -157,7 +159,11 @@ class RemoteMcpExecutableToolTest {
     // 1. server 行缺失
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.empty());
     when(repository.getTool(TOOL_NAME)).thenReturn(Optional.of(tool(TOOL_NAME, "echo")));
-    assertTrue(execute(tool, descriptor, "call_missing", "{}").error());
+    ToolResult missingServer = execute(tool, descriptor, "call_missing", "{}");
+    assertTrue(missingServer.error());
+    // 失败必须是本次调用自己的终态结果：call id 对齐且文本脱敏，绝不泄漏 endpoint；后续 2-5 走同一分支。
+    assertEquals("call_missing", missingServer.toolCallId());
+    assertFalse(missingServer.toString().contains(fakeServer.endpointUrl()));
 
     // 2. server 被禁用
     McpServer disabled = server(fakeServer.endpointUrl());
@@ -171,7 +177,43 @@ class RemoteMcpExecutableToolTest {
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(unverified));
     assertTrue(execute(tool, descriptor, "call_unverified", "{}").error());
 
+    // 4. server 发现失败
+    McpServer failed = server(fakeServer.endpointUrl());
+    failed.setDiscoveryStatus(McpDiscoveryStatus.FAILED);
+    when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(failed));
+    assertTrue(execute(tool, descriptor, "call_failed", "{}").error());
+
+    // 5. 工具行缺失
+    when(repository.getByName(SERVER_NAME))
+        .thenReturn(Optional.of(server(fakeServer.endpointUrl())));
+    when(repository.getTool(TOOL_NAME)).thenReturn(Optional.empty());
+    assertTrue(execute(tool, descriptor, "call_tool_missing", "{}").error());
+
+    // 不可用只终结该次调用：整个失败序列不得产生任何网络 I/O（连握手都不允许），
+    // 因此用请求总数断言，而不只是工具调用次数。
     assertEquals(0, fakeServer.toolCallCount());
+    assertEquals(0, fakeServer.requestCount());
+
+    // 反向对照：同一进程内健康 server 的兄弟工具照常发送并成功，证明不可用性不扩散到其他工具。
+    String siblingServerName = "healthy_server";
+    String siblingToolName = "mcp_healthy_server_echo";
+    fakeServer.addTool("echo", "Echo", "{}");
+    when(repository.getByName(siblingServerName))
+        .thenReturn(Optional.of(serverOf(siblingServerName, fakeServer.endpointUrl())));
+    McpTool siblingRow = tool(siblingToolName, "echo");
+    siblingRow.setServerName(siblingServerName);
+    when(repository.getTool(siblingToolName)).thenReturn(Optional.of(siblingRow));
+    ToolDescriptor siblingDescriptor = SampleDescriptors.tool(siblingToolName);
+    RemoteMcpExecutableTool sibling =
+        new RemoteMcpExecutableTool(
+            siblingDescriptor, siblingServerName, siblingToolName, "echo", repository, executor);
+
+    ToolResult siblingResult = execute(sibling, siblingDescriptor, "call_sibling", "{}");
+    assertFalse(siblingResult.error());
+    assertEquals("call_sibling", siblingResult.toolCallId());
+    assertEquals(1, fakeServer.toolCallCount());
+    // 健康调用确实产生了网络 I/O：证明上面的 requestCount==0 是「没有请求」而不是计数器失效。
+    assertTrue(fakeServer.requestCount() > 0);
   }
 
   @Test
@@ -264,8 +306,12 @@ class RemoteMcpExecutableToolTest {
   }
 
   private static McpServer server(String url) {
+    return serverOf(SERVER_NAME, url);
+  }
+
+  private static McpServer serverOf(String name, String url) {
     McpServer server = new McpServer();
-    server.setName(SERVER_NAME);
+    server.setName(name);
     server.setUrl(url);
     server.setHeaders(Map.of());
     server.setEnabled(true);
