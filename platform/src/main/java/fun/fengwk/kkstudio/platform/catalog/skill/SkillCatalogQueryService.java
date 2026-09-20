@@ -2,51 +2,37 @@ package fun.fengwk.kkstudio.platform.catalog.skill;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillCatalogRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
+import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
- * Platform 全局 Skill 目录的只读查询入口。
+ * Platform 全局 Skill Package 的只读查询入口。
  *
- * <p>运行时的 turn 规划与系统提示词预览都只读取当前活跃目录事实，因此共用这一个窄查询面：按 name 稳定排序的活跃 Skill 列表与活跃 package 列表。写路径一律走
- * {@link fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService}。
+ * <p>运行时的 Skill 解析、Prompt 渲染与稳定 URI 内容读取都只读取当前发布事实，因此共用这一个窄查询面。写路径一律走 {@link
+ * fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService}。
  */
 @Component
 public class SkillCatalogQueryService {
 
-  private final SkillCatalogRepository repository;
+  private final SkillPackageRepository repository;
 
-  public SkillCatalogQueryService(SkillCatalogRepository repository) {
+  public SkillCatalogQueryService(SkillPackageRepository repository) {
     this.repository = Objects.requireNonNull(repository, "repository");
   }
 
-  /** 按 {@code name} 升序列出全部活跃 Skill（含正文）。 */
-  public List<Skill> listActiveSkills() {
-    return repository.listActiveSkills();
+  /** 按 {@code package_name asc} 列出全部 Package。 */
+  public List<SkillPackage> listPackages() {
+    return repository.listPackages();
   }
 
-  /** 按 {@code name} 升序返回全部活跃 Skill 的索引，便于按选中名精确解析。 */
-  public Map<String, Skill> activeSkillsByName() {
-    Map<String, Skill> index = new LinkedHashMap<>();
-    for (Skill skill : repository.listActiveSkills()) {
-      index.put(skill.getName(), skill);
+  /** 读取某 Package；不存在返回 null。 */
+  public SkillPackage getPackage(String packageName) {
+    if (packageName == null) {
+      return null;
     }
-    return index;
-  }
-
-  /** 按 {@code package_name asc, package_version asc} 列出全部活跃 package。 */
-  public List<SkillPackage> listActivePackages() {
-    return repository.listActivePackages();
-  }
-
-  /** 读取某 package 名当前的活跃版本；不存在返回 null。 */
-  public SkillPackage getActivePackage(String packageName) {
-    return repository.getActivePackage(packageName);
+    return repository.getPackage(packageName);
   }
 }

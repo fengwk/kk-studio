@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.sql.SQLException;
 import java.util.List;
@@ -96,7 +97,7 @@ public class AgentDefinitionServiceImplTest {
     verify(factory, never()).update(definition, update);
   }
 
-  /** 测试意图：验证创建 Agent 时会锁定并校验全局 Skill 名。 */
+  /** 测试意图：验证创建 Agent 时会校验全局 Skill 引用。 */
   @Test
   public void createAgentValidatesCurrentSkills() {
     AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
@@ -109,17 +110,19 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinition definition = definition();
     AgentDefinitionCreateDTO create = create();
-    create.getConfig().setSkills(List.of("dev"));
-    definition.setConfigJson("{\"tools\":[],\"skills\":[\"dev\"],\"subagents\":[]}");
+    SkillRefDTO skillRef = skillRef("tools", "dev");
+    create.getConfig().setSkills(List.of(skillRef));
+    definition.setConfigJson(
+        "{\"tools\":[],\"skills\":[{\"packageName\":\"tools\",\"name\":\"dev\"}],\"subagents\":[]}");
 
     when(factory.newAgent("agent", create)).thenReturn(definition);
     when(repository.create(definition)).thenReturn(true);
 
     service.createAgent(create);
-    verify(resolver).requireCurrentSkills(List.of("dev"));
+    verify(resolver).requireCurrentSkills(List.of(skillRef));
   }
 
-  /** 测试意图：验证更新 Agent 时会锁定并校验全局 Skill 名。 */
+  /** 测试意图：验证更新 Agent 时会校验全局 Skill 引用。 */
   @Test
   public void updateAgentValidatesCurrentSkills() {
     AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
@@ -131,16 +134,18 @@ public class AgentDefinitionServiceImplTest {
         service(repository, converter, factory, resolver, variants);
 
     AgentDefinition definition = definition();
-    definition.setConfigJson("{\"tools\":[],\"skills\":[\"dev\"],\"subagents\":[]}");
+    SkillRefDTO skillRef = skillRef("tools", "dev");
+    definition.setConfigJson(
+        "{\"tools\":[],\"skills\":[{\"packageName\":\"tools\",\"name\":\"dev\"}],\"subagents\":[]}");
     when(resolver.requireAgent("agent")).thenReturn(definition);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(definition);
     when(repository.updateByName(definition, 0L)).thenReturn(true);
 
     AgentDefinitionUpdateDTO update = update("0");
-    update.getConfig().setSkills(List.of("dev"));
+    update.getConfig().setSkills(List.of(skillRef));
 
     service.updateAgent("agent", update);
-    verify(resolver).requireCurrentSkills(List.of("dev"));
+    verify(resolver).requireCurrentSkills(List.of(skillRef));
   }
 
   @Test
@@ -320,5 +325,12 @@ public class AgentDefinitionServiceImplTest {
   private static DataIntegrityViolationException integrityFailure(String sqlState) {
     return new DataIntegrityViolationException(
         "database integrity failure", new SQLException("database failure", sqlState));
+  }
+
+  private static SkillRefDTO skillRef(String packageName, String name) {
+    SkillRefDTO ref = new SkillRefDTO();
+    ref.setPackageName(packageName);
+    ref.setName(name);
+    return ref;
   }
 }

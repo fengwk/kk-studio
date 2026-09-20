@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,12 +17,15 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -60,7 +64,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -105,7 +108,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
@@ -124,6 +128,7 @@ import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolType;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -311,7 +316,7 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(List.of(), requestSpec.skillBindings());
+    assertFalse(requestSpec.systemInstruction().contains("<available_skills>"));
     assertTrue(requestSpec.systemInstruction().contains("date:"));
   }
 
@@ -357,8 +362,9 @@ class DatabaseTurnResolverTest {
         new DaemonEnvironmentInfo(
             DaemonOperatingSystem.LINUX,
             "America/Los_Angeles",
-            "Custom <Linux> & tools.",
-            "/home/dev"));
+            "dev-user",
+            "/home/dev",
+            "Custom <Linux> & tools."));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     String prompt = instructionText(requestSpec);
@@ -380,7 +386,11 @@ class DatabaseTurnResolverTest {
 
     DaemonEnvironmentInfo environmentInfo =
         new DaemonEnvironmentInfo(
-            DaemonOperatingSystem.WSL, "Asia/Tokyo", "Stable WSL environment.", "/home/dev");
+            DaemonOperatingSystem.WSL,
+            "Asia/Tokyo",
+            "dev-user",
+            "/home/dev",
+            "Stable WSL environment.");
     Fixture readyFixture = new Fixture(List.of(), List.of(), List.of());
     readyFixture.readyEnvironment(ENV_A, List.of(), environmentInfo);
     String ready = instructionText(readyFixture.resolved(readyFixture.path(settings("default"))));
@@ -422,27 +432,34 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void keepsEnvironmentToolDeclarationsWhenBranchHasNoEnvironment() {
-    // 未选择 Environment 的 branch 仍能规划：环境工具保持声明，但冻结为 null 路由，调用时才失败。
-    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+  void filtersRequiredToolsAndPreservesOptionalAndSkillsWhenBranchHasNoEnvironment() {
+    // 未选择 Environment 的 branch：REQUIRED 工具在规划期被过滤掉；OPTIONAL（如 read）保持声明但冻结为 null 路由。
+    Fixture fixture = new Fixture(List.of("bash", "read"), List.of(), List.of());
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
     assertEquals(
         List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertTrue(requestSpec.toolBindings().getFirst().environmentRequired());
+    assertEquals(
+        EnvironmentSupport.OPTIONAL, requestSpec.toolBindings().getFirst().environmentSupport());
     assertNull(requestSpec.toolBindings().getFirst().environmentId());
+    assertNull(requestSpec.toolBindings().getFirst().environmentName());
 
-    // Platform Skill 与 Environment 解耦：未选择 Environment 仍可冻结并声明 load_skill。
-    Fixture skillsFixture =
-        new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    // Platform Skill 与 Environment 解耦：未选择 Environment 仍可解析 skill 并注入 read。
+    Fixture skillsFixture = new Fixture(List.of(), List.of("dev"), List.of());
     ModelRequestSpec skillSpec =
         skillsFixture.resolved(skillsFixture.path(unboundSettings("default")));
+    assertTrue(skillSpec.systemInstruction().contains("<available_skills>"));
+    assertTrue(
+        skillSpec
+            .systemInstruction()
+            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
     assertEquals(
-        List.of("dev"), skillSpec.skillBindings().stream().map(SkillBinding::name).toList());
-    assertEquals(
-        List.of("load_skill"),
+        List.of("read"),
         skillSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+    assertEquals(
+        EnvironmentSupport.OPTIONAL, skillSpec.toolBindings().getFirst().environmentSupport());
+    assertNull(skillSpec.toolBindings().getFirst().environmentId());
   }
 
   @Test
@@ -497,11 +514,10 @@ class DatabaseTurnResolverTest {
         "tool fixed_tool requires environment " + ENV_B + " but branch has environment " + ENV_A,
         rejected.error().message());
 
-    // branch 未选择环境：仍冻结 null，调用时得到 ENVIRONMENT_NOT_SELECTED，而不是规划失败。
+    // branch 未选择环境：REQUIRED 工具在规划期被过滤，toolBindings 为空。
     Fixture unbound = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
     ModelRequestSpec unboundSpec = unbound.resolved(unbound.path(unboundSettings("default")));
-    assertTrue(unboundSpec.toolBindings().getFirst().environmentRequired());
-    assertNull(unboundSpec.toolBindings().getFirst().environmentId());
+    assertEquals(List.of(), unboundSpec.toolBindings());
   }
 
   @Test
@@ -548,7 +564,7 @@ class DatabaseTurnResolverTest {
   @Test
   void skillsRequireTheSelectedBranchEnvironmentNameToExist() {
     // name 无法解析时 skills 与工具同样确定性拒绝规划。
-    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     assertEquals(
         "environment not found: " + ENV_MISSING_NAME,
         fixture
@@ -562,24 +578,22 @@ class DatabaseTurnResolverTest {
             .message());
   }
 
-  /** 测试意图：即使 Daemon 离线（无 live connection），全局目录 Skill 仍能完成规划并冻结完整事实；环境块只按连接行保留事实渲染。 */
+  /** 测试意图：即使 Daemon 离线（无 live connection），全局目录 Skill 仍能完成规划并渲染进 prompt；环境块只按连接行保留事实渲染。 */
   @Test
   void skillsPlanningSucceedsFromGlobalCatalogWhenDaemonIsOffline() {
     Fixture fixture =
-        new Fixture(
-            List.of(),
-            List.of("dev"),
-            List.of(hostDescriptor("load_skill")),
-            Clock.fixed(NOW, ZoneOffset.UTC));
+        new Fixture(List.of(), List.of("dev"), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     fixture.publishEnvironment(ENV_A);
     when(fixture.environmentRegistry.find(ENV_A)).thenReturn(Optional.empty());
     when(fixture.environmentRegistry.hasReadyLease(ENV_A)).thenReturn(false);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(
-        List.of(new SkillBinding("dev", "test-package", "1.0.0", "dev description")),
-        requestSpec.skillBindings());
+    assertTrue(requestSpec.systemInstruction().contains("<available_skills>"));
+    assertTrue(
+        requestSpec
+            .systemInstruction()
+            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
     assertFalse(instructionText(requestSpec).contains("- system:"));
   }
 
@@ -615,8 +629,7 @@ class DatabaseTurnResolverTest {
   @Test
   void routesByExactEnvironmentIdAndNeverFallsBack() {
     // 两个独立不可变 name；branch 只认 settings 中那一个 name，绝不回看更旧 settings 或 fallback。
-    Fixture fixture =
-        new Fixture(List.of("bash"), List.of("dev-b"), List.of(hostDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of("bash"), List.of("dev-b"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings =
@@ -626,18 +639,16 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
     assertEquals(
-        List.of("bash", "load_skill"),
+        List.of("bash", "read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     List<EnvironmentId> boundRoutes =
         requestSpec.toolBindings().stream().map(ToolBinding::environmentId).toList();
     assertEquals(ENV_B, boundRoutes.get(0));
-    assertNull(boundRoutes.get(1));
-    for (int i = 2; i < boundRoutes.size(); i++) {
-      assertNull(boundRoutes.get(i));
-    }
-    assertEquals(
-        List.of(new SkillBinding("dev-b", "test-package", "1.0.0", "dev-b description")),
-        requestSpec.skillBindings());
+    assertEquals(ENV_B, boundRoutes.get(1));
+    assertTrue(
+        requestSpec
+            .systemInstruction()
+            .contains("<path>kkstudio:/skills/test-package/dev-b/SKILL.md</path>"));
   }
 
   @Test
@@ -656,8 +667,8 @@ class DatabaseTurnResolverTest {
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
     assertEquals(
-        List.of(true, false, true),
-        requestSpec.toolBindings().stream().map(ToolBinding::environmentRequired).toList());
+        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.OPTIONAL),
+        requestSpec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
     assertEquals(List.of("bash", "create_goal", "read"), boundNames);
 
@@ -670,13 +681,11 @@ class DatabaseTurnResolverTest {
 
   @Test
   void freezesContributorProvenanceAndProjectsBranchScopedGoalContext() {
-    Tool dummyLoadSkill = mock(Tool.class);
-    when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
-    when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
+    ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-    BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(dummyLoadSkill, dummyTask);
+    BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(readTool, dummyTask);
     HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
     Fixture fixture = new Fixture(List.of("create_goal"), List.of(), List.of(), catalog);
     BranchSettings settings = settings("default");
@@ -712,47 +721,52 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void derivesLoadSkillFromLatestAgentSkills() {
-    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+  void derivesReadToolFromLatestAgentSkills() {
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("load_skill"),
+        List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(
-        List.of(new SkillBinding("dev", "test-package", "1.0.0", "dev description")),
-        requestSpec.skillBindings());
+    assertTrue(
+        requestSpec
+            .systemInstruction()
+            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
   }
 
   @Test
   void bindsSkillsExactlyFromSelectedEnvironment() {
-    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("load_skill"),
+        List.of("read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
     assertEquals(
-        List.of(new SkillBinding("dev", "test-package", "1.0.0", "dev description")),
-        requestSpec.skillBindings());
+        EnvironmentSupport.OPTIONAL, requestSpec.toolBindings().getFirst().environmentSupport());
+    assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
+    assertEquals(ENV_A_NAME, requestSpec.toolBindings().getFirst().environmentName());
+    assertTrue(
+        requestSpec
+            .systemInstruction()
+            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
 
-    // 全局目录缺少该 Skill：不静默丢弃，typed 拒绝。
-    fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    // 全局目录缺少该 Package：不静默丢弃，typed 拒绝；缺失形态统一为同一条不含目录内部细节的消息。
+    fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of());
     fixture.missingGlobalSkills();
     assertEquals(
-        "agent skill not found in the global catalog: dev",
+        "agent skill not found in the global catalog: test-package/dev",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
   @Test
-  void rejectsMissingLoadSkillDescriptor() {
-    // Catalog 完全没有 load_skill：工具绑定阶段即拒绝，绝不自动补装。
+  void rejectsMissingReadToolDescriptor() {
+    // Catalog 完全没有 read：工具绑定阶段即拒绝，绝不自动补装。
     Fixture fixture =
         new Fixture(
             List.of(),
@@ -766,18 +780,18 @@ class DatabaseTurnResolverTest {
             HarnessCatalog.from(List.of()));
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
-        "tool not found: load_skill",
+        "tool not found: read",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
   @Test
-  void ignoresStaleLoadSkillWhenLatestAgentHasNoSkills() {
+  void ignoresStaleReadToolWhenLatestAgentHasNoSkills() {
     Fixture fixture =
         new Fixture(
             List.of(),
             List.of(),
-            List.of(hostDescriptor("load_skill")),
-            Set.of("load_skill"),
+            List.of(),
+            Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
             PromptCacheCapability.unsupported(),
@@ -788,7 +802,6 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertEquals(List.of(), requestSpec.skillBindings());
   }
 
   @Test
@@ -805,7 +818,8 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of(TaskTool.NAME),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-    assertFalse(requestSpec.toolBindings().getFirst().environmentRequired());
+    assertEquals(
+        EnvironmentSupport.NONE, requestSpec.toolBindings().getFirst().environmentSupport());
     String system = instructionText(requestSpec);
     assertTrue(system.contains("<available_subagents>"), system);
     assertTrue(system.contains("<name>reviewer</name>"), system);
@@ -934,7 +948,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void projectsSemanticMessagesInRootToHeadOrderIgnoringBoundariesAndErrors() {
-    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of(hostDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("dev"), List.of());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     BranchSettings settings = settings("default");
 
@@ -953,6 +967,9 @@ class DatabaseTurnResolverTest {
         instruction.contains("</current_environment>\n\nThe following skills provide"),
         instruction);
     assertTrue(instruction.contains("<name>dev</name>"), instruction);
+    assertTrue(
+        instruction.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"),
+        instruction);
 
     List<ProviderMessage> messages = materialized(path, requestSpec);
     assertEquals(3, messages.size());
@@ -1180,8 +1197,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void escapesXmlInAvailableSkillsSection() {
-    Fixture fixture =
-        new Fixture(List.of(), List.of("a&b<c>"), List.of(hostDescriptor("load_skill")));
+    Fixture fixture = new Fixture(List.of(), List.of("a&b<c>"), List.of());
     fixture.readyEnvironmentWithSkills(ENV_A, List.of(skillName("a&b<c>", "d&e")));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
@@ -1189,6 +1205,8 @@ class DatabaseTurnResolverTest {
     String system = instructionText(requestSpec);
     assertTrue(system.contains("<name>a&amp;b&lt;c&gt;</name>"));
     assertTrue(system.contains("<description>d&amp;e</description>"));
+    assertTrue(
+        system.contains("<path>kkstudio:/skills/test-package/a&amp;b&lt;c&gt;/SKILL.md</path>"));
   }
 
   @Test
@@ -1654,13 +1672,11 @@ class DatabaseTurnResolverTest {
   }
 
   static BuiltinHarnessContributor defaultBuiltinContributor() {
-    Tool dummyLoadSkill = mock(Tool.class);
-    when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
-    when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
+    ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-    return new BuiltinHarnessContributor(dummyLoadSkill, dummyTask);
+    return new BuiltinHarnessContributor(readTool, dummyTask);
   }
 
   static ProjectHarnessContributor defaultProjectContributor() {
@@ -1732,7 +1748,6 @@ class DatabaseTurnResolverTest {
     // 压缩 turn 的 spec 冻结摘要 system prompt：唯一指令，不存在 preamble 消息列表。
     assertEquals(CompactionPrompts.summarizationSystemPrompt(), requestSpec.systemInstruction());
     assertEquals(List.of(), requestSpec.toolBindings());
-    assertEquals(List.of(), requestSpec.skillBindings());
     assertEquals(List.of(), requestSpec.subagentBindings());
     assertEquals(ProviderCacheControl.none(), requestSpec.cacheControl());
     assertFalse(requestSpec.systemInstruction().contains("<current_environment>"));
@@ -1991,8 +2006,8 @@ class DatabaseTurnResolverTest {
     List<String> names = spec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
     assertEquals(List.of("bash", "create_goal", "read"), names);
     assertEquals(
-        List.of(true, false, true),
-        spec.toolBindings().stream().map(ToolBinding::environmentRequired).toList());
+        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.OPTIONAL),
+        spec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
     assertEquals(ENV_A, spec.toolBindings().get(0).environmentId());
     assertNull(spec.toolBindings().get(1).environmentId());
     assertEquals(ENV_A, spec.toolBindings().get(2).environmentId());
@@ -2000,7 +2015,7 @@ class DatabaseTurnResolverTest {
 
   @Test
   void toolBindingEnvironmentNameReflectsBranchEnvironmentSelection() {
-    // 1. branch 选择了环境：environmentRequired 的工具冻结环境名，非环境工具冻结 null
+    // 1. branch 选择了环境：REQUIRED 工具冻结环境名，OPTIONAL 工具冻结环境名，NONE 工具冻结 null
     Fixture fixture =
         new Fixture(
             List.of("bash", "create_goal", "read"),
@@ -2011,39 +2026,43 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec boundSpec = fixture.resolved(fixture.path(settings("default")));
     List<ToolBinding> boundTools = boundSpec.toolBindings();
     assertEquals(3, boundTools.size());
-    // bash (environmentRequired) -> ENV_A_NAME
-    assertTrue(boundTools.get(0).environmentRequired());
+    // bash (REQUIRED) -> ENV_A_NAME
+    assertEquals(EnvironmentSupport.REQUIRED, boundTools.get(0).environmentSupport());
     assertEquals(ENV_A_NAME, boundTools.get(0).environmentName());
-    // create_goal (not environmentRequired) -> null
-    assertFalse(boundTools.get(1).environmentRequired());
+    assertEquals(ENV_A, boundTools.get(0).environmentId());
+    // create_goal (NONE) -> null
+    assertEquals(EnvironmentSupport.NONE, boundTools.get(1).environmentSupport());
     assertNull(boundTools.get(1).environmentName());
-    // read (environmentRequired) -> ENV_A_NAME
-    assertTrue(boundTools.get(2).environmentRequired());
+    assertNull(boundTools.get(1).environmentId());
+    // read (OPTIONAL) -> ENV_A_NAME
+    assertEquals(EnvironmentSupport.OPTIONAL, boundTools.get(2).environmentSupport());
     assertEquals(ENV_A_NAME, boundTools.get(2).environmentName());
+    assertEquals(ENV_A, boundTools.get(2).environmentId());
 
-    // 2. branch 未选择环境：environment-required 工具保持声明但环境名冻结为 null
+    // 2. branch 未选择环境：REQUIRED 工具在规划期被过滤掉；NONE 与 OPTIONAL 工具保留，OPTIONAL 的环境名与 ID 冻结为 null
     ModelRequestSpec unboundSpec = fixture.resolved(fixture.path(unboundSettings("default")));
     List<ToolBinding> unboundTools = unboundSpec.toolBindings();
-    assertEquals(3, unboundTools.size());
-    assertTrue(unboundTools.get(0).environmentRequired());
+    assertEquals(2, unboundTools.size());
+    assertEquals("create_goal", unboundTools.get(0).descriptor().name());
+    assertEquals(EnvironmentSupport.NONE, unboundTools.get(0).environmentSupport());
     assertNull(unboundTools.get(0).environmentName());
-    assertFalse(unboundTools.get(1).environmentRequired());
+    assertNull(unboundTools.get(0).environmentId());
+    assertEquals("read", unboundTools.get(1).descriptor().name());
+    assertEquals(EnvironmentSupport.OPTIONAL, unboundTools.get(1).environmentSupport());
     assertNull(unboundTools.get(1).environmentName());
-    assertTrue(unboundTools.get(2).environmentRequired());
-    assertNull(unboundTools.get(2).environmentName());
+    assertNull(unboundTools.get(1).environmentId());
 
-    // 3. 环境已被清除（历史 turn 选择了环境，最新 turn 未选择环境）：environment-required 工具 binding 的 environmentName 冻结为
-    // null
+    // 3. 环境已被清除（历史 turn 选择了环境，最新 turn 未选择环境）：REQUIRED 工具同样被过滤，OPTIONAL 冻结为 null
     ModelRequestSpec clearedSpec =
         fixture.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
     List<ToolBinding> clearedTools = clearedSpec.toolBindings();
-    assertEquals(3, clearedTools.size());
-    assertTrue(clearedTools.get(0).environmentRequired());
-    assertNull(clearedTools.get(0).environmentName());
-    assertFalse(clearedTools.get(1).environmentRequired());
+    assertEquals(2, clearedTools.size());
+    assertEquals("create_goal", clearedTools.get(0).descriptor().name());
+    assertEquals(EnvironmentSupport.NONE, clearedTools.get(0).environmentSupport());
+    assertEquals("read", clearedTools.get(1).descriptor().name());
+    assertEquals(EnvironmentSupport.OPTIONAL, clearedTools.get(1).environmentSupport());
     assertNull(clearedTools.get(1).environmentName());
-    assertTrue(clearedTools.get(2).environmentRequired());
-    assertNull(clearedTools.get(2).environmentName());
+    assertNull(clearedTools.get(1).environmentId());
   }
 
   @Test
@@ -2241,7 +2260,6 @@ class DatabaseTurnResolverTest {
     verify(fixture.roleToolSelector, never()).select(any());
     verify(fixture.roleContextProjector, never()).project(any());
     assertEquals(List.of(), spec.toolBindings());
-    assertEquals(List.of(), spec.skillBindings());
     // 压缩 spec 的指令是摘要 system prompt，与 live resolver 的 Agent 组合指令完全不同。
     assertEquals(CompactionPrompts.summarizationSystemPrompt(), spec.systemInstruction());
     assertFalse(spec.systemInstruction().contains("agent system prompt"));
@@ -2451,7 +2469,7 @@ class DatabaseTurnResolverTest {
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
     private final SkillCatalogQueryService skillCatalogQueryService =
         mock(SkillCatalogQueryService.class);
-    private final Map<String, Skill> activeSkills = new LinkedHashMap<>();
+    private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
@@ -2603,15 +2621,38 @@ class DatabaseTurnResolverTest {
       model.setConfigJson("model-config");
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
+      List<SkillRefDTO> skillRefs = new ArrayList<>();
+      for (String skill : skills) {
+        SkillRefDTO ref = new SkillRefDTO();
+        ref.setPackageName("test-package");
+        ref.setName(skill);
+        skillRefs.add(ref);
+        packages
+            .computeIfAbsent("test-package", k -> new LinkedHashMap<>())
+            .put(skill, skill + " description");
+      }
       agentConfig.setTools(List.copyOf(tools));
-      agentConfig.setSkills(List.copyOf(skills));
+      agentConfig.setSkills(skillRefs);
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
-      for (String skill : skills) {
-        activeSkills.put(skill, activeSkill(skill, skill + " description"));
-      }
-      when(skillCatalogQueryService.activeSkillsByName())
-          .thenAnswer(invocation -> Map.copyOf(activeSkills));
+
+      when(skillCatalogQueryService.getPackage(anyString()))
+          .thenAnswer(
+              invocation -> {
+                String pkgName = invocation.getArgument(0);
+                Map<String, String> entries = packages.get(pkgName);
+                if (entries == null) {
+                  return null;
+                }
+                SkillPackage pkg = new SkillPackage();
+                pkg.setPackageName(pkgName);
+                pkg.setCurrentCommit("0123456789abcdef0123456789abcdef01234567");
+                pkg.setSkills(
+                    entries.entrySet().stream()
+                        .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
+                        .toList());
+                return pkg;
+              });
 
       modelSupportsTools(true);
       modelSupportsReasoning(true);
@@ -2638,8 +2679,7 @@ class DatabaseTurnResolverTest {
                   new ContributorDescriptor(new ContributorId("host"), "Host", "1", Set.of()),
                   registrar -> {
                     for (ToolDescriptor descriptor : hostDescriptors) {
-                      if (descriptor.name().equals("load_skill")
-                          || descriptor.name().equals("task")
+                      if (descriptor.name().equals("task")
                           || descriptor.name().equals("create_goal")
                           || descriptor.name().equals("get_goal")
                           || descriptor.name().equals("update_goal")
@@ -2777,7 +2817,7 @@ class DatabaseTurnResolverTest {
     }
 
     private void missingGlobalSkills() {
-      activeSkills.clear();
+      packages.clear();
     }
 
     private void modelSupportsTools(boolean tools) {
@@ -2896,7 +2936,7 @@ class DatabaseTurnResolverTest {
               new DaemonCapabilities(
                   DaemonCapabilities.VERSION,
                   new DaemonEnvironmentInfo(
-                      DaemonOperatingSystem.WSL, "UTC", "Retained note", "/retained/root")),
+                      DaemonOperatingSystem.WSL, "UTC", "dev-user", "/home/dev", "Retained note")),
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
@@ -2912,7 +2952,7 @@ class DatabaseTurnResolverTest {
           environmentId,
           skills,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
+              DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment."));
     }
 
     private void readyEnvironment(
@@ -2934,7 +2974,7 @@ class DatabaseTurnResolverTest {
           environmentId,
           skills,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
+              DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment."));
     }
 
     /** 只注册该 Environment 的路由身份，不涉及任何 Skill 事实（Skill 只来自全局目录）。 */
@@ -2942,7 +2982,7 @@ class DatabaseTurnResolverTest {
       readyEnvironmentWithSkills(
           environmentId,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"),
+              DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment."),
           NOW);
     }
 
@@ -2970,25 +3010,19 @@ class DatabaseTurnResolverTest {
     /** 只发布名称的全局目录条目，描述固定为 {@code <name> description}。 */
     private void publishGlobalSkills(List<String> names) {
       for (String name : names) {
-        activeSkills.put(name, activeSkill(name, name + " description"));
+        packages
+            .computeIfAbsent("test-package", k -> new LinkedHashMap<>())
+            .put(name, name + " description");
       }
     }
 
     /** 发布带精确描述的全局目录条目（XML 转义等断言依赖描述原文）。 */
     private void publishGlobalSkills(Iterable<SkillName> skills) {
       for (SkillName skill : skills) {
-        activeSkills.put(skill.name(), activeSkill(skill.name(), skill.description()));
+        packages
+            .computeIfAbsent("test-package", k -> new LinkedHashMap<>())
+            .put(skill.name(), skill.description());
       }
-    }
-
-    private Skill activeSkill(String name, String description) {
-      Skill skill = new Skill();
-      skill.setName(name);
-      skill.setPackageName("test-package");
-      skill.setPackageVersion("1.0.0");
-      skill.setDescription(description);
-      skill.setContent("# " + name);
-      return skill;
     }
   }
 }

@@ -4,7 +4,6 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentPrompts;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 
 import java.time.format.DateTimeFormatter;
@@ -30,7 +29,7 @@ public final class AgentPromptComposer {
   public String compose(
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
-      List<SkillBinding> skills,
+      List<SkillPromptEntry> skills,
       List<SubagentBinding> subagents) {
     Objects.requireNonNull(currentEnvironment, "currentEnvironment");
     Objects.requireNonNull(skills, "skills");
@@ -117,9 +116,9 @@ public final class AgentPromptComposer {
     fields.add("- " + name + ": " + escapeXml(value));
   }
 
-  private static String skillEntries(List<SkillBinding> skills) {
+  private static String skillEntries(List<SkillPromptEntry> skills) {
     List<String> values = new ArrayList<>(skills.size());
-    for (SkillBinding skill : skills) {
+    for (SkillPromptEntry skill : skills) {
       values.add(
           "  <skill>\n"
               + "    <name>"
@@ -128,6 +127,9 @@ public final class AgentPromptComposer {
               + "    <description>"
               + escapeXml(skill.description())
               + "</description>\n"
+              + "    <path>"
+              + escapeXml(skill.path())
+              + "</path>\n"
               + "  </skill>");
     }
     return String.join("\n", values);

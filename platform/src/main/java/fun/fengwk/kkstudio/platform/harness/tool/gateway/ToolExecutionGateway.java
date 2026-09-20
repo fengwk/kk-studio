@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -186,7 +187,7 @@ public final class ToolExecutionGateway implements ToolGateway {
                   + " does not match the catalog contribution."));
     }
     ToolRequirements requirements = contribution.requirements();
-    if (binding.environmentRequired() != requirements.environmentRequired()) {
+    if (binding.environmentSupport() != requirements.environmentSupport()) {
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
@@ -225,7 +226,8 @@ public final class ToolExecutionGateway implements ToolGateway {
    * 失败。
    */
   private static ToolInvocationError environmentNotSelected(ToolBinding binding) {
-    if (!binding.environmentRequired() || binding.environmentId() != null) {
+    if (binding.environmentSupport() != EnvironmentSupport.REQUIRED
+        || binding.environmentId() != null) {
       return null;
     }
     return new ToolInvocationError(
@@ -322,7 +324,7 @@ public final class ToolExecutionGateway implements ToolGateway {
           contributorBranchViewLoader.load(
               execution.assistantEntryId(), contribution.id().contributorId().value());
       BoundEnvironment boundEnvironment =
-          execution.request().binding().environmentRequired()
+          execution.request().binding().environmentId() != null
               ? new PlatformBoundEnvironment(
                   execution.request().binding().environmentId(),
                   capabilityTransport,

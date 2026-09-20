@@ -222,7 +222,8 @@ class StudioEnvironmentControllerTest {
     card.setOperatingSystem("linux");
     card.setTimeZone("UTC");
     card.setNote("Linux environment.");
-    card.setRootPath("/home/dev");
+    card.setUserName("dev");
+    card.setHomeDirectory("/home/dev");
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
 
     mockMvc
@@ -231,7 +232,8 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.operatingSystem").value("linux"))
         .andExpect(jsonPath("$.data.timeZone").value("UTC"))
         .andExpect(jsonPath("$.data.note").value("Linux environment."))
-        .andExpect(jsonPath("$.data.rootPath").value("/home/dev"));
+        .andExpect(jsonPath("$.data.userName").value("dev"))
+        .andExpect(jsonPath("$.data.homeDirectory").value("/home/dev"));
   }
 
   /** 意图：从未 READY 的 Environment 的宿主 metadata 字段为 null，而不是伪造默认值。 */

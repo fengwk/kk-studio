@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
@@ -159,7 +160,7 @@ class ToolExecutionGatewayEffectsTest {
           @Override
           public ToolRequirements requirements() {
             return new ToolRequirements(
-                false, List.of(new StateDeclaration("state", StateMode.WRITE)));
+                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.WRITE)));
           }
 
           @Override
@@ -205,7 +206,8 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, mismatchedContributor, false, null));
+            new ToolBinding(
+                DEFINITION, mismatchedContributor, EnvironmentSupport.NONE, null, null));
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -232,7 +234,7 @@ class ToolExecutionGatewayEffectsTest {
           @Override
           public ToolRequirements requirements() {
             return new ToolRequirements(
-                false, List.of(new StateDeclaration("state", StateMode.WRITE)));
+                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.WRITE)));
           }
 
           @Override
@@ -286,7 +288,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, binding, false, null));
+            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
     ToolGateway.Execution exec =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -321,7 +323,7 @@ class ToolExecutionGatewayEffectsTest {
           @Override
           public ToolRequirements requirements() {
             return new ToolRequirements(
-                false, List.of(new StateDeclaration("state", StateMode.READ)));
+                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.READ)));
           }
 
           @Override
@@ -375,7 +377,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, binding, false, null));
+            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
     ToolGateway.Execution exec =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -406,7 +408,8 @@ class ToolExecutionGatewayEffectsTest {
 
       @Override
       public ToolRequirements requirements() {
-        return new ToolRequirements(false, List.of(new StateDeclaration("state", StateMode.WRITE)));
+        return new ToolRequirements(
+            EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.WRITE)));
       }
 
       @Override
@@ -497,7 +500,7 @@ class ToolExecutionGatewayEffectsTest {
       ToolInvocationRequest request =
           new ToolInvocationRequest(
               new ToolCall("call-1", "effects_tool", "{}"),
-              new ToolBinding(DEFINITION, contributor, false, null));
+              new ToolBinding(DEFINITION, contributor, EnvironmentSupport.NONE, null, null));
       return new ToolGateway.Execution(
           ToolGatewayTestSupport.INVOCATION_ID,
           ToolGatewayTestSupport.THREAD_ID,

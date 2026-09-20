@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.util.List;
 
@@ -24,14 +25,15 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldPersistCanonicalCapabilityListsAndKeepIdentity() throws Exception {
     ObjectMapper objectMapper = new ObjectMapper();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
-    AgentDefinitionConfigDTO config = config(List.of("browser"), List.of("java", "dev"));
+    AgentDefinitionConfigDTO config =
+        config(List.of("browser"), List.of(skillRef("tools", "java"), skillRef("tools", "dev")));
     AgentDefinitionCreateDTO create = create("agent", "provider/model", config, "default");
 
     AgentDefinition definition = factory.newAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of("browser"), stored.getTools());
-    assertEquals(List.of("java", "dev"), stored.getSkills());
+    assertEquals(List.of(skillRef("tools", "java"), skillRef("tools", "dev")), stored.getSkills());
     assertEquals("provider", definition.getModelProviderName());
     assertEquals("model", definition.getModelName());
 
@@ -51,11 +53,16 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRejectNonCanonicalCapabilityNames() {
     AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
     AgentDefinitionCreateDTO create =
-        create("agent", "provider/model", config(List.of(), List.of("java", "java")), "default");
+        create(
+            "agent",
+            "provider/model",
+            config(List.of(), List.of(skillRef("tools", "java"), skillRef("tools", "java"))),
+            "default");
     AiValidationException error =
         assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
     assertEquals(
-        "agent definition config skills must not contain duplicates: java", error.getMessage());
+        "agent definition config skills must not contain duplicates: tools/java",
+        error.getMessage());
 
     create.setConfig(config(List.of(" read "), List.of()));
     error = assertThrows(AiValidationException.class, () -> factory.newAgent("agent", create));
@@ -122,12 +129,19 @@ public class AgentDefinitionMutationFactoryTest {
     return create;
   }
 
-  private static AgentDefinitionConfigDTO config(List<String> tools, List<String> skills) {
+  private static AgentDefinitionConfigDTO config(List<String> tools, List<SkillRefDTO> skills) {
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(tools);
     config.setSkills(skills);
     config.setSubagents(List.of());
     return config;
+  }
+
+  private static SkillRefDTO skillRef(String packageName, String name) {
+    SkillRefDTO ref = new SkillRefDTO();
+    ref.setPackageName(packageName);
+    ref.setName(name);
+    return ref;
   }
 
   private AgentDefinitionMutationFactory factory(ObjectMapper objectMapper) {

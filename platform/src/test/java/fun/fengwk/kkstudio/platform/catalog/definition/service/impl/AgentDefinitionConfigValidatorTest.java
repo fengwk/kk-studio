@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -47,7 +49,9 @@ class AgentDefinitionConfigValidatorTest {
 
   private static final String CUSTOM_TOOL_NAME = "custom_tool";
   private static final String ENVIRONMENT_TOOL_NAME = "read";
-  private static final String INTERNAL_TOOL_NAME = "load_skill";
+
+  /** 内置 subagent 工具是唯一 INTERNAL 工具：Agent 选择必须在配置阶段被拒绝。 */
+  private static final String INTERNAL_TOOL_NAME = "task";
 
   @Test
   void acceptsEnvironmentToolsAndAgentConfigWithNoEnvironment() {
@@ -60,7 +64,7 @@ class AgentDefinitionConfigValidatorTest {
     try (Fixture fixture = new Fixture(List.of(hostTool("host_tool"), fixedEnvironmentTool))) {
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of(ENVIRONMENT_TOOL_NAME, "host_tool", CUSTOM_TOOL_NAME));
-      config.setSkills(List.of("dev", "ops"));
+      config.setSkills(List.of(skillRef("tools", "dev"), skillRef("tools", "ops")));
       config.setSubagents(List.of("reviewer"));
 
       assertDoesNotThrow(() -> fixture.validator.validate(config));
@@ -100,12 +104,12 @@ class AgentDefinitionConfigValidatorTest {
       String tooLong = "x".repeat(129);
       AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
       config.setTools(List.of());
-      config.setSkills(List.of(tooLong));
+      config.setSkills(List.of(skillRef("tools", tooLong)));
       config.setSubagents(List.of());
       assertTrue(
           assertThrows(IllegalArgumentException.class, () -> fixture.validator.validate(config))
               .getMessage()
-              .contains("invalid agent skill name"));
+              .contains("canonical short names"));
     }
   }
 
@@ -244,13 +248,11 @@ class AgentDefinitionConfigValidatorTest {
 
     private Fixture(List<Tool> tools) {
       List<HarnessContributor> contributors = new ArrayList<>();
-      Tool dummyLoadSkill = mock(Tool.class);
-      when(dummyLoadSkill.descriptor()).thenReturn(hostDescriptor("load_skill"));
-      when(dummyLoadSkill.requirements()).thenReturn(ToolRequirements.none());
+      ReadTool dummyRead = new ReadTool((request, listener) -> null);
       Tool dummyTask = mock(Tool.class);
       when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
       when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-      contributors.add(new BuiltinHarnessContributor(dummyLoadSkill, dummyTask));
+      contributors.add(new BuiltinHarnessContributor(dummyRead, dummyTask));
 
       if (!tools.isEmpty()) {
         contributors.add(
@@ -273,5 +275,12 @@ class AgentDefinitionConfigValidatorTest {
 
     @Override
     public void close() {}
+  }
+
+  private static SkillRefDTO skillRef(String packageName, String name) {
+    SkillRefDTO ref = new SkillRefDTO();
+    ref.setPackageName(packageName);
+    ref.setName(name);
+    return ref;
   }
 }

@@ -230,7 +230,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setOperatingSystem(host == null ? null : host.operatingSystem().wireValue());
     dto.setTimeZone(host == null ? null : host.timeZone());
     dto.setNote(host == null ? null : host.note());
-    dto.setRootPath(host == null ? null : host.rootPath());
+    dto.setUserName(host == null ? null : host.userName());
+    dto.setHomeDirectory(host == null ? null : host.homeDirectory());
     dto.setCapabilities(
         conn.capabilities().stream()
             .map(

@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
@@ -43,9 +42,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Harness Thread 控制/查询 API：snapshot availability、rename、compact、yolo、stop、approval 与 system-prompt。
- */
+/** Harness Thread 控制/查询 API：snapshot availability、rename、compact、yolo、stop 与 approval。 */
 class StudioHarnessThreadControllerTest {
 
   private static UUID id(long value) {
@@ -57,15 +54,12 @@ class StudioHarnessThreadControllerTest {
   }
 
   private HarnessRuntime runtime;
-  private SystemPromptPreviewService systemPromptPreviewService;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
-    systemPromptPreviewService = mock(SystemPromptPreviewService.class);
-    StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, systemPromptPreviewService);
+    StudioHarnessThreadController controller = new StudioHarnessThreadController(runtime);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -311,18 +305,5 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
     verify(runtime).decideToolApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
-  }
-
-  /** 意图：验证 GET /api/harness/threads/{threadId}/system-prompt 查询系统提示词预览。 */
-  @Test
-  void getSystemPromptReturnsPreviewDto() throws Exception {
-    when(systemPromptPreviewService.preview(id(1))).thenReturn("You are a helpful assistant.");
-
-    mockMvc
-        .perform(get("/api/harness/threads/" + idText(1) + "/system-prompt"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.text").value("You are a helpful assistant."));
-
-    verify(systemPromptPreviewService).preview(id(1));
   }
 }

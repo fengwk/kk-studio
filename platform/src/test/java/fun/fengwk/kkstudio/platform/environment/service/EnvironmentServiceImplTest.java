@@ -104,7 +104,8 @@ class EnvironmentServiceImplTest {
     assertNull(card.getOperatingSystem());
     assertNull(card.getTimeZone());
     assertNull(card.getNote());
-    assertNull(card.getRootPath());
+    assertNull(card.getUserName());
+    assertNull(card.getHomeDirectory());
   }
 
   /** 测试意图：Card 行创建失败必须向上冒泡，绝不留下半成品。 */
@@ -197,7 +198,7 @@ class EnvironmentServiceImplTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
-                    DaemonOperatingSystem.LINUX, "Asia/Shanghai", "Note", "/home/dev")),
+                    DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
             NOW,
             NOW.plusSeconds(60));
 
@@ -213,7 +214,8 @@ class EnvironmentServiceImplTest {
     assertEquals("linux", single.getOperatingSystem());
     assertEquals("Asia/Shanghai", single.getTimeZone());
     assertEquals("Note", single.getNote());
-    assertEquals("/home/dev", single.getRootPath());
+    assertEquals("dev", single.getUserName());
+    assertEquals("/home/dev", single.getHomeDirectory());
     List<EnvironmentCardDTO> list = service.list();
     assertEquals(1, list.size());
     assertNull(list.get(0).getRegistrationToken());
@@ -251,7 +253,8 @@ class EnvironmentServiceImplTest {
     assertNull(card.getOperatingSystem());
     assertNull(card.getTimeZone());
     assertNull(card.getNote());
-    assertNull(card.getRootPath());
+    assertNull(card.getUserName());
+    assertNull(card.getHomeDirectory());
     assertTrue(card.getCapabilities().isEmpty());
   }
 
@@ -287,7 +290,11 @@ class EnvironmentServiceImplTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
-                    DaemonOperatingSystem.WSL, "Asia/Shanghai", "Retained note", "/home/dev")),
+                    DaemonOperatingSystem.WSL,
+                    "Asia/Shanghai",
+                    "dev",
+                    "/home/dev",
+                    "Retained note")),
             NOW,
             NOW.plusSeconds(60));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
@@ -302,7 +309,8 @@ class EnvironmentServiceImplTest {
     assertEquals("wsl", card.getOperatingSystem());
     assertEquals("Asia/Shanghai", card.getTimeZone());
     assertEquals("Retained note", card.getNote());
-    assertEquals("/home/dev", card.getRootPath());
+    assertEquals("dev", card.getUserName());
+    assertEquals("/home/dev", card.getHomeDirectory());
   }
 
   /** 测试意图：registrationToken 只读端点幂等——连续读取返回同一 token，且不推进 version / updateTime（不轮换、不写库）。 */

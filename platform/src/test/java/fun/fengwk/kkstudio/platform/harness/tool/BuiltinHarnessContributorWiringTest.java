@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
-import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
@@ -21,24 +21,23 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
   @Autowired private List<HarnessContributor> contributors;
   @Autowired private BuiltinHarnessContributor builtinContributor;
   @Autowired private HarnessCatalog harnessCatalog;
-  @Autowired private LoadSkillTool loadSkillTool;
+  @Autowired private ReadTool readTool;
   @Autowired private TaskTool taskTool;
 
   @Test
   void registersBuiltinContributorAndExposesToolsThroughCatalog() {
     assertTrue(contributors.contains(builtinContributor));
     assertEquals(BuiltinHarnessContributor.ID, builtinContributor.descriptor().id());
-    assertEquals(LoadSkillTool.NAME, loadSkillTool.descriptor().name());
+    assertEquals(ReadTool.NAME, readTool.descriptor().name());
     assertEquals(TaskTool.NAME, taskTool.descriptor().name());
 
-    assertTrue(harnessCatalog.findTool(LoadSkillTool.NAME).isPresent());
+    assertTrue(harnessCatalog.findTool(ReadTool.NAME).isPresent());
     assertTrue(harnessCatalog.findTool(TaskTool.NAME).isPresent());
-    assertTrue(harnessCatalog.findTool("read").isPresent());
     assertTrue(harnessCatalog.findTool("create_goal").isPresent());
 
     assertEquals(
-        LoadSkillTool.NAME,
-        harnessCatalog.findTool(LoadSkillTool.NAME).orElseThrow().definition().descriptor().name());
+        ReadTool.NAME,
+        harnessCatalog.findTool(ReadTool.NAME).orElseThrow().definition().descriptor().name());
     assertEquals(
         TaskTool.NAME,
         harnessCatalog.findTool(TaskTool.NAME).orElseThrow().definition().descriptor().name());

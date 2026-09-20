@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -9,6 +8,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
@@ -62,7 +62,7 @@ class McpToolCatalogTest {
     assertEquals(15000L, contribution.definition().descriptor().defaultTimeout().toMillis());
     assertEquals("platform.mcp", contribution.id().contributorId().value());
     assertEquals("mcp-github-list-repos", contribution.id().localName());
-    assertFalse(contribution.requirements().environmentRequired());
+    assertEquals(EnvironmentSupport.NONE, contribution.requirements().environmentSupport());
   }
 
   @Test

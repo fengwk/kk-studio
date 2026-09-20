@@ -160,8 +160,8 @@ class CompositeRuntimeToolCatalogTest {
 
   @Test
   void findToolFallsBackToDelegateForStaticInternalTools() {
-    // 意图：不在 selectableTools 列表中的静态 INTERNAL 工具（如 load_skill/task）能通过 delegate.findTool 正常回退查找
-    ToolContribution internal = dummyContribution("load_skill", ToolVisibility.INTERNAL);
+    // 意图：不在 selectableTools 列表中的静态 INTERNAL 工具（如 task）能通过 delegate.findTool 正常回退查找
+    ToolContribution internal = dummyContribution("task", ToolVisibility.INTERNAL);
     ToolContribution selectable = dummyContribution("search", ToolVisibility.SELECTABLE);
 
     RuntimeToolCatalog staticCatalog = mock(RuntimeToolCatalog.class);
@@ -169,10 +169,10 @@ class CompositeRuntimeToolCatalogTest {
 
     // internal 工具不在 selectableTools 中
     when(staticCatalog.selectableTools()).thenReturn(List.of());
-    when(staticCatalog.findTool("load_skill")).thenReturn(Optional.of(internal));
+    when(staticCatalog.findTool("task")).thenReturn(Optional.of(internal));
 
     when(dynamicCatalog.selectableTools()).thenReturn(List.of(selectable));
-    when(dynamicCatalog.findTool("load_skill")).thenReturn(Optional.empty());
+    when(dynamicCatalog.findTool("task")).thenReturn(Optional.empty());
 
     CompositeRuntimeToolCatalog composite =
         new CompositeRuntimeToolCatalog(List.of(staticCatalog, dynamicCatalog));
@@ -181,7 +181,7 @@ class CompositeRuntimeToolCatalogTest {
     assertEquals(List.of(selectable), composite.selectableTools());
 
     // findTool 能成功查找到 internal 工具
-    Optional<ToolContribution> found = composite.findTool("load_skill");
+    Optional<ToolContribution> found = composite.findTool("task");
     assertTrue(found.isPresent());
     assertEquals(internal, found.get());
   }

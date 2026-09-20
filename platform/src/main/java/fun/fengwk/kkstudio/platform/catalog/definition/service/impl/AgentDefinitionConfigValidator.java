@@ -7,9 +7,12 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 依据 {@link RuntimeToolCatalog} 校验 Agent 选择：工具必须存在且可被 Agent 选择，Skill 名必须 canonical，subagent
@@ -30,7 +33,7 @@ public final class AgentDefinitionConfigValidator {
   public void validate(AgentDefinitionConfigDTO config) {
     Objects.requireNonNull(config, "config");
     validateToolNames(config.getTools());
-    validateSkillNames(config.getSkills());
+    validateSkills(config.getSkills());
     validateSubagents(config.getSubagents());
   }
 
@@ -47,21 +50,38 @@ public final class AgentDefinitionConfigValidator {
     }
   }
 
-  private static void validateSkillNames(List<String> names) {
-    if (names == null) {
-      return;
+  private static void validateSkills(List<SkillRefDTO> skills) {
+    if (skills == null) {
+      throw new IllegalArgumentException("agent definition config skills is required");
     }
-    for (String name : names) {
-      if (name == null) {
-        throw new IllegalArgumentException("agent skill name must not be null");
+    Set<SkillRefKey> seen = new HashSet<>();
+    for (SkillRefDTO skill : skills) {
+      if (skill == null) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must not contain null elements");
       }
       try {
-        SkillNames.canonicalSkillName(name);
-      } catch (IllegalArgumentException error) {
-        throw new IllegalArgumentException("invalid agent skill name: " + name, error);
+        SkillNames.canonicalPackageName(skill.getPackageName());
+        SkillNames.canonicalSkillName(skill.getName());
+      } catch (IllegalArgumentException | NullPointerException error) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must contain canonical short names: "
+                + skill.getPackageName()
+                + "/"
+                + skill.getName(),
+            error);
+      }
+      if (!seen.add(new SkillRefKey(skill.getPackageName(), skill.getName()))) {
+        throw new IllegalArgumentException(
+            "agent definition config skills must not contain duplicates: "
+                + skill.getPackageName()
+                + "/"
+                + skill.getName());
       }
     }
   }
+
+  private record SkillRefKey(String packageName, String name) {}
 
   private static void validateSubagents(List<String> names) {
     for (String name : names) {

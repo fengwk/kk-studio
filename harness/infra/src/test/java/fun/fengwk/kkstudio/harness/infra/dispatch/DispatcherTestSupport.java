@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.dispatch;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -627,7 +628,6 @@ final class DispatcherTestSupport {
         "Test system instruction.",
         List.of(),
         List.of(),
-        List.of(),
         ProviderCacheControl.none());
   }
 
@@ -642,7 +642,6 @@ final class DispatcherTestSupport {
         1024,
         "Test system instruction.",
         List.of(toolRequest().binding()),
-        List.of(),
         List.of(),
         base.cacheControl());
   }
@@ -704,7 +703,8 @@ final class DispatcherTestSupport {
                     Duration.ofSeconds(30)),
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "bash", List.of()),
-            true,
-            ENV_ID));
+            EnvironmentSupport.REQUIRED,
+            ENV_ID,
+            "test-env"));
   }
 }

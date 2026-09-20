@@ -40,7 +40,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
       new DaemonCapabilities(
           DaemonCapabilities.VERSION,
           new DaemonEnvironmentInfo(
-              DaemonOperatingSystem.LINUX, "UTC", "Linux environment.", "/home/dev"));
+              DaemonOperatingSystem.LINUX, "UTC", "dev", "/home/dev", "Linux environment."));
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();

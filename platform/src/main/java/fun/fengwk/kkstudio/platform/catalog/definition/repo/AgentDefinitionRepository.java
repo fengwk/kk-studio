@@ -16,8 +16,8 @@ public interface AgentDefinitionRepository {
 
   boolean existsReferencingSubagent(String name);
 
-  /** 是否有任何 Agent 的 {@code config.skills} 引用该全局 Skill 名。 */
-  boolean existsReferencingSkill(String skillName);
+  /** 是否有任何 Agent 的 {@code config.skills} 引用该全局 Skill。 */
+  boolean existsReferencingSkill(String packageName, String skillName);
 
   boolean create(AgentDefinition agentDefinition);
 

@@ -70,16 +70,18 @@ public interface AgentDefinitionMapper extends BaseMapper {
       select exists (
           select 1
           from agent_definition,
-               lateral jsonb_array_elements_text(
+               lateral jsonb_array_elements(
                    case when jsonb_typeof(config -> 'skills') = 'array'
                         then config -> 'skills'
                         else '[]'::jsonb
                    end
-               ) as skill_name
-          where skill_name = #{skillName}
+               ) as skill
+          where skill ->> 'packageName' = #{packageName}
+            and skill ->> 'name' = #{skillName}
       )
       """)
-  boolean existsReferencingSkill(@Param("skillName") String skillName);
+  boolean existsReferencingSkill(
+      @Param("packageName") String packageName, @Param("skillName") String skillName);
 
   @Insert(
       """

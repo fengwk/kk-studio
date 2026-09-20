@@ -14,15 +14,20 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
-import fun.fengwk.kkstudio.share.ai.skill.SkillDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO;
-import fun.fengwk.kkstudio.share.ai.skill.SkillPackageUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
 
 import java.util.List;
 
-/** Platform 全局 Skill 目录 API。 */
+/**
+ * Platform 全局 Git Skill Package API。
+ *
+ * <p>同一 Package 资源上暴露七个入口：列表、读取、创建、编辑（description / branch）、删除、检查 branch HEAD 与发布 exact
+ * commit。所有写操作都携带客户端已展示的 CAS {@code expectedVersion}，陈旧 Card 统一得到 version conflict。
+ */
 @AllArgsConstructor
 @RequestMapping("/api/ai/catalog")
 @RestController
@@ -30,37 +35,43 @@ public class StudioSkillCatalogController {
 
   private final SkillCatalogService skillCatalogService;
 
-  @GetMapping("/skills")
-  public Result<List<SkillDTO>> listSkills() {
-    return Results.ok(skillCatalogService.listSkills());
-  }
-
   @GetMapping("/skill-packages")
   public Result<List<SkillPackageDTO>> listPackages() {
     return Results.ok(skillCatalogService.listPackages());
   }
 
   @GetMapping("/skill-packages/{name}")
-  public Result<SkillPackageDetailDTO> getPackage(@PathVariable("name") String name) {
+  public Result<SkillPackageDTO> getPackage(@PathVariable("name") String name) {
     return Results.ok(skillCatalogService.getPackage(name));
   }
 
   @PostMapping("/skill-packages")
-  public Result<SkillPackageDetailDTO> createPackage(@RequestBody SkillPackageCreateDTO createDTO) {
+  public Result<SkillPackageDTO> createPackage(@RequestBody SkillPackageCreateDTO createDTO) {
     return Results.created(skillCatalogService.createPackage(createDTO));
   }
 
   @PutMapping("/skill-packages/{name}")
-  public Result<SkillPackageDetailDTO> updatePackage(
-      @PathVariable("name") String name, @RequestBody SkillPackageUpdateDTO updateDTO) {
-    return Results.ok(skillCatalogService.updatePackage(name, updateDTO));
+  public Result<SkillPackageDTO> editPackage(
+      @PathVariable("name") String name, @RequestBody SkillPackageEditDTO editDTO) {
+    return Results.ok(skillCatalogService.editPackage(name, editDTO));
   }
 
   @DeleteMapping("/skill-packages/{name}")
   public Result<Void> deletePackage(
-      @PathVariable("name") String name,
-      @RequestParam("expectedPackageVersion") String expectedPackageVersion) {
-    skillCatalogService.deletePackage(name, expectedPackageVersion);
+      @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
+    skillCatalogService.deletePackage(name, expectedVersion);
     return Results.noContent();
+  }
+
+  @PostMapping("/skill-packages/{name}/check")
+  public Result<SkillPackageDTO> checkPackage(
+      @PathVariable("name") String name, @RequestBody SkillPackageCheckDTO checkDTO) {
+    return Results.ok(skillCatalogService.checkPackage(name, checkDTO));
+  }
+
+  @PostMapping("/skill-packages/{name}/update")
+  public Result<SkillPackageDTO> updatePackage(
+      @PathVariable("name") String name, @RequestBody SkillPackagePublishDTO publishDTO) {
+    return Results.ok(skillCatalogService.updatePackage(name, publishDTO));
   }
 }

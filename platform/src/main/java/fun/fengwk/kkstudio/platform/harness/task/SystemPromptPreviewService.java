@@ -7,25 +7,25 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -135,29 +135,33 @@ public final class SystemPromptPreviewService {
    *
    * <p>保持只读预览的宽容契约：目录中不存在的名称被省略，绝不因单个失效名称使整段预览失败。
    */
-  private List<SkillBinding> previewSkills(List<String> skillNames) {
-    if (skillNames == null || skillNames.isEmpty()) {
+  private List<SkillPromptEntry> previewSkills(List<SkillRefDTO> skillRefs) {
+    if (skillRefs == null || skillRefs.isEmpty()) {
       return List.of();
     }
-    Map<String, Skill> catalog;
-    try {
-      catalog = skillCatalogQueryService.activeSkillsByName();
-    } catch (RuntimeException error) {
-      return List.of();
-    }
-    List<SkillBinding> bindings = new ArrayList<>();
-    for (String skillName : skillNames) {
-      Skill skill = catalog.get(skillName);
-      if (skill != null) {
-        bindings.add(
-            new SkillBinding(
-                skill.getName(),
-                skill.getPackageName(),
-                skill.getPackageVersion(),
-                skill.getDescription()));
+    List<SkillPromptEntry> entries = new ArrayList<>();
+    for (SkillRefDTO ref : skillRefs) {
+      if (ref == null || ref.getPackageName() == null || ref.getName() == null) {
+        continue;
+      }
+      SkillPackage pkg;
+      try {
+        pkg = skillCatalogQueryService.getPackage(ref.getPackageName());
+      } catch (RuntimeException error) {
+        continue;
+      }
+      if (pkg != null) {
+        SkillManifestEntry manifest = pkg.findSkill(ref.getName());
+        if (manifest != null) {
+          entries.add(
+              new SkillPromptEntry(
+                  manifest.name(),
+                  manifest.description(),
+                  "kkstudio:/skills/" + ref.getPackageName() + "/" + ref.getName() + "/SKILL.md"));
+        }
       }
     }
-    return List.copyOf(bindings);
+    return List.copyOf(entries);
   }
 
   private List<SubagentBinding> previewSubagents(List<String> names) {

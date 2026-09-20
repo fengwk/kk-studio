@@ -25,11 +25,25 @@ public class HarnessRuntimeProperties {
   private Path resourceRoot =
       Path.of(System.getProperty("user.dir", "."), ".kkstudio", "resources");
 
+  /**
+   * Platform 拥有的 Git Skill cache 根目录，bare repository 落在 {@code
+   * <skill-cache-root>/<package>.git}；未配置时取进程当前目录下的 {@code .kkstudio/skills}。
+   */
+  private Path skillCacheRoot = Path.of(System.getProperty("user.dir", "."), ".kkstudio", "skills");
+
   public Path resolvedResourceRoot() {
     if (resourceRoot == null) {
       throw new IllegalArgumentException(
           "kk-studio.harness.runtime.resource-root must not be null");
     }
     return resourceRoot.toAbsolutePath().normalize();
+  }
+
+  public Path resolvedSkillCacheRoot() {
+    if (skillCacheRoot == null) {
+      throw new IllegalArgumentException(
+          "kk-studio.harness.runtime.skill-cache-root must not be null");
+    }
+    return skillCacheRoot.toAbsolutePath().normalize();
   }
 }

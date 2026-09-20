@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -304,8 +305,9 @@ class ToolExecutionGatewayStartTest {
             new ToolBinding(
                 unknownDefinition,
                 new ContributorBinding("test", "missing", List.of()),
-                true,
-                ToolGatewayTestSupport.ENV_A));
+                EnvironmentSupport.REQUIRED,
+                ToolGatewayTestSupport.ENV_A,
+                "test-env"));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -342,7 +344,12 @@ class ToolExecutionGatewayStartTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "bash", "{}"),
-            new ToolBinding(driftedDefinition, contributor, true, ToolGatewayTestSupport.ENV_A));
+            new ToolBinding(
+                driftedDefinition,
+                contributor,
+                EnvironmentSupport.REQUIRED,
+                ToolGatewayTestSupport.ENV_A,
+                "test-env"));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -413,7 +420,8 @@ class ToolExecutionGatewayStartTest {
         new ToolBinding(
             new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE),
             new ContributorBinding("wrong-contributor", "host-tool", List.of()),
-            false,
+            EnvironmentSupport.NONE,
+            null,
             null);
     ToolGateway.StartResult result =
         gateway.start(
@@ -441,8 +449,9 @@ class ToolExecutionGatewayStartTest {
         new ToolBinding(
             bashContribution.definition(),
             new ContributorBinding("wrong-contributor", "environment.bash", List.of()),
-            true,
-            ToolGatewayTestSupport.ENV_A);
+            EnvironmentSupport.REQUIRED,
+            ToolGatewayTestSupport.ENV_A,
+            "test-env");
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(

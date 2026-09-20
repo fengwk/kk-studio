@@ -24,19 +24,20 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.Skill;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -128,8 +129,9 @@ class SystemPromptPreviewServiceTest {
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.WSL,
                     "America/New_York",
-                    "Local <dev> & tools.",
-                    "/workspace")));
+                    "dev-user",
+                    "/home/dev",
+                    "Local <dev> & tools.")));
     when(environments.find(environmentId)).thenReturn(Optional.of(liveEnvironment));
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
@@ -157,7 +159,7 @@ class SystemPromptPreviewServiceTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
-                    DaemonOperatingSystem.LINUX, "UTC", "Live note", "/live/root")));
+                    DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Live note")));
     when(environments.find(environmentId)).thenReturn(Optional.of(liveEnvironment));
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
@@ -187,7 +189,7 @@ class SystemPromptPreviewServiceTest {
             new DaemonCapabilities(
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
-                    DaemonOperatingSystem.WSL, "UTC", "Retained note", "/retained/root")));
+                    DaemonOperatingSystem.WSL, "UTC", "dev-user", "/home/dev", "Retained note")));
     when(environments.find(environmentId)).thenReturn(Optional.of(connecting));
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
@@ -215,14 +217,16 @@ class SystemPromptPreviewServiceTest {
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of("dev"));
+    config.setSkills(List.of(skillRef("test-package", "dev")));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
     // Daemon 离线
     when(environments.find(environmentId)).thenReturn(Optional.empty());
-    when(skillCatalog.activeSkillsByName())
-        .thenReturn(Map.of("dev", skill("dev", "Dev skill description")));
+    when(skillCatalog.getPackage("test-package"))
+        .thenReturn(
+            skillPackage(
+                "test-package", List.of(new SkillManifestEntry("dev", "Dev skill description"))));
 
     String preview =
         service(runtime, agents, codec, environments, boundRepository(), skillCatalog)
@@ -231,6 +235,8 @@ class SystemPromptPreviewServiceTest {
     assertTrue(preview.contains("<available_skills>"), preview);
     assertTrue(preview.contains("<name>dev</name>"), preview);
     assertTrue(preview.contains("<description>Dev skill description</description>"), preview);
+    assertTrue(
+        preview.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"), preview);
   }
 
   /** 测试意图：验证预览宽容忽略全局目录中不存在的 Skill。 */
@@ -252,13 +258,15 @@ class SystemPromptPreviewServiceTest {
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of("dev", "missing"));
+    config.setSkills(List.of(skillRef("test-package", "dev"), skillRef("test-package", "missing")));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
     when(environments.find(environmentId)).thenReturn(Optional.empty());
-    when(skillCatalog.activeSkillsByName())
-        .thenReturn(Map.of("dev", skill("dev", "Dev skill description")));
+    when(skillCatalog.getPackage("test-package"))
+        .thenReturn(
+            skillPackage(
+                "test-package", List.of(new SkillManifestEntry("dev", "Dev skill description"))));
 
     String preview =
         service(runtime, agents, codec, environments, boundRepository(), skillCatalog)
@@ -364,7 +372,7 @@ class SystemPromptPreviewServiceTest {
     when(agents.getByName("assistant")).thenReturn(agent);
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of("dev"));
+    config.setSkills(List.of(skillRef("test-package", "dev")));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
@@ -415,11 +423,12 @@ class SystemPromptPreviewServiceTest {
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of());
-    config.setSkills(List.of("code_search"));
+    config.setSkills(List.of(skillRef("test-package", "code_search")));
     config.setSubagents(List.of());
     when(codec.decode("agent-config")).thenReturn(config);
 
-    when(skillCatalog.activeSkillsByName()).thenThrow(new IllegalStateException("catalog down"));
+    when(skillCatalog.getPackage("test-package"))
+        .thenThrow(new IllegalStateException("catalog down"));
 
     String preview =
         service(
@@ -534,14 +543,18 @@ class SystemPromptPreviewServiceTest {
     return repository;
   }
 
-  private static Skill skill(String name, String description) {
-    Skill skill = new Skill();
-    skill.setName(name);
-    skill.setPackageName("test-package");
-    skill.setPackageVersion("1.0.0");
-    skill.setDescription(description);
-    skill.setContent("# " + name);
-    return skill;
+  private static SkillRefDTO skillRef(String packageName, String name) {
+    SkillRefDTO ref = new SkillRefDTO();
+    ref.setPackageName(packageName);
+    ref.setName(name);
+    return ref;
+  }
+
+  private static SkillPackage skillPackage(String packageName, List<SkillManifestEntry> entries) {
+    SkillPackage pkg = new SkillPackage();
+    pkg.setPackageName(packageName);
+    pkg.setSkills(entries);
+    return pkg;
   }
 
   private static ThreadSnapshot snapshot() {

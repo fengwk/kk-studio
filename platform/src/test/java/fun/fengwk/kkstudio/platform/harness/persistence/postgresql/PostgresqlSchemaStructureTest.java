@@ -39,7 +39,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "agent_model",
           "agent_definition",
           "skill_package",
-          "skill",
+          "plugin_credential",
           "flyway_schema_history",
           "comfyui_workflow_api",
           "mcp_server",
@@ -287,6 +287,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "lease_token",
         "status",
         "runtime_info",
+        "skill_state",
+        "recent_events",
         "last_seen_at",
         "lease_until");
     assertColumns(
@@ -458,17 +460,24 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void noTableStoresByteaFileBlobs() throws SQLException {
+  void noTableStoresByteaFileBlobsExceptEncryptedCredentialPayload() throws SQLException {
+    // 文件正文与媒体字节只存在于 S3；public schema 中唯一允许的 bytea 是 plugin_credential 的
+    // AES-256-GCM 加密凭据信封，它不是文件正文。
+    Set<String> byteaColumns = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
         ResultSet rs =
             st.executeQuery(
                 "select table_name || '.' || column_name from information_schema.columns"
                     + " where table_schema = 'public' and data_type = 'bytea'")) {
-      assertFalse(
-          rs.next(),
-          "no public table may store bytea file blobs; artifact content lives outside the database");
+      while (rs.next()) {
+        byteaColumns.add(rs.getString(1));
+      }
     }
+    assertEquals(
+        Set.of("plugin_credential.encrypted_payload"),
+        byteaColumns,
+        "only the encrypted credential envelope may use bytea; file and media content lives outside the database");
   }
 
   @Test
@@ -863,6 +872,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "trg_harness_thread_version_notify",
             "trg_canvas_document_version_notify",
             "trg_canvas_function_work_notify",
+            "trg_skill_package_changed",
             "trg_project_issue_changed_project",
             "trg_project_issue_changed_session_owner",
             "trg_project_issue_changed_issue",
@@ -989,7 +999,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "canvas_document_version_notify",
             "canvas_function_work_notify",
             "project_issue_changed_notify",
-            "notify_issue_controller_work_due"),
+            "notify_issue_controller_work_due",
+            "skill_package_changed_notify"),
         functions,
         "only declared notification helpers may exist");
 
@@ -1293,9 +1304,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_issue_run_id_issue",
             "uk_issue_run_terminal_action",
             "uk_issue_run_single_active",
-            "uk_session_owner_issue_run",
-            "uk_skill_package_active",
-            "uk_skill_active"),
+            "uk_session_owner_issue_run"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -1307,7 +1316,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                 "select conname from pg_constraint where contype = 'f'"
                     + " and conname in ('fk_agent_model_provider',"
                     + " 'fk_agent_definition_model',"
-                    + " 'fk_skill_package',"
                     + " 'fk_environment_connection_environment',"
                     + " 'fk_harness_work_environment',"
                     + " 'fk_canvas_group_canvas',"
@@ -1334,7 +1342,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "fk_agent_model_provider",
             "fk_agent_definition_model",
-            "fk_skill_package",
             "fk_environment_connection_environment",
             "fk_harness_work_environment",
             "fk_canvas_group_canvas",

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentPrompts;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
@@ -489,7 +490,6 @@ class DatabaseSubagentRunnerTest {
             1024,
             "Task delegation parent instruction.",
             List.of(),
-            List.of(),
             List.of(new SubagentBinding(SUBAGENT, "Review the change.")),
             ProviderCacheControl.none()),
         ModelInvocationStatus.READY,
@@ -653,7 +653,6 @@ class DatabaseSubagentRunnerTest {
         1024,
         "Task delegation parent instruction.",
         List.of(),
-        List.of(),
         List.of(new SubagentBinding(SUBAGENT, "Review the change.")),
         ProviderCacheControl.none());
   }
@@ -690,7 +689,8 @@ class DatabaseSubagentRunnerTest {
     return new ToolBinding(
         new AgentToolDefinition(descriptor, ToolVisibility.INTERNAL),
         new ContributorBinding("core", "task", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 
