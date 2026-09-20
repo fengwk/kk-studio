@@ -26,6 +26,14 @@ test -f web/target/kk-studio-web-1.0.0.jar
 `spring-boot-maven-plugin` 写入 `BOOT-INF/classes/static`。普通 `mvn test` / `mvn package`
 不激活该 profile。
 
+可选 Plugin 是构建期依赖，不从运行目录动态发现。把对应 artifact 以 runtime scope 加入
+[`web/pom.xml`](../../web/pom.xml) 后，上面的 `-pl web -am` 会构建并把它写入 Fat JAR；
+移除 dependency 并重新构建后，该 Plugin 的管理端口、调度任务和模型工具都不存在。
+顶层 `plugins` aggregator 只定义可构建模块，不决定发行物包含哪些 Plugin。
+共享数据库且启用 Worker 的 App 节点必须运行同一 Fat JAR 和 Plugin 集合；改变 Plugin
+依赖时先停止旧 Worker 领取新 Work、排空在途调用，再整体切换，不能让不同 Tool catalog
+长期混跑。
+
 验证静态资源已进入产物：
 
 ```bash
@@ -178,7 +186,6 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-dae
 ```text
 --gateway-uri ws://app:8080/api/harness/environment-daemon/v1
 --note "Isolated Docker reliability environment."
---environment-root /workspace
 --data-dir /workspace/.kkstudio/daemon
 ```
 
@@ -222,6 +229,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
+| production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
 | distributed | node identity/ports | `DISTRIBUTED_*` |
@@ -246,6 +254,10 @@ Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 Sy
   command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
   mode `600` 的 Maven settings，二者都不进 command line、POM、image 或报告。
+- Plugin credential 主密钥是 Base64 编码的 32-byte 随机值，只通过
+  `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 指向的只读 secret file 注入，不能把密钥正文放进
+  environment、Compose 文件、数据库或 image。多 App 节点必须使用同一内容；缺失或错误时
+  已保存凭据读取与新认证 fail closed，未连接 Plugin 不阻止 App 启动。
 
 Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network：App image build 支持
 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和

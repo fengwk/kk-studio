@@ -4,7 +4,7 @@
 
 `web` 是 kk-studio 唯一的生产 Spring Boot composition root：它把 Platform application
 services、Canvas/Harness infra、纯 Java `harness-runtime`、第一方
-`BuiltinHarnessContributor` 和受信任 Contributor JAR 快照组合成一个可运行的
+`BuiltinHarnessContributor`、可选 classpath Plugin 和受信任 Contributor JAR 快照组合成一个可运行的
 HTTP/WebSocket 进程，并把浏览器 REST、静态 SPA、浏览器 Application Event WebSocket
 与 Environment Daemon WebSocket 一起暴露给外部；领域规则由被组合的模块持有，
 Controller 只做 DTO 解析、调用 application service 和结果投影。
@@ -24,6 +24,7 @@ Controller 只做 DTO 解析、调用 application service 和结果投影。
 | Harness composition | `kk-studio-harness-environment`、`kk-studio-harness-environment-server`、`kk-studio-harness-runtime`、`kk-studio-harness-infra`、`kk-studio-harness-contributor-api` |
 | Web transport | `convention4j-spring-boot-starter-web`、`spring-boot-starter-websocket`、`spring-boot-starter-actuator` |
 | Database bootstrap | `kk-studio-schema`（runtime）、`spring-boot-starter-flyway`、`flyway-database-postgresql` |
+| Optional Plugins | 选中的 `kk-studio-plugin-*`（runtime）；没有 dependency 就不进入 Fat JAR |
 | Integration tests | convention test starter、`spring-boot-starter-webmvc-test`、Testcontainers PostgreSQL/JUnit |
 
 [WebModuleArchitectureTest](../../web/src/test/java/fun/fengwk/kkstudio/web/WebModuleArchitectureTest.java)
@@ -37,12 +38,15 @@ Harness Infra、Harness Environment、Contributor API，并禁止以任何 scope
 compile-scope 依赖传递进入组合根，web 一旦声明更近的 test-scope 依赖就会遮蔽它，使
 Spring Boot repackage 把这些 jar 从 Fat JAR 的 `BOOT-INF/lib` 中剔除。测试还禁止
 `web.controller` 包导入 `harness.runtime.processor`，并禁止
-`TrustedJarContributorLoader` 引用 Spring、Flyway、HttpClient 或 WebClient。
+`TrustedJarContributorLoader` 引用 Spring、Flyway、HttpClient 或 WebClient。可选
+`kk-studio-plugin-*` 只能是 runtime dependency，Web main/test source 都不得 import 其
+implementation package。
 
 ```text
 WebApplication
   -> Spring Boot / MVC / WebSocket / Flyway
   -> PlatformAutoConfiguration -> Platform application services and adapters
+  -> selected Plugin AutoConfigurations -> StudioPlugin + HarnessContributor
   -> Canvas infra -> canvas-core
   -> HarnessRuntimeConfiguration -> harness-infra -> harness-runtime -> harness-tool / harness-environment
   -> ContributorCatalogConfiguration -> Spring HarnessContributor beans + TrustedJarContributorLoader -> HarnessCatalog
@@ -72,7 +76,7 @@ WebApplication
 
 [ContributorCatalogConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogConfiguration.java)
 收集 Spring bean 形式的 `HarnessContributor`（含 Platform 暴露的
-`BuiltinHarnessContributor`）与 [TrustedJarContributorLoader](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java)
+`BuiltinHarnessContributor` 和已安装 Plugin）与 [TrustedJarContributorLoader](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java)
 加载的外部贡献者，调用 `HarnessCatalog.from` 冻结为单一不可变 `HarnessCatalog`；外部
 Contributor 是启动期静态扩展，不提供运行时安装或热刷新。
 [RuntimeToolCatalogConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
@@ -101,11 +105,12 @@ result status 对齐。
 | Agent Model | `/api/ai/catalog/models` | page、create；路径参数复合 `(providerName, modelNameHead, *modelNameTail)` 承载可含 `/` 的 model name |
 | Agent Definition | `/api/ai/catalog/agents` | page、create、update、expectedVersion delete |
 | Tool catalog | `GET /api/ai/catalog/tools` | Platform/Environment 可选工具目录投影 |
+| Plugin | `/api/plugins`、`/{pluginId}`、`/{pluginId}/auth/prepare|complete`、`DELETE /{pluginId}/auth` | 已安装 classpath Plugin、安全状态与固定 deep-link 认证动作；认证响应 `no-store` |
 | MCP Server | `/api/ai/mcp-servers`、`/{name}`、`/{name}/config`、`/{name}/discover` | name-keyed 显式 HTTP CRUD（name 不可变、无改名端点）；显式配置查询附带 `Cache-Control: no-store`；发现同步返回 200 |
 | Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
-| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/system-prompt`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、命名、运行控制与人工审批 |
+| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、命名、运行控制与人工审批 |
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
@@ -316,6 +321,11 @@ refresh/install；加载失败立即关闭 child classloader，Spring destroy �
 loader 本身不引用 Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于
 composition root。
 
+Trusted Contributor JAR 与 classpath Plugin 是两条不同边界：前者只能通过
+`ServiceLoader<HarnessContributor>` 提供无 Spring 的 Tool contribution；后者由
+`AutoConfiguration.imports` 随应用启动，可使用 Platform 的凭据、Storage、调度和管理
+端口。两者都在启动期冻结，均不支持运行中增删。
+
 ## 生命周期与配置
 
 | 生命周期 | phase / owner | 关闭语义 |
@@ -327,6 +337,7 @@ composition root。
 | PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
 | Harness processors / RT source | `modelProcessor`、`toolProcessor`、`realtimeEventSource` 等 | Spring destroy `close`；heartbeat timer 用 `shutdown`，heartbeat worker 与 model flush executor 用 `close` |
 | Trusted contributor | `TrustedJarContributorLoader` | destroy `close` child classloader，列表不可再使用 |
+| Plugin credential refresh | `PluginCredentialRefreshLifecycle` | 启动立即 scan，随后默认每小时 scan；stop 停止领取新 lease，in-flight finalize 仍由 lease/version 围栏 |
 
 Web context 自身持有的部署配置：
 
@@ -343,7 +354,7 @@ Web context 自身持有的部署配置：
 | `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
 
 其余 `kk-studio.*` 键（dispatcher、execution-admission、runtime resource root、project
-controller、storage、canvas、comfyui、opencli-hub）由 Platform 与 Canvas Infra 的
+controller、storage、Plugin credential、canvas、comfyui、opencli-hub）由 Platform 与 Canvas Infra 的
 `@ConfigurationProperties` 定义，完整清单见 [Platform 模块配置](platform.md#配置)。
 
 ### 安全边界
@@ -356,35 +367,40 @@ controller、storage、canvas、comfyui、opencli-hub）由 Platform 与 Canvas 
 - 系统不开放公开 S3 预签名端点；Blob 原始与预览访问统一由 Storage/Canvas 签发有限
   expiry 的 presigned URL，ComfyUI 文件输入直接使用 blobId。
 - Trusted JAR 只从显式 canonical directory 加载，不提供远程下载或热加载。
+- Plugin auth callback、明文 credential 与 renewal 参数只在 `no-store` 请求内短暂存在；
+  PostgreSQL 只存认证密文。未配置部署级主密钥时认证写入与已存在凭据读取 fail closed，
+  但未连接的可选 Plugin 不阻止应用启动。
 - `StrictJacksonConfiguration` 与各 domain codec 拒绝 duplicate/unknown/trailing
-  fields；Controller 不把上游异常、credential、bucket 或本地 Environment root 作为
-  公开字段。
+  fields；Controller 不把上游异常、credential、bucket 或任意宿主执行路径作为
+  公开字段；明确声明的 Daemon 用户与 HOME 宿主事实除外。
 
 ## 事务、并发与失败恢复不变量
 
 1. `WebApplication` 是唯一生产 Spring Boot root；Controller 只调用 Platform/Runtime/Core
    port，不复制领域事务或状态机。
-2. `V1__schema.sql` 是全仓唯一 baseline，profile seed 只由 Flyway locations 选择；没有
+2. Plugin 是否安装只由 `web` 的 runtime dependency 决定；数据库行或前端开关不能加载
+   一个 classpath 中不存在的 Plugin。
+3. `V1__schema.sql` 是全仓唯一 baseline，profile seed 只由 Flyway locations 选择；没有
    第二份 SQL bootstrap。
-3. REST snapshot 是 durable truth 的读取入口；Application Event WebSocket 只发送
+4. REST snapshot 是 durable truth 的读取入口；Application Event WebSocket 只发送
    Thread/Canvas version、Thread realtime、Project changed 与全局 resync signal，
    不保存事件记录、不替代 REST command/query。
-4. Event subscription 的上游注册先于 cursor 读取，ack 先于 activation，陈旧 version 按
+5. Event subscription 的上游注册先于 cursor 读取，ack 先于 activation，陈旧 version 按
    cursor 过滤；buffer 溢出必然折叠成一个 resync，内存有界且可恢复。
-5. WebSocket 每连接只保留单一 in-flight frame，并有 frame count + UTF-8 bytes 双限与
+6. WebSocket 每连接只保留单一 in-flight frame，并有 frame count + UTF-8 bytes 双限与
    有限 send timeout；失败先停止入队，再清理订阅/registry，最后关闭 transport。
-6. PostgreSQL notification loop 的一个 handler 失败不影响其它 channel；连接丢失由
+7. PostgreSQL notification loop 的一个 handler 失败不影响其它 channel；连接丢失由
    reconnect + resync 恢复，通知丢失不改变 PostgreSQL durable truth。Project 的跨节点/
    浏览器 invalidation 只来自数据库 trigger 提交事实，不在 Controller 额外广播。
-7. Harness dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确
+8. Harness dispatcher、processor、event loop、heartbeat scheduler 和 sender 都有明确
    owner；Environment WebSocket 的等待链路在 DB 连接与 send timeout 预算内 fail closed，
    control-plane 不存在目录 round trip。
-8. Trusted JAR list 在 catalog 创建后不可变，jar scan 只从显式目录发生；任何加载异常在
+9. Trusted JAR list 在 catalog 创建后不可变，jar scan 只从显式目录发生；任何加载异常在
    context 可用前关闭已创建的 classloader。
-9. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 与 duplicate
+10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 与 duplicate
    detection 在 Web boundary 拒绝不确定输入；error advice 不改领域事实，只映射 status、
    stable code、context 与 locale message。
-10. S3 是应用必配基础设施，启动时严格验证 properties 与 bucket 可访问性；ComfyUI
+11. S3 是应用必配基础设施，启动时严格验证 properties 与 bucket 可访问性；ComfyUI
     disabled 返回 503，enabled workflow 不存在返回 404，参数/selector/binding 错误返回
     400。
 

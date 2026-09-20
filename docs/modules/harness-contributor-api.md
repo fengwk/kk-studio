@@ -84,16 +84,27 @@ ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener 
 [`ToolRequirements`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java) 冻结三项声明：
 
 ```text
-environmentRequired      是否需要绑定执行环境
-requiredEnvironmentId    精确要求的目标 Environment；非空时 environmentRequired 必须为 true，且 branch 必须恰好选择该 Environment
-stateAccesses[]          该工具访问的 branch custom state 集合（同一 customType 不得重复）
+environmentSupport       NONE / OPTIONAL / REQUIRED
+requiredEnvironmentId    精确要求的目标 Environment；非空时 support 必须为 REQUIRED
+stateAccesses[]           该工具访问的 branch custom state 集合（同一 customType 不得重复）
 ```
 
-工厂方法 `none()` / `environment()` / `environment(EnvironmentId)` 覆盖三种常见形态，其中第三项用于把工具绑定到指定 Environment 执行（如编码工具）。Platform 侧的 MCP 工具使用 `none()`：它们通过 Backend 的 Streamable HTTP 调用执行，与宿主 Environment 无关。
+`NONE` 工具始终在 Platform 执行且不接收 Environment；`OPTIONAL` 工具在无 Environment
+时仍可执行，有选择时获得可选 `BoundEnvironment`；`REQUIRED` 工具只有在 Branch 已选择
+Environment 时才进入模型工具面。`requiredEnvironmentId` 用于把 `REQUIRED` 工具限定到
+指定 Environment。Platform MCP 工具使用 `NONE`，统一 `read` 使用 `OPTIONAL`，宿主
+写入、命令、检索与 LSP 工具使用 `REQUIRED`。
 
 需要环境的工具在 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 中拿到 `invocationId`、`threadId`、`executedAt`、`branch` 与可选的 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 是刻意窄的接口——只有 `environmentId()` 与 `execute(capability, request, listener)`，工具据此执行一个 `EnvironmentCapabilityDescriptor`，而连接注册、路由与协议细节由 Platform 的适配器承担。
 
-环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java) 要求 `environmentRequired=false` 时 `environmentId` 与 `environmentName` 必须为空；`environmentRequired=true` 而 `environmentId` 为空表示 branch 未选择 Environment，工具声明保留到调用时才失败。`environmentName` 与 `environmentId` 同源，是后续历史投影判定 native 资格的 durable 事实。Platform 的 [`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java) 在执行前用冻结的 definition、Contributor provenance 与 `requiredEnvironmentId` 逐项比对当前目录：未选择 Environment 的环境工具在权限判定前即以稳定的 `ENVIRONMENT_NOT_SELECTED` 拒绝，其余不一致也确定性拒绝执行，绝不按当前配置静默重解释。
+环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)
+保留 `environmentSupport` 与可空的 `environmentId` / `environmentName`。`NONE` 不得携带
+环境，`OPTIONAL` 可携带当前选择，`REQUIRED` 只会在存在选择时被正常规划。Platform 在
+构造模型工具列表前过滤无 Environment 的 `REQUIRED` 工具；[`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
+仍用冻结 definition、Contributor provenance、support 与 `requiredEnvironmentId` 逐项
+比对当前目录，并对陈旧或伪造的缺环境调用稳定返回 `ENVIRONMENT_NOT_SELECTED`。
+`environmentName` 与 `environmentId` 同源，继续作为历史投影判定 native 资格的
+durable 事实。
 
 ## 分支状态与副作用
 
@@ -108,10 +119,25 @@ stateAccesses[]          该工具访问的 branch custom state 集合（同一 
 ## 扩展一个 Contributor
 
 1. 实现 `HarnessContributor`（多用 `of` 工厂），给出 canonical `ContributorId`、版本与 `requires`。
-2. 在 `contribute` 中注册工具：实现 `Tool` 的 `descriptor()` / `requirements()` / `execute()`，选择 `ToolVisibility` 与 priority；需要环境能力就声明 `environment()`，需要精确绑定就声明 `environment(EnvironmentId)`；希望历史降级时仍保留语义就 override `historyRenderer()`。
+2. 在 `contribute` 中注册工具：实现 `Tool` 的 `descriptor()` / `requirements()` /
+   `execute()`，选择 `ToolVisibility` 与 priority；按工具实际执行面声明 `NONE`、
+   `OPTIONAL` 或 `REQUIRED`，需要精确绑定时再给出 `requiredEnvironmentId`；希望历史
+   降级时仍保留语义就 override `historyRenderer()`。
 3. 要维护分支状态时，先 `registerCustomEntryType(localName, customType, priority)`，再在 `ToolRequirements.stateAccesses` 中声明 READ 或 WRITE；状态载荷与 `AppendCustomEntry` 使用同一个 customType。
 4. 要注入模型上下文时注册 `ContextProjector`，只依据 `BranchView` 计算文本。
 5. 装配到组合根：组件注册进 Spring 容器或受信任 JAR，由组合根统一交给 `HarnessCatalog.from`。
+
+Contributor 的能力在两种装配方式下完全相同，但宿主边界不同：
+
+- 构建期 Plugin 由 Spring Boot auto-configuration 创建 `HarnessContributor` bean，可以
+  同时使用 Platform 的 credential、Blob 和 management services；Plugin 仍只经本 SPI
+  注册 Tool，不得另建执行、历史或审批协议。
+- 外部 trusted JAR 由隔离 classloader 和 `ServiceLoader` 创建，只适合自包含 Contributor，
+  不能依赖 Spring 注入或 Plugin 管理面。
+
+两种方式都在 `HarnessCatalog.from` 时一次性冻结，运行中不安装、卸载或刷新代码。Plugin
+本身是否存在由 `web` 的 Maven runtime dependency 决定；`EnvironmentSupport.NONE` 的
+远端 API 工具不会因未选择 Environment 被过滤。
 
 ## 源码与测试
 

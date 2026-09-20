@@ -88,7 +88,7 @@ contract 按 HTTP 边界分组，全部是严格 wire 类型：
 | --- | --- |
 | [base.ts](../../frontend/src/shared/api/contracts/base.ts) | `ResultEnvelope`、分页、时间、canonical decimal、`CatalogVersion`、`CanvasVersion` |
 | [ai-runtime.ts](../../frontend/src/shared/api/contracts/ai-runtime.ts) | Session/Entry/Thread、branch settings、command batch、stop/approval、model/tool invocation、Snapshot |
-| [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool catalog 与 structured config |
+| [ai-catalog.ts](../../frontend/src/shared/api/contracts/ai-catalog.ts) | Provider、Model、Agent、Tool、Git Skill Package catalog 与 structured config |
 | [ai-chat.ts](../../frontend/src/shared/api/contracts/ai-chat.ts) | Chat 资源 |
 | [ai-environment.ts](../../frontend/src/shared/api/contracts/ai-environment.ts) | Environment Card 与 live capability 投影 |
 | [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影、显式配置与显式 HTTP 创建/更新请求 |
@@ -165,6 +165,44 @@ sequenceDiagram
 durable Entry 投影为恰好一条记录，把 active model/tool invocation 和 attempt failure
 作为锚定其 Entry 之后的 synthetic record；状态为 `pending`、`running`、`completed`、
 `failed`、`stopped`。
+
+### Thread Debug
+
+`/debug` 与 Conversation 互斥使用主滚动区，顶部标注 `NEXT REQUEST PREVIEW` 并展示
+当前 Branch 下一次规划的模型请求前缀：
+
+```text
+┌─ DEBUG · NEXT REQUEST PREVIEW ─────────────────── [Request] [Copy] ┐
+│ SYSTEM PROMPT                                                     │
+│ ┌───────────────────────────────────────────────────────────────┐ │
+│ │ ...                                                           │ │
+│ └───────────────────────────────────────────────────────────────┘ │
+│ TOOLS  4 sent · 5 filtered                                    →  │
+│ [read P+E] [task P] │ [⊘ bash E] [⊘ grep E] [⊘ write E]           │
+│ SKILLS  3                                                     →  │
+│ [dev · local] [git-workspace · local] [chatgpt · platform]        │
+├───────────────────────────────────────────────────────────────────┤
+│ EVENTS                                                            │
+├─ INSPECTOR: selected Tool / Skill / Request ──────────────── [×] ─┤
+│ ...                                                               │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+System Prompt 保留独立的有界纵向滚动；Tools 与 Skills 各固定一行、不换行，超宽时横向
+滚动。Tools 先列最终发给模型的定义，再以灰色、虚线和 `⊘` 列出因未选择 Environment
+被过滤的 Agent 候选；`P`、`P+E`、`E` 分别表示 `NONE`、`OPTIONAL`、`REQUIRED`。
+点击任一 Tool 或 Skill 在 Composer 上方打开共享详情面板：Tool
+展示完整 description、input schema、EnvironmentSupport、Contributor、发送/过滤状态；
+Skill 展示 Package、description、稳定 path、Platform current/observed commit、Daemon
+installed commit 与实际 Prompt XML。
+
+Debug API 明确区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`。顶部 Rails
+属于前者；后者通过 Request 详情展示由冻结 ModelRequestSpec 物化的 canonical
+ProviderRequest，其精确 Skill 列表已在冻结 systemInstruction 的 XML 中。预览不能冒充
+历史实际请求。详情完整保留可读 JSON，但不展示 credential、Authorization header、
+对象存储内部地址或 Base64 正文。前端只调用
+`GET /api/harness/threads/{threadId}/model-request-debug`，进入 Debug 拉取一次，并在
+Turn 开始/结束时刷新。
 
 运行控制面同样以 Snapshot 为对账依据：
 
@@ -260,21 +298,44 @@ upload handle 只能按 upload id 删除，blob original/preview URL 只在资�
 ### AI
 
 [`features/ai`](../../frontend/src/features/ai) 分成 catalog、chat、composer、environment、
-mcp、runtime、skills 七个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
+mcp、plugins、runtime、skills 八个子目录。Catalog 页面按 structured config 渲染 Provider/Model/Agent；
 Agent 的 `tools`、`subagents` 用 catalog candidate 校验（candidate 身份就是模型可见
-name），`skills` 用 Platform 全局 canonical Skill name 引用候选。Agent 表单还显式编辑
+name），`skills` 用 `(packageName, name)` 引用候选，选择器显示 `package / name`。
+System Prompt 仍只展示 Skill 自身的 name、description 与 path，相同 name 可以由路径与
+描述区分。Agent 表单还显式编辑
 `inheritParentEnvironment`（新建默认开启），决定该 Agent 被 `task` 委派时是否继承父
 会话当前 Environment。Chat 只持久化 title、agentName 与 YOLO 开关，Environment
 是可空的分支选择（`BranchSettings.environmentName`），随每个分支的 branchSettings 独立
 保存并逐字段投影。
 
 Environment 卡片只展示 capability 的 canonical `id`，管理弹窗只投影宿主事实
-（`EnvironmentHostSection`：OS、时区、备注、root path 与最后活跃时间），不提供任何
-环境侧写入或异步任务视图。MCP 卡片只消费不含连接细节的安全投影（name、enabled、
+（`EnvironmentHostSection`：OS、时区、Daemon 进程用户、HOME、可选备注与最后活跃
+时间）和最近一条 WARN/ERROR。管理弹窗按需轮询最近 200 条连接/Skill 同步运维事件，
+不展示原始 stdout、凭据或签名 URL。MCP 卡片只消费不含连接细节的安全投影（name、enabled、
 timeout、发现状态与工具数），完整配置（URL 与 headers）仅在打开编辑弹窗时经 `no-store`
 端点读取，并用递增 generation fence 防止关闭/重开时的迟到响应覆盖当前弹窗；更新或发现
-进行中时所有 mutation 控件禁用。Platform 全局 Skill package 的 CRUD 与当前 Skill 候选
-独立在 [`features/ai/skills`](../../frontend/src/features/ai/skills)。
+进行中时所有 mutation 控件禁用。Platform Skill Package 卡片展示 repository、branch、
+current commit、最近观察到的 branch HEAD 与检查状态；Check 只更新候选，用户点击 exact
+commit 的 Update 后才发布并同步。相关 CRUD 与当前 Skill 候选独立在
+[`features/ai/skills`](../../frontend/src/features/ai/skills)。
+
+Plugin 配置是统一的静态 UI，不加载 Plugin 提供的脚本或 HTML。页面从
+`GET /api/plugins` 只渲染当前 Fat JAR 实际安装的 descriptor；删除 `web` runtime
+dependency 并重新构建后，对应卡片自然消失。每张卡片只显示名称、版本、连接状态、region、
+token 到期时间、下一次刷新时间和去敏错误，不展示密文、token 或 client identity。
+
+MiniMax Mavis 卡片的 Connect 流程是：
+
+1. 选择 CN 或 EN，调用 `auth/prepare` 取得固定官方登录链接并在新窗口打开；
+2. 用户登录后复制 `minimax-cn://auth-callback?...` 或
+   `minimax://auth-callback?...` deep link；
+3. password 型输入禁用 autocomplete，不写 local/session storage；提交
+   `auth/complete` 后无论成功失败都立即清空；
+4. 前端重新读取安全状态，成功显示 Connected；`REAUTH_REQUIRED` 只提供重新连接，
+   `REFRESH_FAILED` 展示自动重试时间，`REFRESH_UNCERTAIN` 要求重新连接；Disconnect 要
+   二次确认。
+
+同一 callback 请求不自动重试；generation fence 防止关闭/重开弹窗后的迟到响应覆盖新状态。
 
 ### Projects
 
@@ -318,8 +379,9 @@ pending operation，poll interval `1500ms`，polling 集合是 `pending`/`in_pro
 editor/delete 是 ExtensionHost dialog contribution。
 
 [SettingsPage](../../frontend/src/features/settings/SettingsPage.tsx) 的 General tab
-只保存浏览器偏好（`kkstudio.browser-preferences.v1`），不写入 `/api/settings`；server
-tabs 完全由 `GET /api/settings/schema` 的 sections、groups、fields 和 label keys 决定。
+只保存浏览器偏好（`kkstudio.browser-preferences.v1`），不写入 `/api/settings`；Plugins
+tab 挂载上面的统一 Plugin 卡片，但凭据走 `/api/plugins`，不混入 SystemSettings aggregate；
+其余 server tabs 完全由 `GET /api/settings/schema` 的 sections、groups、fields 和 label keys 决定。
 [SystemSettingsSchemaRenderer](../../frontend/src/features/settings/SystemSettingsSchemaRenderer.tsx)
 依据 `BOOLEAN`、`INTEGER`、`LONG`、`TEXT`、`ENUM`、`PERMISSION`、`MODEL_SELECTION` 选择
 控件，permission 有 `allow`/`ask`/`deny`，apply timing 有 `NEXT_INVOCATION`、

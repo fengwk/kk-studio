@@ -19,8 +19,8 @@ Environment 页面会显示 `READY`，Agent 即可绑定它。
   普通 WebSocket。每个终止 WebSocket 的代理层都要启用压缩。
 
 运行边界：Daemon 是普通宿主进程，继承启动它的 Unix 用户权限。业务授权由 Studio 侧判定，
-宿主不提供文件系统沙箱；`--environment-root` 只是 READY 中的展示元数据，既不是沙箱，也不是
-工具默认工作目录，每次工具调用都自带 `workdir`。
+宿主不提供文件系统沙箱。READY 自动报告进程用户与 canonical HOME，但两者都不是默认
+工作目录；相对文件路径与命令执行必须由调用显式给出 `workdir`。
 
 ## 下载并校验发布物
 
@@ -78,6 +78,8 @@ java -jar ~/.local/lib/kk-studio/kk-studio-daemon.jar \
 注册成功后进程保持前台运行，连接断开时按退避自动重连；`Ctrl-C` 结束进程。启动或注册失败时
 进程向 stderr 输出原因并以非零状态码退出。Studio 页面转为 `READY` 后，可在对话分支选择该
 Environment，并为 Agent 选择需要的 Environment Tools；Skill 由 Platform 全局目录独立管理。
+Platform 会在 READY 后异步把当前已发布的 Skill Package commit 同步到 Daemon；同步失败
+不影响其它 Environment 能力，Agent 会退回 Platform Skill URI。
 
 `--help`、`-h` 和 `--version` 只在作为唯一参数时生效，打印后直接退出，不打开数据目录也不建立
 连接。
@@ -160,11 +162,11 @@ rm ~/.config/systemd/user/kk-studio-daemon.service
 systemctl --user daemon-reload
 rm -rf ~/.local/lib/kk-studio
 rm -f ~/.config/kk-studio/daemon.token
-rm -rf ~/.kk-studio        # 数据目录：进程锁与 resources/{text,staging}
+rm -rf ~/.kk-studio        # 数据目录：进程锁、resources/ 与 skills/
 ```
 
 最后一条会删除进程锁、durable 命令文本日志（`resources/text/*.log`）与上传中转暂存
-（`resources/staging/*.part`），确认不再需要这些记录后再执行。
+（`resources/staging/*.part`），以及当前安装的 Skill Packages；确认不再需要这些记录后再执行。
 
 ## 常见问题
 
@@ -186,8 +188,7 @@ rm -rf ~/.kk-studio        # 数据目录：进程锁与 resources/{text,staging
 | `--heartbeat` | 否 | `PT15S` | 心跳间隔 |
 | `--reconnect-initial` | 否 | `PT1S` | 首次重连退避 |
 | `--reconnect-max` | 否 | `PT30S` | 最大重连退避 |
-| `--note` | 否 | 按操作系统生成 | 进入 READY 的可信备注，单行且不超过 512 字符 |
-| `--environment-root` | 否 | 启动用户 canonical HOME | 仅作 READY 展示元数据 |
+| `--note` | 否 | 无 | 进入 READY 的可信备注，单行且不超过 512 字符 |
 | `--data-dir` | 否 | `~/.kk-studio` | 本地数据目录，显式给出时必须绝对 |
 | `--bash-executable` | 否 | `bash` | `process.exec` 使用的 shell |
 | `--lsp-bridge-command` | 否 | 缺省禁用 | LSP bridge 命令，未配置时相关能力返回不可用 |

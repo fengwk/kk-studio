@@ -11,24 +11,40 @@ Environment Daemon 是运行在目标宿主上的独立 JVM 进程。它把 Plat
 ```text
 CLI -> DaemonConfig
    -> DaemonDataDirectory.open(dataDir)          # owner-only 布局 + daemon.lock
-   -> CodingToolsConfig.fromCli(environmentRoot, dataDir/resources, ...)
+   -> CodingToolsConfig.fromCli(dataDir/resources, ...)
    -> DaemonRuntime.create
    -> shutdown hook -> start -> awaitTermination
 ```
 
 单个 `--help`/`-h` 或 `--version` 是纯信息命令，在打开数据目录之前输出并直接返回；混用或多余参数一律交给配置解析并失败关闭。注册被拒时进程进入 FAILED，向 stderr 输出原因并以非零状态码退出。
 
-[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java) 的完整选项、默认值与安装方式只在 [Environment Daemon 安装与运行](../operations/environment-daemon.md) 维护；进程侧只需要知道三条约束：`--gateway-uri` 与 `--registration-token-file` 必填，`--reconnect-initial` / `--reconnect-max` / `--heartbeat` 决定重连与心跳，`--environment-root` 只作 READY 展示元数据。
+[`DaemonConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfig.java)
+的完整选项、默认值与安装方式只在
+[Environment Daemon 安装与运行](../operations/environment-daemon.md) 维护；进程侧只需要
+知道三条约束：`--gateway-uri` 与 `--registration-token-file` 必填，
+`--reconnect-initial` / `--reconnect-max` / `--heartbeat` 决定重连与心跳，
+`--data-dir` 决定 owner-only 本地状态位置。READY 的进程用户与 HOME 由 Daemon
+直接探测。
 
 注册凭证只以 owner-only 普通文件存在：CLI 只接收路径，配置对象不保存凭证文本，因此 `equals`/`hashCode`/`toString` 与日志都不会扩散秘密，凭证在每次 HELLO 前按需读取。[`DaemonTokenFile`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFile.java) 要求绝对路径、现存普通文件（拒绝符号链接与目录）与 owner-only 权限，并忽略两端空白。未知选项（包括历史遗留的 `--registration-token`、`--skill-dir`）一律启动失败，没有兼容回退。
 
-[`DaemonDataDirectory`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectory.java) 以 owner-only 权限创建固定布局（POSIX 目录 0700、文件 0600），持有 `daemon.lock` 的进程独占锁，因此同一目录上的第二个 Daemon 立即失败而不是并发写同一份本地数据。启动只清理 `resources/staging` 下遗留的 `*.part`；已发布的 `resources/text` 永不自动删除，因为 durable history 仍可能引用其中的路径。`--environment-root` 同样只是展示元数据，不参与资源目录、调用 cwd 或路径边界。
+[`DaemonDataDirectory`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectory.java)
+以 owner-only 权限创建固定布局（POSIX 目录 0700、文件 0600），持有 `daemon.lock` 的
+进程独占锁，因此同一目录上的第二个 Daemon 立即失败而不是并发写同一份本地数据。目录
+包含 `resources/{text,staging}` 与 `skills/{.staging,<package>}`；启动清理未发布的
+staging 残留，已安装 Package 与可读的大文本由各自生命周期管理。HOME 只作为 READY
+宿主事实，不参与资源目录、调用 cwd 或路径边界。
 
 ## 能力注册表
 
-[`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java) 在运行时构造完成时冻结，运行期能力集合不可变。注册的 9 项能力与 [Harness Environment](harness-environment.md) 的目录逐项对齐，descriptor 的版本与 schema 都从 catalog 取用：
+[`DaemonCapabilityRegistry`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonCapabilityRegistry.java)
+在运行时构造完成时冻结，运行期能力集合不可变。注册的能力与
+[Harness Environment](harness-environment.md) 的目录逐项对齐，descriptor 的版本与
+schema 都从 catalog 取用：
 
 - [`CodingCapabilities`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilities.java) 注册 9 项编码能力：`fs.read`、`fs.write`、`fs.edit`、`process.exec`、`fs.grep`、`fs.find`、`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`。
+- 内部 `skill.sync` 安装 Platform 指定的 exact commit；它复用通用 capability
+  invocation 协议，但不注册为模型工具。
 
 Daemon 不注册任何 MCP 能力：MCP 是 Platform 在 Backend 进程内的能力（见 [Harness MCP](harness-mcp.md)），不进入宿主执行面。
 
@@ -69,7 +85,14 @@ journal 的 `start` 原子去重、`complete` 只允许 `RUNNING` 到终态的�
 
 ## 本地存储与文本输出
 
-Daemon 不维护本地内容寻址资源库，也不持久化任何 Skill 或 MCP 目录；数据目录下的唯一本地状态是命令输出的 durable 全文。
+Daemon 不维护本地内容寻址资源库，也不持久化 MCP 目录；本地状态只有命令输出全文与
+当前安装的 Skill Packages。
+
+Skill Package 安装目录稳定为 `<data-dir>/skills/<package>/`。包内
+`.kkstudio-commit` marker 记录该目录对应的 exact commit，模型可见路径始终是
+`<data-dir>/skills/<package>/<skill>/SKILL.md`，不包含 commit。`skill.sync` 只在 marker
+与 Platform 目标 commit 不同且完整 staging 校验成功后替换 Package；失败保留旧目录，
+Branch HEAD 永远不能替代调用参数中的 exact commit。
 
 `process.exec`/`grep`/`find` 的超阈值文本经 [`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) 写入 `<data-dir>/resources/staging/*.part`（0600）后原子发布为 `<data-dir>/resources/text/*.log`（durable，永不隐式删除）。终态无论大小都只返回一个 `TextResultContent`：小输出完整内联，大输出为有界 head/tail 预览加绝对路径、总字节/行数与 read/grep 指引，同一事实写入 `detailsJson.textOutput`（`totalBytes`、`totalLines`、`capturedBytes`、`captureTruncated`、`captureFailed`，可发布时另有 `path` 与 `readHint`）。
 
@@ -85,11 +108,17 @@ Daemon 不维护本地内容寻址资源库，也不持久化任何 Skill 或 MC
 
 ### workdir 语义
 
-`workdir` 是每次调用自己的执行目录，不是文件系统沙箱，也没有默认值。[`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 只解析本次调用 arguments 中的路径：
+`workdir` 是每次调用自己的执行目录，不是文件系统沙箱，也没有默认值。
+[`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java)
+只解析本次调用 arguments 中的路径：
 
-- `workdir` 必填，先经 [`DaemonWorkdirSyntax`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntax.java) 按本机 OS 做词法校验，再要求自身 `Path` 视角下绝对、现存、为目录且可读，最后返回真实路径；
-- 相对 `path` 以本次 `workdir` 为基准解析，绝对 `path` 直接使用，允许落在 workdir 之外；符号链接照常跟随；
-- 目录不存在时明确失败：不自动 mkdir、不回退 HOME、不回退 Environment root，也不沿用前一次调用的目录。
+- 相对 `path` 必须携带显式 `workdir`；`workdir` 先经
+  [`DaemonWorkdirSyntax`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntax.java)
+  按本机 OS 做词法校验，再要求自身 `Path` 视角下绝对、现存、为目录且可读；
+- 绝对 `path` 自身已经完整定位，不需要 `workdir`；相对 `path` 以本次 `workdir` 为
+  基准，允许目标落在 workdir 之外，符号链接照常跟随；
+- `process.exec` 没有目标 path，因此始终要求显式 `workdir`；
+- 目录不存在时明确失败：不自动 mkdir、不回退 HOME 或任何隐藏目录，也不沿用前一次调用的目录。
 
 命令与文件系统的业务授权由 Platform 的权限判定负责，Daemon 不提供额外的路径沙箱。
 
@@ -131,7 +160,7 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 | 包路径 | 职责与边界 |
 | --- | --- |
 | `fun.fengwk.kkstudio.harness.daemon` | 进程启动入口与运行时编排。解析启动配置（`DaemonConfig`、`DaemonTokenFile`、`DaemonDataDirectory`）、冻结能力注册表（`DaemonCapabilityRegistry`）、持有双线程池资源、驱动握手与重连状态机、按 wire 有效超时裁决能力调用 deadline 并按 message type 校验入站报文。 |
-| `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只解析本次调用 arguments 中的显式绝对 `workdir`，绝不把它当作文件系统沙箱或会话默认目录；大文本经 `TextOutputStore` 落盘为本地 durable 日志，二进制结果不落本地存储而是由终态编码阶段直传对象存储；调用之间不继承目录。 |
+| `fun.fengwk.kkstudio.harness.daemon.coding` | 编码能力实现：文件读写与编辑、命令执行、原生文本检索与 LSP 桥接。`EnvironmentPaths` 只用显式 `workdir` 解析相对路径，绝不把 HOME 当作文件系统沙箱或会话默认目录；大文本经 `TextOutputStore` 落盘为本地日志，二进制结果由终态编码阶段直传对象存储；调用之间不继承目录。 |
 | `fun.fengwk.kkstudio.harness.daemon.journal` | 进程内调用执行事实与去重日志。跟踪 invocation 的 `RUNNING` 与终态，以原子操作保证单次执行并记录终态结果；重连后的重复 `INVOKE` 幂等重放 `STARTED` 或终态报文。日志在进程整个生命周期内有效，连接断开不改变执行状态。 |
 | `fun.fengwk.kkstudio.harness.daemon.transport` | 底层网络传输抽象与基于 OkHttp WebSocket 的生产实现。提供连接管理、文本帧收发与传输监听，强制协商 `permessage-deflate`，并对单消息累积体积与二进制帧执行策略违规关闭。 |
 

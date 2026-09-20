@@ -27,7 +27,7 @@
 | [Harness Infra](modules/harness-infra.md) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
 | [Harness Provider](modules/harness-provider.md) | 模型请求、SSE、reasoning replay 和上游错误如何处理？ |
 | [Harness Tool](modules/harness-tool.md) | Tool 的身份、定义、调用、校验和结果采用什么统一契约？ |
-| [Harness Contributor API](modules/harness-contributor-api.md) | Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
+| [Harness Contributor API](modules/harness-contributor-api.md) | Builtin、构建期 Plugin 与 Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
 | [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
 | [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
 | [Harness MCP](modules/harness-mcp.md) | 无状态 MCP client 如何处理总预算、取消与结果映射？ |
@@ -53,8 +53,8 @@
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Platform](modules/platform.md) | Catalog、Chat、Project、Storage、Environment 与外部系统如何编排？ |
-| [Web](modules/web.md) | Spring Boot composition root 如何装配 HTTP、WebSocket、Worker 和生命周期？ |
+| [Platform](modules/platform.md) | Catalog、Plugin、Chat、Project、Storage、Environment 与外部系统如何编排？ |
+| [Web](modules/web.md) | Spring Boot composition root 如何按 Maven dependency 装配可选 Plugin、HTTP、WebSocket、Worker 和生命周期？ |
 | [Frontend](modules/frontend.md) | 浏览器如何把 durable Snapshot 与 lossy realtime 合并为可恢复体验？ |
 
 ## 仓库与文档维护

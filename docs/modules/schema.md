@@ -22,6 +22,11 @@ schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql
 erDiagram
     AGENT_PROVIDER ||--o{ AGENT_MODEL : hosts
     AGENT_MODEL ||--o{ AGENT_DEFINITION : binds
+    PLUGIN_CREDENTIAL {
+        varchar plugin_id PK
+        bytea encrypted_payload
+        timestamptz next_refresh_at
+    }
     ENVIRONMENT ||--o| ENVIRONMENT_CONNECTION : leases
     MCP_SERVER ||--o{ MCP_TOOL : exposes
     HARNESS_SESSION ||--o{ HARNESS_ENTRY : trees
@@ -56,7 +61,8 @@ erDiagram
 
 | 区域 | durable 事实 |
 | --- | --- |
-| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package`、`skill`、`comfyui_workflow_api` |
+| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package`、`comfyui_workflow_api` |
+| Plugin | `plugin_credential`（加密凭据、状态与跨节点 refresh lease） |
 | MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控） |
 | Environment | `environment`、`environment_connection` |
 | Chat / Canvas | `chat`、`canvas_document`、`canvas_group`、`canvas_node`、`canvas_link`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
@@ -69,6 +75,63 @@ erDiagram
 `harness_` 前缀只属于 Harness 执行协议的七张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的表集合与这份清单完全相等，多一张少一张都失败）。
 
 ## 关键表与约束
+
+### Skill Package
+
+`skill_package` 每个 Package 只有一行，不再拆分独立 Skill 内容表：
+
+```text
+package_name          PK，不可变
+description           nullable text
+repository_url        text，不可变且禁止内嵌 userinfo
+branch                text，只用于检查候选更新
+current_commit        当前人工确认的 40/64 位小写 Git object id
+observed_head_commit  最近检查到的 branch HEAD，可空
+head_checked_at       最近检查时间，可空
+head_check_error      最近检查的有界错误，可空
+skills                当前 commit 派生的 JSON array
+version               非负 CAS
+create_time / update_time
+```
+
+`skills` 元素精确为 `{name, description}`，按 name 排序；Package 内 name 唯一，目录固定从
+`<repository>/<name>/SKILL.md` 推导。`current_commit` 与 `skills` 只能在同一次 CAS 中
+切换；`observed_head_commit` 与检查状态可以独立更新，但不改变 Agent 行为。Skill 正文、
+references、scripts 与 assets 全部保留在 Git，不写 PostgreSQL。
+
+`environment_connection` 在既有租约字段之外保存两个有界 JSON 投影：
+
+- `skill_state` 是当前 Daemon 对各 Package 的 installed commit、稳定 path、状态与有界
+  错误；新的 READY 先清空再全量同步，写回必须命中 owner/lease fence。
+- `recent_events` 保存最近 200 条连接与 Skill 同步运维事件；事件只有时间、级别、类型与
+  去敏消息，不保存 stdout、凭据、Git URL userinfo 或签名地址。
+
+两者都属于可重建运行投影，不是 Package 内容或执行历史；断线时保留供 Card 诊断，Daemon
+重新 READY 后按当前事实收敛。
+
+### Plugin credential
+
+`plugin_credential` 是所有构建期 Plugin 共用的一行一凭据存储，不给每个 Plugin 建专用表：
+
+| 列 | 约束与用途 |
+| --- | --- |
+| `plugin_id` | PK；全局唯一且不可变，与 classpath 中的 `StudioPlugin.pluginId` 对齐 |
+| `encrypted_payload` | 非空 `bytea`；AES-256-GCM 二进制 envelope，包含格式版本、随机 nonce 与 token/client identity 等 opaque JSON 的认证密文；AAD 绑定 `pluginId/region/formatVersion` |
+| `region` | 非秘密路由元数据；只允许 Plugin descriptor 声明的固定 region |
+| `expires_at` / `next_refresh_at` | token 失效时间与下一次 refresh claim 时间 |
+| `status` | `CONNECTED`、`REFRESH_FAILED`、`REFRESH_UNCERTAIN` 或 `REAUTH_REQUIRED`；断连以删除行表达 |
+| `last_refreshed_at` / `last_refresh_error` | 可空运维摘要；错误有长度上限且必须去敏 |
+| `refresh_lease_token` / `refresh_lease_until` | nullable 成对 lease；跨 App 节点唯一领取到期刷新 |
+| `create_time` / `update_time` / `version` | 审计时间与 CAS/fencing 版本 |
+
+加密主密钥来自所有 App 节点共享的 owner-only 部署文件，不写入本表。持久化层只接受
+Plugin opaque payload，不按 provider token 字段建列；管理查询永远不返回
+`encrypted_payload`。刷新 claim 只在 `next_refresh_at <= now()` 且 lease 为空或过期时
+成功；外部 HTTP 在事务外完成，finalize 必须同时匹配
+`plugin_id + refresh_lease_token + version`。删除认证与迟到 finalize 竞争时，删除获胜，
+迟到结果不得重建该行。`REFRESH_UNCERTAIN` 与 `REAUTH_REQUIRED` 不再自动 claim，必须由
+新的 `auth/complete` 覆盖；扫描到过期但未 finalize 的 refresh lease 时直接转为
+`REFRESH_UNCERTAIN`，不能假设前任 owner 尚未发送请求。
 
 ### Canvas graph
 
@@ -95,10 +158,14 @@ erDiagram
 
 ### 应用拥有的版本与提示
 
+- `skill_package` 每个 package 只有一行：不可变 repository URL、用于检查的 branch、人工
+  确认的 `current_commit`、最近观察的 branch HEAD 与从 current commit 派生的
+  `skills` JSON 组成当前发布快照。Skill 正文不进数据库，Package 更新以
+  `expectedVersion` CAS 原子替换 commit 与 JSON；branch 检查只更新观察字段。
 - Harness Entry 的 ROOT 唯一、parent shape 与 `entry_type` 由 check 与部分唯一索引固定；Thread head 必须属于同一 Session；Thread Command 以 `(thread_id, sequence)` 与 `(thread_id, idempotency_key)` 保证顺序与精确回放。
 - `harness_work` 以 `(target_type, target_id)` 唯一表示 THREAD/MODEL/TOOL 调度事实，`wake_version` 为正，lease token 与 until 成对；`target_id` 是多态引用，刻意不建外键，因此 `required_environment_id` 非空时由 check 限定只能出现在 TOOL Work 上。
 - `system_setting` 恒为一行（`ck_system_setting_id` 要求 `id = 1`），`config` 必须是 JSON object，`version` 是非负 CAS 令牌。
-- 六个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`system_settings_changed`（version 文本）、`issue_controller_work_due`（issue id）、`project_issue_changed`（project id）、`harness_thread_version`（`id:version`）、`canvas_version`（`id:version`）、`canvas_function_work`（空 payload）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。
+- 七个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`system_settings_changed`（version 文本）、`skill_package_changed`（package name）、`issue_controller_work_due`（issue id）、`project_issue_changed`（project id）、`harness_thread_version`（`id:version`）、`canvas_version`（`id:version`）、`canvas_function_work`（空 payload）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。Skill listener 建连或重连后全量回读 Package，弥补通知丢失。
 - V1 全文没有 `IF NOT EXISTS`（文件开头的注释明确说明这一点），任何声明冲突都会让迁移直接失败，而不是留下一个 drift 过的库。业务实体 id 全部由应用生成：仓库里没有 `create sequence`、`serial` 或 generated identity，`PostgresqlSchemaStructureTest` 对此有专门断言。
 
 ## Profile seeds
@@ -116,7 +183,7 @@ erDiagram
 `V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的两个 App 节点（Main 与 Dev）同时使用，所以这条路径有硬性安全要求：
 
 - 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。Dev 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 Main 集成。
-- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`skill`、`agent_definition` 会回灌；`environment_connection` 是重连后重新生成的租约，`mcp_server`/`mcp_tool` 是重建后需要重新创建并发现的 Platform 配置，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`agent_definition` 和 `plugin_credential` 会回灌；`environment_connection` 是重连后重新生成的租约，`mcp_server`/`mcp_tool` 是重建后需要重新创建并发现的 Platform 配置，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
 - 备份 archive 含 Provider credential 与 Environment registration token，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储。
 
 就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 Main 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
