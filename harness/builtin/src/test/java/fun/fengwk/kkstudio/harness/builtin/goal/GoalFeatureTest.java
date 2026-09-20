@@ -389,7 +389,7 @@ class GoalFeatureTest {
     assertEquals(expectedName, descriptor.name());
     assertEquals(expectedName, descriptor.rendererKey());
     assertEquals(expectedSideEffect, descriptor.sideEffect());
-    assertEquals(Duration.ZERO, descriptor.timeout());
+    assertEquals(Duration.ZERO, descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
     assertEquals(requiredParams, descriptor.inputSchema().required());
     assertEquals(allParams, descriptor.inputSchema().properties().keySet());

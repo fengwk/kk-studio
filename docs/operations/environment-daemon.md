@@ -186,7 +186,6 @@ rm -rf ~/.kk-studio        # 数据目录：进程锁与 resources/{text,staging
 | `--heartbeat` | 否 | `PT15S` | 心跳间隔 |
 | `--reconnect-initial` | 否 | `PT1S` | 首次重连退避 |
 | `--reconnect-max` | 否 | `PT30S` | 最大重连退避 |
-| `--tool-timeout` | 否 | `PT5M` | 能力调用的默认超时 |
 | `--note` | 否 | 按操作系统生成 | 进入 READY 的可信备注，单行且不超过 512 字符 |
 | `--environment-root` | 否 | 启动用户 canonical HOME | 仅作 READY 展示元数据 |
 | `--data-dir` | 否 | `~/.kk-studio` | 本地数据目录，显式给出时必须绝对 |
@@ -197,7 +196,8 @@ rm -rf ~/.kk-studio        # 数据目录：进程锁与 resources/{text,staging
 | `--version` | 否 | — | 作为唯一参数时打印版本并退出 |
 
 时间参数使用 ISO-8601 duration 文本，重连参数要求非负且首次退避不超过最大退避。未知参数一律
-启动失败，不做兼容回退。
+启动失败，不做兼容回退；能力执行超时不属于 Daemon 配置，它由 Tool definition 的默认值与每次调用的
+显式 arguments 共同决定。
 
 ---
 

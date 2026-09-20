@@ -13,7 +13,7 @@
 
 ## 唯一身份：模型可见 name
 
-[`ToolDescriptor`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java) 的 `name` 是工具的唯一 Agent 侧身份：模型调用、Agent 配置、权限规则键、catalog 条目与 durable binding 全部使用同一个名字。`ToolDescriptor.isValidName` 要求它字母开头、只含字母数字与 `_`、`-`，且不超过 64 字符（`NAME_MAX_LENGTH`）；该规则在所有持久化与配置边界共享，因此不存在第二套内部 ID 或工具版本。`description`、`rendererKey` 不得空白，`inputSchema` 复用 `harness-common` 的 `InputSchema`，`timeout` 不得为负。[`ToolSideEffect`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolSideEffect.java) 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT` 三档，供重试与未知结果处理判定；超时拦截与截止时间计算在执行层，本模块只承载声明。
+[`ToolDescriptor`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java) 的 `name` 是工具的唯一 Agent 侧身份：模型调用、Agent 配置、权限规则键、catalog 条目与 durable binding 全部使用同一个名字。`ToolDescriptor.isValidName` 要求它字母开头、只含字母数字与 `_`、`-`，且不超过 64 字符（`NAME_MAX_LENGTH`）；该规则在所有持久化与配置边界共享，因此不存在第二套内部 ID 或工具版本。`description`、`rendererKey` 不得空白，`inputSchema` 复用 `harness-common` 的 `InputSchema`，`defaultTimeout` 不得为负，`0` 表示该工具没有执行 deadline。[`ToolSideEffect`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolSideEffect.java) 只有 `READ_ONLY`、`IDEMPOTENT`、`NON_IDEMPOTENT` 三档，供重试与未知结果处理判定；超时拦截与截止时间计算在执行层，本模块只承载声明。
 
 [`AgentToolDefinition`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java) 把 `ToolDescriptor` 与 [`ToolVisibility`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolVisibility.java)（`SELECTABLE` / `INTERNAL`）组合为模型契约，但不含任何环境或实现字段：具体 `Tool` 实例与环境需求由 Contributor 目录解析并在冻结时绑定。Contributor 侧的 scoped `ContributionId`（`(contributorId, localName)`）只用于定位贡献归属，不是 Agent 可见身份。
 
@@ -45,7 +45,7 @@ ToolCall normalized = call.validateFor(descriptor);
 [`codec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/) 包是这三类值模型与 wire 之间唯一的转换层，三者都启用 `STRICT_DUPLICATE_DETECTION` 与 `FAIL_ON_TRAILING_TOKENS`，遇到未知字段、类型错误或领域不变量违反即抛异常：
 
 - [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 处理 `descriptor` / `visibility` 两个顶层字段，用于 durable 工具定义；任何旧 wire 的 `id` 字段都按未知字段拒绝，没有兼容读取路径；
-- [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 按固定顺序输出 `name`、`description`、`rendererKey`、`sideEffect`、`timeoutMillis`、`inputSchema`，其中 schema 字段委派给 `harness-common` 的 `SchemaJsonCodec`，保证 Provider tool schema 与内部 schema 只有一份序列化实现；
+- [`ToolDescriptorJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/ToolDescriptorJsonCodec.java) 按固定顺序输出 `name`、`description`、`rendererKey`、`sideEffect`、`defaultTimeoutMillis`、`inputSchema`，其中 schema 字段委派给 `harness-common` 的 `SchemaJsonCodec`，保证 Provider tool schema 与内部 schema 只有一份序列化实现；
 - `ToolResultJsonCodec` 提供静态的 `encode` / `decode` 与 `exceedsEncodedUtf8Bytes(result, maxBytes)`，后者按与 `encode` 完全相同的字段顺序流式计数，超限即停，不物化完整 JSON，因此执行层可以在真正序列化之前判定 partial 与终态的字节预算。
 
 ## 源码与测试

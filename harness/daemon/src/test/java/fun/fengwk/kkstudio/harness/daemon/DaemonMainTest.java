@@ -41,7 +41,6 @@ class DaemonMainTest {
             "--heartbeat",
             "--reconnect-initial",
             "--reconnect-max",
-            "--tool-timeout",
             "--note",
             "--environment-root",
             "--data-dir",
@@ -54,7 +53,7 @@ class DaemonMainTest {
       }
       // 默认值也是契约的一部分：操作者必须能从这里读出省略参数时的行为。
       for (String documentedDefault :
-          new String[] {"PT15S", "PT1S", "PT30S", "PT5M", "~/.kk-studio", "bash", "javap"}) {
+          new String[] {"PT15S", "PT1S", "PT30S", "~/.kk-studio", "bash", "javap"}) {
         assertTrue(
             usage.contains(documentedDefault), "usage must document default " + documentedDefault);
       }

@@ -34,7 +34,7 @@ import java.util.Set;
  * {@link ToolDescriptorJsonCodec} 的契约与 round-trip 测试。
  *
  * <p>覆盖：round-trip、canonical fixture、所有 schema element、未知字段、trailing token、duplicate field、错误类型、非法
- * required/property、location / sideEffect / timeout 边界。
+ * required/property、sideEffect / defaultTimeout 边界。
  */
 class ToolDescriptorJsonCodecTest {
 
@@ -219,7 +219,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + ",\"extra\":\"nope\"}";
 
@@ -235,7 +235,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[],"
             + "\"additionalProperties\":false,\"stranger\":true}"
             + "}";
@@ -252,7 +252,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"q\":{\"type\":\"string\",\"min\":1}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -270,7 +270,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"q\":{\"type\":\"weird\"}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -288,7 +288,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + "} {}";
 
@@ -304,7 +304,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"name\":\"y\",\"description\":\"x\","
             + "\"rendererKey\":\"x\","
-            + "\"sideEffect\":\"READ_ONLY\",\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"sideEffect\":\"READ_ONLY\",\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + "}";
 
@@ -320,7 +320,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"q\":{\"type\":\"string\"},\"q\":{\"type\":\"integer\"}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -338,7 +338,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[],"
             + "\"additionalProperties\":\"yes\"}"
             + "}";
@@ -355,7 +355,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":\"q\","
             + "\"additionalProperties\":false}"
             + "}";
@@ -372,7 +372,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"q\":{\"type\":\"string\"}},"
             + "\"required\":[\"q\",\"q\"],\"additionalProperties\":false}"
@@ -390,7 +390,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[\"q\"],"
             + "\"additionalProperties\":false}"
             + "}";
@@ -407,7 +407,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"a\",1]}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -425,7 +425,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"xs\":{\"type\":\"array\"}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -443,7 +443,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"string\",\"properties\":{},\"required\":[],"
             + "\"additionalProperties\":false}"
             + "}";
@@ -460,7 +460,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"required\":[],\"additionalProperties\":false}"
             + "}";
 
@@ -496,7 +496,7 @@ class ToolDescriptorJsonCodecTest {
             + "a".repeat(64)
             + "\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + "}";
     assertEquals(64, codec.decode(atLimit).name().length());
@@ -512,7 +512,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"1tool\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + "}";
 
@@ -528,7 +528,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"UNSAFE\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + "}";
 
@@ -537,14 +537,14 @@ class ToolDescriptorJsonCodecTest {
     assertTrue(error.getMessage().contains("sideEffect"));
   }
 
-  /** timeoutMillis 负值必须拒绝。 */
+  /** defaultTimeoutMillis 负值必须拒绝。 */
   @Test
   void rejectsNegativeTimeout() {
     String json =
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":-1,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":-1,\"inputSchema\":"
             + emptySchema()
             + "}";
 
@@ -555,14 +555,14 @@ class ToolDescriptorJsonCodecTest {
             || error.getMessage().toLowerCase().contains("negative"));
   }
 
-  /** timeoutMillis 非整数必须拒绝。 */
+  /** defaultTimeoutMillis 非整数必须拒绝。 */
   @Test
   void rejectsNonIntegralTimeout() {
     String json =
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":\"10s\",\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":\"10s\",\"inputSchema\":"
             + emptySchema()
             + "}";
 
@@ -575,7 +575,7 @@ class ToolDescriptorJsonCodecTest {
     String json =
         "{"
             + "\"description\":\"x\",\"rendererKey\":\"x\",\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + emptySchema()
             + "}";
 
@@ -591,7 +591,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0"
+            + "\"defaultTimeoutMillis\":0"
             + "}";
 
     IllegalArgumentException error =
@@ -673,7 +673,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":\"red\"}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -691,7 +691,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"red\",\" \"]}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -709,7 +709,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"red\",\"green\",\"red\"]}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -728,7 +728,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"outer\":{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"a\",\"a\"]}},"
@@ -748,7 +748,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":[]},"
             + "\"required\":[],\"additionalProperties\":false}"
             + "}";
@@ -765,7 +765,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\",\"description\":1}},"
             + "\"required\":[],\"additionalProperties\":false}"
             + "}";
@@ -782,7 +782,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},"
             + "\"additionalProperties\":false}"
             + "}";
@@ -799,7 +799,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[]}"
             + "}";
 
@@ -815,7 +815,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},\"required\":[],"
             + "\"additionalProperties\":null}"
             + "}";
@@ -832,7 +832,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{},"
             + "\"required\":null,\"additionalProperties\":false}"
             + "}";
@@ -849,7 +849,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},"
             + "\"required\":[42],\"additionalProperties\":false}"
             + "}";
@@ -866,7 +866,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},"
             + "\"required\":[\"\"],\"additionalProperties\":false}"
             + "}";
@@ -883,7 +883,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"outer\":{\"type\":\"object\","
             + "\"properties\":{\"q\":42},"
@@ -903,7 +903,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"outer\":{\"type\":\"object\","
             + "\"properties\":{\"q\":{\"type\":\"string\"}},"
@@ -923,7 +923,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\" \":{\"type\":\"string\"}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -941,7 +941,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"outer\":{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"a\",\"\"]}},"
@@ -961,7 +961,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\" \":{\"type\":\"string\"}},"
             + "\"required\":[],\"additionalProperties\":false}"
@@ -979,7 +979,7 @@ class ToolDescriptorJsonCodecTest {
         "{"
             + "\"name\":\"x\",\"description\":\"x\",\"rendererKey\":\"x\","
             + "\"sideEffect\":\"READ_ONLY\","
-            + "\"timeoutMillis\":0,\"inputSchema\":"
+            + "\"defaultTimeoutMillis\":0,\"inputSchema\":"
             + "{\"type\":\"object\","
             + "\"properties\":{\"c\":{\"type\":\"string\",\"enum\":[\"a\",\"\"]}},"
             + "\"required\":[],\"additionalProperties\":false}"

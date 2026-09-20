@@ -15,7 +15,7 @@ Usage:
 
 Examples:
 - `bash({ command: "npm test", workdir: "/srv/project/packages/web" })`
-- `bash({ command: "mvn -q test", workdir: "/srv/project/services/java", timeout_seconds: 120 })`
+- `bash({ command: "mvn -q test", workdir: "/srv/project/services/java", timeout_seconds: 900 })`
 - `bash({ command: "git status --short", workdir: "/srv/project" })`
 - `bash({ command: "mkdir -p build && cp \"source file.txt\" build/", workdir: "/srv/project/packages/app" })`
 - `bash({ command: "mv src/old.ts src/archive/old.ts", workdir: "C:/src/project/services/api" })`

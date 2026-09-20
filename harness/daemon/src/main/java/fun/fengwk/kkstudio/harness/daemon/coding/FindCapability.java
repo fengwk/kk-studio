@@ -12,14 +12,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 
 /** 使用 Java NIO 查找遵守分层 {@code .gitignore} 的 environment 文件。 */
 public final class FindCapability extends AbstractCodingCapability {
-
-  static final int DEFAULT_TIMEOUT_SECONDS = 15;
-  static final int MAX_TIMEOUT_SECONDS = 3600;
 
   public FindCapability(CodingToolsConfig config, ExecutorService executor) {
     super(config, executor, EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND));
@@ -32,7 +28,8 @@ public final class FindCapability extends AbstractCodingCapability {
     Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
     Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     int limit = optionalPositiveInt(args, "limit", 1000, 100_000);
-    Duration timeout = effectiveSearchTimeout(request.effectiveTimeout(), args);
+    // 有效超时在 Platform 侧解析完成（definition 默认值或显式 timeout_seconds）；这里只消费它。
+    Duration timeout = request.timeout();
     SearchControl control = SearchControl.start(timeout, execution, "find");
     String sourcePattern = string(args, "pattern");
     boolean pathPattern = sourcePattern.indexOf('/') >= 0;
@@ -79,16 +76,5 @@ public final class FindCapability extends AbstractCodingCapability {
       }
       return spool.finish(false);
     }
-  }
-
-  static Duration effectiveSearchTimeout(Duration invocationTimeout, JsonNode args) {
-    Objects.requireNonNull(invocationTimeout, "invocationTimeout");
-    Duration outerTimeout = invocationTimeout.isZero() ? Duration.ofHours(1) : invocationTimeout;
-    if (!args.has("timeout_seconds")) {
-      return outerTimeout;
-    }
-    Duration requestedTimeout =
-        Duration.ofSeconds(optionalPositiveInt(args, "timeout_seconds", 1, MAX_TIMEOUT_SECONDS));
-    return outerTimeout.compareTo(requestedTimeout) > 0 ? requestedTimeout : outerTimeout;
   }
 }

@@ -147,21 +147,21 @@ class BuiltinHarnessContributorTest {
         "environment.bash",
         EnvironmentCapabilityIds.PROCESS_EXEC,
         ToolSideEffect.NON_IDEMPOTENT,
-        Duration.ofHours(1));
+        Duration.ofMinutes(5));
     assertEnvironmentTool(
         catalog,
         "grep",
         "environment.grep",
         EnvironmentCapabilityIds.FS_GREP,
         ToolSideEffect.READ_ONLY,
-        Duration.ofHours(1));
+        Duration.ofMinutes(1));
     assertEnvironmentTool(
         catalog,
         "find",
         "environment.find",
         EnvironmentCapabilityIds.FS_FIND,
         ToolSideEffect.READ_ONLY,
-        Duration.ofHours(1));
+        Duration.ofMinutes(1));
     assertEnvironmentTool(
         catalog,
         "lsp_goto_definition",
@@ -303,7 +303,7 @@ class BuiltinHarnessContributorTest {
       String localName,
       EnvironmentCapabilityId capabilityId,
       ToolSideEffect sideEffect,
-      Duration timeout) {
+      Duration defaultTimeout) {
     ToolContribution tool = catalog.findTool(toolName).orElseThrow();
     assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
@@ -317,7 +317,7 @@ class BuiltinHarnessContributorTest {
     EnvironmentCapabilityDescriptor capability = EnvironmentCapabilityCatalog.require(capabilityId);
     assertEquals(toolName, descriptor.rendererKey());
     assertEquals(sideEffect, descriptor.sideEffect());
-    assertEquals(timeout, descriptor.timeout());
+    assertEquals(defaultTimeout, descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
     if (EnvironmentCapabilityCatalog.requiresWorkdir(capabilityId)) {
       // 模型提示词必须与 schema 的必填绝对 workdir 契约一致，避免生成必然被服务端拒绝的相对或缺省目录调用。
@@ -327,7 +327,7 @@ class BuiltinHarnessContributorTest {
     }
 
     assertEquals(capability.inputSchema(), descriptor.inputSchema());
-    assertEquals(capability.timeout(), descriptor.timeout());
+    assertEquals(capability.defaultTimeout(), descriptor.defaultTimeout());
     assertEquals(capability, envCapabilityTool.capability());
 
     // Lookup by model-visible name and ContributionId
@@ -365,7 +365,7 @@ class BuiltinHarnessContributorTest {
     assertEquals(toolName, descriptor.name());
     assertEquals(toolName, descriptor.rendererKey());
     assertEquals(sideEffect, descriptor.sideEffect());
-    assertEquals(Duration.ZERO, descriptor.timeout());
+    assertEquals(Duration.ZERO, descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());

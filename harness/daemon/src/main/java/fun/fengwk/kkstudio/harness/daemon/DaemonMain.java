@@ -21,7 +21,6 @@ public final class DaemonMain {
         --heartbeat <duration>           Heartbeat interval (default: PT15S)
         --reconnect-initial <duration>   Initial reconnect backoff (default: PT1S)
         --reconnect-max <duration>       Maximum reconnect backoff (default: PT30S)
-        --tool-timeout <duration>        Default capability timeout (default: PT5M)
 
       Host identity:
         --note <text>                    Single-line note shown to the model; at most once

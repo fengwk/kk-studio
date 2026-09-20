@@ -519,7 +519,7 @@ final class StoreTestSupport {
                     rendererKey,
                     descriptor.inputSchema(),
                     descriptor.sideEffect(),
-                    descriptor.timeout()),
+                    descriptor.defaultTimeout()),
                 definition.visibility()),
             invocation.binding().contributor(),
             invocation.binding().environmentRequired(),

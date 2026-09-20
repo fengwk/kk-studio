@@ -177,7 +177,7 @@ class ToolExecutionGatewayEffectsTest {
             "effects_tool",
             DESCRIPTOR.inputSchema(),
             DESCRIPTOR.sideEffect(),
-            DESCRIPTOR.timeout()));
+            DESCRIPTOR.defaultTimeout()));
     ToolGateway.StartResult result =
         fixture.gateway.start(fixture.execution("write"), fixture.listener);
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);

@@ -81,7 +81,8 @@ class ToolContractTest {
     RecordComponent[] components = ToolDescriptor.class.getRecordComponents();
 
     assertEquals(
-        List.of("name", "description", "rendererKey", "inputSchema", "sideEffect", "timeout"),
+        List.of(
+            "name", "description", "rendererKey", "inputSchema", "sideEffect", "defaultTimeout"),
         Arrays.stream(components).map(RecordComponent::getName).toList());
     assertEquals(
         List.of(

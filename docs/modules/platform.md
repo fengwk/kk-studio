@@ -376,6 +376,12 @@ admission（默认 `kk-studio.harness.execution-admission.tool=64`），再经�
 `BoundEnvironment`、提交异步执行并返回两阶段门控 Handle，最后在门控桥校验 effects
 归属与声明、完成 managed Resource 外部化并一次性投递。
 
+执行前只解析一次有效执行超时（`Tool.resolveTimeout`），解析结果原样进入 Tool 请求：
+缺省时为 definition 的 `defaultTimeout`（`0` 表示该 tool 没有 deadline），拥有 arguments
+级超时契约的工具（环境工具族）则用正数 `timeout_seconds` 严格覆盖默认值；下游不再回落
+默认值、不做 min clamp、也没有上限。非正数的 arguments 级超时或无法按 descriptor 构造
+的请求直接返回 `Rejected(INVALID_REQUEST)`，既不提交 executor 也不重试。
+
 Tool admission 无 permit 或 executor 明确拒绝时返回 `RetryLater`，其它无法证明是否
 提交的异常返回 `Indeterminate(EXECUTION_FAILED)`。`Started` 后的 partial 必须非空、
 toolCallId 精确匹配、不能携带 Binary/Resource，且 canonical JSON 不超过 `256 KiB`；

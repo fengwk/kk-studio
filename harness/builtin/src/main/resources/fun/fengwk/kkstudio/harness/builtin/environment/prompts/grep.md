@@ -15,5 +15,5 @@ Usage:
 Examples:
 - `grep({ pattern: "createDemoDirectory", path: "src", workdir: "/srv/project/packages/web", literal: true })`
 - `grep({ pattern: "create.*Directory", path: "src", workdir: "/srv/project/services/api", ignore_case: true })`
-- `grep({ pattern: "TODO", path: "src", workdir: "/srv/project", include: "**/*.ts", timeout_seconds: 30 })`
+- `grep({ pattern: "TODO", path: "src", workdir: "/srv/project", include: "**/*.ts", timeout_seconds: 120 })`
 - `grep({ pattern: "start\\nend", path: "src", workdir: "C:/src/project", multiline: true })`

@@ -45,14 +45,15 @@ class EnvironmentCapabilityContractTest {
     RecordComponent[] components = EnvironmentCapabilityDescriptor.class.getRecordComponents();
 
     assertArrayEquals(
-        new String[] {"id", "version", "inputSchema", "timeout"}, componentNames(components));
+        new String[] {"id", "version", "inputSchema", "defaultTimeout"},
+        componentNames(components));
     assertEquals(EnvironmentCapabilityId.class, components[0].getType());
     assertEquals(String.class, components[1].getType());
     assertEquals(InputSchema.class, components[2].getType());
     assertEquals(Duration.class, components[3].getType());
   }
 
-  /** 反射锁定执行请求只包含 descriptor、call 与 timeout：workdir 只存在于具体 arguments。 */
+  /** 反射锁定执行请求只包含 descriptor、call 与已解析 timeout：workdir 只存在于具体 arguments。 */
   @Test
   void requestContainsOnlyCapabilityExecutionFields() {
     assertArrayEquals(
@@ -60,14 +61,14 @@ class EnvironmentCapabilityContractTest {
         componentNames(EnvironmentCapabilityExecutionRequest.class.getRecordComponents()));
   }
 
-  /** descriptor 版本必须非空，timeout 允许 zero 但不能为负。 */
+  /** descriptor 版本必须非空，defaultTimeout 允许 zero 但不能为负。 */
   @Test
   void validatesDescriptorBounds() {
     assertEquals(
         Duration.ZERO,
         new EnvironmentCapabilityDescriptor(
                 new EnvironmentCapabilityId("fs.read"), "1", SCHEMA, Duration.ZERO)
-            .timeout());
+            .defaultTimeout());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -134,9 +135,9 @@ class EnvironmentCapabilityContractTest {
                 .validateFor(DESCRIPTOR));
   }
 
-  /** 请求构造时完成参数校验，并在 timeout 为 zero 时解析 descriptor 默认超时。 */
+  /** 请求构造时完成参数校验，并原样保留调用方给出的 timeout（0 表示无 deadline），不做任何回落。 */
   @Test
-  void requestNormalizesCallAndUsesDefaultTimeout() {
+  void requestNormalizesCallAndKeepsGivenTimeout() {
     EnvironmentCapabilityExecutionRequest request =
         new EnvironmentCapabilityExecutionRequest(
             DESCRIPTOR,
@@ -145,7 +146,6 @@ class EnvironmentCapabilityContractTest {
 
     assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
     assertEquals(Duration.ZERO, request.timeout());
-    assertEquals(Duration.ofSeconds(10), request.effectiveTimeout());
   }
 
   /** timeout 不能为负；请求外壳不携带 workdir（目录只存在于 arguments）。 */

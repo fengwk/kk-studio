@@ -72,9 +72,9 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofHours(1)),
-        descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofHours(1)),
-        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofHours(1)),
+        descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofMinutes(5)),
+        descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)));
@@ -100,8 +100,8 @@ public final class EnvironmentCapabilityCatalog {
   }
 
   private static EnvironmentCapabilityDescriptor descriptor(
-      EnvironmentCapabilityId id, Duration timeout) {
-    return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), timeout);
+      EnvironmentCapabilityId id, Duration defaultTimeout) {
+    return new EnvironmentCapabilityDescriptor(id, VERSION, loadSchema(id), defaultTimeout);
   }
 
   /** 该能力是否要求具体 arguments 携带目标 Daemon 上的显式绝对 workdir。 */

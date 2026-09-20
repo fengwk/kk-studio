@@ -180,6 +180,13 @@ final class ToolGatewayTestSupport {
 
   /** 真实 daemon capability 的 ENVIRONMENT 请求：绑定 {@code bash} 并路由到指定 canonical 环境。 */
   static ToolInvocationRequest environmentRequest(String callId, EnvironmentId environmentId) {
+    return environmentRequest(
+        callId, environmentId, "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}");
+  }
+
+  /** 真实 daemon capability 的 ENVIRONMENT 请求，使用显式 arguments 验证 arguments 级超时解析。 */
+  static ToolInvocationRequest environmentRequest(
+      String callId, EnvironmentId environmentId, String argumentsJson) {
     HarnessCatalog catalog = defaultCatalog();
     ToolContribution bashContribution = catalog.findTool("bash").orElseThrow();
     ContributorBinding contributor =
@@ -188,7 +195,7 @@ final class ToolGatewayTestSupport {
             bashContribution.id().localName(),
             List.of());
     return new ToolInvocationRequest(
-        new ToolCall(callId, "bash", "{\"command\":\"ls\",\"workdir\":\"/home/dev\"}"),
+        new ToolCall(callId, "bash", argumentsJson),
         new ToolBinding(bashContribution.definition(), contributor, true, environmentId));
   }
 
@@ -372,6 +379,13 @@ final class ToolGatewayTestSupport {
     private final ToolDescriptor descriptor;
     final List<ToolExecutionRequest> requests = new CopyOnWriteArrayList<>();
     final List<FakeToolHandle> handles = new CopyOnWriteArrayList<>();
+
+    /** resolveTimeout 的调用次数：用于证明超时只在执行前解析一次。 */
+    final AtomicInteger resolveTimeoutCalls = new AtomicInteger();
+
+    /** 非 null 时作为 resolveTimeout 的结果，用于验证显式解析值与解析失败路径。 */
+    volatile Duration resolvedTimeout;
+
     volatile ToolExecutionHandler handler = (request, listener) -> {};
     volatile boolean returnNullHandle;
 
@@ -382,6 +396,13 @@ final class ToolGatewayTestSupport {
     @Override
     public ToolDescriptor descriptor() {
       return descriptor;
+    }
+
+    @Override
+    public Duration resolveTimeout(ToolCall call) {
+      resolveTimeoutCalls.incrementAndGet();
+      Duration explicit = resolvedTimeout;
+      return explicit == null ? Tool.super.resolveTimeout(call) : explicit;
     }
 
     @Override

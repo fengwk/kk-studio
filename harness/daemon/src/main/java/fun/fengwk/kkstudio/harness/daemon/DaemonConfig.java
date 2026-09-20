@@ -15,7 +15,8 @@ import java.util.Objects;
  *
  * <p>连接、身份、说明、本地执行程序、environment root 与数据目录的唯一配置来源是 CLI：{@code --registration-token-file}、gateway
  * 连接参数、可选且唯一 {@code --note}、唯一 {@code --environment-root}、 可选 {@code --data-dir} 与三个可选的本地执行程序
- * {@code --bash-executable}、{@code --lsp-bridge-command}、 {@code --javap-executable}。
+ * {@code --bash-executable}、{@code --lsp-bridge-command}、 {@code --javap-executable}。已删除的 {@code
+ * --tool-timeout} 作为未知参数 fail closed：执行超时只由 Tool definition 默认值与调用显式值决定。
  *
  * <p>{@code --registration-token-file} 指向 owner-only 普通文件：凭证文本只存在于该文件，进程参数、环境变量与日志都不携带它；本 record
  * 只保存路径，因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。已删除的 {@code
@@ -33,7 +34,6 @@ public record DaemonConfig(
     Duration heartbeatInterval,
     Duration initialReconnectDelay,
     Duration maxReconnectDelay,
-    Duration defaultToolTimeout,
     String note,
     Path environmentRoot,
     Path dataDir,
@@ -59,7 +59,6 @@ public record DaemonConfig(
     if (initialReconnectDelay.compareTo(maxReconnectDelay) > 0) {
       throw new IllegalArgumentException("initialReconnectDelay must not exceed maxReconnectDelay");
     }
-    defaultToolTimeout = requirePositive(defaultToolTimeout, "defaultToolTimeout");
     note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
     environmentRoot = canonicalDirectory(environmentRoot, "environmentRoot");
     dataDir = requireAbsoluteDirectory(dataDir);
@@ -75,7 +74,6 @@ public record DaemonConfig(
       Duration heartbeatInterval,
       Duration initialReconnectDelay,
       Duration maxReconnectDelay,
-      Duration defaultToolTimeout,
       String note,
       Path environmentRoot,
       Path dataDir) {
@@ -85,7 +83,6 @@ public record DaemonConfig(
         heartbeatInterval,
         initialReconnectDelay,
         maxReconnectDelay,
-        defaultToolTimeout,
         note,
         environmentRoot,
         dataDir,
@@ -102,7 +99,6 @@ public record DaemonConfig(
     String heartbeat = null;
     String reconnectInitial = null;
     String reconnectMax = null;
-    String toolTimeout = null;
     String environmentRoot = null;
     String note = null;
     String dataDir = null;
@@ -124,7 +120,6 @@ public record DaemonConfig(
         case "--heartbeat" -> heartbeat = requireArgValue(args, ++index, arg);
         case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
-        case "--tool-timeout" -> toolTimeout = requireArgValue(args, ++index, arg);
         case "--bash-executable" -> bashExecutable = requireArgValue(args, ++index, arg);
         case "--lsp-bridge-command" -> lspBridgeCommand = requireArgValue(args, ++index, arg);
         case "--javap-executable" -> javapExecutable = requireArgValue(args, ++index, arg);
@@ -156,7 +151,6 @@ public record DaemonConfig(
         parseDuration(heartbeat, Duration.ofSeconds(15)),
         parseDuration(reconnectInitial, Duration.ofSeconds(1)),
         parseDuration(reconnectMax, Duration.ofSeconds(30)),
-        parseDuration(toolTimeout, Duration.ofMinutes(5)),
         note,
         environmentRoot == null ? defaultEnvironmentRoot() : Path.of(environmentRoot),
         dataDir == null ? defaultDataDir() : Path.of(dataDir),

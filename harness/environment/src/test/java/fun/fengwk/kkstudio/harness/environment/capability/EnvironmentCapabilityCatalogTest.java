@@ -93,7 +93,8 @@ class EnvironmentCapabilityCatalogTest {
       InputSchema schema = descriptor.inputSchema();
       assertFalse(schema.additionalProperties(), id);
       assertFalse(schema.properties().isEmpty(), id);
-      assertFalse(descriptor.timeout().isZero() || descriptor.timeout().isNegative(), id);
+      assertFalse(
+          descriptor.defaultTimeout().isZero() || descriptor.defaultTimeout().isNegative(), id);
     }
   }
 }

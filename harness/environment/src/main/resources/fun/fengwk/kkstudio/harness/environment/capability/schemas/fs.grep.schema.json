@@ -35,7 +35,7 @@
     },
     "timeout_seconds": {
       "type": "integer",
-      "description": "Positive search timeout in seconds. Defaults to 15."
+      "description": "Positive search timeout in seconds. Defaults to 60 (1 minute)."
     }
   },
   "required": [

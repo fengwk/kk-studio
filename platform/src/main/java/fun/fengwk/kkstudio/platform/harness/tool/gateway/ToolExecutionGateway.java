@@ -336,9 +336,22 @@ public final class ToolExecutionGateway implements ToolGateway {
               clock.instant(),
               branch,
               Optional.ofNullable(boundEnvironment));
-      ToolExecutionRequest toolRequest =
-          new ToolExecutionRequest(
-              currentDescriptor, execution.request().call(), Duration.ZERO, context);
+      // 超时在执行前只解析一次：解析结果原样进入请求，下游不再回落默认值或施加任何上限。
+      ToolExecutionRequest toolRequest;
+      try {
+        toolRequest =
+            new ToolExecutionRequest(
+                currentDescriptor,
+                execution.request().call(),
+                tool.resolveTimeout(execution.request().call()),
+                context);
+      } catch (IllegalArgumentException invalidRequest) {
+        // arguments 级超时非法（例如非正数）或请求无法按 descriptor 构造：确定性拒绝，绝不重试也绝不执行。
+        lease.close();
+        return new ToolGateway.Rejected(
+            new ToolInvocationError(
+                INVALID_REQUEST_KIND, failureMessage(invalidRequest, "Tool request is invalid.")));
+      }
 
       GatedToolExecutionListener bridge =
           new GatedToolExecutionListener(

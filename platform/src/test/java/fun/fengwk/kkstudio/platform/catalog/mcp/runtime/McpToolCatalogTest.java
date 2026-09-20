@@ -59,7 +59,7 @@ class McpToolCatalogTest {
     assertEquals("tool", contribution.definition().descriptor().rendererKey());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT, contribution.definition().descriptor().sideEffect());
-    assertEquals(15000L, contribution.definition().descriptor().timeout().toMillis());
+    assertEquals(15000L, contribution.definition().descriptor().defaultTimeout().toMillis());
     assertEquals("platform.mcp", contribution.id().contributorId().value());
     assertEquals("mcp-github-list-repos", contribution.id().localName());
     assertFalse(contribution.requirements().environmentRequired());

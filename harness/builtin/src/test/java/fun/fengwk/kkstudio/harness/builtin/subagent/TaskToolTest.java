@@ -50,7 +50,7 @@ class TaskToolTest {
     assertEquals(TaskTool.NAME, descriptor.name());
     assertEquals(TaskTool.RENDERER_KEY, descriptor.rendererKey());
     assertEquals(ToolSideEffect.NON_IDEMPOTENT, descriptor.sideEffect());
-    assertEquals(Duration.ZERO, descriptor.timeout());
+    assertEquals(Duration.ZERO, descriptor.defaultTimeout());
     assertFalse(descriptor.description().isBlank());
     assertEquals(ToolRequirements.none(), tool.requirements());
 
