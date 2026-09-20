@@ -39,6 +39,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -198,12 +200,7 @@ public final class DaemonRuntime implements AutoCloseable {
     this.resourceTransferClient =
         new DaemonResourceTransferClient(resourceHttpClient, this::sendTransferControl);
     DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
-    this.environmentInfo =
-        new DaemonEnvironmentInfo(
-            operatingSystem,
-            ZoneId.systemDefault().getId(),
-            config.effectiveNote(operatingSystem),
-            config.environmentRoot().toString());
+    this.environmentInfo = detectEnvironmentInfo(config, operatingSystem);
     this.nextReconnectDelay = config.initialReconnectDelay();
     if (requireFixedCapabilityCatalog
         && !List.copyOf(capabilityRegistry.descriptors()).equals(fixedCapabilityDescriptors())) {
@@ -216,6 +213,38 @@ public final class DaemonRuntime implements AutoCloseable {
   /** 生产装配注册的 capability descriptor 全集。 */
   private static List<EnvironmentCapabilityDescriptor> fixedCapabilityDescriptors() {
     return List.copyOf(EnvironmentCapabilityCatalog.descriptors());
+  }
+
+  /**
+   * 采集真实进程宿主事实：进程用户与 canonical HOME。
+   *
+   * <p>这两项只是模型可见的展示事实，不构成 cwd、默认 workdir 或沙箱；HOME 无法 canonical 化时退化为绝对规范化路径， 宿主目录缺失不阻止 Daemon 启动。
+   */
+  private static DaemonEnvironmentInfo detectEnvironmentInfo(
+      DaemonConfig config, DaemonOperatingSystem operatingSystem) {
+    return new DaemonEnvironmentInfo(
+        operatingSystem,
+        ZoneId.systemDefault().getId(),
+        requireHostProperty("user.name"),
+        canonicalHomeDirectory(requireHostProperty("user.home")),
+        config.effectiveNote(operatingSystem));
+  }
+
+  private static String requireHostProperty(String name) {
+    String value = System.getProperty(name);
+    if (value == null || value.isBlank()) {
+      throw new IllegalStateException("system property " + name + " must be present");
+    }
+    return value;
+  }
+
+  private static String canonicalHomeDirectory(String home) {
+    Path path = Path.of(home);
+    try {
+      return path.toRealPath().toString();
+    } catch (IOException error) {
+      return path.toAbsolutePath().normalize().toString();
+    }
   }
 
   private static ScheduledThreadPoolExecutor newScheduler() {

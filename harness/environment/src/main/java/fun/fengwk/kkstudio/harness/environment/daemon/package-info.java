@@ -6,8 +6,9 @@
  *
  * <p>当前 {@code READY} payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的宿主 metadata
- * 对象： {@code {"version":1,"environment":{"operatingSystem","timeZone","note","rootPath"}}}。它是 READY
- * 的唯一 wire 形状：Daemon 不再上报任何目录或 Skill 事实。
+ * 对象： {@code
+ * {"version":2,"environment":{"operatingSystem","timeZone","userName","homeDirectory","note"}}}。它是
+ * READY 的唯一 wire 形状：Daemon 不再上报任何目录或 Skill 事实。
  *
  * <p>Capability INVOKE payload 由 {@link
  * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec} 编解码，字段固定为 {@code

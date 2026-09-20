@@ -33,33 +33,8 @@ public record ModelRequestSpec(
     int outputTokens,
     String systemInstruction,
     List<ToolBinding> toolBindings,
-    List<SkillBinding> skillBindings,
     List<SubagentBinding> subagentBindings,
     ProviderCacheControl cacheControl) {
-
-  /** 构造不具备 Subagent 委派能力的请求。 */
-  public ModelRequestSpec(
-      ProviderType providerType,
-      UUID providerConnectionGenerationId,
-      ModelDescriptor model,
-      ModelVariant variant,
-      int outputTokens,
-      String systemInstruction,
-      List<ToolBinding> toolBindings,
-      List<SkillBinding> skillBindings,
-      ProviderCacheControl cacheControl) {
-    this(
-        providerType,
-        providerConnectionGenerationId,
-        model,
-        variant,
-        outputTokens,
-        systemInstruction,
-        toolBindings,
-        skillBindings,
-        List.of(),
-        cacheControl);
-  }
 
   public ModelRequestSpec {
     providerType = Objects.requireNonNull(providerType, "providerType");
@@ -74,11 +49,9 @@ public record ModelRequestSpec(
       throw new IllegalArgumentException("systemInstruction must not be blank");
     }
     toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
-    skillBindings = List.copyOf(Objects.requireNonNull(skillBindings, "skillBindings"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));
     cacheControl = Objects.requireNonNull(cacheControl, "cacheControl");
     requireUniqueToolBindings(toolBindings);
-    requireUniqueSkillNames(skillBindings);
     requireUniqueSubagentNames(subagentBindings);
     requireConsistentEnvironments(toolBindings);
   }
@@ -94,16 +67,6 @@ public record ModelRequestSpec(
     }
   }
 
-  private static void requireUniqueSkillNames(List<SkillBinding> skillBindings) {
-    Set<String> names = new HashSet<>();
-    for (SkillBinding skill : skillBindings) {
-      Objects.requireNonNull(skill, "skillBindings[]");
-      if (!names.add(skill.name())) {
-        throw new IllegalArgumentException("skill binding names must not repeat: " + skill.name());
-      }
-    }
-  }
-
   private static void requireUniqueSubagentNames(List<SubagentBinding> subagentBindings) {
     Set<String> names = new HashSet<>();
     for (SubagentBinding subagent : subagentBindings) {
@@ -115,11 +78,12 @@ public record ModelRequestSpec(
     }
   }
 
+  /** 一次模型调用只服务一个 Environment：任何携带环境的 binding 必须共享同一个 Environment 身份。 */
   private static void requireConsistentEnvironments(List<ToolBinding> toolBindings) {
     EnvironmentId environmentId = null;
     boolean environmentSeen = false;
     for (ToolBinding binding : toolBindings) {
-      if (!binding.environmentRequired()) {
+      if (binding.environmentId() == null) {
         continue;
       }
       if (!environmentSeen) {

@@ -43,6 +43,7 @@ class RuntimeModuleArchitectureTest {
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.tool.",
           "fun.fengwk.kkstudio.harness.environment.",
+          "fun.fengwk.kkstudio.harness.contributor.api.",
           FastIgnoreRule.class.getName());
 
   private static final Pattern MODULE_PATTERN =
@@ -110,6 +111,7 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-common",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
+            "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
             "org.eclipse.jgit:org.eclipse.jgit",
             "org.slf4j:slf4j-api"));
     assertDirectProductionDependencies(

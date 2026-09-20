@@ -8,12 +8,10 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.UpdateGoalTool;
-import fun.fengwk.kkstudio.harness.builtin.skill.LoadSkillTool;
-import fun.fengwk.kkstudio.harness.builtin.skill.SkillContentLoader;
-import fun.fengwk.kkstudio.harness.builtin.skill.ThreadSelectedSkillLookup;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -32,8 +30,8 @@ import java.util.Optional;
 /**
  * {@link BuiltinHistoryRenderers} 及其在 6 个内建工具中绑定的历史动作渲染器单元测试。
  *
- * <p>验证 load_skill、task、create_goal、get_goal、update_goal 的最小语义动作提取、省略执行控制参数、 缺失核心字段与畸形输入的确定性安全回退，以及
- * 6 个内建工具均暴露渲染器且为确定性纯函数。
+ * <p>验证 task、create_goal、get_goal、update_goal 的最小语义动作提取、省略执行控制参数、 缺失核心字段与畸形输入的确定性安全回退，以及 6
+ * 个内建工具均暴露渲染器且为确定性纯函数。
  */
 class BuiltinHistoryRenderersTest {
 
@@ -47,38 +45,6 @@ class BuiltinHistoryRenderersTest {
     when(call.toolName()).thenReturn(toolName);
     when(call.argumentsJson()).thenReturn(argumentsJson);
     return new ToolHistoryRenderRequest(call, null);
-  }
-
-  /**
-   * 验证 loadSkill 历史动作渲染器提取 name 字段渲染为 "load skill " + name，保留多余字段， 并在 name 缺失、空白、非文本或 JSON
-   * 畸形时安全回退返回 Optional.empty()。
-   */
-  @Test
-  void loadSkillRendersNameAndFallbackOnMissingOrMalformed() {
-    ToolHistoryRenderer renderer = BuiltinHistoryRenderers.loadSkill();
-
-    // 正常渲染
-    assertEquals(
-        Optional.of("load skill git-workspace"),
-        renderer.render(request("load_skill", "{\"name\":\"git-workspace\"}")));
-
-    // 包含多余字段
-    assertEquals(
-        Optional.of("load skill git-workspace"),
-        renderer.render(
-            request("load_skill", "{\"name\":\"git-workspace\",\"extra\":\"parameter\"}")));
-
-    // name 缺失、空白、null 或非文本
-    assertEquals(Optional.empty(), renderer.render(request("load_skill", "{}")));
-    assertEquals(Optional.empty(), renderer.render(request("load_skill", "{\"name\":\"\"}")));
-    assertEquals(Optional.empty(), renderer.render(request("load_skill", "{\"name\":\"   \"}")));
-    assertEquals(Optional.empty(), renderer.render(request("load_skill", "{\"name\":null}")));
-    assertEquals(Optional.empty(), renderer.render(request("load_skill", "{\"name\":123}")));
-
-    // 畸形 JSON 与非对象
-    assertEquals(
-        Optional.empty(), renderer.render(malformedRequest("load_skill", "{invalid json")));
-    assertEquals(Optional.empty(), renderer.render(malformedRequest("load_skill", "[\"dev\"]")));
   }
 
   /**
@@ -219,11 +185,11 @@ class BuiltinHistoryRenderersTest {
 
   /**
    * 验证全部 6
-   * 个内建工具（EnvironmentCapabilityTool、CreateGoalTool、GetGoalTool、UpdateGoalTool、LoadSkillTool、TaskTool）
+   * 个内建工具（EnvironmentCapabilityTool、ReadTool、CreateGoalTool、GetGoalTool、UpdateGoalTool、TaskTool）
    * 均通过 historyRenderer() 暴露渲染器，且该渲染器为确定性纯函数：同一合法输入连续两次调用返回相同非空结果，同一非法输入连续两次调用返回相同 empty。
    */
   @Test
-  void allSixBuiltinToolsExposeHistoryRendererAsDeterministicPureFunction() {
+  void allBuiltinToolsExposeHistoryRendererAsDeterministicPureFunction() {
     // 构造 1: EnvironmentCapabilityTool
     EnvironmentCapabilityDescriptor fsReadDesc =
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ);
@@ -237,24 +203,23 @@ class BuiltinHistoryRenderersTest {
             fsReadDesc.defaultTimeout());
     Tool envTool = new EnvironmentCapabilityTool(envToolDesc, fsReadDesc);
 
-    // 构造 2: CreateGoalTool
+    // 构造 2: ReadTool
+    Tool readTool = new ReadTool((request, listener) -> null);
+
+    // 构造 3: CreateGoalTool
     Tool createGoalTool = new CreateGoalTool();
 
-    // 构造 3: GetGoalTool
+    // 构造 4: GetGoalTool
     Tool getGoalTool = new GetGoalTool();
 
-    // 构造 4: UpdateGoalTool
+    // 构造 5: UpdateGoalTool
     Tool updateGoalTool = new UpdateGoalTool();
-
-    // 构造 5: LoadSkillTool（依赖轻量接口，使用 mock 构造）
-    Tool loadSkillTool =
-        new LoadSkillTool(mock(ThreadSelectedSkillLookup.class), mock(SkillContentLoader.class));
 
     // 构造 6: TaskTool（依赖轻量接口，使用 mock 构造）
     Tool taskTool = new TaskTool(mock(SubagentRunner.class));
 
     List<Tool> tools =
-        List.of(envTool, createGoalTool, getGoalTool, updateGoalTool, loadSkillTool, taskTool);
+        List.of(envTool, readTool, createGoalTool, getGoalTool, updateGoalTool, taskTool);
 
     // 断言所有 6 个工具均暴露 historyRenderer
     for (Tool tool : tools) {
@@ -293,12 +258,12 @@ class BuiltinHistoryRenderersTest {
     assertEquals(Optional.of("mark the goal completed: done"), ugFirst);
     assertEquals(ugFirst, ugSecond);
 
-    ToolHistoryRenderer loadSkillRenderer = loadSkillTool.historyRenderer().orElseThrow();
-    ToolHistoryRenderRequest loadSkillReq = request("load_skill", "{\"name\":\"dev\"}");
-    Optional<String> lsFirst = loadSkillRenderer.render(loadSkillReq);
-    Optional<String> lsSecond = loadSkillRenderer.render(loadSkillReq);
-    assertEquals(Optional.of("load skill dev"), lsFirst);
-    assertEquals(lsFirst, lsSecond);
+    ToolHistoryRenderer readRenderer = readTool.historyRenderer().orElseThrow();
+    ToolHistoryRenderRequest readReq = request("read", "{\"path\":\"src/Test.java\"}");
+    Optional<String> readFirst = readRenderer.render(readReq);
+    Optional<String> readSecond = readRenderer.render(readReq);
+    assertEquals(Optional.of("read src/Test.java"), readFirst);
+    assertEquals(readFirst, readSecond);
 
     ToolHistoryRenderer taskRenderer = taskTool.historyRenderer().orElseThrow();
     ToolHistoryRenderRequest taskReq = request("task", "{\"subagent_type\":\"coder\"}");
@@ -310,8 +275,7 @@ class BuiltinHistoryRenderersTest {
     // 验证安全回退的确定性：对非 get_goal 工具连续调用无效请求两次，均稳定返回 Optional.empty()
     ToolHistoryRenderRequest emptyReq = request("dummy", "{}");
     List<ToolHistoryRenderer> fallibleRenderers =
-        List.of(
-            envRenderer, createGoalRenderer, updateGoalRenderer, loadSkillRenderer, taskRenderer);
+        List.of(envRenderer, readRenderer, createGoalRenderer, updateGoalRenderer, taskRenderer);
     for (ToolHistoryRenderer renderer : fallibleRenderers) {
       Optional<String> f1 = renderer.render(emptyReq);
       Optional<String> f2 = renderer.render(emptyReq);

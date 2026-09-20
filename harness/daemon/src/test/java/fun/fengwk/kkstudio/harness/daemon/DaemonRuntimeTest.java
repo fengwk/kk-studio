@@ -96,7 +96,30 @@ class DaemonRuntimeTest {
 
   private static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-  private static final Path ENVIRONMENT_ROOT = Path.of(System.getProperty("user.dir"));
+  private static final Path WORKSPACE_ROOT = Path.of(System.getProperty("user.dir"));
+
+  /** 与生产一致：{@code user.name} 缺失时 Daemon 启动即失败，因此这里直接取真实进程属性，不做兜底。 */
+  private static String expectedProcessUserName() {
+    String user = System.getProperty("user.name");
+    if (user == null || user.isBlank()) {
+      throw new IllegalStateException("system property user.name must be present");
+    }
+    return user;
+  }
+
+  /** 与生产一致：canonical 化失败时退化为绝对规范化路径，不伪造 HOME。 */
+  private static String expectedProcessHomeDirectory() {
+    String home = System.getProperty("user.home");
+    if (home == null || home.isBlank()) {
+      throw new IllegalStateException("system property user.home must be present");
+    }
+    Path path = Path.of(home);
+    try {
+      return path.toRealPath().toString();
+    } catch (IOException error) {
+      return path.toAbsolutePath().normalize().toString();
+    }
+  }
 
   /** 测试用注册凭证：与真实部署一样，只以 owner-only 文件形式存在，argv/日志中不出现明文。 */
   private static final String REGISTRATION_TOKEN = "test-registration-token";
@@ -238,7 +261,9 @@ class DaemonRuntimeTest {
     JsonNode ready = codec.readPayload(handshake.get(1));
     assertEquals(2, ready.size());
     assertEquals(DaemonCapabilities.VERSION, ready.path("version").asInt());
-    assertEquals(ENVIRONMENT_ROOT.toString(), ready.path("environment").path("rootPath").asText());
+    assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asText());
+    assertEquals(
+        expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asText());
 
     transport.disconnect();
     transport.awaitConnections(1);
@@ -261,7 +286,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            ENVIRONMENT_ROOT,
             dataDir());
 
     assertThrows(
@@ -283,9 +307,8 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            ENVIRONMENT_ROOT,
             dataDir());
-    CodingToolsConfig toolsConfig = TestCodingConfig.withBridge(ENVIRONMENT_ROOT);
+    CodingToolsConfig toolsConfig = TestCodingConfig.withBridge(WORKSPACE_ROOT);
 
     runtime = DaemonRuntime.create(config, toolsConfig);
 
@@ -305,7 +328,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            ENVIRONMENT_ROOT,
             dataDir());
     AtomicReference<ExecutorService> executorRef = new AtomicReference<>();
     AtomicReference<ScheduledExecutorService> schedulerRef = new AtomicReference<>();
@@ -347,7 +369,8 @@ class DaemonRuntimeTest {
     assertEquals(
         DaemonOperatingSystemDetector.detectCurrent(),
         capabilities.environment().operatingSystem());
-    assertEquals(ENVIRONMENT_ROOT.toString(), capabilities.environment().rootPath());
+    assertEquals(expectedProcessUserName(), capabilities.environment().userName());
+    assertEquals(expectedProcessHomeDirectory(), capabilities.environment().homeDirectory());
     assertEquals(
         new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
@@ -356,7 +379,6 @@ class DaemonRuntimeTest {
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 null,
-                ENVIRONMENT_ROOT,
                 dataDir())
             .effectiveNote(capabilities.environment().operatingSystem()),
         capabilities.environment().note());
@@ -483,22 +505,22 @@ class DaemonRuntimeTest {
 
   /**
    * 测试意图：coding capability 的 workdir 只来自该次调用 arguments，缺失时在请求构造期被 schema 确定性拒绝（因此没有 STARTED），且绝不回退到
-   * Environment Root。
+   * 任何默认路径。
    *
-   * <p>用真实 {@link ReadCapability}：Environment Root 下放置同名文件；若实现发生回退，capability 就能读到该文件并在 COMPLETED
+   * <p>用真实 {@link ReadCapability}：临时目录下放置同名文件；若实现发生回退，capability 就能读到该文件并在 COMPLETED
    * 内容中出现其文本，从而被本测试捕获。
    */
   @Test
-  void omittedWorkdirIsRejectedWithoutEnvironmentRootFallback() throws Exception {
+  void omittedWorkdirIsRejectedWithoutDefaultFallback() throws Exception {
     Path root = Files.createTempDirectory("daemon-workdir-root");
     try {
-      Files.writeString(root.resolve("local.txt"), "from-environment-root");
+      Files.writeString(root.resolve("local.txt"), "from-local-dir");
       FakeTransport transport = new FakeTransport();
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
           new ReadCapability(
               TestCodingConfig.withBridge(root), Executors.newVirtualThreadPerTaskExecutor()));
-      runtime = runtime(transport, registry, root);
+      runtime = runtime(transport, registry);
 
       runtime.start();
       transport.awaitConnections(1);
@@ -511,7 +533,7 @@ class DaemonRuntimeTest {
       assertMessageTypes(missing, DaemonMessageType.FAILED);
       String failure = missing.get(0).payloadJson();
       assertTrue(failure.contains("workdir"), failure);
-      assertFalse(failure.contains("from-environment-root"), failure);
+      assertFalse(failure.contains("from-local-dir"), failure);
 
       // 显式绝对 workdir 正常执行并读到该目录下的文件；可见内容证明目录来自 arguments 而非 Environment Root。
       transport.receive(
@@ -809,7 +831,6 @@ class DaemonRuntimeTest {
                   Duration.ZERO,
                   Duration.ofSeconds(1),
                   null,
-                  root,
                   dataDir()),
               transport,
               registry,
@@ -1551,11 +1572,13 @@ class DaemonRuntimeTest {
     assertFalse(payload.has("mcpServers"));
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
     JsonNode environment = payload.path("environment");
-    assertEquals(4, environment.size());
+    assertEquals(5, environment.size());
     assertTrue(environment.path("operatingSystem").isTextual());
     assertTrue(environment.path("timeZone").isTextual());
+    assertTrue(environment.path("userName").isTextual());
+    assertTrue(environment.path("homeDirectory").isTextual());
     assertTrue(environment.path("note").isTextual());
-    assertTrue(environment.path("rootPath").isTextual());
+    assertTrue(environment.path("rootPath").isMissingNode());
     assertTrue(environment.path("workingDirectory").isMissingNode());
     // 严格 wire 形状：必须能被共享 codec 往返解码。
     assertEquals(
@@ -1795,7 +1818,6 @@ class DaemonRuntimeTest {
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 null,
-                ENVIRONMENT_ROOT,
                 dataDir()),
             transport,
             registry,
@@ -1840,7 +1862,6 @@ class DaemonRuntimeTest {
                 Duration.ZERO,
                 Duration.ofSeconds(1),
                 null,
-                ENVIRONMENT_ROOT,
                 dataDir()),
             transport,
             registry,
@@ -1927,7 +1948,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            ENVIRONMENT_ROOT,
             dataDir()),
         transport,
         registry,
@@ -1949,7 +1969,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             note,
-            ENVIRONMENT_ROOT,
             dataDir()),
         transport,
         registry,
@@ -1958,30 +1977,7 @@ class DaemonRuntimeTest {
         Executors.newVirtualThreadPerTaskExecutor());
   }
 
-  private DaemonRuntime runtime(
-      FakeTransport transport, EnvironmentCapability capability, Path environmentRoot) {
-    handshakeTransport = transport;
-    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-    registry.register(capability);
-    return new DaemonRuntime(
-        new DaemonConfig(
-            URI.create("ws://localhost/gateway"),
-            registrationTokenFile(),
-            Duration.ofMinutes(1),
-            Duration.ZERO,
-            Duration.ofSeconds(1),
-            null,
-            environmentRoot,
-            dataDir()),
-        transport,
-        registry,
-        new InMemoryDaemonInvocationJournal(),
-        Executors.newSingleThreadScheduledExecutor(),
-        Executors.newVirtualThreadPerTaskExecutor());
-  }
-
-  private DaemonRuntime runtime(
-      FakeTransport transport, DaemonCapabilityRegistry registry, Path environmentRoot) {
+  private DaemonRuntime runtime(FakeTransport transport, DaemonCapabilityRegistry registry) {
     handshakeTransport = transport;
     return new DaemonRuntime(
         new DaemonConfig(
@@ -1991,7 +1987,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            environmentRoot,
             dataDir()),
         transport,
         registry,
@@ -2015,7 +2010,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            ENVIRONMENT_ROOT,
             dataDir()),
         transport,
         registry,
@@ -2039,7 +2033,6 @@ class DaemonRuntimeTest {
             Duration.ZERO,
             Duration.ofSeconds(1),
             null,
-            ENVIRONMENT_ROOT,
             dataDir()),
         transport,
         registry,

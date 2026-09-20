@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -23,9 +22,6 @@ import java.util.Optional;
 
 /** 委托至 BoundEnvironment 执行的具体环境能力 Tool 实现。 */
 public final class EnvironmentCapabilityTool implements Tool {
-
-  /** Environment capability arguments 中的显式超时字段；它是该调用唯一被识别的显式超时来源。 */
-  static final String TIMEOUT_SECONDS_ARGUMENT = "timeout_seconds";
 
   private final ToolDescriptor descriptor;
   private final EnvironmentCapabilityDescriptor capability;
@@ -67,16 +63,7 @@ public final class EnvironmentCapabilityTool implements Tool {
    */
   @Override
   public Duration resolveTimeout(ToolCall call) {
-    Objects.requireNonNull(call, "call");
-    var explicit = JsonValues.readTree(call.argumentsJson()).get(TIMEOUT_SECONDS_ARGUMENT);
-    if (explicit == null || explicit.isNull()) {
-      return capability.defaultTimeout();
-    }
-    long seconds = explicit.longValue();
-    if (seconds <= 0) {
-      throw new IllegalArgumentException("timeout_seconds must be positive: " + seconds);
-    }
-    return Duration.ofSeconds(seconds);
+    return EnvironmentCapabilityTimeouts.resolve(capability, call);
   }
 
   /**

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -437,7 +438,8 @@ final class ToolProcessorTestSupport {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 
@@ -461,7 +463,6 @@ final class ToolProcessorTestSupport {
         1024,
         "Test system instruction.",
         List.of(hostBinding(ToolSideEffect.READ_ONLY)),
-        List.of(),
         List.of(),
         provider.cacheControl());
   }

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -20,6 +21,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
@@ -61,8 +63,7 @@ class GoalFeatureTest {
   void catalogFreezesGoalToolsStateOwnershipAndAccessModes() {
     BuiltinHarnessContributor contributor =
         new BuiltinHarnessContributor(
-            stubTool("load_skill", ToolRequirements.environment()),
-            stubTool("task", ToolRequirements.none()));
+            new ReadTool((request, listener) -> null), stubTool("task", ToolRequirements.none()));
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
     assertTrue(catalog.findTool("create_goal").isPresent());
@@ -77,19 +78,19 @@ class GoalFeatureTest {
 
     assertEquals(
         new ToolRequirements(
-            false,
+            EnvironmentSupport.NONE,
             List.of(
                 new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, StateMode.WRITE))),
         catalog.findTool("create_goal").orElseThrow().requirements());
     assertEquals(
         new ToolRequirements(
-            false,
+            EnvironmentSupport.NONE,
             List.of(
                 new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, StateMode.READ))),
         catalog.findTool("get_goal").orElseThrow().requirements());
     assertEquals(
         new ToolRequirements(
-            false,
+            EnvironmentSupport.NONE,
             List.of(
                 new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, StateMode.WRITE))),
         catalog.findTool("update_goal").orElseThrow().requirements());

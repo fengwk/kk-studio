@@ -10,7 +10,7 @@ public final class DaemonProtocol {
    * environmentId}、nullable {@code invocationId}、{@code payload}）、HELLO 携带的 {@code
    * daemonInstanceId} 与 强制协商的 {@code permessage-deflate}。其他版本帧一律拒绝，不做双协议 fallback。
    */
-  public static final int VERSION = 1;
+  public static final int VERSION = 2;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

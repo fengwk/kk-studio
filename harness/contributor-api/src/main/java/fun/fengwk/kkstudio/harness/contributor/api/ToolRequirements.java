@@ -8,22 +8,23 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 工具执行所需的前置条件与状态声明。
+ * 工具执行所需的环境关系与状态声明。
  *
- * @param environmentRequired 是否需要绑定 Environment
- * @param requiredEnvironmentId 精确要求的目标 Environment 身份；非空时 environmentRequired 必须为 true，null
- *     表示可使用任意已绑定 Environment
+ * @param environmentSupport 该工具与 Environment 的关系级别
+ * @param requiredEnvironmentId 精确要求的目标 Environment 身份；非空时 {@code environmentSupport} 必须为 {@link
+ *     EnvironmentSupport#REQUIRED}，null 表示接受任意已绑定 Environment
  * @param stateAccesses 声明的 branch custom state 访问集合
  */
 public record ToolRequirements(
-    boolean environmentRequired,
+    EnvironmentSupport environmentSupport,
     EnvironmentId requiredEnvironmentId,
     List<StateDeclaration> stateAccesses) {
 
   public ToolRequirements {
-    if (requiredEnvironmentId != null && !environmentRequired) {
+    environmentSupport = Objects.requireNonNull(environmentSupport, "environmentSupport");
+    if (requiredEnvironmentId != null && environmentSupport != EnvironmentSupport.REQUIRED) {
       throw new IllegalArgumentException(
-          "environmentRequired must be true when requiredEnvironmentId is present");
+          "requiredEnvironmentId requires EnvironmentSupport.REQUIRED");
     }
     stateAccesses = List.copyOf(Objects.requireNonNull(stateAccesses, "stateAccesses"));
     Set<String> customTypes = new HashSet<>();
@@ -36,23 +37,30 @@ public record ToolRequirements(
     }
   }
 
-  public ToolRequirements(boolean environmentRequired, List<StateDeclaration> stateAccesses) {
-    this(environmentRequired, null, stateAccesses);
+  /** 不要求绑定 Environment，但声明 branch custom state 访问的 ToolRequirements。 */
+  public ToolRequirements(
+      EnvironmentSupport environmentSupport, List<StateDeclaration> stateAccesses) {
+    this(environmentSupport, null, stateAccesses);
   }
 
   /** 返回无任何前置要求的 ToolRequirements。 */
   public static ToolRequirements none() {
-    return new ToolRequirements(false, null, List.of());
+    return new ToolRequirements(EnvironmentSupport.NONE, null, List.of());
   }
 
-  /** 返回仅需要绑定执行环境的 ToolRequirements（接受任意已绑定的 Environment）。 */
+  /** 返回有 Environment 时使用、无 Environment 时由 Platform 侧执行的 ToolRequirements。 */
+  public static ToolRequirements optionalEnvironment() {
+    return new ToolRequirements(EnvironmentSupport.OPTIONAL, null, List.of());
+  }
+
+  /** 返回需要绑定执行环境的 ToolRequirements（接受任意已绑定的 Environment）。 */
   public static ToolRequirements environment() {
-    return new ToolRequirements(true, null, List.of());
+    return new ToolRequirements(EnvironmentSupport.REQUIRED, null, List.of());
   }
 
   /** 返回精确要求目标 Environment 的 ToolRequirements。 */
   public static ToolRequirements environment(EnvironmentId requiredEnvironmentId) {
     Objects.requireNonNull(requiredEnvironmentId, "requiredEnvironmentId");
-    return new ToolRequirements(true, requiredEnvironmentId, List.of());
+    return new ToolRequirements(EnvironmentSupport.REQUIRED, requiredEnvironmentId, List.of());
   }
 }

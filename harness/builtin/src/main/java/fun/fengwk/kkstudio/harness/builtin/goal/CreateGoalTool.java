@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -38,7 +39,8 @@ public final class CreateGoalTool implements Tool {
 
   private static final ToolRequirements REQUIREMENTS =
       new ToolRequirements(
-          false, List.of(new StateDeclaration(GoalFeature.STATE_TYPE, StateMode.WRITE)));
+          EnvironmentSupport.NONE,
+          List.of(new StateDeclaration(GoalFeature.STATE_TYPE, StateMode.WRITE)));
 
   @Override
   public ToolDescriptor descriptor() {

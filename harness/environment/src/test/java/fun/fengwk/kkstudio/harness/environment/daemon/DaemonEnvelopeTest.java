@@ -66,10 +66,10 @@ class DaemonEnvelopeTest {
   @Test
   void rejectsAnyProtocolVersionOtherThanCurrent() {
     assertEquals(
-        1,
+        DaemonProtocol.VERSION,
         new DaemonEnvelope(DaemonProtocol.VERSION, DaemonMessageType.READY, ID, null, "{}")
             .protocolVersion());
-    for (int version : new int[] {0, 2, 3}) {
+    for (int version : new int[] {0, 1, 3}) {
       assertThrows(
           IllegalArgumentException.class,
           () -> new DaemonEnvelope(version, DaemonMessageType.READY, ID, null, "{}"));

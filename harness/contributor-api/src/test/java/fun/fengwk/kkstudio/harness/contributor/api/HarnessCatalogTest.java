@@ -145,7 +145,8 @@ class HarnessCatalogTest {
     Tool stateTool =
         dummyTool(
             "state_tool",
-            new ToolRequirements(false, List.of(new StateDeclaration("state", StateMode.READ))));
+            new ToolRequirements(
+                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.READ))));
     Tool envTool = dummyTool("env_tool", ToolRequirements.environment());
     ContextProjector projector = view -> List.of();
 
@@ -186,7 +187,7 @@ class HarnessCatalogTest {
 
     ToolContribution envContrib = catalog.findTool(envId).orElseThrow();
     assertEquals(envTool, envContrib.tool());
-    assertTrue(envContrib.requirements().environmentRequired());
+    assertEquals(EnvironmentSupport.REQUIRED, envContrib.requirements().environmentSupport());
 
     // 验证按模型可见 name 查询
     assertSame(plainContrib, catalog.findTool("plain_tool").orElseThrow());
@@ -325,7 +326,8 @@ class HarnessCatalogTest {
         dummyTool(
             "state_tool",
             new ToolRequirements(
-                false, List.of(new StateDeclaration("unregistered-state", StateMode.READ))));
+                EnvironmentSupport.NONE,
+                List.of(new StateDeclaration("unregistered-state", StateMode.READ))));
 
     HarnessContributor contrib =
         HarnessContributor.of(desc, reg -> reg.registerTool("t", tool, ToolVisibility.SELECTABLE));

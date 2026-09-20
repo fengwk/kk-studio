@@ -2,12 +2,14 @@ package fun.fengwk.kkstudio.harness.builtin;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentPrompts;
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GoalContextProjector;
 import fun.fengwk.kkstudio.harness.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -25,8 +27,10 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>注册 9 个模型可见 Environment capability 工具、{@code load_skill} 与 {@code task} internal 工具、Goal
- * 工具、{@code goal.state} 自定义 Entry 类型与上下文投影器（共 14 个内置工具）。
+ * <p>集中注册 13 个内置工具（统一 {@code read}、8 个宿主 Environment capability 工具、{@code task} internal 工具、 3 个
+ * Goal 工具）、{@code goal.state} 自定义 Entry 类型与上下文投影器。 其中 {@code read} 声明 {@link
+ * EnvironmentSupport#OPTIONAL}，其余 8 个宿主工具声明 {@link EnvironmentSupport#REQUIRED}， {@code task} 与
+ * Goal 工具声明 {@link EnvironmentSupport#NONE}。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
@@ -38,17 +42,17 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
 
-  private final Tool loadSkillTool;
+  private final ReadTool readTool;
   private final Tool taskTool;
 
-  public BuiltinHarnessContributor(Tool loadSkillTool, Tool taskTool) {
-    this.loadSkillTool = Objects.requireNonNull(loadSkillTool, "loadSkillTool");
+  public BuiltinHarnessContributor(ReadTool readTool, Tool taskTool) {
+    this.readTool = Objects.requireNonNull(readTool, "readTool");
     this.taskTool = Objects.requireNonNull(taskTool, "taskTool");
-    ToolDescriptor loadSkillDescriptor = this.loadSkillTool.descriptor();
-    if (loadSkillDescriptor == null || !"load_skill".equals(loadSkillDescriptor.name())) {
+    ToolDescriptor readDescriptor = this.readTool.descriptor();
+    if (readDescriptor == null || !"read".equals(readDescriptor.name())) {
       throw new IllegalArgumentException(
-          "loadSkillTool descriptor name must be \"load_skill\", got "
-              + (loadSkillDescriptor == null ? "null" : "\"" + loadSkillDescriptor.name() + "\""));
+          "readTool descriptor name must be \"read\", got "
+              + (readDescriptor == null ? "null" : "\"" + readDescriptor.name() + "\""));
     }
     ToolDescriptor taskDescriptor = this.taskTool.descriptor();
     if (taskDescriptor == null || !"task".equals(taskDescriptor.name())) {
@@ -67,13 +71,10 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   public void contribute(HarnessRegistrar registrar) {
     Objects.requireNonNull(registrar, "registrar");
 
-    // 9 Environment capability tools（read/write/edit/bash/grep/find + 3 个 LSP）
-    registerEnvironment(
-        registrar,
-        "environment.read",
-        "read",
-        EnvironmentCapabilityIds.FS_READ,
-        ToolSideEffect.READ_ONLY);
+    // 统一 read 工具（SELECTABLE, priority 0, optionalEnvironment）
+    registrar.registerTool("read", readTool, ToolVisibility.SELECTABLE, 0);
+
+    // 8 个 Environment capability 工具（write/edit/bash/grep/find + 3 个 LSP）
     registerEnvironment(
         registrar,
         "environment.write",
@@ -123,8 +124,7 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY);
 
-    // Internal server-side tools
-    registrar.registerTool("runtime.load-skill", loadSkillTool, ToolVisibility.INTERNAL, 0);
+    // Internal server-side tool
     registrar.registerTool("runtime.task", taskTool, ToolVisibility.INTERNAL, 0);
 
     // Goal tools & custom entry

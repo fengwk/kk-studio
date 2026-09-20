@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -20,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -73,16 +73,15 @@ class ResolvedRequestValidatorTest {
   }
 
   @Test
-  void acceptsValidNormalRequestWithMatchingToolAndSkillRoutes() {
+  void acceptsValidNormalRequestWithMatchingToolRoutes() {
     ModelRequestSpec spec =
         normalSpec(
             SETTINGS,
             List.of(environmentTool(ENV_BINDING)),
-            List.of(skillBinding("dev", ENV_BINDING)),
             List.of(),
             ProviderCacheControl.none());
 
-    // 正常 turn 允许匹配 candidate environment 的 tool/skill binding。
+    // 正常 turn 允许匹配 candidate environment 的 tool binding。
     assertDoesNotThrow(
         () -> ResolvedRequestValidator.validate(normalPath(SETTINGS), null, resolved(spec)));
   }
@@ -133,7 +132,6 @@ class ResolvedRequestValidatorTest {
         preparation(),
         List.of(),
         List.of(),
-        List.of(),
         ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "key"));
   }
 
@@ -141,18 +139,7 @@ class ResolvedRequestValidatorTest {
   void rejectsToolBindingOnCompactionRequest() {
     // 压缩只发送 model/variant，不能把任何 tool binding 带入 Provider 请求。
     assertCompactionRejects(
-        preparation(), List.of(hostTool()), List.of(), List.of(), ProviderCacheControl.none());
-  }
-
-  @Test
-  void rejectsSkillBindingOnCompactionRequest() {
-    // 压缩调用不加载 skill；skill 绑定必须留在正常 turn。
-    assertCompactionRejects(
-        preparation(),
-        List.of(),
-        List.of(skillBinding("dev", ENV_BINDING)),
-        List.of(),
-        ProviderCacheControl.none());
+        preparation(), List.of(hostTool()), List.of(), ProviderCacheControl.none());
   }
 
   @Test
@@ -160,7 +147,6 @@ class ResolvedRequestValidatorTest {
     // 压缩摘要不应携带子 Agent 委派能力。
     assertCompactionRejects(
         preparation(),
-        List.of(),
         List.of(),
         List.of(new SubagentBinding("reviewer", "review the summary")),
         ProviderCacheControl.none());
@@ -171,7 +157,6 @@ class ResolvedRequestValidatorTest {
     // 压缩请求必须禁用 Provider cache，避免摘要请求复用正常 turn 的缓存策略。
     assertCompactionRejects(
         preparation(),
-        List.of(),
         List.of(),
         List.of(),
         ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "compaction-cache"));
@@ -193,7 +178,7 @@ class ResolvedRequestValidatorTest {
   @Test
   void acceptsAnyEnvironmentIdBecauseBranchSettingsCarryNoDirectory() {
     // branch settings 只冻结 agent/model/environmentName，不携带路由身份；Environment 每轮按 name 解析，
-    // 因此候选 Spec 中任意 environmentId 的 tool/skill 都不与 branch 构成 Resolved 契约冲突。
+    // 因此候选 Spec 中任意 environmentId 的 tool 都不与 branch 构成 Resolved 契约冲突。
     assertDoesNotThrow(
         () ->
             ResolvedRequestValidator.validate(
@@ -203,20 +188,13 @@ class ResolvedRequestValidatorTest {
                     normalSpec(
                         SETTINGS,
                         List.of(environmentTool(OTHER_ENVIRONMENT_ID)),
-                        List.of(skillBinding("dev", OTHER_ENVIRONMENT_ID)),
                         List.of(),
                         ProviderCacheControl.none()))));
-  }
-
-  /** 冻结的平台 Skill 包身份 fixture。 */
-  private static SkillBinding skillBinding(String name, EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding(name, "test-package", "1.0.0", "developer rules");
   }
 
   private static void assertCompactionRejects(
       CompactionPreparation preparation,
       List<ToolBinding> tools,
-      List<SkillBinding> skills,
       List<SubagentBinding> subagents,
       ProviderCacheControl cacheControl) {
     IllegalStateException error =
@@ -227,12 +205,7 @@ class ResolvedRequestValidatorTest {
                     compactionPath(SETTINGS, preparation.frozenStart()),
                     preparation,
                     resolved(
-                        normalSpec(
-                            preparation.executionModel(),
-                            tools,
-                            skills,
-                            subagents,
-                            cacheControl))));
+                        normalSpec(preparation.executionModel(), tools, subagents, cacheControl))));
     assertEquals(
         "compaction requests must carry only model/variant with cache disabled",
         error.getMessage());
@@ -275,26 +248,24 @@ class ResolvedRequestValidatorTest {
 
   private static ModelRequestSpec compactionSpec(CompactionPreparation preparation) {
     return normalSpec(
-        preparation.executionModel(), List.of(), List.of(), List.of(), ProviderCacheControl.none());
+        preparation.executionModel(), List.of(), List.of(), ProviderCacheControl.none());
   }
 
   private static ModelRequestSpec normalSpec(BranchSettings settings) {
-    return normalSpec(settings, List.of(), List.of(), List.of(), ProviderCacheControl.none());
+    return normalSpec(settings, List.of(), List.of(), ProviderCacheControl.none());
   }
 
   private static ModelRequestSpec normalSpec(
       BranchSettings settings,
       List<ToolBinding> tools,
-      List<SkillBinding> skills,
       List<SubagentBinding> subagents,
       ProviderCacheControl cacheControl) {
-    return normalSpec(settings.model(), tools, skills, subagents, cacheControl);
+    return normalSpec(settings.model(), tools, subagents, cacheControl);
   }
 
   private static ModelRequestSpec normalSpec(
       ModelSelection model,
       List<ToolBinding> tools,
-      List<SkillBinding> skills,
       List<SubagentBinding> subagents,
       ProviderCacheControl cacheControl) {
     return new ModelRequestSpec(
@@ -323,7 +294,6 @@ class ResolvedRequestValidatorTest {
         1024,
         "Test system instruction.",
         tools,
-        skills,
         subagents,
         cacheControl);
   }
@@ -332,15 +302,17 @@ class ResolvedRequestValidatorTest {
     return new ToolBinding(
         toolDefinition("test.fs"),
         new ContributorBinding("base", "fs", List.of()),
-        true,
-        environment);
+        EnvironmentSupport.REQUIRED,
+        environment,
+        "dev");
   }
 
   private static ToolBinding hostTool() {
     return new ToolBinding(
         toolDefinition("test.bash"),
         new ContributorBinding("core", "bash", List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

@@ -2,9 +2,9 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
@@ -44,11 +44,6 @@ final class InvocationCodecTestFixtures {
 
   private InvocationCodecTestFixtures() {}
 
-  /** 冻结的平台 Skill 包身份事实。 */
-  static SkillBinding skillBinding(EnvironmentId sourceEnvironmentId) {
-    return new SkillBinding("review", "review-package", "1.0.0", "Review code");
-  }
-
   static ToolDescriptor descriptor() {
     return descriptor("bash");
   }
@@ -63,11 +58,11 @@ final class InvocationCodecTestFixtures {
         Duration.ofSeconds(30));
   }
 
-  static ToolBinding binding(boolean environmentRequired) {
-    return binding(environmentRequired, false);
+  static ToolBinding binding(EnvironmentSupport environmentSupport) {
+    return binding(environmentSupport, false);
   }
 
-  static ToolBinding binding(boolean environmentRequired, boolean withStateAccesses) {
+  static ToolBinding binding(EnvironmentSupport environmentSupport, boolean withStateAccesses) {
     ContributorBinding contributor =
         withStateAccesses
             ? new ContributorBinding(
@@ -75,12 +70,13 @@ final class InvocationCodecTestFixtures {
                 "create",
                 List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)))
             : new ContributorBinding("core", "bash", List.of());
+    boolean hasEnv = environmentSupport == EnvironmentSupport.REQUIRED;
     return new ToolBinding(
-        definition(environmentRequired ? "fs" : "bash"),
+        definition(hasEnv ? "fs" : "bash"),
         contributor,
-        environmentRequired,
-        environmentRequired ? ENVIRONMENT_ID : null,
-        environmentRequired ? "dev" : null);
+        environmentSupport,
+        hasEnv ? ENVIRONMENT_ID : null,
+        hasEnv ? "dev" : null);
   }
 
   private static AgentToolDefinition definition(String name) {
@@ -112,7 +108,7 @@ final class InvocationCodecTestFixtures {
   }
 
   static ModelRequestSpec environmentModelRequest() {
-    ToolBinding binding = binding(true);
+    ToolBinding binding = binding(EnvironmentSupport.REQUIRED);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -122,13 +118,12 @@ final class InvocationCodecTestFixtures {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(skillBinding(ENVIRONMENT_ID)),
         List.of(),
         provider.cacheControl());
   }
 
   static ModelRequestSpec hostModelRequest() {
-    ToolBinding binding = binding(false);
+    ToolBinding binding = binding(EnvironmentSupport.NONE);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -138,7 +133,6 @@ final class InvocationCodecTestFixtures {
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of(skillBinding(ENVIRONMENT_ID)),
         List.of(),
         provider.cacheControl());
   }

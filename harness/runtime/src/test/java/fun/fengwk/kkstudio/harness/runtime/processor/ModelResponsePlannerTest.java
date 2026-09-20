@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -317,7 +318,8 @@ class ModelResponsePlannerTest {
                 Duration.ofSeconds(30)),
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", name, List.of()),
-        false,
+        EnvironmentSupport.NONE,
+        null,
         null);
   }
 

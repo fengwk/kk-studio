@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
 class WorkdirPathSemanticsTest {
 
   @TempDir Path workdir;
-  @TempDir Path environmentRoot;
+  @TempDir Path workspaceRoot;
   @TempDir Path externalRoot;
 
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -48,15 +48,15 @@ class WorkdirPathSemanticsTest {
   }
 
   /**
-   * 省略 workdir 必须被拒绝，且绝不回退到 Environment Root。
+   * 省略 workdir 必须被拒绝，且绝不回退到默认路径。
    *
-   * <p>workdir 是 schema 必填字段，因此拒绝发生在执行请求构造期（即永远不会进入 capability 执行），这是比“执行后报错”更强的 保证：在 Environment
-   * Root 下放置同名文件也无法被读取。
+   * <p>workdir 是 schema 必填字段，因此拒绝发生在执行请求构造期（即永远不会进入 capability 执行），这是比“执行后报错”更强的 保证：在 workspace
+   * 下放置同名文件也无法被读取。
    */
   @Test
-  void omittedWorkdirIsRejectedWithoutEnvironmentRootFallback() throws Exception {
+  void omittedWorkdirIsRejectedWithoutDefaultFallback() throws Exception {
     Files.writeString(workdir.resolve("local.txt"), "from-explicit-workdir\n");
-    Files.writeString(environmentRoot.resolve("local.txt"), "from-environment-root\n");
+    Files.writeString(workspaceRoot.resolve("local.txt"), "from-workspace-root\n");
 
     IllegalArgumentException error =
         assertThrows(
@@ -64,7 +64,7 @@ class WorkdirPathSemanticsTest {
             () -> invoke(new ReadCapability(config(), executor), "{\"path\":\"local.txt\"}"));
 
     assertTrue(error.getMessage().contains("workdir"), error.getMessage());
-    assertFalse(error.getMessage().contains("from-environment-root"));
+    assertFalse(error.getMessage().contains("from-workspace-root"));
     assertFalse(error.getMessage().contains("from-explicit-workdir"));
   }
 
@@ -257,7 +257,7 @@ class WorkdirPathSemanticsTest {
   }
 
   private CodingToolsConfig config() {
-    return TestCodingConfig.withoutBridge(environmentRoot);
+    return TestCodingConfig.withoutBridge(workspaceRoot);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String arguments)

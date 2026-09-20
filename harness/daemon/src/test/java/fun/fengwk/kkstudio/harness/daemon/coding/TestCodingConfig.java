@@ -53,7 +53,6 @@ public final class TestCodingConfig {
       String javapExecutable,
       String bashExecutable) {
     return new CodingToolsConfig(
-        root,
         previewMaxLines,
         previewMaxBytes,
         bashExecutable,

@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.SkillBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
@@ -41,10 +40,6 @@ public final class ModelRequestSpecJsonCodec {
     for (ToolBinding binding : spec.toolBindings()) {
       tools.add(BINDING_CODEC.encodeNode(binding));
     }
-    ArrayNode skills = node.putArray("skillBindings");
-    for (SkillBinding skill : spec.skillBindings()) {
-      skills.add(encodeSkill(skill));
-    }
     ArrayNode subagents = node.putArray("subagentBindings");
     for (SubagentBinding subagent : spec.subagentBindings()) {
       subagents.add(encodeSubagent(subagent));
@@ -69,7 +64,6 @@ public final class ModelRequestSpecJsonCodec {
         "outputTokens",
         "systemInstruction",
         "toolBindings",
-        "skillBindings",
         "subagentBindings",
         "cacheControl");
     ArrayNode toolNodes =
@@ -78,13 +72,6 @@ public final class ModelRequestSpecJsonCodec {
     List<ToolBinding> toolBindings = new ArrayList<>(toolNodes.size());
     for (JsonNode toolNode : toolNodes) {
       toolBindings.add(BINDING_CODEC.decodeNode(toolNode));
-    }
-    ArrayNode skillNodes =
-        InvocationJsonSupport.array(
-            InvocationJsonSupport.required(node, "skillBindings", CONTEXT), "skillBindings");
-    List<SkillBinding> skillBindings = new ArrayList<>(skillNodes.size());
-    for (JsonNode skillNode : skillNodes) {
-      skillBindings.add(decodeSkill(skillNode));
     }
     ArrayNode subagentNodes =
         InvocationJsonSupport.array(
@@ -101,31 +88,9 @@ public final class ModelRequestSpecJsonCodec {
         InvocationJsonSupport.positiveInt(node, "outputTokens", CONTEXT),
         InvocationJsonSupport.text(node, "systemInstruction", CONTEXT),
         toolBindings,
-        skillBindings,
         subagentBindings,
         PROVIDER_CODEC.decodeCacheControlNode(
             InvocationJsonSupport.required(node, "cacheControl", CONTEXT)));
-  }
-
-  private static ObjectNode encodeSkill(SkillBinding skill) {
-    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
-    node.put("name", skill.name());
-    node.put("packageName", skill.packageName());
-    node.put("packageVersion", skill.packageVersion());
-    node.put("description", skill.description());
-    return node;
-  }
-
-  /** 严格解码：全部身份/描述字段必填，旧 tolerant 形状（缺少 package 身份）被拒绝。 */
-  private static SkillBinding decodeSkill(JsonNode value) {
-    ObjectNode node = InvocationJsonSupport.object(value, "skillBinding");
-    InvocationJsonSupport.requireFields(
-        node, "skillBinding", "name", "packageName", "packageVersion", "description");
-    return new SkillBinding(
-        InvocationJsonSupport.text(node, "name", "skillBinding"),
-        InvocationJsonSupport.text(node, "packageName", "skillBinding"),
-        InvocationJsonSupport.text(node, "packageVersion", "skillBinding"),
-        InvocationJsonSupport.text(node, "description", "skillBinding"));
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {
