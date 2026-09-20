@@ -11,8 +11,12 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
+
 import java.lang.reflect.Field;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /** Harness Runtime HTTP DTO 契约：严格字段、严格字符串 cursor 与 compact/snapshot 投影。 */
 class HarnessRuntimeDtoContractTest {
@@ -220,5 +224,126 @@ class HarnessRuntimeDtoContractTest {
     assertThrows(
         NoSuchFieldException.class,
         () -> HarnessBranchSettingsDTO.class.getDeclaredField("workspacePath"));
+  }
+
+  @Test
+  void systemPromptPreviewIsReplacedByStructuredModelRequestDebug() throws Exception {
+    // 意图：展示文本预览被删除，Debug 只暴露结构化投影（预览与冻结请求两种视图）。
+    assertThrows(
+        ClassNotFoundException.class,
+        () ->
+            Class.forName(
+                HarnessModelSelectionDTO.class.getPackageName()
+                    + ".HarnessSystemPromptPreviewDTO"));
+
+    Map<String, Class<?>> expected =
+        Map.ofEntries(
+            Map.entry("kind", String.class),
+            Map.entry("generatedAt", Instant.class),
+            Map.entry("model", HarnessModelSelectionDTO.class),
+            Map.entry("environmentName", String.class),
+            Map.entry("systemInstruction", String.class),
+            Map.entry("tools", List.class),
+            Map.entry("skills", List.class),
+            Map.entry("subagents", List.class),
+            Map.entry("cacheControl", HarnessModelRequestDebugDTO.CacheControlDTO.class),
+            Map.entry("planningError", String.class),
+            Map.entry("frozenInvocation", HarnessModelRequestDebugDTO.FrozenInvocationDTO.class));
+    for (Map.Entry<String, Class<?>> entry : expected.entrySet()) {
+      assertEquals(
+          entry.getValue(),
+          HarnessModelRequestDebugDTO.class.getDeclaredField(entry.getKey()).getType(),
+          entry.getKey());
+    }
+  }
+
+  @Test
+  void modelRequestDebugMarksRequiredNullableFacts() throws Exception {
+    // 意图：未选择 Environment 与 planning 失败都是真实状态，字段必须显式发射 null 而不是缺席。
+    for (String fieldName : List.of("environmentName", "planningError")) {
+      JsonInclude include =
+          HarnessModelRequestDebugDTO.class
+              .getDeclaredField(fieldName)
+              .getAnnotation(JsonInclude.class);
+      assertNotNull(include, fieldName);
+      assertEquals(JsonInclude.Include.ALWAYS, include.value(), fieldName);
+    }
+  }
+
+  @Test
+  void modelRequestDebugProjectsToolAndSkillDeliveryFacts() throws Exception {
+    // 意图：Tool 的发送/过滤状态与 EnvironmentSupport、Skill 的交付路径与 commit 都是结构化字段。
+    HarnessModelRequestDebugDTO.ToolDTO sent = new HarnessModelRequestDebugDTO.ToolDTO();
+    sent.setName("read");
+    sent.setDescription("Read a file.");
+    sent.setInputSchemaJson("{\"type\":\"object\"}");
+    sent.setEnvironmentSupport(EnvironmentSupportDTO.OPTIONAL);
+    sent.setProvenance("builtin:read");
+    sent.setState("SENT");
+    sent.setFilterReason(null);
+
+    HarnessModelRequestDebugDTO.ToolDTO filtered = new HarnessModelRequestDebugDTO.ToolDTO();
+    filtered.setName("bash");
+    filtered.setEnvironmentSupport(EnvironmentSupportDTO.REQUIRED);
+    filtered.setState("FILTERED");
+    filtered.setFilterReason("ENVIRONMENT_NOT_SELECTED");
+
+    HarnessModelRequestDebugDTO.SkillDTO skill = new HarnessModelRequestDebugDTO.SkillDTO();
+    skill.setPackageName("dev-tools");
+    skill.setName("dev");
+    skill.setDelivery("LOCAL");
+    skill.setPath("/data/skills/dev-tools/dev/SKILL.md");
+    skill.setCurrentCommit("0123456789012345678901234567890123456789");
+    skill.setInstalledCommit("0123456789012345678901234567890123456789");
+    skill.setPromptXml("<skill name=\"dev\"/>");
+
+    HarnessModelRequestDebugDTO debug = new HarnessModelRequestDebugDTO();
+    debug.setKind("NEXT_REQUEST_PREVIEW");
+    debug.setEnvironmentName(null);
+    debug.setPlanningError(null);
+    debug.setTools(List.of(sent, filtered));
+    debug.setSkills(List.of(skill));
+
+    String json = MAPPER.writeValueAsString(debug);
+    assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
+    assertTrue(json.contains("\"state\":\"FILTERED\""), json);
+    assertTrue(json.contains("\"filterReason\":\"ENVIRONMENT_NOT_SELECTED\""), json);
+    assertTrue(json.contains("\"environmentSupport\":\"OPTIONAL\""), json);
+    assertTrue(json.contains("\"delivery\":\"LOCAL\""), json);
+    assertTrue(json.contains("\"environmentName\":null"), json);
+    assertTrue(json.contains("\"planningError\":null"), json);
+  }
+
+  @Test
+  void modelRequestDebugNeverCarriesCredentialsOrBodies() {
+    // 意图：Debug 只展示可读 JSON 与去敏事实，绝不含凭据、Authorization 头、存储地址或 Base64 正文。
+    List<Class<?>> debugClasses =
+        List.of(
+            HarnessModelRequestDebugDTO.class,
+            HarnessModelRequestDebugDTO.ToolDTO.class,
+            HarnessModelRequestDebugDTO.SkillDTO.class,
+            HarnessModelRequestDebugDTO.SubagentDTO.class,
+            HarnessModelRequestDebugDTO.CacheControlDTO.class,
+            HarnessModelRequestDebugDTO.FrozenInvocationDTO.class);
+    List<String> forbidden =
+        List.of(
+            "token",
+            "secret",
+            "credential",
+            "authorization",
+            "apikey",
+            "password",
+            "base64",
+            "bucket");
+    for (Class<?> debugClass : debugClasses) {
+      for (Field field : debugClass.getDeclaredFields()) {
+        String normalized = field.getName().toLowerCase();
+        for (String forbiddenPart : forbidden) {
+          assertFalse(
+              normalized.contains(forbiddenPart),
+              () -> debugClass.getSimpleName() + " must not expose " + field.getName());
+        }
+      }
+    }
   }
 }
