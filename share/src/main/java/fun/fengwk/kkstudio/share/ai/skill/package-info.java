@@ -1,8 +1,8 @@
 /**
- * Platform 全局 Skill 目录的对外 DTO。
+ * Platform 全局 Git Skill Package 的对外 DTO。
  *
- * <p>Skill 身份是全局唯一的短名，版本身份是 {@code (packageName, packageVersion, name)}；package 更新写入一个新的 package
- * 版本，历史版本行永不修改、永不删除，删除只把当前版本与其 Skill 行置为非活跃。正文只在 {@link
- * fun.fengwk.kkstudio.share.ai.skill.SkillPackageDetailDTO} 中回传，供客户端编辑后整体替换。
+ * <p>Skill 身份是 {@code (packageName, name)}：Package 以不可变 {@code packageName} 键控一个不可变 repository
+ * URL，发布内容由人工确认的 exact commit 决定，Skill 正文、references、scripts 与 assets 全部保留在 Git。这些 DTO
+ * 只暴露仓库身份、branch 检查观察值、从 current commit 派生的 manifest 与 CAS {@code version}，不承载任何 Skill 正文。
  */
 package fun.fengwk.kkstudio.share.ai.skill;

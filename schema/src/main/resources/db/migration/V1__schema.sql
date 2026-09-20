@@ -142,23 +142,30 @@ create index idx_agent_definition_model
     on agent_definition (model_provider_name, model_name);
 
 -- -----------------------------------------------------------------------------
--- Platform 全局 Skill 目录
+-- Platform 全局 Skill Package
 --
--- Skill 是 Platform 自身的全局资源：身份是全局唯一的 name，版本身份是
--- (package_name, package_version, name)。package 更新是一次完整替换，写入一个新的 package
--- 版本；历史版本行永不修改、永不物理删除，只有 active 标记可以变更，因此任何已冻结的三元组
--- 都能永久精确取回内容。删除一个 package 只把当前版本与其 Skill 行置为非活跃。
+-- Skill 正文、references、scripts 与 assets 全部保留在 Git：Platform 每个 packageName 只
+-- 保存一行——不可变 repository URL、只用于检查候选更新的 branch、人工确认的 exact current
+-- commit、最近观察到的 branch HEAD 与检查结果，以及从 current commit 派生的 Skill
+-- manifest JSON。repository URL 创建后不可改，更换仓库要使用新的 Package。
 --
 -- canonical 文本规则与 SkillNames 一致：无环绕空白、无控制字符、不含 : / @ \。
 -- -----------------------------------------------------------------------------
 
 create table skill_package (
-    package_name     varchar(128)  not null,
-    package_version  varchar(128)  not null,
-    description      text,
-    active           boolean       not null,
-    create_time      timestamptz(3) not null default current_timestamp,
-    constraint pk_skill_package primary key (package_name, package_version),
+    package_name         varchar(128)  not null,
+    description          text,
+    repository_url       text          not null,
+    branch               varchar(255)  not null,
+    current_commit       varchar(64)   not null,
+    observed_head_commit varchar(64),
+    head_checked_at      timestamptz(3),
+    head_check_error     text,
+    skills               jsonb         not null default '[]'::jsonb,
+    version              bigint        not null default 0,
+    create_time          timestamptz(3) not null default current_timestamp,
+    update_time          timestamptz(3) not null default current_timestamp,
+    constraint pk_skill_package primary key (package_name),
     constraint ck_skill_package_name check (
         package_name = btrim(package_name)
         and char_length(package_name) > 0
@@ -168,75 +175,157 @@ create table skill_package (
         and position('@' in package_name) = 0
         and position('\' in package_name) = 0
     ),
-    constraint ck_skill_package_version check (
-        package_version = btrim(package_version)
-        and char_length(package_version) > 0
-        and package_version !~ '[[:cntrl:]]'
-    ),
     constraint ck_skill_package_description check (
         description is null
         or (description = btrim(description) and char_length(description) > 0)
-    )
+    ),
+    constraint ck_skill_package_repository_url check (
+        repository_url = btrim(repository_url)
+        and repository_url ~ '^[a-z][a-z0-9+.-]*://[^[:space:]]+$'
+        and char_length(repository_url) <= 2048
+        and repository_url !~ '[[:cntrl:]]'
+        and repository_url !~ '://[^/[:space:]]*@'
+    ),
+    constraint ck_skill_package_branch check (
+        branch = btrim(branch)
+        and char_length(branch) > 0
+        and branch !~ '[[:cntrl:]]'
+    ),
+    constraint ck_skill_package_current_commit check (
+        current_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
+    ),
+    constraint ck_skill_package_observed_head_commit check (
+        observed_head_commit is null
+        or observed_head_commit ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'
+    ),
+    constraint ck_skill_package_head_check_error check (
+        head_check_error is null
+        or (
+            head_check_error = btrim(head_check_error)
+            and char_length(head_check_error) > 0
+            and octet_length(head_check_error) <= 4096
+        )
+    ),
+    constraint ck_skill_package_skills check (jsonb_typeof(skills) = 'array'),
+    constraint ck_skill_package_version check (version >= 0),
+    constraint ck_skill_package_time_order check (update_time >= create_time)
 );
 
-comment on table skill_package is 'Platform 全局 Skill package 版本：每个 (name, version) 恰一行，旧版本的 active=false 永久保留';
-comment on column skill_package.package_name is 'package 名（非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
-comment on column skill_package.package_version is 'package 版本（非空白、无环绕空白、无控制字符、≤128）；一经写入永不复用';
+comment on table skill_package is 'Platform 全局 Skill Package 权威行：每个 packageName 恰一行，内容保存在 Git，数据库只保存不可变仓库事实、人工确认的 exact commit、branch 检查观察值与派生的 Skill manifest';
+comment on column skill_package.package_name is 'package 名（主键与不可变路由身份；非空白、无环绕空白、无控制字符、不含 : / @ \、≤128）';
 comment on column skill_package.description is '可空 package 描述；null 表示未填写';
-comment on column skill_package.active is '是否为该 package 名当前的活跃版本；删除 package 时仅置 false 并同时停用其 Skill 行';
+comment on column skill_package.repository_url is '不可变 Git repository URL（必须带 scheme、无内嵌 userinfo、无空白、≤2048）；更换仓库必须新建 Package';
+comment on column skill_package.branch is '只用于检查候选更新的 branch（非空白、无环绕空白、无控制字符、≤255）；不决定发布内容';
+comment on column skill_package.current_commit is '人工确认的 exact Git object id（40 或 64 位小写 hex），与 skills 在同一次 CAS 中原子切换';
+comment on column skill_package.observed_head_commit is '最近一次成功检查到的 branch HEAD（40 或 64 位小写 hex）；从未成功检查时为 null';
+comment on column skill_package.head_checked_at is '最近一次检查时间（毫秒精度）；从未检查时为 null';
+comment on column skill_package.head_check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
+comment on column skill_package.skills is '从 current_commit 派生的 Skill manifest（JSON array，元素为 {name, description} 并按 name 排序）；元素形状由应用严格验证';
+comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
 comment on column skill_package.create_time is '创建时间（毫秒精度）';
+comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
 
--- 每个 package 名至多一个活跃版本：并发安装由该唯一索引收敛。
-create unique index uk_skill_package_active
-    on skill_package (package_name)
-    where active;
+-- Skill Package 发布提示。
+--
+-- version 由应用拥有，PostgreSQL 绝不修改行。该触发器只在行被插入、version 真正变化或
+-- 行被删除后发出提示，payload 是 package 名；listener 建连/重连时全量回读 Package，
+-- 因此通知丢失不会改变 durable truth。
+create or replace function skill_package_changed_notify()
+returns trigger language plpgsql as $$
+begin
+    if tg_op = 'DELETE' then
+        perform pg_notify('skill_package_changed', old.package_name);
+        return old;
+    end if;
+    if tg_op = 'INSERT' or new.version is distinct from old.version then
+        perform pg_notify('skill_package_changed', new.package_name);
+    end if;
+    return new;
+end $$;
 
-comment on index uk_skill_package_active is '每个 package 名至多一个活跃版本';
+create trigger trg_skill_package_changed
+    after insert or update or delete on skill_package
+    for each row execute function skill_package_changed_notify();
 
-create table skill (
-    package_name     varchar(128)  not null,
-    package_version  varchar(128)  not null,
-    name             varchar(128)  not null,
-    description      text          not null,
-    content          text          not null,
-    active           boolean       not null,
-    create_time      timestamptz(3) not null default current_timestamp,
-    constraint pk_skill primary key (package_name, package_version, name),
-    constraint fk_skill_package foreign key (package_name, package_version)
-        references skill_package (package_name, package_version) on delete restrict,
-    constraint ck_skill_name check (
-        name = btrim(name)
-        and char_length(name) > 0
-        and name !~ '[[:cntrl:]]'
-        and position(':' in name) = 0
-        and position('/' in name) = 0
-        and position('@' in name) = 0
-        and position('\' in name) = 0
+-- -----------------------------------------------------------------------------
+-- 构建期 Plugin 凭据
+--
+-- 所有构建期 Plugin 共用一行一凭据存储：plugin_id 与 classpath 中的 StudioPlugin.pluginId
+-- 对齐；encrypted_payload 是 AES-256-GCM 二进制 envelope（格式版本 + 随机 nonce + 认证
+-- 密文，AAD 绑定 pluginId/region/formatVersion）。加密主密钥来自部署侧 owner-only key
+-- file，绝不进入本表、SystemSettings、DTO 或日志；管理查询永远不返回 encrypted_payload。
+-- 断连以删除行表达，迟到 finalize 由 lease token 与 version 围栏拒绝。
+-- -----------------------------------------------------------------------------
+
+create table plugin_credential (
+    plugin_id           varchar(64)   not null,
+    encrypted_payload   bytea         not null,
+    region              varchar(64)   not null,
+    expires_at          timestamptz(3) not null,
+    next_refresh_at     timestamptz(3) not null,
+    status              varchar(32)   not null,
+    last_refreshed_at   timestamptz(3),
+    last_refresh_error  text,
+    refresh_lease_token varchar(128),
+    refresh_lease_until timestamptz(3),
+    version             bigint        not null default 0,
+    create_time         timestamptz(3) not null default current_timestamp,
+    update_time         timestamptz(3) not null default current_timestamp,
+    constraint pk_plugin_credential primary key (plugin_id),
+    constraint ck_plugin_credential_plugin_id check (
+        plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
     ),
-    constraint ck_skill_description check (
-        description = btrim(description)
-        and char_length(description) > 0
-        and char_length(description) <= 1024
-        and translate(description, chr(10), '') !~ '[[:cntrl:]]'
+    constraint ck_plugin_credential_encrypted_payload check (
+        octet_length(encrypted_payload) > 0
     ),
-    constraint ck_skill_content check (content <> '')
+    constraint ck_plugin_credential_region check (
+        region = btrim(region)
+        and char_length(region) > 0
+    ),
+    constraint ck_plugin_credential_status check (
+        status in ('CONNECTED', 'REFRESH_FAILED', 'REFRESH_UNCERTAIN', 'REAUTH_REQUIRED')
+    ),
+    constraint ck_plugin_credential_last_refresh_error check (
+        last_refresh_error is null
+        or (
+            last_refresh_error = btrim(last_refresh_error)
+            and char_length(last_refresh_error) > 0
+            and octet_length(last_refresh_error) <= 4096
+        )
+    ),
+    constraint ck_plugin_credential_refresh_lease check (
+        (refresh_lease_token is null) = (refresh_lease_until is null)
+        and (
+            refresh_lease_token is null
+            or (
+                refresh_lease_token = btrim(refresh_lease_token)
+                and char_length(refresh_lease_token) > 0
+            )
+        )
+    ),
+    constraint ck_plugin_credential_version check (version >= 0),
+    constraint ck_plugin_credential_time_order check (update_time >= create_time)
 );
 
-comment on table skill is 'Platform 全局 Skill 内容：身份是 (package_name, package_version, name)，历史版本行永不修改、永不删除，只有 active 标记可变';
-comment on column skill.package_name is '所属 package 名（与 package_version 一起指向 package 版本）';
-comment on column skill.package_version is '所属 package 版本；更新 package 时换用从未使用过的新版本';
-comment on column skill.name is 'Skill canonical 名（同一 package 版本内唯一，全局至多一个活跃同名 Skill）';
-comment on column skill.description is 'Skill 描述（非空、无环绕空白、≤1024、仅允许 LF 换行）';
-comment on column skill.content is 'Skill 完整正文（非空，长度不设人为上限，精确按提交字节保存）';
-comment on column skill.active is '是否为该 Skill 名当前生效的行；package 替换或删除时随版本切换';
-comment on column skill.create_time is '创建时间（毫秒精度）';
+comment on table plugin_credential is '构建期 Plugin 的加密凭据权威行：每个已认证 Plugin 一行，未认证时无行，断连即删除行';
+comment on column plugin_credential.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
+comment on column plugin_credential.encrypted_payload is 'AES-256-GCM 二进制 envelope（格式版本 + 96-bit 随机 nonce + 认证密文，AAD 绑定 pluginId/region/formatVersion）；任何查询投影都不得返回';
+comment on column plugin_credential.region is '非秘密 region 路由元数据（无环绕空白、≤64），只允许 Plugin descriptor 声明的固定 region 候选';
+comment on column plugin_credential.expires_at is 'access token 失效时刻（毫秒精度）';
+comment on column plugin_credential.next_refresh_at is '下一次 refresh claim 时刻（毫秒精度）；仅当该时刻已到且 lease 为空或过期时可被 claim';
+comment on column plugin_credential.status is '状态：CONNECTED, REFRESH_FAILED, REFRESH_UNCERTAIN, REAUTH_REQUIRED';
+comment on column plugin_credential.last_refreshed_at is '最近一次成功刷新时刻（毫秒精度）；从未成功刷新时为 null';
+comment on column plugin_credential.last_refresh_error is '最近一次刷新失败的有界去敏错误摘要（非空、无环绕空白、≤4096 字节）；成功时为 null';
+comment on column plugin_credential.refresh_lease_token is '跨节点 refresh lease 令牌（与 refresh_lease_until 同时存在或同时缺失）';
+comment on column plugin_credential.refresh_lease_until is 'refresh lease 到期时刻（毫秒精度）；过期 lease 视为结果未知';
+comment on column plugin_credential.version is 'CAS 乐观锁版本：非负，从 0 开始，每次写入 +1；finalize 必须匹配 lease token 与 version';
+comment on column plugin_credential.create_time is '创建时间（毫秒精度）';
+comment on column plugin_credential.update_time is '最后更新时间（毫秒精度），应用侧维护';
 
--- 每个 Skill 名至多一个活跃行：并发替换由该唯一索引收敛。
-create unique index uk_skill_active
-    on skill (name)
-    where active;
+create index idx_plugin_credential_refresh_due
+    on plugin_credential (next_refresh_at);
 
-comment on index uk_skill_active is '每个 Skill 名至多一个活跃行';
+comment on index idx_plugin_credential_refresh_due is 'refresh dispatcher 按 next_refresh_at 扫描到期行';
 
 -- Platform MCP Server 配置：name 是主键与唯一路由身份，创建后不可变。Backend 只通过
 -- Streamable HTTP 连接 Server；请求 header 可能内嵌凭据，绝不进入列表投影与日志。
@@ -584,6 +673,8 @@ create table environment_connection (
     lease_token     uuid           not null,
     status          varchar(32)    not null,
     runtime_info    jsonb,
+    skill_state     jsonb          not null default '[]'::jsonb,
+    recent_events   jsonb          not null default '[]'::jsonb,
     last_seen_at    timestamptz(3) not null,
     lease_until     timestamptz(3) not null,
     constraint fk_environment_connection_environment foreign key (environment_id)
@@ -597,6 +688,12 @@ create table environment_connection (
     constraint ck_environment_connection_ready_runtime_info check (
         status <> 'READY' or (runtime_info is not null and jsonb_typeof(runtime_info) = 'object')
     ),
+    constraint ck_environment_connection_skill_state check (
+        jsonb_typeof(skill_state) = 'array'
+    ),
+    constraint ck_environment_connection_recent_events check (
+        jsonb_typeof(recent_events) = 'array'
+    ),
     constraint ck_environment_connection_lease check (
         lease_until > last_seen_at
     )
@@ -608,6 +705,8 @@ comment on column environment_connection.owner_node_id is '当前持有该连接
 comment on column environment_connection.lease_token is '当前路由租约代币 UUID（每次接管/重绑生成新 token，fence 旧持有者）';
 comment on column environment_connection.status is '路由状态：CONNECTING / READY';
 comment on column environment_connection.runtime_info is '最近一次被接受的 READY 宿主 metadata（JSON object）；断线或重新 CONNECTING 时保留，从未 READY 时为 null';
+comment on column environment_connection.skill_state is '当前 Daemon 对各 Skill Package 的可重建同步投影（JSON array，元素含 installed commit、稳定 path、状态与有界错误）；新的 READY 先清空再全量同步，写回必须命中 owner/lease fence';
+comment on column environment_connection.recent_events is '最近 200 条连接与 Skill 同步运维事件（JSON array，元素只有时间、级别、类型与去敏消息）；不保存 stdout、凭据、Git URL userinfo 或签名地址';
 comment on column environment_connection.last_seen_at is '最后活跃时间（毫秒精度）';
 comment on column environment_connection.lease_until is '租约到期时间（毫秒精度），必须晚于 last_seen_at';
 
