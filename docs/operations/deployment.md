@@ -230,6 +230,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
+| production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
 | distributed | node identity/ports | `DISTRIBUTED_*` |
@@ -257,6 +258,12 @@ Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也�
   `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 指向的只读 secret file 注入，不能把密钥正文放进
   environment、Compose 文件、数据库或 image。多 App 节点必须使用同一内容；缺失或错误时
   已保存凭据读取与新认证 fail closed，未连接 Plugin 不阻止 App 启动。
+- Plugin 资源端口只在需要时接受外部内容：会话资源下载以调用方的 Harness Thread 归属授权，
+  远端媒体暂存只允许公网 HTTPS 目标（私网/保留/环回等地址一律拒绝，因此节点必须能对目标
+  主机做正向解析）、受默认 `256MiB` 与 `1GiB` 硬上限的字节预算约束，并在成功后立即删除
+  临时文件。放宽 `KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、把目标指向内网或让
+  `KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` 落到共享卷都会直接扩大该端口的暴露面，
+  应作为部署变更评审。
 
 Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network：App image build 支持
 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和

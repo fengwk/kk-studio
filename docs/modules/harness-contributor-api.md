@@ -131,7 +131,12 @@ Contributor 的能力在两种装配方式下完全相同，但宿主边界不�
 
 - 构建期 Plugin 由 Spring Boot auto-configuration 创建 `HarnessContributor` bean，可以
   同时使用 Platform 的 credential、Blob 和 management services；Plugin 仍只经本 SPI
-  注册 Tool，不得另建执行、历史或审批协议。
+  注册 Tool，不得另建执行、历史或审批协议。要访问当前 Session 的 Resource 或把远端媒体写回
+  Storage，Plugin 只能调用 `PluginResourceGateway`：`resolveSessionResource(threadId, resourceUri)`
+  的唯一身份来源是本次调用的 `ToolExecutionContext.threadId()`，实现据此校验 Session 对 blob 的
+  引用后签发短期受控下载地址。因此工具在发送请求前必须自证拿到了 invocation context；取不到
+  threadId 时引用会话资源的调用必须确定性失败（如 Mavis 映射为 `MAVIS_RESOURCE_UNAVAILABLE`），
+  不允许退化为未鉴权访问或跳过资源解析后发送。
 构建期 Plugin 是唯一的扩展方式，因此不需要隔离 classloader、`ServiceLoader` 或运行时
 jar 目录扫描：扩展代码要么在编译期依赖里，要么不存在。
 

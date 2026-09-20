@@ -320,7 +320,9 @@ contributor id 在启动期失败。构建期 Plugin 由自己的 `AutoConfigura
 语义，web 也不需要任何插件目录、classloader 或热刷新代码。
 
 Plugin 自己的管理面由 [StudioPluginController](../../web/src/main/java/fun/fengwk/kkstudio/web/plugin/StudioPluginController.java)
-暴露，装配入口是 Platform 的 `PluginConfiguration`。
+暴露，装配入口是 Platform 的 `PluginConfiguration`；同一入口也以 `@ConditionalOnMissingBean`
+装配 Platform 自带的 `PluginResourceGateway` 生产实现（会话资源受控下载与远端媒体暂存），
+它只依赖 Platform 自身的 Harness/Storage bean，与具体 Plugin 无关。
 
 ## 生命周期与配置
 
@@ -349,6 +351,7 @@ Web context 自身持有的部署配置：
 | `kk-studio.harness.environment-gateway.*` | Daemon WebSocket 入站 frame 与出站 queue/bytes/send timeout |
 | `kk-studio.plugins.credential-key-file` | Plugin 凭据主密钥的 owner-only 绝对路径；空值表示本部署不提供凭据能力并 fail closed，多节点必须挂载同一内容 |
 | `kk-studio.plugins.refresh.poll-delay` / `lease-duration` | 凭据刷新扫描间隔与跨节点互斥 lease；由 `KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY` / `..._LEASE_DURATION` 提供，默认 `1h` / `2m` |
+| `kk-studio.plugins.resource.*` | Plugin 资源端口边界：`connect-timeout`、`request-timeout`、`upload-timeout`、`max-bytes`（默认 `256MiB`，硬上限 `1GiB`）与 `temp-directory`（留空即 `java.io.tmpdir`）；由 `KK_STUDIO_PLUGINS_RESOURCE_*` 提供 |
 
 其余 `kk-studio.*` 键（dispatcher、execution-admission、runtime resource root、project
 controller、storage、Plugin credential、canvas、comfyui、opencli-hub）由 Platform 与 Canvas Infra 的

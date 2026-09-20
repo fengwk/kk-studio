@@ -243,6 +243,55 @@ lease 只解决多节点互斥，不承诺外部 exactly-once：节点在 HTTP �
 请求发送后的网络断开或超时不能证明服务端未签发新 token，因此当前 claim 和以后定时扫描
 都不重放该 credential 的 renewal。
 
+### Plugin 资源端口
+
+`PluginResourceGateway` 是 Plugin 访问当前 Session Resource 与暂存远端媒体的受控端口。
+Platform 在 `fun.fengwk.kkstudio.platform.plugin.resource` 包中提供了开箱即用的生产实现
+[`StoragePluginResourceGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/StoragePluginResourceGateway.java)，
+由 [`PluginConfiguration`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfiguration.java)
+通过 `@ConditionalOnMissingBean` 自动装配。它依赖 `HarnessStore`、`SessionBlobRefManager`、
+`StorageBlobManager`、`StorageUploadService` 与 `PluginProperties`，属于 Platform 自带的基础设施，
+不依赖任何具体 Plugin（没有 Plugin 时只是没有调用方）。
+
+端口由两条互不信任的窄路径组成：
+
+1. **会话资源受控下载（`resolveSessionResource`）**：调用方必须显式传入 Harness Thread id
+   （来自 Tool invocation context）。实现经 `HarnessStore.transaction` 执行
+   `findThread(threadId).sessionId()` 解析 Session，只用 `SessionBlobRefManager.contains(sessionId, blobId)`
+   授权当前 Session 是否确实持有该 blob 的引用，并通过 `StorageBlobManager.presignOriginalUrl`
+   返回短期受控 GET 地址（绝对 HTTPS URI 且无 userinfo）。资源 URI 形态严格匹配
+   `kkstudio:/resources/<小写规范 UUID>`；任何缺少 threadId、Thread 不存在、Session 未引用该 blob
+   或已被删除的情况，确定性抛出 `PluginResourceUnavailableException`，绝不降级为未鉴权下载。
+2. **远端媒体安全校验与有界暂存（`stageRemoteMedia`）**：
+   - **地址准入与 SSRF 防护**：远端媒体地址必须是绝对 HTTPS URI，拒绝 userinfo、fragment 与空 host。
+     `PublicAddressPolicy` 逐个校验解析出的所有 IPv4/IPv6 地址：私有网段（RFC 1918）、保留网段（0/8、240/4）、
+     环回（127/8）、链路本地（169.254/16、fe80::/10）、组播、运营商级 NAT（100.64/10）、测试网段，
+     以及 IPv6 ULA（fc00::/7）、文档段（2001:db8::/32）、Teredo（2001::/32）、6to4（2002::/16）、
+     NAT64（0064:ff9b::/32）和内嵌内网 IPv4 的 IPv4-mapped/compatible 地址全部拒绝；解析出的地址中
+     任一条不属于公网即整体失败，杜绝部分公网放行。
+   - **传输与预算控制**：底层基于 JDK `HttpClient` 的 `JdkRemoteMediaTransport` 固定
+     `Redirect.NEVER`（3xx 直接判定失败，杜绝跳转绕过地址准入）；单次连接超时受 `connect-timeout`
+     约束，整体响应与读取期限受 `request-timeout` 约束。`Content-Length` 与实际读取字节数双向校验，
+     声明超出 `max-bytes`（默认 256 MiB，硬上限 1 GiB）或实际读取超限均立即失败。
+   - **流式落盘与权威嗅探**：内容边流式写临时文件（默认位于 `java.io.tmpdir`，可通过 `temp-directory`
+     配置绝对路径）边计算 SHA-256 摘要，不把大媒体读入堆内存。媒体类型由 `MediaTypeSniffer` 优先
+     按头部 magic 特征判定，无法判定时回退到响应规范化 `Content-Type`（小写 `type/subtype`）；且权威类型
+     必须属于调用方声明的 `PluginMediaFamily`（`IMAGE`、`AUDIO`、`VIDEO`、`DOCUMENT`），否则拒绝并清理临时文件。
+   - **暂存落库**：调用 `StorageUploadService.reserve` 生成上传记录；仅当状态为 `PENDING` 时，才用
+     预签名 PUT 流式上传临时文件（原样回传 signed headers，但过滤 `Host`、`Content-Length` 等客户端受限头，
+     受 `upload-timeout` 约束，要求返回 2xx）；上传完成后调用 `StorageUploadService.complete`；
+     只有确认为 `READY` 且生成 `blobId` 后，才返回 `blob-upload:<uploadId>` 的 `ResourceRef`
+     （含权威 size、SHA-256、mediaType 与清洗后的文件名）。
+   - **失败清理与审计**：任何步骤失败均以 `PluginResourceUnavailableException` 终结，在 finally 中删除
+     临时文件，并 best-effort 调用 `StorageUploadService.delete(uploadId)` 回收孤儿上传。日志只记录
+     uploadId、字节数、媒体类型与族，绝不记录预签名 URL 或响应头。
+
+运维配置位于 `kk-studio.plugins.resource.*`，包含连接超时 `connect-timeout`（默认 `5s`）、请求与读取整体期限
+`request-timeout`（默认 `30s`）、预签名 PUT 上传期限 `upload-timeout`（默认 `5m`）、单次暂存字节上限
+`max-bytes`（默认 `256MiB`，硬上限 `1GiB`）以及临时目录 `temp-directory`（默认空）。在 Tool 执行面，除凭据缺失的
+`KEY_UNAVAILABLE` 外，资源相关失败统一收敛为插件资源不可用（如 Mavis 映射为 `MAVIS_RESOURCE_UNAVAILABLE`），
+作为确定性失败不自动重放。
+
 ### MiniMax Mavis
 
 `plugins/minimax-mavis` 注册 `minimax-mavis` Studio Plugin 与同名
@@ -483,8 +532,8 @@ Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocat
 
 Platform Plugin 不借 `ResourceStore` 的 `byte[]` 接口搬运大媒体。
 `PluginResourceGateway` 用 Thread 解析当前 Session，并在签发输入前校验
-`session_blob_ref`；远端输出以有界 multipart stream 写入 Storage upload，边传输边做
-MIME sniff、size budget 与 SHA-256，Tool terminal 返回 `blob-upload:<uploadId>`。之后仍由
+`session_blob_ref`；远端输出以有界流写入临时文件，边传输边做
+MIME sniff、size budget 与 SHA-256，落库走 `StorageUploadService.reserve` → 预签名 PUT 直传 → `complete`，Tool terminal 返回 `blob-upload:<uploadId>`。之后仍由
 同一个 `ToolResultFinalizer` 和
 `GlobalStorageToolResultHistoryMaterializer` 完成全量校验与 owner 原子转移，不建立
 Plugin 旁路。第三方下载固定禁用自动 redirect；每一跳都必须是 HTTPS、通过 DNS/IP
@@ -847,6 +896,7 @@ token 或 OpenCLI instance identity。
 | `kk-studio.storage.maintenance.{poll-delay,cleanup-lease}` | platform | maintenance 轮询与 cleanup lease，默认 `30s/5m` |
 | `kk-studio.plugins.credential-key-file` | platform | Plugin credential AES-256-GCM 主密钥的 owner-only 绝对文件；各 App 节点内容必须一致，不进入数据库 |
 | `kk-studio.plugins.refresh.{poll-delay,lease-duration}` | platform | Plugin credential refresh 扫描与互斥 lease，默认 `1h/2m` |
+| `kk-studio.plugins.resource.{connect-timeout,request-timeout,upload-timeout,max-bytes,temp-directory}` | platform | Plugin 资源端口受控下载与暂存边界；默认连接 `5s`、请求与读取整体期限 `30s`、PUT 直传超时 `5m`、单次暂存上限 `256MiB`（硬上限 `1GiB`）、临时目录留空为 `java.io.tmpdir` |
 | `kk-studio.canvas.resource.{ffprobe-binary,ffmpeg-binary,temp-dir}` | platform | 媒体处理本地路径 |
 | `kk-studio.comfyui.api-key` | platform | ComfyUI secret，非 SystemSettings |
 | `kk-studio.opencli-hub.instance-id` | platform | OpenCLI Hub 部署身份 |

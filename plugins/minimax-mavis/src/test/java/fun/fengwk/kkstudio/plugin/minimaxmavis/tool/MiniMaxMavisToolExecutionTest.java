@@ -44,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -354,8 +355,13 @@ class MiniMaxMavisToolExecutionTest {
 
   /** 假资源网关。 */
   static final class FakeResourceGateway implements PluginResourceGateway {
+    private final List<UUID> resolvedThreadIds = Collections.synchronizedList(new ArrayList<>());
+    private final List<String> resolvedUris = Collections.synchronizedList(new ArrayList<>());
+
     @Override
-    public URI resolveSessionResource(String resourceUri) {
+    public URI resolveSessionResource(UUID threadId, String resourceUri) {
+      resolvedThreadIds.add(threadId);
+      resolvedUris.add(resourceUri);
       return URI.create("https://stage.kkstudio.local/download/mock-file");
     }
 
@@ -367,6 +373,18 @@ class MiniMaxMavisToolExecutionTest {
           name,
           1024L,
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    }
+
+    public List<UUID> resolvedThreadIds() {
+      return Collections.unmodifiableList(resolvedThreadIds);
+    }
+
+    public List<String> resolvedUris() {
+      return Collections.unmodifiableList(resolvedUris);
+    }
+
+    public int resolveCallCount() {
+      return resolvedUris.size();
     }
   }
 

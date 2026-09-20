@@ -125,3 +125,11 @@ kk-studio:
     refresh:
       poll-delay: ${KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY:1h}
       lease-duration: ${KK_STUDIO_PLUGINS_REFRESH_LEASE_DURATION:2m}
+    resource:
+      # 会话 Resource 下载与远端媒体暂存的硬边界；max-bytes 上限 1 GiB，所有越界输入都以确定性失败终结
+      connect-timeout: ${KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT:5s}
+      request-timeout: ${KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT:30s}
+      upload-timeout: ${KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT:5m}
+      max-bytes: ${KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES:268435456}
+      # 留空表示 java.io.tmpdir；非空必须是绝对路径，只用于暂存，成功后即删除
+      temp-directory: ${KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY:}

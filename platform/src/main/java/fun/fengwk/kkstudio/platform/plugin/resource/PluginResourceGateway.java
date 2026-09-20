@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.plugin.resource;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 
 import java.net.URI;
+import java.util.UUID;
 
 /**
  * Plugin 访问当前 Session Resource 与暂存远端媒体的受控端口。
@@ -25,12 +26,18 @@ import java.net.URI;
 public interface PluginResourceGateway {
 
   /**
-   * 把当前 Session 有权访问的规范 Resource URI 解析为受控短期 HTTPS 下载地址。
+   * 把指定 Thread 所属 Session 有权访问的规范 Resource URI 解析为受控短期 HTTPS 下载地址。
    *
+   * <p>授权上下文由调用方**显式**给出（Tool invocation context 里的 {@code threadId}），实现从 durable Thread 行解析
+   * Session 并校验 {@code session_blob_ref}。因此本端口没有任何隐式调用者身份：拿不到 threadId 的调用必须在发送请求前失败，而不是继承
+   * 某个环境变量或线程局部状态。
+   *
+   * @param threadId 本次调用的 Harness Thread id；实现据此解析 Session 并鉴权
    * @param resourceUri {@code kkstudio:/resources/<blobId>} 形式的会话 Resource URI
-   * @throws PluginResourceUnavailableException 当前 Session 无权访问、Resource 已删除或无法签发下载
+   * @throws PluginResourceUnavailableException threadId 无法解析出 Session、当前 Session 无权访问、Resource
+   *     已删除或无法签发下载
    */
-  URI resolveSessionResource(String resourceUri);
+  URI resolveSessionResource(UUID threadId, String resourceUri);
 
   /**
    * 把远端媒体有界流式暂存为全局 Blob 上传，返回 {@code blob-upload:<uploadId>} 瞬态引用。
