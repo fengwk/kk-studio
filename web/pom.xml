@@ -16,6 +16,15 @@
             <artifactId>kk-studio-schema</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!--
+          | minimax-mavis 是构建期可选 Plugin：只有本 runtime dependency 决定它是否进入 Fat JAR，
+          | web 源码不引用 Plugin 实现。删除本依赖并重新构建后，该 Plugin 的 Bean、后台任务与模型工具全部消失。
+          |-->
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-plugin-minimax-mavis</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform</artifactId>

@@ -1,0 +1,23 @@
+{
+  "description": "Analyze video inputs through the MiniMax Mavis gateway, reasoning over frames, motion, speech and sound together. Video analysis can take minutes; each input reports success independently.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Video understanding parameters.",
+    "properties": {
+      "inputs": {
+        "type": "array",
+        "description": "Video inputs to analyze, 1-10 entries.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) video URL or a kkstudio:/resources/<blobId> video resource of the current session."
+        }
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional question or instruction applied to every input."
+      }
+    },
+    "required": ["inputs"],
+    "additionalProperties": false
+  }
+}

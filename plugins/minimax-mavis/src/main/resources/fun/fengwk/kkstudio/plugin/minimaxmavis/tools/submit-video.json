@@ -1,0 +1,79 @@
+{
+  "description": "Submit one asynchronous video generation task through the MiniMax Mavis gateway and return its task_id; poll it with mavis_query_video. MiniMax-H3 supports 4-15 seconds with native audio and accepts keyframe or reference sets; MiniMax-Hailuo-2.3 supports 6 or 10 silent seconds from text or a single first frame. Submission is non-idempotent and consumes quota: an uncertain failure must not be submitted again.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Asynchronous video submission parameters. Keyframe inputs (input_image with optional last_frame_image) and reference sets are mutually exclusive.",
+    "properties": {
+      "model": {
+        "type": "string",
+        "description": "Target model. MiniMax-H3: 4-15 seconds, 768P or 2K, native audio. MiniMax-Hailuo-2.3: 6 or 10 silent seconds, 768P or 1080P.",
+        "enum": ["MiniMax-H3", "MiniMax-Hailuo-2.3"]
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Video description: subject, motion, camera and, for H3, the sound the clip should contain."
+      },
+      "duration": {
+        "type": "integer",
+        "description": "Clip length in seconds. MiniMax-H3 accepts 4-15; MiniMax-Hailuo-2.3 accepts 6 or 10."
+      },
+      "input_image": {
+        "type": "string",
+        "description": "First frame or keyframe image: a public HTTP(S) image URL or a kkstudio:/resources/<blobId> image resource of the current session."
+      },
+      "last_frame_image": {
+        "type": "string",
+        "description": "Closing frame image, MiniMax-H3 only and only together with input_image."
+      },
+      "reference_type": {
+        "type": "string",
+        "description": "Role of input_image. MiniMax-H3 accepts first_frame, last_frame or subject; MiniMax-Hailuo-2.3 accepts first_frame, or subject at 6 seconds.",
+        "enum": ["first_frame", "last_frame", "subject"]
+      },
+      "reference_images": {
+        "type": "array",
+        "description": "Reference images, MiniMax-H3 only, up to 9 entries. Reference sets are mutually exclusive with keyframe inputs.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) image URL or a kkstudio:/resources/<blobId> image resource of the current session."
+        }
+      },
+      "reference_videos": {
+        "type": "array",
+        "description": "Reference videos, MiniMax-H3 only, up to 3 entries; supply the matching durations in reference_video_durations.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) video URL or a kkstudio:/resources/<blobId> video resource of the current session."
+        }
+      },
+      "reference_video_durations": {
+        "type": "array",
+        "description": "Duration in seconds of each reference video, in the same order and with the same length as reference_videos.",
+        "items": {
+          "type": "integer",
+          "description": "Reference video duration in seconds."
+        }
+      },
+      "reference_audios": {
+        "type": "array",
+        "description": "Reference audio tracks, MiniMax-H3 only, up to 3 entries; they cannot be used without a reference image or video.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) audio URL or a kkstudio:/resources/<blobId> audio resource of the current session."
+        }
+      },
+      "resolution": {
+        "type": "string",
+        "description": "Output resolution. MiniMax-H3 supports 768P and 2K; MiniMax-Hailuo-2.3 supports 768P and 1080P, and 10 seconds only with 768P.",
+        "enum": ["1080P", "2K", "768P"]
+      },
+      "ratio": {
+        "type": "string",
+        "description": "Output aspect ratio, MiniMax-H3 only; adaptive is required for keyframe mode and is the default for reference sets.",
+        "enum": ["16:9", "1:1", "21:9", "3:4", "4:3", "9:16", "adaptive"]
+      }
+    },
+    "required": ["duration", "model", "prompt"],
+    "additionalProperties": false
+  }
+}

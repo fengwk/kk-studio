@@ -1,0 +1,23 @@
+{
+  "description": "Analyze audio inputs through the MiniMax Mavis gateway: speech, music and ambient sound. Each input reports success independently.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Audio understanding parameters.",
+    "properties": {
+      "inputs": {
+        "type": "array",
+        "description": "Audio inputs to analyze, 1-10 entries.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) audio URL or a kkstudio:/resources/<blobId> audio resource of the current session."
+        }
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional question or instruction applied to every input."
+      }
+    },
+    "required": ["inputs"],
+    "additionalProperties": false
+  }
+}

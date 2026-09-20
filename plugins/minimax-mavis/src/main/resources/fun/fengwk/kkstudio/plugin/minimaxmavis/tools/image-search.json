@@ -1,0 +1,23 @@
+{
+  "description": "Search images by keyword through the MiniMax Mavis gateway. Results are grouped per query and contain the image URL, the page it came from and its source.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Keyword image search parameters.",
+    "properties": {
+      "queries": {
+        "type": "array",
+        "description": "Search queries, 1-10 entries.",
+        "items": {
+          "type": "string",
+          "description": "Image search keywords."
+        }
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional relevance filter applied to every query, for example which images to keep."
+      }
+    },
+    "required": ["queries"],
+    "additionalProperties": false
+  }
+}

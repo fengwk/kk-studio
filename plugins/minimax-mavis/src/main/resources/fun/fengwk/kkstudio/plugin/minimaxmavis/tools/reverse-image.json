@@ -1,0 +1,15 @@
+{
+  "description": "Reverse-search one image to find similar images, likely sources and reprints. Findings are candidates only and never prove ownership or first publication; an empty result may simply mean no match.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Reverse image search parameters.",
+    "properties": {
+      "image": {
+        "type": "string",
+        "description": "Image to search for: a public HTTP(S) image URL or a kkstudio:/resources/<blobId> image resource of the current session."
+      }
+    },
+    "required": ["image"],
+    "additionalProperties": false
+  }
+}

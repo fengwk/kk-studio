@@ -1,0 +1,23 @@
+{
+  "description": "Analyze images through the MiniMax Mavis gateway: description, OCR, or visual question answering. Each input reports success independently.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Image understanding parameters.",
+    "properties": {
+      "inputs": {
+        "type": "array",
+        "description": "Images to analyze, 1-10 entries.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) image URL or a kkstudio:/resources/<blobId> image resource of the current session."
+        }
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional question or instruction applied to every image."
+      }
+    },
+    "required": ["inputs"],
+    "additionalProperties": false
+  }
+}

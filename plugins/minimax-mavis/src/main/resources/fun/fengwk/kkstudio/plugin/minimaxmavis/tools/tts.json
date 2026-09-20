@@ -1,0 +1,36 @@
+{
+  "description": "Synthesize one speech audio file from text through the MiniMax Mavis gateway. Generation is non-idempotent and consumes quota, so a disconnected call is an uncertain failure that must not be resent blindly.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Single speech synthesis parameters.",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to speak."
+      },
+      "voice_id": {
+        "type": "string",
+        "description": "Voice to use, taken from mavis_list_voices; omit for the server default voice."
+      },
+      "speed": {
+        "type": "number",
+        "description": "Speech speed between 0.5 and 2.0."
+      },
+      "volume": {
+        "type": "number",
+        "description": "Volume between 0 and 10."
+      },
+      "pitch": {
+        "type": "integer",
+        "description": "Pitch shift between -12 and 12."
+      },
+      "emotion": {
+        "type": "string",
+        "description": "Emotion of the synthesized speech.",
+        "enum": ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprised"]
+      }
+    },
+    "required": ["text"],
+    "additionalProperties": false
+  }
+}

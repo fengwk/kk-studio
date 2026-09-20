@@ -423,7 +423,15 @@ function checkRepositoryStructure() {
     )
   }
 
-  const expectedRootModules = ['share', 'schema', 'canvas', 'harness', 'platform', 'web']
+  const expectedRootModules = [
+    'share',
+    'schema',
+    'canvas',
+    'harness',
+    'platform',
+    'plugins',
+    'web',
+  ]
   const rootPomPath = path.join(repositoryRoot, 'pom.xml')
   if (existsSync(rootPomPath)) {
     const actualRootModules = extractPomModules('pom.xml')
@@ -485,6 +493,41 @@ function checkRepositoryStructure() {
       const moduleDir = path.join(repositoryRoot, 'harness', moduleName)
       if (!existsSync(moduleDir)) {
         addError(`missing harness module directory: harness/${moduleName}`)
+      }
+    }
+  }
+
+  // plugins 只聚合构建期可选 Plugin；发行物包含哪些 Plugin 由 web 的 runtime dependency 决定。
+  const expectedPluginsModules = ['minimax-mavis']
+  const pluginsRoot = path.join(repositoryRoot, 'plugins')
+  if (existsSync(pluginsRoot)) {
+    const actualPluginsDirectories = readdirSync(pluginsRoot, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isDirectory() && entry.name !== 'target' && !entry.name.startsWith('.'),
+      )
+      .map((entry) => entry.name)
+      .sort()
+    const expectedPluginsDirectories = [...expectedPluginsModules].sort()
+    if (JSON.stringify(actualPluginsDirectories) !== JSON.stringify(expectedPluginsDirectories)) {
+      addError(
+        `plugins directories mismatch: expected [${expectedPluginsDirectories.join(', ')}], found [${actualPluginsDirectories.join(', ')}]`,
+      )
+    }
+  }
+
+  const pluginsPomPath = path.join(repositoryRoot, 'plugins/pom.xml')
+  if (existsSync(pluginsPomPath)) {
+    const actualPluginsModules = extractPomModules('plugins/pom.xml')
+    if (JSON.stringify(actualPluginsModules) !== JSON.stringify(expectedPluginsModules)) {
+      addError(
+        `plugins/pom.xml modules mismatch: expected [${expectedPluginsModules.join(', ')}], found [${actualPluginsModules.join(', ')}]`,
+      )
+    }
+    for (const moduleName of expectedPluginsModules) {
+      const moduleDir = path.join(repositoryRoot, 'plugins', moduleName)
+      if (!existsSync(moduleDir)) {
+        addError(`missing plugins module directory: plugins/${moduleName}`)
       }
     }
   }

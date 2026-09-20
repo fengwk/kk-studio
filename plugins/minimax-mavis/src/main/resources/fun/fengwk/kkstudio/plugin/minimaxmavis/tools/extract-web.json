@@ -1,0 +1,23 @@
+{
+  "description": "Extract focused page content from up to 10 public web pages through the MiniMax Mavis gateway. Each page reports success independently, so a page blocked by the target site does not fail the others.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Batch page extraction parameters.",
+    "properties": {
+      "urls": {
+        "type": "array",
+        "description": "Page URLs to extract, 1-10 entries; each entry must be an HTTP(S) URL.",
+        "items": {
+          "type": "string",
+          "description": "HTTP(S) page URL."
+        }
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Extraction instruction applied to every URL, for example which conclusions or fields to keep."
+      }
+    },
+    "required": ["prompt", "urls"],
+    "additionalProperties": false
+  }
+}

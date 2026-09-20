@@ -1,0 +1,10 @@
+{
+  "description": "List the TTS voices available on the MiniMax Mavis gateway. Use a returned voice_id with mavis_tts or mavis_tts_batch; omitting voice_id uses the server default voice.",
+  "inputSchema": {
+    "type": "object",
+    "description": "The voice list takes no parameters.",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "description": "Synthesize up to 10 speech audio files in one MiniMax Mavis request. Every request is reported separately: a partial failure must not be reported as full success, and the whole batch must not be replayed after an uncertain failure.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Batch speech synthesis parameters.",
+    "properties": {
+      "requests": {
+        "type": "array",
+        "description": "Speech items to synthesize, 1-10 entries.",
+        "items": {
+          "type": "object",
+          "description": "One speech synthesis item.",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "Text to speak."
+            },
+            "voice_id": {
+              "type": "string",
+              "description": "Voice to use, taken from mavis_list_voices; omit for the server default voice."
+            },
+            "speed": {
+              "type": "number",
+              "description": "Speech speed between 0.5 and 2.0."
+            },
+            "volume": {
+              "type": "number",
+              "description": "Volume between 0 and 10."
+            },
+            "pitch": {
+              "type": "integer",
+              "description": "Pitch shift between -12 and 12."
+            },
+            "emotion": {
+              "type": "string",
+              "description": "Emotion of the synthesized speech.",
+              "enum": ["angry", "disgusted", "fearful", "happy", "neutral", "sad", "surprised"]
+            }
+          },
+          "required": ["text"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["requests"],
+    "additionalProperties": false
+  }
+}
