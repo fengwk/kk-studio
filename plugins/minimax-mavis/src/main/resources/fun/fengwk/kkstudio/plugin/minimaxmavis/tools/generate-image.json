@@ -1,0 +1,33 @@
+{
+  "description": "Generate one image through the MiniMax Mavis gateway, either from text only or from text plus reference images. Generation is non-idempotent and consumes quota, so a disconnected call is an uncertain failure that must not be resent blindly.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Single image generation parameters.",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Image description. When references are given, state which parts of them to keep and which to change."
+      },
+      "references": {
+        "type": "array",
+        "description": "Reference images, up to 4 entries.",
+        "items": {
+          "type": "string",
+          "description": "A public HTTP(S) image URL or a kkstudio:/resources/<blobId> image resource of the current session."
+        }
+      },
+      "aspect_ratio": {
+        "type": "string",
+        "description": "Output aspect ratio.",
+        "enum": ["1:1", "16:9", "21:9", "3:4", "4:3", "9:16"]
+      },
+      "resolution": {
+        "type": "string",
+        "description": "Output resolution.",
+        "enum": ["1K", "2K", "4K"]
+      }
+    },
+    "required": ["prompt"],
+    "additionalProperties": false
+  }
+}

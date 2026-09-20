@@ -1,0 +1,29 @@
+{
+  "description": "Search the public web through the MiniMax Mavis gateway and return result titles, URLs and snippets. Results are summaries only; use mavis_extract_web to read a page body.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Keyword web search parameters.",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search keywords."
+      },
+      "count": {
+        "type": "integer",
+        "description": "Number of results to return, 1-50; defaults to 10."
+      },
+      "freshness": {
+        "type": "string",
+        "description": "Time window of the results; omit for no limit.",
+        "enum": ["noLimit", "day", "week", "month", "semiyear", "year"]
+      },
+      "search_type": {
+        "type": "string",
+        "description": "Kind of results; the underlying search source is routed by the server.",
+        "enum": ["search", "videos", "places", "news", "shopping"]
+      }
+    },
+    "required": ["query"],
+    "additionalProperties": false
+  }
+}

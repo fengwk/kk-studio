@@ -1,0 +1,23 @@
+{
+  "description": "Transcribe one audio input verbatim through the MiniMax Mavis gateway. An empty transcription is reported as a failure rather than an empty success.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Single audio transcription parameters.",
+    "properties": {
+      "input": {
+        "type": "string",
+        "description": "Audio to transcribe: a public HTTP(S) audio URL or a kkstudio:/resources/<blobId> audio resource of the current session."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional transcription hint, for example keeping product names or proper nouns verbatim."
+      },
+      "language": {
+        "type": "string",
+        "description": "Optional expected language code. It becomes part of the transcription hint and is never sent as a gateway field on its own."
+      }
+    },
+    "required": ["input"],
+    "additionalProperties": false
+  }
+}

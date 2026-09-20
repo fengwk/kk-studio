@@ -1,0 +1,32 @@
+{
+  "description": "Generate one music track through the MiniMax Mavis gateway: an instrumental track from a style prompt, or a song when lyrics are supplied. Generation is non-idempotent and consumes quota, so a disconnected call is an uncertain failure that must not be resent blindly.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Single music generation parameters.",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Music style and scene description, 10-300 characters after trimming."
+      },
+      "lyrics": {
+        "type": "string",
+        "description": "Optional lyrics, 10-600 characters after trimming. Omit for an instrumental track."
+      },
+      "format": {
+        "type": "string",
+        "description": "Audio container format; defaults to mp3.",
+        "enum": ["mp3", "pcm", "wav"]
+      },
+      "sample_rate": {
+        "type": "integer",
+        "description": "Sample rate in Hz; one of 16000, 24000, 32000, 44100."
+      },
+      "bitrate": {
+        "type": "integer",
+        "description": "Bitrate in bit/s; one of 32000, 64000, 128000, 256000."
+      }
+    },
+    "required": ["prompt"],
+    "additionalProperties": false
+  }
+}

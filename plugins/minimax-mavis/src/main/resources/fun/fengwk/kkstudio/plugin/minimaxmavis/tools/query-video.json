@@ -1,0 +1,20 @@
+{
+  "description": "Query one asynchronous video task submitted by mavis_submit_video. The call does not poll: while the status is queued or running, wait and call again; a succeeded task returns a short-lived video URL, and failed or cancelled tasks return their failure fields.",
+  "inputSchema": {
+    "type": "object",
+    "description": "Video task query parameters.",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "Task identifier returned by mavis_submit_video."
+      },
+      "model": {
+        "type": "string",
+        "description": "Model the task was submitted with; it must match the submission.",
+        "enum": ["MiniMax-H3", "MiniMax-Hailuo-2.3"]
+      }
+    },
+    "required": ["model", "task_id"],
+    "additionalProperties": false
+  }
+}
