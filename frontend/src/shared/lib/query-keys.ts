@@ -19,7 +19,11 @@ export const queryKeys = {
     all: ['skills'] as const,
     list: ['skills', 'list'] as const,
     packages: ['skills', 'packages'] as const,
-    packageDetail: (name: string) => ['skills', 'packages', name] as const,
+  },
+  plugins: {
+    all: ['plugins'] as const,
+    list: ['plugins', 'list'] as const,
+    detail: (pluginId: string) => ['plugins', 'detail', pluginId] as const,
   },
   environments: {
     all: ['environments'] as const,
@@ -41,7 +45,7 @@ export const queryKeys = {
     all: ['threads'] as const,
     snapshot: (threadId: string) => ['threads', 'snapshot', threadId] as const,
     entries: (threadId: string) => ['threads', 'entries', threadId] as const,
-    systemPrompt: (threadId: string) => ['threads', 'system-prompt', threadId] as const,
+    modelRequestDebug: (threadId: string) => ['threads', 'model-request-debug', threadId] as const,
   },
   comfyui: {
     workflows: ['comfyui', 'workflows'] as const,

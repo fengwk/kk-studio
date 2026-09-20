@@ -5,8 +5,13 @@ import {
   buildSubagentCandidates,
   buildToolCandidates,
   withSelectedOrphans,
+  withSelectedSkillOrphans,
 } from '@/features/ai/catalog/agent-capability-candidates'
-import type { AgentDefinitionDTO, SkillDTO, ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
+import type {
+  AgentDefinitionDTO,
+  SkillPackageDTO,
+  ToolCatalogEntryDTO,
+} from '@/shared/api/contracts/ai-catalog'
 
 function agent(name: string, description: string | null): AgentDefinitionDTO {
   return {
@@ -22,17 +27,24 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
   }
 }
 
-function skill(
-  name: string,
-  description: string | null = null,
-  packageName = 'core',
-  packageVersion = '1.0.0',
-): SkillDTO {
+function skillPackage(
+  packageName: string,
+  skills: { name: string; description: string }[],
+): SkillPackageDTO {
   return {
-    name,
-    description: description ?? '',
     packageName,
-    packageVersion,
+    description: null,
+    repositoryUrl: 'https://example.com/repo.git',
+    branch: 'main',
+    currentCommit: '1111111111111111111111111111111111111111',
+    observedHeadCommit: null,
+    headCheckedAt: null,
+    headCheckError: null,
+    checkStatus: 'UP_TO_DATE',
+    skills,
+    version: '1',
+    createTime: '2026-07-20T00:00:00.000Z',
+    updateTime: '2026-07-20T01:00:00.000Z',
   }
 }
 
@@ -85,23 +97,33 @@ describe('agent-capability-candidates', () => {
     expect(tools[0]).not.toHaveProperty('source')
   })
 
-  it('builds skill candidates from platform global skills with deduplication', () => {
-    const skills = [
-      skill('dev', 'dev skill'),
-      skill('ops', 'ops skill'),
-      skill('dev', 'duplicate exact'),
+  it('builds skill candidates from skill packages formatted as package / name', () => {
+    const packages = [
+      skillPackage('core-tools', [
+        { name: 'dev', description: 'dev skill' },
+        { name: 'ops', description: 'ops skill' },
+        { name: 'dev', description: 'duplicate in same package' },
+      ]),
+      skillPackage('extra-tools', [
+        { name: 'web', description: 'web skill' },
+      ]),
     ]
 
-    expect(buildSkillCandidates(skills)).toEqual([
+    expect(buildSkillCandidates(packages)).toEqual([
       {
-        value: 'dev',
-        name: 'dev',
+        value: 'core-tools:dev',
+        name: 'core-tools / dev',
         description: 'dev skill',
       },
       {
-        value: 'ops',
-        name: 'ops',
+        value: 'core-tools:ops',
+        name: 'core-tools / ops',
         description: 'ops skill',
+      },
+      {
+        value: 'extra-tools:web',
+        name: 'extra-tools / web',
+        description: 'web skill',
       },
     ])
   })
@@ -112,23 +134,26 @@ describe('agent-capability-candidates', () => {
     expect(buildSkillCandidates([])).toEqual([])
   })
 
-  it('retains selected orphans for global skills', () => {
+  it('retains selected orphans for skills with package / name formatting', () => {
     const candidates = buildSkillCandidates([
-      skill('dev', 'dev skill'),
+      skillPackage('core-tools', [{ name: 'dev', description: 'dev skill' }]),
     ])
 
-    const selected = ['dev', 'missing-skill']
+    const selected = [
+      { packageName: 'core-tools', name: 'dev' },
+      { packageName: 'old-pkg', name: 'legacy-skill' },
+    ]
 
-    const merged = withSelectedOrphans(candidates, selected)
+    const merged = withSelectedSkillOrphans(candidates, selected)
     expect(merged).toEqual([
       {
-        value: 'dev',
-        name: 'dev',
+        value: 'core-tools:dev',
+        name: 'core-tools / dev',
         description: 'dev skill',
       },
       {
-        value: 'missing-skill',
-        name: 'missing-skill',
+        value: 'old-pkg:legacy-skill',
+        name: 'old-pkg / legacy-skill',
         description: null,
         offline: true,
         missing: true,

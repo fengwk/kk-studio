@@ -1,6 +1,7 @@
 import type {
   AgentDefinitionDTO,
-  SkillDTO,
+  SkillPackageDTO,
+  SkillRefDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 
@@ -11,6 +12,21 @@ export interface CapabilityOption {
   offline?: boolean
   /** 已配置但不在当前候选中（仍展示，可取消勾选）。 */
   missing?: boolean
+}
+
+export function skillRefToKey(ref: SkillRefDTO): string {
+  return `${ref.packageName}:${ref.name}`
+}
+
+export function keyToSkillRef(key: string): SkillRefDTO {
+  const idx = key.indexOf(':')
+  if (idx < 0) {
+    return { packageName: '', name: key }
+  }
+  return {
+    packageName: key.slice(0, idx),
+    name: key.slice(idx + 1),
+  }
 }
 
 /** 构建统一的离线可选 tool 目录，不暴露来源环境。 */
@@ -54,27 +70,38 @@ export function buildPermissionToolCandidates(
 }
 
 /**
- * 构建来自 Platform 全局生效 Skill 目录的 skill 候选。
+ * 构建来自 Platform Skill Packages 目录的 skill 候选。
+ * 候选显示格式为 `package / name`。
  */
 export function buildSkillCandidates(
-  skills: SkillDTO[] | null | undefined,
+  packages: SkillPackageDTO[] | null | undefined,
 ): CapabilityOption[] {
-  if (!skills?.length) {
+  if (!packages?.length) {
     return []
   }
   const options: CapabilityOption[] = []
   const seen = new Set<string>()
-  for (const skill of skills) {
-    const name = skill.name?.trim()
-    if (!name || seen.has(name)) {
+  for (const pkg of packages) {
+    const packageName = pkg.packageName?.trim()
+    if (!packageName || !pkg.skills?.length) {
       continue
     }
-    seen.add(name)
-    options.push({
-      value: name,
-      name,
-      description: skill.description?.trim() || null,
-    })
+    for (const skill of pkg.skills) {
+      const name = skill.name?.trim()
+      if (!name) {
+        continue
+      }
+      const key = `${packageName}:${name}`
+      if (seen.has(key)) {
+        continue
+      }
+      seen.add(key)
+      options.push({
+        value: key,
+        name: `${packageName} / ${name}`,
+        description: skill.description?.trim() || null,
+      })
+    }
   }
   return options
 }
@@ -126,6 +153,33 @@ export function withSelectedOrphans(
       missing: true,
     }
     byValue.set(value, orphan)
+    merged.push(orphan)
+  }
+  return merged
+}
+
+/**
+ * 把已勾选但不在候选中的 SkillRef 并入列表（置灰展示）。
+ */
+export function withSelectedSkillOrphans(
+  candidates: CapabilityOption[],
+  selected: SkillRefDTO[],
+): CapabilityOption[] {
+  const byValue = new Map(candidates.map((item) => [item.value, item]))
+  const merged = [...candidates]
+  for (const ref of selected) {
+    const key = skillRefToKey(ref)
+    if (!key || byValue.has(key)) {
+      continue
+    }
+    const orphan: CapabilityOption = {
+      value: key,
+      name: `${ref.packageName} / ${ref.name}`,
+      description: null,
+      offline: true,
+      missing: true,
+    }
+    byValue.set(key, orphan)
     merged.push(orphan)
   }
   return merged

@@ -190,7 +190,7 @@ describe('tool display', () => {
     expect(formatToolCallSummary('find', JSON.stringify({})).text).toBe('find {}')
   })
 
-  it('formats lsp and load_skill summaries', () => {
+  it('formats lsp tool summaries', () => {
     expect(formatToolCallSummary('lsp_workspace_symbols', JSON.stringify({
       path: 'src/App.java',
       workdir: '/srv/project',
@@ -214,10 +214,6 @@ describe('tool display', () => {
       path: 'src/App.java',
       workdir: '/srv/project',
     })).text).toBe('lsp_java_decompile src/App.java in /srv/project')
-    expect(formatToolCallSummary('load_skill', JSON.stringify({ name: 'dev' })).text)
-      .toBe('load_skill dev')
-    // name 缺失时回退为原始 JSON 文本（{} 是合法解析结果）。
-    expect(formatToolCallSummary('load_skill', JSON.stringify({})).text).toBe('load_skill {}')
   })
 
   it('normalizes tool names and falls back to a placeholder when blank', () => {

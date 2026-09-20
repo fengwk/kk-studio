@@ -34,9 +34,65 @@ export type EntryType =
   | 'COMPACTION'
   | 'TURN_END'
 
-/** 按当前 branch 最新状态现算的系统提示词预览。 */
-export interface HarnessSystemPromptPreviewDTO {
-  text: string
+/** 候选 Tool 的发送状态与最终 definition 事实。 */
+export interface HarnessModelRequestDebugToolDTO {
+  name: string
+  description: string
+  inputSchemaJson: string
+  environmentSupport: 'NONE' | 'OPTIONAL' | 'REQUIRED'
+  requiredEnvironmentId: string | null
+  provenance: string
+  state: 'SENT' | 'FILTERED'
+  filterReason: string | null
+}
+
+/** 单个 Skill 的交付事实与实际 Prompt 片段。 */
+export interface HarnessModelRequestDebugSkillDTO {
+  packageName: string
+  name: string
+  description: string
+  path: string
+  delivery: 'LOCAL' | 'PLATFORM'
+  currentCommit: string
+  observedHeadCommit: string | null
+  installedCommit: string | null
+  promptXml: string
+}
+
+/** subagent allowlist 元素。 */
+export interface HarnessModelRequestDebugSubagentDTO {
+  name: string
+  description: string
+}
+
+/** Provider cache control 事实。 */
+export interface HarnessModelRequestDebugCacheControlDTO {
+  retention: 'NONE' | 'SHORT' | 'LONG'
+  affinityKey: string | null
+  breakpoints: string[]
+}
+
+/** 活动 ModelInvocation 的冻结 canonical ProviderRequest。 */
+export interface HarnessModelRequestDebugFrozenInvocationDTO {
+  kind: 'FROZEN_INVOCATION'
+  requestJson: string
+}
+
+/**
+ * Thread Debug 的结构化模型请求投影。
+ */
+export interface HarnessModelRequestDebugDTO {
+  kind: 'NEXT_REQUEST_PREVIEW'
+  generatedAt: string
+  model: HarnessModelSelectionDTO
+  environmentName: string | null
+  systemInstruction: string
+  tools: HarnessModelRequestDebugToolDTO[]
+  skills: HarnessModelRequestDebugSkillDTO[]
+  subagents: HarnessModelRequestDebugSubagentDTO[]
+  cacheControl: HarnessModelRequestDebugCacheControlDTO | null
+  planningError: string | null
+  frozenInvocation: HarnessModelRequestDebugFrozenInvocationDTO | null
 }
 
 /** Session Entry 查询投影；id 均为 canonical UUID string。 */

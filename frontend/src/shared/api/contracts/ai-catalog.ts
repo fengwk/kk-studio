@@ -123,52 +123,62 @@ export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
   expectedVersion: CatalogVersion
 }
 
-export interface SkillDTO {
-  /** Skill canonical 名（全局唯一）。 */
-  name: string
-  /** Skill 描述。 */
-  description: string
-  /** 承载该 Skill 的 package 名。 */
+export interface SkillRefDTO {
+  /** Package 名（不可变路由身份）。 */
   packageName: string
-  /** 承载该 Skill 的 package 版本（不可变，永不复用）。 */
-  packageVersion: string
+  /** Package 内的 Skill 名。 */
+  name: string
 }
 
-export interface SkillDefinitionDTO {
-  /** Skill canonical 名。 */
+export interface SkillManifestEntryDTO {
+  /** Skill 名。 */
   name: string
   /** Skill 描述。 */
   description: string
-  /** Skill 正文。 */
-  content: string
 }
+
+export type SkillPackageCheckStatus =
+  | 'UNCHECKED'
+  | 'UP_TO_DATE'
+  | 'UPDATE_AVAILABLE'
+  | 'CHECK_FAILED'
 
 export interface SkillPackageDTO {
-  name: string
-  packageVersion: string
+  packageName: string
   description: string | null
-  skills: SkillDTO[]
-}
-
-export interface SkillPackageDetailDTO {
-  name: string
-  packageVersion: string
-  description: string | null
-  skills: SkillDefinitionDTO[]
+  repositoryUrl: string
+  branch: string
+  currentCommit: string
+  observedHeadCommit: string | null
+  headCheckedAt: string | null
+  headCheckError: string | null
+  checkStatus: SkillPackageCheckStatus
+  skills: SkillManifestEntryDTO[]
+  version: string
+  createTime: string
+  updateTime: string
 }
 
 export interface SkillPackageCreateDTO {
-  name: string
-  packageVersion: string
+  packageName: string
   description?: string | null
-  skills: SkillDefinitionDTO[]
+  repositoryUrl: string
+  branch: string
 }
 
-export interface SkillPackageUpdateDTO {
-  expectedPackageVersion: string
-  newPackageVersion: string
+export interface SkillPackageEditDTO {
+  expectedVersion: string
   description?: string | null
-  skills: SkillDefinitionDTO[]
+  branch: string
+}
+
+export interface SkillPackageCheckDTO {
+  expectedVersion: string
+}
+
+export interface SkillPackagePublishDTO {
+  expectedVersion: string
+  targetCommit: string
 }
 
 export interface AgentDefinitionConfigDTO {
@@ -176,19 +186,23 @@ export interface AgentDefinitionConfigDTO {
   inheritParentEnvironment: boolean
   /** 有序且唯一的模型可见 tool name 列表；候选来自离线 tool catalog。 */
   tools: string[]
-  /** 选中的 Platform 全局 Skill canonical 名列表；按声明顺序且不可重复。 */
-  skills: string[]
+  /** 选中的 Skill 引用列表 (packageName, name)；按声明顺序且不可重复。 */
+  skills: SkillRefDTO[]
   /** 可通过 task 委派的 Agent 名称 allowlist；只接受短名。 */
   subagents: string[]
 }
+
+export type EnvironmentSupport = 'NONE' | 'OPTIONAL' | 'REQUIRED'
 
 /** 可离线选择的统一运行时 tool catalog 条目。 */
 export interface ToolCatalogEntryDTO {
   /** 模型可见工具名：全局唯一。 */
   name: string
   description: string
-  environmentRequired: boolean
-  environmentId: string | null
+  environmentSupport?: EnvironmentSupport
+  requiredEnvironmentId?: string | null
+  environmentRequired?: boolean
+  environmentId?: string | null
 }
 
 /** 公开的全局 Agent definition；model/variant 与 config 是 Thread 运行时的输入。 */

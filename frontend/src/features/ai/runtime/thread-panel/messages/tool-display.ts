@@ -34,7 +34,6 @@ const QUIET_RESULT_TOOLS = new Set([
   'find',
   'edit',
   'write',
-  'load_skill',
   'lsp_goto_definition',
   'lsp_workspace_symbols',
   'lsp_java_decompile',
@@ -288,8 +287,6 @@ function formatKnownToolDetail(
       const target = stringField(values.target)
       return `${base}${target ? ` ${JSON.stringify(target)}` : ''}`.trim()
     }
-    case 'load_skill':
-      return stringField(values.name) || null
     case 'task': {
       const subagentType = stringField(values.subagent_type)
       if (!subagentType) {

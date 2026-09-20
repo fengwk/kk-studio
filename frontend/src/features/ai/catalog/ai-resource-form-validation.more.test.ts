@@ -196,7 +196,7 @@ describe('ai-resource-form-validation additional branches', () => {
   it.each([
     // 空 variant 是合法的「使用 model 默认」覆盖
     [agent({ tools: ['read', 'read'] }), 'tools'],
-    [agent({ skills: ['dev', 'dev'] }), 'skills'],
+    [agent({ skills: [{ packageName: 'pkg', name: 'dev' }, { packageName: 'pkg', name: 'dev' }] }), 'skills'],
     [agent({ subagents: ['dev', 'dev'] }), 'subagents'],
   ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
     const result = validate({ kind: 'agent', mode: 'create' }, { agentDraft })

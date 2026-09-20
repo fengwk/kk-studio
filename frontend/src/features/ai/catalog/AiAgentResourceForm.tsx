@@ -3,7 +3,10 @@ import {
   buildSkillCandidates,
   buildSubagentCandidates,
   buildToolCandidates,
+  keyToSkillRef,
+  skillRefToKey,
   withSelectedOrphans,
+  withSelectedSkillOrphans,
   type CapabilityOption,
 } from '@/features/ai/catalog/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
@@ -14,7 +17,7 @@ import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-va
 import { Select } from '@/shared/ui/console/Select'
 import type {
   AgentDefinitionDTO,
-  SkillDTO,
+  SkillPackageDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import { translate, useI18n } from '@/shared/i18n'
@@ -40,7 +43,7 @@ export function AgentForm({
   models: AgentModelView[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDefinitionDTO[]
-  skills?: SkillDTO[]
+  skills?: SkillPackageDTO[]
   skillsLoading?: boolean
   skillsError?: unknown
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
@@ -83,12 +86,13 @@ export function AgentForm({
   const visibleToolValues = new Set(toolCandidates.map((option) => option.value))
   const visibleSelectedTools = draft.tools.filter((id) => visibleToolValues.has(id.trim()))
 
-  const skillCandidates = withSelectedOrphans(
+  const selectedSkillKeys = draft.skills.map(skillRefToKey)
+  const skillCandidates = withSelectedSkillOrphans(
     buildSkillCandidates(skills),
     draft.skills,
   )
   const visibleSkillValues = new Set(skillCandidates.map((option) => option.value))
-  const visibleSelectedSkills = draft.skills.filter((id) => visibleSkillValues.has(id.trim()))
+  const visibleSelectedSkills = selectedSkillKeys.filter((key) => visibleSkillValues.has(key))
 
   // Subagent 候选来自当前全局 Agent catalog；create 模式下同名候选（该行尚不存在）不展示，
   // edit 模式下当前 agent 已存在，可以正常显示。已勾选但 catalog 缺失的名称保留为可移除 orphan。
@@ -189,9 +193,13 @@ export function AgentForm({
           emptyText={t('ai.catalog.form.noCandidateSkills')}
           statusText={skillsLoading ? t('ai.common.loadingResources') : null}
           errorText={skillsError ? t('ai.common.resourceLoadFailed') : null}
-          onToggle={(value) =>
-            onChange({ ...draft, skills: toggleValue(draft.skills, value) })
-          }
+          onToggle={(value) => {
+            const exists = draft.skills.some((ref) => skillRefToKey(ref) === value)
+            const nextSkills = exists
+              ? draft.skills.filter((ref) => skillRefToKey(ref) !== value)
+              : [...draft.skills, keyToSkillRef(value)]
+            onChange({ ...draft, skills: nextSkills })
+          }}
         />
         {fieldErrors.skills ? <span className="field-error">{fieldErrors.skills}</span> : null}
       </fieldset>

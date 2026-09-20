@@ -10,7 +10,7 @@ import type {
   AgentDefinitionDTO,
   AgentModelConfigDTO,
   AgentModelView,
-  SkillDTO,
+  SkillPackageDTO,
 } from '@/shared/api/contracts/ai-catalog'
 
 const baseConfig: AgentModelConfigDTO = {
@@ -45,16 +45,24 @@ function modelWithVariants(): AgentModelView {
   }
 }
 
-function globalSkill(
-  name: string,
-  description: string | null = null,
-  packageName = 'core',
-): SkillDTO {
+function skillPackage(
+  packageName: string,
+  skills: { name: string; description: string }[],
+): SkillPackageDTO {
   return {
-    name,
-    description: description ?? '',
     packageName,
-    packageVersion: '1.0.0',
+    description: null,
+    repositoryUrl: 'https://example.com/repo.git',
+    branch: 'main',
+    currentCommit: '1111111111111111111111111111111111111111',
+    observedHeadCommit: null,
+    headCheckedAt: null,
+    headCheckError: null,
+    checkStatus: 'UP_TO_DATE',
+    skills,
+    version: '1',
+    createTime: '2026-07-20T00:00:00.000Z',
+    updateTime: '2026-07-20T01:00:00.000Z',
   }
 }
 
@@ -73,7 +81,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
 }
 
 describe('AgentForm current contracts', () => {
-  it('selects model/variant and selects global skills as string[]', async () => {
+  it('selects model/variant and selects skills as SkillRefDTO[]', async () => {
     const user = userEvent.setup()
     const longDescription =
       'Execute shell commands in the configured environment and return the captured output without losing long diagnostic context.'
@@ -82,7 +90,7 @@ describe('AgentForm current contracts', () => {
         ...emptyAgentDraft(modelWithVariants()),
         tools: ['missing-tool'],
       })
-      const skills = [globalSkill('dev', 'dev skill')]
+      const skills = [skillPackage('core', [{ name: 'dev', description: 'dev skill' }])]
       return (
         <AgentForm
           draft={draft}
@@ -116,19 +124,19 @@ describe('AgentForm current contracts', () => {
     await user.click(bashInput)
     expect(bashInput).toBeChecked()
 
-    // Global skill candidate is available and can be selected
-    const devSkill = screen.getByLabelText(/dev/)
+    // Skill candidate shows "core / dev"
+    const devSkill = screen.getByLabelText(/core \/ dev/)
     expect(devSkill).not.toBeChecked()
     await user.click(devSkill)
     expect(devSkill).toBeChecked()
   })
 
-  it('renders and toggles global skills from catalog', async () => {
+  it('renders and toggles skills as exact {packageName, name} objects', async () => {
     const user = userEvent.setup()
     const drafts: AgentDraft[] = []
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft(modelWithVariants()))
-      const skills = [globalSkill('online-skill', 'global skill')]
+      const skills = [skillPackage('core', [{ name: 'online-skill', description: 'global skill' }])]
       return (
         <AgentForm
           draft={draft}
@@ -143,24 +151,24 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    const skillCheckbox = screen.getByLabelText(/online-skill/)
+    const skillCheckbox = screen.getByLabelText(/core \/ online-skill/)
     expect(skillCheckbox).not.toBeChecked()
     await user.click(skillCheckbox)
-    expect(drafts.at(-1)?.skills).toEqual(['online-skill'])
+    expect(drafts.at(-1)?.skills).toEqual([{ packageName: 'core', name: 'online-skill' }])
 
     await user.click(skillCheckbox)
     expect(drafts.at(-1)?.skills).toEqual([])
   })
 
-  it('preserves orphan skills as removable choices and serializes string[]', async () => {
+  it('preserves orphan skills as removable choices and serializes SkillRefDTO[]', async () => {
     const user = userEvent.setup()
     const drafts: AgentDraft[] = []
     function Harness() {
       const [draft, setDraft] = useState<AgentDraft>({
         ...emptyAgentDraft(modelWithVariants()),
-        skills: ['orphan-skill'],
+        skills: [{ packageName: 'legacy', name: 'orphan-skill' }],
       })
-      const skills = [globalSkill('live-skill', 'live')]
+      const skills = [skillPackage('core', [{ name: 'live-skill', description: 'live' }])]
       return (
         <AgentForm
           draft={draft}
@@ -176,7 +184,7 @@ describe('AgentForm current contracts', () => {
     }
     render(<Harness />)
 
-    const orphanCheckbox = screen.getByLabelText(/orphan-skill/)
+    const orphanCheckbox = screen.getByLabelText(/legacy \/ orphan-skill/)
     expect(orphanCheckbox).toBeChecked()
 
     // Uncheck orphan skill
@@ -270,7 +278,7 @@ describe('AgentForm current contracts', () => {
     expect(drafts.at(-1)?.inheritParentEnvironment).toBe(false)
   })
 
-  it('submits clean payload with skills string[] and no environmentId', () => {
+  it('submits clean payload with skills SkillRefDTO[] and no environmentId', () => {
     const draft: AgentDraft = {
       name: 'assistant',
       description: 'my description',
@@ -279,7 +287,10 @@ describe('AgentForm current contracts', () => {
       variant: 'fast',
       inheritParentEnvironment: true,
       tools: ['bash'],
-      skills: ['dev', 'search'],
+      skills: [
+        { packageName: 'core', name: 'dev' },
+        { packageName: 'core', name: 'search' },
+      ],
       subagents: ['helper'],
     }
 
@@ -293,7 +304,10 @@ describe('AgentForm current contracts', () => {
       config: {
         inheritParentEnvironment: true,
         tools: ['bash'],
-        skills: ['dev', 'search'],
+        skills: [
+          { packageName: 'core', name: 'dev' },
+          { packageName: 'core', name: 'search' },
+        ],
         subagents: ['helper'],
       },
     })

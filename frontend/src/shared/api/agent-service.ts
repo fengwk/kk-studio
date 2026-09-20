@@ -9,11 +9,11 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderUpdateDTO,
-  SkillDTO,
+  SkillPackageCheckDTO,
   SkillPackageCreateDTO,
   SkillPackageDTO,
-  SkillPackageDetailDTO,
-  SkillPackageUpdateDTO,
+  SkillPackageEditDTO,
+  SkillPackagePublishDTO,
   ToolCatalogEntryDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { PageResult } from '@/shared/api/contracts/base'
@@ -80,28 +80,35 @@ export function createAgentService(client: HttpClient = apiClient) {
 
     // --- Global Skills & Skill Packages ---
 
-    listSkills: (): Promise<SkillDTO[]> => client.get('/ai/catalog/skills'),
-
     listSkillPackages: (): Promise<SkillPackageDTO[]> => client.get('/ai/catalog/skill-packages'),
 
-    getSkillPackage: (name: string): Promise<SkillPackageDetailDTO> =>
-      client.get(`/ai/catalog/skill-packages/${encodeURIComponent(name)}`),
-
-    createSkillPackage: (data: SkillPackageCreateDTO): Promise<SkillPackageDetailDTO> =>
+    createSkillPackage: (data: SkillPackageCreateDTO): Promise<SkillPackageDTO> =>
       client.post('/ai/catalog/skill-packages', data),
 
-    updateSkillPackage: (
+    editSkillPackage: (
       name: string,
-      data: SkillPackageUpdateDTO,
-    ): Promise<SkillPackageDetailDTO> =>
+      data: SkillPackageEditDTO,
+    ): Promise<SkillPackageDTO> =>
       client.put(`/ai/catalog/skill-packages/${encodeURIComponent(name)}`, data),
+
+    checkSkillPackage: (
+      name: string,
+      data: SkillPackageCheckDTO,
+    ): Promise<SkillPackageDTO> =>
+      client.post(`/ai/catalog/skill-packages/${encodeURIComponent(name)}/check`, data),
+
+    publishSkillPackage: (
+      name: string,
+      data: SkillPackagePublishDTO,
+    ): Promise<SkillPackageDTO> =>
+      client.post(`/ai/catalog/skill-packages/${encodeURIComponent(name)}/update`, data),
 
     deleteSkillPackage: (
       name: string,
-      expectedPackageVersion: string,
+      expectedVersion: string,
     ): Promise<void> =>
       client.delete(`/ai/catalog/skill-packages/${encodeURIComponent(name)}`, {
-        params: { expectedPackageVersion },
+        params: { expectedVersion },
       }),
 
   }

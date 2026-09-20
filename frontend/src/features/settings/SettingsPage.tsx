@@ -1,8 +1,10 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
 import { SettingsToolbar } from '@/features/settings/SettingsToolbar'
 import { GeneralTab } from '@/features/settings/tabs/GeneralTab'
+import { PluginsTab } from '@/features/ai/plugins/PluginsTab'
 import {
   GENERAL_SETTINGS_TAB,
+  PLUGINS_SETTINGS_TAB,
   type SettingsTabMeta,
 } from '@/features/settings/settings-tabs'
 import { SystemSettingsSchemaRenderer } from '@/features/settings/SystemSettingsSchemaRenderer'
@@ -32,7 +34,10 @@ export function SettingsPage({
       })),
     [editor.schema],
   )
-  const tabs = useMemo(() => [GENERAL_SETTINGS_TAB, ...serverTabs], [serverTabs])
+  const tabs = useMemo(
+    () => [GENERAL_SETTINGS_TAB, PLUGINS_SETTINGS_TAB, ...serverTabs],
+    [serverTabs],
+  )
   const [activeTab, setActiveTab] = useState(GENERAL_SETTINGS_TAB.id)
   const effectiveActiveTab = tabs.some((tab) => tab.id === activeTab)
     ? activeTab
@@ -102,6 +107,8 @@ export function SettingsPage({
         >
           {effectiveActiveTab === GENERAL_SETTINGS_TAB.id ? (
             <GeneralTab />
+          ) : effectiveActiveTab === PLUGINS_SETTINGS_TAB.id ? (
+            <PluginsTab />
           ) : (
             <ServerTabPane
               editor={editor}
