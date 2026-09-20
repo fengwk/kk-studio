@@ -125,15 +125,15 @@ durable 事实。
    降级时仍保留语义就 override `historyRenderer()`。
 3. 要维护分支状态时，先 `registerCustomEntryType(localName, customType, priority)`，再在 `ToolRequirements.stateAccesses` 中声明 READ 或 WRITE；状态载荷与 `AppendCustomEntry` 使用同一个 customType。
 4. 要注入模型上下文时注册 `ContextProjector`，只依据 `BranchView` 计算文本。
-5. 装配到组合根：组件注册进 Spring 容器或受信任 JAR，由组合根统一交给 `HarnessCatalog.from`。
+5. 装配到组合根：组件以 Spring bean 注册，由组合根统一交给 `HarnessCatalog.from`。
 
 Contributor 的能力在两种装配方式下完全相同，但宿主边界不同：
 
 - 构建期 Plugin 由 Spring Boot auto-configuration 创建 `HarnessContributor` bean，可以
   同时使用 Platform 的 credential、Blob 和 management services；Plugin 仍只经本 SPI
   注册 Tool，不得另建执行、历史或审批协议。
-- 外部 trusted JAR 由隔离 classloader 和 `ServiceLoader` 创建，只适合自包含 Contributor，
-  不能依赖 Spring 注入或 Plugin 管理面。
+构建期 Plugin 是唯一的扩展方式，因此不需要隔离 classloader、`ServiceLoader` 或运行时
+jar 目录扫描：扩展代码要么在编译期依赖里，要么不存在。
 
 两种方式都在 `HarnessCatalog.from` 时一次性冻结，运行中不安装、卸载或刷新代码。Plugin
 本身是否存在由 `web` 的 Maven runtime dependency 决定；`EnvironmentSupport.NONE` 的

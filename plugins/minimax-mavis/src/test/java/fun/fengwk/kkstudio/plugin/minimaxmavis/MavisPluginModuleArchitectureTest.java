@@ -31,30 +31,33 @@ class MavisPluginModuleArchitectureTest {
   private static final List<String> EXPECTED_PRODUCTION_DEPENDENCIES =
       List.of(
           "com.fasterxml.jackson.core:jackson-databind",
-          "fun.fengwk.kk-studio:kk-studio-harness-common");
+          "fun.fengwk.kk-studio:kk-studio-harness-common",
+          "fun.fengwk.kk-studio:kk-studio-harness-contributor-api",
+          "fun.fengwk.kk-studio:kk-studio-harness-tool",
+          "fun.fengwk.kk-studio:kk-studio-platform",
+          "org.springframework.boot:spring-boot-autoconfigure");
   private static final Set<String> ALLOWED_TEST_DEPENDENCIES =
-      Set.of("fun.fengwk.kk-studio:kk-studio-harness-tool", "org.junit.jupiter:junit-jupiter");
+      Set.of(
+          "fun.fengwk.convention4j:convention4j-spring-boot-starter-test",
+          "org.junit.jupiter:junit-jupiter",
+          "org.mockito:mockito-core");
 
-  private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
+  private static final List<String> ALLOWED_IMPORT_PREFIXES =
       List.of(
-          "fun.fengwk.kkstudio.platform.",
-          "fun.fengwk.kkstudio.web.",
-          "fun.fengwk.kkstudio.canvas.",
-          "fun.fengwk.kkstudio.schema.",
-          "fun.fengwk.kkstudio.harness.builtin.",
-          "fun.fengwk.kkstudio.harness.daemon.",
-          "fun.fengwk.kkstudio.harness.infra.",
-          "fun.fengwk.kkstudio.harness.mcp.",
-          "fun.fengwk.kkstudio.harness.provider.",
-          "fun.fengwk.kkstudio.harness.runtime.",
-          "org.springframework.",
-          "jakarta.",
-          "javax.sql.",
-          "java.sql.",
-          "org.mybatis.",
-          "org.apache.ibatis.");
+          "java.",
+          "javax.",
+          "com.fasterxml.jackson.",
+          "lombok.",
+          "org.springframework.beans.",
+          "org.springframework.boot.autoconfigure.",
+          "org.springframework.context.annotation.",
+          "fun.fengwk.kkstudio.harness.contributor.api.",
+          "fun.fengwk.kkstudio.harness.tool.",
+          "fun.fengwk.kkstudio.harness.common.",
+          "fun.fengwk.kkstudio.platform.plugin.",
+          "fun.fengwk.kkstudio.plugin.minimaxmavis.");
 
-  /** 模块主源码只依赖 JDK、Jackson 与 Harness 契约，不出现 Spring 或数据库 API。 */
+  /** 模块主源码只允许白名单中的合法依赖包，不出现未经允许的外部或平台内部实现包。 */
   @Test
   void pluginMainSourcesStayOnJdkJacksonAndHarnessContracts() throws IOException {
     Path main = repositoryRoot().resolve("plugins/minimax-mavis/src/main/java");
@@ -69,20 +72,22 @@ class MavisPluginModuleArchitectureTest {
         if (imported.startsWith("static ")) {
           imported = imported.substring("static ".length()).trim();
         }
-        for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
+        boolean allowed = false;
+        for (String prefix : ALLOWED_IMPORT_PREFIXES) {
           if (imported.startsWith(prefix)) {
-            violations.add(main.relativize(source) + ": " + trimmed);
+            allowed = true;
+            break;
           }
+        }
+        if (!allowed) {
+          violations.add(main.relativize(source) + ": " + trimmed);
         }
       }
     }
     assertTrue(violations.isEmpty(), () -> "forbidden imports:\n" + String.join("\n", violations));
   }
 
-  /**
-   * 模块 POM 的生产依赖被收敛到客户端必需的 Jackson 与 Harness schema 契约；Spring、HTTP 库、数据库、Platform 一律不得进入，且 Harness
-   * tool 契约只在测试期使用。
-   */
+  /** 模块 POM 的生产依赖集合精确等于白名单契约，test 依赖只允许白名单范围。 */
   @Test
   void pluginPomDeclaresOnlyClientDependencies() throws IOException {
     String pom =
@@ -108,7 +113,6 @@ class MavisPluginModuleArchitectureTest {
     productionDependencies.sort(String::compareTo);
     assertTrue(violations.isEmpty(), () -> "unexpected dependencies: " + violations);
     assertEquals(EXPECTED_PRODUCTION_DEPENDENCIES, productionDependencies);
-    assertTrue(testDependencies.contains("fun.fengwk.kk-studio:kk-studio-harness-tool"));
   }
 
   /** 仓库其他模块的源码都不引用 Plugin 包，因此移除 web 的 runtime dependency 不需要改任何源码。 */

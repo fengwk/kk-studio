@@ -29,6 +29,7 @@ class PlatformPackageArchitectureTest {
             "harness",
             "orchestration",
             "persistence",
+            "plugin",
             "project",
             "settings",
             "storage"),

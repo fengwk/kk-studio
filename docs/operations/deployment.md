@@ -240,8 +240,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | 显式 Seedance prepare-only | 外部 Hub/workspace | `OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
 Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 SystemSettings editor 修改。
-`KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY`、Canvas Function runtime 变量和
-`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也只在启动期读取。
+Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也只在启动期读取。
 
 凭据边界：
 

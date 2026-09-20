@@ -37,10 +37,10 @@ Harness Infra、Harness Environment、Contributor API，并禁止以任何 scope
 `kk-studio-harness-common`。后两者的原因很具体：Builtin 与 Common 由 Platform 的
 compile-scope 依赖传递进入组合根，web 一旦声明更近的 test-scope 依赖就会遮蔽它，使
 Spring Boot repackage 把这些 jar 从 Fat JAR 的 `BOOT-INF/lib` 中剔除。测试还禁止
-`web.controller` 包导入 `harness.runtime.processor`，并禁止
-`TrustedJarContributorLoader` 引用 Spring、Flyway、HttpClient 或 WebClient。可选
-`kk-studio-plugin-*` 只能是 runtime dependency，Web main/test source 都不得 import 其
-implementation package。
+`web.controller` 包导入 `harness.runtime.processor`，并禁止 web main source 出现
+`TrustedJarContributorLoader`、`URLClassLoader`、`ServiceLoader` 与
+`kk-studio.harness.contributors.directory` 等动态加载残留。可选 `kk-studio-plugin-*` 只能是
+runtime dependency，Web main/test source 都不得 import 其 implementation package。
 
 ```text
 WebApplication
@@ -49,7 +49,7 @@ WebApplication
   -> selected Plugin AutoConfigurations -> StudioPlugin + HarnessContributor
   -> Canvas infra -> canvas-core
   -> HarnessRuntimeConfiguration -> harness-infra -> harness-runtime -> harness-tool / harness-environment
-  -> ContributorCatalogConfiguration -> Spring HarnessContributor beans + TrustedJarContributorLoader -> HarnessCatalog
+  -> ContributorCatalogConfiguration -> Spring HarnessContributor beans（Builtin + 已安装 Plugin）-> HarnessCatalog
   -> RuntimeToolCatalogConfiguration -> HarnessToolCatalogAdapter + DB-backed McpToolCatalog -> CompositeRuntimeToolCatalog
   -> IssueControllerRuntimeConfiguration -> bounded Issue dispatcher + worker + poll
   -> HTTP Controllers / DTO mappers / error advice
@@ -76,9 +76,9 @@ WebApplication
 
 [ContributorCatalogConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogConfiguration.java)
 收集 Spring bean 形式的 `HarnessContributor`（含 Platform 暴露的
-`BuiltinHarnessContributor` 和已安装 Plugin）与 [TrustedJarContributorLoader](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java)
-加载的外部贡献者，调用 `HarnessCatalog.from` 冻结为单一不可变 `HarnessCatalog`；外部
-Contributor 是启动期静态扩展，不提供运行时安装或热刷新。
+`BuiltinHarnessContributor` 和已安装 Plugin），调用 `HarnessCatalog.from` 冻结为单一不可变
+`HarnessCatalog`；Contributor 是启动期静态扩展，不提供运行时安装或热刷新，也不存在外部
+jar 目录或隔离 classloader 这条路径。
 [RuntimeToolCatalogConfiguration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/RuntimeToolCatalogConfiguration.java)
 进一步把静态目录与 DB-backed `McpToolCatalog` 聚合成 `@Primary` 的
 `CompositeRuntimeToolCatalog`。
@@ -310,21 +310,17 @@ close code `1010` 关闭，且不向会话核心暴露通道。非 servlet Sprin
 声明组合 `EnvironmentSessionListener`，通过 `ObjectProvider` 弱引用唤醒可选的
 `HarnessWorkDispatcher`，解除与 `EnvironmentDaemonServer` 的循环依赖并隔离异常。
 
-### Trusted JAR 启动加载
+### Plugin 组合边界
 
-`TrustedJarContributorLoader` 只接受 `kk-studio.harness.contributors.directory`：空值返回
-空 snapshot；非空目录必须 canonical、真实存在且为 directory；只收集不跟随 symlink 的
-普通 `.jar` 文件并按 filename 排序；创建 parent 为 `HarnessContributor` classloader 的
-parent-first `URLClassLoader`，用 `ServiceLoader<HarnessContributor>` 加载并要求实现类
-确实来自该 child classloader；构造完成后保存 immutable contributor list，不提供
-refresh/install；加载失败立即关闭 child classloader，Spring destroy 时 `close()` 幂等。
-loader 本身不引用 Spring、Flyway、HttpClient 或 WebClient，classloader 只存在于
-composition root。
+Contributor 只有一条来源：Spring 容器中的 bean。`ContributorCatalogConfiguration` 用
+`ObjectProvider<HarnessContributor>` 收集它们并冻结为单一 `HarnessCatalog`，重复
+contributor id 在启动期失败。构建期 Plugin 由自己的 `AutoConfiguration.imports` 随应用
+启动，可使用 Platform 的凭据、Storage、调度和管理端口；它是否进入发行物只由
+`web/pom.xml` 的 runtime dependency 决定，因此删除该 dependency 后应用不残留任何 Plugin
+语义，web 也不需要任何插件目录、classloader 或热刷新代码。
 
-Trusted Contributor JAR 与 classpath Plugin 是两条不同边界：前者只能通过
-`ServiceLoader<HarnessContributor>` 提供无 Spring 的 Tool contribution；后者由
-`AutoConfiguration.imports` 随应用启动，可使用 Platform 的凭据、Storage、调度和管理
-端口。两者都在启动期冻结，均不支持运行中增删。
+Plugin 自己的管理面由 [StudioPluginController](../../web/src/main/java/fun/fengwk/kkstudio/web/plugin/StudioPluginController.java)
+暴露，装配入口是 Platform 的 `PluginConfiguration`。
 
 ## 生命周期与配置
 
@@ -336,7 +332,7 @@ Trusted Contributor JAR 与 classpath Plugin 是两条不同边界：前者只�
 | Application Event Hub | `ApplicationEventHub`，destroy `close` | 关闭 resource upstream、标记 subscriptions closed |
 | PostgreSQL notifications | `PostgresqlNotificationLoop`，`MAX_VALUE` | abort connection、interrupt、bounded 5s join |
 | Harness processors / RT source | `modelProcessor`、`toolProcessor`、`realtimeEventSource` 等 | Spring destroy `close`；heartbeat timer 用 `shutdown`，heartbeat worker 与 model flush executor 用 `close` |
-| Trusted contributor | `TrustedJarContributorLoader` | destroy `close` child classloader，列表不可再使用 |
+| Plugin credential refresh | `PluginCredentialRefreshDispatcher`（phase `MAX_VALUE`） | 启动立即 scan，随后默认每小时 scan；stop 取消调度并等待在途 scan，claim 后的 finalize 仍由 lease token 与 version 围栏 |
 | Plugin credential refresh | `PluginCredentialRefreshLifecycle` | 启动立即 scan，随后默认每小时 scan；stop 停止领取新 lease，in-flight finalize 仍由 lease/version 围栏 |
 
 Web context 自身持有的部署配置：
@@ -351,7 +347,8 @@ Web context 自身持有的部署配置：
 | `spring.mvc.converters.preferred-json-mapper` | `jackson`，并排除 convention4j 的 `WebErrorAutoConfiguration` |
 | `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher 与 Issue Controller；可由 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` 配置，默认 true，测试与 NAS Dev 显式关闭 |
 | `kk-studio.harness.environment-gateway.*` | Daemon WebSocket 入站 frame 与出站 queue/bytes/send timeout |
-| `kk-studio.harness.contributors.directory` | trusted JAR 目录；空值不加载外部贡献者 |
+| `kk-studio.plugins.credential-key-file` | Plugin 凭据主密钥的 owner-only 绝对路径；空值表示本部署不提供凭据能力并 fail closed，多节点必须挂载同一内容 |
+| `kk-studio.plugins.refresh.poll-delay` / `lease-duration` | 凭据刷新扫描间隔与跨节点互斥 lease；由 `KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY` / `..._LEASE_DURATION` 提供，默认 `1h` / `2m` |
 
 其余 `kk-studio.*` 键（dispatcher、execution-admission、runtime resource root、project
 controller、storage、Plugin credential、canvas、comfyui、opencli-hub）由 Platform 与 Canvas Infra 的
@@ -427,15 +424,15 @@ HTTP boundary 按目录定位：
 | Error advice 与 i18n | [advice/](../../web/src/test/java/fun/fengwk/kkstudio/web/advice/)、[i18n/](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/) | [`StudioProjectErrorAdviceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdviceTest.java)、[`StudioMessageServiceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/StudioMessageServiceTest.java) |
 | Project snapshot 与 invalidation | [project/](../../web/src/test/java/fun/fengwk/kkstudio/web/project/) | [`ProjectSnapshotAssemblerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssemblerTest.java)、[`ProjectInvalidationHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectInvalidationHubTest.java) |
 | Harness/Issue 组合与 mapper | [runtime/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/) | [`HarnessRuntimeConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfigurationTest.java)、[`HarnessRuntimeRequestMapperTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapperTest.java) |
-| Trusted JAR 与 Contributor 装配 | [runtime/contributor/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/) | [`TrustedJarContributorLoaderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoaderTest.java)、[`ContributorCatalogWiringTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogWiringTest.java) |
+| Contributor 装配与 Plugin 管理面 | [runtime/contributor/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/)、[plugin/](../../web/src/test/java/fun/fengwk/kkstudio/web/plugin/) | [`ContributorCatalogWiringTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogWiringTest.java)、[`StudioPluginControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/plugin/StudioPluginControllerTest.java) |
 | 通知、Application Event 与 Daemon WebSocket | [events/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/)、[events/postgresql/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/)、[environment/](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/) | [`PostgresqlNotificationLoopTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoopTest.java)、[`ApplicationEventHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventHubTest.java)、[`DaemonOutboundSenderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonOutboundSenderTest.java) |
 | 跨 owner 事务 orchestration | [orchestration/](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/) | [`HarnessCommandAcceptanceOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/HarnessCommandAcceptanceOrchestratorIntegrationTest.java)、[`SessionDeletionOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/SessionDeletionOrchestratorIntegrationTest.java) |
 
 这些测试覆盖 Web composition 的真实风险：唯一 root 与依赖方向、Flyway single
 baseline、PostgreSQL notification reconnect/resync、Harness/Issue worker NOTIFY+poll
 唤醒、Project trigger invalidation、ack-before-event、bounded sender、Environment large
-READY frame、synchronous MCP discovery/execution、strict DTO、trusted JAR
-classloader lifecycle、locale fallback 与静态 SPA fallback。
+READY frame、synchronous MCP discovery/execution、strict DTO、Plugin 管理面 no-store 与
+去敏、locale fallback 与静态 SPA fallback。
 
 ---
 

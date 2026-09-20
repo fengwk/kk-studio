@@ -18,10 +18,10 @@ WebSocket transport 由 [web](web.md) 拥有。
 它只做 `BaseMapperScan` 与 `ComponentScan`，并通过
 [AutoConfiguration.imports](../../platform/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports)
 作为 Spring Boot auto-configuration 被 web 引入、装载全部 application service 与适配器。
-Harness reducer、processor 与 claim/lease 状态机留在 harness-runtime，插件目录扫描与
-classloader 由 web 的
-[TrustedJarContributorLoader](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/contributor/TrustedJarContributorLoader.java)
-承担。
+Harness reducer、processor 与 claim/lease 状态机留在 harness-runtime。Plugin 没有目录
+扫描或外部 classloader：是否存在完全由 [web/pom.xml](../../web/pom.xml) 的 runtime
+dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行提供 `StudioPlugin`
+与 `HarnessContributor` bean。
 
 ## 子域地图
 
@@ -230,7 +230,7 @@ due row
   -> short transaction:
        success -> replace encrypted payload + expiry + nextRefreshAt
        auth rejection -> REAUTH_REQUIRED
-       definitely not sent -> REFRESH_FAILED + bounded delayed retry
+       not sent, or a definitive but unusable renewal result -> REFRESH_FAILED + delayed retry
        sent but no definitive response -> REFRESH_UNCERTAIN
 expired in-flight lease -> REFRESH_UNCERTAIN, never reclaim-and-send
 ```
