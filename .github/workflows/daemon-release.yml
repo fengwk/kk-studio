@@ -6,7 +6,7 @@
 #
 # 上传只使用 workflow 自带的 `github.token`（`contents: write`），不使用 PAT，也不读取
 # 任何其它 secret；发布物本身不含凭证。资产集合由
-# `scripts/release/prepare-daemon-release.sh` 唯一定义，本工作流只负责把它产出的文件
+# `scripts/daemon/prepare-release.sh` 唯一定义，本工作流只负责把它产出的文件
 # 原样上传：多一个或少一个都直接失败。
 name: daemon-release
 
@@ -31,8 +31,30 @@ env:
   RELEASE_DIR: harness/daemon/target/release
 
 jobs:
+  validate_windows_daemon:
+    name: validate Windows daemon installer
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Test installer with PowerShell 7
+        shell: pwsh
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+
   publish:
     name: build, stage and publish daemon release
+    needs: validate_windows_daemon
     runs-on: ubuntu-latest
     steps:
       # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。
@@ -74,14 +96,33 @@ jobs:
 
       # 通过门禁的提交才可能进入构建与发布步骤；任一门禁失败都会终止 workflow。
       - name: Scan for sensitive data
-        run: python3 scripts/security/check-sensitive-data.py
+        run: python3 scripts/dev/verify/repository/check-sensitive-data.py
       - name: Check documentation layout
-        run: node scripts/docs/check.mjs
-      - name: Run repository script contracts
+        run: node scripts/dev/verify/repository/check.mjs
+      - name: Run repository script tests
         run: |
-          python3 -m unittest discover -s scripts/e2e/tests
-          node --test scripts/e2e/tests/*.test.mjs
-          node --test scripts/supply-chain/tests/*.test.mjs
+          set -euo pipefail
+          shopt -s nullglob
+          # 每个能力的测试都放在自己的 tests/ 目录；CI 只发现目录，不维护能力清单。
+          python_dirs=(scripts/*/tests scripts/dev/verify/*/tests)
+          node_files=(scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs)
+          if [ "${#python_dirs[@]}" -eq 0 ] || [ "${#node_files[@]}" -eq 0 ]; then
+            echo "no script tests discovered below scripts/" >&2
+            exit 1
+          fi
+          python_ran=0
+          for dir in "${python_dirs[@]}"; do
+            if [ -z "$(find "${dir}" -name 'test_*.py' -print -quit)" ]; then
+              continue
+            fi
+            python3 -m unittest discover -s "${dir}"
+            python_ran=1
+          done
+          [ "${python_ran}" -eq 1 ] || {
+            echo "no python script tests discovered below scripts/" >&2
+            exit 1
+          }
+          node --test "${node_files[@]}"
       - name: Verify the daemon module
         run: >-
           env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am
@@ -90,7 +131,7 @@ jobs:
 
       # 唯一资产暂存实现：校验可执行单文件 JAR 后，把资产写进 RELEASE_DIR。
       - name: Stage release assets
-        run: scripts/release/prepare-daemon-release.sh "${GITHUB_REF_NAME}"
+        run: scripts/daemon/prepare-release.sh "${GITHUB_REF_NAME}"
 
       - name: Publish GitHub Release
         env:

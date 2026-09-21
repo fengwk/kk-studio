@@ -9,10 +9,10 @@
 | 工具 | 用途与约束 |
 | --- | --- |
 | JDK 21 | 所有 Maven 命令显式使用 `JAVA_HOME_21`；根 POM 的 `maven.compiler.release` 是 `21` |
-| Maven | 通过 `mvn` 可用；[`scripts/dev.sh`](../../scripts/dev.sh)、[`scripts/e2e/lib.sh`](../../scripts/e2e/lib.sh)、[`regression.sh`](../../scripts/reliability/regression.sh)、[`scripts/supply-chain.sh`](../../scripts/supply-chain.sh) 都会校验 JDK 21 |
+| Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 都会校验 JDK 21 |
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
-| `curl`、`jq`、`lsof` | [scripts/dev.sh](../../scripts/dev.sh) 启动前后检查端口与健康状态 |
+| `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 启动前后检查端口与健康状态 |
 | Python 3 | E2E 与测试栈的 smoke 脚本 |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
@@ -21,13 +21,13 @@
 
 ## 日常开发循环
 
-[scripts/dev.sh](../../scripts/dev.sh) 是 Backend 与 Vite 的统一入口：
+[scripts/dev/app.sh](../../scripts/dev/app.sh) 是 Backend 与 Vite 的统一入口：
 
 ```bash
-./scripts/dev.sh start
-./scripts/dev.sh status
-./scripts/dev.sh logs all
-./scripts/dev.sh stop
+./scripts/dev/app.sh start
+./scripts/dev/app.sh status
+./scripts/dev/app.sh logs all
+./scripts/dev/app.sh stop
 ```
 
 | 项 | 默认值 |
@@ -54,15 +54,15 @@ Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`�
 | `DEV_SKIP_NPM_INSTALL` | `false` | 完全跳过前端依赖安装或刷新 |
 | `DEV_READY_TIMEOUT_SECONDS` | `90` | 等待 Backend/Vite ready 的预算，超时打印日志并以非零状态退出 |
 | `JAVA_OPTS` | 空 | 传给 Backend JVM |
-| `DEV_ENV_FILE` | 未设置 | 显式给出时按字面量读取外部数据面配置；见[本机 preview 的外部数据面](#本机-preview-的外部数据面) |
+| `SHARED_PREVIEW_ENV_FILE` | 未设置 | 显式给出时按字面量读取外部数据面配置；见[本机 preview 的外部数据面](#本机-preview-的外部数据面) |
 
 `e2e` profile 启用时，宿主同步器会按需读取 Google、OpenAI Responses、MiniMax Anthropic 和
 DeepSeek 四组完整 credential pair，经 backend API 写入 E2E database 中对应的 seed Provider
 row。Backend、Vite 和 Daemon 长驻进程都显式移除 `TEST_*` 变量，这些变量只向短生命周期的同步器
 透传；credential 不进入 seed SQL/resource，密钥与 endpoint 不打印。
 
-要让本机 Backend 连 NAS 上已有的 PostgreSQL/S3，用 [scripts/local-dev.sh](../../scripts/local-dev.sh)
-代替 `scripts/dev.sh`：它固定 `prod` profile、关闭 Flyway 与 Harness worker，并从一份 owner-only
+要让本机 Backend 连 NAS 上已有的 PostgreSQL/S3，用 [scripts/dev/shared-preview.sh](../../scripts/dev/shared-preview.sh)
+代替 `scripts/dev/app.sh`：它固定 `prod` profile、关闭 Flyway 与 Harness worker，并从一份 owner-only
 配置文件读取数据面 endpoint 与凭据；完整契约与配置键见下文
 [本机 preview 的外部数据面](#本机-preview-的外部数据面)。
 
@@ -79,13 +79,13 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 只格式化本次改动的模块 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
-| 隔离栈端到端 smoke | `./deploy/test/run.sh --with-app` |
-| 免费 API 契约矩阵 | [`./scripts/e2e.sh`](../../scripts/e2e.sh) |
-| 确认矩阵有哪些 case | `./scripts/e2e.sh --list`、`./scripts/e2e.sh --docs` |
-| 文档与敏感数据门禁 | `node scripts/docs/check.mjs`、`python3 scripts/security/check-sensitive-data.py` |
-| 可靠性确定性回归 | `./scripts/reliability/regression.sh --iterations 1` |
-| 离线性能基线 | `./scripts/performance.sh` |
-| 供应链 SBOM / 漏洞门禁 | `./scripts/supply-chain.sh all` |
+| 隔离栈端到端 smoke | `./scripts/dev/verify/smoke/offline-chat.sh --with-app` |
+| 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
+| 确认矩阵有哪些 case | `./scripts/dev/verify/e2e/run.sh --list`、`./scripts/dev/verify/e2e/run.sh --docs` |
+| 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`python3 scripts/dev/verify/repository/check-sensitive-data.py` |
+| 可靠性确定性回归 | `./scripts/dev/verify/reliability/regression.sh --iterations 1` |
+| 离线性能基线 | `./scripts/dev/verify/performance/run.sh` |
+| 供应链 SBOM / 漏洞门禁 | `./scripts/dev/verify/supply-chain/run.sh all` |
 
 真实 Provider、真实 Tool、UI、分布式和镜像扫描都只在显式开关下运行，默认路径不产生模型费用。
 
@@ -95,9 +95,9 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | --- | --- |
 | 静态与格式门禁 | `mvn validate`、`npm --prefix frontend run lint` |
 | Java 与 Frontend 单测、覆盖率 | `mvn test`、`mvn verify`、`npm --prefix frontend run test\|coverage` |
-| 免费端到端契约 | `./scripts/e2e.sh`、`./deploy/test/run.sh --with-app` |
-| 真实 Provider、Tool、UI、分布式栈 | `./scripts/e2e.sh --real`、`--with-tools`、`--ui`、`--distributed` |
-| 可靠性、性能、供应链 | [`scripts/reliability`](../../scripts/reliability/)、`./scripts/performance.sh`、`./scripts/supply-chain.sh` |
+| 免费端到端契约 | `./scripts/dev/verify/e2e/run.sh`、`./scripts/dev/verify/smoke/offline-chat.sh --with-app` |
+| 真实 Provider、Tool、UI、分布式栈 | `./scripts/dev/verify/e2e/run.sh --real`、`--with-tools`、`--ui`、`--distributed` |
+| 可靠性、性能、供应链 | [`scripts/dev/verify/reliability`](../../scripts/dev/verify/reliability/)、`./scripts/dev/verify/performance/run.sh`、`./scripts/dev/verify/supply-chain/run.sh` |
 
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
@@ -190,7 +190,7 @@ localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry
 scrollIntoView 和 React Flow layout 提供确定性 stub。
 
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
-case inventory 由 `node scripts/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
+case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
 
 ## Compose、静态资源与文档门禁
 
@@ -199,11 +199,11 @@ docker compose -f deploy/local/compose.yaml config --quiet
 docker compose -f deploy/test/compose.yaml config --quiet
 docker compose -f deploy/test/compose.yaml --profile app config --quiet
 docker compose -f deploy/reliability/compose.yaml config --quiet
-./deploy/distributed/run.sh verify
+./scripts/dev/verify/e2e/distributed.sh verify
 ```
 
-`deploy/distributed/run.sh verify` 只静态校验双节点 Compose config 与网络不变量，不启动容器。
-`./deploy/test/run.sh` 把配置检查、镜像构建、依赖 health、非 root runtime、PostgreSQL、MinIO
+[`scripts/dev/verify/e2e/distributed.sh verify`](../../scripts/dev/verify/e2e/distributed.sh) 只静态校验双节点 Compose config 与网络不变量，不启动容器。
+[`scripts/dev/verify/smoke/offline-chat.sh`](../../scripts/dev/verify/smoke/offline-chat.sh) 把配置检查、镜像构建、依赖 health、非 root runtime、PostgreSQL、MinIO
 bucket 与 HTTP mock smoke 组合成一个可清理入口，`--with-app` 再覆盖全局 Blob、Canvas Resource、
 signed GET、fake Function、容器内 OpenCLI fake Hub 与离线 Chat。
 
@@ -211,37 +211,37 @@ Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应�
 再检查浏览器入口。文档、敏感数据与 Git 空白检查：
 
 ```bash
-node scripts/e2e/run-matrix.mjs --docs
-node scripts/docs/check.mjs
-python3 scripts/security/check-sensitive-data.py
+node scripts/dev/verify/e2e/run-matrix.mjs --docs
+node scripts/dev/verify/repository/check.mjs
+python3 scripts/dev/verify/repository/check-sensitive-data.py
 git diff --check
 ```
 
-[scripts/docs/check.mjs](../../scripts/docs/check.mjs) 负责固定文档布局、Markdown 链接、H1、源码
-路径和旧词守卫。[check-sensitive-data.py](../../scripts/security/check-sensitive-data.py) 扫描
+[scripts/dev/verify/repository/check.mjs](../../scripts/dev/verify/repository/check.mjs) 负责固定文档布局、Markdown 链接、H1、源码
+路径和旧词守卫。[check-sensitive-data.py](../../scripts/dev/verify/repository/check-sensitive-data.py) 扫描
 tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史，历史审计是公开策略中
 的独立步骤。
 
 ## E2E
 
-标准入口是 [scripts/e2e.sh](../../scripts/e2e.sh)：
+标准入口是 [scripts/dev/verify/e2e/run.sh](../../scripts/dev/verify/e2e/run.sh)：
 
 ```bash
-./scripts/e2e.sh
-./scripts/e2e.sh --rebuild
-./scripts/e2e.sh --real
-./scripts/e2e.sh --with-tools
-./scripts/e2e.sh --real --with-branch
-./scripts/e2e.sh --with-canvas-storage
-./scripts/e2e.sh --with-canvas-function
-./scripts/e2e.sh --real --with-tools --with-canvas-storage
-./scripts/e2e.sh --distributed
-./scripts/e2e.sh --ui
-./scripts/e2e.sh --only CASE_ID
-./scripts/e2e.sh --level L1
-./scripts/e2e.sh --list
-./scripts/e2e.sh --docs
+./scripts/dev/verify/e2e/run.sh
+./scripts/dev/verify/e2e/run.sh --rebuild
+./scripts/dev/verify/e2e/run.sh --real
+./scripts/dev/verify/e2e/run.sh --with-tools
+./scripts/dev/verify/e2e/run.sh --real --with-branch
+./scripts/dev/verify/e2e/run.sh --with-canvas-storage
+./scripts/dev/verify/e2e/run.sh --with-canvas-function
+./scripts/dev/verify/e2e/run.sh --real --with-tools --with-canvas-storage
+./scripts/dev/verify/e2e/run.sh --distributed
+./scripts/dev/verify/e2e/run.sh --ui
+./scripts/dev/verify/e2e/run.sh --only CASE_ID
+./scripts/dev/verify/e2e/run.sh --level L1
+./scripts/dev/verify/e2e/run.sh --list
+./scripts/dev/verify/e2e/run.sh --docs
 ```
 
 | Flag | 语义 |
@@ -260,7 +260,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 矩阵分成 L1 免费 API 契约、L2 真实文本与推理、L3 真实分支、L4 Environment/Tool/approval、L5
 双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题与 `requires` 只由
-`node scripts/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
+`node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
@@ -310,9 +310,9 @@ database 中的 `minimax` Responses Provider。
 ### 确定性回归
 
 ```bash
-./scripts/reliability/regression.sh --help
-./scripts/reliability/regression.sh --iterations 1
-./scripts/reliability/regression.sh --iterations 3 --report-root reports/reliability
+./scripts/dev/verify/reliability/regression.sh --help
+./scripts/dev/verify/reliability/regression.sh --iterations 1
+./scripts/dev/verify/reliability/regression.sh --iterations 3 --report-root reports/reliability
 ```
 
 `--iterations` 取值 `1..100`（默认 `3`），首轮失败即停止后续轮次。runner 不启动
@@ -329,23 +329,23 @@ invalid XML、Maven `[ERROR]`、`Surefire is going to kill` 或非零退出都�
 `TEST_MINIMAX_*` 时同步该 credential pair；工具隔离由 `inspect` 断言。矩阵专用的准备命令是：
 
 ```bash
-./scripts/reliability/stack.sh snapshot
-./scripts/reliability/stack.sh case-reset <case-id> <pi|pi-base>
-./scripts/reliability/stack.sh case-deps <case-id>
-./scripts/reliability/stack.sh tool-smoke
+./scripts/dev/verify/reliability/stack.sh snapshot
+./scripts/dev/verify/reliability/stack.sh case-reset <case-id> <pi|pi-base>
+./scripts/dev/verify/reliability/stack.sh case-deps <case-id>
+./scripts/dev/verify/reliability/stack.sh tool-smoke
 ```
 
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/reliability/NativeToolSmoke.java) 经 stdin 送入
+`tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java) 经 stdin 送入
 Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provider 或 App command batch。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
 ```bash
-node scripts/reliability/run-agent-matrix.mjs --help
-node scripts/reliability/run-agent-matrix.mjs --list
-node scripts/reliability/run-agent-matrix.mjs --only CASE_ID
-node scripts/reliability/reassess-agent-run.mjs <runId>
+node scripts/dev/verify/reliability/run-agent-matrix.mjs --help
+node scripts/dev/verify/reliability/run-agent-matrix.mjs --list
+node scripts/dev/verify/reliability/run-agent-matrix.mjs --only CASE_ID
+node scripts/dev/verify/reliability/reassess-agent-run.mjs <runId>
 ```
 
 | Flag | 默认/语义 |
@@ -357,20 +357,20 @@ node scripts/reliability/reassess-agent-run.mjs <runId>
 | `--report-root DIR` | `reports/reliability` |
 | `--max-cost-usd N` | `0..5`，硬上限为 USD 5 |
 
-case 集合、模型/变体组合与 tool policy 由 [scripts/reliability/matrix.mjs](../../scripts/reliability/matrix.mjs)
-和 [policy.mjs](../../scripts/reliability/policy.mjs) 定义。真实执行前 runner 要求 provider、
+case 集合、模型/变体组合与 tool policy 由 [scripts/dev/verify/reliability/matrix.mjs](../../scripts/dev/verify/reliability/matrix.mjs)
+和 [policy.mjs](../../scripts/dev/verify/reliability/policy.mjs) 定义。真实执行前 runner 要求 provider、
 model、variant、Tool catalog 和 Environment `READY` 全部匹配；未知 cost、超过上限、测试或工作区
 隔离证据缺失都 fail closed。`--real`/`--with-tools` 等 flag 只属于
-[`scripts/e2e.sh`](../../scripts/e2e.sh)，不适用于该 runner。
+[`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh)，不适用于该 runner。
 
 ## 性能基线
 
 ```bash
-./scripts/performance.sh --help
-./scripts/performance.sh
-./scripts/performance.sh --duration-seconds 5
-./scripts/performance.sh --skip-build
-./scripts/performance.sh --report-root /tmp/kk-studio-performance
+./scripts/dev/verify/performance/run.sh --help
+./scripts/dev/verify/performance/run.sh
+./scripts/dev/verify/performance/run.sh --duration-seconds 5
+./scripts/dev/verify/performance/run.sh --skip-build
+./scripts/dev/verify/performance/run.sh --report-root /tmp/kk-studio-performance
 ```
 
 | Flag | 当前值 |
@@ -396,12 +396,12 @@ TERM 都执行 `down --volumes --remove-orphans`。
 ## 供应链门禁
 
 ```bash
-./scripts/supply-chain.sh sbom
-./scripts/supply-chain.sh audit
-./scripts/supply-chain.sh image
-./scripts/supply-chain.sh all
-./scripts/supply-chain.sh test
-./scripts/supply-chain.sh help
+./scripts/dev/verify/supply-chain/run.sh sbom
+./scripts/dev/verify/supply-chain/run.sh audit
+./scripts/dev/verify/supply-chain/run.sh image
+./scripts/dev/verify/supply-chain/run.sh all
+./scripts/dev/verify/supply-chain/run.sh test
+./scripts/dev/verify/supply-chain/run.sh help
 ```
 
 | 子命令 | 内容 |
@@ -410,7 +410,7 @@ TERM 都执行 `down --volumes --remove-orphans`。
 | `audit` | frontend `npm audit` + Maven OWASP Dependency-Check |
 | `image` | 构建 App/Daemon，运行功能 smoke，再用 pinned Trivy 扫描 |
 | `all` | `sbom`、`audit`、`image` 的合取结果 |
-| `test` | [supply-chain.test.mjs](../../scripts/supply-chain/tests/supply-chain.test.mjs)，不联网 |
+| `test` | [supply-chain.test.mjs](../../scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs)，不联网 |
 
 根 POM 的 `supply-chain` profile 是显式 profile：CycloneDX Maven Plugin `2.9.3` 生成 JSON schema
 `1.6` 的非 test-scope aggregate BOM；OWASP Dependency-Check `13.0.0` 输出 HTML/JSON/SARIF，
@@ -460,28 +460,28 @@ schema、持久 JSON 或 Work wire 确实不兼容时，先把 NAS App 推进到
 
 ### 本机 preview 的外部数据面
 
-[scripts/local-dev.sh](../../scripts/local-dev.sh) 是笔记本上的一条命令入口：它用 NAS 上已有的
+[scripts/dev/shared-preview.sh](../../scripts/dev/shared-preview.sh) 是笔记本上的一条命令入口：它用 NAS 上已有的
 PostgreSQL/S3 启动已打包的 Backend 与 Vite/HMR，并复用
-[scripts/dev.sh](../../scripts/dev.sh) 的全部子命令。
+[scripts/dev/app.sh](../../scripts/dev/app.sh) 的全部子命令。
 
 ```bash
-./scripts/local-dev.sh start
-./scripts/local-dev.sh status
-./scripts/local-dev.sh logs all
-./scripts/local-dev.sh stop
+./scripts/dev/shared-preview.sh start
+./scripts/dev/shared-preview.sh status
+./scripts/dev/shared-preview.sh logs all
+./scripts/dev/shared-preview.sh stop
 ```
 
-配置默认来自 `$HOME/.config/kk-studio/local-dev.env`，只有 `DEV_ENV_FILE` 能改成别的路径；模板是
-[scripts/local-dev.config.example](../../scripts/local-dev.config.example)，只含键名与空值，真实
+配置默认来自 `$HOME/.config/kk-studio/shared-preview.env`，只有 `SHARED_PREVIEW_ENV_FILE` 能改成别的路径；模板是
+[scripts/dev/shared-preview.env.example](../../scripts/dev/shared-preview.env.example)，只含键名与空值，真实
 值永远留在仓库之外。文件必须是当前用户所有的绝对路径普通文件、不是符号链接、没有 group/other
 权限位：
 
 ```bash
 install -d -m 700 ~/.config/kk-studio
-install -m 600 scripts/local-dev.config.example ~/.config/kk-studio/local-dev.env
+install -m 600 scripts/dev/shared-preview.env.example ~/.config/kk-studio/shared-preview.env
 ```
 
-[scripts/dev.sh](../../scripts/dev.sh) 只按 `KEY=VALUE` 逐行字面量解析，不使用 `source`/`eval`，
+[scripts/dev/app.sh](../../scripts/dev/app.sh) 只按 `KEY=VALUE` 逐行字面量解析，不使用 `source`/`eval`，
 只按第一个 `=` 拆分，忽略空行与 `#` 注释行；键必须落在外部数据面的白名单内，值不缺失、不出现在
 日志或命令参数里。任何失败（相对路径、目录、符号链接、属主不符、权限过宽、未知键、缺值）都在
 启动任何服务之前报错，且不会回显文件内容。
@@ -490,7 +490,7 @@ install -m 600 scripts/local-dev.config.example ~/.config/kk-studio/local-dev.en
 | --- | --- | --- |
 | `BACKEND_HOST` / `BACKEND_PORT` | `127.0.0.1` / `18080` | 本机 Backend 监听地址与端口 |
 | `FRONTEND_HOST` / `FRONTEND_PORT` | `127.0.0.1` / `5173` | 本机 Vite/HMR 监听地址与端口 |
-| `DEV_ENV_FILE` | `$HOME/.config/kk-studio/local-dev.env` | 外部数据面配置文件的绝对路径 |
+| `SHARED_PREVIEW_ENV_FILE` | `$HOME/.config/kk-studio/shared-preview.env` | 外部数据面配置文件的绝对路径 |
 | `DEV_WORK_DIR` | `runtime/dev` | log 与 PID 目录 |
 
 入口固定 `SPRING_PROFILES_ACTIVE=prod`、`SPRING_FLYWAY_ENABLED=false` 和
@@ -498,22 +498,24 @@ install -m 600 scripts/local-dev.config.example ~/.config/kk-studio/local-dev.en
 缺配置或不一致时在启动前失败。`SPRING_PROFILES_ACTIVE` 不是 `prod`、Flyway 没有关闭、或进程
 试图承担 Harness worker，都会直接报错，不会让本机进程成为第二个迁移执行者或第二个 worker。
 
-Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，在那台主机以
-宿主进程或 `systemd --user` 常驻，并连接 NAS App 的 gateway
-`wss://<studio-origin>/api/harness/environment-daemon/v1`；安装、注册 token 文件与 systemd 单元
-见 [Environment Daemon 安装与运行](environment-daemon.md)。
+Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文件、命令与检索时，规范路径是在那台
+主机 clone 源码并通过平台对应的安装脚本常驻（Linux/macOS 用
+[scripts/daemon/install.sh](../../scripts/daemon/install.sh)，Windows 用
+[scripts/daemon/install.ps1](../../scripts/daemon/install.ps1)），连接 NAS App 的 gateway
+`wss://<studio-origin>/api/harness/environment-daemon/v1`；前置条件、注册 token 文件、构建安装、
+升级与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 共享数据库重建
 
 共享 database 的标准重建入口是
-[scripts/operations/rebuild-database.sh](../../scripts/operations/rebuild-database.sh)：
+[scripts/ops/rebuild-database.sh](../../scripts/ops/rebuild-database.sh)：
 
 ```bash
 # 只读预检；不创建文件、不停止容器、不修改 database
-./scripts/operations/rebuild-database.sh --dry-run
+./scripts/ops/rebuild-database.sh --dry-run
 
 # 仅在 Human 批准的维护窗口内执行
-./scripts/operations/rebuild-database.sh
+./scripts/ops/rebuild-database.sh
 ```
 
 脚本仓库只保留完整声明当前结构的 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)，
@@ -523,7 +525,7 @@ revision 构建的镜像但保持停止；脚本会把仓库 V1 的 Flyway check
 对比，不一致就停止回灌并保持 App 关闭。
 
 重建要先认清源库属于哪种结构，这一步由只读的
-[scripts/operations/database_rebuild_source.py](../../scripts/operations/database_rebuild_source.py)
+[scripts/ops/database_rebuild_source.py](../../scripts/ops/database_rebuild_source.py)
 完成（同一份投影既用于导出 bundle，也用于导出后比对的目标指纹）：
 
 | 源结构 | 判定依据 | 回灌方式 |
@@ -582,7 +584,7 @@ Agent 在本机 preview 上遵循以下闭环：
 
 1. 开始前检查 Git 状态并保留 Human 的并行修改，不覆盖未提交工作。
 2. 对实际变更执行定向测试；Java 关键路径同时遵守覆盖率门禁。
-3. 普通 Frontend 变更由 Vite HMR 生效；Java 变更先构建，再用 `./scripts/local-dev.sh restart`
+3. 普通 Frontend 变更由 Vite HMR 生效；Java 变更先构建，再用 `./scripts/dev/shared-preview.sh restart`
    重启受管的 Backend/Vite，不需要重建任何容器。
 4. 重启前提交源码和必要的 durable 进度；重启只在当前回合内短暂中断 preview 的连接。
 5. 验证 Backend health、Frontend、应用事件 WebSocket 后再继续下一轮。
@@ -651,7 +653,7 @@ Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、smo
 
 ## 清理与故障排查
 
-开发循环自己的清理是 `./scripts/local-dev.sh stop` 或 `./scripts/dev.sh stop`；本地与测试栈、
+开发循环自己的清理是 `./scripts/dev/shared-preview.sh stop` 或 `./scripts/dev/app.sh stop`；本地与测试栈、
 分布式栈和可靠性栈的清理命令、
 保留与删除语义见[部署与运行](deployment.md#清理)。[deploy/test](../../deploy/test/README.md) 与
 performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network，`--distributed` 入口在退出时
@@ -661,16 +663,16 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | --- | --- | --- |
 | JDK/compile/checkstyle 失败 | `"$JAVA_HOME_21/bin/java" -version`；`env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp validate` | 必须是 JDK 21；先修复 Spotless/Checkstyle |
 | Frontend 找不到依赖或 Playwright | `npm --prefix frontend ci`；`npm --prefix frontend run test` | 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定 |
-| dev 端口占用 | `./scripts/dev.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 用 `DEV_KILL_PORTS=true` 或换端口 |
-| 本机 preview 启动即失败 | `./scripts/local-dev.sh status`；核对 `DEV_ENV_FILE` 指向的文件 | 必须是绝对路径的 owner-only 普通文件；权限、属主、未知键或缺值都 fail closed，输出不回显文件内容 |
+| dev 端口占用 | `./scripts/dev/app.sh status`；`ss -ltnp \| grep -E ':18080\|:5173'` | 用 `DEV_KILL_PORTS=true` 或换端口 |
+| 本机 preview 启动即失败 | `./scripts/dev/shared-preview.sh status`；核对 `SHARED_PREVIEW_ENV_FILE` 指向的文件 | 必须是绝对路径的 owner-only 普通文件；权限、属主、未知键或缺值都 fail closed，输出不回显文件内容 |
 | local app unhealthy | `docker compose -f deploy/local/compose.yaml ps`；`docker compose -f deploy/local/compose.yaml logs app postgres` | 先确认 PostgreSQL health，再检查 `/actuator/health` |
 | Canvas test 健康失败 | `docker compose -f deploy/test/compose.yaml ps`；`docker compose -f deploy/test/compose.yaml logs` | 检查 MinIO bucket、mock `/health`、ffmpeg/ffprobe |
-| E2E 只跑少数 case | `node scripts/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
+| E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI,ANTHROPIC,DEEPSEEK}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
-| reliability 环境未 READY | `./scripts/reliability/stack.sh status`；`./scripts/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
-| 敏感数据门禁失败 | `python3 scripts/security/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
+| reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
+| 敏感数据门禁失败 | `python3 scripts/dev/verify/repository/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
-| loopback proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行 `./deploy/test/run.sh --with-app` | loopback proxy 使用 host build network，代理值不进入镜像 |
+| loopback proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行 `./scripts/dev/verify/smoke/offline-chat.sh --with-app` | loopback proxy 使用 host build network，代理值不进入镜像 |
 
 ---
 

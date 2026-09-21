@@ -257,8 +257,8 @@ descriptor、管理动作、后台任务或 Tool，不在数据库维护第二�
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl plugins/<plugin-id> -am test
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test
-node scripts/docs/check.mjs
-python3 scripts/security/check-sensitive-data.py
+node scripts/dev/verify/repository/check.mjs
+python3 scripts/dev/verify/repository/check-sensitive-data.py
 git diff --check
 ```
 

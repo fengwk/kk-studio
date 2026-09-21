@@ -30,6 +30,27 @@ env:
   NODE_VERSION: '24.14.0'
 
 jobs:
+  validate_windows_daemon:
+    name: validate Windows daemon installer
+    if: github.ref_name == 'main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+      # PowerShell 5.1 is the minimum supported host; PowerShell 7 catches modern-host drift.
+      # The test constructs a real ScheduledTasks definition and probes Java argv without
+      # registering a task or changing the runner's service state.
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Test installer with PowerShell 7
+        shell: pwsh
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+
   validate:
     name: validate repository
     if: github.ref_name == 'main'
@@ -59,18 +80,39 @@ jobs:
       - name: Build frontend
         run: npm --prefix frontend run build
       - name: Check documentation layout
-        run: node scripts/docs/check.mjs
-      - name: Run repository script contracts
+        run: node scripts/dev/verify/repository/check.mjs
+      - name: Run repository script tests
         run: |
-          python3 -m unittest discover -s scripts/e2e/tests
-          node --test scripts/e2e/tests/*.test.mjs
-          node --test scripts/supply-chain/tests/*.test.mjs
+          set -euo pipefail
+          shopt -s nullglob
+          # 每个能力的测试都放在自己的 tests/ 目录；CI 只发现目录，不维护能力清单。
+          python_dirs=(scripts/*/tests scripts/dev/verify/*/tests)
+          node_files=(scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs)
+          if [ "${#python_dirs[@]}" -eq 0 ] || [ "${#node_files[@]}" -eq 0 ]; then
+            echo "no script tests discovered below scripts/" >&2
+            exit 1
+          fi
+          python_ran=0
+          for dir in "${python_dirs[@]}"; do
+            if [ -z "$(find "${dir}" -name 'test_*.py' -print -quit)" ]; then
+              continue
+            fi
+            python3 -m unittest discover -s "${dir}"
+            python_ran=1
+          done
+          [ "${python_ran}" -eq 1 ] || {
+            echo "no python script tests discovered below scripts/" >&2
+            exit 1
+          }
+          node --test "${node_files[@]}"
       - name: Scan for sensitive data
-        run: python3 scripts/security/check-sensitive-data.py
+        run: python3 scripts/dev/verify/repository/check-sensitive-data.py
 
   publish:
     name: build and push image
-    needs: validate
+    needs:
+      - validate
+      - validate_windows_daemon
     # `main` 只能在全量门禁成功后发布；`dev` 的 validate job 按设计为 skipped，
     # 仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
     if: >-
@@ -78,6 +120,10 @@ jobs:
         always()
         && !cancelled()
         && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+        && (
+          needs.validate_windows_daemon.result == 'success'
+          || needs.validate_windows_daemon.result == 'skipped'
+        )
       }}
     runs-on: ubuntu-latest
     steps:

@@ -122,6 +122,6 @@ ss -ltnp | grep -E ':8080|:5432|:9000' || true
 | 宿主端口被占用 | 用 `KK_STUDIO_APP_PORT` / `KK_STUDIO_PG_PORT` / `KK_STUDIO_S3_PORT` 改映射，避免影响其它栈 |
 | 浏览器里图片或附件加载失败 | 检查 `KK_STUDIO_S3_PUBLIC_HOST` 是否可从浏览器访问，预签名 URL 使用该主机名 |
 | 改过 `KK_STUDIO_PG_*` 后连接失败 | 命名卷里已有旧数据库；`docker compose -f deploy/local/compose.yaml down -v` 后按新值重新初始化 |
-| 需要真实 Provider 的 E2E | 不在本栈执行；从宿主运行 `./scripts/e2e.sh --real`，见[开发与测试](../../docs/operations/development-and-testing.md) |
+| 需要真实 Provider 的 E2E | 不在本栈执行；从宿主运行 `./scripts/dev/verify/e2e/run.sh --real`，见[开发与测试](../../docs/operations/development-and-testing.md) |
 
 隔离的 Canvas/Storage 测试栈见 [deploy/test](../test/README.md)。
