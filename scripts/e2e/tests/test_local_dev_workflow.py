@@ -721,6 +721,31 @@ class TestDevScriptArtifactContracts(unittest.TestCase):
                 "a missing lock file must be reported by status, not by a fabricated digest",
             )
 
+    def test_readiness_fails_fast_for_an_exited_child_and_start_cleans_up(self):
+        # Intent: a configuration or startup failure must not consume the whole readiness
+        # timeout or leave the other managed process running.
+        with tempfile.TemporaryDirectory() as temporary:
+            pid_file = Path(temporary) / "backend.pid"
+            pid_file.write_text("999999999\n")
+            result = source_dev_script(
+                f"wait_http http://127.0.0.1:1 backend {shlex.quote(str(pid_file))}",
+                {"DEV_READY_TIMEOUT_SECONDS": "30"},
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("backend exited before becoming ready", result.stderr)
+
+        start = function_body(DEV_SCRIPT, "start_all")
+        self.assertIn('"$BACKEND_PID_FILE"; then', start)
+        self.assertIn(
+            'if ! wait_http "$FRONTEND_URL/threads" frontend "$FRONTEND_PID_FILE"; then',
+            start,
+        )
+        self.assertEqual(
+            2,
+            len(re.findall(r"print_logs all >&2\s+stop_all\s+return 1", start)),
+            "both Backend and Frontend readiness failures must log and clean up",
+        )
+
 
 class TestRemovedDevTopology(unittest.TestCase):
     """The NAS source-build node and its image must not come back."""

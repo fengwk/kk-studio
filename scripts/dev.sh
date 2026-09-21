@@ -392,15 +392,21 @@ run_backend_detached() {
 wait_http() {
   local url=$1
   local name=$2
+  local pid_file=$3
+  local pid
   for _ in $(seq 1 "$READY_TIMEOUT_SECONDS"); do
     if curl -fsS "$url" >/dev/null 2>&1; then
-      return
+      return 0
+    fi
+    pid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -z "$pid" ] || ! kill -0 "$pid" >/dev/null 2>&1; then
+      echo "$name exited before becoming ready: $url" >&2
+      return 1
     fi
     sleep 1
   done
   echo "Timed out after ${READY_TIMEOUT_SECONDS}s waiting for $name: $url" >&2
-  print_logs all >&2
-  exit 1
+  return 1
 }
 
 ensure_frontend_deps() {
@@ -488,7 +494,14 @@ start_all() {
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT"
   echo "$DETACHED_PID" > "$BACKEND_PID_FILE"
-  wait_http "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" backend
+  if ! wait_http \
+    "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" \
+    backend \
+    "$BACKEND_PID_FILE"; then
+    print_logs all >&2
+    stop_all
+    return 1
+  fi
 
   if profile_enabled e2e; then
     sync_e2e_provider_credentials
@@ -502,7 +515,11 @@ start_all() {
     --host "$FRONTEND_HOST" \
     --port "$FRONTEND_PORT"
   echo "$DETACHED_PID" > "$FRONTEND_PID_FILE"
-  wait_http "$FRONTEND_URL/threads" frontend
+  if ! wait_http "$FRONTEND_URL/threads" frontend "$FRONTEND_PID_FILE"; then
+    print_logs all >&2
+    stop_all
+    return 1
+  fi
 
   echo "Dev environment is running"
   echo "Backend:  $BACKEND_URL"
