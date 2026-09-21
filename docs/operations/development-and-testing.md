@@ -451,10 +451,12 @@ App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`
 | Environment 的宿主能力 | 笔记本（或其它主机）上的 Environment Daemon |
 
 Human 在本机 preview 提交命令时，同步 HTTP 处理使用当前工作区代码，随后产生的异步 Harness Work
-使用 NAS 上正在运行的镜像，同一用户流程可能跨两个版本边界。Harness 持久状态、Entry JSON、
-Provider/Tool wire、Storage 生命周期和数据库约束必须保持向后兼容。修改 processor/runtime 等
-异步执行路径不会在本机 preview 中生效，这些改动必须由自动化测试验证后才能验收；本机 preview
-只覆盖前端、同步 API 和查询行为。
+使用 NAS 上正在运行的镜像，同一用户流程明确允许跨两个版本边界；共享 PostgreSQL/S3 是唯一数据
+事实源，不为本机 preview 复制数据，也不为短期版本错位增加运行时兼容层。兼容时直接继续迭代；
+schema、持久 JSON 或 Work wire 确实不兼容时，先把 NAS App 推进到当前 revision，必要时按下文重建
+共享数据库，再恢复本机 preview。修改 processor/runtime 等异步执行路径不会在本机 preview 中
+生效，这些改动在 NAS 镜像更新前只能由自动化测试验证，本机 preview 只覆盖前端、同步 API 和查询
+行为。
 
 ### 本机 preview 的外部数据面
 
@@ -600,13 +602,17 @@ Agent modifies dev
   -> main workflow runs the full gates and publishes kk-studio:main
 ```
 
-必须停止自动重启并交给 Human 决策的变更包括：
+以下变更可能使本机代码与 NAS Worker 不兼容，不能仅凭本机 preview 完成端到端验收；遇到它们时应
+先更新 NAS 镜像，涉及 V1 时在已批准的维护窗口重建共享数据库：
 
 - 未合入 `main` 的 Flyway migration 或破坏性 schema 变更；
 - 删除或重命名持久 JSON 字段、数据库枚举值或 wire 字段；
 - 改变 Work/Invocation 状态机、claim/lease/fencing 语义；
 - 改变 S3 object key、Blob 引用计数或 cleanup 生命周期；
 - 需要重建镜像与重启 NAS 容器，或使共享 durable 状态在旧镜像下不可读的数据变更。
+
+版本错位本身不是错误，也不要求每次本机修改都先发布镜像；只有实际触发上述不兼容边界时才收敛
+版本。仓库不为旧 NAS 镜像保留兼容 shim。
 
 源码仓库、Dockerfile 和 image layer 只保存环境变量名与无敏感默认值。数据库、S3、Provider、
 Gateway 和 Daemon registration credential 由 NAS 私密环境文件在运行时注入，本机 preview 的
