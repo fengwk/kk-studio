@@ -14,6 +14,6 @@ spring:
     password: ${KK_STUDIO_DB_PASSWORD}
 
 server:
-  # Main/Dev 节点都位于外部 Gateway 之后，需要按 X-Forwarded-* 还原外部
-  # scheme/host；端口与压缩仍由 application.yml 提供。
+  # 部署在外部 Gateway 之后时按 X-Forwarded-* 还原外部 scheme/host；
+  # 端口与压缩仍由 application.yml 提供。
   forward-headers-strategy: framework

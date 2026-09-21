@@ -58,7 +58,7 @@ dev_env_key_allowed() {
 # 注释行，不做 source/eval 或任何 shell 求值。任何错误信息只包含行号与键名，绝不打印值。
 load_dev_env_file() {
   local file=$1
-  local line_number=0 line trimmed key value
+  local line_number=0 line trimmed key value candidate
   local owner mode
   case "$file" in
     /*) ;;
@@ -82,6 +82,11 @@ load_dev_env_file() {
     fail "DEV_ENV_FILE must not grant group or other permissions"
   fi
 
+  # 配置文件是这组键的唯一事实源，不能与调用 shell 偶然继承的同名变量混用。先清空，再把
+  # 解析值保留为未导出的 shell 变量；只有 Backend fork 的瞬间才向子进程导出。
+  for candidate in "${DEV_ENV_REQUIRED_KEYS[@]}" "${DEV_ENV_OPTIONAL_KEYS[@]}"; do
+    unset "$candidate"
+  done
   while IFS= read -r line || [ -n "$line" ]; do
     line_number=$((line_number + 1))
     line=${line%$'\r'}
@@ -99,7 +104,6 @@ load_dev_env_file() {
       fail "unknown key on DEV_ENV_FILE line $line_number: $key"
     fi
     printf -v "$key" '%s' "$value"
-    export "$key"
   done < "$file"
   step "Loaded external data-plane settings from DEV_ENV_FILE (values not printed)"
 }
@@ -358,6 +362,33 @@ run_detached() {
   DETACHED_PID=$!
 }
 
+# 只有 Backend 需要数据库/S3/Plugin 数据面配置。构建步骤、npm 与 Vite 不继承这些值；
+# `env` 的 argv 也不会携带凭据正文。
+set_loaded_dev_env_exported() {
+  local exported=$1 key
+  if [ -z "$DEV_ENV_FILE" ]; then
+    return
+  fi
+  for key in "${DEV_ENV_REQUIRED_KEYS[@]}" "${DEV_ENV_OPTIONAL_KEYS[@]}"; do
+    if [[ ! -v $key ]]; then
+      continue
+    fi
+    if [ "$exported" = "true" ]; then
+      export "$key"
+    else
+      export -n "$key"
+    fi
+  done
+}
+
+run_backend_detached() {
+  local log_file=$1
+  shift
+  set_loaded_dev_env_exported true
+  run_detached "$log_file" "$@"
+  set_loaded_dev_env_exported false
+}
+
 wait_http() {
   local url=$1
   local name=$2
@@ -450,7 +481,7 @@ start_all() {
   read -r -a java_opts <<< "${JAVA_OPTS:-}"
   local -a test_env_unsets=()
   mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
-  run_detached "$BACKEND_LOG" env \
+  run_backend_detached "$BACKEND_LOG" env \
     "${test_env_unsets[@]}" \
     "$java_home/bin/java" "${java_opts[@]}" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \

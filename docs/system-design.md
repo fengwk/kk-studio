@@ -67,12 +67,12 @@ Root 保存初始设置，每个普通 TurnStart 冻结该回合设置；`SET_AG
 
 ```xml
 <current_environment>
-- name: nas-dev
+- name: laptop-dev
 - system: linux
 - user: user
 - home: /home/user
 - date: 2026-09-21
-- note: NAS development daemon.
+- note: Local workstation daemon.
 </current_environment>
 ```
 
