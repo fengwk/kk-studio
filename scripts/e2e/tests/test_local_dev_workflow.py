@@ -279,8 +279,8 @@ class TestLocalDevConfigLoader(unittest.TestCase):
         self.assertEqual(["e2e", "18080", "5173"], result.stdout.split())
         self.assertNotIn(VALUE_PREFIX, result.stdout)
 
-    def test_allowed_values_reach_child_processes_and_ignore_comments_and_blank_lines(self):
-        """Parsed values are exported, comments and blank lines are skipped."""
+    def test_allowed_values_reach_only_an_explicit_backend_child(self):
+        """Parsed values stay shell-private until the Backend handoff and are then unexported."""
         password_key = "KK_STUDIO_DB_PASSWORD"
         with tempfile.TemporaryDirectory() as temporary:
             config = write_config(
@@ -288,13 +288,35 @@ class TestLocalDevConfigLoader(unittest.TestCase):
                 f"# comment line\n\n{password_key}=pa=ss=word\n",
             )
             result = source_dev_script(
-                f'printf "RESULT:%s\\n" "${password_key}"',
+                (
+                    f'if printenv {password_key} >/dev/null; then echo PRE_EXPORTED; fi\n'
+                    "set_loaded_dev_env_exported true\n"
+                    f'bash -c \'printf "CHILD:%s\\\\n" "${password_key}"\'\n'
+                    "set_loaded_dev_env_exported false\n"
+                    f'if printenv {password_key} >/dev/null; then echo POST_EXPORTED; fi\n'
+                    f'printf "RESULT:%s\\n" "${password_key}"'
+                ),
                 {"DEV_ENV_FILE": str(config)},
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             # 只按第一个 `=` 拆分，值按字面量读取，不做任何 shell 求值。
+            self.assertIn("CHILD:pa=ss=word", result.stdout)
             self.assertIn("RESULT:pa=ss=word", result.stdout)
             self.assertIn("values not printed", result.stdout)
+            self.assertNotIn("PRE_EXPORTED", result.stdout)
+            self.assertNotIn("POST_EXPORTED", result.stdout)
+
+    def test_start_exports_data_plane_only_around_backend_fork(self):
+        """Maven/npm/Vite must not inherit the owner-only data-plane credentials."""
+        start = function_body(DEV_SCRIPT, "start_all")
+        backend_handoff = function_body(DEV_SCRIPT, "run_backend_detached")
+
+        self.assertIn('run_backend_detached "$BACKEND_LOG"', start)
+        self.assertIn('run_detached "$FRONTEND_LOG"', start)
+        self.assertNotIn('run_backend_detached "$FRONTEND_LOG"', start)
+        self.assertIn("set_loaded_dev_env_exported true", backend_handoff)
+        self.assertIn('run_detached "$log_file" "$@"', backend_handoff)
+        self.assertIn("set_loaded_dev_env_exported false", backend_handoff)
 
     def test_crlf_line_endings_do_not_leak_into_values(self):
         """A config written with CRLF must still yield the exact value."""

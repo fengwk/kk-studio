@@ -353,7 +353,7 @@ Web context 自身持有的部署配置：
 | `server.port` / `server.compression.enabled` / `server.forward-headers-strategy` | 默认 `8080`、gzip；prod 用 `framework` 按 `X-Forwarded-*` 还原外部 scheme/host |
 | `management.endpoints.web.exposure.include` | `health,prometheus,offline,online` |
 | `spring.mvc.converters.preferred-json-mapper` | `jackson`，并排除 convention4j 的 `WebErrorAutoConfiguration` |
-| `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher 与 Issue Controller；可由 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` 配置，默认 true，测试与 NAS Dev 显式关闭 |
+| `kk-studio.harness.runtime.workers-enabled` | 是否启动 Work dispatcher 与 Issue Controller；可由 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` 配置，默认 true，测试与本机 preview 显式关闭 |
 | `kk-studio.harness.environment-gateway.*` | Daemon WebSocket 入站 frame 与出站 queue/bytes/send timeout |
 | `kk-studio.plugins.credential-key-file` | Plugin 凭据主密钥的 owner-only 绝对路径；空值表示本部署不提供凭据能力并 fail closed，多节点必须挂载同一内容 |
 | `kk-studio.plugins.refresh.poll-delay` / `lease-duration` | 凭据刷新扫描间隔与跨节点互斥 lease；由 `KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY` / `..._LEASE_DURATION` 提供，默认 `1h` / `2m` |
