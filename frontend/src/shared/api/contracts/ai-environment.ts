@@ -24,8 +24,10 @@ export interface EnvironmentCardDTO {
   lastSeen: InstantTimestamp
   /** 支持的原子能力列表。 */
   capabilities: LiveEnvironmentCapabilityDTO[]
-  /** daemon 实际 root display path。 */
-  rootPath: string | null
+  /** 最近一次被接受的 READY 宿主 Daemon 进程用户；从未 READY 时为 null，仅用于展示。 */
+  userName?: string | null
+  /** 最近一次被接受的 READY 宿主进程用户 canonical HOME；从未 READY 时为 null，仅用于展示。 */
+  homeDirectory?: string | null
   /** 操作系统信息。 */
   operatingSystem?: string | null
   /** 时区信息。 */

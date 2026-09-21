@@ -24,8 +24,12 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
           <span className="val">{environment.timeZone ?? '—'}</span>
         </div>
         <div className="env-host-meta-card">
-          <span className="lbl">{t('ai.environment.runtime.rootPath')}</span>
-          <span className="val mono">{environment.rootPath ?? '—'}</span>
+          <span className="lbl">{t('ai.environment.runtime.userName')}</span>
+          <span className="val mono">{environment.userName ?? '—'}</span>
+        </div>
+        <div className="env-host-meta-card">
+          <span className="lbl">{t('ai.environment.runtime.homeDirectory')}</span>
+          <span className="val mono">{environment.homeDirectory ?? '—'}</span>
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.lastSeen')}</span>

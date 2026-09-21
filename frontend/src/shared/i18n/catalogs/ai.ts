@@ -1981,9 +1981,9 @@ export const aiCatalog = {
     'en-US': 'Capabilities',
     'zh-CN': 'Capabilities',
   },
-  'ai.environment.rootPath': {
-    'en-US': 'Root Path',
-    'zh-CN': 'Root 路径',
+  'ai.environment.userName': {
+    'en-US': 'Process User',
+    'zh-CN': '进程用户',
   },
   'ai.environment.manage': {
     'en-US': 'Manage',
@@ -2005,9 +2005,13 @@ export const aiCatalog = {
     'en-US': 'Timezone',
     'zh-CN': '时区',
   },
-  'ai.environment.runtime.rootPath': {
-    'en-US': 'Root Path',
-    'zh-CN': '根路径',
+  'ai.environment.runtime.userName': {
+    'en-US': 'Process User',
+    'zh-CN': '进程用户',
+  },
+  'ai.environment.runtime.homeDirectory': {
+    'en-US': 'Home Directory',
+    'zh-CN': '用户主目录',
   },
   'ai.environment.runtime.note': {
     'en-US': 'Note',

@@ -38,10 +38,8 @@ public final class AgentPromptComposer {
     if (systemPrompt != null && !systemPrompt.isBlank()) {
       sections.add(renderAgentBody(systemPrompt, currentEnvironment));
     }
-    String environment = currentEnvironment(currentEnvironment);
-    if (!environment.isBlank()) {
-      sections.add(environment);
-    }
+    // current_environment 段始终存在：未选择 Environment 时渲染 name: none 与 Platform 日期。
+    sections.add(currentEnvironment(currentEnvironment));
     if (!skills.isEmpty()) {
       sections.add(
           SubagentPrompts.agentSkillsTemplate().render(Map.of("skills", skillEntries(skills))));
@@ -94,23 +92,35 @@ public final class AgentPromptComposer {
     }
   }
 
+  /**
+   * 宿主事实按稳定顺序渲染：name、system、user、home、date、note；不可用的可选事实整行省略。
+   *
+   * <p>未选择 Environment 时只渲染 {@code name: none} 与 Platform 当前日期。这里的 name/user/home 只是展示事实，绝不参与路径默认值：
+   * 不存在 workspace、cwd 或任何根目录语义。
+   */
   private static String currentEnvironment(CurrentEnvironmentContext context) {
     List<String> fields = new ArrayList<>();
+    fields.add(
+        "- name: "
+            + escapeXml(context.environmentName() == null ? "none" : context.environmentName()));
     if (context.operatingSystem() != null) {
       addEnvironmentField(fields, "system", context.operatingSystem().wireValue());
     }
+    addEnvironmentField(fields, "user", context.userName());
+    addEnvironmentField(fields, "home", context.homeDirectory());
     addEnvironmentField(fields, "date", DATE_FORMAT.format(context.currentDate()));
     addEnvironmentField(fields, "note", context.note());
-    if (fields.isEmpty()) {
-      return "";
-    }
     return SubagentPrompts.currentEnvironmentTemplate()
         .render(Map.of("fields", String.join("\n", fields)))
         .stripTrailing();
   }
 
+  /**
+   * 只省略 null/空白事实：宿主事实即使字面等于 {@code none} 也是合法取值，必须原样渲染，避免与未选择 Environment 的 {@code name: none}
+   * 哨兵混淆。
+   */
   private static void addEnvironmentField(List<String> fields, String name, String value) {
-    if (value == null || value.isBlank() || "none".equals(value)) {
+    if (value == null || value.isBlank()) {
       return;
     }
     fields.add("- " + name + ": " + escapeXml(value));

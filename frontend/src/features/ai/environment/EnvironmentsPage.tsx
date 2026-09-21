@@ -284,11 +284,11 @@ export function EnvironmentsPage() {
                   </span>
                 </div>
                 <div className="meta-block">
-                  {environment.rootPath ? (
+                  {environment.userName ? (
                     <div className="meta-row">
-                      <span className="lbl">{t('ai.environment.rootPath')}</span>
-                      <span className="val" title={environment.rootPath}>
-                        {environment.rootPath}
+                      <span className="lbl">{t('ai.environment.userName')}</span>
+                      <span className="val" title={environment.userName}>
+                        {environment.userName}
                       </span>
                     </div>
                   ) : null}

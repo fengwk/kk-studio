@@ -31,17 +31,101 @@ class AgentPromptComposerTest {
         name, description, "kkstudio:/skills/test-package/" + name + "/SKILL.md");
   }
 
-  /** 空正文 + 无 Environment 只保留有值的 date，不输出 none 字段。 */
+  /** 无 Environment 时只渲染 name: none 与 date；绝不出现任何宿主事实或 root/workspace/cwd 语义。 */
   @Test
-  void omitsNoneCurrentEnvironmentFields() {
-    String expected = "<current_environment>\n" + "- date: 2026-08-09\n" + "</current_environment>";
+  void rendersNoneEnvironmentNameAndPlatformDate() {
+    String expected =
+        "<current_environment>\n"
+            + "- name: none\n"
+            + "- date: 2026-08-09\n"
+            + "</current_environment>";
 
-    assertEquals(expected, composer.compose(null, none(), List.of(), List.of()));
+    String rendered = composer.compose(null, none(), List.of(), List.of());
+    assertEquals(expected, rendered);
     assertEquals(expected, composer.compose("   ", none(), List.of(), List.of()));
-    assertFalse(expected.contains("- name:"));
-    assertFalse(expected.contains("- workspace:"));
-    assertFalse(expected.contains("- system:"));
-    assertFalse(expected.contains("- note:"));
+    assertFalse(rendered.contains("- system:"), rendered);
+    assertFalse(rendered.contains("- user:"), rendered);
+    assertFalse(rendered.contains("- home:"), rendered);
+    assertFalse(rendered.contains("- note:"), rendered);
+    assertFalse(rendered.contains("root"), rendered);
+    assertFalse(rendered.contains("workspace"), rendered);
+    assertFalse(rendered.contains("cwd"), rendered);
+  }
+
+  /** Environment 宿主事实严格按 name、system、user、home、date、note 顺序渲染。 */
+  @Test
+  void rendersEnvironmentFactsInStableOrder() {
+    CurrentEnvironmentContext environment =
+        new CurrentEnvironmentContext(
+            TestEnvironments.environmentId("env-1"),
+            "nas-dev",
+            DaemonOperatingSystem.LINUX,
+            "dev-user",
+            "/home/dev",
+            LocalDate.of(2026, 8, 9),
+            "Linux environment.");
+
+    String rendered = composer.compose(null, environment, List.of(), List.of());
+
+    assertEquals(
+        "<current_environment>\n"
+            + "- name: nas-dev\n"
+            + "- system: linux\n"
+            + "- user: dev-user\n"
+            + "- home: /home/dev\n"
+            + "- date: 2026-08-09\n"
+            + "- note: Linux environment.\n"
+            + "</current_environment>",
+        rendered);
+  }
+
+  /** 可选宿主事实缺失时整行省略，但 name 与 date 始终存在。 */
+  @Test
+  void omitsUnavailableHostFacts() {
+    CurrentEnvironmentContext environment =
+        new CurrentEnvironmentContext(
+            TestEnvironments.environmentId("env-1"),
+            "nas-dev",
+            null,
+            null,
+            null,
+            LocalDate.of(2026, 8, 9),
+            null);
+
+    String rendered = composer.compose(null, environment, List.of(), List.of());
+
+    assertEquals(
+        "<current_environment>\n"
+            + "- name: nas-dev\n"
+            + "- date: 2026-08-09\n"
+            + "</current_environment>",
+        rendered);
+  }
+
+  /** 宿主事实即使字面等于 none 也是合法取值，必须原样渲染，绝不与未选择环境的 name: none 哨兵混淆。 */
+  @Test
+  void rendersFactualNoneValues() {
+    CurrentEnvironmentContext environment =
+        new CurrentEnvironmentContext(
+            TestEnvironments.environmentId("env-1"),
+            "nas-dev",
+            null,
+            "none",
+            "/home/none",
+            LocalDate.of(2026, 8, 9),
+            "none");
+
+    String rendered = composer.compose(null, environment, List.of(), List.of());
+
+    assertEquals(
+        "<current_environment>\n"
+            + "- name: nas-dev\n"
+            + "- user: none\n"
+            + "- home: /home/none\n"
+            + "- date: 2026-08-09\n"
+            + "- note: none\n"
+            + "</current_environment>",
+        rendered);
   }
 
   /** 正文、current environment、skills、subagents 严格按固定顺序拼接，并来自真实 classpath 模板。 */
@@ -72,7 +156,10 @@ class AgentPromptComposerTest {
     CurrentEnvironmentContext environment =
         new CurrentEnvironmentContext(
             TestEnvironments.environmentId("env-1"),
+            "env-1<&>",
             DaemonOperatingSystem.WSL,
+            "dev&user",
+            "/home/<dev>",
             LocalDate.of(2026, 8, 9),
             "Use <mount> & \"commands\" from 'Windows'.");
 
@@ -83,6 +170,9 @@ class AgentPromptComposerTest {
             List.of(skill("a&b", "uses <angle> and \"quotes\" and 'apos'")),
             List.of(new SubagentBinding("x<y>", "desc & more")));
 
+    assertTrue(result.contains("- name: env-1&lt;&amp;&gt;"), result);
+    assertTrue(result.contains("- user: dev&amp;user"), result);
+    assertTrue(result.contains("- home: /home/&lt;dev&gt;"), result);
     assertTrue(
         result.contains(
             "- note: Use &lt;mount&gt; &amp; &quot;commands&quot; from &apos;Windows&apos;."),
@@ -160,7 +250,8 @@ class AgentPromptComposerTest {
     String mixed = "cwd=${cwd} keep ${JAVA_HOME} and ${unterminated";
     EnvironmentId binding = TestEnvironments.environmentId("env");
     CurrentEnvironmentContext selected =
-        new CurrentEnvironmentContext(binding, null, LocalDate.of(2026, 8, 9), null);
+        new CurrentEnvironmentContext(
+            binding, "env", null, null, null, LocalDate.of(2026, 8, 9), null);
 
     String rendered = composer.compose(withBoth, selected, List.of(), List.of());
     assertTrue(rendered.startsWith("Today is 2026-08-09 in ${workspace}."), rendered);
@@ -189,6 +280,7 @@ class AgentPromptComposerTest {
   }
 
   private static CurrentEnvironmentContext none() {
-    return new CurrentEnvironmentContext(null, null, LocalDate.of(2026, 8, 9), null);
+    return new CurrentEnvironmentContext(
+        null, null, null, null, null, LocalDate.of(2026, 8, 9), null);
   }
 }
