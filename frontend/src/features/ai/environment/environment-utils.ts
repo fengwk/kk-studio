@@ -1,5 +1,8 @@
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentEventLevel,
+} from '@/shared/api/contracts/ai-environment'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type { AppLocale } from '@/shared/i18n'
 
@@ -15,6 +18,11 @@ export function filterEnvironments(
 /** 统一可用性规则（服务端 ready 标记：READY + 连接打开 + 心跳未过期）；过期/未连接一律不可选。 */
 export function filterReadyEnvironments(environments: EnvironmentCardDTO[]): EnvironmentCardDTO[] {
   return environments.filter((environment) => environment.ready)
+}
+
+/** 事件级别是封闭枚举，因此 class 映射只在这里定义一次，避免遗漏样式。 */
+export function environmentEventLevelClass(level: EnvironmentEventLevel): string {
+  return `is-${level.toLowerCase()}`
 }
 
 export function formatDateTime24(date: Date, locale: AppLocale): string {

@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -31,6 +32,9 @@ import java.util.UUID;
  *
  * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_id, owner_node_id, lease_token)} 为围栏更新，
  * 保证只有当前持有该路由租约的本地连接能推进状态；所有围栏更新在租约失效时返回 false（fail-closed）。
+ *
+ * <p>连接生命周期事件（CONNECTING/READY/DISCONNECTED）在推进状态的同一条围栏语句里原子追加到 {@code recent_events}， 数组始终是 200
+ * 条以内的按时间正序窗口；READY 同时把 {@code skill_state} 清空，随后由 Skill 同步编排器全量重建。
  */
 @Component
 public class EnvironmentRegistry implements DaemonLeaseStore {
@@ -46,17 +50,22 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       tried_upsert as (
           insert into environment_connection (
               environment_id, owner_node_id, lease_token,
-              status, runtime_info, last_seen_at, lease_until
+              status, runtime_info, recent_events, last_seen_at, lease_until
           )
           select
               id, ?, ?,
-              'CONNECTING', null, statement_timestamp(), statement_timestamp() + (? * interval '1 millisecond')
+              'CONNECTING', null, jsonb_build_array(?::jsonb), statement_timestamp(), statement_timestamp() + (? * interval '1 millisecond')
           from locked_env
           where token_valid = true
           on conflict (environment_id) do update
           set owner_node_id = excluded.owner_node_id,
               lease_token = excluded.lease_token,
               status = 'CONNECTING',
+              recent_events = case
+                  when jsonb_array_length(environment_connection.recent_events) >= ?
+                      then (environment_connection.recent_events - 0) || excluded.recent_events
+                      else environment_connection.recent_events || excluded.recent_events
+                  end,
               last_seen_at = statement_timestamp(),
               lease_until = statement_timestamp() + (? * interval '1 millisecond')
           where environment_connection.lease_until <= statement_timestamp()
@@ -68,25 +77,31 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       union all
       select null::uuid as lease_token, false as acquired,
              case
-                 when not exists (select 1 from locked_env) then 'NOT_FOUND'
-                 when not (select token_valid from locked_env) then 'INVALID_TOKEN'
-                 else 'ACTIVE_ROUTE'
+                when not exists (select 1 from locked_env) then 'NOT_FOUND'
+                when not (select token_valid from locked_env) then 'INVALID_TOKEN'
+                else 'ACTIVE_ROUTE'
              end as result_type
       from (select 1) as dummy
       where not exists (select 1 from tried_upsert)
       """;
 
   /**
-   * 围栏式登记 READY 并把最近一次被接受的宿主 metadata 写入 {@code environment_connection.runtime_info}。
+   * 围栏式登记 READY：推进行状态、写入最近一次被接受的宿主 metadata、清空 Skill 同步投影并追加一条 READY 事件。
    *
    * <p>只有当前 owner + lease 且未过期的连接行才能推进 READY；围栏失效时既不推进状态也不改写 runtime_info。离线或重新 CONNECTING
-   * 都不清空该保留事实。
+   * 都不清空该保留事实；skill_state 每次都先清空，随后由 Skill 同步编排器全量重建。
    */
   private static final String MARK_READY_SQL =
       """
       update environment_connection
       set status = 'READY',
           runtime_info = ?::jsonb,
+          skill_state = '[]'::jsonb,
+          recent_events = case
+              when jsonb_array_length(recent_events) >= ?
+                  then (recent_events - 0) || ?::jsonb
+                  else recent_events || ?::jsonb
+              end,
           last_seen_at = statement_timestamp(),
           lease_until = statement_timestamp() + (? * interval '1 millisecond')
       where environment_id = ?
@@ -110,6 +125,11 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       update environment_connection
       set status = 'CONNECTING',
+          recent_events = case
+              when jsonb_array_length(recent_events) >= ?
+                  then (recent_events - 0) || ?::jsonb
+                  else recent_events || ?::jsonb
+              end,
           last_seen_at = statement_timestamp(),
           lease_until = statement_timestamp() + (? * interval '1 millisecond')
       where environment_id = ?
@@ -121,7 +141,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String FIND_SQL =
       """
       select environment_id, owner_node_id, lease_token,
-             status, runtime_info, last_seen_at, lease_until
+             status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
       where environment_id = ?
       """;
@@ -171,23 +191,76 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String LIST_SQL =
       """
       select environment_id, owner_node_id, lease_token,
-             status, runtime_info, last_seen_at, lease_until
+             status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
       order by environment_id asc
       """;
 
+  /** 本节点当前持有未过期 READY 租约的 Environment 行，供 Skill 同步与通知重连对账定位目标。 */
+  private static final String LIST_READY_OWNED_SQL =
+      """
+      select environment_id, owner_node_id, lease_token,
+             status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
+      from environment_connection
+      where owner_node_id = ?
+        and status = 'READY'
+        and lease_until > statement_timestamp()
+      order by environment_id asc
+      """;
+
+  /** 只追加一条运维事件的围栏写：锁定的必须是本节点未过期的 READY 租约。 */
+  private static final String APPEND_EVENT_SQL =
+      """
+      update environment_connection
+      set recent_events = case
+              when jsonb_array_length(recent_events) >= ?
+                  then (recent_events - 0) || ?::jsonb
+                  else recent_events || ?::jsonb
+              end
+      where environment_id = ?
+        and owner_node_id = ?
+        and lease_token = ?
+        and status = 'READY'
+        and lease_until > statement_timestamp()
+      """;
+
+  /** 同一围栏下原子替换 Skill 同步投影并追加一条事件的写。 */
+  private static final String REPLACE_SKILL_STATE_SQL =
+      """
+      update environment_connection
+      set skill_state = ?::jsonb,
+          recent_events = case
+              when jsonb_array_length(recent_events) >= ?
+                  then (recent_events - 0) || ?::jsonb
+                  else recent_events || ?::jsonb
+              end
+      where environment_id = ?
+        and owner_node_id = ?
+        and lease_token = ?
+        and status = 'READY'
+        and lease_until > statement_timestamp()
+      """;
+
   private final JdbcTemplate jdbcTemplate;
   private final UUID ownerNodeId;
+  private final Clock clock;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+  private final EnvironmentStateCodec stateCodec = new EnvironmentStateCodec();
 
   public EnvironmentRegistry(
-      JdbcTemplate jdbcTemplate, @Qualifier("nodeInstanceId") UUID ownerNodeId) {
+      JdbcTemplate jdbcTemplate, @Qualifier("nodeInstanceId") UUID ownerNodeId, Clock clock) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
+    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   public UUID ownerNodeId() {
     return ownerNodeId;
+  }
+
+  /** 构造一条连接生命周期事件；{@code message} 必须是程序构造的固定事实，绝不承载 Daemon 输入。 */
+  private EnvironmentEvent lifecycleEvent(String level, String type, String message) {
+    return new EnvironmentEvent(clock.instant(), level, type, message);
   }
 
   /**
@@ -206,6 +279,12 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Objects.requireNonNull(leaseDuration, "leaseDuration");
     UUID newLeaseToken = UUID.randomUUID();
     long millis = leaseDuration.toMillis();
+    String connectingEvent =
+        stateCodec.encodeEvent(
+            lifecycleEvent(
+                EnvironmentEvent.LEVEL_INFO,
+                EnvironmentEvent.TYPE_CONNECTING,
+                "daemon connection accepted"));
     List<AcquireRow> rows =
         jdbcTemplate.query(
             TRY_ACQUIRE_SQL,
@@ -218,7 +297,9 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
             environmentId.value(),
             ownerNodeId,
             newLeaseToken,
+            connectingEvent,
             millis,
+            EnvironmentConnection.MAX_RECENT_EVENTS,
             millis);
 
     if (rows.isEmpty()) {
@@ -255,10 +336,17 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     Objects.requireNonNull(capabilities, "capabilities");
     Objects.requireNonNull(leaseDuration, "leaseDuration");
     String runtimeInfoJson = capabilitiesCodec.encode(capabilities);
+    String readyEvent =
+        stateCodec.encodeEvent(
+            lifecycleEvent(
+                EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_READY, "environment ready"));
     int updated =
         jdbcTemplate.update(
             MARK_READY_SQL,
             runtimeInfoJson,
+            EnvironmentConnection.MAX_RECENT_EVENTS,
+            readyEvent,
+            readyEvent,
             leaseDuration.toMillis(),
             environmentId.value(),
             ownerNodeId,
@@ -298,10 +386,19 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     if (environmentId == null || leaseToken == null) {
       return false;
     }
+    String disconnectedEvent =
+        stateCodec.encodeEvent(
+            lifecycleEvent(
+                EnvironmentEvent.LEVEL_WARN,
+                EnvironmentEvent.TYPE_DISCONNECTED,
+                "daemon connection lost"));
     try {
       int updated =
           jdbcTemplate.update(
               DISCONNECT_SQL,
+              EnvironmentConnection.MAX_RECENT_EVENTS,
+              disconnectedEvent,
+              disconnectedEvent,
               graceDuration.toMillis(),
               environmentId.value(),
               ownerNodeId,
@@ -325,6 +422,69 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   /** 查询当前数据库中所有活跃环境的路由快照列表。 */
   public List<EnvironmentConnection> list() {
     return jdbcTemplate.query(LIST_SQL, new EnvironmentConnectionRowMapper());
+  }
+
+  /**
+   * 查询当前节点持有未过期 READY 租约的 Environment 快照。
+   *
+   * <p>这是 Skill 增量同步与通知重连对账的目标集合：行级 owner 与租约活跃性都由数据库现在时判定，绝不依据进程内缓存。
+   */
+  public List<EnvironmentConnection> listReadyOwnedByNode() {
+    return jdbcTemplate.query(
+        LIST_READY_OWNED_SQL, new EnvironmentConnectionRowMapper(), ownerNodeId);
+  }
+
+  /**
+   * 围栏追加一条 Skill 同步运维事件（不改变 skill_state）。
+   *
+   * <p>事件写入与连接状态推进共用同一个 owner + lease token + 未过期 READY 围栏；围栏失效时返回 false（fail-closed），
+   * 绝不把过期持有者的事件写进新持有者的行。
+   */
+  public boolean recordSkillEvent(
+      EnvironmentId environmentId, UUID leaseToken, EnvironmentEvent event) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(leaseToken, "leaseToken");
+    Objects.requireNonNull(event, "event");
+    String eventJson = stateCodec.encodeEvent(event);
+    int updated =
+        jdbcTemplate.update(
+            APPEND_EVENT_SQL,
+            EnvironmentConnection.MAX_RECENT_EVENTS,
+            eventJson,
+            eventJson,
+            environmentId.value(),
+            ownerNodeId,
+            leaseToken);
+    return updated > 0;
+  }
+
+  /**
+   * 在同一个围栏写中原子替换 Skill 同步投影并追加一条事件。
+   *
+   * @return 围栏成立且更新 1 行返回 true；租约被夺取、已离线或过期时返回 false，调用方必须放弃该结果
+   */
+  public boolean replaceSkillState(
+      EnvironmentId environmentId,
+      UUID leaseToken,
+      List<EnvironmentSkillState> skillState,
+      EnvironmentEvent event) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(leaseToken, "leaseToken");
+    Objects.requireNonNull(skillState, "skillState");
+    Objects.requireNonNull(event, "event");
+    String skillStateJson = stateCodec.encodeSkillState(skillState);
+    String eventJson = stateCodec.encodeEvent(event);
+    int updated =
+        jdbcTemplate.update(
+            REPLACE_SKILL_STATE_SQL,
+            skillStateJson,
+            EnvironmentConnection.MAX_RECENT_EVENTS,
+            eventJson,
+            eventJson,
+            environmentId.value(),
+            ownerNodeId,
+            leaseToken);
+    return updated > 0;
   }
 
   /** 数据库现在时判定指定环境是否有任意活跃租约（用于 delete 在锁行下的安全准入）。 */
@@ -397,10 +557,22 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       String runtimeInfoJson = rs.getString("runtime_info");
       DaemonCapabilities capabilities =
           runtimeInfoJson == null ? null : capabilitiesCodec.decode(runtimeInfoJson);
+      // 两个 JSONB 投影同样与 status 无关：断线或重新 CONNECTING 都保留最近一次同步事实与最近事件。
+      List<EnvironmentSkillState> skillState =
+          stateCodec.decodeSkillState(rs.getString("skill_state"));
+      List<EnvironmentEvent> recentEvents = stateCodec.decodeEvents(rs.getString("recent_events"));
       Instant lastSeenAt = rs.getObject("last_seen_at", OffsetDateTime.class).toInstant();
       Instant leaseUntil = rs.getObject("lease_until", OffsetDateTime.class).toInstant();
       return new EnvironmentConnection(
-          id, owner, leaseToken, status, capabilities, lastSeenAt, leaseUntil);
+          id,
+          owner,
+          leaseToken,
+          status,
+          capabilities,
+          skillState,
+          recentEvents,
+          lastSeenAt,
+          leaseUntil);
     }
   }
 }

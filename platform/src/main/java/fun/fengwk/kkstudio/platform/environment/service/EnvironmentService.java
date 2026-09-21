@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.service;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.util.List;
@@ -18,6 +19,13 @@ public interface EnvironmentService {
 
   /** 列表查询所有 Environment Cards，包含 live 状态投影，永不返回 registrationToken。 */
   List<EnvironmentCardDTO> list();
+
+  /**
+   * 按时间正序返回该 Environment 最近 200 条以内的连接与 Skill 同步运维事件。
+   *
+   * <p>事件与 Card 的 {@code lastEvent} 同源：都是连接行保留的可重建投影，不是实时协议。
+   */
+  List<EnvironmentEventDTO> listEvents(EnvironmentId id);
 
   /** 幂等只读当前 registrationToken；不轮换、不更新 version/updateTime。 */
   EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id);

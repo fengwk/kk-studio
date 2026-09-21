@@ -2017,6 +2017,14 @@ export const aiCatalog = {
     'en-US': 'Note',
     'zh-CN': '备注',
   },
+  'ai.environment.events.title': {
+    'en-US': 'Events',
+    'zh-CN': '事件记录',
+  },
+  'ai.environment.events.empty': {
+    'en-US': 'No events recorded',
+    'zh-CN': '暂无事件记录',
+  },
   'ai.skillPackages.title': {
     'en-US': 'Skill Packages',
     'zh-CN': 'Skill Packages',

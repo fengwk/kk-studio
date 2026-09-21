@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -976,6 +978,24 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "select prosrc from pg_proc"
                 + " where pronamespace = 'public'::regnamespace"
                 + " and proname = 'canvas_function_work_notify'");
+    // Skill Package 发布提示：channel 必须与 Platform listener 常量一致，payload 只是 package 名。
+    String skillPackageFunctionSource =
+        singleString(
+            "select prosrc from pg_proc"
+                + " where pronamespace = 'public'::regnamespace"
+                + " and proname = 'skill_package_changed_notify'");
+    assertTrue(skillPackageFunctionSource.contains("pg_notify"));
+    assertTrue(
+        skillPackageFunctionSource.contains(EnvironmentSkillSyncOrchestrator.CHANNEL),
+        () ->
+            "skill package notify function must use the orchestrator channel: "
+                + skillPackageFunctionSource);
+    assertTrue(
+        skillPackageFunctionSource.contains("new.package_name")
+            && skillPackageFunctionSource.contains("old.package_name"),
+        () ->
+            "skill package notify payload must be the package name: " + skillPackageFunctionSource);
+
     assertTrue(canvasWorkFunctionSource.contains("pg_notify"));
     assertTrue(canvasWorkFunctionSource.contains("canvas_function_work"));
     assertTrue(canvasWorkFunctionSource.contains("new.status = 'READY'"));

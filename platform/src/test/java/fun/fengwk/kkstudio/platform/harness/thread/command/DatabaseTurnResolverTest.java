@@ -112,9 +112,11 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
@@ -1232,6 +1234,48 @@ class DatabaseTurnResolverTest {
     assertTrue(system.contains("<description>d&amp;e</description>"));
     assertTrue(
         system.contains("<path>kkstudio:/skills/test-package/a&amp;b&lt;c&gt;/SKILL.md</path>"));
+  }
+
+  /**
+   * 测试意图：只有选定 Environment 的同步投影精确记录该 package 的 currentCommit 已安装时，prompt 才注入 Daemon
+   * 本地稳定路径；提交不一致或同步失败都必须回退 platform URI。
+   */
+  @Test
+  void usesLocalStableSkillPathOnlyForExactlyInstalledCommit() {
+    String installedCommit = "0123456789abcdef0123456789abcdef01234567";
+    String otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
+
+    Fixture installed = new Fixture(List.of(), List.of("dev"), List.of());
+    installed.readyEnvironment(ENV_A, List.of("dev"));
+    installed.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(EnvironmentSkillState.installed("test-package", installedCommit, localPath)));
+
+    assertTrue(
+        instructionText(installed.resolved(installed.path(settings("default"))))
+            .contains("<path>" + localPath + "/dev/SKILL.md</path>"));
+
+    Fixture mismatched = new Fixture(List.of(), List.of("dev"), List.of());
+    mismatched.readyEnvironment(ENV_A, List.of("dev"));
+    mismatched.readyEnvironmentWithSkillState(
+        ENV_A, List.of(EnvironmentSkillState.installed("test-package", otherCommit, localPath)));
+    assertTrue(
+        instructionText(mismatched.resolved(mismatched.path(settings("default"))))
+            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+
+    Fixture failed = new Fixture(List.of(), List.of("dev"), List.of());
+    failed.readyEnvironment(ENV_A, List.of("dev"));
+    failed.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(
+            EnvironmentSkillState.failed(
+                "test-package",
+                EnvironmentSkillState.installed("test-package", installedCommit, localPath),
+                "skill package sync failed: COMMIT_NOT_FOUND")));
+    assertTrue(
+        instructionText(failed.resolved(failed.path(settings("default"))))
+            .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
   }
 
   @Test
@@ -2494,6 +2538,8 @@ class DatabaseTurnResolverTest {
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
+    private final SkillPromptPathResolver skillPromptPathResolver =
+        new SkillPromptPathResolver(environmentRegistry);
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
     private final SkillCatalogQueryService skillCatalogQueryService =
         mock(SkillCatalogQueryService.class);
@@ -2755,6 +2801,7 @@ class DatabaseTurnResolverTest {
               environmentRegistry,
               environmentRepository,
               skillCatalogQueryService,
+              skillPromptPathResolver,
               () -> new CompactionConfig(20_000, null),
               new AgentPromptComposer(() -> subagentConfig),
               roleToolSelector,
@@ -2947,6 +2994,8 @@ class DatabaseTurnResolverTest {
               UUID.randomUUID(),
               LiveEnvironmentStatus.CONNECTING,
               null,
+              List.of(),
+              List.of(),
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
@@ -2965,6 +3014,8 @@ class DatabaseTurnResolverTest {
                   DaemonCapabilities.VERSION,
                   new DaemonEnvironmentInfo(
                       DaemonOperatingSystem.WSL, "UTC", "dev-user", "/home/dev", "Retained note")),
+              List.of(),
+              List.of(),
               NOW,
               NOW.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
@@ -2995,6 +3046,31 @@ class DatabaseTurnResolverTest {
         DaemonEnvironmentInfo environmentInfo) {
       publishGlobalSkills(skills);
       readyEnvironmentWithSkills(environmentId, environmentInfo, NOW);
+    }
+
+    /** 覆盖该 Environment 路由行的 Skill 同步投影：用于验证「精确安装」与「回退 platform URI」两条路径。 */
+    private void readyEnvironmentWithSkillState(
+        EnvironmentId environmentId, List<EnvironmentSkillState> skillState) {
+      EnvironmentConnection env =
+          new EnvironmentConnection(
+              environmentId,
+              UUID.randomUUID(),
+              UUID.randomUUID(),
+              LiveEnvironmentStatus.READY,
+              new DaemonCapabilities(
+                  DaemonCapabilities.VERSION,
+                  new DaemonEnvironmentInfo(
+                      DaemonOperatingSystem.LINUX,
+                      "UTC",
+                      "dev-user",
+                      "/home/dev",
+                      "Linux environment.")),
+              skillState,
+              List.of(),
+              NOW,
+              NOW.plusSeconds(60));
+      when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));
+      when(environmentRegistry.hasReadyLease(environmentId)).thenReturn(true);
     }
 
     private void readyEnvironmentWithSkills(EnvironmentId environmentId, List<SkillName> skills) {
@@ -3029,6 +3105,8 @@ class DatabaseTurnResolverTest {
               UUID.randomUUID(),
               LiveEnvironmentStatus.READY,
               new DaemonCapabilities(DaemonCapabilities.VERSION, environmentInfo),
+              List.of(),
+              List.of(),
               lastSeenAt,
               lastSeenAt.plusSeconds(60));
       when(environmentRegistry.find(environmentId)).thenReturn(Optional.of(env));

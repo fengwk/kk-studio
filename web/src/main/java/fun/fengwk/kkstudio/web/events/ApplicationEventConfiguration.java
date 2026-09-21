@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSourc
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
@@ -70,6 +71,7 @@ public class ApplicationEventConfiguration {
       ProjectInvalidationHub projectInvalidationHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
       PostgresqlRealtimeEventSource realtimeEventSource,
+      EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new PostgresqlNotificationLoop(
@@ -109,11 +111,17 @@ public class ApplicationEventConfiguration {
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 8. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
+            // 9. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
-                realtimeEventSource::onResync)),
+                realtimeEventSource::onResync),
+            // 10. Skill Package 变更：payload 是 package 名，把该 Package 同步到本节点全部 READY 的 Environment；
+            // 建连/重连时全量对账，通知丢失不改变 durable truth
+            new PostgresqlNotificationHandler(
+                EnvironmentSkillSyncOrchestrator.CHANNEL,
+                environmentSkillSyncOrchestrator::onPackageChanged,
+                environmentSkillSyncOrchestrator::reconcileReadyEnvironments)),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }

@@ -99,6 +99,7 @@ kk-studio:
       model: ${KK_STUDIO_MODEL_MAX_CONCURRENCY:16}
       tool: ${KK_STUDIO_TOOL_MAX_CONCURRENCY:64}
       subagent: ${KK_STUDIO_SUBAGENT_MAX_CONCURRENCY:10}
+      skill-sync: ${KK_STUDIO_SKILL_SYNC_MAX_CONCURRENCY:8}
     environment-gateway:
       # Daemon WebSocket 单帧上限（字节）。协议安全边界，不进 SystemSettings。
       max-message-bytes: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:16777216}

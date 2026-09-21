@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 
 import java.time.Clock;
 import java.util.Objects;
@@ -21,6 +22,7 @@ public final class SystemPromptPreviewServiceFactory {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPromptPathResolver skillPromptPathResolver;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
 
@@ -30,6 +32,7 @@ public final class SystemPromptPreviewServiceFactory {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       SkillCatalogQueryService skillCatalogQueryService,
+      SkillPromptPathResolver skillPromptPathResolver,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.agentDefinitionRepository =
@@ -40,6 +43,8 @@ public final class SystemPromptPreviewServiceFactory {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillCatalogQueryService =
         Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPromptPathResolver =
+        Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -52,6 +57,7 @@ public final class SystemPromptPreviewServiceFactory {
         environmentRegistry,
         environmentRepository,
         skillCatalogQueryService,
+        skillPromptPathResolver,
         promptComposer,
         clock);
   }

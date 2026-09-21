@@ -193,7 +193,7 @@ registerCase({
   level: 'L5',
   title: '双节点租约路由：DB 权威投影跨节点一致',
   requires: ['distributed'],
-  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/rootPath/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 fs.read@1',
+  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/userName/homeDirectory/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 fs.read@2',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -220,15 +220,16 @@ registerCase({
         fromA.status === fromB.status && fromA.ready === fromB.ready,
         `${label}: status/ready must match across nodes`,
       )
+      // 宿主事实来自连接行保留的最近一次 READY payload：DB 是唯一路由权威，本机 socket 不参与。
       assert(
-        typeof fromA.rootPath === 'string' && fromA.rootPath.length > 0,
-        `${label}: rootPath must be projected cross-node`,
+        typeof fromA.homeDirectory === 'string' && fromA.homeDirectory.length > 0,
+        `${label}: homeDirectory must be projected cross-node`,
       )
       assert(
-        fromA.rootPath === fromB.rootPath,
-        `${label}: rootPath must come from DB routing, not the caller's local socket`,
+        fromA.homeDirectory === fromB.homeDirectory && fromA.userName === fromB.userName,
+        `${label}: host facts must come from DB routing, not the caller's local socket`,
       )
-      // live 投影的原子能力来自权威 catalog，因此必然包含 version=1 的 coding capability。
+      // live 投影的原子能力来自权威 catalog，因此必然包含 descriptor version=2（即 catalog VERSION）的 coding capability。
       const capabilityKey = (card) =>
         (card.capabilities || [])
           .map((capability) => `${capability.id}@${capability.version}`)
@@ -240,9 +241,9 @@ registerCase({
       )
       assert(
         (fromA.capabilities || []).some(
-          (capability) => capability.id === 'fs.read' && capability.version === '1',
+          (capability) => capability.id === 'fs.read' && capability.version === '2',
         ),
-        `${label}: coding capabilities must advertise fs.read@1, got ${capabilityKey(fromA)}`,
+        `${label}: coding capabilities must advertise fs.read@2, got ${capabilityKey(fromA)}`,
       )
     }
 
@@ -265,7 +266,7 @@ registerCase({
   level: 'L5',
   title: 'DB loss fail-closed 与有界 recovery',
   requires: ['distributed'],
-  docs: '先验证 node A 投影 env A READY；通过受限白名单调 disconnect-db-a 断开 node A DB 网络；断网后 node A 的 DB 权威读路径必须失败（HTTP 4xx/5xx，而不是回退本机 websocket 返回 200）；finally 无条件 reconnect-db-a，随后有界轮询 node A 与 node B 都恢复 READY 且 rootPath 与断网前一致（证明 DB-authoritative route 恢复）',
+  docs: '先验证 node A 投影 env A READY；通过受限白名单调 disconnect-db-a 断开 node A DB 网络；断网后 node A 的 DB 权威读路径必须失败（HTTP 4xx/5xx，而不是回退本机 websocket 返回 200）；finally 无条件 reconnect-db-a，随后有界轮询 node A 与 node B 都恢复 READY 且宿主事实（userName/homeDirectory）与断网前一致（证明 DB-authoritative route 恢复）',
   async run(ctx) {
     assertDistributedContext(ctx)
     assert(
@@ -277,10 +278,10 @@ registerCase({
     const preCardA = await waitForEnvironmentReady(ctx.callNode, 'a', ENV_A_ID)
     const preCardAOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID)
     assert(
-      preCardA.rootPath === preCardAOnB.rootPath,
-      `pre-check: cross-node rootPath mismatch: ${JSON.stringify({
-        onA: preCardA.rootPath,
-        onB: preCardAOnB.rootPath,
+      preCardA.homeDirectory === preCardAOnB.homeDirectory,
+      `pre-check: cross-node host fact mismatch: ${JSON.stringify({
+        onA: preCardA.homeDirectory,
+        onB: preCardAOnB.homeDirectory,
       })}`,
     )
 
@@ -313,14 +314,14 @@ registerCase({
     const recoveredOnB = await waitForEnvironmentReady(ctx.callNode, 'b', ENV_A_ID, 60)
     assert(recoveredOnA?.status === 'READY', 'node A failed to recover READY status')
     assert(
-      recoveredOnA.rootPath === preCardA.rootPath,
-      `node A rootPath must recover to the same DB-authoritative value: ${
-        recoveredOnA.rootPath
-      } != ${preCardA.rootPath}`,
+      recoveredOnA.homeDirectory === preCardA.homeDirectory,
+      `node A homeDirectory must recover to the same DB-authoritative value: ${
+        recoveredOnA.homeDirectory
+      } != ${preCardA.homeDirectory}`,
     )
     assert(
-      recoveredOnB.rootPath === preCardA.rootPath,
-      `node B must observe the recovered route: ${recoveredOnB.rootPath} != ${preCardA.rootPath}`,
+      recoveredOnB.homeDirectory === preCardA.homeDirectory,
+      `node B must observe the recovered route: ${recoveredOnB.homeDirectory} != ${preCardA.homeDirectory}`,
     )
 
     ctx.writeArtifact(
@@ -328,8 +329,8 @@ registerCase({
       JSON.stringify(
         {
           dbLossStatus: dbLossError?.status ?? null,
-          recoveredOnA: { status: recoveredOnA.status, rootPath: recoveredOnA.rootPath },
-          recoveredOnB: { status: recoveredOnB.status, rootPath: recoveredOnB.rootPath },
+          recoveredOnA: { status: recoveredOnA.status, homeDirectory: recoveredOnA.homeDirectory },
+          recoveredOnB: { status: recoveredOnB.status, homeDirectory: recoveredOnB.homeDirectory },
         },
         null,
         2,

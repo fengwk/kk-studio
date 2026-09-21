@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -192,8 +193,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     this.node1 = UUID.randomUUID();
     this.node2 = UUID.randomUUID();
 
-    this.registryNode1 = new EnvironmentRegistry(jdbcTemplate, node1);
-    this.registryNode2 = new EnvironmentRegistry(jdbcTemplate, node2);
+    this.registryNode1 = new EnvironmentRegistry(jdbcTemplate, node1, Clock.systemUTC());
+    this.registryNode2 = new EnvironmentRegistry(jdbcTemplate, node2, Clock.systemUTC());
 
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     EnvironmentSessionListener sessionListener = env -> {};

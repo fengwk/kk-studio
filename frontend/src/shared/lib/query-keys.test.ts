@@ -24,6 +24,7 @@ describe('queryKeys', () => {
     expect(queryKeys.environments.all).toEqual(['environments'])
     expect(queryKeys.environments.list).toEqual(['environments', 'list'])
     expect(queryKeys.environments.detail('env-1')).toEqual(['environments', 'detail', 'env-1'])
+    expect(queryKeys.environments.events('env-1')).toEqual(['environments', 'events', 'env-1'])
 
     expect(queryKeys.mcpServers.all).toEqual(['mcp-servers'])
     expect(queryKeys.mcpServers.list(1, 50)).toEqual(['mcp-servers', 'list', 1, 50])

@@ -25,7 +25,7 @@ import java.util.Set;
 public final class EnvironmentCapabilityCatalog {
 
   /** 基础 capability 与 catalog 版本。 */
-  public static final String VERSION = "1";
+  public static final String VERSION = "2";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
@@ -76,7 +76,8 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)));
+        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
+        descriptor(EnvironmentCapabilityIds.SKILL_SYNC, Duration.ofMinutes(5)));
   }
 
   /** 全部已注册 descriptor。 */

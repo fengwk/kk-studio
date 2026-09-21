@@ -11,15 +11,19 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.revwalk.RevCommit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.daemon.DaemonCapabilityRegistry;
+import fun.fengwk.kkstudio.harness.daemon.skill.SkillPackageInstaller;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapability;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
@@ -61,7 +65,13 @@ class CodingCapabilitiesTest {
   void registersEnvironmentDescriptorsAndRejectsMalformedArguments() {
     CodingToolsConfig config = config();
     DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-    CodingCapabilities.registerAll(registry, config, executor, scheduler);
+    SkillPackageInstaller installer =
+        new SkillPackageInstaller(
+            workspaceRoot.resolve("skills"),
+            workspaceRoot.resolve("cache"),
+            workspaceRoot.resolve("staging"),
+            workspaceRoot.resolve("backup"));
+    CodingCapabilities.registerAll(registry, config, installer, executor, scheduler);
 
     assertEquals(
         List.of(
@@ -73,7 +83,8 @@ class CodingCapabilitiesTest {
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile"),
+            "lsp.java-decompile",
+            "skill.sync"),
         registry.descriptors().stream().map(d -> d.id().value()).toList());
     EnvironmentCapability read = registry.find(EnvironmentCapabilityIds.FS_READ).orElseThrow();
     assertThrows(
@@ -904,6 +915,58 @@ class CodingCapabilitiesTest {
                 capability.descriptor(), new EnvironmentCapabilityCall("call", arguments), timeout),
             listener);
     return listener;
+  }
+
+  /** 验证 skill.sync 能力执行成功时返回预期的结构化 JSON 结果，并在失败时返回脱敏的 codedError。 */
+  @Test
+  void skillSyncCapabilityExecutesAndReturnsExactJsonResult() throws Exception {
+    Path remoteRepo = workspaceRoot.resolve("remote-repo");
+    String commitId;
+    try (Git git = Git.init().setDirectory(remoteRepo.toFile()).call()) {
+      Path skillDir = remoteRepo.resolve("my-skill");
+      Files.createDirectories(skillDir);
+      Files.writeString(skillDir.resolve("SKILL.md"), "test content\n");
+      git.add().addFilepattern(".").call();
+      RevCommit commit = git.commit().setMessage("init").call();
+      commitId = commit.getId().name();
+    }
+
+    SkillPackageInstaller installer =
+        new SkillPackageInstaller(
+            workspaceRoot.resolve("skills"),
+            workspaceRoot.resolve("cache"),
+            workspaceRoot.resolve("staging"),
+            workspaceRoot.resolve("backup"));
+    SkillSyncCapability capability = new SkillSyncCapability(config(), installer, executor);
+
+    String args =
+        "{\"packageName\":\"demo-skill\",\"repositoryUrl\":"
+            + json(remoteRepo.toUri().toString())
+            + ",\"branch\":\"master\",\"targetCommit\":"
+            + json(commitId)
+            + "}";
+
+    EnvironmentCapabilityResult result = invoke(capability, args);
+    assertFalse(result.error());
+    assertEquals(1, result.contents().size());
+    assertTrue(result.contents().get(0) instanceof JsonResultContent);
+    JsonResultContent jsonContent = (JsonResultContent) result.contents().get(0);
+    JsonNode parsed = AbstractCodingCapability.OBJECT_MAPPER.readTree(jsonContent.json());
+    assertEquals("demo-skill", parsed.get("packageName").textValue());
+    assertEquals(commitId, parsed.get("installedCommit").textValue());
+    assertEquals(
+        workspaceRoot.resolve("skills").resolve("demo-skill").toString(),
+        parsed.get("localPath").textValue());
+
+    // 测试失败路径：未知 commit 返回 codedError
+    String badArgs =
+        "{\"packageName\":\"demo-skill\",\"repositoryUrl\":"
+            + json(remoteRepo.toUri().toString())
+            + ",\"branch\":\"master\",\"targetCommit\":\"0123456789012345678901234567890123456789\"}";
+    EnvironmentCapabilityResult badResult = invoke(capability, badArgs);
+    assertTrue(badResult.error());
+    assertTrue(badResult.detailsJson().contains("COMMIT_NOT_FOUND"));
+    assertFalse(text(badResult).contains(remoteRepo.toUri().toString()));
   }
 
   private static String text(EnvironmentCapabilityResult result) {

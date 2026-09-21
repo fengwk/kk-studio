@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 
@@ -30,7 +31,7 @@ import java.util.UUID;
  *
  * <p>{@code registrationToken} 仅出现在 create、显式只读 token 以及 rotate-token 响应中；三者均返回 {@code
  * Cache-Control: no-store}， 避免敏感凭据进入 HTTP 缓存。列表与普通详情永不返回 token。最近一次 READY 的宿主 metadata 直接随 Card
- * 返回，因此没有独立端点。
+ * 返回，因此没有独立端点；最近 200 条以内的运维事件走只读 events 端点，Card 只投影最近一条 WARN/ERROR。
  */
 @AllArgsConstructor
 @RequestMapping("/api/harness/environments")
@@ -55,6 +56,13 @@ public class StudioEnvironmentController {
   public ResponseEntity<Result<EnvironmentCardDTO>> createEnvironment(
       @RequestBody EnvironmentCreateDTO request) {
     return noStore(Results.created(environmentService.create(request)));
+  }
+
+  /** 按时间正序返回最近的事件窗口（最多 200 条）；管理面按需轮询，不引入实时协议。 */
+  @GetMapping("/{environmentId}/events")
+  public Result<List<EnvironmentEventDTO>> listEnvironmentEvents(
+      @PathVariable String environmentId) {
+    return Results.ok(environmentService.listEvents(parseEnvironmentId(environmentId)));
   }
 
   /** 幂等只读当前 registrationToken；不轮换、不改变 version/updateTime。 */
