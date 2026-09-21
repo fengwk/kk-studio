@@ -1838,8 +1838,8 @@ registerCase({
       )
       const envRoot = process.env.DAEMON_ENV_ROOT
       assert(envRoot, 'DAEMON_ENV_ROOT must be exported by scripts/e2e/lib.sh')
-      // 具体工具 arguments 必须携带目标 Daemon 上的显式绝对 workdir；Daemon 的 environment root
-      // 就是 e2e fixture 所在目录，因此该绝对路径同时是 fixture 位置与调用 workdir。
+      // 具体工具 arguments 必须携带目标 Daemon 上的显式绝对 workdir；E2E 任务工作目录就是
+      // fixture 所在目录，因此该绝对路径同时是 fixture 位置与调用 workdir。
       const workdir = path.resolve(envRoot)
       assert(path.isAbsolute(workdir), `workdir must be absolute: ${workdir}`)
       const fixturePath = path.join(envRoot, 'e2e-resource.txt')

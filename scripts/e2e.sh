@@ -76,7 +76,7 @@ Env:
   JAVA_HOME_21=...
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
-  DAEMON_ENV_ROOT=...     # optional override; default: $WORK_DIR/environment
+  DAEMON_ENV_ROOT=...     # optional tool-case work directory; default: $WORK_DIR/environment
 EOF
 }
 

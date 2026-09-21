@@ -231,8 +231,6 @@ services:
       - ws://app-a:8080/api/harness/environment-daemon/v1
       - --note
       - Distributed test node A (shared data, no app-to-app network).
-      - --environment-root
-      - /workspace
       - --data-dir
       - /workspace/.kkstudio/daemon
     volumes:
@@ -255,8 +253,6 @@ services:
       - ws://app-b:8080/api/harness/environment-daemon/v1
       - --note
       - Distributed test node B (shared data, no app-to-app network).
-      - --environment-root
-      - /workspace
       - --data-dir
       - /workspace/.kkstudio/daemon
     volumes:

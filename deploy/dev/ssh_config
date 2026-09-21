@@ -1,8 +1,0 @@
-# GitHub SSH must stay non-interactive inside the long-running Agent container.
-Host github.com
-    BatchMode yes
-    IdentitiesOnly yes
-    StrictHostKeyChecking yes
-    # Bound the connection setup so a network black hole fails the entrypoint fetch
-    # instead of stalling container startup indefinitely.
-    ConnectTimeout 10

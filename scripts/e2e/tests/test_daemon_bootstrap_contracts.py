@@ -13,7 +13,6 @@ E2E_LIB_SH = REPOSITORY_ROOT / "scripts/e2e/lib.sh"
 RELIABILITY_COMPOSE = REPOSITORY_ROOT / "deploy/reliability/compose.yaml"
 DISTRIBUTED_COMPOSE = REPOSITORY_ROOT / "deploy/distributed/compose.yaml"
 RELIABILITY_ENTRYPOINT = REPOSITORY_ROOT / "deploy/reliability/daemon-entrypoint.sh"
-DEV_ENTRYPOINT = REPOSITORY_ROOT / "deploy/dev/entrypoint.sh"
 UI_SMOKE_MJS = REPOSITORY_ROOT / "scripts/e2e/ui-smoke.mjs"
 LIFECYCLE_TEST_JAVA = (
     REPOSITORY_ROOT
@@ -72,6 +71,9 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertIn("--data-dir", lib_content)
         self.assertNotIn("--skill-dir", lib_content)
         self.assertIn("e2e-token-host-tool", lib_content)
+        # 已删除的 daemon 选项不得重新出现在任何启动路径里：工作目录由调用方按 Tool
+        # arguments 显式给出，Daemon 自己的持久状态只由 --data-dir 决定。
+        self.assertNotIn("--environment-root", lib_content)
 
         rel_content = RELIABILITY_COMPOSE.read_text(encoding="utf-8")
         # compose 只向容器入口注入环境变量，daemon 参数由 entrypoint 物化为 token 文件。
@@ -79,6 +81,7 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertNotIn("--registration-token", rel_content)
         self.assertIn("--data-dir", rel_content)
         self.assertIn("e2e-token-reliability", rel_content)
+        self.assertNotIn("--environment-root", rel_content)
 
         dist_content = DISTRIBUTED_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("KK_STUDIO_DAEMON_REGISTRATION_TOKEN", dist_content)
@@ -86,6 +89,7 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertEqual(2, dist_content.count("--data-dir"))
         self.assertIn("e2e-token-dist-a", dist_content)
         self.assertIn("e2e-token-dist-b", dist_content)
+        self.assertNotIn("--environment-root", dist_content)
 
         # reliability/distributed 共用同一入口脚本：它必须把环境变量写成 owner-only 文件后只传路径。
         entrypoint = RELIABILITY_ENTRYPOINT.read_text(encoding="utf-8")

@@ -5,8 +5,9 @@ Environment Daemon 是宿主上的独立 JVM 进程，连接 Studio 的 Environm
 Environment 页面会显示 `READY`，Agent 即可绑定它。
 
 进程内部的协议、能力协商与恢复语义见 [Harness Daemon 模块](../modules/harness-daemon.md)，跨模块
-边界见[系统设计](../system-design.md)。容器内的 Daemon 运行方式（可靠性栈、分布式栈、NAS Dev
-节点）见[部署与运行](deployment.md)。
+边界见[系统设计](../system-design.md)。隔离测试栈里的容器内运行方式见
+[部署与运行](deployment.md#隔离栈与可靠性栈)；NAS 上的 App 容器只运行 App 本身，需要主机能力
+的每台主机各自运行本 Daemon。
 
 ## 前置条件
 
@@ -113,6 +114,8 @@ systemctl --user status kk-studio-daemon.service
 ```
 
 - 凭证只通过文件路径读取，不要放进 `Environment=`。
+- 服务以启动它的系统用户身份运行，Daemon 上报的进程用户与 canonical HOME 都来自这个用户：
+  换运行用户就换了 Agent 能触达的文件与命令边界。
 - `/usr/bin/java` 必须指向 JDK 21；否则改成本机 JDK 21 的绝对路径。
 - 仅在需要「未登录也随机器启动」时执行一次 `sudo loginctl enable-linger "$USER"`；否则 systemd
   会在该用户最后一个会话结束时停止服务。

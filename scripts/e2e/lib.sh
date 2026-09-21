@@ -27,6 +27,8 @@ DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
 DAEMON_DATA_DIR=${DAEMON_DATA_DIR:-"$WORK_DIR/daemon-data"}
 DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 
+# DAEMON_ENV_ROOT 只是 E2E case 使用的任务工作目录（fixture 路径与 Tool 调用的 workdir 都由
+# 它派生），不是 Daemon 配置：Daemon 自身的数据目录由 --data-dir 决定。
 export DAEMON_ENV_ROOT
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.0.jar"}
@@ -269,7 +271,6 @@ start_daemon() {
     --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \
     --registration-token-file "$token_file" \
     --note "$DAEMON_NOTE" \
-    --environment-root "$DAEMON_ENV_ROOT" \
     --data-dir "$DAEMON_DATA_DIR" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"

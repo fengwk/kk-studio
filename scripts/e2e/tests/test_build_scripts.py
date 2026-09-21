@@ -167,7 +167,7 @@ class TestBuildScripts(unittest.TestCase):
         self.assertEqual([], calls)
 
     def test_daemon_environment_root_is_exported_to_node_matrix(self):
-        """The daemon and real Node cases must share the task-local environment root."""
+        """The real Node case must receive the task-local work directory as an absolute path."""
         with tempfile.TemporaryDirectory() as temporary:
             work_dir = Path(temporary) / "e2e"
             env = os.environ.copy()

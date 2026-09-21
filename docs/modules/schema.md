@@ -180,16 +180,16 @@ Plugin opaque payload，不按 provider token 字段建列；管理查询永远�
 
 ## 修改 V1 的代价
 
-`V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的两个 App 节点（Main 与 Dev）同时使用，所以这条路径有硬性安全要求：
+`V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的 App 节点与访问它的本机 preview 同时使用，所以这条路径有硬性安全要求：
 
-- 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。Dev 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 Main 集成。
-- 需要重建时必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`agent_definition` 和 `plugin_credential` 会回灌；`environment_connection` 是重连后重新生成的租约，`mcp_server`/`mcp_tool` 是重建后需要重新创建并发现的 Platform 配置，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。`dev` 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 `main` 集成。
+- 需要重建时必须先停止 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable 配置搬回去」：只有 `environment`、`agent_provider`、`agent_model`、`skill_package`、`agent_definition` 和 `plugin_credential` 会回灌；`environment_connection` 是重连后重新生成的租约，`mcp_server`/`mcp_tool` 是重建后需要重新创建并发现的 Platform 配置，`system_setting` 取 V1 默认聚合，会话/Harness/Canvas/Project/Issue/Storage 运行数据都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
 - 回灌只承认两种源结构：与当前 V1 完全一致的库，以及 `main` 上正在运行的旧结构。旧结构里 Environment 既持有 Agent 定义关系又持有 Skill 包，Agent 定义的 `config.skills` 与 Environment 属性表都是独立事实；投影到当前 V1 时：`toolIds` 按内建标识映射或改写为已发现的 `mcp_tool.model_name`，`subagents` 原样保留，`inheritParentEnvironment` 在旧结构里不存在，按当前默认值 `true` 初始化；只有旧结构里本来就是空数组的 `skills` 才会投影为当前空列表，非空 Skill 引用意味着当前 V1 没有可承接的 durable 事实，在预检阶段直接失败，不会被静默清空。旧结构里「Agent 定义归属某个 Environment」也不再是 durable 配置：执行环境改由 Thread/Session 侧在发起时决定，因此非空 `agent_definition.environment_id` 被列为不可表达的已废弃事实，只在 manifest 里计数、不回灌。Skill 引用非空、工具标识无法映射、列集合既不匹配当前 V1 也不匹配旧结构时，预检直接失败并保留原库，不做任何降级推测。
 - 备份 archive 含 Provider credential 与 Environment registration token，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储。
 
-就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 Main 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
+就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 App 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
 
-完整的执行步骤、脚本参数、失败处理和清理约定见 [NAS main/dev 自迭代运行规范](../operations/development-and-testing.md#44-nas-maindev-自迭代运行规范)。
+完整的执行步骤、脚本参数、失败处理和清理约定见 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建)。
 
 ## 从哪里改
 
