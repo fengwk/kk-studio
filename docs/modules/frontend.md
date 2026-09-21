@@ -319,10 +319,29 @@ current commit、最近观察到的 branch HEAD 与检查状态；Check 只更�
 commit 的 Update 后才发布并同步。相关 CRUD 与当前 Skill 候选独立在
 [`features/ai/skills`](../../frontend/src/features/ai/skills)。
 
-Plugin 配置是统一的静态 UI，不加载 Plugin 提供的脚本或 HTML。页面从
-`GET /api/plugins` 只渲染当前 Fat JAR 实际安装的 descriptor；删除 `web` runtime
-dependency 并重新构建后，对应卡片自然消失。每张卡片只显示名称、版本、连接状态、region、
-token 到期时间、下一次刷新时间和去敏错误，不展示密文、token 或 client identity。
+#### Plugin 设置
+
+Plugin 管理入口是 `/settings` 的静态 **Plugins** 页签。
+[`SettingsPage`](../../frontend/src/features/settings/SettingsPage.tsx) 固定把
+[`PLUGINS_SETTINGS_TAB`](../../frontend/src/features/settings/settings-tabs.ts) 放在 General
+之后；它不来自 `GET /api/settings/schema`，Plugin 凭据也不属于 SystemSettings aggregate。
+页签挂载 [`PluginsTab`](../../frontend/src/features/ai/plugins/PluginsTab.tsx)，通过
+[`plugins-service`](../../frontend/src/shared/api/plugins-service.ts) 调用 `/api/plugins`。
+
+Plugin 配置是统一的静态 UI，不加载 Plugin 提供的脚本、HTML 或任意表单 schema。页面从
+`GET /api/plugins` 只渲染当前 Fat JAR 实际安装的 `StudioPlugin` descriptor；删除 `web`
+runtime dependency 并重新构建后，对应卡片自然消失。每张卡片只显示名称、版本、连接状态、
+region、token 到期时间、下一次刷新时间和去敏错误，不展示密文、token 或 client identity。
+只提供 `HarnessContributor`、不提供 `StudioPlugin` 的 Tool-only Plugin 不会出现在这里。
+
+前端认证 contract 是
+[`PluginAuthKindDTO`](../../frontend/src/shared/api/contracts/ai-plugin.ts) 的封闭 union，当前
+只有 `DEEP_LINK`。因此新 Plugin 若沿用固定 region + 官方登录页 + 粘贴 callback URL 的交互，
+通用卡片和连接弹窗可直接复用，不需要新增 Plugin 专属页面；名称、版本、region 候选与状态均
+来自后端安全投影。若要增加其它认证方式或 Plugin 专属设置，必须同步扩展 Share DTO、
+Platform 管理协议、TypeScript contract、静态组件、双语 i18n 和测试，不能让 Plugin JAR
+注入前端代码。后端 `authKind: null` 表示不提供交互认证，但当前卡片尚未定义无认证 Plugin
+的只读状态语义；引入这种 `StudioPlugin` 前必须先补齐并测试该前端行为。
 
 MiniMax Mavis 卡片的 Connect 流程是：
 

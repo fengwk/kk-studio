@@ -10,6 +10,7 @@
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
+| 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
