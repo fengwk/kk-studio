@@ -75,7 +75,15 @@ test('repository structure guard verifies root and harness POM module lists', ()
   // Test intent: ensure declared POM module declarations exactly match expected topology.
   const rootPom = readFileSync(path.join(REPOSITORY_ROOT, 'pom.xml'), 'utf8')
   const rootModules = [...rootPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
-  assert.deepEqual(rootModules, ['share', 'schema', 'canvas', 'harness', 'platform', 'web'])
+  assert.deepEqual(rootModules, [
+    'share',
+    'schema',
+    'canvas',
+    'harness',
+    'platform',
+    'plugins',
+    'web',
+  ])
 
   const harnessPom = readFileSync(path.join(REPOSITORY_ROOT, 'harness/pom.xml'), 'utf8')
   const harnessModules = [...harnessPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
