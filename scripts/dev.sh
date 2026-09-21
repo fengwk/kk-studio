@@ -5,11 +5,144 @@ SCRIPT_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_HOME=$(cd "$SCRIPT_HOME/.." && pwd)
 WORK_DIR=${DEV_WORK_DIR:-"$APP_HOME/runtime/dev"}
 
+# 本机 preview 的外部数据面配置：只有调用方显式给出 DEV_ENV_FILE 时才读取（见 usage），
+# 未给出时本脚本保持通用/e2e 行为，不接触任何外部配置文件。
+DEV_ENV_FILE=${DEV_ENV_FILE:-}
+# 配置文件允许出现的键。整份白名单之外的名字一律视为配置错误，避免把任意环境变量注入
+# 长驻 Backend/Vite 进程。
+DEV_ENV_REQUIRED_KEYS=(
+  KK_STUDIO_DB_URL
+  KK_STUDIO_DB_USER
+  KK_STUDIO_DB_PASSWORD
+  KK_STUDIO_STORAGE_S3_ENDPOINT
+  KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT
+  KK_STUDIO_STORAGE_S3_REGION
+  KK_STUDIO_STORAGE_S3_BUCKET
+  KK_STUDIO_STORAGE_S3_ACCESS_KEY
+  KK_STUDIO_STORAGE_S3_SECRET_KEY
+)
+DEV_ENV_OPTIONAL_KEYS=(
+  KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE
+  KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN
+)
+
+fail() {
+  echo "ERROR: $1" >&2
+  exit 1
+}
+
+step() {
+  echo "==> $1"
+}
+
+# 属主与权限查询只返回单个数值；失败时由调用方按「无法读取」处理，不回显文件内容。
+file_owner_uid() {
+  stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null
+}
+
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
+dev_env_key_allowed() {
+  local key=$1 candidate
+  for candidate in "${DEV_ENV_REQUIRED_KEYS[@]}" "${DEV_ENV_OPTIONAL_KEYS[@]}"; do
+    if [ "$key" = "$candidate" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 读取 owner-only 的 KEY=VALUE 文件：逐行字面量解析，只按第一个 `=` 拆分，忽略空行与
+# 注释行，不做 source/eval 或任何 shell 求值。任何错误信息只包含行号与键名，绝不打印值。
+load_dev_env_file() {
+  local file=$1
+  local line_number=0 line trimmed key value
+  local owner mode
+  case "$file" in
+    /*) ;;
+    *) fail "DEV_ENV_FILE must be an absolute path" ;;
+  esac
+  if [ ! -f "$file" ]; then
+    fail "DEV_ENV_FILE must be an existing regular file"
+  fi
+  if [ -L "$file" ]; then
+    fail "DEV_ENV_FILE must not be a symbolic link"
+  fi
+  owner=$(file_owner_uid "$file") || fail "cannot read the DEV_ENV_FILE owner"
+  if [ "$owner" != "$(id -u)" ]; then
+    fail "DEV_ENV_FILE must be owned by the current user"
+  fi
+  mode=$(file_mode "$file") || fail "cannot read the DEV_ENV_FILE permissions"
+  case "$mode" in
+    *[!0-7]*) fail "cannot interpret the DEV_ENV_FILE permissions" ;;
+  esac
+  if (( (8#$mode & 8#077) != 0 )); then
+    fail "DEV_ENV_FILE must not grant group or other permissions"
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_number=$((line_number + 1))
+    line=${line%$'\r'}
+    trimmed=${line#"${line%%[![:space:]]*}"}
+    case "$trimmed" in
+      '' | '#'*) continue ;;
+    esac
+    case "$trimmed" in
+      *=*) ;;
+      *) fail "malformed DEV_ENV_FILE line $line_number: expected KEY=VALUE" ;;
+    esac
+    key=${trimmed%%=*}
+    value=${trimmed#*=}
+    if ! dev_env_key_allowed "$key"; then
+      fail "unknown key on DEV_ENV_FILE line $line_number: $key"
+    fi
+    printf -v "$key" '%s' "$value"
+    export "$key"
+  done < "$file"
+  step "Loaded external data-plane settings from DEV_ENV_FILE (values not printed)"
+}
+
+if [ -n "$DEV_ENV_FILE" ]; then
+  load_dev_env_file "$DEV_ENV_FILE"
+fi
+
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
 BACKEND_PORT=${BACKEND_PORT:-18080}
 FRONTEND_HOST=${FRONTEND_HOST:-127.0.0.1}
 FRONTEND_PORT=${FRONTEND_PORT:-5173}
 SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
+# scripts/local-dev.sh 用该标记声明「本次运行必须连外部数据面」：此时 profile、Flyway 与
+# Harness worker 开关都必须与 NAS 上唯一 Flyway owner / Harness worker 的取值一致。
+KK_STUDIO_LOCAL_DEV_EXTERNAL_SERVICES=${KK_STUDIO_LOCAL_DEV_EXTERNAL_SERVICES:-false}
+
+# 外部数据面 preview 的 fail-closed 校验：配置缺失、profile 不是 prod，或本机进程试图
+# 承担 Flyway / 分布式 Work，都在启动任何服务之前失败。
+require_external_data_plane() {
+  local key
+  if [ -z "$DEV_ENV_FILE" ]; then
+    fail "KK_STUDIO_LOCAL_DEV_EXTERNAL_SERVICES=true requires DEV_ENV_FILE"
+  fi
+  for key in "${DEV_ENV_REQUIRED_KEYS[@]}"; do
+    if [ -z "${!key:-}" ]; then
+      fail "DEV_ENV_FILE must define a value for $key"
+    fi
+  done
+  if [ "$SPRING_PROFILE" != "prod" ]; then
+    fail "external data-plane preview requires SPRING_PROFILES_ACTIVE=prod"
+  fi
+  if [ "${SPRING_FLYWAY_ENABLED:-}" != "false" ]; then
+    fail "external data-plane preview requires SPRING_FLYWAY_ENABLED=false"
+  fi
+  if [ "${KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED:-}" != "false" ]; then
+    fail "external data-plane preview requires KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false"
+  fi
+}
+
+if [ "$KK_STUDIO_LOCAL_DEV_EXTERNAL_SERVICES" = "true" ]; then
+  require_external_data_plane
+fi
 
 BACKEND_URL="http://$BACKEND_HOST:$BACKEND_PORT"
 FRONTEND_URL="http://$FRONTEND_HOST:$FRONTEND_PORT"
@@ -29,10 +162,6 @@ SKIP_PACKAGE=${DEV_SKIP_PACKAGE:-false}
 SKIP_NPM_INSTALL=${DEV_SKIP_NPM_INSTALL:-false}
 READY_TIMEOUT_SECONDS=${DEV_READY_TIMEOUT_SECONDS:-90}
 LOG_LINES=${LOG_LINES:-120}
-
-step() {
-  echo "==> $1"
-}
 
 # 当前工作区修订；非 Git 工作区（源码快照）输出空值，此时构建产物不受修订绑定约束。
 current_revision() {
@@ -96,6 +225,11 @@ Environment:
   BACKEND_PORT=18080
   FRONTEND_PORT=5173
   SPRING_PROFILES_ACTIVE=e2e   # dev/e2e 均使用 PostgreSQL；dev=stub seed，e2e=real provider seed
+  DEV_ENV_FILE=/absolute/path/to/local-dev.env
+  # 只有显式给出时才按字面量解析 KEY=VALUE 外部数据面配置（owner-only、无 group/other 权限位、
+  # 非符号链接）；未给出时脚本行为与过去一致。
+  # scripts/local-dev.sh 会额外设置 KK_STUDIO_LOCAL_DEV_EXTERNAL_SERVICES=true，此时缺配置或
+  # profile/Flyway/worker 开关不是 prod/false/false 都在启动前失败。
   TEST_GOOGLE_BASE_URL / TEST_GOOGLE_API_KEY
   TEST_OPENAI_BASE_URL / TEST_OPENAI_API_KEY
   TEST_ANTHROPIC_BASE_URL / TEST_ANTHROPIC_API_KEY

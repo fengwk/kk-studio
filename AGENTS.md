@@ -15,8 +15,6 @@
 - 任何有意义的测试请沉淀为单元测试和自动化集成测试。
 - 编写测试的同时在注释中描述测试意图，便于后续接手者判断此测试是否仍然有效。
 - 当前代码树的敏感数据门禁是 `python3 scripts/security/check-sensitive-data.py`；命中时只报告规则和位置，不回显敏感值。
-- 在 NAS `dev` 节点执行自迭代任务前，必须阅读并遵守
-  [main/dev 自迭代运行规范](docs/operations/development-and-testing.md#44-nas-maindev-自迭代运行规范)。
 
 ## Java Formatting
 

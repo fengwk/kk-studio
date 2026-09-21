@@ -113,8 +113,8 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 5. Environment 页面显示 `READY` 后，编辑 Agent，绑定该 Environment，并选择需要的
    Tools 或 Skills。
 
-Daemon 直接继承启动用户的主机权限，`environmentRoot` 只是展示信息，不是文件系统
-沙箱。下载校验、TLS 地址、systemd 常驻、升级和故障处理见
+Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。下载校验、TLS 地址、systemd
+常驻、升级和故障处理见
 [Environment Daemon 安装与运行](docs/operations/environment-daemon.md)。
 
 ## 停止与清理
@@ -144,8 +144,11 @@ Backend 与 Vite：
 
 脚本默认启动 Vite `http://127.0.0.1:5173`、Backend
 `http://127.0.0.1:18080`，并使用 `e2e` profile；它与上文监听 `8080` 的本地 Compose
-栈是两条独立运行路径。依赖服务和环境变量配置见
-[开发与测试](docs/operations/development-and-testing.md)。
+栈是两条独立运行路径。要把本机 preview 指向 NAS 上已有的 PostgreSQL/S3，改用
+[`scripts/local-dev.sh`](scripts/local-dev.sh)：它读一份 owner-only 配置文件里的
+endpoint 与凭据，强制 `prod` profile 并关闭本机 Flyway 与 Harness worker，配置文件模板见
+[`scripts/local-dev.config.example`](scripts/local-dev.config.example)。依赖服务和环境变量
+配置见[开发与测试](docs/operations/development-and-testing.md)。
 
 常用质量检查：
 

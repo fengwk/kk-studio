@@ -128,8 +128,6 @@ services:
       - ws://app:8080/api/harness/environment-daemon/v1
       - --note
       - Isolated Docker reliability environment.
-      - --environment-root
-      - /workspace
       - --data-dir
       - /workspace/.kkstudio/daemon
     volumes:

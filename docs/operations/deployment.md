@@ -1,7 +1,7 @@
 # 部署与运行
 
 本文覆盖从源码构建可运行产物、在容器里运行 App、接入外部 PostgreSQL 与 S3、生产反向代理，
-以及本仓库提供的隔离栈和 NAS Main/Dev 外部部署边界。跨模块边界的整体模型见
+以及本仓库提供的隔离栈和 NAS 运行拓扑。跨模块边界的整体模型见
 [系统设计](../system-design.md)。
 
 日常本地使用走 [deploy/local](../../deploy/local/README.md) 的 Compose 栈，隔离测试走
@@ -228,6 +228,8 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | --- | --- | --- |
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
+| NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
+| 本机 preview | 外部数据面配置文件 | `DEV_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
 | production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
@@ -247,6 +249,10 @@ Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也�
 
 - [.dockerignore](../../.dockerignore) 与 [.gitignore](../../.gitignore) 排除 `.env`、key/cert/
   credential 文件、`credentials*`、service account JSON 和 `secrets/`。
+- 本机 preview 的外部数据面配置是仓库之外的 owner-only 文件（模板见
+  [scripts/local-dev.config.example](../../scripts/local-dev.config.example)）：[scripts/dev.sh](../../scripts/dev.sh)
+  只按 `KEY=VALUE` 字面量解析白名单键，不做 shell 求值、不把值放进命令参数或日志，权限过宽、
+  属主不符、符号链接、未知键或值缺失都直接失败。
 - local/test/reliability/distributed 的固定 PostgreSQL 与 MinIO 凭据只属于 disposable compose；
   宿主绑定地址一旦改为非 loopback，就必须显式覆盖这些默认值。
 - [`scripts/e2e.sh`](../../scripts/e2e.sh) 只在显式 `--real` 时读取四组完整 credential pair，并经 HTTP 写入各自专用
@@ -298,139 +304,65 @@ bucket 初始化。清理命令只作用于对应 Compose project，不影响其
 volume。任何 app、database、MinIO、mock、Daemon `READY` 或 smoke 失败都应保留诊断并进入失败
 路径，而不是把未验证的服务交给上层脚本。
 
-## NAS Main/Dev 外部部署边界
+## NAS 运行拓扑
 
-NAS 自迭代拓扑横跨三个职责边界，本仓库只提供前者的产物与脚本：
+本仓库只发布产物与脚本，NAS 上由外部 Compose 项目运行它，Gateway 负责对外路由；自迭代不需要
+第二个 NAS 节点，也不需要容器内源码或工具链：
 
 | 边界 | 职责 |
 | --- | --- |
-| 本仓库 | Main Fat JAR image、Dev toolchain/source image、运行 profile、Daemon 与自迭代脚本 |
-| NAS Compose 仓库 | `vps-kk-studio`、`vps-kk-studio-dev`、共享 PostgreSQL/S3 连接、持久 workspace/cache/`gh` 配置、SSH key 只读挂载、私密环境变量注入 |
-| Gateway 仓库 | `studio.kk1.fun`、`studio-dev.kk1.fun` 的 HTTP/WebSocket 路由和访问控制 |
+| 本仓库 | 应用镜像 [`deploy/local/Dockerfile`](../../deploy/local/Dockerfile)、[发布工作流](../../.github/workflows/docker-publish.yml)、NAS Compose 引用的变量名与 Daemon 发布物 |
+| NAS Compose 仓库 | `vps-kk-studio` 容器、共享 PostgreSQL/S3 连接、私密环境变量注入、反向代理接入 |
+| Gateway 仓库 | `studio.kk1.fun` 的 HTTP/WebSocket 路由和访问控制 |
 
 ### 镜像与运行职责
 
-Main runtime image 不含源码、Maven、Node 或 credential，是唯一 Flyway owner 与唯一 Harness
-worker。Dev 节点镜像由 [deploy/dev/Dockerfile](../../deploy/dev/Dockerfile) 构建：Maven
-3.9.11/JDK 21 与 Node 24.14.0/npm 11.9.0 工具链、`git`/`curl`/`jq`/`lsof`/`python3`/`ffmpeg`/
-`ffprobe`、`openssh-client` 与 GitHub CLI `2.100.0`，并以同一源码构建的 Environment Daemon
-作为容器主进程。
+App 镜像只有一个：[deploy/local/Dockerfile](../../deploy/local/Dockerfile) 构建的 Fat JAR 镜像
+（内嵌前端），运行时不包含源码、Maven、Node 或凭据。`dev` 与 `main` 发布同一个镜像，只有可变
+tag 不同：
 
-Dev Backend 关闭 Flyway 与进程内 Harness dispatcher（`SPRING_FLYWAY_ENABLED=false`、
-`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`），Harness Thread/Model/Tool Work 只由 Main
-执行；这两个开关在镜像、entrypoint 和 `kk-studio-dev-reload` 中都是 fail-closed 默认值，ad hoc
-覆盖 worker 开关会让 reload 直接拒绝执行。Main 与 Dev 共享逻辑 database 和 bucket，因此 Dev
-中改动 processor/runtime 等异步执行路径必须依靠自动化测试或显式隔离环境验证，不能以 Dev
-preview 的行为作为验收依据。
+| 分支 | 可变 tag | 用途 |
+| --- | --- | --- |
+| `dev` | `<namespace>/kk-studio:dev` | 自迭代：仓库门禁在提交前完成，push 后直接发布 |
+| `main` | `<namespace>/kk-studio:main` | 用户使用的稳定版本：通过完整仓库门禁后发布 |
 
-### 挂载与持久化
+NAS 上只运行一个 App 容器 `vps-kk-studio`，以 `prod` profile 常驻：它既是共享数据库唯一的
+Flyway owner，也是唯一的 Harness worker，Thread/Model/Tool 的异步执行都发生在这里。迭代手段
+是替换镜像 tag 并重启容器，而不是在容器内改源码，因此容器不挂载源码工作区、Maven/npm cache
+或 `gh` 配置。
 
-容器以 uid/gid `10001` 运行，工作区、cache 和配置必须由外部 Compose 以 `10001:10001` 属主
-挂载：
+### 本机 preview 与 NAS 数据面
 
-```text
-/workspace                     # Daemon environment-root 与 Git checkout 根
-/workspace/kk-studio           # 实际源码 checkout
-/home/kkdaemon/.m2             # Maven local repository
-/home/kkdaemon/.npm            # npm cache
-/home/kkdaemon/.config/gh      # gh auth（gh hosts.yml）
-/var/kk-studio/dev             # backend/frontend log 与 PID
-```
+前端与同步 API 的日常开发在笔记本上进行：[scripts/local-dev.sh](../../scripts/local-dev.sh)
+用 NAS 上已有的 PostgreSQL/S3 启动已打包的 Backend 与 Vite/HMR。它读一份 owner-only 配置文件
+（endpoint 与凭据，模板见
+[scripts/local-dev.config.example](../../scripts/local-dev.config.example)），强制
+`SPRING_PROFILES_ACTIVE=prod`、`SPRING_FLYWAY_ENABLED=false` 和
+`KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`：schema 只由 NAS 上的 Flyway owner 演进，
+异步 Harness Work 只在 NAS 上执行，本机进程只是同步 HTTP 面。Backend 默认监听
+`127.0.0.1:18080`，Vite/HMR 默认监听 `127.0.0.1:5173`；配置文件的权限要求、键白名单与失败
+边界见[开发与测试](development-and-testing.md#本机-preview-的外部数据面)。
 
-`/workspace`、`/home/kkdaemon/.m2`、`/home/kkdaemon/.npm` 与 `/home/kkdaemon/.config/gh` 是必须
-持久化的 volume；entrypoint 启动时校验 `/workspace` 可写性，属主错误直接失败，不会退化成不可写
-容器。SSH 私钥由外部以只读 volume 挂载到 `/run/kk-studio/ssh`
-（`KK_STUDIO_SSH_CREDENTIALS_DIR`），entrypoint 启动时才把 `id_*` 复制进 `/home/kkdaemon/.ssh`；
-github.com 的 host key 固化在镜像内的 `/etc/ssh/ssh_known_hosts`，镜像级 SSH 配置使用
-`BatchMode`、`IdentitiesOnly`、严格 host key 校验和 `ConnectTimeout 10`，认证异常直接失败而不是
-挂起等待输入。`gh` 使用默认配置目录 `/home/kkdaemon/.config/gh`，该目录持久化后只需首次交互式
-登录一次，登录命令见[开发与测试](development-and-testing.md#gh-首次登录)。
-
-### 控制面 origin 与网络地址
-
-Dev Daemon 经内部 Docker 网络连接 Main 的 origin，而不是本容器的 Backend：Main 的 HTTP(S)
-origin 统一保存在外部 Compose 项目的 `.env`，`docker-compose.yml` 只把同名变量显式传入 Dev，
-entrypoint 再派生出 WebSocket 地址：
-
-```dotenv
-# .env
-KK_STUDIO_CONTROL_PLANE_BASE_URL=http://vps-kk-studio:8080
-```
-
-```yaml
-# docker-compose.yml
-environment:
-  KK_STUDIO_CONTROL_PLANE_BASE_URL: ${KK_STUDIO_CONTROL_PLANE_BASE_URL}
-```
-
-origin 必须是使用 DNS/IPv4 host 与可选端口的裸 HTTP(S) origin，可选一个结尾 `/`；`https`
-派生 `wss`。不得填写公共 Gateway 域名、`ws`/`wss` scheme、路径、query、fragment、userinfo
-或非法端口，非法值在准备 workspace 和启动服务之前就让容器启动失败且不回显输入值。上面的值
-最终派生为 `ws://vps-kk-studio:8080/api/harness/environment-daemon/v1`。
-
-两个容器内的服务端访问都不得绕到公网域名：
-
-```text
-PostgreSQL -> vps-postgres:5432
-S3 API     -> http://vps-s3:9000
-OpenCLI    -> 同一 vps 网络的 Hub 容器 HTTP origin
-Daemon     -> http://vps-kk-studio:8080（entrypoint 派生 ws://vps-kk-studio:8080/api/harness/environment-daemon/v1）
-```
-
-OpenCLI 的 `baseUrl` 由 System Settings 配置，上传、执行轮询和产物下载都从该 origin 构造并拒绝
-跨源产物 URL，因此 NAS 配置必须填写 Hub 的容器内地址而不是公网域名。S3 的 public endpoint 只
-用于返回给浏览器的预签名直传/直下 URL，服务端 `PUT`/`GET`/`HEAD`/`COPY`/`DELETE` 始终使用
-`vps-s3:9000`。
-
-### entrypoint 启动同步与冷启动预算
-
-每次启动 entrypoint 都把持久工作区无损快进到 `origin/$KK_STUDIO_GIT_BRANCH`，只允许
-`merge --ff-only`，永不 reset/rebase/stash/checkout：
-
-- 远端不可达（fetch 失败）、工作区没有 `origin`、快进会被本地修改或未跟踪文件覆盖（git 拒绝）、
-  或本地历史与远端互不包含时，容器直接启动失败，节点不会静默运行未验证的修订；
-- 存在未 push 的本地提交（本地领先）时按原样启动并提示 ahead；
-- 同步后按修订 stamp 决定重建量：后端 JAR 记录在 `web/target/.kk-studio-revision`，前端依赖
-  记录在 [`frontend`](../../frontend) 下的 `node_modules/.kk-studio-package-lock.sha`。
-
-冷 cache 首次启动要完整构建 Backend 并安装前端依赖，实测约 29 分钟（20 核 x86_64），因此镜像
-healthcheck 的 start period 取 `--start-period=2700s`，覆盖冷启动并留约 50% 余量。真正的引导
-失败不会被掩盖：entrypoint 的 readiness 预算是 `DEV_READY_TIMEOUT_SECONDS`（容器内默认
-`600s`），超时直接以非零状态退出。外部 Compose 应继承镜像 healthcheck，不要用更短的
-`start_period` 覆盖这条边界。
-
-### Dev 运行环境变量契约
-
-外部 Compose 只引用变量名，真实值由 NAS 私密环境文件注入：
-
-| 变量 | 职责 |
-| --- | --- |
-| `KK_STUDIO_WORKSPACE_ROOT` | Daemon environment-root 与持久工作区根，默认 `/workspace` |
-| `KK_STUDIO_REPOSITORY_DIR` | 源码 checkout，默认 `/workspace/kk-studio` |
-| `KK_STUDIO_GIT_REMOTE_URL` / `KK_STUDIO_GIT_BRANCH` | 首次 clone 的 SSH remote 与每次启动 fetch/快进的目标分支，默认不带 remote / `dev` |
-| `KK_STUDIO_SSH_CREDENTIALS_DIR` | 只读 SSH key 挂载目录，默认 `/run/kk-studio/ssh`；`id_*` 在启动时复制到 `/home/kkdaemon/.ssh` |
-| `KK_STUDIO_DEV_ALLOW_SOURCE_SEED` | 是否允许用镜像内源码快照初始化非 Git 工作区，默认 `false` |
-| `KK_STUDIO_SOURCE_SEED` | 源码快照路径，默认 `/opt/kk-studio/source` |
-| `SPRING_PROFILES_ACTIVE` / `SPRING_FLYWAY_ENABLED` | Backend profile 与 Flyway 开关，必须为 `prod` / `false` |
-| `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED` | Dev Backend 的 Harness worker 开关，必须为 `false` |
-| `KK_STUDIO_CONTROL_PLANE_BASE_URL` | Main App 的 HTTP(S) origin，必填；entrypoint 派生 Daemon 的 ws(s) gateway 地址 |
-| `BACKEND_HOST` / `BACKEND_PORT` / `FRONTEND_HOST` / `FRONTEND_PORT` / `DEV_WORK_DIR` | [scripts/dev.sh](../../scripts/dev.sh) 的监听地址、端口与 log/PID 目录 |
-| `DEV_READY_TIMEOUT_SECONDS` | Backend/Vite readiness 预算，容器内默认 `600`（仓库默认 `90`） |
-| `KK_STUDIO_DAEMON_REGISTRATION_TOKEN` / `KK_STUDIO_DAEMON_NOTE` / `KK_STUDIO_DAEMON_DATA_DIR` | Daemon 注册 token、Environment note（默认 `kk-studio dev node`）与 Daemon 数据目录（默认 `/workspace/.kkstudio/daemon`）；token 在注册后立即 `unset` |
+Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机以宿主进程或
+`systemd --user` 运行，并连接 NAS App 的 gateway
+`wss://<studio-origin>/api/harness/environment-daemon/v1`。安装、注册与常驻见
+[Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 发布产物与凭据边界
 
-[`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送 `main`
-时先执行全仓 Java/Frontend/脚本质量门禁，再构建并发布 `<namespace>/kk-studio:main`；推送 `dev`
-时依赖提交前检查，跳过这组重复的全仓门禁，直接构建并发布
-`<namespace>/kk-studio-dev:dev`。两者都附带 immutable commit SHA tag、`linux/amd64` 平台和
-Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，不作为 build arg 或 image layer。
+[`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送
+`main` 时先执行全仓 Java/Frontend/脚本/文档/敏感数据门禁，再构建并发布
+`<namespace>/kk-studio:main`；推送 `dev` 时依赖提交前检查，跳过这组重复的全仓门禁，直接构建并
+发布同一个 Dockerfile 的 `<namespace>/kk-studio:dev`。两者都附带 immutable commit SHA tag、
+`linux/amd64` 平台和 Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，不作为 build arg
+或 image layer。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、Gateway、
-registration credential 和 SSH 私钥不进入本仓库、Docker build context、image layer、日志或
-报告；registration token 经 owner-only 凭证文件传递（`--registration-token-file`），不出现在
-Daemon argv 或环境变量中。Agent 停止边界、共享数据库重建等自迭代约束见
-[开发与测试](development-and-testing.md#nas-maindev-自迭代运行规范)。
+registration credential 和 Plugin 主密钥不进入本仓库、Docker build context、image layer、日志
+或报告；registration token 经 owner-only 凭证文件传递（`--registration-token-file`），不出现
+在 Daemon argv 或环境变量中。本机 preview 的配置文件同样留在仓库之外、只有 owner 可读，脚本
+只把它当作数据面输入，不打印其中的值。Agent 停止边界与共享数据库重建见
+[开发与测试](development-and-testing.md#共享数据库重建)。
 
 ---
 

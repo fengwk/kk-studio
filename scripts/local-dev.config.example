@@ -1,0 +1,28 @@
+# kk-studio 本机 preview 的外部数据面配置模板。
+#
+# 这里只有键名，没有任何真实值、主机、账号或令牌。填好真实值的文件必须留在仓库之外：
+#
+#   install -d -m 700 "$HOME/.config/kk-studio"
+#   install -m 600 scripts/local-dev.config.example "$HOME/.config/kk-studio/local-dev.env"
+#   # 编辑 ~/.config/kk-studio/local-dev.env 填入真实值，不要提交、不要粘贴到日志或工单
+#
+# 然后把 `scripts/local-dev.sh start` 交给它读取；换路径时只设置 DEV_ENV_FILE。文件必须是
+# 当前用户所有的普通文件、无 group/other 权限位、不是符号链接。解析规则：每行 `KEY=VALUE`，
+# 值按字面量读取（不要加引号），只按第一个 `=` 拆分，`#` 起始行与空行忽略，其它键名一律拒绝。
+
+# PostgreSQL：NAS 上已有的共享 durable 库
+KK_STUDIO_DB_URL=
+KK_STUDIO_DB_USER=
+KK_STUDIO_DB_PASSWORD=
+
+# S3：NAS 上已有的共享对象存储（服务端地址与浏览器可访问的预签名 origin 各一个）
+KK_STUDIO_STORAGE_S3_ENDPOINT=
+KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT=
+KK_STUDIO_STORAGE_S3_REGION=
+KK_STUDIO_STORAGE_S3_BUCKET=
+KK_STUDIO_STORAGE_S3_ACCESS_KEY=
+KK_STUDIO_STORAGE_S3_SECRET_KEY=
+
+# 可选：需要在本机 preview 里验证已认证 Plugin 或 ComfyUI 时再填写
+KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE=
+KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN=

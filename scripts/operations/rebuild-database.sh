@@ -42,7 +42,7 @@ DB_CONTAINER=${KK_STUDIO_REBUILD_DB_CONTAINER:-vps-postgres}
 DB_NAME=${KK_STUDIO_REBUILD_DB_NAME:-kk_studio}
 DB_USER=${KK_STUDIO_REBUILD_DB_USER:-postgres}
 MAIN_CONTAINER=${KK_STUDIO_REBUILD_MAIN_CONTAINER:-vps-kk-studio}
-FOLLOWER_CONTAINER_NAMES=${KK_STUDIO_REBUILD_FOLLOWER_CONTAINERS:-vps-kk-studio-dev}
+FOLLOWER_CONTAINER_NAMES=${KK_STUDIO_REBUILD_FOLLOWER_CONTAINERS:-}
 READY_TIMEOUT_SECONDS=${KK_STUDIO_REBUILD_READY_TIMEOUT_SECONDS:-900}
 
 SCRIPT_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -135,7 +135,7 @@ Environment:
   KK_STUDIO_REBUILD_DB_NAME               default: kk_studio
   KK_STUDIO_REBUILD_DB_USER               default: postgres
   KK_STUDIO_REBUILD_MAIN_CONTAINER        default: vps-kk-studio
-  KK_STUDIO_REBUILD_FOLLOWER_CONTAINERS   default: vps-kk-studio-dev
+  KK_STUDIO_REBUILD_FOLLOWER_CONTAINERS   default: (none); optional followers must be listed explicitly
   KK_STUDIO_REBUILD_READY_TIMEOUT_SECONDS default: 900
   KK_STUDIO_REBUILD_WORK_DIR              default: ~/.local/state/kk-studio/database-rebuild
 EOF
