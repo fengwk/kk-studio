@@ -576,20 +576,18 @@ Harness worker。各项默认值与全部 Dev 环境变量的完整契约见
 
 Agent 在 Dev 节点遵循以下闭环：
 
-1. 只修改、提交和 push `dev`；不得直接修改或 push `main`。
-2. 开始前检查 Git 状态并保留 Human 的并行修改，不覆盖未提交工作。
-3. 对实际变更执行定向测试；Java 关键路径同时遵守覆盖率门禁。
-4. 普通 Frontend 变更由 Vite HMR 生效；Java 变更先增量构建，再重启 Dev Backend/Vite 受管进程，
+1. 开始前检查 Git 状态并保留 Human 的并行修改，不覆盖未提交工作。
+2. 对实际变更执行定向测试；Java 关键路径同时遵守覆盖率门禁。
+3. 普通 Frontend 变更由 Vite HMR 生效；Java 变更先增量构建，再重启 Dev Backend/Vite 受管进程，
    不重启 Main 或 Daemon。只有 Dev 容器、镜像入口或 Daemon 代码变化才重建并重启 Dev 容器，那会
    重建 Main 与 Daemon 的连接。
-5. 重启前提交源码和必要的 durable 进度。`kk-studio-dev-reload` 执行时不中断当前 Environment
+4. 重启前提交源码和必要的 durable 进度。`kk-studio-dev-reload` 执行时不中断当前 Environment
    Tool，等待 Dev Backend/Vite readiness 后正常返回；浏览器的 HTTP、应用事件与 HMR 连接会在
    reload 期间短暂断开并自动重连。只有重启 Dev 容器或 Daemon 本身时，当前 Tool outcome 才可能
    不确定，这类操作必须是当前 Agent 回合最后一个 Tool 操作。
-6. 验证 Dev health、Frontend、应用事件 WebSocket 和 Daemon `READY` 后再继续下一轮。
-7. 功能达到可验收状态后 push `dev` 并向 Human 报告变更、验证和已知风险。只有 Human 决定何时合入
-   `main` 和更新稳定节点；涉及 processor/runtime 等异步执行路径的改动必须附带自动化测试证据或
-   显式隔离环境验证。
+5. 验证 Dev health、Frontend、应用事件 WebSocket 和 Daemon `READY` 后再继续下一轮。
+6. 功能达到可验收状态后提交并 push 目标分支，同时报告变更、验证和已知风险；涉及
+   processor/runtime 等异步执行路径的改动必须附带自动化测试证据或显式隔离环境验证。
 
 必须停止自动重启并交给 Human 决策的变更包括：
 
@@ -607,10 +605,10 @@ Agent modifies dev
   -> targeted tests
   -> commit and push dev
   -> reload vps-kk-studio-dev
-  -> Human observes and validates studio-dev
-  -> Human merges dev into main
+  -> observe and validate studio-dev
+  -> merge dev into main
   -> main workflow builds immutable image
-  -> Human updates vps-kk-studio
+  -> update vps-kk-studio
   -> Dev synchronizes the new main baseline
 ```
 
