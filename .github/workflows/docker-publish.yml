@@ -1,9 +1,10 @@
 # kk-studio Docker publish.
 #
-# `main` 发布不可变生产镜像 `deploy/local/Dockerfile`（Fat JAR + 内嵌前端），`dev`
-# 发布带有持久源码工作区与开发工具链的 `deploy/dev/Dockerfile`。两个分支都先跑
-# 仓库质量门禁，再以 linux/amd64 推送 `:<branch>` 与 `:<commit-sha>` 两个 tag；
-# 真实模型 E2E、UI E2E 等付费/长耗时检查不在本文工作流内。
+# `main` 先跑仓库质量门禁，再发布不可变生产镜像 `deploy/local/Dockerfile`
+#（Fat JAR + 内嵌前端）；`dev` 的检查在提交前完成，push 后直接发布带有持久源码工作区
+# 与开发工具链的 `deploy/dev/Dockerfile`。两个分支都以 linux/amd64 推送
+# `:<branch>` 与 `:<commit-sha>` 两个 tag；真实模型 E2E、UI E2E 等付费/长耗时检查
+# 不在本文工作流内。
 #
 # Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
 # 或 build log。
@@ -31,6 +32,7 @@ env:
 jobs:
   validate:
     name: validate repository
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +71,14 @@ jobs:
   publish:
     name: build and push image
     needs: validate
+    # `main` 只能在全量门禁成功后发布；`dev` 的 validate job 按设计为 skipped，
+    # 仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
+    if: >-
+      ${{
+        always()
+        && !cancelled()
+        && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

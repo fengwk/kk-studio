@@ -760,11 +760,15 @@ class TestNasDevImageContracts(unittest.TestCase):
 
     def test_publish_workflow_selects_the_branch_specific_image(self):
         # Intent: `main` publishes the immutable production image, `dev` the
-        # self-iteration image; both keep an immutable commit tag.
+        # self-iteration image; both keep an immutable commit tag, while a skipped
+        # dev-only validation job must not suppress the dev image publication.
         workflow = PUBLISH_WORKFLOW.read_text()
         self.assertRegex(workflow, r"(?m)^on:\n  push:\n    branches:\n      - main\n      - dev\n")
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("needs: validate", workflow)
+        self.assertIn("always()", workflow)
+        self.assertIn("needs.validate.result == 'success'", workflow)
+        self.assertIn("needs.validate.result == 'skipped'", workflow)
         self.assertIn("cancel-in-progress: true", workflow)
         self.assertIn("platforms: linux/amd64", workflow)
         self.assertIn("cache-from: type=gha", workflow)
@@ -782,10 +786,15 @@ class TestNasDevImageContracts(unittest.TestCase):
         # Unknown refs must fail instead of publishing an unintended image.
         self.assertIn("unsupported publish branch", workflow)
 
-    def test_publish_workflow_validates_and_keeps_credentials_in_secrets(self):
-        # Intent: images may only be pushed after the repository gates pass, and registry
-        # credentials must never become build args, image content or paid E2E runs.
+    def test_publish_workflow_validates_main_only_and_keeps_credentials_in_secrets(self):
+        # Intent: the production image requires the complete repository gate, while dev trusts
+        # pre-push validation and publishes directly; registry credentials must remain secret.
         workflow = PUBLISH_WORKFLOW.read_text()
+        self.assertRegex(
+            workflow,
+            r"(?m)^  validate:\n    name: validate repository\n"
+            r"    if: github\.ref_name == 'main'$",
+        )
         for gate in (
             "mvn -B -ntp verify",
             "npm --prefix frontend ci",

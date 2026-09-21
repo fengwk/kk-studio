@@ -421,8 +421,9 @@ healthcheck 的 start period 取 `--start-period=2700s`，覆盖冷启动并留�
 ### 发布产物与凭据边界
 
 [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送 `main`
-时构建并发布 `<namespace>/kk-studio:main`，在推送 `dev` 时构建并发布
-`<namespace>/kk-studio-dev:dev`，两者都附带 immutable commit SHA tag、`linux/amd64` 平台和
+时先执行全仓 Java/Frontend/脚本质量门禁，再构建并发布 `<namespace>/kk-studio:main`；推送 `dev`
+时依赖提交前检查，跳过这组重复的全仓门禁，直接构建并发布
+`<namespace>/kk-studio-dev:dev`。两者都附带 immutable commit SHA tag、`linux/amd64` 平台和
 Buildx GHA cache；Docker Hub 凭据只来自 Actions secrets，不作为 build arg 或 image layer。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、Gateway、
