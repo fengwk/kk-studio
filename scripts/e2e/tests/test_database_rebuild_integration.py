@@ -29,8 +29,8 @@ V1_MIGRATION = (
     REPOSITORY_ROOT / "schema" / "src" / "main" / "resources" / "db" / "migration" / "V1__schema.sql"
 )
 FIXTURES = Path(__file__).resolve().parent / "resources" / "database_rebuild"
-LEGACY_SOURCE_FIXTURE = FIXTURES / "legacy_source.sql"
-CURRENT_EDGE_FIXTURE = FIXTURES / "current_edge_fixture.sql"
+LEGACY_SOURCE_FIXTURE = FIXTURES / "legacy_source.psql"
+CURRENT_EDGE_FIXTURE = FIXTURES / "current_edge_fixture.psql"
 
 #: Throwaway server.  The image also has to be pullable; a missing image is a provisioning failure
 #: and must fail the test rather than silently skip it.
