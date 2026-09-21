@@ -22,6 +22,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -507,7 +508,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
    * <p>只靠 HTTP 请求期限不足以约束响应体：服务端可以在读完响应头后一直不发送正文，让阻塞的 {@code read} 永久挂住调用线程。因此这里把复制放到 daemon
    * 线程，超时后关闭响应体让读线程尽快退出，并在调用线程上立刻给出确定性失败。字节预算仍在读循环内逐块判定。
    */
-  private static final class StreamingCopy implements Runnable {
+  private static final class StreamingCopy {
 
     private final InputStream source;
     private final Path target;
@@ -529,38 +530,47 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
 
     /** 在调用线程上等待复制完成；超时或中断时收敛为确定性失败并关闭响应体。 */
     void awaitCompletion() {
-      Thread worker = new Thread(this, "plugin-media-staging");
-      worker.setDaemon(true);
-      worker.start();
-      long remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
-      if (remainingMillis <= 0L) {
-        fail(
-            new PluginResourceUnavailableException(
-                "remote media download exceeded the response deadline"));
+      // 调用线程先持有输出流，确保迟启动的 worker 无法在超时清理后重新创建目标文件。
+      try (OutputStream output =
+          Files.newOutputStream(
+              target, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+        long remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
+        if (remainingMillis <= 0L) {
+          fail(
+              new PluginResourceUnavailableException(
+                  "remote media download exceeded the response deadline"));
+          closeQuietly(source);
+          return;
+        }
+        Thread worker = new Thread(() -> copyTo(output), "plugin-media-staging");
+        worker.setDaemon(true);
+        worker.start();
+        try {
+          worker.join(remainingMillis);
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          closeQuietly(source);
+          worker.interrupt();
+          fail(
+              new PluginResourceUnavailableException(
+                  "remote media download was interrupted", error));
+          return;
+        }
+        if (worker.isAlive()) {
+          fail(
+              new PluginResourceUnavailableException(
+                  "remote media download exceeded the response deadline"));
+          closeQuietly(source);
+          worker.interrupt();
+        }
+      } catch (IOException error) {
         closeQuietly(source);
-        return;
-      }
-      try {
-        worker.join(remainingMillis);
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-        closeQuietly(source);
-        fail(
-            new PluginResourceUnavailableException("remote media download was interrupted", error));
-        return;
-      }
-      if (worker.isAlive()) {
-        fail(
-            new PluginResourceUnavailableException(
-                "remote media download exceeded the response deadline"));
-        closeQuietly(source);
+        fail(new PluginResourceUnavailableException("cannot stage remote media", error));
       }
     }
 
-    @Override
-    public void run() {
-      try (InputStream body = source;
-          OutputStream out = Files.newOutputStream(target)) {
+    private void copyTo(OutputStream output) {
+      try (InputStream body = source) {
         byte[] buffer = new byte[COPY_BUFFER_BYTES];
         int read = body.read(buffer);
         while (read != -1) {
@@ -572,7 +582,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
             return;
           }
           digest.update(buffer, 0, read);
-          out.write(buffer, 0, read);
+          output.write(buffer, 0, read);
           headLength = copyHead(buffer, head, headLength, read);
           read = body.read(buffer);
         }
