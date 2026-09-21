@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
+import fun.fengwk.kkstudio.harness.daemon.skill.SkillPackageInstaller;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonConnection;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransport;
 import fun.fengwk.kkstudio.harness.daemon.transport.DaemonTransportListener;
@@ -126,12 +127,16 @@ public final class DaemonRuntime implements AutoCloseable {
    * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由 runtime
    * 独占生命周期；任一步构造失败都会释放 transport 和已创建的执行资源。
    */
-  public static DaemonRuntime create(DaemonConfig config, CodingToolsConfig toolsConfig) {
+  public static DaemonRuntime create(
+      DaemonConfig config, CodingToolsConfig toolsConfig, DaemonDataDirectory dataDirectory) {
     Objects.requireNonNull(toolsConfig, "toolsConfig");
+    Objects.requireNonNull(dataDirectory, "dataDirectory");
+    SkillPackageInstaller skillInstaller = SkillPackageInstaller.open(dataDirectory);
     return create(
         config,
         (registry, executor, scheduler) ->
-            CodingCapabilities.registerAll(registry, toolsConfig, executor, scheduler));
+            CodingCapabilities.registerAll(
+                registry, toolsConfig, skillInstaller, executor, scheduler));
   }
 
   static DaemonRuntime create(DaemonConfig config, CapabilityRegistrar registrar) {

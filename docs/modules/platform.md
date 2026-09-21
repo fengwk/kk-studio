@@ -568,13 +568,17 @@ Platform 侧的产品适配器只做映射，不持有会话状态：[Environmen
 和管理页面仍可读取最后一次已接受的 OS、时区、进程用户、HOME 与可选备注。
 
 每次 READY 与 Package 发布都会异步调用内部 `skill.sync` capability。Daemon 返回每个
-Package 的 installed commit 与稳定本地根目录；Platform 只在 installed commit 等于
-Package `currentCommit` 时向 Prompt 注入
-`<data-dir>/skills/<package>/<skill>/SKILL.md`，否则注入 Platform URI。同步失败不阻塞
-Environment 的其它能力，也不回退或覆盖 Daemon 已安装的旧包。
+Package 的 installed commit 与稳定本地根目录；结果按本次请求严格校验：只接受恰好
+`packageName`、`installedCommit`、`localPath` 三个字段的 object，Package 名必须一致、
+commit 必须等于该 Package 的 `currentCommit` 且是 canonical 形状、`localPath` 必须是目标
+Daemon OS 上的显式绝对路径且以该 Package 根目录结尾，任何缺失、多余或形状不符的值都收敛为
+固定的去敏失败摘要。Platform 只在 installed commit 等于 Package `currentCommit` 时向
+Prompt 注入 `<data-dir>/skills/<package>/<skill>/SKILL.md`，否则注入 Platform URI。同步
+失败不阻塞 Environment 的其它能力，也不回退或覆盖 Daemon 已安装的旧包。
 同步按 Package 独立调用并使用固定 deadline：HTTP 发布在数据库提交后立即返回，不等待
 任何 Daemon；离线 Environment 跳过，单包失败继续其它包，下次 READY 或显式重试再次
-收敛。
+收敛。编排器本身是 Platform 组件，但它的 Spring 组合属于 web 组合根（它依赖 Environment
+会话核心的 capability 传输），因此 Platform-only 上下文不会因为缺少该传输而启动失败。
 
 同步结果按 owner/lease fence 写入 `environment_connection.skill_state`。连接、READY、
 断开与同步开始/成功/失败同时追加到该行有界的 `recent_events`，只记录结构化、去敏的
@@ -889,7 +893,7 @@ token 或 OpenCLI instance identity。
 | key | owner | 边界 |
 | --- | --- | --- |
 | `kk-studio.harness.dispatcher.*` | platform | Work claim/handoff 租约、轮询、拒绝退避与 bounded worker 容量；默认 `64/30s/1s/1s/16/64`（maxDispatchTasks/lease/poll/rejection/worker/queue） |
-| `kk-studio.harness.execution-admission.{model,tool,subagent}` | platform | 进程级容量，默认 `16/64/10` |
+| `kk-studio.harness.execution-admission.{model,tool,subagent,skill-sync}` | platform | 进程级容量，默认 `16/64/10/8`；`skill-sync` 约束 Environment Skill Package 同步的并发（单 Environment 串行） |
 | `kk-studio.harness.runtime.{workers-enabled,resource-root,skill-cache-root}` | platform | worker 开关、内容寻址 Resource 存储根与 bare Skill Git cache 根（默认位于 `<cwd>/.kkstudio/`） |
 | `kk-studio.project.controller.*` | platform | Issue Controller lease 30s、poll 1s、retry 5s、blocked 60s、run 30m、continuation 10、worker `8 + queue 64` |
 | `kk-studio.storage.s3.{endpoint,public-endpoint,region,bucket,access-key,secret-key}` | platform | S3/MinIO 服务端与 presign endpoint；bucket 只能由服务端配置 |

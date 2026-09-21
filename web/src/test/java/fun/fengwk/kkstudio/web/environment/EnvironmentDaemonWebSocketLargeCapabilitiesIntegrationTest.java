@@ -21,6 +21,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
@@ -125,9 +126,18 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
       assertEquals("/home/dev", connection.daemonCapabilities().environment().homeDirectory());
       assertEquals("dev", connection.userName());
       assertEquals("/home/dev", connection.homeDirectory());
+      // 注册表暴露的 capability 只能是 Platform canonical catalog 的精确投影。
+      assertEquals(
+          EnvironmentCapabilityCatalog.descriptors().stream()
+              .map(descriptor -> descriptor.id().value())
+              .toList(),
+          connection.capabilities().stream().map(c -> c.id().value()).toList());
+      // skill.* 命名空间只允许内部的 skill.sync：旧版面向模型的 skill capability 必须彻底消失。
       assertTrue(
-          connection.capabilities().stream().noneMatch(c -> c.id().value().startsWith("skill.")),
-          "registry capabilities must be MCP and platform catalog only, without legacy skill capabilities");
+          connection.capabilities().stream()
+              .filter(c -> c.id().value().startsWith("skill."))
+              .allMatch(c -> EnvironmentCapabilityIds.SKILL_SYNC.value().equals(c.id().value())),
+          "only the internal skill.sync capability may use the skill.* namespace");
     } finally {
       client.dispatcher().executorService().shutdown();
       client.connectionPool().evictAll();

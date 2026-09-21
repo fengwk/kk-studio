@@ -35,12 +35,13 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
   return {
     id: 'env-id-1',
     name: 'env',
-    userName: null,
-    homeDirectory: null,
     status: 'READY',
     ready: true,
     lastSeen: null,
     capabilities: [],
+    userName: null,
+    homeDirectory: null,
+    lastEvent: null,
     version: '1',
     createTime: '2026-07-20T00:00:00.000Z',
     updateTime: '2026-07-20T00:00:00.000Z',
@@ -78,7 +79,7 @@ describe('EnvironmentsPage', () => {
         status: 'READY',
         ready: true,
         lastSeen: '2026-07-20T01:02:03.000Z',
-        capabilities: [{ id: 'process.exec', version: '1' }],
+        capabilities: [{ id: 'process.exec', version: '2' }],
         version: '1',
         createTime: '2026-07-20T00:00:00.000Z',
         updateTime: '2026-07-20T00:00:00.000Z',
@@ -163,6 +164,7 @@ describe('EnvironmentsPage', () => {
       lastSeen: null,
       capabilities: [],
       userName: null,
+      homeDirectory: null,
       version: '1',
       createTime: '2026-07-20T00:00:00.000Z',
       updateTime: '2026-07-20T00:00:00.000Z',
@@ -448,5 +450,45 @@ describe('EnvironmentsPage', () => {
 
     // 验证列表真正为空时不渲染多余的 StateBlock 文本
     expect(screen.queryByText('当前没有 Environment')).not.toBeInTheDocument()
+  })
+
+  /**
+   * 测试意图：验证环境卡片在存在 lastEvent 时呈现其级别、类型、时间与说明，
+   * 且在没有 lastEvent 时不呈现多余的事件信息。
+   */
+  it('surfaces lastEvent when present and renders nothing extra when absent', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({
+        id: 'env-with-event',
+        name: 'error-box',
+        lastEvent: {
+          time: '2026-07-20T01:02:03.000Z',
+          level: 'ERROR',
+          type: 'SKILL_SYNC_FAILED',
+          message: 'Failed to synchronize skill package git repo',
+        },
+      }),
+      environment({
+        id: 'env-without-event',
+        name: 'clean-box',
+        lastEvent: null,
+      }),
+    ])
+    renderPage()
+
+    expect(await screen.findByText('error-box')).toBeInTheDocument()
+    expect(screen.getByText('clean-box')).toBeInTheDocument()
+
+    // 含有 lastEvent 的卡片呈现 level / type / time / message
+    expect(screen.getByText('ERROR')).toBeInTheDocument()
+    expect(screen.getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
+    expect(screen.getByText('Failed to synchronize skill package git repo')).toBeInTheDocument()
+
+    // 检查卡片，验证 clean-box 不呈现 lastEvent 区域，而 error-box 呈现 lastEvent
+    const errorCard = screen.getByRole('heading', { name: 'error-box' }).closest('article')!
+    const cleanCard = screen.getByRole('heading', { name: 'clean-box' }).closest('article')!
+    expect(within(errorCard).getByText('SKILL_SYNC_FAILED')).toBeInTheDocument()
+    expect(within(cleanCard).queryByText('SKILL_SYNC_FAILED')).not.toBeInTheDocument()
+    expect(within(cleanCard).queryByText('ERROR')).not.toBeInTheDocument()
   })
 })

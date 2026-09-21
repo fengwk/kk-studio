@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -42,6 +43,7 @@ public final class SystemPromptPreviewService {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPromptPathResolver skillPromptPathResolver;
   private final AgentPromptComposer promptComposer;
   private final Clock clock;
 
@@ -52,6 +54,7 @@ public final class SystemPromptPreviewService {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       SkillCatalogQueryService skillCatalogQueryService,
+      SkillPromptPathResolver skillPromptPathResolver,
       AgentPromptComposer promptComposer,
       Clock clock) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
@@ -63,6 +66,8 @@ public final class SystemPromptPreviewService {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillCatalogQueryService =
         Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPromptPathResolver =
+        Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
@@ -87,7 +92,7 @@ public final class SystemPromptPreviewService {
     return promptComposer.compose(
         agent.getSystemPrompt(),
         environment,
-        previewSkills(config.getSkills()),
+        previewSkills(environment.environmentId(), config.getSkills()),
         previewSubagents(config.getSubagents()));
   }
 
@@ -123,7 +128,8 @@ public final class SystemPromptPreviewService {
    *
    * <p>保持只读预览的宽容契约：目录中不存在的名称被省略，绝不因单个失效名称使整段预览失败。
    */
-  private List<SkillPromptEntry> previewSkills(List<SkillRefDTO> skillRefs) {
+  private List<SkillPromptEntry> previewSkills(
+      EnvironmentId environmentId, List<SkillRefDTO> skillRefs) {
     if (skillRefs == null || skillRefs.isEmpty()) {
       return List.of();
     }
@@ -145,11 +151,22 @@ public final class SystemPromptPreviewService {
               new SkillPromptEntry(
                   manifest.name(),
                   manifest.description(),
-                  "kkstudio:/skills/" + ref.getPackageName() + "/" + ref.getName() + "/SKILL.md"));
+                  skillPath(environmentId, pkg, manifest)));
         }
       }
     }
     return List.copyOf(entries);
+  }
+
+  /** 路径解析失败只回退 platform URI：只读预览绝不因单个 skill 的本地投影异常而整段失败。 */
+  private String skillPath(
+      EnvironmentId environmentId, SkillPackage pkg, SkillManifestEntry skill) {
+    try {
+      return skillPromptPathResolver.resolve(
+          environmentId, pkg.getPackageName(), skill.name(), pkg.getCurrentCommit());
+    } catch (RuntimeException error) {
+      return SkillPromptPathResolver.platformPath(pkg.getPackageName(), skill.name());
+    }
   }
 
   private List<SubagentBinding> previewSubagents(List<String> names) {

@@ -2,12 +2,16 @@ import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
+  EnvironmentEventDTO,
   EnvironmentRegistrationTokenDTO,
 } from '@/shared/api/contracts/ai-environment'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
   return {
     listEnvironments: (): Promise<EnvironmentCardDTO[]> => client.get('/harness/environments'),
+
+    listEnvironmentEvents: (id: string): Promise<EnvironmentEventDTO[]> =>
+      client.get(`/harness/environments/${encodeURIComponent(id)}/events`),
 
     getEnvironment: (id: string): Promise<EnvironmentCardDTO> =>
       client.get(`/harness/environments/${encodeURIComponent(id)}`),

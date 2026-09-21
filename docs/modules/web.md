@@ -71,6 +71,9 @@ WebApplication
   `harnessModelFlushExecutor` 执行；
 - `HarnessWorkDispatcher` 使用单线程 drain、bounded worker executor、poll scheduler 与
   `harness_work` claim；
+- `EnvironmentSkillSyncOrchestrator` 与它的 bounded `environmentSkillSyncExecutor`
+  在这里装配：它依赖 Environment 会话核心提供的 `EnvironmentCapabilityTransport`，因此
+  Platform 自动配置不持有这个组合，Platform-only 上下文不会因为缺少该传输而启动失败；
 - `HarnessRuntimeLifecycle` 只控制 dispatcher 是否启动，Runtime control/query、store、
   processor 与 realtime bean 始终由 context 持有。
 
@@ -119,7 +122,7 @@ result status 对齐。
 | Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|commands|snapshot` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 Coordinator Harness command |
 | Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/status|dependencies|inputs|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、六态迁移、依赖、追加输入、Run 人工动作与归档 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
-| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息直接随 Card 返回 |
+| Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
 | ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
@@ -234,6 +237,7 @@ canvas_version
 project_issue_changed
 system_settings_changed
 harness_realtime
+skill_package_changed
 ```
 
 Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread：连接建立后一次性
@@ -243,8 +247,10 @@ Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread：�
 破坏 LISTEN 循环，空闲无通知时不会触发意外断连与额外 resync。某个 handler 抛错只隔离
 该 handler，不终止 loop；连接断开按 backoff 重连，重连成功再次 resync。关闭顺序是
 `connection.abort` → interrupt loop thread → 最多 5s join，`SmartLifecycle.close` 幂等。
-前三个 channel 只做 dispatcher wake，version、realtime、settings 和 Project handler
-负责各自的 snapshot/resync 逻辑，NOTIFY 本身不是 durable event log。
+前三个 channel 只做 dispatcher wake，version、realtime、settings、Project 与 Skill Package
+handler 负责各自的 snapshot/resync 逻辑，NOTIFY 本身不是 durable event log；
+`skill_package_changed` 的 payload 是 package 名，resync 对本节点全部 READY Environment
+做全量对账。
 
 ### Application Event WebSocket
 

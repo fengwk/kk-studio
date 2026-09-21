@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Check, Copy, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
-import { filterEnvironments, formatTimestamp } from '@/features/ai/environment/environment-utils'
+import {
+  environmentEventLevelClass,
+  filterEnvironments,
+  formatTimestamp,
+} from '@/features/ai/environment/environment-utils'
 import { copyTextToClipboard } from '@/features/ai/environment/clipboard'
 import { EnvironmentManagementModal } from '@/features/ai/environment/EnvironmentManagementModal'
 import { CreateCard, StateBlock } from '@/shared/ui/console/AiConsoleCommonCards'
@@ -260,6 +264,8 @@ export function EnvironmentsPage() {
               .map((capability) => capability.id)
               .filter(Boolean)
             const lastSeen = formatTimestamp(environment.lastSeen, locale)
+            const lastEvent = environment.lastEvent
+            const lastEventTime = lastEvent ? formatTimestamp(lastEvent.time, locale) : ''
             return (
               <article key={environment.id} className="info-card environment-card">
                 <div className="head">
@@ -293,6 +299,24 @@ export function EnvironmentsPage() {
                     </div>
                   ) : null}
                   <TagRow label={t('ai.environment.capabilities')} names={capabilityIds} />
+                  {lastEvent ? (
+                    <div className={`env-last-event ${environmentEventLevelClass(lastEvent.level)}`}>
+                      <div className="env-last-event-header">
+                        <span
+                          className={`env-event-level ${environmentEventLevelClass(lastEvent.level)}`}
+                        >
+                          {lastEvent.level}
+                        </span>
+                        <span className="env-event-type">{lastEvent.type}</span>
+                        {lastEventTime ? (
+                          <span className="env-event-time">{lastEventTime}</span>
+                        ) : null}
+                      </div>
+                      <p className="env-last-event-message" title={lastEvent.message}>
+                        {lastEvent.message}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="chat-card-foot split">
                   <button

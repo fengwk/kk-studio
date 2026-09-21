@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
 
@@ -89,6 +91,24 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       results.add(toCardDto(env, false));
     }
     return List.copyOf(results);
+  }
+
+  @Override
+  public List<EnvironmentEventDTO> listEvents(EnvironmentId id) {
+    Objects.requireNonNull(id, "id");
+    if (environmentRepository.getById(id.value()) == null) {
+      throw new AiResourceNotFoundException(RESOURCE);
+    }
+    // 事件与 Card 的 lastEvent 同源：连接行保留的可重建投影；从未连接的 Environment 没有事件。
+    EnvironmentConnection connection = environmentRegistry.find(id).orElse(null);
+    if (connection == null) {
+      return List.of();
+    }
+    List<EnvironmentEventDTO> events = new ArrayList<>(connection.recentEvents().size());
+    for (EnvironmentEvent event : connection.recentEvents()) {
+      events.add(toEventDto(event));
+    }
+    return List.copyOf(events);
   }
 
   @Override
@@ -176,6 +196,15 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return count != null && count > 0;
   }
 
+  private static EnvironmentEventDTO toEventDto(EnvironmentEvent event) {
+    EnvironmentEventDTO dto = new EnvironmentEventDTO();
+    dto.setTime(event.time());
+    dto.setLevel(event.level());
+    dto.setType(event.type());
+    dto.setMessage(event.message());
+    return dto;
+  }
+
   private String validateName(String raw) {
     if (raw == null) {
       throw new AiValidationException(RESOURCE, "environment name must not be blank");
@@ -232,6 +261,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     dto.setNote(host == null ? null : host.note());
     dto.setUserName(host == null ? null : host.userName());
     dto.setHomeDirectory(host == null ? null : host.homeDirectory());
+    dto.setLastEvent(conn.lastAlert().map(EnvironmentServiceImpl::toEventDto).orElse(null));
     dto.setCapabilities(
         conn.capabilities().stream()
             .map(

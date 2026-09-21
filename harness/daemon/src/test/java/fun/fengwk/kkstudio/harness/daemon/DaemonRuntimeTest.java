@@ -310,11 +310,13 @@ class DaemonRuntimeTest {
             dataDir());
     CodingToolsConfig toolsConfig = TestCodingConfig.withBridge(WORKSPACE_ROOT);
 
-    runtime = DaemonRuntime.create(config, toolsConfig);
+    try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(config.dataDir())) {
+      runtime = DaemonRuntime.create(config, toolsConfig, dataDirectory);
 
-    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
-    runtime.close();
-    assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+      assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+      runtime.close();
+      assertEquals(DaemonRuntimeState.STOPPED, runtime.state());
+    }
   }
 
   /** 生产装配在 capability 注册失败时必须释放已经创建的 scheduler/executor。 */
@@ -527,7 +529,13 @@ class DaemonRuntimeTest {
       transport.takeMessages(2);
 
       // 相对 path 省略 workdir：请求形状合法，但执行期拒绝且绝不回退到任何默认目录。
-      transport.receive(invoke("missing-workdir", "fs.read", "1", 100, "{\"path\":\"local.txt\"}"));
+      transport.receive(
+          invoke(
+              "missing-workdir",
+              "fs.read",
+              EnvironmentCapabilityCatalog.version(),
+              100,
+              "{\"path\":\"local.txt\"}"));
       List<DaemonEnvelope> missing = transport.takeMessages(2);
       assertMessageTypes(missing, STARTED, DaemonMessageType.COMPLETED);
       String failure = missing.get(1).payloadJson();
@@ -539,7 +547,7 @@ class DaemonRuntimeTest {
           invoke(
               "explicit-workdir",
               "fs.read",
-              "1",
+              EnvironmentCapabilityCatalog.version(),
               100,
               "{\"path\":\"local.txt\",\"workdir\":\"" + jsonEscape(root.toString()) + "\"}"));
       assertMessageTypes(transport.takeMessages(2), STARTED, DaemonMessageType.COMPLETED);
@@ -846,7 +854,7 @@ class DaemonRuntimeTest {
           invoke(
               "write-timeout",
               "fs.write",
-              "1",
+              EnvironmentCapabilityCatalog.version(),
               100,
               "{\"workdir\":\""
                   + jsonEscape(root.toString())

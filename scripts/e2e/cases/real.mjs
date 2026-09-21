@@ -1738,14 +1738,18 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影固定 9 个模型可见 capabilities + rootPath（daemon canonical Environment Root），capability 均为 version=1，且不公开产品目录或 READY environment metadata',
+  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影 10 项 capability（9 项模型可见 + 内部 skill.sync），descriptor version 与 catalog VERSION 同为 2，并投影宿主事实 userName/homeDirectory，且不公开产品目录、raw READY environment metadata、工具或凭据',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
     assert(match?.status === 'READY', safeDiagnosticJson(match))
     canonicalUuid(match.id, 'match.id')
     assert(
-      typeof match.rootPath === 'string' && match.rootPath.length > 0,
+      typeof match.userName === 'string' && match.userName.length > 0,
+      safeDiagnosticJson(match),
+    )
+    assert(
+      typeof match.homeDirectory === 'string' && match.homeDirectory.startsWith('/'),
       safeDiagnosticJson(match),
     )
     // 目录浏览能力已随产品 Workspace 删除，不再是 catalog 的一部分。
@@ -1760,7 +1764,12 @@ registerCase({
       'lsp.workspace-symbols',
       'lsp.java-decompile',
     ]
-    const expectedCapabilities = modelCapabilityIds.map((id) => ({ id, version: '1' }))
+    // descriptor version 就是 catalog VERSION（当前为 2）；内部 skill.sync 是 catalog 的一部分但
+    // 不注册为模型工具，因此同样出现在 canonical 投影里。
+    const expectedCapabilities = [...modelCapabilityIds, 'skill.sync'].map((id) => ({
+      id,
+      version: '2',
+    }))
     const actualCapabilities = match.capabilities || []
     const actualIdentity = actualCapabilities.map(({ id, version }) => ({ id, version }))
     const ids = actualIdentity.map(({ id }) => id)
@@ -1770,14 +1779,14 @@ registerCase({
     )
     assert(!ids.includes('fs.list-directory'), safeDiagnosticJson(actualCapabilities))
     assert(!ids.some((id) => id.startsWith('skill.source.')), safeDiagnosticJson(actualCapabilities))
+    // Card 只投影 canonical capability 与保留的宿主事实：不公开工具/技能目录、raw workdir 或凭据。
     assert(
       !Object.hasOwn(match, 'tools')
         && !Object.hasOwn(match, 'skills')
         && !Object.hasOwn(match, 'mcpServers')
-        && !Object.hasOwn(match, 'operatingSystem')
         && !Object.hasOwn(match, 'workingDirectory')
-        && !Object.hasOwn(match, 'timeZone')
-        && !Object.hasOwn(match, 'note'),
+        && !Object.hasOwn(match, 'rootPath')
+        && !Object.hasOwn(match, 'registrationToken'),
       safeDiagnosticJson(match),
     )
     assert(match.ready === true, safeDiagnosticJson(match))

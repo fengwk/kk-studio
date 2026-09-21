@@ -1001,15 +1001,15 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     edit: `edit tool card ${stamp} ${suffix}`,
     write: `write tool card ${stamp} ${suffix}`,
   }
-  // 工具 arguments 必须显式携带目标 Daemon 上的绝对 workdir；Card 的 rootPath 就是该 Daemon 的 canonical root。
+  // 工具 arguments 必须显式携带目标 Daemon 上已存在的绝对 workdir；Card 保留的 homeDirectory 就是该 Daemon 上的绝对宿主目录。
   const environments = await listEnvironments(apiCtx)
   const matchedEnv = environments.find((e) => e.name === daemonEnv)
   assert(matchedEnv, `daemonEnv missing: ${daemonEnv}`)
   assert(
-    typeof matchedEnv.rootPath === 'string' && matchedEnv.rootPath.startsWith('/'),
-    `daemonEnv '${daemonEnv}' must project an absolute rootPath for explicit workdir arguments: ${JSON.stringify(matchedEnv)}`,
+    typeof matchedEnv.homeDirectory === 'string' && matchedEnv.homeDirectory.startsWith('/'),
+    `daemonEnv '${daemonEnv}' must project an absolute homeDirectory for explicit workdir arguments: ${JSON.stringify(matchedEnv)}`,
   )
-  const workdir = matchedEnv.rootPath
+  const workdir = matchedEnv.homeDirectory
   const path =
     `${workdir}/${'very-long-directory-segment/'.repeat(12)}`
     + 'QuickSort.java'

@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
@@ -37,7 +38,11 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
+import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
@@ -72,11 +77,22 @@ import java.util.concurrent.TimeUnit;
  * 经 {@link InvocationRetryPolicyProvider} 每次判定点现读。本组合根不持有任何硬编码的重复默认值。
  *
  * <p>所有 executor 线程均为 daemon 并以 {@code destroyMethod = "shutdown"} 交给 Spring 持有生命周期；dispatcher 使用
- * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor。
+ * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor，Skill 同步使用部署级容量的 bounded
+ * AbortPolicy executor。
+ *
+ * <p>依赖 Environment 会话核心（{@code EnvironmentCapabilityTransport}）的组件只在这里装配：Platform 的自动配置不参与 Harness
+ * 组合，任何只装配 Platform 的上下文都不会因为缺少该传输而启动失败。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({HarnessRuntimeProperties.class, HarnessDispatcherProperties.class})
+@EnableConfigurationProperties({
+  HarnessRuntimeProperties.class,
+  HarnessDispatcherProperties.class,
+  HarnessExecutionAdmissionProperties.class
+})
 public class HarnessRuntimeConfiguration {
+
+  /** 每个 skill 同步并发槽位可排队的任务数：容量有界，突发只排队不无界建线程。 */
+  private static final int SKILL_SYNC_QUEUE_PER_SLOT = 8;
 
   @Bean
   public Clock clock() {
@@ -354,13 +370,67 @@ public class HarnessRuntimeConfiguration {
         toolProcessor);
   }
 
-  /** READY 事件作为唤醒提示：唤醒可选的 HarnessWorkDispatcher，异常不影响监听器本身。 */
+  /**
+   * Skill 同步专用 executor：固定并发 + 有界队列 + AbortPolicy。
+   *
+   * <p>每个任务在等待 capability 终态时阻塞至多一个 Package 的调用超时，因此并发必须受部署级容量约束；容量用尽时显式拒绝， 绝不无界建线程。被拒绝的同步不会重放：下一次
+   * READY 或通知重连对账会重新收敛。
+   */
+  @Bean(name = "environmentSkillSyncExecutor", destroyMethod = "shutdown")
+  public ExecutorService environmentSkillSyncExecutor(
+      HarnessExecutionAdmissionProperties admissionProperties) {
+    int concurrency = admissionProperties.getSkillSync();
+    return new ThreadPoolExecutor(
+        concurrency,
+        concurrency,
+        0L,
+        TimeUnit.MILLISECONDS,
+        new LinkedBlockingQueue<>(concurrency * SKILL_SYNC_QUEUE_PER_SLOT),
+        Thread.ofVirtual().name("environment-skill-sync-", 0L).factory(),
+        new ThreadPoolExecutor.AbortPolicy());
+  }
+
+  /**
+   * Environment Skill Package 同步编排器。
+   *
+   * <p>它依赖 {@code EnvironmentCapabilityTransport}（即 Environment 会话核心），因此只在组合根装配：Platform 的 自动配置不参与
+   * Harness 组合，任何只装配 Platform 的上下文都不会因为缺少该传输而启动失败。
+   */
+  @Bean
+  public EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator(
+      EnvironmentRegistry environmentRegistry,
+      SkillCatalogQueryService skillCatalogQueryService,
+      EnvironmentCapabilityTransport capabilityTransport,
+      @Qualifier("environmentSkillSyncExecutor") ExecutorService environmentSkillSyncExecutor,
+      Clock clock) {
+    return new EnvironmentSkillSyncOrchestrator(
+        environmentRegistry,
+        skillCatalogQueryService,
+        capabilityTransport,
+        environmentSkillSyncExecutor,
+        clock);
+  }
+
+  /**
+   * READY 事件的组合宿主：唤醒可选的 HarnessWorkDispatcher，并触发该 Environment 的 Skill 全量同步。
+   *
+   * <p>两个动作都立刻返回且各自隔离异常：READY 的会话状态推进会先落库，任何宿主回调失败都不得影响会话本身。
+   *
+   * <p>两个协作者都用延迟解析：dispatcher 与 Skill 同步编排器都经由 capability 传输间接依赖本监听器（daemon server → listener →
+   * orchestrator），启动期直接注入会形成环。
+   */
   @Bean
   public EnvironmentSessionListener compositeEnvironmentSessionListener(
-      ObjectProvider<HarnessWorkDispatcher> dispatcherProvider) {
-    return ignoredEnvironmentId -> {
+      ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
+      ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider) {
+    return environmentId -> {
       try {
         dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
+      } catch (RuntimeException ignored) {
+      }
+      try {
+        orchestratorProvider.ifAvailable(
+            orchestrator -> orchestrator.onEnvironmentReady(environmentId));
       } catch (RuntimeException ignored) {
       }
     };

@@ -59,6 +59,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
@@ -110,6 +111,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPromptPathResolver skillPromptPathResolver;
   private final CompactionConfigProvider compactionConfigProvider;
   private final AgentPromptComposer promptComposer;
   private final ProjectRoleToolSelector roleToolSelector;
@@ -130,6 +132,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       SkillCatalogQueryService skillCatalogQueryService,
+      SkillPromptPathResolver skillPromptPathResolver,
       CompactionConfigProvider compactionConfigProvider,
       AgentPromptComposer promptComposer,
       ProjectRoleToolSelector roleToolSelector,
@@ -149,6 +152,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.skillCatalogQueryService =
         Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPromptPathResolver =
+        Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
@@ -229,7 +234,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment, now);
     // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。
     EnvironmentId environmentId = currentEnvironment.environmentId();
-    List<SkillPromptEntry> skills = resolveSkills(agentConfig.getSkills());
+    List<SkillPromptEntry> skills = resolveSkills(environmentId, agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
     List<String> toolNames = resolveToolNames(agentConfig, threadId);
     List<ToolBinding> toolBindings =
@@ -530,8 +535,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
    *
    * <p>通过 {@link SkillCatalogQueryService#getPackage(String)} 读取 Platform 权威事实，按 (packageName,
    * name) 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
+   *
+   * <p>路径由 {@link SkillPromptPathResolver} 决定：只有选定 Environment 的 skill_state 记录的已安装 commit 与
+   * Package 的 currentCommit 完全一致时才冻结 Daemon 本地稳定路径，否则冻结 platform URI。
    */
-  private List<SkillPromptEntry> resolveSkills(List<SkillRefDTO> skillRefs) {
+  private List<SkillPromptEntry> resolveSkills(
+      EnvironmentId environmentId, List<SkillRefDTO> skillRefs) {
     if (skillRefs == null || skillRefs.isEmpty()) {
       return List.of();
     }
@@ -560,7 +569,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
           new SkillPromptEntry(
               entry.name(),
               entry.description(),
-              "kkstudio:/skills/" + ref.getPackageName() + "/" + ref.getName() + "/SKILL.md"));
+              skillPromptPathResolver.resolve(
+                  environmentId, ref.getPackageName(), ref.getName(), pkg.getCurrentCommit())));
     }
     return List.copyOf(entries);
   }

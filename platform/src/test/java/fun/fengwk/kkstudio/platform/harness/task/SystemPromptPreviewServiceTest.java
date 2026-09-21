@@ -28,8 +28,11 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
+import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -250,6 +253,74 @@ class SystemPromptPreviewServiceTest {
     assertTrue(preview.contains("<description>Dev skill description</description>"), preview);
     assertTrue(
         preview.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"), preview);
+  }
+
+  /**
+   * 测试意图：只读预览同样只在同步投影精确记录该 package 的 currentCommit 已安装时使用 Daemon 本地稳定路径， 提交不一致或从未同步时必须回退 platform
+   * URI。
+   */
+  @Test
+  void previewsLocalStableSkillPathOnlyForExactlyInstalledCommit() {
+    String installedCommit = "0123456789abcdef0123456789abcdef01234567";
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
+
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
+    EnvironmentRegistry environments = mock(EnvironmentRegistry.class);
+    SkillCatalogQueryService skillCatalog = mock(SkillCatalogQueryService.class);
+    EnvironmentId environmentId = ENVIRONMENT_ID;
+
+    when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot());
+    AgentDefinition agent = new AgentDefinition();
+    agent.setName("assistant");
+    agent.setSystemPrompt("You are the planner.");
+    agent.setConfigJson("agent-config");
+    when(agents.getByName("assistant")).thenReturn(agent);
+
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of(skillRef("test-package", "dev")));
+    config.setSubagents(List.of());
+    when(codec.decode("agent-config")).thenReturn(config);
+
+    SkillPackage pkg =
+        skillPackage(
+            "test-package", List.of(new SkillManifestEntry("dev", "Dev skill description")));
+    pkg.setCurrentCommit(installedCommit);
+    when(skillCatalog.getPackage("test-package")).thenReturn(pkg);
+
+    when(environments.find(environmentId))
+        .thenReturn(
+            Optional.of(
+                previewConnection(
+                    List.of(
+                        EnvironmentSkillState.installed(
+                            "test-package", installedCommit, localPath)))));
+
+    String preview =
+        service(runtime, agents, codec, environments, boundRepository(), skillCatalog)
+            .preview(THREAD_ID);
+
+    assertTrue(preview.contains("<path>" + localPath + "/dev/SKILL.md</path>"), preview);
+
+    // 投影记录的安装 commit 与 catalog 权威 commit 不一致时回退 platform URI。
+    when(environments.find(environmentId))
+        .thenReturn(
+            Optional.of(
+                previewConnection(
+                    List.of(
+                        EnvironmentSkillState.installed(
+                            "test-package",
+                            "fedcba9876543210fedcba9876543210fedcba98",
+                            localPath)))));
+
+    String fallback =
+        service(runtime, agents, codec, environments, boundRepository(), skillCatalog)
+            .preview(THREAD_ID);
+
+    assertTrue(
+        fallback.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"), fallback);
   }
 
   /** 测试意图：验证预览宽容忽略全局目录中不存在的 Skill。 */
@@ -551,6 +622,7 @@ class SystemPromptPreviewServiceTest {
             environmentRegistry,
             environmentRepository,
             skillCatalog,
+            new SkillPromptPathResolver(environmentRegistry),
             new AgentPromptComposer(() -> subagentConfig),
             Clock.fixed(NOW, ZoneOffset.UTC))
         .create(runtime);
@@ -570,6 +642,22 @@ class SystemPromptPreviewServiceTest {
     ref.setPackageName(packageName);
     ref.setName(name);
     return ref;
+  }
+
+  private static EnvironmentConnection previewConnection(List<EnvironmentSkillState> skillState) {
+    return new EnvironmentConnection(
+        ENVIRONMENT_ID,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        LiveEnvironmentStatus.READY,
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION,
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "dev-user", "/home/dev", "Linux environment.")),
+        skillState,
+        List.of(),
+        NOW,
+        NOW.plusSeconds(60));
   }
 
   private static SkillPackage skillPackage(String packageName, List<SkillManifestEntry> entries) {

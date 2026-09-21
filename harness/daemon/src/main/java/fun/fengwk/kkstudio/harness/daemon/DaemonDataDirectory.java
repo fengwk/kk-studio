@@ -41,20 +41,44 @@ public final class DaemonDataDirectory implements AutoCloseable {
   private static final String TEXT = "text";
   private static final String STAGING = "staging";
   private static final String STAGING_SUFFIX = ".part";
+  private static final String SKILLS = "skills";
+  private static final String SKILL_WORK = "skill-work";
+  private static final String CACHE = "cache";
+  private static final String BACKUP = "backup";
 
   private final Path root;
   private final Path resources;
   private final Path text;
   private final Path staging;
+  private final Path skills;
+  private final Path skillWork;
+  private final Path skillCache;
+  private final Path skillStaging;
+  private final Path skillBackup;
   private final FileChannel lockChannel;
   private final FileLock lock;
 
   private DaemonDataDirectory(
-      Path root, Path resources, Path text, Path staging, FileChannel lockChannel, FileLock lock) {
+      Path root,
+      Path resources,
+      Path text,
+      Path staging,
+      Path skills,
+      Path skillWork,
+      Path skillCache,
+      Path skillStaging,
+      Path skillBackup,
+      FileChannel lockChannel,
+      FileLock lock) {
     this.root = root;
     this.resources = resources;
     this.text = text;
     this.staging = staging;
+    this.skills = skills;
+    this.skillWork = skillWork;
+    this.skillCache = skillCache;
+    this.skillStaging = skillStaging;
+    this.skillBackup = skillBackup;
     this.lockChannel = lockChannel;
     this.lock = lock;
   }
@@ -76,6 +100,11 @@ public final class DaemonDataDirectory implements AutoCloseable {
       Path resources = createOwnerOnlyDirectory(root.resolve(RESOURCES));
       Path text = createOwnerOnlyDirectory(resources.resolve(TEXT));
       Path staging = createOwnerOnlyDirectory(resources.resolve(STAGING));
+      Path skills = createOwnerOnlyDirectory(root.resolve(SKILLS));
+      Path skillWork = createOwnerOnlyDirectory(root.resolve(SKILL_WORK));
+      Path skillCache = createOwnerOnlyDirectory(skillWork.resolve(CACHE));
+      Path skillStaging = createOwnerOnlyDirectory(skillWork.resolve(STAGING));
+      Path skillBackup = createOwnerOnlyDirectory(skillWork.resolve(BACKUP));
       FileChannel channel = openOwnerOnlyLock(root.resolve(LOCK_FILE_NAME));
       FileLock lock;
       try {
@@ -89,7 +118,18 @@ public final class DaemonDataDirectory implements AutoCloseable {
             "data directory is already in use by another daemon process: " + root);
       }
       DaemonDataDirectory directory =
-          new DaemonDataDirectory(root, resources, text, staging, channel, lock);
+          new DaemonDataDirectory(
+              root,
+              resources,
+              text,
+              staging,
+              skills,
+              skillWork,
+              skillCache,
+              skillStaging,
+              skillBackup,
+              channel,
+              lock);
       try {
         directory.cleanStaleStagingFiles();
       } catch (IOException | RuntimeException error) {
@@ -129,6 +169,31 @@ public final class DaemonDataDirectory implements AutoCloseable {
   /** owner-only 中转目录，只允许出现未发布的 {@code *.part} 文件。 */
   public Path staging() {
     return staging;
+  }
+
+  /** 已安装技能根目录。 */
+  public Path skills() {
+    return skills;
+  }
+
+  /** 技能工作根目录（缓存、暂存与备份的父目录）。 */
+  public Path skillWork() {
+    return skillWork;
+  }
+
+  /** 技能裸 Git 缓存目录。 */
+  public Path skillCache() {
+    return skillCache;
+  }
+
+  /** 技能安装暂存目录。 */
+  public Path skillStaging() {
+    return skillStaging;
+  }
+
+  /** 技能安装备份目录。 */
+  public Path skillBackup() {
+    return skillBackup;
   }
 
   /** 只清理本次启动前遗留的中转文件；已发布全文不会被动。 */

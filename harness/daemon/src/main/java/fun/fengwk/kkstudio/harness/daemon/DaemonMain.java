@@ -69,7 +69,7 @@ public final class DaemonMain {
               daemonConfig.bashExecutable(),
               daemonConfig.lspBridgeCommand(),
               daemonConfig.javapExecutable());
-      DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig);
+      DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig, dataDirectory);
       Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
       runtime.start();
       DaemonRuntimeState finalState = runtime.awaitTermination();

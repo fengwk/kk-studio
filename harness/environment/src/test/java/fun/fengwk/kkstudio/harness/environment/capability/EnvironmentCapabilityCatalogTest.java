@@ -16,7 +16,7 @@ import java.util.Set;
 /** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 9 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 10 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -29,9 +29,10 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
+            EnvironmentCapabilityIds.SKILL_SYNC);
 
-    assertEquals("1", EnvironmentCapabilityCatalog.version());
+    assertEquals("2", EnvironmentCapabilityCatalog.version());
     assertEquals(
         List.of(
             "fs.read",
@@ -42,7 +43,8 @@ class EnvironmentCapabilityCatalogTest {
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile"),
+            "lsp.java-decompile",
+            "skill.sync"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
         expected,
@@ -58,19 +60,25 @@ class EnvironmentCapabilityCatalogTest {
     assertEquals(
         expected.size(), EnvironmentCapabilityCatalog.descriptors().stream().distinct().count());
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      assertEquals("1", descriptor.version(), descriptor.id().value());
+      assertEquals("2", descriptor.version(), descriptor.id().value());
     }
     // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。
     assertEquals(
-        expected.subList(1, expected.size()),
+        expected.subList(1, expected.size() - 1),
         EnvironmentCapabilityCatalog.descriptors().stream()
             .map(EnvironmentCapabilityDescriptor::id)
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
     assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
+    assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.SKILL_SYNC));
     assertEquals(
         Set.of("path"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ)
+            .inputSchema()
+            .required());
+    assertEquals(
+        Set.of("packageName", "repositoryUrl", "branch", "targetCommit"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
             .inputSchema()
             .required());
   }

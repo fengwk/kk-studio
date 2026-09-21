@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.registry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchem
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -34,6 +36,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId PROD =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
+  private static final String COMMIT = "0123456789abcdef0123456789abcdef01234567";
   private static final String DEV_TOKEN = "token-1";
   private static final String PROD_TOKEN = "token-2";
   private static final DaemonCapabilities CAPABILITIES =
@@ -58,8 +61,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
         new SingleConnectionDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
     this.jdbcTemplate = new JdbcTemplate(ds);
-    this.registry1 = new EnvironmentRegistry(jdbcTemplate, node1);
-    this.registry2 = new EnvironmentRegistry(jdbcTemplate, node2);
+    this.registry1 = new EnvironmentRegistry(jdbcTemplate, node1, Clock.systemUTC());
+    this.registry2 = new EnvironmentRegistry(jdbcTemplate, node2, Clock.systemUTC());
 
     // 播种底层 environment 卡片行
     jdbcTemplate.update(
@@ -325,6 +328,201 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertFalse(registry2.hasReadyLease(DEV));
     assertFalse(registry1.holdsReadyLease(DEV, token1));
     assertFalse(registry1.hasActiveLeaseToken(DEV, token1));
+  }
+
+  /**
+   * 测试意图：验证 CONNECTING/READY/DISCONNECTED 三个生命周期事件由推进状态的同一条围栏语句原子追加，且断线后事件与 Skill 投影都作为保留事实继续存在。
+   */
+  @Test
+  void lifecycleEventsAreAppendedAtomicallyAlongStatusTransitions() {
+    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
+    UUID token = assertInstanceOf(LeaseBindResult.Acquired.class, r1).leaseToken();
+
+    EnvironmentConnection connecting = registry1.find(DEV).orElseThrow();
+    assertEquals(List.of(EnvironmentEvent.TYPE_CONNECTING), eventTypes(connecting.recentEvents()));
+    assertEquals(EnvironmentEvent.LEVEL_INFO, connecting.recentEvents().get(0).level());
+
+    assertTrue(registry1.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
+    assertTrue(
+        registry1.replaceSkillState(
+            DEV,
+            token,
+            List.of(EnvironmentSkillState.installed("dev", COMMIT, "/home/dev/skills/dev")),
+            new EnvironmentEvent(
+                Instant.now(),
+                EnvironmentEvent.LEVEL_INFO,
+                EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
+                "skill package sync succeeded: dev")));
+
+    assertTrue(registry1.disconnect(DEV, token, LEASE_DURATION));
+    EnvironmentConnection offline = registry1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.CONNECTING, offline.status());
+    assertEquals(
+        List.of(
+            EnvironmentEvent.TYPE_CONNECTING,
+            EnvironmentEvent.TYPE_READY,
+            EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
+            EnvironmentEvent.TYPE_DISCONNECTED),
+        eventTypes(offline.recentEvents()));
+    assertEquals(EnvironmentEvent.LEVEL_WARN, offline.recentEvents().get(3).level());
+    // 保留事实：断线不清空宿主 metadata、Skill 投影与事件窗口。
+    assertNotNull(offline.daemonCapabilities());
+    assertEquals(1, offline.skillState().size());
+    assertEquals("/home/dev/skills/dev", offline.installedSkillRoot("dev", COMMIT).orElseThrow());
+    assertTrue(offline.lastAlert().isPresent());
+  }
+
+  /**
+   * 测试意图：验证 READY 在同一条围栏语句里清空前一次连接的 Skill 同步投影，且围栏失效时绝不清空。
+   *
+   * <p>清空是「每次 READY 都由编排器全量重建」的前提：残留投影不得跨连接生命周期存活。
+   */
+  @Test
+  void readyClearsSkillStateUnderLeaseFence() {
+    UUID token1 = acquireReady(registry1, DEV, DEV_TOKEN);
+    assertTrue(
+        registry1.replaceSkillState(
+            DEV,
+            token1,
+            List.of(EnvironmentSkillState.installed("dev", COMMIT, "/home/dev/skills/dev")),
+            new EnvironmentEvent(
+                Instant.now(),
+                EnvironmentEvent.LEVEL_INFO,
+                EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
+                "skill package sync succeeded: dev")));
+
+    // 围栏失效（错误 leaseToken）时既不推进状态也不清空投影。
+    assertFalse(registry1.markReady(DEV, UUID.randomUUID(), CAPABILITIES, LEASE_DURATION));
+    assertEquals(1, registry1.find(DEV).orElseThrow().skillState().size());
+
+    assertTrue(registry1.disconnect(DEV, token1, LEASE_DURATION));
+    UUID token2 = acquireReady(registry1, DEV, DEV_TOKEN);
+    assertNotEquals(token1, token2);
+    EnvironmentConnection ready = registry1.find(DEV).orElseThrow();
+    assertEquals(LiveEnvironmentStatus.READY, ready.status());
+    assertEquals(List.of(), ready.skillState());
+    assertTrue(ready.installedSkillRoot("dev", COMMIT).isEmpty());
+  }
+
+  /** 测试意图：验证 Skill 投影与事件的写回受 owner + leaseToken + 未过期 + READY 四重围栏保护，任何一环失效都 fail-closed。 */
+  @Test
+  void skillStateWritesAreFencedByOwnerLeaseExpiryAndReadyStatus() {
+    UUID token1 = acquireReady(registry1, DEV, DEV_TOKEN);
+    List<EnvironmentSkillState> state =
+        List.of(EnvironmentSkillState.installed("dev", COMMIT, "/home/dev/skills/dev"));
+    EnvironmentEvent event =
+        new EnvironmentEvent(
+            Instant.now(),
+            EnvironmentEvent.LEVEL_INFO,
+            EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
+            "skill package sync succeeded: dev");
+
+    // 错误 leaseToken 与其它节点都不得写入。
+    assertFalse(registry1.replaceSkillState(DEV, UUID.randomUUID(), state, event));
+    assertFalse(registry2.replaceSkillState(DEV, token1, state, event));
+    assertFalse(
+        registry2.recordSkillEvent(
+            DEV,
+            token1,
+            new EnvironmentEvent(
+                Instant.now(),
+                EnvironmentEvent.LEVEL_WARN,
+                EnvironmentEvent.TYPE_DISCONNECTED,
+                "daemon connection lost")));
+    assertTrue(registry1.find(DEV).orElseThrow().skillState().isEmpty());
+
+    // 租约过期后原持有者不得写入。
+    jdbcTemplate.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
+        DEV.value());
+    assertFalse(registry1.replaceSkillState(DEV, token1, state, event));
+    assertTrue(registry1.find(DEV).orElseThrow().skillState().isEmpty());
+
+    // 接管后的新持有者写入成功。
+    UUID token2 = acquireReady(registry1, DEV, DEV_TOKEN);
+    assertTrue(registry1.replaceSkillState(DEV, token2, state, event));
+    EnvironmentConnection connection = registry1.find(DEV).orElseThrow();
+    assertEquals(state, connection.skillState());
+    assertEquals(
+        EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
+        connection.recentEvents().get(connection.recentEvents().size() - 1).type());
+
+    // 重新 CONNECTING（断线）后同一 leaseToken 也不得再写入。
+    assertTrue(registry1.disconnect(DEV, token2, LEASE_DURATION));
+    assertFalse(registry1.replaceSkillState(DEV, token2, state, event));
+    assertFalse(registry1.recordSkillEvent(DEV, token2, event));
+    assertEquals(state, registry1.find(DEV).orElseThrow().skillState());
+  }
+
+  /** 测试意图：验证 recent_events 始终是 200 条以内的按时间正序窗口，最旧的先被淘汰。 */
+  @Test
+  void recentEventsKeepNewestTwoHundred() {
+    UUID token = acquireReady(registry1, DEV, DEV_TOKEN);
+    for (int index = 0; index < 250; index++) {
+      assertTrue(
+          registry1.recordSkillEvent(
+              DEV,
+              token,
+              new EnvironmentEvent(
+                  Instant.now(),
+                  EnvironmentEvent.LEVEL_INFO,
+                  EnvironmentEvent.TYPE_SKILL_SYNC_STARTED,
+                  "event " + index)));
+    }
+
+    List<EnvironmentEvent> events = registry1.find(DEV).orElseThrow().recentEvents();
+    assertEquals(EnvironmentConnection.MAX_RECENT_EVENTS, events.size());
+    assertEquals("event 50", events.get(0).message());
+    assertEquals("event 249", events.get(events.size() - 1).message());
+    for (int index = 1; index < events.size(); index++) {
+      assertFalse(events.get(index).time().isBefore(events.get(index - 1).time()));
+    }
+  }
+
+  /** 测试意图：验证增量 Skill 同步的目标集合严格等于「本节点持有未过期 READY 租约」的 Environment 行。 */
+  @Test
+  void listReadyOwnedByNodeReturnsOnlyLocallyOwnedReadyRows() {
+    UUID token1 = acquireReady(registry1, DEV, DEV_TOKEN);
+    registry2.tryAcquire(PROD, PROD_TOKEN, LEASE_DURATION);
+
+    assertEquals(List.of(DEV), environmentIds(registry1.listReadyOwnedByNode()));
+    assertEquals(List.of(), registry2.listReadyOwnedByNode());
+
+    UUID token2 = acquireReady(registry2, PROD, PROD_TOKEN);
+    assertEquals(List.of(PROD), environmentIds(registry2.listReadyOwnedByNode()));
+
+    // 租约过期即从目标集合中消失，无需任何进程内缓存失效。
+    jdbcTemplate.update(
+        "update environment_connection set last_seen_at = statement_timestamp() - interval '100 seconds', lease_until = statement_timestamp() - interval '1 second' where environment_id = ?",
+        DEV.value());
+    assertEquals(List.of(), registry1.listReadyOwnedByNode());
+    assertFalse(
+        registry1.replaceSkillState(
+            DEV,
+            token1,
+            List.of(),
+            new EnvironmentEvent(
+                Instant.now(),
+                EnvironmentEvent.LEVEL_INFO,
+                EnvironmentEvent.TYPE_SKILL_SYNC_SUCCEEDED,
+                "skill package sync succeeded: dev")));
+    assertNotNull(token2);
+  }
+
+  private UUID acquireReady(
+      EnvironmentRegistry registry, EnvironmentId environmentId, String token) {
+    LeaseBindResult bound = registry.tryAcquire(environmentId, token, LEASE_DURATION);
+    UUID leaseToken = assertInstanceOf(LeaseBindResult.Acquired.class, bound).leaseToken();
+    assertTrue(registry.markReady(environmentId, leaseToken, CAPABILITIES, LEASE_DURATION));
+    return leaseToken;
+  }
+
+  private static List<String> eventTypes(List<EnvironmentEvent> events) {
+    return events.stream().map(EnvironmentEvent::type).toList();
+  }
+
+  private static List<EnvironmentId> environmentIds(List<EnvironmentConnection> connections) {
+    return connections.stream().map(EnvironmentConnection::environmentId).toList();
   }
 
   /** 测试意图：验证 list 查询能列出不同环境的独立路由行。 */

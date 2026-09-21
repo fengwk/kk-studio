@@ -37,17 +37,35 @@ class DaemonDataDirectoryTest {
       Path resourcesDir = dataDir.resolve("resources");
       Path textDir = resourcesDir.resolve("text");
       Path stagingDir = resourcesDir.resolve("staging");
+      Path skillsDir = dataDir.resolve("skills");
+      Path skillWorkDir = dataDir.resolve("skill-work");
+      Path skillCacheDir = skillWorkDir.resolve("cache");
+      Path skillStagingDir = skillWorkDir.resolve("staging");
+      Path skillBackupDir = skillWorkDir.resolve("backup");
 
       assertEquals(dataDir.toAbsolutePath().normalize(), dir.root());
       assertEquals(resourcesDir, dir.resources());
       assertEquals(textDir, dir.text());
       assertEquals(stagingDir, dir.staging());
+      assertEquals(skillsDir, dir.skills());
+      assertEquals(skillWorkDir, dir.skillWork());
+      assertEquals(skillCacheDir, dir.skillCache());
+      assertEquals(skillStagingDir, dir.skillStaging());
+      assertEquals(skillBackupDir, dir.skillBackup());
 
       assertTrue(Files.isRegularFile(lockFile, LinkOption.NOFOLLOW_LINKS), "daemon.lock 必须为普通文件");
       assertTrue(Files.isDirectory(dir.root(), LinkOption.NOFOLLOW_LINKS), "root 必须为目录");
       assertTrue(Files.isDirectory(dir.resources(), LinkOption.NOFOLLOW_LINKS), "resources 必须为目录");
       assertTrue(Files.isDirectory(dir.text(), LinkOption.NOFOLLOW_LINKS), "text 必须为目录");
       assertTrue(Files.isDirectory(dir.staging(), LinkOption.NOFOLLOW_LINKS), "staging 必须为目录");
+      assertTrue(Files.isDirectory(dir.skills(), LinkOption.NOFOLLOW_LINKS), "skills 必须为目录");
+      assertTrue(Files.isDirectory(dir.skillWork(), LinkOption.NOFOLLOW_LINKS), "skillWork 必须为目录");
+      assertTrue(
+          Files.isDirectory(dir.skillCache(), LinkOption.NOFOLLOW_LINKS), "skillCache 必须为目录");
+      assertTrue(
+          Files.isDirectory(dir.skillStaging(), LinkOption.NOFOLLOW_LINKS), "skillStaging 必须为目录");
+      assertTrue(
+          Files.isDirectory(dir.skillBackup(), LinkOption.NOFOLLOW_LINKS), "skillBackup 必须为目录");
 
       if (isPosixSupported()) {
         Set<PosixFilePermission> ownerOnlyDirPerms =
@@ -61,6 +79,11 @@ class DaemonDataDirectoryTest {
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.resources()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.text()));
         assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.staging()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skills()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillWork()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillCache()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillStaging()));
+        assertEquals(ownerOnlyDirPerms, Files.getPosixFilePermissions(dir.skillBackup()));
         assertEquals(ownerOnlyFilePerms, Files.getPosixFilePermissions(lockFile));
       }
     }

@@ -103,4 +103,29 @@ describe('environmentService', () => {
       '/harness/environments/env-1?expectedVersion=3',
     )
   })
+
+  /**
+   * 测试意图：验证获取 Environment 事件列表端点使用 GET /harness/environments/{id}/events，
+   * 且支持路径参数转义。
+   */
+  it('lists environment events via GET /harness/environments/{id}/events with proper encoding', async () => {
+    const events = [
+      {
+        time: '2026-07-20T01:00:00.000Z',
+        level: 'INFO',
+        type: 'READY',
+        message: 'Connected',
+      },
+    ]
+    const client = {
+      get: vi.fn(async () => events),
+      post: vi.fn(async () => ({})),
+      put: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+    }
+    const service = createEnvironmentService(client)
+    const result = await service.listEnvironmentEvents('env/special:1')
+    expect(client.get).toHaveBeenCalledWith('/harness/environments/env%2Fspecial%3A1/events')
+    expect(result).toEqual(events)
+  })
 })

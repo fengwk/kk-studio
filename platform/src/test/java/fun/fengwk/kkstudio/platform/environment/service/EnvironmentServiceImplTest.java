@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -34,6 +35,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.time.Clock;
@@ -199,6 +201,8 @@ class EnvironmentServiceImplTest {
                 DaemonCapabilities.VERSION,
                 new DaemonEnvironmentInfo(
                     DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+            List.of(),
+            List.of(),
             NOW,
             NOW.plusSeconds(60));
 
@@ -295,6 +299,8 @@ class EnvironmentServiceImplTest {
                     "dev",
                     "/home/dev",
                     "Retained note")),
+            List.of(),
+            List.of(),
             NOW,
             NOW.plusSeconds(60));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
@@ -438,5 +444,118 @@ class EnvironmentServiceImplTest {
     when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(0);
     service.delete(EnvironmentId.of(ENV_ID), "0");
     verify(repo).deleteById(ENV_ID, 0L);
+  }
+
+  /** 测试意图：Card 只把最近一条 WARN/ERROR 事件作为 lastEvent 暴露；只有 INFO 事件时为 null。 */
+  @Test
+  void cardExposesOnlyLatestAlertEvent() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+
+    Environment env = new Environment();
+    env.setId(ENV_ID);
+    env.setName("local-env");
+    env.setVersion(0L);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+
+    EnvironmentEvent syncFailed =
+        new EnvironmentEvent(
+            NOW,
+            EnvironmentEvent.LEVEL_ERROR,
+            EnvironmentEvent.TYPE_SKILL_SYNC_FAILED,
+            "skill package sync failed: dev");
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(Optional.of(connection(List.of(syncFailed))));
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+
+    EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
+    EnvironmentEventDTO lastEvent = card.getLastEvent();
+    assertNotNull(lastEvent);
+    assertEquals("SKILL_SYNC_FAILED", lastEvent.getType());
+    assertEquals("ERROR", lastEvent.getLevel());
+    assertEquals("skill package sync failed: dev", lastEvent.getMessage());
+
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(
+            Optional.of(
+                connection(
+                    List.of(
+                        new EnvironmentEvent(
+                            NOW,
+                            EnvironmentEvent.LEVEL_INFO,
+                            EnvironmentEvent.TYPE_READY,
+                            "environment ready")))));
+    assertNull(service.get(EnvironmentId.of(ENV_ID)).getLastEvent());
+  }
+
+  /** 测试意图：事件端点按时间正序返回同一连接行的保留事件窗口，未知 Environment 抛 404 语义错误。 */
+  @Test
+  void listEventsReturnsChronologicalWindow() {
+    EnvironmentRepository repo = mock(EnvironmentRepository.class);
+    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
+    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
+
+    Environment env = new Environment();
+    env.setId(ENV_ID);
+    env.setName("local-env");
+    env.setVersion(0L);
+    when(repo.getById(ENV_ID)).thenReturn(env);
+
+    when(registry.find(EnvironmentId.of(ENV_ID)))
+        .thenReturn(
+            Optional.of(
+                connection(
+                    List.of(
+                        new EnvironmentEvent(
+                            NOW,
+                            EnvironmentEvent.LEVEL_INFO,
+                            EnvironmentEvent.TYPE_CONNECTING,
+                            "daemon connection accepted"),
+                        new EnvironmentEvent(
+                            NOW.plusSeconds(1),
+                            EnvironmentEvent.LEVEL_WARN,
+                            EnvironmentEvent.TYPE_DISCONNECTED,
+                            "daemon connection lost")))));
+
+    EnvironmentServiceImpl service =
+        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+
+    List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
+    assertEquals(2, events.size());
+    assertEquals("CONNECTING", events.get(0).getType());
+    assertEquals("DISCONNECTED", events.get(1).getType());
+    assertEquals(NOW, events.get(0).getTime());
+
+    // 从未连接过（无连接行）的 Environment 事件窗口为空，而不是错误。
+    when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
+    assertEquals(List.of(), service.listEvents(EnvironmentId.of(ENV_ID)));
+
+    // 未知 Environment 与详情查询一样是 404 语义错误。
+    when(repo.getById(ENV_ID)).thenReturn(null);
+    assertThrows(
+        AiResourceNotFoundException.class, () -> service.listEvents(EnvironmentId.of(ENV_ID)));
+  }
+
+  private static EnvironmentConnection connection(List<EnvironmentEvent> events) {
+    return new EnvironmentConnection(
+        EnvironmentId.of(ENV_ID),
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        LiveEnvironmentStatus.READY,
+        new DaemonCapabilities(
+            DaemonCapabilities.VERSION,
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "Asia/Shanghai", "dev", "/home/dev", "Note")),
+        List.of(),
+        events,
+        NOW,
+        NOW.plusSeconds(60));
   }
 }

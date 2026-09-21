@@ -6704,6 +6704,131 @@ select.settings-input option {
   word-break: break-all;
 }
 
+/* --- Environment Events --- */
+
+.env-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.env-event-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.env-event-item.is-warn {
+  border-color: var(--warning-border);
+}
+
+.env-event-item.is-error {
+  border-color: var(--danger-border);
+}
+
+.env-event-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.env-event-level {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg-muted);
+}
+
+.env-event-level.is-info {
+  color: var(--info);
+  border-color: rgba(119, 199, 245, 0.35);
+  background: var(--info-soft);
+}
+
+.env-event-level.is-warn {
+  color: var(--warning);
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.env-event-level.is-error {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
+.env-event-type {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.env-event-time {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-left: auto;
+}
+
+.env-event-message {
+  font-size: 12px;
+  color: var(--fg-dim);
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.env-events-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+.env-last-event {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+
+.env-last-event.is-warn {
+  border-color: var(--warning-border);
+}
+
+.env-last-event.is-error {
+  border-color: var(--danger-border);
+}
+
+.env-last-event-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.env-last-event-message {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .env-source-modal-card {
   width: min(520px, 100%);
 }

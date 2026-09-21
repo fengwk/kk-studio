@@ -27,10 +27,12 @@ import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -122,6 +124,44 @@ class StudioEnvironmentControllerTest {
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data.registrationToken").value("secret-token"));
+  }
+
+  /** 意图：验证 GET /api/harness/environments/{id}/events 按时间正序返回事件窗口。 */
+  @Test
+  void listEnvironmentEventsReturnsChronologicalWindow() throws Exception {
+    EnvironmentEventDTO connecting = new EnvironmentEventDTO();
+    connecting.setTime(Instant.parse("2026-09-21T06:00:00Z"));
+    connecting.setLevel("INFO");
+    connecting.setType("CONNECTING");
+    connecting.setMessage("daemon connection accepted");
+    EnvironmentEventDTO failed = new EnvironmentEventDTO();
+    failed.setTime(Instant.parse("2026-09-21T06:05:00Z"));
+    failed.setLevel("ERROR");
+    failed.setType("SKILL_SYNC_FAILED");
+    failed.setMessage("skill package sync failed: COMMIT_NOT_FOUND");
+    when(environmentService.listEvents(eq(EnvironmentId.of(ENV_ID))))
+        .thenReturn(List.of(connecting, failed));
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/events"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.length()").value(2))
+        .andExpect(jsonPath("$.data[0].type").value("CONNECTING"))
+        .andExpect(jsonPath("$.data[0].level").value("INFO"))
+        .andExpect(jsonPath("$.data[1].type").value("SKILL_SYNC_FAILED"))
+        .andExpect(jsonPath("$.data[1].level").value("ERROR"));
+  }
+
+  /** 意图：未知 Environment 的事件查询与详情查询一样映射为 404 资源不存在。 */
+  @Test
+  void listEnvironmentEventsReturnsNotFoundForMissingEnvironment() throws Exception {
+    when(environmentService.listEvents(eq(EnvironmentId.of(ENV_ID))))
+        .thenThrow(new AiResourceNotFoundException("environment"));
+
+    mockMvc
+        .perform(get("/api/harness/environments/" + ENV_ID + "/events"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("resource_not_found"));
   }
 
   /**
