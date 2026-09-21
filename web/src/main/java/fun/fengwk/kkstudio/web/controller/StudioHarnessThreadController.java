@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactResultDTO;
@@ -48,10 +50,14 @@ import java.util.function.Supplier;
 @RequestMapping("/api/harness/threads")
 public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
+  private final ModelRequestDebugService modelRequestDebugService;
 
   /** 创建 Thread API Controller。 */
-  public StudioHarnessThreadController(HarnessRuntime runtime) {
+  public StudioHarnessThreadController(
+      HarnessRuntime runtime, ModelRequestDebugService modelRequestDebugService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
+    this.modelRequestDebugService =
+        Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
@@ -65,6 +71,21 @@ public class StudioHarnessThreadController {
               ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
               return HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability);
             }));
+  }
+
+  /**
+   * 现算结构化 Model Request Debug 投影（read-only）：不检查 branch HEAD、不发布 Package、不触发 sync、不产生写入。
+   *
+   * <p>请求体与 UUID 形状由 {@link HarnessRuntimeRequestMapper#parseUuid} 严格校验（非 canonical UUID -&gt;
+   * 400），缺失 Thread 由 {@link HarnessRuntime} 的 typed 异常翻译为 404。
+   */
+  @GetMapping("/{threadId}/model-request-debug")
+  public Result<HarnessModelRequestDebugDTO> getModelRequestDebug(@PathVariable String threadId) {
+    return Results.ok(
+        withRuntimeTranslation(
+            () ->
+                modelRequestDebugService.getModelRequestDebug(
+                    HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId"))));
   }
 
   /** 直接重命名 Thread（name 由 Core 权威规范化；同名 no-op、version 精确 +1 仅在实际改名时发生），返回权威当前 Thread。 */

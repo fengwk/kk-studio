@@ -53,7 +53,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     getThreadSnapshot: vi.fn(),
     acceptCommandBatch: vi.fn(),
     compactThread: vi.fn(),
-    getSystemPromptPreview: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
   },

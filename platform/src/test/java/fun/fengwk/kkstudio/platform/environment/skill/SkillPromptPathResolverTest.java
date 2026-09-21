@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -94,6 +95,44 @@ class SkillPromptPathResolverTest {
         List.of(
             EnvironmentSkillState.installed("other", COMMIT, "/home/dev/.kkstudio/skills/other")));
     assertEquals(expected, resolver.resolve(ENV, "pkg", "dev", COMMIT));
+  }
+
+  /**
+   * 测试意图：结构化交付细节与路径判定是同一次判定——只有精确安装才给出 LOCAL，其余情况一律 PLATFORM； {@code installedCommit}
+   * 独立如实暴露（含同步失败保留的更早一次安装），绝不能由它反推交付方式。
+   */
+  @Test
+  void detailsSeparateDeliveryFromInstalledCommit() {
+    // 未选择 Environment：无已安装事实，交付方式恒为 PLATFORM。
+    SkillPromptResolution unselected = resolver.resolveDetails(null, "pkg", "dev", COMMIT);
+    assertEquals("kkstudio:/skills/pkg/dev/SKILL.md", unselected.path());
+    assertEquals(SkillPromptResolution.Delivery.PLATFORM, unselected.delivery());
+    assertNull(unselected.installedCommit());
+
+    // 精确安装：LOCAL，且暴露的已安装 commit 就是 currentCommit。
+    bind(List.of(EnvironmentSkillState.installed("pkg", COMMIT, "/home/dev/.kkstudio/skills/pkg")));
+    SkillPromptResolution local = resolver.resolveDetails(ENV, "pkg", "dev", COMMIT);
+    assertEquals("/home/dev/.kkstudio/skills/pkg/dev/SKILL.md", local.path());
+    assertEquals(SkillPromptResolution.Delivery.LOCAL, local.delivery());
+    assertEquals(COMMIT, local.installedCommit());
+
+    // 提交不一致：仍暴露实际安装的 commit，但交付方式是 PLATFORM。
+    SkillPromptResolution outdated = resolver.resolveDetails(ENV, "pkg", "dev", OTHER_COMMIT);
+    assertEquals("kkstudio:/skills/pkg/dev/SKILL.md", outdated.path());
+    assertEquals(SkillPromptResolution.Delivery.PLATFORM, outdated.delivery());
+    assertEquals(COMMIT, outdated.installedCommit());
+
+    // 同步失败保留上一次成功安装的事实：如实暴露 installedCommit，交付方式仍是 PLATFORM。
+    bind(
+        List.of(
+            EnvironmentSkillState.failed(
+                "pkg",
+                EnvironmentSkillState.installed("pkg", OTHER_COMMIT, "/home/dev/old"),
+                "boom")));
+    SkillPromptResolution failed = resolver.resolveDetails(ENV, "pkg", "dev", COMMIT);
+    assertEquals("kkstudio:/skills/pkg/dev/SKILL.md", failed.path());
+    assertEquals(SkillPromptResolution.Delivery.PLATFORM, failed.delivery());
+    assertEquals(OTHER_COMMIT, failed.installedCommit());
   }
 
   /** 测试意图：platform URI 是稳定的托管路径，与 registry 状态无关。 */

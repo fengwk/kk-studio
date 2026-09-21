@@ -259,15 +259,26 @@ class HarnessRuntimeDtoContractTest {
 
   @Test
   void modelRequestDebugMarksRequiredNullableFacts() throws Exception {
-    // 意图：未选择 Environment 与 planning 失败都是真实状态，字段必须显式发射 null 而不是缺席。
-    for (String fieldName : List.of("environmentName", "planningError")) {
-      JsonInclude include =
-          HarnessModelRequestDebugDTO.class
-              .getDeclaredField(fieldName)
-              .getAnnotation(JsonInclude.class);
-      assertNotNull(include, fieldName);
-      assertEquals(JsonInclude.Include.ALWAYS, include.value(), fieldName);
+    // 意图：未选择 Environment、planning 失败、无活动 Invocation 都是真实状态，字段必须显式发射 null 而不是缺席。
+    for (String fieldName :
+        List.of("environmentName", "cacheControl", "planningError", "frozenInvocation")) {
+      assertRequiredNullable(HarnessModelRequestDebugDTO.class, fieldName);
     }
+    // 嵌套事实同理：无固定 requiredEnvironmentId、SENT 工具无过滤原因、未检查/未安装的 commit 与 NONE 缓存都没有 key。
+    for (String fieldName : List.of("requiredEnvironmentId", "filterReason")) {
+      assertRequiredNullable(HarnessModelRequestDebugDTO.ToolDTO.class, fieldName);
+    }
+    for (String fieldName : List.of("observedHeadCommit", "installedCommit")) {
+      assertRequiredNullable(HarnessModelRequestDebugDTO.SkillDTO.class, fieldName);
+    }
+    assertRequiredNullable(HarnessModelRequestDebugDTO.CacheControlDTO.class, "affinityKey");
+  }
+
+  private static void assertRequiredNullable(Class<?> dtoClass, String fieldName) throws Exception {
+    JsonInclude include = dtoClass.getDeclaredField(fieldName).getAnnotation(JsonInclude.class);
+    assertNotNull(include, dtoClass.getSimpleName() + "." + fieldName);
+    assertEquals(
+        JsonInclude.Include.ALWAYS, include.value(), dtoClass.getSimpleName() + "." + fieldName);
   }
 
   @Test

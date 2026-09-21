@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
 
 import java.util.Objects;
 
@@ -38,18 +39,41 @@ public class SkillPromptPathResolver {
    */
   public String resolve(
       EnvironmentId environmentId, String packageName, String skillName, String currentCommit) {
+    return resolveDetails(environmentId, packageName, skillName, currentCommit).path();
+  }
+
+  /**
+   * 解析单个 skill 的完整交付细节：稳定路径、当前 Environment 实际安装的 commit 与交付方式。
+   *
+   * <p>路径与 {@link #resolve} 是同一次判定；调用方既不能用路径前缀反推交付方式，也不能把 {@code installedCommit} 的存在当成
+   * LOCAL：只有「状态为 installed 且 commit 与 {@code currentCommit} 完全一致」才产生 LOCAL。
+   */
+  public SkillPromptResolution resolveDetails(
+      EnvironmentId environmentId, String packageName, String skillName, String currentCommit) {
     Objects.requireNonNull(packageName, "packageName");
     Objects.requireNonNull(skillName, "skillName");
-    if (environmentId != null) {
-      EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
-      if (connection != null) {
-        String root = connection.installedSkillRoot(packageName, currentCommit).orElse(null);
-        if (root != null) {
-          return root + "/" + skillName + "/SKILL.md";
-        }
+    EnvironmentConnection connection =
+        environmentId == null ? null : environmentRegistry.find(environmentId).orElse(null);
+    if (connection != null) {
+      String root = connection.installedSkillRoot(packageName, currentCommit).orElse(null);
+      String installedCommit =
+          connection
+              .skillStateOf(packageName)
+              .map(EnvironmentSkillState::installedCommit)
+              .orElse(null);
+      if (root != null) {
+        return new SkillPromptResolution(
+            root + "/" + skillName + "/SKILL.md",
+            installedCommit,
+            SkillPromptResolution.Delivery.LOCAL);
       }
+      return new SkillPromptResolution(
+          platformPath(packageName, skillName),
+          installedCommit,
+          SkillPromptResolution.Delivery.PLATFORM);
     }
-    return platformPath(packageName, skillName);
+    return new SkillPromptResolution(
+        platformPath(packageName, skillName), null, SkillPromptResolution.Delivery.PLATFORM);
   }
 
   /** platform 托管的稳定 skill 资源路径。 */

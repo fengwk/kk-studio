@@ -54,7 +54,6 @@ vi.mock('@/shared/api/harness-service', () => ({
     listSessionEntries: vi.fn(),
     getThreadSnapshot: vi.fn(),
     compactThread: vi.fn(),
-    getSystemPromptPreview: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
     decideApproval: vi.fn(),
@@ -193,7 +192,6 @@ beforeEach(() => {
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf())
   vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(acceptedResponse())
   vi.mocked(harnessService.listSessionEntries).mockResolvedValue([])
-  vi.mocked(harnessService.getSystemPromptPreview).mockResolvedValue({ text: '' })
   vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
     Promise.resolve(threadFixture({ threadId, yoloEnabled: data.yoloEnabled, version: '1' })),
   )

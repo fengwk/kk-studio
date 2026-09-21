@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -117,6 +118,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
@@ -175,6 +177,9 @@ class DatabaseTurnResolverTest {
 
   private static final String ENV_B_NAME = "env-b";
   private static final String ENV_MISSING_NAME = "env-missing";
+
+  /** 测试用全局目录 Package 的权威 currentCommit。 */
+  private static final String CURRENT_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
   /** 测试用全局目录 Skill 名称与描述对。 */
   private static SkillName skillName(String name, String description) {
@@ -1276,6 +1281,185 @@ class DatabaseTurnResolverTest {
     assertTrue(
         instructionText(failed.resolved(failed.path(settings("default"))))
             .contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"));
+  }
+
+  /**
+   * 测试意图：Debug 预览与正式 Turn 消费同一次规划——同一 path 上预览 spec 与 resolve 的 spec 完全相等，且预览的 SENT 候选 就是 spec 中冻结的
+   * toolBindings（名称与顺序一致），所以两侧的规划逻辑不可能漂移。
+   */
+  @Test
+  void previewPlanAndRuntimeResolutionShareTheExactSpec() {
+    Fixture fixture = new Fixture(List.of("bash", "read"), List.of("dev"), List.of());
+    fixture.readyEnvironment(ENV_A, List.of("dev"));
+    EntryPath path = fixture.path(settings("default"));
+
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+
+    assertEquals(fixture.resolved(path), planned.spec());
+    assertEquals(
+        planned.spec().toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
+        planned.candidateTools().stream()
+            .filter(tool -> tool.state() == LiveTurnPlan.ToolState.SENT)
+            .map(LiveTurnPlan.CandidateTool::name)
+            .toList());
+    assertTrue(planned.contextWindow() > 0);
+  }
+
+  /**
+   * 测试意图：候选投影固定为「SENT 在前、FILTERED 在后」；未选择 Environment 时 REQUIRED 候选只被过滤而不拒绝规划， 并携带唯一稳定原因与精确的
+   * descriptor/schema、EnvironmentSupport、固定 requiredEnvironmentId 与 contributor provenance。
+   */
+  @Test
+  void previewPlanListsSentCandidatesBeforeFilteredRequiredCandidates() {
+    HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool", ENV_B);
+    Fixture fixture =
+        new Fixture(
+            List.of("bash", "fixed_tool", "create_goal", "read"),
+            List.of(),
+            List.of(),
+            fixedCatalog);
+
+    LiveTurnPlan.Planned planned = fixture.planned(fixture.path(unboundSettings("default")));
+
+    List<LiveTurnPlan.CandidateTool> candidates = planned.candidateTools();
+    assertEquals(
+        List.of("create_goal", "read", "bash", "fixed_tool"),
+        candidates.stream().map(LiveTurnPlan.CandidateTool::name).toList());
+    assertEquals(
+        List.of(
+            LiveTurnPlan.ToolState.SENT,
+            LiveTurnPlan.ToolState.SENT,
+            LiveTurnPlan.ToolState.FILTERED,
+            LiveTurnPlan.ToolState.FILTERED),
+        candidates.stream().map(LiveTurnPlan.CandidateTool::state).toList());
+    // 最终模型工具面只含 SENT 候选，顺序与候选投影中的 SENT 段一致。
+    assertEquals(
+        List.of("create_goal", "read"),
+        planned.spec().toolBindings().stream()
+            .map(binding -> binding.descriptor().name())
+            .toList());
+
+    LiveTurnPlan.CandidateTool environmentTool = candidates.getLast();
+    assertEquals(EnvironmentSupport.REQUIRED, environmentTool.environmentSupport());
+    assertEquals(ENV_B, environmentTool.requiredEnvironmentId());
+    assertEquals("fixed:fixed.tool", environmentTool.provenance());
+    assertEquals(
+        LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, environmentTool.filterReason());
+    assertEquals("fixed_tool description", environmentTool.description());
+    assertEquals(
+        new SchemaJsonCodec().encode(hostDescriptor("fixed_tool").inputSchema()),
+        environmentTool.inputSchemaJson());
+
+    // 每个 SENT 候选的 description / schema 都与冻结 spec 中的 descriptor 逐字一致。
+    SchemaJsonCodec schemaCodec = new SchemaJsonCodec();
+    for (ToolBinding binding : planned.spec().toolBindings()) {
+      LiveTurnPlan.CandidateTool sentCandidate =
+          candidates.stream()
+              .filter(tool -> tool.name().equals(binding.descriptor().name()))
+              .findFirst()
+              .orElseThrow();
+      assertEquals(
+          binding.descriptor().description(),
+          sentCandidate.description(),
+          binding.descriptor().name());
+      assertEquals(
+          schemaCodec.encode(binding.descriptor().inputSchema()),
+          sentCandidate.inputSchemaJson(),
+          binding.descriptor().name());
+    }
+
+    LiveTurnPlan.CandidateTool optionalTool = candidates.get(1);
+    assertEquals(EnvironmentSupport.OPTIONAL, optionalTool.environmentSupport());
+    assertNull(optionalTool.requiredEnvironmentId());
+    assertNull(optionalTool.filterReason());
+    assertEquals("builtin:read", optionalTool.provenance());
+  }
+
+  /**
+   * 测试意图：结构化 Skill 事实把「交付方式」与「已安装 commit」分开投影——只有精确安装 currentCommit 才是 LOCAL； 提交不一致或同步失败仍如实暴露实际
+   * installedCommit，但交付方式必须是 PLATFORM；observedHeadCommit 来自 Package 自身； promptXml 与真正进入
+   * systemInstruction 的片段逐字相同。
+   */
+  @Test
+  void previewPlanProjectsSkillDeliveryCommitsAndExactPromptXml() {
+    String otherCommit = "fedcba9876543210fedcba9876543210fedcba98";
+    String observedHead = "abcdef0123456789abcdef0123456789abcdef01";
+    String localPath = "/home/dev/.kkstudio/skills/test-package";
+
+    Fixture platformOnly = new Fixture(List.of(), List.of("dev"), List.of());
+    platformOnly.readyEnvironment(ENV_A, List.of("dev"));
+    platformOnly.observedHeadCommit(observedHead);
+    LiveTurnPlan.Planned platformPlan =
+        platformOnly.planned(platformOnly.path(settings("default")));
+    LiveTurnPlan.PlannedSkill platformSkill = platformPlan.skills().getFirst();
+
+    assertEquals("test-package", platformSkill.packageName());
+    assertEquals("dev", platformSkill.name());
+    assertEquals("dev description", platformSkill.description());
+    assertEquals(SkillPromptResolution.Delivery.PLATFORM, platformSkill.delivery());
+    assertEquals("kkstudio:/skills/test-package/dev/SKILL.md", platformSkill.path());
+    assertEquals(CURRENT_COMMIT, platformSkill.currentCommit());
+    assertEquals(observedHead, platformSkill.observedHeadCommit());
+    assertNull(platformSkill.installedCommit());
+    String platformXml = AgentPromptComposer.skillFragment(platformSkill.promptEntry());
+    assertTrue(
+        platformXml.contains("<path>kkstudio:/skills/test-package/dev/SKILL.md</path>"),
+        platformXml);
+    assertTrue(platformPlan.spec().systemInstruction().contains(platformXml));
+
+    Fixture alreadyInstalled = new Fixture(List.of(), List.of("dev"), List.of());
+    alreadyInstalled.readyEnvironment(ENV_A, List.of("dev"));
+    alreadyInstalled.readyEnvironmentWithSkillState(
+        ENV_A, List.of(EnvironmentSkillState.installed("test-package", CURRENT_COMMIT, localPath)));
+    LiveTurnPlan.Planned localPlan =
+        alreadyInstalled.planned(alreadyInstalled.path(settings("default")));
+    LiveTurnPlan.PlannedSkill localSkill = localPlan.skills().getFirst();
+    assertEquals(SkillPromptResolution.Delivery.LOCAL, localSkill.delivery());
+    assertEquals(localPath + "/dev/SKILL.md", localSkill.path());
+    assertEquals(CURRENT_COMMIT, localSkill.installedCommit());
+    assertTrue(
+        localPlan
+            .spec()
+            .systemInstruction()
+            .contains("<path>" + localPath + "/dev/SKILL.md</path>"));
+
+    // 同步失败保留更早一次成功安装的事实：如实暴露 installedCommit，但交付方式仍是 PLATFORM。
+    Fixture failedSync = new Fixture(List.of(), List.of("dev"), List.of());
+    failedSync.readyEnvironment(ENV_A, List.of("dev"));
+    failedSync.readyEnvironmentWithSkillState(
+        ENV_A,
+        List.of(
+            EnvironmentSkillState.failed(
+                "test-package",
+                EnvironmentSkillState.installed("test-package", otherCommit, localPath),
+                "skill package sync failed: COMMIT_NOT_FOUND")));
+    LiveTurnPlan.PlannedSkill failedSkill =
+        failedSync.planned(failedSync.path(settings("default"))).skills().getFirst();
+    assertEquals(SkillPromptResolution.Delivery.PLATFORM, failedSkill.delivery());
+    assertEquals(otherCommit, failedSkill.installedCommit());
+    assertEquals("kkstudio:/skills/test-package/dev/SKILL.md", failedSkill.path());
+  }
+
+  /**
+   * 测试意图：预览入口的确定性拒绝只投影稳定 code 与同源 detail（与 resolve 的 typed 拒绝逐字一致）； repository 等基础设施异常照常传播，绝不伪装成
+   * planning 失败。
+   */
+  @Test
+  void previewPlanProjectsStableRejectionAndPropagatesInfrastructureFailures() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.missingAgent();
+
+    LiveTurnPlan.Rejected rejected = fixture.plannedRejection(fixture.path(settings("default")));
+
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
+    assertEquals("agent not found: assistant", rejected.detail());
+    TurnResolver.Rejected runtimeRejected = fixture.rejected(fixture.path(settings("default")));
+    assertEquals(rejected.errorCode(), runtimeRejected.error().code());
+    assertEquals(rejected.detail(), runtimeRejected.error().message());
+
+    Fixture down = new Fixture(List.of(), List.of(), List.of());
+    down.failAgentLookup(new IllegalStateException("catalog is down"));
+    assertThrows(IllegalStateException.class, () -> down.planLive(down.path(settings("default"))));
   }
 
   @Test
@@ -2544,6 +2728,7 @@ class DatabaseTurnResolverTest {
     private final SkillCatalogQueryService skillCatalogQueryService =
         mock(SkillCatalogQueryService.class);
     private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
+    private String observedHeadCommit;
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
@@ -2720,7 +2905,8 @@ class DatabaseTurnResolverTest {
                 }
                 SkillPackage pkg = new SkillPackage();
                 pkg.setPackageName(pkgName);
-                pkg.setCurrentCommit("0123456789abcdef0123456789abcdef01234567");
+                pkg.setCurrentCommit(CURRENT_COMMIT);
+                pkg.setObservedHeadCommit(observedHeadCommit);
                 pkg.setSkills(
                     entries.entrySet().stream()
                         .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
@@ -2961,6 +3147,22 @@ class DatabaseTurnResolverTest {
 
     private EntryPath path(BranchSettings settings) {
       return rootPath(settings);
+    }
+
+    private void observedHeadCommit(String commit) {
+      this.observedHeadCommit = commit;
+    }
+
+    private LiveTurnPlan planLive(EntryPath path) {
+      return resolver.planLive(THREAD_ID, path);
+    }
+
+    private LiveTurnPlan.Planned planned(EntryPath path) {
+      return assertInstanceOf(LiveTurnPlan.Planned.class, planLive(path));
+    }
+
+    private LiveTurnPlan.Rejected plannedRejection(EntryPath path) {
+      return assertInstanceOf(LiveTurnPlan.Rejected.class, planLive(path));
     }
 
     private ModelRequestSpec resolved(EntryPath path) {

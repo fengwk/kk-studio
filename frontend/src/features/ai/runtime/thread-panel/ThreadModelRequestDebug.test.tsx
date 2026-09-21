@@ -7,9 +7,9 @@ import {
   ThreadDebugInspector,
   type DebugInspectorSelection,
 } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
-import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
+import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
 
-function sampleDebug(overrides: Partial<HarnessModelRequestDebugDTO> = {}): HarnessModelRequestDebugDTO {
+function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): ThreadModelRequestDebugData {
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
     generatedAt: '2026-09-21T00:00:00.000Z',
@@ -66,7 +66,7 @@ function sampleDebug(overrides: Partial<HarnessModelRequestDebugDTO> = {}): Harn
   }
 }
 
-function DebugViewHarness({ debug = sampleDebug() }: { debug?: HarnessModelRequestDebugDTO }) {
+function DebugViewHarness({ debug = sampleDebug() }: { debug?: ThreadModelRequestDebugData }) {
   const [selection, setSelection] = useState<DebugInspectorSelection | null>(null)
   return (
     <div>
