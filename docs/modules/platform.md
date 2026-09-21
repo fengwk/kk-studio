@@ -190,6 +190,82 @@ platform <- plugins/minimax-mavis <-runtime- web
 descriptor、管理动作、后台任务或 Tool，不在数据库维护第二个 enabled 开关，也不支持
 运行时安装与 classloader 热更新。
 
+### 新增 Plugin
+
+本节是仓库内新增构建期 Plugin 的接入事实源。参考实现是
+[`plugins/minimax-mavis`](../../plugins/minimax-mavis)，但新实现只复制它的边界和装配方式，
+不复制与 MiniMax 协议相关的代码。完整接入顺序如下：
+
+1. **建立独立模块**：创建 `plugins/<plugin-id>/pom.xml`，父 POM 使用
+   `kk-studio-plugins`，artifact 命名为 `kk-studio-plugin-<plugin-id>`；源码包使用独立的
+   `fun.fengwk.kkstudio.plugin.<name>`。只声明直接使用的依赖，允许依赖 Platform 暴露的
+   Plugin 窄端口和 Harness 契约，禁止依赖 `web` 或其它 Plugin implementation。
+2. **加入 Reactor 与版本管理**：把子模块加入
+   [`plugins/pom.xml`](../../plugins/pom.xml) 的 `modules`，并在根
+   [`pom.xml`](../../pom.xml) 的 `dependencyManagement` 中以 `${kk-studio.version}` 管理新
+   artifact。前者只让 Maven 构建模块，后者只提供依赖版本；两者都不表示 Plugin 已安装。
+3. **按职责实现两个独立 SPI**：
+   - 需要出现在统一管理面、使用认证或刷新凭据时，实现
+     [`StudioPlugin`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPlugin.java)。
+     `PluginDescriptor.pluginId` 必须全局唯一、稳定且符合 canonical 语法；认证只通过
+     `PluginAuthHandler` 交还 opaque `PluginCredentialMaterial`，刷新只通过
+     `PluginCredentialRefresher` 处理本次快照。Plugin 不直接访问 credential repository、
+     lease、主密钥或密文格式。
+   - 需要向模型提供 Tool、自定义状态或上下文投影时，实现
+     [`HarnessContributor`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java)，
+     只通过 `HarnessRegistrar` 注册能力。Tool 必须准确声明 visibility、side effect、
+     timeout 和 `EnvironmentSupport`；不得另建 Tool、审批、历史或结果协议。详细契约见
+     [Harness Contributor API](harness-contributor-api.md#扩展一个-contributor)。
+   - 同时需要管理面和模型能力的远端集成通常同时提供两个 bean；纯 Tool 集成可以只提供
+     `HarnessContributor`，此时不会出现在 `/api/plugins` 或 Settings 的 Plugins 页签。
+4. **提供唯一自动装配入口**：在 Plugin JAR 内定义一个 `@AutoConfiguration`，由它创建
+   `StudioPlugin`、`HarnessContributor` 及本 Plugin 自己的 client、executor 和 lifecycle
+   bean。启动期只加载静态 descriptor/schema 并构造 bean，不登录、不解密凭据、不调用远端
+   capability；网络访问和 credential resolution 延迟到管理动作、刷新任务或 Tool 调用。
+   executor 与后台任务必须有明确并发上限、关闭方法和失败边界。
+5. **声明 Boot 元数据**：创建
+   `src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`，
+   每行填写一个 AutoConfiguration 全限定类名。不要依赖 Web component scan，也不要引入
+   `ServiceLoader`、外部 classloader 或 Plugin 目录扫描。
+6. **确认前端管理形态**：提供 `StudioPlugin` 后，通用管理 API 会把 descriptor 与凭据安全
+   投影到 `/settings` 的静态 Plugins 页签。现有前端只完整实现封闭的 `DEEP_LINK` 交互：
+   descriptor 给出固定 region，`prepare` 返回官方登录地址，`complete` 只提交
+   `callbackUrl`。使用这一交互的新 Plugin 不需要新增专属路由或组件。需要其它认证类型或
+   Plugin 专属设置时，必须先显式扩展 Share sealed DTO、Platform 管理用例、静态前端
+   contract/UI、i18n 与测试；禁止由 Plugin JAR 下发 HTML、脚本或任意表单 schema。后端允许
+   `authHandler()` 为空并投影 `authKind: null`，但当前通用卡片没有定义无认证 Plugin 的
+   只读状态语义，因此这种管理形态在补齐前端契约前不能直接发布。具体入口见
+   [Frontend：Plugin 设置](frontend.md#plugin-设置)。
+7. **选择是否进入发行物**：需要安装时，在 [`web/pom.xml`](../../web/pom.xml) 添加该
+   artifact 的 `runtime` dependency；这是唯一安装开关。Web Java/TypeScript 源码不得 import
+   Plugin implementation。移除依赖并重新构建后，Plugin JAR、bean、后台任务和模型工具必须
+   全部消失。
+8. **复用平台持久化与资源边界**：不要为“已安装/启用”新增数据库行或前端开关。认证凭据使用
+   共用 `plugin_credential` 与 `PluginCredentialStore`；会话输入和远端媒体输出使用
+   `PluginResourceGateway`。只有 Plugin 自身确有独立 durable domain state 时才设计新的
+   schema，不能把安装状态或明文 secret 放入业务表。
+9. **补齐验证**：至少覆盖 descriptor/工具身份与 schema、AutoConfiguration bean 装配和
+   `AutoConfiguration.imports`、认证去敏与失败状态、Tool side effect/取消/超时、资源预算，
+   以及模块依赖方向。架构测试应验证仓库其它模块不 import Plugin implementation，且 Web
+   只以 runtime scope 选择 artifact；可参考
+   [`MiniMaxMavisAutoConfigurationTest`](../../plugins/minimax-mavis/src/test/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MiniMaxMavisAutoConfigurationTest.java)
+   和
+   [`MavisPluginModuleArchitectureTest`](../../plugins/minimax-mavis/src/test/java/fun/fengwk/kkstudio/plugin/minimaxmavis/MavisPluginModuleArchitectureTest.java)。
+
+最小检查入口：
+
+```bash
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl plugins/<plugin-id> -am test
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test
+node scripts/docs/check.mjs
+python3 scripts/security/check-sensitive-data.py
+git diff --check
+```
+
+修改前端 contract/UI 时，还必须执行 `npm --prefix frontend run test`、`run lint` 与
+`run build`。发行物验收使用 `-Pdistribution -pl web -am package`，并确认选中的 artifact
+位于 Fat JAR 的 `BOOT-INF/lib`；仅加入 `plugins/pom.xml` 不能满足安装验收。
+
 统一管理 API 为：
 
 ```text
