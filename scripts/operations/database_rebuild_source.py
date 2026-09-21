@@ -425,7 +425,8 @@ def source_projection(kind: str, table: str) -> str:
             "           d.variant,\n"
             f"           {legacy_config_sql('d')} as config,\n"
             "           d.created_at, d.updated_at, d.version\n"
-            "      from public.agent_definition d"
+            "      from public.agent_definition d\n"
+            "      order by d.name"
         )
     columns = ", ".join(f"source.{column}" for column in TARGET_COLUMNS[table])
     order = ", ".join(f"source.{column}" for column in ORDER_COLUMNS[table])

@@ -27,6 +27,7 @@ from scripts.operations.database_rebuild_source import (
     LEGACY_MARKER_TABLES,
     LEGACY_MCP_TABLE,
     LEGACY_SOURCE,
+    ORDER_COLUMNS,
     sanitize_error,
     verify_source_columns,
     MigrationError,
@@ -554,6 +555,18 @@ class TestSourceProjectionContracts(unittest.TestCase):
         for table in DURABLE_TABLES:
             columns = ", ".join(f"source.{column}" for column in TARGET_COLUMNS[table])
             self.assertIn(columns, source_projection(CURRENT_SOURCE, table), table)
+
+    def test_every_projection_is_explicitly_ordered(self):
+        """Bundles and digests must be reproducible, so no projection may rely on heap order."""
+        for table in DURABLE_TABLES:
+            order = ", ".join(f"source.{column}" for column in ORDER_COLUMNS[table])
+            self.assertRegex(
+                source_projection(CURRENT_SOURCE, table), re.escape(f" order by {order}") + r"\Z"
+            )
+        # The legacy Agent projection has no `source` alias: its row order comes from the name.
+        self.assertRegex(
+            source_projection(LEGACY_SOURCE, "agent_definition"), r"\n\s+order by d\.name\Z"
+        )
 
     def test_legacy_config_rejection_rules(self):
         """Unrepresentable legacy Agent configs fail closed with rule-specific reasons."""
