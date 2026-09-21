@@ -47,7 +47,12 @@ def placeholder_config(omit=(), empty=(), optional=False):
     for key in keys:
         if key in omit:
             continue
-        value = "" if key in empty else f"{VALUE_PREFIX}{key.lower()}"
+        if key in empty:
+            value = ""
+        elif key == "KK_STUDIO_DB_URL":
+            value = f"jdbc:postgresql://{VALUE_PREFIX}host/{VALUE_PREFIX}database"
+        else:
+            value = f"{VALUE_PREFIX}{key.lower()}"
         lines.append(f"{key}={value}")
     return "\n".join(lines) + "\n"
 
@@ -455,6 +460,19 @@ class TestLocalDevConfigLoader(unittest.TestCase):
             result = source_dev_script(":", {"DEV_ENV_FILE": str(emptied), **marker})
             self.assertNotEqual(0, result.returncode)
             self.assertIn("KK_STUDIO_DB_PASSWORD", result.stderr)
+
+            no_database = write_config(
+                root,
+                placeholder_config().replace(
+                    f"jdbc:postgresql://{VALUE_PREFIX}host/{VALUE_PREFIX}database",
+                    f"jdbc:postgresql://{VALUE_PREFIX}host",
+                ),
+                name="no-database.env",
+            )
+            result = source_dev_script(":", {"DEV_ENV_FILE": str(no_database), **marker})
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("explicit database name", result.stderr)
+            self.assertNotIn(VALUE_PREFIX, result.stdout + result.stderr)
 
             for override, expected in (
                 ({"SPRING_PROFILES_ACTIVE": "e2e"}, "SPRING_PROFILES_ACTIVE=prod"),
