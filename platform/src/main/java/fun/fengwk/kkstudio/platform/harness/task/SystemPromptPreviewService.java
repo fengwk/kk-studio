@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.task;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -23,7 +22,6 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -75,8 +73,8 @@ public final class SystemPromptPreviewService {
     BranchSettings settings = path.baseSettings();
     AgentDefinition agent = agentDefinitionRepository.getByName(settings.agentName());
     Instant now = clock.instant();
-    EnvironmentId environmentId = resolveEnvironmentId(settings.environmentName());
-    CurrentEnvironmentContext environment = resolveCurrentEnvironment(environmentId, now);
+    Environment selectedEnvironment = resolveEnvironment(settings.environmentName());
+    CurrentEnvironmentContext environment = currentEnvironment(selectedEnvironment, now);
     if (agent == null) {
       return promptComposer.compose(null, environment, List.of(), List.of());
     }
@@ -94,40 +92,30 @@ public final class SystemPromptPreviewService {
   }
 
   /** Environment 只按当前 branch settings 的 name 解析；null 或 name 缺失时宽容回退为空环境。 */
-  private EnvironmentId resolveEnvironmentId(String environmentName) {
+  private Environment resolveEnvironment(String environmentName) {
     if (environmentName == null) {
       return null;
     }
-    Environment environment = environmentRepository.getByName(environmentName);
-    return environment == null ? null : EnvironmentId.of(environment.getId());
+    return environmentRepository.getByName(environmentName);
   }
 
-  private CurrentEnvironmentContext resolveCurrentEnvironment(
-      EnvironmentId environmentId, Instant now) {
-    if (environmentId == null) {
-      return new CurrentEnvironmentContext(
-          null, null, now.atZone(clock.getZone()).toLocalDate(), null);
+  /**
+   * 预览的 Environment 块同样只由选中 Environment 的 name 与连接行保留的最近一次 READY 宿主 payload 组成；两者都缺失时只渲染 {@code
+   * name: none} 与 Platform 日期。
+   */
+  private CurrentEnvironmentContext currentEnvironment(Environment selected, Instant now) {
+    if (selected == null) {
+      return CurrentEnvironmentContext.none(now, clock.getZone());
     }
-    // 宿主 metadata 只来自连接行保留的最近一次 READY payload；从未 READY 时按空环境上下文。
+    EnvironmentId environmentId = EnvironmentId.of(selected.getId());
+    // 宿主 metadata 只来自连接行保留的最近一次 READY payload；从未 READY 时可选事实整行省略。
     EnvironmentConnection liveEnvironment = environmentRegistry.find(environmentId).orElse(null);
     DaemonEnvironmentInfo environmentInfo =
         liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
             ? null
             : liveEnvironment.daemonCapabilities().environment();
-    DaemonOperatingSystem os = environmentInfo != null ? environmentInfo.operatingSystem() : null;
-    String note = environmentInfo != null ? environmentInfo.note() : null;
-    String timeZone = environmentInfo != null ? environmentInfo.timeZone() : null;
-    ZoneId zone;
-    if (timeZone != null) {
-      try {
-        zone = ZoneId.of(timeZone);
-      } catch (Exception ex) {
-        zone = clock.getZone();
-      }
-    } else {
-      zone = clock.getZone();
-    }
-    return new CurrentEnvironmentContext(environmentId, os, now.atZone(zone).toLocalDate(), note);
+    return CurrentEnvironmentContext.selected(
+        environmentId, selected.getName(), environmentInfo, now, clock.getZone());
   }
 
   /**

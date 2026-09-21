@@ -35,7 +35,8 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
   return {
     id: 'env-id-1',
     name: 'env',
-    rootPath: null,
+    userName: null,
+    homeDirectory: null,
     status: 'READY',
     ready: true,
     lastSeen: null,
@@ -72,7 +73,8 @@ describe('EnvironmentsPage', () => {
       {
         id: 'env-1',
         name: 'local-dev',
-        rootPath: '/workspace/local-dev',
+        userName: 'dev-user',
+        homeDirectory: '/home/dev',
         status: 'READY',
         ready: true,
         lastSeen: '2026-07-20T01:02:03.000Z',
@@ -84,7 +86,8 @@ describe('EnvironmentsPage', () => {
       {
         id: 'env-2',
         name: 'stale-box',
-        rootPath: '/workspace/stale-box',
+        userName: 'ops-user',
+        homeDirectory: '/home/ops',
         status: 'READY',
         ready: false,
         lastSeen: '2026-07-19T00:00:00.000Z',
@@ -96,7 +99,8 @@ describe('EnvironmentsPage', () => {
       {
         id: 'env-3',
         name: 'connecting-box',
-        rootPath: '/workspace/connecting-box',
+        userName: null,
+        homeDirectory: null,
         status: 'CONNECTING',
         ready: false,
         lastSeen: null,
@@ -112,6 +116,11 @@ describe('EnvironmentsPage', () => {
     expect(screen.getAllByText('READY').length).toBe(1)
     expect(screen.getByText('UNAVAILABLE')).toBeInTheDocument()
     expect(screen.getByText('process.exec')).toBeInTheDocument()
+    // 卡片展示最近一次 READY 的宿主进程用户，且不再展示任何 Root 路径。
+    expect(screen.getByText('dev-user')).toBeInTheDocument()
+    expect(screen.getByText('ops-user')).toBeInTheDocument()
+    expect(screen.queryByText('/workspace/local-dev')).toBeNull()
+    expect(screen.queryByText('Root 路径')).toBeNull()
     // 卡片不展示 skills 字段
     expect(screen.queryByText('dev')).toBeNull()
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
@@ -153,7 +162,7 @@ describe('EnvironmentsPage', () => {
       ready: false,
       lastSeen: null,
       capabilities: [],
-      rootPath: null,
+      userName: null,
       version: '1',
       createTime: '2026-07-20T00:00:00.000Z',
       updateTime: '2026-07-20T00:00:00.000Z',

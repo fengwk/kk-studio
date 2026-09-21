@@ -80,7 +80,10 @@ class SystemPromptPreviewServiceTest {
 
     assertTrue(preview.startsWith("You are the planner."), preview);
     assertTrue(preview.contains("<current_environment>"), preview);
-    assertFalse(preview.contains("- name:"), preview);
+    // 选中的 Environment 用自身 name 进入环境块；宿主从未 READY 时不伪造 user/home。
+    assertTrue(preview.contains("- name: local"), preview);
+    assertFalse(preview.contains("- user:"), preview);
+    assertFalse(preview.contains("- home:"), preview);
     assertTrue(preview.contains("- date: 2026-08-17"), preview);
     assertFalse(preview.contains("<available_skills>"), preview);
   }
@@ -96,7 +99,7 @@ class SystemPromptPreviewServiceTest {
     String preview = service(runtime, agents, codec).preview(THREAD_ID);
 
     assertTrue(preview.startsWith("<current_environment>"), preview);
-    assertFalse(preview.contains("- name:"), preview);
+    assertTrue(preview.contains("- name: local"), preview);
     assertTrue(preview.contains("- date: 2026-08-17"), preview);
     assertFalse(preview.contains("You are the planner."), preview);
   }
@@ -137,7 +140,11 @@ class SystemPromptPreviewServiceTest {
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
 
     assertFalse(preview.contains("workspace"), preview);
+    assertTrue(preview.contains("- name: local"), preview);
     assertTrue(preview.contains("- system: wsl"), preview);
+    // 宿主进程用户与 HOME 是展示事实：既进入环境块，也不携带任何路径默认值语义。
+    assertTrue(preview.contains("- user: dev-user"), preview);
+    assertTrue(preview.contains("- home: /home/dev"), preview);
     assertTrue(preview.contains("- date: 2026-08-16"), preview);
     assertTrue(preview.contains("- note: Local &lt;dev&gt; &amp; tools."), preview);
   }
@@ -164,7 +171,10 @@ class SystemPromptPreviewServiceTest {
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
 
+    assertTrue(preview.contains("- name: local"), preview);
     assertTrue(preview.contains("- system: linux"), preview);
+    assertTrue(preview.contains("- user: dev-user"), preview);
+    assertTrue(preview.contains("- home: /home/dev"), preview);
     assertTrue(preview.contains("- note: Live note"), preview);
   }
 
@@ -194,7 +204,10 @@ class SystemPromptPreviewServiceTest {
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
 
+    assertTrue(preview.contains("- name: local"), preview);
     assertTrue(preview.contains("- system: wsl"), preview);
+    assertTrue(preview.contains("- user: dev-user"), preview);
+    assertTrue(preview.contains("- home: /home/dev"), preview);
     assertTrue(preview.contains("- note: Retained note"), preview);
   }
 
@@ -277,9 +290,9 @@ class SystemPromptPreviewServiceTest {
     assertFalse(preview.contains("missing"), preview);
   }
 
-  /** 测试意图：从未 READY（连接行不存在或没有保留 metadata）时环境块为空，绝不伪造 OS 或 note。 */
+  /** 测试意图：从未 READY（连接行不存在或没有保留 metadata）时不伪造任何宿主事实，只保留 Environment name 与日期。 */
   @Test
-  void rendersEmptyEnvironmentWhenNoAcceptedHostMetadataExists() {
+  void omitsHostFactsWhenNoAcceptedHostMetadataExists() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
@@ -303,14 +316,17 @@ class SystemPromptPreviewServiceTest {
 
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
 
+    assertTrue(preview.contains("- name: local"), preview);
     assertFalse(preview.contains("- system:"), preview);
+    assertFalse(preview.contains("- user:"), preview);
+    assertFalse(preview.contains("- home:"), preview);
     assertFalse(preview.contains("- note:"), preview);
     assertTrue(preview.contains("<current_environment>"), preview);
   }
 
-  /** 测试意图：CONNECTING 但无保留 metadata 的连接行同样渲染空环境块。 */
+  /** 测试意图：CONNECTING 但无保留 metadata 的连接行同样不伪造宿主事实。 */
   @Test
-  void rendersEmptyEnvironmentWhenConnectingRowHasNoRetainedMetadata() {
+  void omitsHostFactsWhenConnectingRowHasNoRetainedMetadata() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
@@ -326,13 +342,14 @@ class SystemPromptPreviewServiceTest {
     String preview = service(runtime, agents, codec, environments).preview(THREAD_ID);
 
     assertTrue(preview.startsWith("<current_environment>"), preview);
+    assertTrue(preview.contains("- name: local"), preview);
     assertFalse(preview.contains("- system:"), preview);
     assertFalse(preview.contains("- note:"), preview);
   }
 
-  /** 测试意图：验证 branch 未选择 Environment 时预览仍渲染空环境块，且绝不因「无环境」失败。 */
+  /** 测试意图：验证 branch 未选择 Environment 时预览渲染 name: none 与 Platform 日期，且绝不因「无环境」失败。 */
   @Test
-  void rendersEmptyEnvironmentWhenBranchHasNoEnvironment() {
+  void rendersNoneEnvironmentNameWhenBranchHasNoEnvironment() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
@@ -353,13 +370,17 @@ class SystemPromptPreviewServiceTest {
 
     assertTrue(preview.startsWith("You are the planner."), preview);
     assertTrue(preview.contains("<current_environment>"), preview);
+    assertTrue(preview.contains("- name: none"), preview);
+    assertTrue(preview.contains("- date: 2026-08-17"), preview);
     assertFalse(preview.contains("- system:"), preview);
+    assertFalse(preview.contains("- user:"), preview);
+    assertFalse(preview.contains("- home:"), preview);
     assertFalse(preview.contains("- note:"), preview);
   }
 
-  /** 测试意图：验证 branch 选择的 Environment name 无法解析时，预览宽容回退为空环境上下文（绝不 500）， 且不读取任何 Agent 侧环境字段。 */
+  /** 测试意图：验证 branch 选择的 Environment name 无法解析时，预览宽容回退为 name: none（绝不 500）， 且不读取任何 Agent 侧环境字段。 */
   @Test
-  void fallsBackToEmptyEnvironmentWhenBranchNameCannotBeResolved() {
+  void fallsBackToNoneEnvironmentWhenBranchNameCannotBeResolved() {
     HarnessRuntime runtime = mock(HarnessRuntime.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
     AgentDefinitionConfigCodec codec = mock(AgentDefinitionConfigCodec.class);
@@ -382,6 +403,7 @@ class SystemPromptPreviewServiceTest {
             .preview(THREAD_ID);
 
     assertTrue(preview.startsWith("You are the planner."), preview);
+    assertTrue(preview.contains("- name: none"), preview);
     assertTrue(preview.contains("- date: 2026-08-17"), preview);
     assertFalse(preview.contains("- system:"), preview);
     assertFalse(preview.contains("<available_skills>"), preview);

@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheAffinityKeyFactory;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
@@ -72,7 +71,6 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -90,10 +88,10 @@ import java.util.UUID;
  * {@link BranchSettings#environmentName()} 在每轮 turn 开始时按全局唯一且不可变的 name 解析出当时 的内部路由身份（{@link
  * EnvironmentId}）：要求环境的工具（REQUIRED）在 Branch 未选择 Environment 时从最终模型工具列表过滤，已选择环境时按解析出的环境绑定； OPTIONAL
  * 工具在已选环境时绑定环境，未选环境时两者为 null；NONE 工具始终不绑定环境；name 无法解析时确定性拒绝规划；Skill 引用按 (packageName, name) 解析为
- * Prompt 三元组；内容由统一 read 按稳定 path 读取。环境上下文（OS、时区、note）只来自连接行保留的最近一次 READY 宿主 payload；引用缺失或失效时确定性拒绝规划
- * （返回 {@link Result.Rejected}，稳定 error code {@value #REJECTION_CODE}）。只有 repository / registry
- * 等基础设施异常向上传播， 由 ThreadProcessor reschedule。YOLO 不进入 spec。非工具元数据（context projectors）从保留的 {@link
- * HarnessCatalog} 提取。
+ * Prompt 三元组；内容由统一 read 按稳定 path 读取。环境上下文（name、system、user、home、date、note）只来自选中的 Environment
+ * 与连接行保留的最近一次 READY 宿主 payload；引用缺失或失效时确定性拒绝规划 （返回 {@link Result.Rejected}，稳定 error code {@value
+ * #REJECTION_CODE}）。只有 repository / registry 等基础设施异常向上传播， 由 ThreadProcessor reschedule。YOLO 不进入
+ * spec。非工具元数据（context projectors）从保留的 {@link HarnessCatalog} 提取。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -227,8 +225,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + ")");
 
     Instant now = clock.instant();
-    EnvironmentId environmentId = resolveEnvironmentId(settings.environmentName());
-    CurrentEnvironmentContext currentEnvironment = resolveCurrentEnvironment(environmentId, now);
+    Environment selectedEnvironment = resolveEnvironment(settings.environmentName());
+    CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment, now);
+    // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。
+    EnvironmentId environmentId = currentEnvironment.environmentId();
     List<SkillPromptEntry> skills = resolveSkills(agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
     List<String> toolNames = resolveToolNames(agentConfig, threadId);
@@ -296,7 +296,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * Environment 只由当前 branch settings 的可空 name 决定：null 表示未选择环境；非 null 时按全局唯一且不可变的 name 查 Environment
    * 并取内部路由身份，缺失时确定性拒绝规划。
    */
-  private EnvironmentId resolveEnvironmentId(String environmentName) {
+  private Environment resolveEnvironment(String environmentName) {
     if (environmentName == null) {
       return null;
     }
@@ -304,7 +304,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (environment == null) {
       throw rejection("environment not found: " + environmentName);
     }
-    return EnvironmentId.of(environment.getId());
+    return environment;
   }
 
   /**
@@ -565,32 +565,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return List.copyOf(entries);
   }
 
-  private CurrentEnvironmentContext resolveCurrentEnvironment(
-      EnvironmentId environmentId, Instant now) {
-    if (environmentId == null) {
-      return new CurrentEnvironmentContext(
-          null, null, now.atZone(clock.getZone()).toLocalDate(), null);
+  /**
+   * 当前 Environment 的宿主事实只来自最近一次被接受的 READY payload：连接行从未 READY 时所有可选事实整行省略，绝不伪造或回退到 Platform
+   * 主机；日期用宿主时区换算，未报告时用 Platform 时钟时区。未选择 Environment 时只保留 Platform 当前日期。
+   */
+  private CurrentEnvironmentContext currentEnvironment(Environment selected, Instant now) {
+    if (selected == null) {
+      return CurrentEnvironmentContext.none(now, clock.getZone());
     }
-    EnvironmentConnection liveEnvironment = environmentRegistry.find(environmentId).orElse(null);
-    // 宿主 metadata 只来自连接行保留的最近一次 READY payload；从未 READY 时按空环境上下文。
-    DaemonEnvironmentInfo environmentInfo =
-        liveEnvironment == null || liveEnvironment.daemonCapabilities() == null
-            ? null
-            : liveEnvironment.daemonCapabilities().environment();
-    DaemonOperatingSystem os = environmentInfo != null ? environmentInfo.operatingSystem() : null;
-    String note = environmentInfo != null ? environmentInfo.note() : null;
-    String timeZone = environmentInfo != null ? environmentInfo.timeZone() : null;
-    ZoneId zone;
-    if (timeZone != null) {
-      try {
-        zone = ZoneId.of(timeZone);
-      } catch (Exception ex) {
-        zone = clock.getZone();
-      }
-    } else {
-      zone = clock.getZone();
-    }
-    return new CurrentEnvironmentContext(environmentId, os, now.atZone(zone).toLocalDate(), note);
+    EnvironmentId environmentId = EnvironmentId.of(selected.getId());
+    EnvironmentConnection connection = environmentRegistry.find(environmentId).orElse(null);
+    return CurrentEnvironmentContext.selected(
+        environmentId, selected.getName(), hostFacts(connection), now, clock.getZone());
+  }
+
+  private static DaemonEnvironmentInfo hostFacts(EnvironmentConnection connection) {
+    return connection == null || connection.daemonCapabilities() == null
+        ? null
+        : connection.daemonCapabilities().environment();
   }
 
   /**

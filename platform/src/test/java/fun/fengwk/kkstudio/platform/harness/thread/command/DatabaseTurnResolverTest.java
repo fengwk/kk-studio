@@ -326,9 +326,11 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
+    // 未选择 Environment：只输出 name: none 与 Platform 日期，没有任何宿主事实或路径默认值。
     assertEquals(
         "agent system prompt\n\n"
             + "<current_environment>\n"
+            + "- name: none\n"
             + "- date: 2026-08-02\n"
             + "</current_environment>",
         instructionText(requestSpec));
@@ -339,16 +341,21 @@ class DatabaseTurnResolverTest {
     Clock serviceClock = Clock.fixed(NOW, ZoneId.of("America/Los_Angeles"));
     Fixture fixture = new Fixture(List.of(), List.of(), List.of(), serviceClock);
 
-    // 未选择 Environment：空环境上下文只保留服务端时钟派生的日期。
+    // 未选择 Environment：环境块只有 name: none 与服务端时钟派生的日期。
     String none = instructionText(fixture.resolved(fixture.path(unboundSettings("default"))));
-    assertFalse(none.contains("- name:"), none);
+    assertTrue(none.contains("- name: none"), none);
     assertFalse(none.contains("- system:"), none);
+    assertFalse(none.contains("- user:"), none);
+    assertFalse(none.contains("- home:"), none);
     assertTrue(none.contains("- date: 2026-08-01"), none);
     assertFalse(none.contains("- note:"), none);
 
-    // 已选择 Environment 但既无 live daemon 也无持久报告：回退到服务端时钟，规划仍然成功。
+    // 已选择 Environment 但既无 live daemon 也无持久报告：只输出 name 与回退到服务端时钟的日期，绝不伪造 user/home。
     String unreported = instructionText(fixture.resolved(fixture.path(settings("default"))));
+    assertTrue(unreported.contains("- name: " + ENV_A_NAME), unreported);
     assertFalse(unreported.contains("- system:"), unreported);
+    assertFalse(unreported.contains("- user:"), unreported);
+    assertFalse(unreported.contains("- home:"), unreported);
     assertTrue(unreported.contains("- date: 2026-08-01"), unreported);
     assertFalse(unreported.contains("- note:"), unreported);
   }
@@ -369,7 +376,10 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
     String prompt = instructionText(requestSpec);
 
+    assertTrue(prompt.contains("- name: " + ENV_A_NAME), prompt);
     assertTrue(prompt.contains("- system: linux"), prompt);
+    assertTrue(prompt.contains("- user: dev-user"), prompt);
+    assertTrue(prompt.contains("- home: /home/dev"), prompt);
     assertTrue(prompt.contains("- date: 2026-08-01"), prompt);
     assertTrue(prompt.contains("- note: Custom &lt;Linux&gt; &amp; tools."), prompt);
   }
@@ -380,7 +390,10 @@ class DatabaseTurnResolverTest {
     fixture.connectingEnvironment(ENV_A);
 
     String withoutMetadata = instructionText(fixture.resolved(fixture.path(settings("default"))));
+    assertTrue(withoutMetadata.contains("- name: " + ENV_A_NAME), withoutMetadata);
     assertFalse(withoutMetadata.contains("- system:"), withoutMetadata);
+    assertFalse(withoutMetadata.contains("- user:"), withoutMetadata);
+    assertFalse(withoutMetadata.contains("- home:"), withoutMetadata);
     assertTrue(withoutMetadata.contains("- date: 2026-08-02"), withoutMetadata);
     assertFalse(withoutMetadata.contains("- note:"), withoutMetadata);
 
@@ -398,7 +411,10 @@ class DatabaseTurnResolverTest {
     staleFixture.staleEnvironment(ENV_A, environmentInfo);
     String stale = instructionText(staleFixture.resolved(staleFixture.path(settings("default"))));
     assertEquals(ready, stale);
+    assertTrue(stale.contains("- name: " + ENV_A_NAME), stale);
     assertTrue(stale.contains("- system: wsl"), stale);
+    assertTrue(stale.contains("- user: dev-user"), stale);
+    assertTrue(stale.contains("- home: /home/dev"), stale);
     assertTrue(stale.contains("- date: 2026-08-02"), stale);
     assertTrue(stale.contains("- note: Stable WSL environment."), stale);
   }
@@ -597,19 +613,25 @@ class DatabaseTurnResolverTest {
     assertFalse(instructionText(requestSpec).contains("- system:"));
   }
 
-  /** 测试意图：环境块只取自连接行保留的宿主 metadata；无连接行时不伪造 OS/note。 */
+  /** 测试意图：环境块只取自选中的 Environment 与连接行保留的宿主 metadata；无连接行时不伪造 user/home/OS/note。 */
   @Test
   void environmentContextComesOnlyFromRetainedHostMetadata() {
     Fixture live = new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     live.readyEnvironment(ENV_A);
     ModelRequestSpec liveSpec = live.resolved(live.path(settings("default")));
+    assertTrue(instructionText(liveSpec).contains("- name: " + ENV_A_NAME));
     assertTrue(instructionText(liveSpec).contains("- system: linux"));
+    assertTrue(instructionText(liveSpec).contains("- user: dev-user"));
+    assertTrue(instructionText(liveSpec).contains("- home: /home/dev"));
 
     Fixture offline =
         new Fixture(List.of(), List.of(), List.of(), Clock.fixed(NOW, ZoneOffset.UTC));
     offline.connectingEnvironment(ENV_A);
     ModelRequestSpec offlineSpec = offline.resolved(offline.path(settings("default")));
+    assertTrue(instructionText(offlineSpec).contains("- name: " + ENV_A_NAME));
     assertFalse(instructionText(offlineSpec).contains("- system:"));
+    assertFalse(instructionText(offlineSpec).contains("- user:"));
+    assertFalse(instructionText(offlineSpec).contains("- home:"));
     assertFalse(instructionText(offlineSpec).contains("- note:"));
   }
 
@@ -622,7 +644,10 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
+    assertTrue(instructionText(requestSpec).contains("- name: " + ENV_A_NAME));
     assertTrue(instructionText(requestSpec).contains("- system: wsl"));
+    assertTrue(instructionText(requestSpec).contains("- user: dev-user"));
+    assertTrue(instructionText(requestSpec).contains("- home: /home/dev"));
     assertTrue(instructionText(requestSpec).contains("- note: Retained note"));
   }
 
@@ -2153,6 +2178,9 @@ class DatabaseTurnResolverTest {
     assertEquals(
         "agent system prompt\n\n"
             + "<current_environment>\n"
+            + "- name: "
+            + ENV_A_NAME
+            + "\n"
             + "- date: 2026-08-02\n"
             + "</current_environment>"
             + "\n\n"

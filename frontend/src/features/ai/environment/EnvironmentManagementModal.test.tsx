@@ -8,7 +8,8 @@ function testEnvironment(overrides: Partial<EnvironmentCardDTO> = {}): Environme
   return {
     id: 'env-test-1',
     name: 'test-environment',
-    rootPath: '/opt/studio/workspace',
+    userName: 'dev-user',
+    homeDirectory: '/home/dev',
     operatingSystem: 'Linux 5.15.0',
     timeZone: 'Asia/Shanghai',
     note: 'Production host',
@@ -30,7 +31,11 @@ describe('EnvironmentManagementModal', () => {
 
     expect(screen.getByText('Linux 5.15.0')).toBeInTheDocument()
     expect(screen.getByText('Asia/Shanghai')).toBeInTheDocument()
-    expect(screen.getByText('/opt/studio/workspace')).toBeInTheDocument()
+    // 宿主信息展示最近一次 READY 的进程用户与 HOME，不再展示任何 Root 路径。
+    expect(screen.getByText('dev-user')).toBeInTheDocument()
+    expect(screen.getByText('/home/dev')).toBeInTheDocument()
+    expect(screen.queryByText('根路径')).toBeNull()
+    expect(screen.queryByText('/opt/studio/workspace')).toBeNull()
     expect(screen.getByText('Production host')).toBeInTheDocument()
     expect(screen.getByText('2026-07-20T02:00:00.000Z')).toBeInTheDocument()
 
