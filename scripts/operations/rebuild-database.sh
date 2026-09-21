@@ -17,13 +17,15 @@
 #   legacy-main  the origin/main baseline (environment_skill_source/environment_skill present,
 #                skill_package/plugin_credential absent, agent_definition.environment_id present);
 #                environment/agent_provider/agent_model are copied column-for-column,
-#                agent_definition is projected onto the current config wire shape with a
-#                deterministic built-in tool id mapping, and the legacy environment-bound Skill
+#                agent_definition is projected onto the current config wire shape (deterministic
+#                built-in tool id mapping, legacy subagents kept, inheritParentEnvironment
+#                initialised to the current default true), and the legacy environment-bound Skill
 #                sources are not migrated because they are not global Git packages.
 #
-# agent_definition.environment_id and the legacy Skill sources cannot be represented in the
+# agent_definition.environment_id and the legacy Skill source tables cannot be represented in the
 # current V1 shape; their counts are reported in the plan and the manifest instead of being
-# silently dropped.  Any legacy Agent configuration that cannot be represented aborts the
+# silently dropped.  A non-empty `skills` reference inside a legacy Agent configuration is not
+# silently cleared either: any legacy Agent configuration that cannot be represented aborts the
 # operation read-only.
 #
 # Runtime leases and transient product data are intentionally not restored.

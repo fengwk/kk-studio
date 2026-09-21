@@ -489,10 +489,12 @@ preview 只覆盖前端、同步 API 和查询行为。
 | current | 六张 durable 表的列集合与当前 V1 完全一致 | 逐列原样搬运 |
 | legacy-main | 六张 durable 表的列集合与 `main` 上的旧结构一致 | 按当前 V1 投影后搬运 |
 
-legacy-main 的投影把旧结构里的 Environment 归属关系（`agent_definition.environment_id`）、旧 Skill
-包与旧 Skill 引用从 Agent 定义里剥掉：工具标识改写为当前 V1 的内建名或发现后的 `mcp_tool.model_name`，
-`skills` 置空、`subagents` 与 `inheritParentEnvironment` 保留。这些被丢弃的事实只在 manifest 中计数，
-不参与回灌。以下情况一律 fail closed，脚本在停止容器、写文件与改库之前就报错退出并保持源库不变：
+legacy-main 的投影逐字段定义目标值：`toolIds` 改写为当前 V1 的内建名或已发现 `mcp_tool.model_name`，
+`subagents` 原样保留，`inheritParentEnvironment` 在旧结构里不存在、按当前默认值 `true` 初始化；只有
+旧结构里本来就是空数组的 `skills` 才投影为当前空列表。旧结构的非空 Skill 引用不会被静默清空，而是
+视为当前 V1 无法承接的 durable 事实，在预检阶段直接失败；非空 `agent_definition.environment_id`
+同样不可表达（环境选择已移到 Thread/Session 侧），作为已废弃事实只在 manifest 中计数。以下情况一律
+fail closed，脚本在停止容器、写文件与改库之前就报错退出并保持源库不变：
 
 - 列集合既不匹配 current 也不匹配 legacy-main；
 - 旧结构的 Skill 引用非空（当前 V1 没有对应的 durable 事实可承接）；
