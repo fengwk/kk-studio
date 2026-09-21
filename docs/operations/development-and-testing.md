@@ -478,20 +478,47 @@ preview 只覆盖前端、同步 API 和查询行为。
 不维护增量 migration 链；修改 V1 必须先停止两个 App 节点，并在 Human 明确批准的维护窗口内重建空库。
 普通自迭代不得重置共享 database 或删除共享 bucket。执行前必须让 Main 容器指向由当前仓库 revision
 构建的镜像但保持停止；脚本会把仓库 V1 的 Flyway checksum 与 Main 实际写入的 checksum 对比，不一致
-就停止回灌并保持 App 关闭。流程固定为：
+就停止回灌并保持 App 关闭。
+
+重建要先认清源库属于哪种结构，这一步由只读的
+[scripts/operations/database_rebuild_source.py](../../scripts/operations/database_rebuild_source.py)
+完成（同一份投影既用于导出 bundle，也用于导出后比对的目标指纹）：
+
+| 源结构 | 判定依据 | 回灌方式 |
+| --- | --- | --- |
+| current | 六张 durable 表的列集合与当前 V1 完全一致 | 逐列原样搬运 |
+| legacy-main | 六张 durable 表的列集合与 `main` 上的旧结构一致 | 按当前 V1 投影后搬运 |
+
+legacy-main 的投影把旧结构里的 Environment 归属关系（`agent_definition.environment_id`）、旧 Skill
+包与旧 Skill 引用从 Agent 定义里剥掉：工具标识改写为当前 V1 的内建名或发现后的 `mcp_tool.model_name`，
+`skills` 置空、`subagents` 与 `inheritParentEnvironment` 保留。这些被丢弃的事实只在 manifest 中计数，
+不参与回灌。以下情况一律 fail closed，脚本在停止容器、写文件与改库之前就报错退出并保持源库不变：
+
+- 列集合既不匹配 current 也不匹配 legacy-main；
+- 旧结构的 Skill 引用非空（当前 V1 没有对应的 durable 事实可承接）；
+- 工具标识无法映射到内建名或已发现的 `mcp_tool.model_name`，或映射后出现重名；
+- Provider/Agent 配置不是合法对象、字段类型错误、子 Agent 列表非法。
+
+流程固定为：
 
 ```text
 停止 Main/Dev
   -> 全库 custom-format 安全备份
-  -> 导出保留配置
+  -> 按源结构投影导出 durable 配置 bundle
+  -> 记录目标库应有的逐表指纹
   -> 旧库原地改名并冻结
   -> 按原 owner/locale 创建空库
   -> Main 执行 V1
   -> 停止 Main
-  -> 单事务回灌并逐表校验内容指纹
+  -> 单事务回灌并逐表比对内容指纹
   -> 启动 Main/Dev
   -> 等待 healthcheck 与 Environment Daemon 重连
 ```
+
+回灌由 `psql --single-transaction -v ON_ERROR_STOP=1` 执行 bundle，事务、提交与回滚全部交给
+PostgreSQL，脚本不自己拼接 `BEGIN`/`COMMIT`：任何一行失败都让整次回灌回到「六张表都空」的状态，
+不会留下半份 durable 配置。bundle 内的 `\set VERBOSITY terse` 与自身的错误输出清洗保证失败信息只
+包含出错语句的位置和错误类别，不打印行内容、凭据或加密载荷。
 
 哪些表属于 durable 保留集合、哪些运行数据在重建后由 V1 或重连重新生成，由
 [Schema 模块](../modules/schema.md#修改-v1-的代价)持有。除 `--dry-run` 外还可用 `--yes` 跳过确认、
