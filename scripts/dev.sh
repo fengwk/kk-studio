@@ -133,6 +133,9 @@ require_external_data_plane() {
       fail "DEV_ENV_FILE must define a value for $key"
     fi
   done
+  if [[ ! "$KK_STUDIO_DB_URL" =~ ^jdbc:postgresql://[^/]+/[^/?#]+([?].*)?$ ]]; then
+    fail "KK_STUDIO_DB_URL must be a PostgreSQL JDBC URL with an explicit database name"
+  fi
   if [ "$SPRING_PROFILE" != "prod" ]; then
     fail "external data-plane preview requires SPRING_PROFILES_ACTIVE=prod"
   fi
