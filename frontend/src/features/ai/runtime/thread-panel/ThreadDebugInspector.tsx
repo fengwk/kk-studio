@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import type {
-  HarnessModelRequestDebugDTO,
-  HarnessModelRequestDebugSkillDTO,
-  HarnessModelRequestDebugToolDTO,
-} from '@/shared/api/contracts/ai-runtime'
+  ThreadModelRequestDebugData,
+  ThreadModelRequestDebugSkill,
+  ThreadModelRequestDebugTool,
+} from '@/features/ai/runtime/thread-timeline-types'
 
 export type DebugInspectorSelection =
-  | { type: 'tool'; tool: HarnessModelRequestDebugToolDTO }
-  | { type: 'skill'; skill: HarnessModelRequestDebugSkillDTO }
+  | { type: 'tool'; tool: ThreadModelRequestDebugTool }
+  | { type: 'skill'; skill: ThreadModelRequestDebugSkill }
   | { type: 'request' }
 
 function formatJson(raw: string | undefined): string {
@@ -29,7 +29,7 @@ export function ThreadDebugInspector({
   onClose,
 }: {
   selection: DebugInspectorSelection
-  debug: HarnessModelRequestDebugDTO
+  debug: ThreadModelRequestDebugData
   onClose: () => void
 }) {
   const closeBtnRef = useRef<HTMLButtonElement>(null)

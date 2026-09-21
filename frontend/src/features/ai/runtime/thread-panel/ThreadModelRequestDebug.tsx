@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
 import { AlertCircle, Check, Copy, Eye } from 'lucide-react'
 import type {
-  HarnessModelRequestDebugDTO,
-  HarnessModelRequestDebugToolDTO,
-} from '@/shared/api/contracts/ai-runtime'
+  ThreadModelRequestDebugData,
+  ThreadModelRequestDebugTool,
+} from '@/features/ai/runtime/thread-timeline-types'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 
 function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
@@ -23,14 +23,14 @@ export function ThreadModelRequestDebug({
   debug,
   onSelectInspector,
 }: {
-  debug: HarnessModelRequestDebugDTO
+  debug: ThreadModelRequestDebugData
   onSelectInspector: (selection: DebugInspectorSelection | null) => void
 }) {
   const [copied, setCopied] = useState(false)
 
   const { sentTools, filteredTools } = useMemo(() => {
-    const sent: HarnessModelRequestDebugToolDTO[] = []
-    const filtered: HarnessModelRequestDebugToolDTO[] = []
+    const sent: ThreadModelRequestDebugTool[] = []
+    const filtered: ThreadModelRequestDebugTool[] = []
     for (const tool of debug.tools || []) {
       if (tool.state === 'SENT') {
         sent.push(tool)

@@ -129,20 +129,30 @@ public final class AgentPromptComposer {
   private static String skillEntries(List<SkillPromptEntry> skills) {
     List<String> values = new ArrayList<>(skills.size());
     for (SkillPromptEntry skill : skills) {
-      values.add(
-          "  <skill>\n"
-              + "    <name>"
-              + escapeXml(skill.name())
-              + "</name>\n"
-              + "    <description>"
-              + escapeXml(skill.description())
-              + "</description>\n"
-              + "    <path>"
-              + escapeXml(skill.path())
-              + "</path>\n"
-              + "  </skill>");
+      values.add(skillFragment(skill));
     }
     return String.join("\n", values);
+  }
+
+  /**
+   * 渲染单个 Skill 在 {@code <available_skills>} 段中的精确 XML 片段（含段内缩进，不含尾部换行）。
+   *
+   * <p>这是该片段的唯一渲染入口：{@link #compose} 与只读 Debug 投影都复用它，因此投影展示的 {@code promptXml} 不可能与真正进入 {@code
+   * systemInstruction} 的文本漂移。
+   */
+  public static String skillFragment(SkillPromptEntry skill) {
+    Objects.requireNonNull(skill, "skill");
+    return "  <skill>\n"
+        + "    <name>"
+        + escapeXml(skill.name())
+        + "</name>\n"
+        + "    <description>"
+        + escapeXml(skill.description())
+        + "</description>\n"
+        + "    <path>"
+        + escapeXml(skill.path())
+        + "</path>\n"
+        + "  </skill>";
   }
 
   private static String subagentEntries(List<SubagentBinding> subagents) {

@@ -38,17 +38,22 @@ import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
+import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
-import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
-import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewServiceFactory;
+import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
+import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
+import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
+import fun.fengwk.kkstudio.platform.plugin.resource.StoragePluginResourceGateway;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import javax.sql.DataSource;
 
@@ -126,6 +131,18 @@ public class HarnessRuntimeConfiguration {
   public ManagedResourceDownloadService managedResourceDownloadService(
       ResourceStore resourceStore) {
     return new ManagedResourceDownloadService(resourceStore);
+  }
+
+  /** Plugin 资源端口依赖 HarnessStore，因此由完整 Harness Runtime 的组合根创建。 */
+  @Bean
+  public PluginResourceGateway pluginResourceGateway(
+      HarnessStore harnessStore,
+      SessionBlobRefManager sessionBlobRefManager,
+      StorageBlobManager storageBlobManager,
+      StorageUploadService storageUploadService,
+      PluginProperties properties) {
+    return new StoragePluginResourceGateway(
+        harnessStore, sessionBlobRefManager, storageBlobManager, storageUploadService, properties);
   }
 
   @Bean
@@ -301,10 +318,11 @@ public class HarnessRuntimeConfiguration {
         toolProcessor);
   }
 
+  /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */
   @Bean
-  public SystemPromptPreviewService systemPromptPreviewService(
-      HarnessRuntime runtime, SystemPromptPreviewServiceFactory factory) {
-    return factory.create(runtime);
+  public ModelRequestDebugService modelRequestDebugService(
+      HarnessRuntime runtime, DatabaseTurnResolver turnResolver, Clock clock) {
+    return new ModelRequestDebugService(runtime, turnResolver, clock);
   }
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */
@@ -398,17 +416,10 @@ public class HarnessRuntimeConfiguration {
    */
   @Bean
   public EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator(
-      EnvironmentRegistry environmentRegistry,
-      SkillCatalogQueryService skillCatalogQueryService,
+      EnvironmentSkillSyncOrchestratorFactory orchestratorFactory,
       EnvironmentCapabilityTransport capabilityTransport,
-      @Qualifier("environmentSkillSyncExecutor") ExecutorService environmentSkillSyncExecutor,
-      Clock clock) {
-    return new EnvironmentSkillSyncOrchestrator(
-        environmentRegistry,
-        skillCatalogQueryService,
-        capabilityTransport,
-        environmentSkillSyncExecutor,
-        clock);
+      @Qualifier("environmentSkillSyncExecutor") ExecutorService environmentSkillSyncExecutor) {
+    return orchestratorFactory.create(capabilityTransport, environmentSkillSyncExecutor);
   }
 
   /**

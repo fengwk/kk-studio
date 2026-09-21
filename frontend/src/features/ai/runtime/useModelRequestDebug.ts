@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
+import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
 
 /**
  * 仅在 Debug 视图启用。进入 `/debug` 拉一次；turn 开始与结束时（working 变化时）刷新，
@@ -30,8 +31,9 @@ export function useModelRequestDebug(
     void query.refetch()
   }, [enabled, query, threadId, working])
 
+  const debug: ThreadModelRequestDebugData | null = query.data ?? null
   return {
-    debug: query.data ?? null,
+    debug,
     loading: query.isLoading,
     error: query.error,
     refetch: query.refetch,

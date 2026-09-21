@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, type KeyboardEvent, type RefObject } from '
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { ThreadModelRequestDebug } from '@/features/ai/runtime/thread-panel/ThreadModelRequestDebug'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
-import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
+import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
 
@@ -47,7 +47,7 @@ export function ThreadEventView({
   onSelectedEventIdChange: (eventId: string | null) => void
   initialScrollTop?: number | null
   bodyRef?: RefObject<HTMLDivElement | null>
-  debug?: HarnessModelRequestDebugDTO | null
+  debug?: ThreadModelRequestDebugData | null
   onSelectInspector?: (selection: DebugInspectorSelection | null) => void
 }) {
   const { t } = useI18n()

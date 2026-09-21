@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
+import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Locale;
@@ -48,7 +49,8 @@ class StudioDomainErrorAdviceTest {
           StudioAgentDefinitionController.class,
           StudioChatController.class,
           StudioMcpServerController.class,
-          StudioEnvironmentController.class
+          StudioEnvironmentController.class,
+          StudioSkillCatalogController.class
         },
         advice.assignableTypes());
   }

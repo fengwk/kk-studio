@@ -40,7 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.harness.task.SystemPromptPreviewService;
+import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
@@ -119,7 +119,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private ModelProcessor modelProcessor;
   @Autowired private ToolProcessor toolProcessor;
   @Autowired private HarnessRuntime harnessRuntime;
-  @Autowired private SystemPromptPreviewService systemPromptPreviewService;
+  @Autowired private ModelRequestDebugService modelRequestDebugService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
   @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
@@ -161,7 +161,7 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(processorScheduler);
     assertNotNull(heartbeatWorkerExecutor);
     assertNotNull(harnessRuntime);
-    assertNotNull(systemPromptPreviewService);
+    assertNotNull(modelRequestDebugService);
     assertNotNull(harnessWorkDispatcher);
     assertNotNull(harnessDispatcherProperties);
     assertEquals(7, harnessDispatcherProperties.getMaxDispatchTasks());

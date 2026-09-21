@@ -166,3 +166,61 @@ export interface ThreadTimeline {
   /** 当 mailbox 中仍有用户可见的排队命令时为 true。 */
   hasPendingInputs: boolean
 }
+
+/** Portable Thread Panel 消费的结构化模型请求 Debug 投影；不依赖 API DTO。 */
+export interface ThreadModelRequestDebugData {
+  kind: 'NEXT_REQUEST_PREVIEW'
+  generatedAt: string
+  model: {
+    providerName: string
+    modelName: string
+    variant: string
+  }
+  environmentName: string | null
+  systemInstruction: string
+  tools: ThreadModelRequestDebugTool[]
+  skills: ThreadModelRequestDebugSkill[]
+  subagents: ThreadModelRequestDebugSubagent[]
+  cacheControl: ThreadModelRequestDebugCacheControl | null
+  planningError: string | null
+  frozenInvocation: ThreadModelRequestDebugFrozenInvocation | null
+}
+
+export interface ThreadModelRequestDebugTool {
+  name: string
+  description: string
+  inputSchemaJson: string
+  environmentSupport: 'NONE' | 'OPTIONAL' | 'REQUIRED'
+  requiredEnvironmentId: string | null
+  provenance: string
+  state: 'SENT' | 'FILTERED'
+  filterReason: string | null
+}
+
+export interface ThreadModelRequestDebugSkill {
+  packageName: string
+  name: string
+  description: string
+  path: string
+  delivery: 'LOCAL' | 'PLATFORM'
+  currentCommit: string
+  observedHeadCommit: string | null
+  installedCommit: string | null
+  promptXml: string
+}
+
+export interface ThreadModelRequestDebugSubagent {
+  name: string
+  description: string
+}
+
+export interface ThreadModelRequestDebugCacheControl {
+  retention: 'NONE' | 'SHORT' | 'LONG'
+  affinityKey: string | null
+  breakpoints: string[]
+}
+
+export interface ThreadModelRequestDebugFrozenInvocation {
+  kind: 'FROZEN_INVOCATION'
+  requestJson: string
+}

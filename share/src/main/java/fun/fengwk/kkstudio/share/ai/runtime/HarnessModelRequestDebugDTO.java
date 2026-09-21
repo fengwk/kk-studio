@@ -47,6 +47,7 @@ public class HarnessModelRequestDebugDTO {
   private List<SubagentDTO> subagents;
 
   /** Provider cache control 事实。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private CacheControlDTO cacheControl;
 
   /** planning 失败的稳定错误码；成功时为 null（required-nullable）。 */
@@ -54,6 +55,7 @@ public class HarnessModelRequestDebugDTO {
   private String planningError;
 
   /** 活动 ModelInvocation 的冻结 canonical ProviderRequest；没有活动 Invocation 时为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private FrozenInvocationDTO frozenInvocation;
 
   /** 候选 Tool 的发送状态与最终 definition 事实。 */
@@ -72,7 +74,8 @@ public class HarnessModelRequestDebugDTO {
     /** Tool 与 Environment 的关系，与 Tool catalog 共用同一个枚举。 */
     private EnvironmentSupportDTO environmentSupport;
 
-    /** 精确要求的目标 Environment UUID（canonical UUID 文本）；不限定环境时为 null。 */
+    /** 精确要求的目标 Environment UUID（canonical UUID 文本）；不限定环境时为 null（required-nullable）。 */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private String requiredEnvironmentId;
 
     /** Contributor 归属身份（{@code contributorId:localName}）。 */
@@ -81,7 +84,8 @@ public class HarnessModelRequestDebugDTO {
     /** 是否进入最终模型工具面：{@code SENT} 或 {@code FILTERED}。 */
     private String state;
 
-    /** 被过滤的稳定原因（当前唯一值 {@code ENVIRONMENT_NOT_SELECTED}）；{@code SENT} 时为 null。 */
+    /** 被过滤的稳定原因（当前唯一值 {@code ENVIRONMENT_NOT_SELECTED}）；{@code SENT} 时为 null（required-nullable）。 */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private String filterReason;
   }
 
@@ -107,10 +111,12 @@ public class HarnessModelRequestDebugDTO {
     /** Package 当前发布 commit。 */
     private String currentCommit;
 
-    /** Package 最近检查到的 branch HEAD；从未成功检查时为 null。 */
+    /** Package 最近检查到的 branch HEAD；从未成功检查时为 null（required-nullable）。 */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private String observedHeadCommit;
 
-    /** 当前 Environment 已安装的 commit；无 Environment 或未安装该 Package 时为 null。 */
+    /** 当前 Environment 已安装的 commit；无 Environment 或未安装该 Package 时为 null（required-nullable）。 */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private String installedCommit;
 
     /** 实际进入 systemInstruction 的 Skill XML 片段。 */
@@ -135,7 +141,8 @@ public class HarnessModelRequestDebugDTO {
     /** 留存档位，取 {@code NONE / SHORT / LONG}。 */
     private String retention;
 
-    /** 稳定前缀标识；{@code retention = NONE} 时为 null。 */
+    /** 稳定前缀标识；{@code retention = NONE} 时为 null（required-nullable）。 */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private String affinityKey;
 
     /** 显式 cache 断点，取 {@code SYSTEM} / {@code TOOLS} 的非空子集；{@code retention = NONE} 时为空。 */

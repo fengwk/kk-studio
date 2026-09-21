@@ -60,6 +60,7 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptPathResolver;
+import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.contributor.ScopedBranchView;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
@@ -174,14 +175,34 @@ public final class DatabaseTurnResolver implements TurnResolver {
         return resolveCompaction(path, compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
-      return resolveLive(threadId, path);
+      return resolved(plan(threadId, path));
     } catch (Rejection rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常原样传播。
       return rejected(rejection.getMessage());
     }
   }
 
-  private Result resolveLive(UUID threadId, EntryPath path) {
+  /**
+   * 只读现算 live 规划：与 {@link #resolve} 共用同一条 Agent/Environment/Tool/Skill 解析纯函数，供 Debug 预览直接消费。
+   *
+   * <p>确定性拒绝被投影为 {@link LiveTurnPlan.Rejected}（稳定 {@value #REJECTION_CODE}）；repository / registry /
+   * projector 等基础设施或编程异常照常传播， 绝不伪装成 planning 失败。压缩路径不属于本入口。
+   */
+  public LiveTurnPlan planLive(UUID threadId, EntryPath path) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(path, "path");
+    try {
+      return plan(threadId, path);
+    } catch (Rejection rejection) {
+      return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
+    }
+  }
+
+  private static TurnResolver.Resolved resolved(LiveTurnPlan.Planned plan) {
+    return new TurnResolver.Resolved(plan.spec(), plan.contextWindow(), plan.spec().outputTokens());
+  }
+
+  private LiveTurnPlan.Planned plan(UUID threadId, EntryPath path) {
     BranchSettings settings = path.baseSettings();
     UUID sessionId = path.root().sessionId();
 
@@ -234,11 +255,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
     CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment, now);
     // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。
     EnvironmentId environmentId = currentEnvironment.environmentId();
-    List<SkillPromptEntry> skills = resolveSkills(environmentId, agentConfig.getSkills());
+    List<LiveTurnPlan.PlannedSkill> skills = resolveSkills(environmentId, agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
     List<String> toolNames = resolveToolNames(agentConfig, threadId);
-    List<ToolBinding> toolBindings =
-        resolveTools(environmentId, settings.environmentName(), toolNames);
+    PlannedTools tools = resolveTools(environmentId, settings.environmentName(), toolNames);
+    List<ToolBinding> toolBindings = tools.bindings();
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
       throw rejection(
@@ -266,11 +287,17 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsedModel.pricing());
     String systemInstruction =
         systemInstruction(
-            threadId, agent.getSystemPrompt(), currentEnvironment, skills, subagentBindings, path);
+            threadId,
+            agent.getSystemPrompt(),
+            currentEnvironment,
+            skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
+            subagentBindings,
+            path);
+    int contextWindow = contextWindow(parsedModel);
     int outputTokens =
         outputTokens(
             parsedModel,
-            contextWindow(parsedModel),
+            contextWindow,
             CompactionPlanner.estimateRequestTokens(path, systemInstruction));
     ProviderCacheControl cacheControl =
         cacheControl(
@@ -282,7 +309,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             sessionId,
             providerConnectionGenerationId,
             cachePolicy(providerFactory, provider.getConfigJson(), selection.providerName()));
-    return new TurnResolver.Resolved(
+    return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             providerType,
             providerConnectionGenerationId,
@@ -293,8 +320,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
             toolBindings,
             subagentBindings,
             cacheControl),
-        contextWindow(parsedModel),
-        outputTokens);
+        contextWindow,
+        tools.candidates(),
+        skills);
   }
 
   /**
@@ -473,21 +501,35 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 按最新 Agent 配置派生的精确顺序逐一绑定。声明环境需求的工具（REQUIRED）在 branch 未选择环境时从最终模型工具列表中过滤， 绝不拒绝规划；branch
-   * 已选择环境时冻结内部路由身份与环境名。OPTIONAL 工具在已选环境时冻结环境，未选环境时两者为 null； NONE 工具始终不绑定环境。贡献声明的固定 {@code
-   * requiredEnvironmentId} 只在 branch 已选择另一个非 null 环境时确定性拒绝。 缺失能力仍立即拒绝，绝不静默跳过。
+   * 按最新 Agent 配置派生的精确顺序逐一规划候选工具。声明环境需求的工具（REQUIRED）在 branch 未选择环境时从最终模型工具面过滤，
+   * 绝不拒绝规划，但候选事实仍保留并携带唯一稳定原因；branch 已选择环境时冻结内部路由身份与环境名。OPTIONAL 工具在已选环境时冻结环境， 未选环境时两者为 null；NONE
+   * 工具始终不绑定环境。贡献声明的固定 {@code requiredEnvironmentId} 只在 branch 已选择另一个非 null 环境时确定性拒绝。
+   * 缺失能力仍立即拒绝，绝不静默跳过。
+   *
+   * <p>返回的候选顺序固定为「SENT 在前、FILTERED 在后」，与 {@link LiveTurnPlan.Planned} 的投影契约一致。
    */
-  private List<ToolBinding> resolveTools(
+  private PlannedTools resolveTools(
       EnvironmentId environmentId, String environmentName, List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
+    List<LiveTurnPlan.CandidateTool> sent = new ArrayList<>(toolNames.size());
+    List<LiveTurnPlan.CandidateTool> filtered = new ArrayList<>();
     for (String toolName : toolNames) {
       ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
       if (contribution == null) {
         throw rejection("tool not found: " + toolName);
       }
       EnvironmentSupport environmentSupport = contribution.requirements().environmentSupport();
+      EnvironmentId toolRequiredEnv = contribution.requirements().requiredEnvironmentId();
+      String inputSchemaJson =
+          schemaCodec.encode(contribution.definition().descriptor().inputSchema());
       if (environmentId == null && environmentSupport == EnvironmentSupport.REQUIRED) {
-        // 未选择环境时过滤 REQUIRED 工具，保留 NONE 与 OPTIONAL 工具。
+        // 未选择环境时只从最终模型工具面过滤 REQUIRED 工具：候选仍可见，并携带唯一稳定原因。
+        filtered.add(
+            candidateTool(
+                contribution,
+                inputSchemaJson,
+                LiveTurnPlan.ToolState.FILTERED,
+                LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED));
         continue;
       }
       List<ContributorStateAccess> stateAccesses =
@@ -503,7 +545,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
               contribution.id().contributorId().value(),
               contribution.id().localName(),
               stateAccesses);
-      EnvironmentId toolRequiredEnv = contribution.requirements().requiredEnvironmentId();
       if (toolRequiredEnv != null
           && environmentId != null
           && !toolRequiredEnv.equals(environmentId)) {
@@ -526,8 +567,28 @@ public final class DatabaseTurnResolver implements TurnResolver {
               environmentSupport,
               boundEnvironmentId,
               boundEnvironmentName));
+      sent.add(candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
     }
-    return List.copyOf(bindings);
+    List<LiveTurnPlan.CandidateTool> candidates = new ArrayList<>(sent.size() + filtered.size());
+    candidates.addAll(sent);
+    candidates.addAll(filtered);
+    return new PlannedTools(List.copyOf(bindings), List.copyOf(candidates));
+  }
+
+  private static LiveTurnPlan.CandidateTool candidateTool(
+      ToolContribution contribution,
+      String inputSchemaJson,
+      LiveTurnPlan.ToolState state,
+      LiveTurnPlan.FilterReason filterReason) {
+    return new LiveTurnPlan.CandidateTool(
+        contribution.definition().descriptor().name(),
+        contribution.definition().descriptor().description(),
+        inputSchemaJson,
+        contribution.requirements().environmentSupport(),
+        contribution.requirements().requiredEnvironmentId(),
+        contribution.id().toString(),
+        state,
+        filterReason);
   }
 
   /**
@@ -536,15 +597,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * <p>通过 {@link SkillCatalogQueryService#getPackage(String)} 读取 Platform 权威事实，按 (packageName,
    * name) 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    *
-   * <p>路径由 {@link SkillPromptPathResolver} 决定：只有选定 Environment 的 skill_state 记录的已安装 commit 与
-   * Package 的 currentCommit 完全一致时才冻结 Daemon 本地稳定路径，否则冻结 platform URI。
+   * <p>路径与交付方式由 {@link SkillPromptPathResolver} 一次判定：只有选定 Environment 的 skill_state 记录的已安装 commit 与
+   * Package 的 currentCommit 完全一致时才冻结 LOCAL 本地稳定路径，否则冻结 PLATFORM URI；同步失败时仍如实暴露实际 installedCommit。
    */
-  private List<SkillPromptEntry> resolveSkills(
+  private List<LiveTurnPlan.PlannedSkill> resolveSkills(
       EnvironmentId environmentId, List<SkillRefDTO> skillRefs) {
     if (skillRefs == null || skillRefs.isEmpty()) {
       return List.of();
     }
-    List<SkillPromptEntry> entries = new ArrayList<>(skillRefs.size());
+    List<LiveTurnPlan.PlannedSkill> skills = new ArrayList<>(skillRefs.size());
     for (SkillRefDTO ref : skillRefs) {
       if (ref == null || ref.getPackageName() == null || ref.getName() == null) {
         throw rejection("invalid agent skill reference");
@@ -565,14 +626,21 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + "/"
                 + ref.getName());
       }
-      entries.add(
-          new SkillPromptEntry(
+      SkillPromptResolution resolution =
+          skillPromptPathResolver.resolveDetails(
+              environmentId, ref.getPackageName(), ref.getName(), pkg.getCurrentCommit());
+      skills.add(
+          new LiveTurnPlan.PlannedSkill(
+              pkg.getPackageName(),
               entry.name(),
               entry.description(),
-              skillPromptPathResolver.resolve(
-                  environmentId, ref.getPackageName(), ref.getName(), pkg.getCurrentCommit())));
+              resolution.path(),
+              resolution.delivery(),
+              pkg.getCurrentCommit(),
+              pkg.getObservedHeadCommit(),
+              resolution.installedCommit()));
     }
-    return List.copyOf(entries);
+    return List.copyOf(skills);
   }
 
   /**
@@ -714,6 +782,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
         .apply(stub, cachePolicy)
         .cacheControl();
   }
+
+  /** 一次工具规划的全部事实：冻结进 spec 的 SENT bindings 与「SENT 在前、FILTERED 在后」的完整候选投影。 */
+  private record PlannedTools(
+      List<ToolBinding> bindings, List<LiveTurnPlan.CandidateTool> candidates) {}
 
   private static <T> T require(T value, String message) {
     if (value == null) {
