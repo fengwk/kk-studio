@@ -25,14 +25,14 @@ capabilityId / capabilityVersion / inputSchema / defaultTimeout
 | capabilityId | 默认超时 | `workdir` | 模型映射 |
 | --- | --- | --- | --- |
 | `fs.read` | 1 分钟 | 相对 path 时需要 | `read` |
-| `fs.write` | 1 分钟 | 相对 path 时需要 | `write` |
-| `fs.edit` | 1 分钟 | 相对 path 时需要 | `edit` |
+| `fs.write` | 1 分钟 | 必填 | `write` |
+| `fs.edit` | 1 分钟 | 必填 | `edit` |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
-| `fs.grep` | 1 分钟 | 相对 path 时需要 | `grep` |
-| `fs.find` | 1 分钟 | 相对 path 时需要 | `find` |
-| `lsp.goto-definition` | 2 分钟 | 相对 path 时需要 | `lsp_goto_definition` |
-| `lsp.workspace-symbols` | 2 分钟 | 相对 path 时需要 | `lsp_workspace_symbols` |
-| `lsp.java-decompile` | 2 分钟 | 相对 path 时需要 | `lsp_java_decompile` |
+| `fs.grep` | 1 分钟 | 必填 | `grep` |
+| `fs.find` | 1 分钟 | 必填 | `find` |
+| `lsp.goto-definition` | 2 分钟 | 必填 | `lsp_goto_definition` |
+| `lsp.workspace-symbols` | 2 分钟 | 必填 | `lsp_workspace_symbols` |
+| `lsp.java-decompile` | 2 分钟 | 必填 | `lsp_java_decompile` |
 | `skill.sync` | 5 分钟 | 无 | 内部控制面 |
 
 `skill.sync` 只由 Platform 调用，其余 9 项由 Contributor 映射为模型工具；底层 catalog
@@ -43,9 +43,9 @@ capabilityId / capabilityVersion / inputSchema / defaultTimeout
 capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityId.java)
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
-各能力的 arguments schema 是冻结的 classpath 资源。`process.exec` 要求绝对
-`workdir`；带 path 的能力只在 path 相对时要求它，绝对 path 可直接执行；`skill.sync`
-不接受 workdir。
+各能力的 arguments schema 是冻结的 classpath 资源。`fs.read` 只在 path 相对时要求
+`workdir`，绝对 path 可直接执行；其余模型可见能力要求每次显式提供绝对 `workdir`；
+`skill.sync` 不接受 workdir。
 
 能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
 

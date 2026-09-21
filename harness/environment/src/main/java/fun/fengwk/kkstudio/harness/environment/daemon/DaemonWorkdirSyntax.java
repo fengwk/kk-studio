@@ -5,9 +5,9 @@ import java.util.Objects;
 /**
  * 目标 Daemon 操作系统上的 workdir 纯词法校验器。
  *
- * <p>workdir 是具体工具 arguments 中的必填字段，表示目标 Daemon 文件系统上的绝对目录。本类只按冻结的 {@link DaemonOperatingSystem}
- * 判断文本形状，不解析 Backend 本机路径（远端路径与 Backend 文件系统无关），也不做任何 {@code ~}、 {@code $VAR}/{@code ${VAR}}/{@code
- * %VAR%} 展开：未展开的占位符一律拒绝，避免把字面量当作目录使用。真实存在性、目录类型与可读性由 Daemon 用自己的 {@code Path} 校验。
+ * <p>workdir 在具体工具需要时表示目标 Daemon 文件系统上的绝对目录。本类只按冻结的 {@link DaemonOperatingSystem} 判断文本形状，不解析
+ * Backend 本机路径（远端路径与 Backend 文件系统无关），也不做任何 {@code ~}、 {@code $VAR}/{@code ${VAR}}/{@code %VAR%}
+ * 展开：未展开的占位符一律拒绝，避免把字面量当作目录使用。真实存在性、目录类型与可读性由 Daemon 用自己的 {@code Path} 校验。
  *
  * <p>Unix 形态（Linux/macOS/WSL）接受任何以 {@code /} 开头的绝对路径。Windows 形态接受带根目录的 drive path（{@code C:\dir}、
  * {@code C:/dir}、{@code C:\}、{@code C:/}）或 UNC（{@code \\server\share}、{@code //server/share}），拒绝
@@ -47,6 +47,26 @@ public final class DaemonWorkdirSyntax {
       return unifySeparators(requireWindowsAbsolute(workdir));
     }
     return requireUnixAbsolute(workdir);
+  }
+
+  /**
+   * 判断任意路径文本是否具有目标 OS 的绝对路径形状。
+   *
+   * <p>该方法只分类绝对/相对形状，不施加 workdir 的空白、长度或占位符限制，适用于判断 {@code read} 的本地 path 是否还需要 workdir。
+   */
+  public static boolean isAbsolutePath(String path, DaemonOperatingSystem operatingSystem) {
+    Objects.requireNonNull(operatingSystem, "operatingSystem");
+    if (path == null || path.isEmpty()) {
+      return false;
+    }
+    if (operatingSystem != DaemonOperatingSystem.WINDOWS) {
+      return path.startsWith("/");
+    }
+    if (isDriveAbsolutePath(path)) {
+      return true;
+    }
+    boolean unc = path.startsWith("\\\\") || path.startsWith("//");
+    return unc && hasServerAndShare(path.substring(2));
   }
 
   /** Unix 形态只要求以 {@code /} 开头；其余形状（含 {@code //} 前缀）交给目标文件系统处理。 */

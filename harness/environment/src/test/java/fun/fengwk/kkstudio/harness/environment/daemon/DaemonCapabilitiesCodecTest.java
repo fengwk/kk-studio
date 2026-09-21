@@ -34,6 +34,26 @@ class DaemonCapabilitiesCodecTest {
     assertEquals("{\"version\":2," + ENVIRONMENT_JSON + "}", encoded);
   }
 
+  /** Windows HOME 必须按目标 Daemon 语法校验，不能被 Linux Platform 的 Path 语义误拒绝。 */
+  @Test
+  void acceptsWindowsHomeDirectoryOnAnyPlatformHost() {
+    DaemonEnvironmentInfo windows =
+        new DaemonEnvironmentInfo(
+            DaemonOperatingSystem.WINDOWS, "UTC", "dev", "C:\\Users\\dev", "Windows environment.");
+
+    assertEquals("C:\\Users\\dev", windows.homeDirectory());
+    assertEquals(
+        windows,
+        codec
+            .decode(codec.encode(new DaemonCapabilities(DaemonCapabilities.VERSION, windows)))
+            .environment());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new DaemonEnvironmentInfo(
+                DaemonOperatingSystem.LINUX, "UTC", "dev", "C:\\Users\\dev", "Linux environment."));
+  }
+
   /** 历史上的 sourceSetVersion / skillSources 都是未知字段，必须在 wire 边界拒绝而不是忽略。 */
   @Test
   void rejectsLegacySkillInventoryFields() {

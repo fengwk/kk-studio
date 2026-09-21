@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
@@ -1111,7 +1112,8 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 发送前按该连接 READY 中冻结的目标 Daemon OS 校验 arguments.workdir 的词法形状。
+   * 发送前按该连接 READY 中冻结的目标 Daemon OS 校验 arguments.workdir 的词法形状；{@code fs.read} 仅在读取相对本地路径时要求
+   * workdir。
    *
    * <p>只做纯文本校验：不使用 Backend 本机 {@code Path} 解析远端路径，也不做 home/环境变量展开。真实存在性、目录类型与可访问性由 Daemon 用 自己的
    * {@code Path} 判定。
@@ -1120,7 +1122,8 @@ public final class EnvironmentDaemonServer
       ConnectionState state,
       EnvironmentCapabilityDescriptor descriptor,
       EnvironmentCapabilityCall call) {
-    if (!EnvironmentCapabilityCatalog.requiresWorkdir(descriptor.id())) {
+    boolean read = EnvironmentCapabilityIds.FS_READ.equals(descriptor.id());
+    if (!read && !EnvironmentCapabilityCatalog.requiresWorkdir(descriptor.id())) {
       return;
     }
     JsonNode arguments = JsonValues.readTree(call.argumentsJson());
@@ -1132,6 +1135,13 @@ public final class EnvironmentDaemonServer
               + descriptor.id().value());
     }
     try {
+      if (read && (workdir == null || workdir.isNull())) {
+        JsonNode path = arguments.get("path");
+        String pathText = path != null && path.isTextual() ? path.textValue() : null;
+        if (DaemonWorkdirSyntax.isAbsolutePath(pathText, operatingSystem)) {
+          return;
+        }
+      }
       DaemonWorkdirSyntax.requireAbsolute(
           workdir == null || !workdir.isTextual() ? null : workdir.textValue(), operatingSystem);
     } catch (IllegalArgumentException error) {

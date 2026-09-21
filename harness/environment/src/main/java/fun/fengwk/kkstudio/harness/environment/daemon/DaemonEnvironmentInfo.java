@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.util.Objects;
@@ -26,7 +24,7 @@ public record DaemonEnvironmentInfo(
     operatingSystem = Objects.requireNonNull(operatingSystem, "operatingSystem");
     timeZone = validateTimeZone(timeZone);
     userName = validateUserName(userName);
-    homeDirectory = validateHomeDirectory(homeDirectory);
+    homeDirectory = validateHomeDirectory(homeDirectory, operatingSystem);
     note = validateNote(note);
   }
 
@@ -77,8 +75,36 @@ public record DaemonEnvironmentInfo(
     return value;
   }
 
-  /** 校验 homeDirectory 的展示结构边界：非空白、无周边空白、单行、无控制字符，且必须为绝对路径。 */
+  /**
+   * 校验 homeDirectory 的展示结构边界，并按报告它的目标 OS 校验绝对路径形状。
+   *
+   * <p>禁止使用 Platform 本机 {@code Path} 解释远端路径；例如 Windows 的 {@code C:\Users\dev} 在 Linux Platform
+   * 上仍是合法宿主事实。
+   */
+  public static String validateHomeDirectory(String value, DaemonOperatingSystem operatingSystem) {
+    validateHomeDirectoryStructure(value);
+    if (!DaemonWorkdirSyntax.isAbsolutePath(
+        value, Objects.requireNonNull(operatingSystem, "operatingSystem"))) {
+      throw new IllegalArgumentException("homeDirectory must be an absolute path");
+    }
+    return value;
+  }
+
+  /**
+   * 校验 OS 暂不可用时的 homeDirectory 展示结构，接受任一支持 OS 的绝对路径形状。
+   *
+   * <p>仅用于可选宿主事实投影；READY wire 必须使用带明确目标 OS 的重载。
+   */
   public static String validateHomeDirectory(String value) {
+    validateHomeDirectoryStructure(value);
+    if (!DaemonWorkdirSyntax.isAbsolutePath(value, DaemonOperatingSystem.LINUX)
+        && !DaemonWorkdirSyntax.isAbsolutePath(value, DaemonOperatingSystem.WINDOWS)) {
+      throw new IllegalArgumentException("homeDirectory must be an absolute path");
+    }
+    return value;
+  }
+
+  private static void validateHomeDirectoryStructure(String value) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException("homeDirectory must not be blank");
     }
@@ -96,14 +122,6 @@ public record DaemonEnvironmentInfo(
                     || Character.getType(codePoint) == Character.PARAGRAPH_SEPARATOR)) {
       throw new IllegalArgumentException("homeDirectory must be a single line");
     }
-    try {
-      if (!Path.of(value).isAbsolute()) {
-        throw new IllegalArgumentException("homeDirectory must be an absolute path");
-      }
-    } catch (InvalidPathException error) {
-      throw new IllegalArgumentException("homeDirectory must be a valid absolute path", error);
-    }
-    return value;
   }
 
   private static String validateTimeZone(String value) {
