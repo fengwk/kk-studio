@@ -88,7 +88,7 @@ describe('EnvironmentsPage', () => {
         id: 'env-2',
         name: 'stale-box',
         userName: 'ops-user',
-        homeDirectory: '/home/ops',
+        homeDirectory: '/srv/operations',
         status: 'READY',
         ready: false,
         lastSeen: '2026-07-19T00:00:00.000Z',

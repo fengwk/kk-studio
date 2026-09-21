@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -191,6 +193,26 @@ class DaemonWorkdirSyntaxTest {
   void rejectsNullOperatingSystem() {
     assertThrows(
         NullPointerException.class, () -> DaemonWorkdirSyntax.requireAbsolute("/srv", null));
+  }
+
+  /** read path 分类只判断目标 OS 的绝对形状，不误用 workdir 的占位符和周边空白规则。 */
+  @Test
+  void classifiesAbsolutePathShapeForReadRouting() {
+    assertTrue(
+        DaemonWorkdirSyntax.isAbsolutePath("/srv/$LITERAL/file", DaemonOperatingSystem.LINUX));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("README.md", DaemonOperatingSystem.LINUX));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("C:\\repo", DaemonOperatingSystem.LINUX));
+
+    assertTrue(DaemonWorkdirSyntax.isAbsolutePath("C:\\repo\\file", DaemonOperatingSystem.WINDOWS));
+    assertTrue(
+        DaemonWorkdirSyntax.isAbsolutePath(
+            "\\\\server\\share\\file", DaemonOperatingSystem.WINDOWS));
+    assertFalse(
+        DaemonWorkdirSyntax.isAbsolutePath("\\root-relative", DaemonOperatingSystem.WINDOWS));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath("C:relative", DaemonOperatingSystem.WINDOWS));
+    assertFalse(DaemonWorkdirSyntax.isAbsolutePath(null, DaemonOperatingSystem.WINDOWS));
+    assertThrows(
+        NullPointerException.class, () -> DaemonWorkdirSyntax.isAbsolutePath("/srv/file", null));
   }
 
   /** 长度上界含边界：{@code MAX_LENGTH} 合法，多一字符即拒绝。 */

@@ -279,8 +279,11 @@ class EnvironmentSkillSyncOrchestratorTest {
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             new DaemonEnvironmentInfo(
-                // 只覆盖目标 OS 对 localPath 的冻结形状；其余宿主字段与路径判定无关。
-                DaemonOperatingSystem.WINDOWS, "UTC", "dev", "/home/dev", "Windows environment.")));
+                DaemonOperatingSystem.WINDOWS,
+                "UTC",
+                "dev",
+                "C:\\Users\\dev",
+                "Windows environment.")));
     transport.responder =
         request ->
             EnvironmentCapabilityResult.json(

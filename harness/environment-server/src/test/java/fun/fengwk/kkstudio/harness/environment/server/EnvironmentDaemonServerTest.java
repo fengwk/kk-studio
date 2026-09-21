@@ -659,9 +659,7 @@ class EnvironmentDaemonServerTest {
                 new RecordingListener()));
   }
 
-  /**
-   * 测试意图：coding 能力的 workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验——缺失、相对与跨 OS 形态都拒绝且不产生 INVOKE 帧。
-   */
+  /** 测试意图：workdir 在 frame send 前按该连接 READY 中冻结的 OS 做词法校验；read 的相对路径要求 workdir，绝对路径则不要求。 */
   @Test
   void validatesWorkdirAgainstReadyOperatingSystemBeforeFrameSend() {
     Fixture fixture = new Fixture();
@@ -686,13 +684,18 @@ class EnvironmentDaemonServerTest {
     // 全部被拒：通道上除了 WELCOME 没有任何 INVOKE 帧。
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
 
-    // 显式绝对 workdir 通过校验并真正产生 INVOKE 帧。
+    // 相对 path + 显式绝对 workdir，以及绝对 path + 省略 workdir 都通过校验并产生 INVOKE 帧。
     fixture.server.invoke(
         ENVIRONMENT_ID,
         requestWith("{\"workdir\":\"/srv/repo\",\"path\":\"README.md\"}", CALL_ONE),
         new RecordingListener());
+    fixture.server.invoke(
+        ENVIRONMENT_ID,
+        requestWith("{\"path\":\"/srv/repo/README.md\"}", CALL_TWO),
+        new RecordingListener());
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE, DaemonMessageType.INVOKE),
+        channel.messageTypes());
   }
 
   /** 测试意图：并发 HELLO 抢占同一环境时只有一个连接获得 WELCOME，另一个以 RETRY_LATER 关闭。 */

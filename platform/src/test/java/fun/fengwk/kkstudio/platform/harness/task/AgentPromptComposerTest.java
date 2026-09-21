@@ -79,6 +79,25 @@ class AgentPromptComposerTest {
         rendered);
   }
 
+  /** Windows homeDirectory 保持宿主原生绝对路径语法；它是事实展示，不得按 Platform 文件系统重新解释。 */
+  @Test
+  void rendersWindowsHomeDirectoryVerbatim() {
+    CurrentEnvironmentContext environment =
+        new CurrentEnvironmentContext(
+            TestEnvironments.environmentId("env-windows"),
+            "windows-dev",
+            DaemonOperatingSystem.WINDOWS,
+            "dev",
+            "C:\\Users\\dev",
+            LocalDate.of(2026, 8, 9),
+            null);
+
+    String rendered = composer.compose(null, environment, List.of(), List.of());
+
+    assertTrue(rendered.contains("- system: windows\n"), rendered);
+    assertTrue(rendered.contains("- home: C:\\Users\\dev\n"), rendered);
+  }
+
   /** 可选宿主事实缺失时整行省略，但 name 与 date 始终存在。 */
   @Test
   void omitsUnavailableHostFacts() {
@@ -111,7 +130,7 @@ class AgentPromptComposerTest {
             "nas-dev",
             null,
             "none",
-            "/home/none",
+            "/srv/none",
             LocalDate.of(2026, 8, 9),
             "none");
 
@@ -121,7 +140,7 @@ class AgentPromptComposerTest {
         "<current_environment>\n"
             + "- name: nas-dev\n"
             + "- user: none\n"
-            + "- home: /home/none\n"
+            + "- home: /srv/none\n"
             + "- date: 2026-08-09\n"
             + "- note: none\n"
             + "</current_environment>",

@@ -32,7 +32,11 @@ public record CurrentEnvironmentContext(
     note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
     userName = userName == null ? null : DaemonEnvironmentInfo.validateUserName(userName);
     homeDirectory =
-        homeDirectory == null ? null : DaemonEnvironmentInfo.validateHomeDirectory(homeDirectory);
+        homeDirectory == null
+            ? null
+            : operatingSystem == null
+                ? DaemonEnvironmentInfo.validateHomeDirectory(homeDirectory)
+                : DaemonEnvironmentInfo.validateHomeDirectory(homeDirectory, operatingSystem);
     if (environmentId == null) {
       if (environmentName != null
           || operatingSystem != null
