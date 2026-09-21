@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+# scripts/dev/verify/e2e/lib.sh
+#
+# 共享函数库：e2e 入口与各 case 共用。
+# 约定：
+# - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
+# - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
+# - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
+# - daemon 是 shaded 单文件 JAR（reactor 依赖已内嵌），只能用 `java -jar` 启动，不存在 lib/ 或 classpath 文件
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# 仓库根解析：KK_STUDIO_REPO_ROOT 优先；否则从脚本位置向上寻找 worktree 根（.git 文件或目录），
+# 不依赖本脚本在仓库中的深度。
+if [ -n "${KK_STUDIO_REPO_ROOT:-}" ]; then
+  REPO_ROOT=$(cd "$KK_STUDIO_REPO_ROOT" && pwd)
+else
+  REPO_ROOT=$SCRIPT_DIR
+  while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do
+    REPO_ROOT=$(dirname "$REPO_ROOT")
+  done
+  if [ ! -e "$REPO_ROOT/.git" ]; then
+    echo "ERROR: cannot locate the kk-studio repository root; set KK_STUDIO_REPO_ROOT" >&2
+    exit 1
+  fi
+fi
+WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
+
+BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
+BACKEND_PORT=${BACKEND_PORT:-18081}
+FRONTEND_HOST=${FRONTEND_HOST:-127.0.0.1}
+FRONTEND_PORT=${FRONTEND_PORT:-5173}
+BACKEND_URL=${BACKEND_URL:-"http://$BACKEND_HOST:$BACKEND_PORT"}
+FRONTEND_URL=${FRONTEND_URL:-"http://$FRONTEND_HOST:$FRONTEND_PORT"}
+SPRING_PROFILE=${SPRING_PROFILES_ACTIVE:-e2e}
+DAEMON_ENV_NAME=${DAEMON_ENV_NAME:-tool-e2e}
+DAEMON_REGISTRATION_TOKEN=${DAEMON_REGISTRATION_TOKEN:-e2e-token-host-tool}
+DAEMON_ENV_ROOT=${DAEMON_ENV_ROOT:-"$WORK_DIR/environment"}
+DAEMON_DATA_DIR=${DAEMON_DATA_DIR:-"$WORK_DIR/daemon-data"}
+DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
+
+# DAEMON_ENV_ROOT 只是 E2E case 使用的任务工作目录（fixture 路径与 Tool 调用的 workdir 都由
+# 它派生），不是 Daemon 配置：Daemon 自身的数据目录由 --data-dir 决定。
+export DAEMON_ENV_ROOT
+
+BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.0.0.jar"}
+DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}
+
+step() { echo "==> $*"; }
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+# Emit NUL-delimited `env -u` arguments for every live TEST_* input. Runtime process
+# isolation must not depend on a manually maintained list of provider credential names.
+test_env_unset_args() {
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      TEST_*)
+        printf '%s\0' -u "$name"
+        ;;
+    esac
+  done < <(compgen -e)
+}
+
+run_maven() {
+  local java_home=$1
+  shift
+  local -a offline_args=()
+  case "${E2E_MAVEN_OFFLINE-false}" in
+    true)
+      offline_args=(-o)
+      ;;
+    false)
+      ;;
+    *)
+      die "E2E_MAVEN_OFFLINE must be exactly true or false (got '${E2E_MAVEN_OFFLINE-}')"
+      ;;
+  esac
+  env JAVA_HOME="$java_home" mvn "${offline_args[@]}" "$@"
+}
+
+resolve_java_home() {
+  local java_home=${JAVA_HOME_21:-${JAVA_HOME:-}}
+  if [ -z "$java_home" ] || [ ! -x "$java_home/bin/java" ]; then
+    die "JAVA_HOME_21 or JAVA_HOME must point to JDK 21"
+  fi
+  echo "$java_home"
+}
+
+wait_http() {
+  local url=$1
+  local name=$2
+  local attempts=${3:-90}
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  die "timed out waiting for $name: $url"
+}
+
+wait_http_process() {
+  local url=$1
+  local name=$2
+  local pid=$3
+  local log_file=$4
+  local attempts=${5:-90}
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      echo "ERROR: $name process exited before readiness (pid=$pid)" >&2
+      if [ -f "$log_file" ]; then
+        echo "--- $name log tail ---" >&2
+        tail -n 120 "$log_file" >&2 || true
+      fi
+      exit 1
+    fi
+    sleep 1
+  done
+  echo "ERROR: timed out waiting for $name: $url" >&2
+  if [ -f "$log_file" ]; then
+    echo "--- $name log tail ---" >&2
+    tail -n 120 "$log_file" >&2 || true
+  fi
+  exit 1
+}
+
+kill_port() {
+  local port=$1
+  local pids
+  pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    step "Stopping listeners on :$port ($pids)"
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    sleep 0.4
+    pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+      # shellcheck disable=SC2086
+      kill -9 $pids 2>/dev/null || true
+    fi
+  fi
+}
+
+kill_daemon() {
+  local pids
+  # daemon 是 `java -jar <DAEMON_JAR>`：进程命令行里不再出现 main class，因此按配置的 JAR 路径匹配。
+  pids=$(pgrep -f -- "$DAEMON_JAR" || true)
+  if [ -n "$pids" ]; then
+    step "Stopping daemon ($pids)"
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    sleep 0.4
+  fi
+}
+
+package_backend() {
+  local java_home=$1
+  step "Clean packaging backend (Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
+  (
+    cd "$REPO_ROOT"
+    run_maven "$java_home" -pl web -am -DskipTests clean package
+  )
+}
+
+package_daemon() {
+  local java_home=$1
+  mkdir -p "$WORK_DIR"
+  step "Clean packaging daemon (shaded single-file JAR, Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
+  (
+    cd "$REPO_ROOT"
+    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package
+  )
+  [ -s "$DAEMON_JAR" ] || die "daemon jar missing: $DAEMON_JAR"
+}
+
+start_backend() {
+  local java_home=$1
+  mkdir -p "$WORK_DIR"
+  kill_port "$BACKEND_PORT"
+  : >"$WORK_DIR/backend.log"
+  step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
+  # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
+  # Explicitly scrub every TEST_* input from the backend Java process.
+  local -a test_env_unsets=()
+  mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
+  nohup env \
+    "${test_env_unsets[@]}" \
+    JAVA_HOME="$java_home" \
+    ${KK_STUDIO_DB_URL:+KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL"} \
+    ${KK_STUDIO_DB_USER:+KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER"} \
+    ${KK_STUDIO_DB_PASSWORD:+KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD"} \
+    "$java_home/bin/java" -jar "$BACKEND_JAR" \
+    --spring.profiles.active="$SPRING_PROFILE" \
+    --server.address="$BACKEND_HOST" \
+    --server.port="$BACKEND_PORT" \
+    >"$WORK_DIR/backend.log" 2>&1 &
+  local pid=$!
+  echo "$pid" >"$WORK_DIR/backend.pid"
+  wait_http_process \
+    "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" \
+    backend \
+    "$pid" \
+    "$WORK_DIR/backend.log" \
+    120
+}
+
+# Synchronize provider credential pairs into the seeded providers after backend readiness.
+sync_e2e_provider_credentials() {
+  require_cmd python3
+  step "Syncing provider E2E credentials from env (secrets not printed)"
+  env \
+    -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
+    TEST_GOOGLE_BASE_URL="${TEST_GOOGLE_BASE_URL-}" \
+    TEST_GOOGLE_API_KEY="${TEST_GOOGLE_API_KEY-}" \
+    TEST_OPENAI_BASE_URL="${TEST_OPENAI_BASE_URL-}" \
+    TEST_OPENAI_API_KEY="${TEST_OPENAI_API_KEY-}" \
+    TEST_ANTHROPIC_BASE_URL="${TEST_ANTHROPIC_BASE_URL-}" \
+    TEST_ANTHROPIC_API_KEY="${TEST_ANTHROPIC_API_KEY-}" \
+    TEST_DEEPSEEK_BASE_URL="${TEST_DEEPSEEK_BASE_URL-}" \
+    TEST_DEEPSEEK_API_KEY="${TEST_DEEPSEEK_API_KEY-}" \
+    python3 "$REPO_ROOT/scripts/dev/verify/e2e/sync_provider_credentials.py" --backend-url "$BACKEND_URL"
+}
+
+start_frontend() {
+  mkdir -p "$WORK_DIR"
+  kill_port "$FRONTEND_PORT"
+  : >"$WORK_DIR/frontend.log"
+  step "Starting frontend $FRONTEND_URL proxy->$BACKEND_URL"
+  (
+    cd "$REPO_ROOT/frontend"
+    local -a test_env_unsets=()
+    mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
+    nohup env \
+      "${test_env_unsets[@]}" \
+      API_PROXY_TARGET="$BACKEND_URL" npm run dev -- \
+      --host "$FRONTEND_HOST" \
+      --port "$FRONTEND_PORT" \
+      >"$WORK_DIR/frontend.log" 2>&1 &
+    echo $! >"$WORK_DIR/frontend.pid"
+  )
+  local pid
+  pid=$(cat "$WORK_DIR/frontend.pid")
+  wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
+  # 额外确认代理已打到当前 backend 契约（结构化 config）
+  curl -fsS "$FRONTEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
+assert m and isinstance(m.get("config"), dict) and m["config"].get("defaultVariant"), m; print("frontend proxy model.config.defaultVariant=", m["config"]["defaultVariant"])'
+}
+
+start_daemon() {
+  local java_home=$1
+  mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
+  kill_daemon
+  package_daemon "$java_home"
+  : >"$WORK_DIR/daemon.log"
+  step "Starting daemon env=$DAEMON_ENV_NAME"
+  if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
+    die "DAEMON_REGISTRATION_TOKEN is required to start the daemon"
+  fi
+  chmod 700 "$WORK_DIR"
+  local token_file
+  token_file=$(cd "$WORK_DIR" && pwd)/daemon-registration.token
+  (umask 077 && printf '%s\n' "$DAEMON_REGISTRATION_TOKEN" > "$token_file")
+  chmod 600 "$token_file"
+  local -a test_env_unsets=()
+  mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
+  nohup env \
+    "${test_env_unsets[@]}" \
+    -u DAEMON_REGISTRATION_TOKEN \
+    -u KK_STUDIO_DAEMON_REGISTRATION_TOKEN \
+    JAVA_HOME="$java_home" "$java_home/bin/java" \
+    -jar "$DAEMON_JAR" \
+    --gateway-uri "ws://$BACKEND_HOST:$BACKEND_PORT/api/harness/environment-daemon/v1" \
+    --registration-token-file "$token_file" \
+    --note "$DAEMON_NOTE" \
+    --data-dir "$DAEMON_DATA_DIR" \
+    >"$WORK_DIR/daemon.log" 2>&1 &
+  echo $! >"$WORK_DIR/daemon.pid"
+  local i env_status=""
+  # Disconnect retains the default 60s route grace lease; leave takeover headroom.
+  for i in $(seq 1 180); do
+    env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
+      | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
+print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
+      2>/dev/null || true)
+    if [ "$env_status" = "READY" ]; then
+      step "Daemon READY"
+      return 0
+    fi
+    sleep 0.5
+  done
+  die "daemon not READY (last status='$env_status'); see $WORK_DIR/daemon.log"
+}
+
+ensure_stack() {
+  local rebuild=${1:-false}
+  local with_daemon=${2:-false}
+  local java_home
+  require_cmd curl
+  require_cmd python3
+  require_cmd lsof
+  require_cmd mvn
+  require_cmd npm
+  java_home=$(resolve_java_home)
+  mkdir -p "$WORK_DIR"
+
+  if [ "$rebuild" = "true" ]; then
+    package_backend "$java_home"
+    start_backend "$java_home"
+    start_frontend
+    if [ "$with_daemon" = "true" ]; then
+      start_daemon "$java_home"
+    fi
+    return
+  fi
+
+  if [ ! -f "$BACKEND_JAR" ]; then
+    package_backend "$java_home"
+  fi
+
+  if ! curl -fsS "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" >/dev/null 2>&1; then
+    start_backend "$java_home"
+  else
+    step "Reusing backend $BACKEND_URL"
+    # Reused processes must expose the current structured model contract.
+    if ! curl -fsS "$BACKEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
+      | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
+raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
+      step "Backend contract stale (missing model.config); rebuilding and restarting"
+      package_backend "$java_home"
+      start_backend "$java_home"
+    fi
+  fi
+
+  if ! curl -fsS "$FRONTEND_URL/" >/dev/null 2>&1; then
+    start_frontend
+  else
+    step "Reusing frontend $FRONTEND_URL"
+    if ! curl -fsS "$FRONTEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
+      | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
+raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
+      step "Frontend proxy contract stale; restarting frontend with API_PROXY_TARGET"
+      start_frontend
+    fi
+  fi
+
+  if [ "$with_daemon" = "true" ]; then
+    env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
+      | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
+print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
+      2>/dev/null || true)
+    if [ "$env_status" != "READY" ]; then
+      start_daemon "$java_home"
+    else
+      step "Reusing daemon env=$DAEMON_ENV_NAME status=READY"
+    fi
+  fi
+}

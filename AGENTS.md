@@ -14,7 +14,7 @@
 - 新增依赖必须是直接使用的能力；不因 starter/JUnit 的传递依赖告警去平铺无关依赖。
 - 任何有意义的测试请沉淀为单元测试和自动化集成测试。
 - 编写测试的同时在注释中描述测试意图，便于后续接手者判断此测试是否仍然有效。
-- 当前代码树的敏感数据门禁是 `python3 scripts/security/check-sensitive-data.py`；命中时只报告规则和位置，不回显敏感值。
+- 当前代码树的敏感数据门禁是 `python3 scripts/dev/verify/repository/check-sensitive-data.py`；命中时只报告规则和位置，不回显敏感值。
 
 ## Java Formatting
 
@@ -29,10 +29,10 @@
 - 项目文档按当前风格维护到 `./docs/`，与最新代码保持一致，不另设文档版本。
 - 每篇文档围绕目标读者的任务和核心价值组织，先建立必要心智模型，再给出简洁而完整的理解或操作路径；禁止用固定模板和清单堆砌代替信息设计。
 - 技术方案文档必须自洽可读：只描述当前生效的职责、结构、协议、约束与实现；不写否决项、会话过程或依赖历史上下文才能理解的内容。
-- 文档质量入口：`node scripts/docs/check.mjs`。
+- 文档质量入口：`node scripts/dev/verify/repository/check.mjs`。
 
 ## E2E
 
-- 端到端回归入口：`./scripts/e2e.sh` 或 `npm --prefix frontend run e2e`；矩阵实现为 Node：`scripts/e2e/run-matrix.mjs`。
+- 端到端回归入口：`./scripts/dev/verify/e2e/run.sh` 或 `npm --prefix frontend run e2e`；矩阵实现为 Node：`scripts/dev/verify/e2e/run-matrix.mjs`。
 - 事实源文档：`docs/operations/development-and-testing.md`。精确 inventory 以 matrix 的 `--list` / `--docs` 输出为准；前端/API 契约变化时同步矩阵 case 与该文档的分类和入口说明。
 - 默认只跑无成本 L1 API 矩阵；真模型/tool/branch/UI 需显式开关（`--real` / `--with-tools` / `--ui`）。报告与截图写入 `reports/e2e/`（已 gitignore），以 `reports/e2e/latest/report.md` 为最近一次可读结论。

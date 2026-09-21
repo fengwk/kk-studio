@@ -10,6 +10,7 @@
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
+| 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
@@ -65,7 +66,7 @@
 - 本地源码、测试、脚本和配置在文档中使用可点击的相对链接；协议值、命令和配置键使用
   反引号。
 - E2E case inventory 由
-  [`scripts/e2e/run-matrix.mjs`](../scripts/e2e/run-matrix.mjs) 的 `--list` / `--docs`
+  [`scripts/dev/verify/e2e/run-matrix.mjs`](../scripts/dev/verify/e2e/run-matrix.mjs) 的 `--list` / `--docs`
   输出生成，文档只说明如何选择和运行矩阵。
-- 从仓库根目录执行 [`scripts/docs/check.mjs`](../scripts/docs/check.mjs) 检查固定布局、
+- 从仓库根目录执行 [`scripts/dev/verify/repository/check.mjs`](../scripts/dev/verify/repository/check.mjs) 检查固定布局、
   标题、链接、模块拓扑和禁止的旧引用。

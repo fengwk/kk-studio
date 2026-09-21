@@ -1,6 +1,6 @@
 # Canvas/Storage 隔离测试栈
 
-[compose.yaml](compose.yaml) 与 [run.sh](run.sh) 提供不依赖远端服务的容器测试底座：PostgreSQL、
+[compose.yaml](compose.yaml) 与 [scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 提供不依赖远端服务的容器测试底座：PostgreSQL、
 MinIO 与 bucket 初始化、一个可配置 HTTP mock，以及可选的当前 App 镜像。它用于 Canvas
 Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat 的确定性 smoke。
 
@@ -19,11 +19,11 @@ Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat �
 ## 一键验证
 
 ```bash
-./deploy/test/run.sh
-./deploy/test/run.sh --with-app
+./scripts/dev/verify/smoke/offline-chat.sh
+./scripts/dev/verify/smoke/offline-chat.sh --with-app
 ```
 
-[run.sh](run.sh) 依次执行：
+[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 依次执行：
 
 1. `docker compose config --quiet` 校验默认与 `--profile app` 配置；
 2. 销毁同名隔离栈及其 PostgreSQL/MinIO volumes，保证直接重写的 V1 从空数据启动；
@@ -141,10 +141,10 @@ Canvas adapter smoke 所需的最小协议；细粒度异常、origin、multipar
 RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
 SEEDANCE_WORKSPACE_ID=... \
 OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
-  ./scripts/seedance-prepare-smoke.sh --confirm-prepare-only
+  ./scripts/dev/verify/smoke/seedance-prepare.sh --confirm-prepare-only
 ```
 
-[scripts/seedance-prepare-smoke.sh](../../scripts/seedance-prepare-smoke.sh) 硬编码 `seedance2.0fast`、
+[scripts/dev/verify/smoke/seedance-prepare.sh](../../scripts/dev/verify/smoke/seedance-prepare.sh) 硬编码 `seedance2.0fast`、
 `duration=4`、`submit=0`、`retry=0`，只验证页面准备与 checkpoint，不点击真实生成、不创建
 FunctionRun、不下载或导入视频。`RUN_REAL_SEEDANCE_PREPARE_SMOKE=1` 与 `--confirm-prepare-only`
 必须同时给出，否则脚本在发起任何外部请求前退出；`SEEDANCE_WORKSPACE_ID` 必须指向真实可访问的

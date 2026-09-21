@@ -34,7 +34,7 @@ Messages 和 Google Gemini。
 | 目标 | 入口 | 适合场景 |
 | --- | --- | --- |
 | 先运行起来 | [`deploy/local`](deploy/local/README.md) | 推荐给首次使用者；Docker Compose 启动 App、PostgreSQL 和 MinIO |
-| 修改源码 | [`scripts/dev.sh`](scripts/dev.sh) | Backend + Vite 开发；需要 JDK 21、Maven、Node/npm、curl、jq、lsof 和已配置的数据服务 |
+| 修改源码 | [`scripts/dev/app.sh`](scripts/dev/app.sh) | Backend + Vite 开发；需要 JDK 21、Maven、Node/npm、curl、jq、lsof 和已配置的数据服务 |
 | 部署到服务器 | [部署与运行](docs/operations/deployment.md) | Fat JAR、容器、多节点、外部 PostgreSQL/S3 与反向代理 |
 
 Environment Daemon 是可选组件。只聊天时不需要安装；需要 Agent 操作某台主机时，再把
@@ -92,9 +92,9 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 
 1. 在 [Environment](http://localhost:8080/environments) 页面创建 Environment，并复制
    registration token。
-2. 在目标主机安装 JDK 21，并从
-   [GitHub Releases](https://github.com/fengwk/kk-studio/releases) 下载和校验 Daemon JAR。
-3. 将 token 保存为仅当前用户可读的文件：
+2. 目标主机需要 JDK 21、Maven 与源码 checkout；常驻服务按平台安装：Linux 使用
+   `systemd --user`，macOS 使用当前用户 LaunchAgent，Windows 10/11 使用当前用户计划任务。
+3. 将 token 保存为仅当前用户可读的绝对路径普通文件：
 
    ```bash
    install -d -m 700 ~/.config/kk-studio
@@ -102,19 +102,22 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
    chmod 600 ~/.config/kk-studio/daemon.token
    ```
 
-4. 连接本地 Studio：
+4. clone 源码并安装为常驻服务，下面是 Linux 与 macOS 的 Unix 用法（Windows 的 PowerShell
+   命令与 token 的 ACL 设置见规范文档）：
 
    ```bash
-   java -jar /path/to/kk-studio-daemon.jar \
+   git clone https://github.com/fengwk/kk-studio.git
+   cd kk-studio
+   ./scripts/daemon/install.sh install \
      --gateway-uri ws://localhost:8080/api/harness/environment-daemon/v1 \
-     --registration-token-file ~/.config/kk-studio/daemon.token
+     --registration-token-file "$HOME/.config/kk-studio/daemon.token"
    ```
 
 5. Environment 页面显示 `READY` 后，编辑 Agent，绑定该 Environment，并选择需要的
    Tools 或 Skills。
 
-Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。下载校验、TLS 地址、systemd
-常驻、升级和故障处理见
+Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。Windows 与 macOS 的安装差异、
+升级、状态查询、可选参数、卸载和前台调试见
 [Environment Daemon 安装与运行](docs/operations/environment-daemon.md)。
 
 ## 停止与清理
@@ -136,18 +139,18 @@ docker compose -f deploy/local/compose.yaml down -v
 Backend 与 Vite：
 
 ```bash
-./scripts/dev.sh start
-./scripts/dev.sh status
-./scripts/dev.sh logs all
-./scripts/dev.sh stop
+./scripts/dev/app.sh start
+./scripts/dev/app.sh status
+./scripts/dev/app.sh logs all
+./scripts/dev/app.sh stop
 ```
 
 脚本默认启动 Vite `http://127.0.0.1:5173`、Backend
 `http://127.0.0.1:18080`，并使用 `e2e` profile；它与上文监听 `8080` 的本地 Compose
 栈是两条独立运行路径。要把本机 preview 指向 NAS 上已有的 PostgreSQL/S3，改用
-[`scripts/local-dev.sh`](scripts/local-dev.sh)：它读一份 owner-only 配置文件里的
+[`scripts/dev/shared-preview.sh`](scripts/dev/shared-preview.sh)：它读一份 owner-only 配置文件里的
 endpoint 与凭据，强制 `prod` profile 并关闭本机 Flyway 与 Harness worker，配置文件模板见
-[`scripts/local-dev.config.example`](scripts/local-dev.config.example)。依赖服务和环境变量
+[`scripts/dev/shared-preview.env.example`](scripts/dev/shared-preview.env.example)。依赖服务和环境变量
 配置见[开发与测试](docs/operations/development-and-testing.md)。
 
 常用质量检查：
@@ -157,8 +160,8 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test
 npm --prefix frontend run test
 npm --prefix frontend run lint
 npm --prefix frontend run build
-node scripts/docs/check.mjs
-python3 scripts/security/check-sensitive-data.py
+node scripts/dev/verify/repository/check.mjs
+python3 scripts/dev/verify/repository/check-sensitive-data.py
 ```
 
 完整的本地配置、E2E、覆盖率、可靠性、性能和供应链入口见
@@ -169,7 +172,7 @@ python3 scripts/security/check-sensitive-data.py
 | 文档 | 从这里解决什么问题 |
 | --- | --- |
 | [本地一键启动栈](deploy/local/README.md) | Compose 服务、端口、参数、日志和数据清理 |
-| [Environment Daemon](docs/operations/environment-daemon.md) | 下载、注册、常驻、升级和本机状态 |
+| [Environment Daemon](docs/operations/environment-daemon.md) | 安装、注册、常驻、升级和本机状态 |
 | [部署与运行](docs/operations/deployment.md) | Fat JAR、镜像、部署拓扑和运行配置 |
 | [开发与测试](docs/operations/development-and-testing.md) | 开发环境和全部质量入口 |
 | [系统设计](docs/system-design.md) | 数据边界、执行链路、并发和恢复模型 |

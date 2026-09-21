@@ -126,8 +126,8 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke：
 
 ```bash
-./deploy/test/run.sh
-./deploy/test/run.sh --with-app
+./scripts/dev/verify/smoke/offline-chat.sh
+./scripts/dev/verify/smoke/offline-chat.sh --with-app
 ```
 
 完整步骤、mock routes 与真实 Seedance prepare-only 边界见
@@ -141,10 +141,10 @@ Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke：
 挂载 [`deploy/test/mock`](../../deploy/test/mock)。
 
 ```bash
-./deploy/distributed/run.sh up [--skip-build]
-./deploy/distributed/run.sh status
-./deploy/distributed/run.sh verify       # 静态拓扑校验，不启动容器
-./deploy/distributed/run.sh down --volumes
+./scripts/dev/verify/e2e/distributed.sh up [--skip-build]
+./scripts/dev/verify/e2e/distributed.sh status
+./scripts/dev/verify/e2e/distributed.sh verify       # 静态拓扑校验，不启动容器
+./scripts/dev/verify/e2e/distributed.sh down --volumes
 ```
 
 `node-a-db`、`node-b-db`、`daemon-a`、`daemon-b` 都是 `internal: true`，没有任何网络同时包含
@@ -161,9 +161,9 @@ DISTRIBUTED_APP_A_PORT=18082
 DISTRIBUTED_APP_B_PORT=18083
 ```
 
-`run.sh disconnect-db-a` / `reconnect-db-a` 是按容器与网络精确操作的幂等故障注入，不会影响
+distributed.sh disconnect-db-a / reconnect-db-a 是按容器与网络精确操作的幂等故障注入，不会影响
 `daemon-a` 网络与 daemon workspace volume。
-[`scripts/e2e.sh`](../../scripts/e2e.sh) 的 `--distributed` 通过该入口启停栈
+[`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) 的 `--distributed` 通过该入口启停栈
 并在退出时清理。
 
 ### [`deploy/reliability`](../../deploy/reliability)：App + Environment Daemon
@@ -174,11 +174,11 @@ DISTRIBUTED_APP_B_PORT=18083
 `RELIABILITY_MINIO_PORT=19002`）。
 
 ```bash
-./scripts/reliability/stack.sh up
-./scripts/reliability/stack.sh status
-./scripts/reliability/stack.sh inspect
-./scripts/reliability/stack.sh logs postgres app workspace-init daemon
-./scripts/reliability/stack.sh down --volumes
+./scripts/dev/verify/reliability/stack.sh up
+./scripts/dev/verify/reliability/stack.sh status
+./scripts/dev/verify/reliability/stack.sh inspect
+./scripts/dev/verify/reliability/stack.sh logs postgres app workspace-init daemon
+./scripts/dev/verify/reliability/stack.sh down --volumes
 ```
 
 Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-daemon/v1` 连接 App。
@@ -216,7 +216,7 @@ Node `22.19.0`/npm `11.19.0`、bash、git，创建 `kkdaemon` uid/gid `10001`，
 ```bash
 PI_ANCHOR=/path/to/pi \
 PI_BASE_ANCHOR=/path/to/pi-base \
-  ./scripts/reliability/stack.sh snapshot
+  ./scripts/dev/verify/reliability/stack.sh snapshot
 ```
 
 可靠性栈与 Agent 矩阵的运行入口见
@@ -229,7 +229,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
-| 本机 preview | 外部数据面配置文件 | `DEV_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
+| 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_SUBAGENT_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*` |
 | production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
 | production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
@@ -250,12 +250,12 @@ Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也�
 - [.dockerignore](../../.dockerignore) 与 [.gitignore](../../.gitignore) 排除 `.env`、key/cert/
   credential 文件、`credentials*`、service account JSON 和 `secrets/`。
 - 本机 preview 的外部数据面配置是仓库之外的 owner-only 文件（模板见
-  [scripts/local-dev.config.example](../../scripts/local-dev.config.example)）：[scripts/dev.sh](../../scripts/dev.sh)
+  [scripts/dev/shared-preview.env.example](../../scripts/dev/shared-preview.env.example)）：[scripts/dev/app.sh](../../scripts/dev/app.sh)
   只按 `KEY=VALUE` 字面量解析白名单键，不做 shell 求值、不把值放进命令参数或日志，权限过宽、
   属主不符、符号链接、未知键或值缺失都直接失败。
 - local/test/reliability/distributed 的固定 PostgreSQL 与 MinIO 凭据只属于 disposable compose；
   宿主绑定地址一旦改为非 loopback，就必须显式覆盖这些默认值。
-- [`scripts/e2e.sh`](../../scripts/e2e.sh) 只在显式 `--real` 时读取四组完整 credential pair，并经 HTTP 写入各自专用
+- [`scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) 只在显式 `--real` 时读取四组完整 credential pair，并经 HTTP 写入各自专用
   database；credential 不进入 Compose environment、Dockerfile、image layer、backend/Daemon
   command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
@@ -273,8 +273,8 @@ Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也�
 
 Proxy 只作用于 build、npm/Maven dependency fetch 或显式 Trivy network：App image build 支持
 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、`KK_STUDIO_BUILD_NO_PROXY` 和
-`KK_STUDIO_MAVEN_BUILD_OPTS`；[deploy/test/run.sh](../../deploy/test/run.sh) 与
-[scripts/performance.sh](../../scripts/performance.sh) 会从宿主 proxy 变量生成 build 参数，
+`KK_STUDIO_MAVEN_BUILD_OPTS`；[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 与
+[scripts/dev/verify/performance/run.sh](../../scripts/dev/verify/performance/run.sh) 会从宿主 proxy 变量生成 build 参数，
 loopback proxy 使用 host build network。proxy 不进入 App/Daemon runtime image，也不作为运行时
 业务配置。
 
@@ -289,11 +289,11 @@ docker compose -f deploy/local/compose.yaml down -v
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 
 # distributed：删除双节点栈的容器、网络和 PostgreSQL/MinIO/daemon workspace volumes
-./deploy/distributed/run.sh down --volumes
+./scripts/dev/verify/e2e/distributed.sh down --volumes
 
 # reliability：保留或删除 PostgreSQL/MinIO/workspace named volumes
-./scripts/reliability/stack.sh down
-./scripts/reliability/stack.sh down --volumes
+./scripts/dev/verify/reliability/stack.sh down
+./scripts/dev/verify/reliability/stack.sh down --volumes
 
 # 确认宿主端口
 ss -ltnp | grep -E ':8080|:5432|:9000|:15432|:15433|:18082|:18083|:18088|:18089|:18090|:19000|:19001|:19002|:18091' || true
@@ -333,20 +333,21 @@ Flyway owner，也是唯一的 Harness worker，Thread/Model/Tool 的异步执�
 
 ### 本机 preview 与 NAS 数据面
 
-前端与同步 API 的日常开发在笔记本上进行：[scripts/local-dev.sh](../../scripts/local-dev.sh)
+前端与同步 API 的日常开发在笔记本上进行：[scripts/dev/shared-preview.sh](../../scripts/dev/shared-preview.sh)
 用 NAS 上已有的 PostgreSQL/S3 启动已打包的 Backend 与 Vite/HMR。它读一份 owner-only 配置文件
 （endpoint 与凭据，模板见
-[scripts/local-dev.config.example](../../scripts/local-dev.config.example)），强制
+[scripts/dev/shared-preview.env.example](../../scripts/dev/shared-preview.env.example)），强制
 `SPRING_PROFILES_ACTIVE=prod`、`SPRING_FLYWAY_ENABLED=false` 和
 `KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false`：schema 只由 NAS 上的 Flyway owner 演进，
 异步 Harness Work 只在 NAS 上执行，本机进程只是同步 HTTP 面。Backend 默认监听
 `127.0.0.1:18080`，Vite/HMR 默认监听 `127.0.0.1:5173`；配置文件的权限要求、键白名单与失败
 边界见[开发与测试](development-and-testing.md#本机-preview-的外部数据面)。
 
-Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标主机以宿主进程或
-`systemd --user` 运行，并连接 NAS App 的 gateway
-`wss://<studio-origin>/api/harness/environment-daemon/v1`。安装、注册与常驻见
-[Environment Daemon 安装与运行](environment-daemon.md)。
+Environment Daemon 不属于 NAS App 容器：需要主机能力时，规范路径是在目标主机 clone 源码并通过平台
+对应的安装脚本常驻（Linux/macOS 用 [scripts/daemon/install.sh](../../scripts/daemon/install.sh)，
+Windows 用 [scripts/daemon/install.ps1](../../scripts/daemon/install.ps1)），并连接 NAS App 的
+gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制、注册 token 文件、
+升级与卸载见 [Environment Daemon 安装与运行](environment-daemon.md)。
 
 ### 发布产物与凭据边界
 

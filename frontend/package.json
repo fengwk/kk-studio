@@ -11,11 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "e2e": "../scripts/e2e.sh",
-    "e2e:ui": "../scripts/e2e.sh --ui",
-    "e2e:matrix": "node ../scripts/e2e/run-matrix.mjs --frontend-url http://127.0.0.1:5173",
-    "e2e:list": "node ../scripts/e2e/run-matrix.mjs --list",
-    "e2e:docs": "node ../scripts/e2e/run-matrix.mjs --docs"
+    "e2e": "../scripts/dev/verify/e2e/run.sh",
+    "e2e:ui": "../scripts/dev/verify/e2e/run.sh --ui",
+    "e2e:matrix": "node ../scripts/dev/verify/e2e/run-matrix.mjs --frontend-url http://127.0.0.1:5173",
+    "e2e:list": "node ../scripts/dev/verify/e2e/run-matrix.mjs --list",
+    "e2e:docs": "node ../scripts/dev/verify/e2e/run-matrix.mjs --docs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.60.2",

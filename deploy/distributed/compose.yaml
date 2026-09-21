@@ -2,7 +2,7 @@ name: kk-studio-distributed
 
 # 双节点分布式 E2E 测试栈（免费 mock topology）。
 #
-# 网络不变量（scripts/e2e/tests/test_distributed_topology.py 静态验证）：
+# 网络不变量（scripts/dev/verify/e2e/validate_distributed.py 静态验证）：
 # - postgres / minio / http-mock 同时加入 node-a-db 与 node-b-db 两个隔离网络；
 # - app-a 只加入 node-a-db + daemon-a + app-ingress-a，app-b 只加入 node-b-db
 #   + daemon-b + app-ingress-b；daemon-a / daemon-b 各只加入自己的 daemon 网络；
@@ -13,14 +13,14 @@ name: kk-studio-distributed
 # deploy/reliability/daemon.Dockerfile，HTTP mock 直接挂载 deploy/test/mock，
 # 不复制任何实现。两个 App 共享同一 PostgreSQL database 与 MinIO bucket。
 #
-# 身份变量（固定默认值，可由宿主环境覆盖；deploy/distributed/run.sh 导出同一组
+# 身份变量（固定默认值，可由宿主环境覆盖；scripts/dev/verify/e2e/distributed.sh 导出同一组
 # 默认值）：
 #   DISTRIBUTED_ENV_A_NAME / DISTRIBUTED_ENV_B_NAME daemon 对应的 environment name
 #   DISTRIBUTED_DAEMON_A_REGISTRATION_TOKEN / DISTRIBUTED_DAEMON_B_REGISTRATION_TOKEN
 #   DISTRIBUTED_APP_A_PORT / DISTRIBUTED_APP_B_PORT 宿主 app 端口
 #
 # 全部凭据是固定、可丢弃的测试值；宿主 MiniMax 凭据不会被本栈读取，
-# 真实 Provider 仍只能通过 scripts/e2e.sh 显式 --real 同步。
+# 真实 Provider 仍只能通过 scripts/dev/verify/e2e/run.sh 显式 --real 同步。
 
 x-app-build: &app-build
   context: ../..
