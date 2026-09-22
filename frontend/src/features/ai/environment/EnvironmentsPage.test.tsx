@@ -17,8 +17,8 @@ vi.mock('@/shared/api/environment-service', () => ({
   },
 }))
 
-vi.mock('@/platform/workbench/WorkbenchSlots', () => ({
-  NavigationSlot: () => null,
+vi.mock('@/features/ai/extensions/AiNavigation', () => ({
+  AiNavigation: () => null,
 }))
 
 function renderPage() {

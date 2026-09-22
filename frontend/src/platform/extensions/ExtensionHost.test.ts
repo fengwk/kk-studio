@@ -24,13 +24,17 @@ describe('ContributionRegistry', () => {
 describe('ExtensionHost', () => {
   it('orders contributions by priority and falls back when an override unloads', () => {
     const host = new ExtensionHost()
-    host.register({ id: 'base', navigation: [{ id: 'ai', label: 'Base', path: 'sessions', priority: 10 }] })
-    const disposeOverride = host.register({ id: 'override', navigation: [{ id: 'ai', label: 'Override', path: 'custom', priority: 20 }] })
-    host.register({ id: 'later', navigation: [{ id: 'later', label: 'Later', path: 'later', priority: 10 }] })
+    const BasePage = () => null
+    const OverridePage = () => null
+    const LaterPage = () => null
 
-    expect(host.navigation.list().map((item) => item.label)).toEqual(['Override', 'Later'])
+    host.register({ id: 'base', pages: [{ id: 'test', path: 'sessions', component: BasePage, priority: 10 }] })
+    const disposeOverride = host.register({ id: 'override', pages: [{ id: 'test', path: 'custom', component: OverridePage, priority: 20 }] })
+    host.register({ id: 'later', pages: [{ id: 'later', path: 'later', component: LaterPage, priority: 10 }] })
+
+    expect(host.pages.list().map((item) => item.path)).toEqual(['custom', 'later'])
     disposeOverride()
-    expect(host.navigation.get('ai')?.label).toBe('Base')
+    expect(host.pages.get('test')?.path).toBe('sessions')
   })
 
   it('publishes one host snapshot per mutation and has idempotent disposal', () => {
@@ -42,7 +46,7 @@ describe('ExtensionHost', () => {
     const dispose = host.register({
       id: 'one',
       pages: [{ id: 'page', path: 'page', component: () => null }],
-      commands: [{ id: 'run', title: 'Run', run: () => undefined }],
+      dialogs: [{ id: 'dialog', component: () => null }],
     })
     const registered = host.getSnapshot()
     expect(listener).toHaveBeenCalledTimes(1)
@@ -63,9 +67,8 @@ describe('ExtensionHost', () => {
     const before = host.getSnapshot()
 
     expect(() => host.register({ id: ' ', pages: [{ id: 'page', path: 'page', component: () => null }] })).toThrow('Extension id must be non-empty')
-    expect(() => host.register({ id: 'invalid-contribution', statuses: [{ id: ' ', component: () => null }] })).toThrow('Contribution in statuses id must be non-empty')
+    expect(() => host.register({ id: 'invalid-contribution', dialogs: [{ id: ' ', component: () => null }] })).toThrow('Contribution in dialogs id must be non-empty')
     expect(() => host.register({ id: 'invalid-page', pages: [{ id: 'page', path: '/page', component: () => null }] })).toThrow('Page path must be a non-empty nested relative path')
-    expect(() => host.register({ id: 'invalid-nav', navigation: [{ id: 'nav', label: 'Nav', path: '../nav' }] })).toThrow('Navigation path must be a non-empty nested relative path')
     expect(() => host.register({
       id: 'duplicate',
       pages: [
@@ -80,7 +83,7 @@ describe('ExtensionHost', () => {
 
   it('rejects duplicate extension ids', () => {
     const host = new ExtensionHost()
-    host.register({ id: 'first', statuses: [{ id: 'status', component: () => null }] })
+    host.register({ id: 'first', dialogs: [{ id: 'dialog', component: () => null }] })
     expect(() => host.register({ id: 'first' })).toThrow('Extension id already registered: first')
   })
 

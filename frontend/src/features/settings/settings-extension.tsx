@@ -23,6 +23,12 @@ function SettingsRoute({ children }: ExtensionComponentProps) {
 export const settingsExtension: TrustedReactExtension = {
   id: 'builtin.settings',
   pages: [
-    { id: 'settings.page', path: 'settings', component: SettingsRoute, priority: 100 },
+    {
+      id: 'settings.page',
+      path: 'settings',
+      component: SettingsRoute,
+      navGroup: 'settings',
+      priority: 100,
+    },
   ],
 }

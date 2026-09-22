@@ -12,6 +12,7 @@ export const comfyuiExtension: TrustedReactExtension = {
       id: 'ai.comfyui',
       path: 'comfyui',
       component: ComfyuiRoute,
+      navGroup: 'tools',
       priority: 100,
     },
   ],

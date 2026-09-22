@@ -12,7 +12,7 @@ import { FieldLabel } from '@/shared/ui/console/FieldLabel'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
 import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
-import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
+import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import {
@@ -424,7 +424,7 @@ export function McpServersPage() {
   return (
     <section className="screen active">
       <nav className="subbar">
-        <NavigationSlot />
+        <AiNavigation />
       </nav>
 
       <div className="screen-body">

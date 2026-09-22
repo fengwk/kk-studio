@@ -1,23 +1,33 @@
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@testing-library/react'
+import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
+import { createApplicationExtensionHost } from '@/app/extension-host'
 import { AppShell } from '@/platform/shell/AppShell'
+import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { setLocale } from '@/shared/i18n'
+
+function renderShell(initialEntry: string, children: ReactNode = <div>Content</div>) {
+  const host = createApplicationExtensionHost()
+  return render(
+    <ExtensionHostProvider host={host}>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <AppShell>
+          {children}
+        </AppShell>
+      </MemoryRouter>
+    </ExtensionHostProvider>,
+  )
+}
 
 describe('AppShell chat immersive routes', () => {
   it.each([
     '/chats/chat-1',
     '/chats/chat-1/',
   ])('hides the global topbar and adds the immersive class for %s', (path) => {
-    render(
-      <MemoryRouter initialEntries={[path]}>
-        <AppShell>
-          <div>Chat workspace</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell(path, <div>Chat workspace</div>)
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
     expect(document.querySelector('.app-frame')).toHaveClass('chat-immersive')
@@ -31,13 +41,7 @@ describe('AppShell chat immersive routes', () => {
     '/chats/chat-1/extra',
     '/chats/chat-1/7',
   ])('keeps the global topbar outside a valid chat workspace route: %s', (path) => {
-    render(
-      <MemoryRouter initialEntries={[path]}>
-        <AppShell>
-          <div>Chat route</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell(path, <div>Chat route</div>)
 
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'KK Studio' })).toBeInTheDocument()
@@ -47,13 +51,7 @@ describe('AppShell chat immersive routes', () => {
 
 describe('AppShell canvas immersive routes', () => {
   it('hides the global topbar and adds the immersive class for a valid /canvas/:canvasId editor route', () => {
-    render(
-      <MemoryRouter initialEntries={['/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f']}>
-        <AppShell>
-          <div>Editor</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/canvas/8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f', <div>Editor</div>)
 
     expect(screen.queryByRole('banner')).not.toBeInTheDocument()
     expect(document.querySelector('.app-frame')).toHaveClass('canvas-immersive')
@@ -69,13 +67,7 @@ describe('AppShell canvas immersive routes', () => {
   ])(
     'keeps the global topbar outside a valid editor route: %s',
     (path) => {
-      render(
-        <MemoryRouter initialEntries={[path]}>
-          <AppShell>
-            <div>Canvas route</div>
-          </AppShell>
-        </MemoryRouter>,
-      )
+      renderShell(path, <div>Canvas route</div>)
 
       expect(screen.getByRole('banner')).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'KK Studio' })).toBeInTheDocument()
@@ -84,15 +76,26 @@ describe('AppShell canvas immersive routes', () => {
   )
 })
 
+describe('AppShell secondary AI routes header activation', () => {
+  it.each([
+    '/skill-packages',
+    '/mcp-servers',
+    '/environments',
+    '/agents',
+    '/models',
+    '/providers',
+  ])('activates AI top navigation and points brand to /chats for %s', (path) => {
+    renderShell(path, <div>AI Sub-route</div>)
+
+    expect(screen.getByRole('banner')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
+  })
+})
+
 describe('AppShell settings navigation', () => {
   it('renders the Gear link in the top navigation for desktop and mobile panels', () => {
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
     const settingsLink = screen.getByRole('link', { name: '设置 Settings' })
     expect(settingsLink).toHaveAttribute('href', '/settings')
     expect(settingsLink.querySelector('small')?.textContent).toBe('Settings')
@@ -101,13 +104,7 @@ describe('AppShell settings navigation', () => {
   })
 
   it('keeps the global topbar and activates only Settings on /settings', () => {
-    render(
-      <MemoryRouter initialEntries={['/settings']}>
-        <AppShell>
-          <div>Settings content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/settings', <div>Settings content</div>)
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(document.querySelector('.app-frame')).not.toHaveClass('chat-immersive')
     expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
@@ -119,13 +116,7 @@ describe('AppShell settings navigation', () => {
   })
 
   it('does not mis-activate Settings on AI, Canvas or Tools routes', () => {
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
     expect(screen.getByRole('link', { name: '设置 Settings' })).not.toHaveClass('active')
     expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')
   })
@@ -136,13 +127,7 @@ describe('AppShell platform feature navigation', () => {
     ['/projects', '项目 Projects', '/projects'],
     ['/projects/123', '项目 Projects', '/projects'],
   ])('activates the feature link and keeps the brand in that feature for %s', (path, label, href) => {
-    render(
-      <MemoryRouter initialEntries={[path]}>
-        <AppShell>
-          <div>Feature content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell(path, <div>Feature content</div>)
 
     expect(screen.getByRole('link', { name: label })).toHaveClass('active')
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', href)
@@ -153,13 +138,7 @@ describe('AppShell platform feature navigation', () => {
 describe('AppShell nav Escape priority guards', () => {
   it('closes the nav on Escape outside modals and editable targets', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
     const toggle = screen.getByRole('button', { name: '打开导航' })
     await user.click(toggle)
     expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
@@ -171,13 +150,7 @@ describe('AppShell nav Escape priority guards', () => {
 
   it('does not close the nav while a modal overlay owns Escape', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
     const toggle = screen.getByRole('button', { name: '打开导航' })
     await user.click(toggle)
     expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
@@ -201,13 +174,7 @@ describe('AppShell nav Escape priority guards', () => {
 
   it('does not close the nav while typing in an editable target', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
     const toggle = screen.getByRole('button', { name: '打开导航' })
     await user.click(toggle)
     expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'true')
@@ -225,15 +192,7 @@ describe('AppShell nav Escape priority guards', () => {
 
   it('keeps the nav open when a higher-priority handler already consumed Escape', async () => {
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
-    // 先注册更高优先级消费者（如 Modal 的 capture/更早的 document handler），
-    // 再打开导航；closeOnEscape 必须先检查 defaultPrevented。
+    renderShell('/chats', <div>Content</div>)
     const consume = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -255,22 +214,17 @@ describe('AppShell nav Escape priority guards', () => {
   it('consumes Escape on close so a mounted ThreadComposer cannot steal focus afterwards', async () => {
     setLocale('zh-CN')
     const user = userEvent.setup()
-    // 真实 ThreadComposer（focusOnEscape）作为低优先级 window handler 常驻；
-    // 导航关闭时若不禁用该 Escape，它会随后把焦点异步抢回 Composer。
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <ThreadComposer
-            parts={[]}
-            pending={false}
-            disabled={false}
-            onPartsChange={() => undefined}
-            onSubmit={() => undefined}
-            onCommand={() => undefined}
-            focusOnEscape
-          />
-        </AppShell>
-      </MemoryRouter>,
+    renderShell(
+      '/chats',
+      <ThreadComposer
+        parts={[]}
+        pending={false}
+        disabled={false}
+        onPartsChange={() => undefined}
+        onSubmit={() => undefined}
+        onCommand={() => undefined}
+        focusOnEscape
+      />,
     )
     const toggle = screen.getByRole('button', { name: '打开导航' })
     await user.click(toggle)
@@ -279,7 +233,6 @@ describe('AppShell nav Escape priority guards', () => {
     await user.keyboard('{Escape}')
     expect(document.querySelector('.app-frame')).toHaveAttribute('data-nav-open', 'false')
     expect(document.activeElement).toBe(toggle)
-    // ThreadComposer 的焦点恢复是异步重试（setTimeout）；必须确认其没有抢回焦点。
     await new Promise((resolve) => setTimeout(resolve, 60))
     expect(document.activeElement).toBe(toggle)
   })
@@ -287,13 +240,7 @@ describe('AppShell nav Escape priority guards', () => {
   it('closes only the inner listbox on the first Escape and keeps the nav; a second Escape closes the nav', async () => {
     setLocale('zh-CN')
     const user = userEvent.setup()
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
     const toggle = screen.getByRole('button', { name: '打开导航' })
     await user.click(toggle)
     const trigger = screen.getAllByRole('button', { name: '语言: 中文' })[0]!
@@ -317,13 +264,7 @@ describe('AppShell locale selector', () => {
     setLocale('zh-CN')
     const user = userEvent.setup()
 
-    render(
-      <MemoryRouter initialEntries={['/chats']}>
-        <AppShell>
-          <div>Content</div>
-        </AppShell>
-      </MemoryRouter>,
-    )
+    renderShell('/chats', <div>Content</div>)
 
     const chineseTriggers = screen.getAllByRole('button', { name: '语言: 中文' })
     expect(chineseTriggers).toHaveLength(2)
@@ -344,7 +285,6 @@ describe('AppShell locale selector', () => {
     expect(chineseTriggers[0]).toHaveAttribute('aria-expanded', 'true')
     expect(chineseTriggers[1]).toHaveAttribute('aria-expanded', 'false')
 
-    // 选中的「中文」选项在打开时聚焦；ArrowUp 移到 English，Enter 选中它。
     await user.keyboard('{ArrowUp}')
     await user.keyboard('{Enter}')
 

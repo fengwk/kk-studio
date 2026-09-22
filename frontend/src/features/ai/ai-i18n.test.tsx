@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
+import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { AgentSelectionPanel } from '@/features/ai/chat/SelectionPanel'
@@ -77,12 +77,16 @@ function createHost() {
   const host = new ExtensionHost()
   host.register({
     id: 'test.ai',
-    navigation: [
+    pages: [
       {
         id: 'ai.nav.environments',
-        label: 'Environment',
-        labelKey: 'ai.nav.environments',
+        component: () => null,
         path: 'environments',
+        navGroup: 'ai',
+        navItem: {
+          label: 'Environment',
+          labelKey: 'ai.nav.environments',
+        },
       },
     ],
   })
@@ -110,7 +114,7 @@ function renderPage(ui: ReactNode, path: string) {
 describe('AI i18n live-switch contracts', () => {
   it('switches the Environment navigation label without remounting', () => {
     act(() => setLocale('en-US'))
-    renderWithWorkbench(<NavigationSlot />, 'environments')
+    renderWithWorkbench(<AiNavigation />, 'environments')
 
     expect(screen.getByRole('link', { name: 'Environment' })).toBeInTheDocument()
 

@@ -39,35 +39,35 @@ Query 默认 `retry: false`、`refetchOnWindowFocus: false`；ExtensionHost 在 
 
 [AppRouter](../../frontend/src/app/router.tsx) 把 `/` replace 到 `/chats`，其余路径
 交给 [WorkbenchShell](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
-WorkbenchShell 的顺序是 `AppShell`、`header` slot、动态 `StudioRoutes` 和 `status`
-slot，每个 Page contribution 都包裹 `OverlayHost`。
+WorkbenchShell 组合 `AppShell` 与动态 `StudioRoutes`，每个 Page contribution 都包裹
+`OverlayHost`（无多余空槽）。
 
-[AppShell](../../frontend/src/platform/shell/AppShell.tsx) 拥有 topbar、主导航
-（AI/Projects/Canvas/Tools/Settings）、locale 选择器和全局 Escape 优先级：合法
-`/chats/:chatId` 与 canonical UUID 的 `/canvas/:canvasId` 使用 immersive shell 并
-隐藏 topbar；Escape 只在没有 blocking modal、焦点不在可编辑控件、内层 menu 未展开
-时才关闭导航抽屉。
+[AppShell](../../frontend/src/platform/shell/AppShell.tsx) 从当前匹配的 `PageContribution`
+获取所属顶层导航组（`navGroup`）与工作区沉浸布局（`workspace` predicate），不再硬编码业务
+path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId` 与 canonical UUID 的
+`/canvas/:canvasId` 使用 immersive shell 并隐藏 topbar；主导航固定组在应用组合根
+（`PRIMARY_NAV_ITEMS`）声明一次；Escape 只在没有 blocking modal、焦点不在可编辑控件、
+内层 menu 未展开时才关闭导航抽屉。
 
 [createApplicationExtensionHost](../../frontend/src/app/extension-host.ts) 注册五个
 内置 extension：
 
 | extension | 页面 | 其他 contribution |
 | --- | --- | --- |
-| `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/skill-packages`、`/environments`、`/mcp-servers` | AI navigation、创建/编辑/删除 dialog、`task` tool renderer |
+| `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/skill-packages`、`/environments`、`/mcp-servers` | 创建/编辑/删除 dialog、`task` tool renderer |
 | `builtin.projects` | `/projects`、`/projects/:projectId` | 全局 Project invalidation overlay |
 | `builtin.canvas` | `/canvas`、`/canvas/:canvasId` | lazy 加载 Canvas feature |
 | `builtin.comfyui` | `/comfyui` | workflow editor/delete dialog |
 | `builtin.settings` | `/settings` | lazy 加载 Settings feature |
 
-[ExtensionHost](../../frontend/src/platform/extensions/ExtensionHost.ts) 提供 `pages`、
-`navigation`、`panels`、`widgets`、`inspectors`、`commands`、`statuses`、`dialogs`、
-`overlays` 和 `toolRenderers` 十个 registry。同一 contribution id 的候选按 `priority`
-降序、注册顺序升序选择，卸载高优先级候选后低优先级候选接管；重复 extension id、非法
-contribution id 和非法 page path 在注册时被拒绝。
-[WorkbenchSlots](../../frontend/src/platform/workbench/WorkbenchSlots.tsx) 只把
-registry 渲染到 slot，`OverlayHost` 统一渲染 dialogs 和 overlays。`toolRenderers`
-的 `id` 必须与后端冻结的 `rendererKey` 一致；`task` renderer 缺失时 MessageList
-使用默认 renderer。
+[ExtensionHost](../../frontend/src/platform/extensions/ExtensionHost.ts) 收敛提供
+`pages`、`dialogs`、`overlays` 和 `toolRenderers` 四个具备实际用途的 registry。AI 专用
+二级导航由 AI pages 自身的 `navItem` 元数据派生并在 feature 内部本地渲染，不再设立伪通用
+Navigation registry，亦不保留零生产消费者的 panels/widgets/inspectors/commands/statuses 槽位。
+同一 contribution id 的候选按 `priority` 降序、注册顺序升序选择，卸载高优先级候选后
+低优先级候选接管；重复 extension id、非法 contribution id 和非法 page path 在注册时被拒绝。
+`OverlayHost` 统一渲染 dialogs 和 overlays。`toolRenderers` 的 `id` 必须与后端冻结的
+`rendererKey` 一致；`task` renderer 缺失时 MessageList 使用默认 renderer。
 
 [`src/shared`](../../frontend/src/shared) 不得依赖 `@/features`（ESLint 强制），feature
 之间只通过 ExtensionHost 和 shared 协作。Thread panel 是可移植 presentation：只依赖

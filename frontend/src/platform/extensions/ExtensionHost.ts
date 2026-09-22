@@ -1,16 +1,10 @@
 import type {
-  CommandContribution,
   DialogContribution,
   Disposable,
-  InspectorContribution,
-  NavigationContribution,
   OverlayContribution,
   PageContribution,
-  PanelContribution,
-  StatusContribution,
   ToolRendererContribution,
   TrustedReactExtension,
-  WidgetContribution,
 } from '@/platform/extensions/types'
 
 type RegistryListener = () => void
@@ -114,12 +108,6 @@ export class ContributionRegistry<T extends { id: string; priority?: number }> {
 
 export class ExtensionHost {
   readonly pages = new ContributionRegistry<PageContribution>()
-  readonly navigation = new ContributionRegistry<NavigationContribution>()
-  readonly panels = new ContributionRegistry<PanelContribution>()
-  readonly widgets = new ContributionRegistry<WidgetContribution>()
-  readonly inspectors = new ContributionRegistry<InspectorContribution>()
-  readonly commands = new ContributionRegistry<CommandContribution>()
-  readonly statuses = new ContributionRegistry<StatusContribution>()
   readonly dialogs = new ContributionRegistry<DialogContribution>()
   readonly overlays = new ContributionRegistry<OverlayContribution>()
   readonly toolRenderers = new ContributionRegistry<ToolRendererContribution>()
@@ -153,12 +141,6 @@ export class ExtensionHost {
     }
 
     registerAll(this.pages, extension.pages)
-    registerAll(this.navigation, extension.navigation)
-    registerAll(this.panels, extension.panels)
-    registerAll(this.widgets, extension.widgets)
-    registerAll(this.inspectors, extension.inspectors)
-    registerAll(this.commands, extension.commands)
-    registerAll(this.statuses, extension.statuses)
     registerAll(this.dialogs, extension.dialogs)
     registerAll(this.overlays, extension.overlays)
     registerAll(this.toolRenderers, extension.toolRenderers)
@@ -214,12 +196,6 @@ export class ExtensionHost {
   private validateExtension(extension: TrustedReactExtension) {
     validateId('Extension', extension.id)
     validateContributionList('pages', extension.pages, (page) => validateNestedPath('Page', page.path))
-    validateContributionList('navigation', extension.navigation, (navigation) => validateNestedPath('Navigation', navigation.path))
-    validateContributionList('panels', extension.panels)
-    validateContributionList('widgets', extension.widgets)
-    validateContributionList('inspectors', extension.inspectors)
-    validateContributionList('commands', extension.commands)
-    validateContributionList('statuses', extension.statuses)
     validateContributionList('dialogs', extension.dialogs)
     validateContributionList('overlays', extension.overlays)
     validateContributionList('toolRenderers', extension.toolRenderers)

@@ -3,7 +3,7 @@ import {
   SearchField,
   StateBlock,
 } from '@/shared/ui/console/AiConsoleCommonCards'
-import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
+import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { useI18n } from '@/shared/i18n'
 
 export function AiConsoleFrame({
@@ -28,7 +28,7 @@ export function AiConsoleFrame({
   return (
     <section className="screen active">
       <nav className="subbar">
-        <NavigationSlot />
+        <AiNavigation />
         <SearchField value={search} onChange={onSearchChange} />
       </nav>
       <div className="screen-body">
