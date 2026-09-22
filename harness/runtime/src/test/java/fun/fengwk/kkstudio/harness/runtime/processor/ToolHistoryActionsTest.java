@@ -75,7 +75,7 @@ class ToolHistoryActionsTest {
         response, ToolHistoryActions.freeze(response, bindings(), (b, c) -> Optional.empty()));
   }
 
-  /** 渲染器输入的 call 必须是 schema 归一化后的 canonical 调用（别名/类型归一化后），而不是 raw provider 文本；binding 原样传给渲染器。 */
+  /** 渲染器输入的 call 必须是按 schema 完成类型归一化的调用，而不是 raw provider 文本；binding 原样传给渲染器。 */
   @Test
   void rendersNormalizedCallAndPassesBinding() {
     ProviderResponse response =

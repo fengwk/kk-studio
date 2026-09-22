@@ -25,7 +25,7 @@
 ToolCall normalized = call.validateFor(descriptor);
 ```
 
-该方法依次做三件事：工具名必须与 descriptor 一致；对 `read`、`write`、`edit`、`find`、`grep` 这五个文件工具，把 `file`、`filePath`、`file_path` 中恰好出现一个的别名字段原值搬到 `path`（不 trim、不转类型，canonical `path` 已存在或多个别名同时出现时不动）；随后经 `InputNormalizer` 做数字字符串与可缺省 `null` 的容错改写，再由 `InputValidator` 严格校验。参数被改动时返回新的 `ToolCall`，执行路径只能使用这个返回值，不得回头读原始 JSON。
+该方法先要求工具名与 descriptor 一致，再经 `InputNormalizer` 按 `inputSchema` 做数字字符串与可缺省 `null` 的通用容错改写，最后由 `InputValidator` 严格校验。参数名及其 required、类型、附加属性规则只由 descriptor schema 决定，不因 `read`、`write` 等工具名获得隐式别名或字段搬运；schema 声明 `file` 时 `file` 就是有效字段，schema 只声明 `path` 时 `file`、`filePath`、`file_path` 都不会替代它。已有 canonical 参数不会被重命名。参数被改动时返回新的 `ToolCall`，执行路径只能使用这个返回值，不得回头读原始 JSON。
 
 同一入口在三个边界各调用一次，因为三者看到的参数必须一致：Planner 校验 Provider wire 上那条 raw call 可按 schema 归一化，durable `ToolInvocation` 入库时校验一次，transient `ToolInvocationRequest` 在权限 preflight、审批预览与执行之前固化归一化副本。原始 function call 仍原样保存在模型结果与 assistant history 中，供审计与 wire replay。
 
@@ -51,10 +51,10 @@ ToolCall normalized = call.validateFor(descriptor);
 ## 源码与测试
 
 - 身份与定义：[`ToolDescriptor.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolDescriptor.java)、[`AgentToolDefinition.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/AgentToolDefinition.java)
-- 调用与归一化：[`ToolCall.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java)、[`ToolArgumentAliasNormalizer.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolArgumentAliasNormalizer.java)
+- 调用与归一化：[`ToolCall.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolCall.java)，通用参数归一化由 [`InputNormalizer.java`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/schema/InputNormalizer.java) 提供
 - 结果容器：[`ToolResult.java`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/ToolResult.java)
 - 编解码：[`codec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/)
-- [`ToolExecutionNormalizationTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolExecutionNormalizationTest.java) 锁定别名、数字文本与 `null` 三段管线的全部边界；[`ToolContractTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java) 用反射固定 descriptor 的组件顺序与类型；[`ToolResultJsonCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/codec/ToolResultJsonCodecTest.java) 逐字节比对 bounded 编码与 `encode`，并断言 Binary 被拒。改动 codec 时 [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 还有 JaCoCo 行覆盖率不低于 90% 的门禁。
+- [`ToolExecutionNormalizationTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolExecutionNormalizationTest.java) 锁定 schema 决定参数名、数字文本、可选 `null` 与不可变性边界；[`ToolContractTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java) 用反射固定 descriptor 的组件顺序与类型；[`ToolResultJsonCodecTest.java`](../../harness/tool/src/test/java/fun/fengwk/kkstudio/harness/tool/codec/ToolResultJsonCodecTest.java) 逐字节比对 bounded 编码与 `encode`，并断言 Binary 被拒。`ToolCall` 与 [`AgentToolDefinitionJsonCodec`](../../harness/tool/src/main/java/fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec.java) 均有 JaCoCo 行覆盖率不低于 90% 的门禁，通用 `InputNormalizer` 的同等门禁位于 `harness-common`。
 
 ---
 

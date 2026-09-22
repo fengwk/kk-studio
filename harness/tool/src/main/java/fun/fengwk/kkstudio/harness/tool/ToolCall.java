@@ -18,7 +18,7 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
   }
 
   /**
-   * 静默归一化参数（文件工具别名→path、数字字符串→integer/number、可缺省属性的显式 null→缺省），再用 schema 严格校验，同时校验工具名称一致。
+   * 按 descriptor schema 静默归一化参数（数字字符串→integer/number、可缺省属性的显式 null→缺省），再用 schema 严格校验，同时校验工具名称一致。
    *
    * @return 持有归一化后参数的新 {@code ToolCall}；执行路径必须使用该返回值，不得再读取原始 JSON。
    */
@@ -26,8 +26,7 @@ public record ToolCall(String id, String toolName, String argumentsJson) {
     if (!toolName.equals(descriptor.name())) {
       throw new IllegalArgumentException("toolName does not match descriptor");
     }
-    String aliased = ToolArgumentAliasNormalizer.normalize(toolName, argumentsJson);
-    String normalized = InputNormalizer.normalize(aliased, descriptor.inputSchema());
+    String normalized = InputNormalizer.normalize(argumentsJson, descriptor.inputSchema());
     InputValidator.validate(normalized, descriptor.inputSchema());
     if (normalized.equals(argumentsJson)) {
       return this;
