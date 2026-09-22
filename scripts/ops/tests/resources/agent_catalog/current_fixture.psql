@@ -1,0 +1,23 @@
+-- Deterministic current-V1 catalog fixture for maintenance lifecycle tests.
+insert into agent_provider (name, description, provider_type, base_url, credential, config,
+    connection_generation_id, created_at, updated_at, version) values
+    ('probe-provider', 'probe provider description', 'openai', 'https://probe.invalid/v1',
+     'probe-provider-credential', '{"modelCallTimeoutMillis": 600000}'::jsonb,
+     '22222222-2222-4222-8222-222222222222',
+     '2024-01-03 00:00:00.001+00', '2024-01-04 00:00:00.002+00', 2);
+
+insert into agent_model (provider_name, name, model_id, description, config, created_at,
+    updated_at, version) values
+    ('probe-provider', 'probe-model', 'probe-wire-model', 'probe model description',
+     '{"variants": [{"id": "probe-variant"}]}'::jsonb,
+     '2024-01-05 00:00:00.003+00', '2024-01-06 00:00:00.004+00', 3);
+
+insert into agent_definition (name, description, system_prompt, model_provider_name, model_name,
+    variant, config, created_at, updated_at, version) values
+    ('bound-agent', 'probe agent description', 'probe system prompt', 'probe-provider',
+     'probe-model', 'probe-variant',
+     '{"tools": ["read", "lsp_goto_definition", "probe_mcp_tool", "update_goal"], "skills": [], "subagents": ["probe-child"], "inheritParentEnvironment": true}'::jsonb,
+     '2024-01-07 00:00:00.005+00', '2024-01-08 00:00:00.006+00', 4),
+    ('unbound-agent', null, null, 'probe-provider', 'probe-model', null,
+     '{"tools": [], "skills": [], "subagents": [], "inheritParentEnvironment": true}'::jsonb,
+     '2024-01-09 00:00:00.007+00', '2024-01-10 00:00:00.008+00', 5);

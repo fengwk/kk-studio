@@ -28,6 +28,7 @@ import tempfile
 import time
 from typing import Dict, List, Optional, Sequence
 import unittest
+from unittest import mock
 import uuid
 
 # 以仓库根为导入根：脚本模块以 `scripts.ops.*` 为包路径，测试不依赖调用者 cwd。
@@ -46,7 +47,7 @@ V1_SCHEMA_SQL = (
     WORKTREE_ROOT / "schema" / "src" / "main" / "resources" / "db" / "migration" / "V1__schema.sql"
 )
 RESOURCES_DIR = OPS_DIR / "tests" / "resources" / "agent_catalog"
-LEGACY_SOURCE_SQL = RESOURCES_DIR / "legacy_source.psql"
+CURRENT_FIXTURE_SQL = RESOURCES_DIR / "current_fixture.psql"
 CURRENT_EDGE_SQL = RESOURCES_DIR / "current_edge_fixture.psql"
 FLYWAY_HISTORY_SQL = RESOURCES_DIR / "flyway_v1_history.psql"
 
@@ -98,6 +99,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
     passfile_path: Optional[Path] = None
     service_dir: Optional[tempfile.TemporaryDirectory] = None
     service_file: Optional[Path] = None
+    home_dir: Optional[tempfile.TemporaryDirectory] = None
     client_env: Optional[Dict[str, str]] = None
     v1_checksum: Optional[str] = None
 
@@ -159,10 +161,15 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         )
         os.chmod(cls.passfile_path, 0o600)
 
-        # Construct inherited client environment for all child libpq and script processes: every
-        # inherited PG* setting is removed first, so an operator's ambient service, passfile or
-        # database can never influence (or authenticate) these tests.
-        env = {key: value for key, value in os.environ.items() if not key.startswith("PG")}
+        # Use an explicit process whitelist and an isolated HOME. Ambient PG*, VPS_POSTGRES_*,
+        # KK_STUDIO_* and default pgpass/service files must never select a maintenance target.
+        cls.home_dir = tempfile.TemporaryDirectory(prefix="integ_home_")
+        env = {
+            key: os.environ[key]
+            for key in ("PATH", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR")
+            if key in os.environ
+        }
+        env["HOME"] = cls.home_dir.name
         env["PGHOST"] = "127.0.0.1"
         env["PGPORT"] = str(cls.pg_port)
         env["PGUSER"] = "postgres"
@@ -235,6 +242,9 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         if cls.service_dir:
             cls.service_dir.cleanup()
             cls.service_dir = None
+        if cls.home_dir:
+            cls.home_dir.cleanup()
+            cls.home_dir = None
 
     def setUp(self) -> None:
         self.test_dir = tempfile.TemporaryDirectory(prefix="catalog_test_")
@@ -409,19 +419,19 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         return dict(re.findall(r"^([a-zA-Z0-9_.]+)=(.*)$", output, re.MULTILINE))
 
     # -------------------------------------------------------------------------
-    # Test 1: Complete legacy flow
+    # Test 1: Complete current-schema flow
     # -------------------------------------------------------------------------
 
-    def test_01_complete_legacy_flow(self) -> None:
+    def test_01_complete_current_flow(self) -> None:
         # Test intent:
-        # Verify the complete migration lifecycle from an origin/main-shaped database through
+        # Verify the complete maintenance lifecycle from a current-V1 database through
         # catalog export, full reset with snapshot retention, Flyway V1 schema application,
         # and catalog import. Confirms that credentials and wire configurations survive,
-        # deprecated columns/tables are eliminated, unmigrated tables remain uncopied, and
+        # unmigrated tables remain uncopied, and
         # server metadata (encoding, locale, owner, connection limit) is strictly preserved.
         db_name = self.register_db(f"probe_flow_{uuid.uuid4().hex[:8]}")
-        self.create_empty_db(db_name)
-        self.run_psql_file(db_name, LEGACY_SOURCE_SQL)
+        self.create_v1_database(db_name)
+        self.run_psql_file(db_name, CURRENT_FIXTURE_SQL)
 
         # Set an explicit connection limit before reset to verify it is preserved.
         self.run_psql_command("postgres", f'ALTER DATABASE "{db_name}" CONNECTION LIMIT 7')
@@ -430,10 +440,6 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             "agent_provider": 1,
             "agent_model": 1,
             "agent_definition": 2,
-            "environment": 1,
-            "mcp_tool": 1,
-            "environment_skill_source": 1,
-            "environment_skill": 1,
         }
         for table, expected in initial_counts.items():
             cnt = int(self.run_psql_command(db_name, f"SELECT count(*) FROM {table}"))
@@ -446,7 +452,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         orig_encoding, orig_collate, orig_owner, orig_connlimit = meta_before
         self.assertEqual(int(orig_connlimit), 7)
 
-        # 1. Export catalog from legacy database.
+        # 1. Export catalog from the current database.
         export_work_dir = Path(self.test_dir.name) / "export_pkg"
         res_export = self.run_script(
             EXPORT_SCRIPT,
@@ -517,7 +523,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         )
         self.assertEqual(restore_res.returncode, 0, "pg_restore rejected the backup file")
 
-        # Assert frozen snapshot exists with datallowconn = f and holds the legacy rows.
+        # Assert frozen snapshot exists with datallowconn = f and holds the current catalog rows.
         snapshots = self.run_psql_command(
             "postgres",
             f"SELECT datname, datallowconn FROM pg_database WHERE datname LIKE '{db_name}_pre_%'",
@@ -633,27 +639,9 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         )
         self.assertEqual(unbound_non_config_ok, "t", "Unbound agent non-config columns mutated")
 
-        # Deprecated agent_definition.environment_id column does NOT exist in V1 schema:
-        env_id_col = int(
-            self.run_psql_command(
-                db_name,
-                "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'agent_definition' AND column_name = 'environment_id'",
-            )
-        )
-        self.assertEqual(env_id_col, 0, "Deprecated environment_id column still exists")
-
-        # Legacy environment tables were NOT recreated:
-        legacy_tables = int(
-            self.run_psql_command(
-                db_name,
-                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('environment_skill', 'environment_skill_source')",
-            )
-        )
-        self.assertEqual(legacy_tables, 0, "Legacy environment skill tables were recreated")
-
-        # Environment row was NOT migrated (current environment table is empty):
+        # Environment rows are outside the catalog package and remain empty:
         env_rows = int(self.run_psql_command(db_name, "SELECT count(*) FROM public.environment"))
-        self.assertEqual(env_rows, 0, "Legacy environment rows were incorrectly migrated")
+        self.assertEqual(env_rows, 0, "Environment rows were incorrectly migrated")
 
     # -------------------------------------------------------------------------
     # Test 2: Current-baseline hostile round trip
@@ -1006,8 +994,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         # identifies agent_definition without leaking secondary detail lines, and confirms that
         # the target database remains cleanly reusable for an intact package import.
         src_db = self.register_db(f"probe_late_src_{uuid.uuid4().hex[:8]}")
-        self.create_empty_db(src_db)
-        self.run_psql_file(src_db, LEGACY_SOURCE_SQL)
+        self.create_v1_database(src_db)
+        self.run_psql_file(src_db, CURRENT_FIXTURE_SQL)
 
         export_work_dir = Path(self.test_dir.name) / "late_export"
         res_export = self.run_script(
@@ -1139,8 +1127,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         # itself refuses to commit anything when the tables are no longer empty, when the restored
         # rows do not match the package fingerprints, or when it is run outside its transaction.
         src_db = self.register_db(f"probe_guard_src_{uuid.uuid4().hex[:8]}")
-        self.create_empty_db(src_db)
-        self.run_psql_file(src_db, LEGACY_SOURCE_SQL)
+        self.create_v1_database(src_db)
+        self.run_psql_file(src_db, CURRENT_FIXTURE_SQL)
         res_export = self.run_script(
             EXPORT_SCRIPT,
             ["--work-dir", str(Path(self.test_dir.name) / "guard_export")],
@@ -1251,8 +1239,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         # Guard 1: --dry-run creates no directories and changes nothing
         with self.subTest("dry_run_is_read_only"):
             db_dry = self.register_db(f"probe_reset_dry_{uuid.uuid4().hex[:8]}")
-            self.create_empty_db(db_dry)
-            self.run_psql_file(db_dry, LEGACY_SOURCE_SQL)
+            self.create_v1_database(db_dry)
+            self.run_psql_file(db_dry, CURRENT_FIXTURE_SQL)
 
             nonexistent_work_dir = Path(self.test_dir.name) / "dry_run_dir"
             res = self.run_script(
@@ -1272,8 +1260,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         # Guard 2: Another connected session is refused and target is untouched
         with self.subTest("connected_session_refused"):
             db_busy = self.register_db(f"probe_reset_busy_{uuid.uuid4().hex[:8]}")
-            self.create_empty_db(db_busy)
-            self.run_psql_file(db_busy, LEGACY_SOURCE_SQL)
+            self.create_v1_database(db_busy)
+            self.run_psql_file(db_busy, CURRENT_FIXTURE_SQL)
 
             # Start a background connection executing pg_sleep
             bg_cmd = [
@@ -1330,8 +1318,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         # Guard 3: A failing createdb rolls the freeze back
         with self.subTest("failing_createdb_unfreezes_original"):
             db_fail = self.register_db(f"probe_reset_fail_cdb_{uuid.uuid4().hex[:8]}")
-            self.create_empty_db(db_fail)
-            self.run_psql_file(db_fail, LEGACY_SOURCE_SQL)
+            self.create_v1_database(db_fail)
+            self.run_psql_file(db_fail, CURRENT_FIXTURE_SQL)
 
             stub_bin_dir = Path(self.test_dir.name) / "stub_bin"
             stub_bin_dir.mkdir(parents=True, exist_ok=True)
@@ -1394,7 +1382,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             self.run_psql_command(
                 "postgres", f'CREATE DATABASE "{db_late}" CONNECTION LIMIT 5'
             )
-            self.run_psql_file(db_late, LEGACY_SOURCE_SQL)
+            self.run_psql_file(db_late, V1_SCHEMA_SQL)
+            self.run_psql_file(db_late, CURRENT_FIXTURE_SQL)
 
             stub_bin_dir = Path(self.test_dir.name) / "late_stub_bin"
             stub_bin_dir.mkdir(parents=True, exist_ok=True)
@@ -1457,8 +1446,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         # instead of proceeding to create an empty replacement.
         with self.subTest("post_freeze_session_recheck_restores_original"):
             db_race = self.register_db(f"probe_reset_race_{uuid.uuid4().hex[:8]}")
-            self.create_empty_db(db_race)
-            self.run_psql_file(db_race, LEGACY_SOURCE_SQL)
+            self.create_v1_database(db_race)
+            self.run_psql_file(db_race, CURRENT_FIXTURE_SQL)
 
             stub_bin_dir = Path(self.test_dir.name) / "race_stub_bin"
             stub_bin_dir.mkdir(parents=True, exist_ok=True)
@@ -1510,7 +1499,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             self.run_psql_command(
                 "postgres", f'CREATE DATABASE "{db_ok}" CONNECTION LIMIT 3'
             )
-            self.run_psql_file(db_ok, LEGACY_SOURCE_SQL)
+            self.run_psql_file(db_ok, V1_SCHEMA_SQL)
+            self.run_psql_file(db_ok, CURRENT_FIXTURE_SQL)
 
             ok_work_dir = Path(self.test_dir.name) / "ok_reset_dir"
             res = self.run_script(
@@ -1608,7 +1598,8 @@ class TestAgentCatalogIntegration(unittest.TestCase):
                 "postgres", f'CREATE DATABASE "{name}" OWNER "{owner}" CONNECTION LIMIT 4'
             )
         self.create_empty_db(db_service)
-        self.run_psql_file(db_service, LEGACY_SOURCE_SQL)
+        self.run_psql_file(db_service, V1_SCHEMA_SQL)
+        self.run_psql_file(db_service, CURRENT_FIXTURE_SQL)
 
         def role_env(role: str, password: str) -> Dict[str, str]:
             """Environment for a specific role: the fixture passfile only knows postgres."""
@@ -1619,9 +1610,13 @@ class TestAgentCatalogIntegration(unittest.TestCase):
 
         owner_env = role_env(owner_role, "probe-owner-pw")
         # The target role owns its tables, which is what pg_dump needs to read the whole database.
-        self.run_psql_file(db_owned, LEGACY_SOURCE_SQL, env=owner_env)
+        self.run_psql_file(db_owned, V1_SCHEMA_SQL, env=owner_env)
+        self.run_psql_file(db_owned, CURRENT_FIXTURE_SQL, env=owner_env)
         self.run_psql_file(
-            db_plain, LEGACY_SOURCE_SQL, env=role_env(plain_role, "probe-plain-pw")
+            db_plain, V1_SCHEMA_SQL, env=role_env(plain_role, "probe-plain-pw")
+        )
+        self.run_psql_file(
+            db_plain, CURRENT_FIXTURE_SQL, env=role_env(plain_role, "probe-plain-pw")
         )
 
         with self.subTest("owner_with_createdb_resets"):
@@ -1693,7 +1688,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             self.assertEqual(
                 res.returncode, 0, f"Service connection failed: {sanitize_error(res.stderr)}"
             )
-            self.assertIn("source_schema=legacy-main", res.stdout)
+            self.assertIn("rows.agent_provider=1", res.stdout)
             # The same pair must also carry reset, which uses the maintenance connection.
             res_reset = self.run_script(
                 RESET_SCRIPT,
@@ -1725,12 +1720,13 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         suffix = uuid.uuid4().hex[:8]
         source = self.register_db(f"probe_conn_source_{suffix}")
         target = self.register_db(f"probe_conn_target_{suffix}")
-        self.create_empty_db(source)
-        self.run_psql_file(source, LEGACY_SOURCE_SQL)
+        self.create_v1_database(source)
+        self.run_psql_file(source, CURRENT_FIXTURE_SQL)
         self.create_v1_database(target)
 
         vps_environment = {
             "PGHOST": "127.0.0.2",
+            "PGHOSTADDR": "127.0.0.2",
             "PGPORT": "1",
             "PGUSER": "wrong-role",
             "PGDATABASE": "wrong_database",
@@ -1755,7 +1751,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             f"VPS environment connection failed: {sanitize_error(exported.stderr)}",
         )
         package = self.parse_facts(exported.stdout)["package_dir"]
-        self.assertIn("source_schema=legacy-main", exported.stdout)
+        self.assertIn("rows.agent_provider=1", exported.stdout)
 
         reset_dry_run = self.run_script(
             RESET_SCRIPT,
@@ -1770,6 +1766,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
 
         cli_environment = {
             "PGHOST": "127.0.0.2",
+            "PGHOSTADDR": "127.0.0.2",
             "PGPORT": "1",
             "PGUSER": "wrong-role",
             "PGDATABASE": "wrong_database",
@@ -1805,6 +1802,61 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             f"CLI connection failed: {sanitize_error(imported.stderr)}",
         )
         self.assertIn("Dry-run complete", imported.stdout)
+
+    def test_10_ambient_pollution_cannot_redirect_reset(self) -> None:
+        # Test intent:
+        # Prove the integration harness ignores hostile ambient PG/VPS/KK_STUDIO settings and that
+        # a real `reset --yes` can only replace the explicitly injected throwaway fixture database.
+        target = self.register_db(f"probe_isolated_reset_{uuid.uuid4().hex[:8]}")
+        untouched = self.register_db(f"probe_isolated_control_{uuid.uuid4().hex[:8]}")
+        self.create_v1_database(target)
+        self.run_psql_file(target, CURRENT_FIXTURE_SQL)
+        self.create_v1_database(untouched)
+        self.run_psql_file(untouched, CURRENT_FIXTURE_SQL)
+        pollution = {
+            "PGHOSTADDR": "192.0.2.10",
+            "PGSERVICE": "hostile-service",
+            "VPS_POSTGRES_HOST": "192.0.2.11",
+            "VPS_POSTGRES_DATABASE": "hostile_database",
+            "KK_STUDIO_MAINTENANCE_DB": "hostile_maintenance",
+        }
+        with mock.patch.dict(os.environ, pollution):
+            for key in pollution:
+                self.assertNotIn(key, self.client_env)
+            result = self.run_script(
+                RESET_SCRIPT,
+                [
+                    "--yes",
+                    "--database",
+                    target,
+                    "--work-dir",
+                    str(Path(self.test_dir.name) / "isolated_reset"),
+                ],
+            )
+        self.assertEqual(result.returncode, 0, sanitize_error(result.stderr))
+        self.assertEqual(
+            "0",
+            self.run_psql_command(
+                target,
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'",
+            ),
+        )
+        self.assertEqual(
+            "2", self.run_psql_command(untouched, "SELECT count(*) FROM agent_definition")
+        )
+
+    def test_11_legacy_column_shape_is_rejected(self) -> None:
+        # Test intent: a legacy discriminator column is no longer projected and fails before export.
+        source = self.register_db(f"probe_legacy_rejected_{uuid.uuid4().hex[:8]}")
+        self.create_v1_database(source)
+        self.run_psql_command(source, "ALTER TABLE agent_definition ADD COLUMN environment_id uuid")
+        result = self.run_script(
+            EXPORT_SCRIPT,
+            ["--dry-run", "--work-dir", str(Path(self.test_dir.name) / "legacy_rejected")],
+            env_override={"PGDATABASE": source},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected source columns for agent_definition", result.stderr)
 
     # -------------------------------------------------------------------------
     # Test 6: Credential non-disclosure

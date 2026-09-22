@@ -15,7 +15,6 @@ The real-server behaviour of the same scripts is covered by
 
 import contextlib
 import importlib
-import inspect
 import io
 import json
 import os
@@ -50,11 +49,6 @@ from scripts.ops.agent_catalog import (  # noqa: E402  (import after sys.path se
     BUNDLE_NAME,
     CATALOG_TABLES,
     CHECKSUMS_NAME,
-    CURRENT_SOURCE,
-    LEGACY_AGENT_DEFINITION_COLUMNS,
-    LEGACY_BUILTIN_TOOLS,
-    LEGACY_MCP_TABLE,
-    LEGACY_SOURCE,
     MANIFEST_NAME,
     ORDER_COLUMNS,
     PACKAGE_FORMAT,
@@ -68,11 +62,6 @@ from scripts.ops.agent_catalog import (  # noqa: E402  (import after sys.path se
     TARGET_SCHEMA,
     CatalogError,
     PgDatabase,
-    collect_config_violations,
-    collect_tool_violations,
-    detect_source_kind,
-    expected_source_columns,
-    _format_violations,
     fingerprint_query,
     package_facts,
     read_package,
@@ -111,22 +100,6 @@ REPORTING_FILES = (EXPORT_SCRIPT, IMPORT_SCRIPT)
 
 #: Tables that must never be migrated: they are runtime data, or they belong to another workflow.
 UNMIGRATED_TABLES = ("environment", "skill_package", "plugin_credential")
-
-#: Legacy selectable built-in AgentToolId -> current model-visible tool name.
-DOCUMENTED_TOOL_MAPPING = (
-    ("base.read", "read"),
-    ("base.write", "write"),
-    ("base.edit", "edit"),
-    ("base.bash", "bash"),
-    ("base.grep", "grep"),
-    ("base.find", "find"),
-    ("base.lsp-goto-definition", "lsp_goto_definition"),
-    ("base.lsp-workspace-symbols", "lsp_workspace_symbols"),
-    ("base.lsp-java-decompile", "lsp_java_decompile"),
-    ("base.goal.create", "create_goal"),
-    ("base.goal.get", "get_goal"),
-    ("base.goal.update", "update_goal"),
-)
 
 #: The V1 revision this checkout declares.  A changed value means the baseline changed, which is a
 #: maintenance decision: this test must fail so the operator re-verifies the whole flow.
@@ -173,7 +146,12 @@ def function_body(script_path, function_name):
 
 def run_library_snippet(snippet, environment=None):
     """Run a bash snippet that sources the production library, with an explicit environment."""
-    child_environment = dict(os.environ)
+    child_environment = {
+        key: os.environ[key]
+        for key in ("PATH", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "WINDIR")
+        if key in os.environ
+    }
+    child_environment["HOME"] = tempfile.gettempdir()
     child_environment["KK_STUDIO_REPO_ROOT"] = str(REPOSITORY_ROOT)
     for key, value in (environment or {}).items():
         if value is None:
@@ -206,7 +184,7 @@ class FakeDatabase:
 
     @staticmethod
     def _table_of(query):
-        # A projected legacy Agent row also references mcp_tool; the catalog table is what counts.
+        # Queries may contain joins in future; the migrated catalog table is what counts.
         matches = re.findall(r"public\.(\w+)", query)
         for candidate in matches:
             if candidate in CATALOG_TABLES:
@@ -235,12 +213,12 @@ def fake_database(fingerprints=None, rows=None, counts=None):
     return FakeDatabase(list(fingerprints) * 2, rows=rows, counts=counts)
 
 
-def bundle_text(kind, database, expected=None):
+def bundle_text(database, expected=None):
     """Render the bundle for one source into memory; the expected fingerprints are an input."""
     if expected is None:
         expected = {table: "0:" for table in CATALOG_TABLES}
     stream = io.StringIO()
-    write_bundle(database, kind, stream, expected)
+    write_bundle(database, stream, expected)
     return stream.getvalue()
 
 
@@ -269,164 +247,40 @@ class TestCatalogProjectionContracts(unittest.TestCase):
         for table in UNMIGRATED_TABLES:
             self.assertNotIn(table, CATALOG_TABLES)
             self.assertTrue(v1_table_columns(table), f"{table} must exist in V1")
-        self.assertNotIn("environment", expected_source_columns(CURRENT_SOURCE))
-        self.assertNotIn("environment", expected_source_columns(LEGACY_SOURCE))
-
-    def test_legacy_agent_definition_columns_drop_only_the_environment_binding(self):
-        """origin/main differs from the current baseline by `environment_id` alone."""
-        current = list(TARGET_COLUMNS["agent_definition"])
-        legacy = list(LEGACY_AGENT_DEFINITION_COLUMNS)
-        current.insert(current.index("config"), "environment_id")
-        self.assertEqual(current, legacy)
-        self.assertNotIn("environment_id", TARGET_COLUMNS["agent_definition"])
-
-    def test_source_detection_uses_the_agent_tables_only(self):
-        """Detection reads the migrated tables, never a domain this tool does not migrate."""
-        self.assertEqual(LEGACY_SOURCE, detect_source_kind(("name", "environment_id", "config")))
-        self.assertEqual(CURRENT_SOURCE, detect_source_kind(("name", "config")))
-        self.assertEqual(CURRENT_SOURCE, detect_source_kind(()))
-
-    def test_source_detection_ignores_unmigrated_domain_tables(self):
-        """Whether skill/plugin/environment tables exist says nothing about the catalog shape."""
-        module = importlib.import_module("scripts.ops.agent_catalog")
-        self.assertFalse(hasattr(module, "LEGACY_MARKER_TABLES"))
-        self.assertFalse(hasattr(module, "CURRENT_MARKER_TABLES"))
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        for table in UNMIGRATED_TABLES:
-            self.assertNotIn(f'"{table}"', source, f"{table} must not appear in quoted literals")
-        # 检测只读列集合，不接收表名，因此不可能依赖某个域的建表与否。
-        self.assertEqual(1, len(inspect.signature(detect_source_kind).parameters))
-
-    def test_intermediate_source_shapes_are_rejected_by_the_exact_column_check(self):
-        """Bare detection is a discriminator; the exact column check is what fails closed."""
-        module = importlib.import_module("scripts.ops.agent_catalog")
-        cases = (
-            # 只多一列 / 少一列都必须拒绝，无论被判定成哪个 baseline。
-            (CURRENT_SOURCE, "agent_model", "extra", "provider_version"),
-            (CURRENT_SOURCE, "agent_definition", "missing", "version"),
-            (LEGACY_SOURCE, "agent_definition", "extra", "environment_name"),
-            (LEGACY_SOURCE, "agent_provider", "missing", "connection_generation_id"),
-        )
-        for kind, table, mutation, column in cases:
-            with self.subTest(kind=kind, table=table, mutation=mutation):
-                columns = {name: list(TARGET_COLUMNS[name]) for name in CATALOG_TABLES}
-                if kind == LEGACY_SOURCE:
-                    columns["agent_definition"] = list(LEGACY_AGENT_DEFINITION_COLUMNS)
-                    columns[LEGACY_MCP_TABLE] = ["id", "model_name"]
-                if mutation == "extra":
-                    columns[table].append(column)
-                else:
-                    columns[table].remove(column)
-                with self.assertRaises(CatalogError) as captured:
-                    module.verify_source_columns(kind, columns)
-                self.assertIn("unexpected source columns for " + table, str(captured.exception))
-
-    def test_legacy_columns_require_the_mcp_mapping_table(self):
-        """The origin/main projection resolves `mcp.<uuid>` tool ids through mcp_tool."""
-        module = importlib.import_module("scripts.ops.agent_catalog")
-        self.assertEqual("mcp_tool", LEGACY_MCP_TABLE)
-        columns = {table: list(TARGET_COLUMNS[table]) for table in CATALOG_TABLES}
-        columns["agent_definition"] = list(LEGACY_AGENT_DEFINITION_COLUMNS)
-        with self.assertRaises(CatalogError) as captured:
-            module.verify_source_columns(LEGACY_SOURCE, columns)
-        self.assertIn(LEGACY_MCP_TABLE, str(captured.exception))
-        columns[LEGACY_MCP_TABLE] = ["id", "model_name"]
-        module.verify_source_columns(LEGACY_SOURCE, columns)
 
     def test_declared_columns_must_match_the_detected_baseline(self):
-        """A durable table with an unexpected column set aborts before anything is written."""
+        """Only exact current columns are accepted; legacy and partial shapes fail closed."""
         module = importlib.import_module("scripts.ops.agent_catalog")
         extra = {table: list(TARGET_COLUMNS[table]) for table in CATALOG_TABLES}
-        extra["agent_model"].append("provider_version")
+        extra["agent_definition"].insert(-4, "environment_id")
         with self.assertRaises(CatalogError) as captured:
-            module.verify_source_columns(CURRENT_SOURCE, extra)
-        self.assertIn("unexpected source columns for agent_model", str(captured.exception))
+            module.verify_source_columns(extra)
+        self.assertIn("unexpected source columns for agent_definition", str(captured.exception))
 
         missing = {table: list(TARGET_COLUMNS[table]) for table in CATALOG_TABLES}
         missing.pop("agent_definition")
         with self.assertRaises(CatalogError) as captured:
-            module.verify_source_columns(CURRENT_SOURCE, missing)
+            module.verify_source_columns(missing)
         self.assertIn("catalog table is missing", str(captured.exception))
 
-    def test_builtin_tool_mapping_is_the_documented_mapping(self):
-        """The legacy->current tool mapping is a closed, documented list."""
-        self.assertEqual(DOCUMENTED_TOOL_MAPPING, LEGACY_BUILTIN_TOOLS)
-
     def test_projections_use_explicit_target_columns(self):
-        """Every projection selects the target columns explicitly and drops environment_id."""
-        legacy_agent = source_projection(LEGACY_SOURCE, "agent_definition")
-        self.assertNotIn("environment_id", legacy_agent)
-        self.assertIn("inheritParentEnvironment", legacy_agent)
-        self.assertIn("mcp_tool", legacy_agent)
-        for agent_tool_id, model_name in DOCUMENTED_TOOL_MAPPING:
-            self.assertIn(f"('{agent_tool_id}', '{model_name}')", legacy_agent)
+        """Every current-only projection selects its target columns explicitly."""
         for table in CATALOG_TABLES:
             columns = ", ".join(f"source.{column}" for column in TARGET_COLUMNS[table])
-            self.assertIn(columns, source_projection(CURRENT_SOURCE, table), table)
+            self.assertIn(columns, source_projection(table), table)
 
     def test_every_projection_is_explicitly_ordered(self):
         """Bundles and digests must be reproducible, so no projection may rely on heap order."""
         for table in CATALOG_TABLES:
             order = ", ".join(f"source.{column}" for column in ORDER_COLUMNS[table])
             self.assertRegex(
-                source_projection(CURRENT_SOURCE, table), re.escape(f" order by {order}") + r"\Z"
+                source_projection(table), re.escape(f" order by {order}") + r"\Z"
             )
-        # The legacy Agent projection has no `source` alias: its row order comes from the name.
-        self.assertRegex(
-            source_projection(LEGACY_SOURCE, "agent_definition"), r"\n\s+order by d\.name\Z"
-        )
-
-    def test_legacy_config_rejection_rules(self):
-        """Unrepresentable legacy Agent configs fail closed with rule-specific reasons."""
-        valid = {"toolIds": ["base.read"], "skills": [], "subagents": ["other-agent"]}
-        self.assertEqual({}, collect_config_violations([("ok", valid)]))
-
-        cases = {
-            "not an object": (["legacy"], "config is not a JSON object"),
-            "unknown field": (dict(valid, extra=1), "config has unknown fields extra"),
-            "missing field": ({"toolIds": [], "skills": []}, "config is missing fields subagents"),
-            "skills selected": (
-                dict(valid, skills=[{"sourceId": "x", "name": "y"}]),
-                "skills is not empty",
-            ),
-            "skills wrong type": (dict(valid, skills={}), "skills is not a JSON array"),
-            "toolIds wrong type": (dict(valid, toolIds="base.read"), "toolIds is not a JSON array"),
-            "subagents non-canonical": (
-                dict(valid, subagents=["bad/name"]),
-                "subagents must be canonical short names",
-            ),
-            "subagents duplicated": (
-                dict(valid, subagents=["a", "a"]),
-                "subagents must not contain duplicates",
-            ),
-        }
-        for label, (config, reason) in cases.items():
-            with self.subTest(label):
-                violations = collect_config_violations([("legacy", config)])
-                self.assertTrue(any(reason in rule for rule in violations), violations)
-                self.assertTrue(
-                    all(names == ["legacy"] for names in violations.values()), violations
-                )
-
-    def test_projected_tool_rejection_rules(self):
-        """The mapped tool list must stay complete, unique and syntactically valid."""
-        self.assertEqual({}, collect_tool_violations([("ok", 2, ["read", "create_goal"])]))
-        cases = {
-            "unmapped": (2, ["read", None], "unmapped or invalid tool id"),
-            "dropped": (3, ["read"], "dropped during projection"),
-            "duplicate": (2, ["read", "read"], "duplicate tool names"),
-            "invalid name": (1, ["1bad"], "unmapped or invalid tool id"),
-            "not a list": (1, None, "unmapped or invalid tool id"),
-        }
-        for label, (count, tools, reason) in cases.items():
-            with self.subTest(label):
-                violations = collect_tool_violations([("legacy", count, tools)])
-                self.assertIn(reason, " ".join(violations))
 
     def test_fingerprint_query_covers_every_target_column(self):
         """Fingerprints compare values by name, so physical column order cannot matter."""
         query = fingerprint_query(
-            source_projection(CURRENT_SOURCE, "agent_definition"),
+            source_projection("agent_definition"),
             TARGET_COLUMNS["agent_definition"],
         )
         for column in TARGET_COLUMNS["agent_definition"]:
@@ -439,8 +293,8 @@ class TestCatalogProjectionContracts(unittest.TestCase):
         """The expected projection and the restored check must build the same canonical json."""
         for table in CATALOG_TABLES:
             columns = TARGET_COLUMNS[table]
-            expected = fingerprint_query(source_projection(LEGACY_SOURCE, table), columns)
-            restored = fingerprint_query(source_projection(CURRENT_SOURCE, table), columns)
+            expected = fingerprint_query(source_projection(table), columns)
+            restored = fingerprint_query(source_projection(table), columns)
             self.assertEqual(json_object_pairs(expected), json_object_pairs(restored))
             self.assertEqual([(column, column) for column in columns], json_object_pairs(expected))
 
@@ -450,7 +304,7 @@ class TestCatalogBundleContracts(unittest.TestCase):
 
     def test_bundle_is_a_single_transaction_script_with_explicit_columns(self):
         """The bundle is a psql script: pinned session, explicit columns, one row terminator each."""
-        bundle = bundle_text(LEGACY_SOURCE, fake_database())
+        bundle = bundle_text(fake_database())
         self.assertIn("\\set VERBOSITY sqlstate", bundle)
         self.assertIn("set time zone 'UTC';", bundle)
         self.assertIn("set datestyle to ISO;", bundle)
@@ -464,14 +318,14 @@ class TestCatalogBundleContracts(unittest.TestCase):
 
     def test_bundle_never_copies_an_unmigrated_table(self):
         """The bundle carries the catalog only; environment and plugins are not its business."""
-        bundle = bundle_text(CURRENT_SOURCE, fake_database())
+        bundle = bundle_text(fake_database())
         for table in UNMIGRATED_TABLES:
             self.assertNotIn(f"copy public.{table}", bundle)
             self.assertNotIn(f"-- {table} rows", bundle)
 
     def test_bundle_guard_locks_and_rechecks_the_target_inside_its_transaction(self):
         """The guard must run before the first COPY and must bound the lock wait."""
-        bundle = bundle_text(CURRENT_SOURCE, fake_database(),
+        bundle = bundle_text(fake_database(),
                              expected={table: f"1:{i}dead" for i, table in enumerate(CATALOG_TABLES)})
         guard = restore_guard_sql()
         self.assertIn("set lock_timeout = '" + RESTORE_LOCK_TIMEOUT + "';", guard)
@@ -487,12 +341,12 @@ class TestCatalogBundleContracts(unittest.TestCase):
     def test_bundle_footer_verifies_every_fingerprint_before_commit(self):
         """The footer compares all three expected fingerprints and rolls back on any mismatch."""
         expected = {table: f"1:{index}deadbeef" for index, table in enumerate(CATALOG_TABLES)}
-        bundle = bundle_text(CURRENT_SOURCE, fake_database(), expected=expected)
+        bundle = bundle_text(fake_database(), expected=expected)
         verify = restore_verify_sql(expected)
         for table in CATALOG_TABLES:
             self.assertIn(f"'{table}'", verify)
             self.assertIn(f"is distinct from '{expected[table]}'", verify)
-            self.assertIn(fingerprint_query(source_projection(CURRENT_SOURCE, table),
+            self.assertIn(fingerprint_query(source_projection(table),
                                             TARGET_COLUMNS[table]), verify)
         self.assertIn(RESTORE_MISMATCH_SQLSTATE, verify)
         # The footer runs after the last COPY, so a mismatch rolls the import back before commit.
@@ -500,7 +354,7 @@ class TestCatalogBundleContracts(unittest.TestCase):
 
     def test_bundle_leaves_the_transaction_to_psql(self):
         """`psql --single-transaction` is the only transaction owner; the bundle must not wrap it."""
-        bundle = bundle_text(CURRENT_SOURCE, fake_database())
+        bundle = bundle_text(fake_database())
         statements = {line.strip().lower() for line in bundle.splitlines()}
         for control in ("begin;", "start transaction;", "commit;", "rollback;"):
             self.assertNotIn(control, statements, control)
@@ -516,7 +370,7 @@ class TestCatalogBundleContracts(unittest.TestCase):
             rows={CATALOG_TABLES[0]: "only-one-row\n"}, counts={CATALOG_TABLES[0]: 2}
         )
         with self.assertRaises(CatalogError) as captured:
-            bundle_text(CURRENT_SOURCE, database)
+            bundle_text(database)
         self.assertIn(f"catalog bundle is incomplete for {CATALOG_TABLES[0]}", str(captured.exception))
 
     def test_bundle_copies_postgres_csv_verbatim(self):
@@ -525,7 +379,7 @@ class TestCatalogBundleContracts(unittest.TestCase):
         database = fake_database(
             rows={CATALOG_TABLES[0]: edge_row + "\n"}, counts={CATALOG_TABLES[0]: 1}
         )
-        bundle = bundle_text(CURRENT_SOURCE, database)
+        bundle = bundle_text(database)
         self.assertIn(edge_row + "\n", bundle)
         self.assertIn(f"-- {CATALOG_TABLES[0]} rows=1\n", bundle)
 
@@ -543,8 +397,7 @@ class TestPackageArtifactContracts(unittest.TestCase):
     def build_package(self, database=None):
         """Write a valid package the way the export entrypoint does."""
         directory = self.package_dir()
-        facts = write_package(database or fake_database(), CURRENT_SOURCE, str(directory),
-                              DOCUMENTED_V1_CHECKSUM)
+        facts = write_package(database or fake_database(), str(directory), DOCUMENTED_V1_CHECKSUM)
         return directory, facts
 
     def test_package_artifacts_are_owner_only_and_carry_no_row_values(self):
@@ -570,7 +423,7 @@ class TestPackageArtifactContracts(unittest.TestCase):
     def test_export_report_carries_only_schema_counts_digests_and_paths(self):
         """The export prints the schema kind, counts, digests and artifact paths, nothing else."""
         directory, facts = self.build_package()
-        self.assertEqual(CURRENT_SOURCE, facts["source_schema"])
+        self.assertNotIn("source_schema", facts)
         for table in CATALOG_TABLES:
             self.assertRegex(f"rows.{table}={facts[f'rows.{table}']}", COUNT_LINE)
             self.assertRegex(f"fingerprint.{table}={facts[f'fingerprint.{table}']}", FINGERPRINT_LINE)
@@ -585,7 +438,7 @@ class TestPackageArtifactContracts(unittest.TestCase):
         self.assertEqual(PACKAGE_FORMAT, manifest["format"])
         self.assertEqual(PACKAGE_FORMAT_VERSION, manifest["format_version"])
         self.assertEqual(TARGET_SCHEMA, manifest["target_schema"])
-        self.assertEqual(CURRENT_SOURCE, manifest["source_schema"])
+        self.assertNotIn("source_schema", manifest)
         self.assertEqual(int(DOCUMENTED_V1_CHECKSUM), manifest["v1_checksum"])
         self.assertEqual(BUNDLE_NAME, manifest["bundle"])
         self.assertEqual([table["table"] for table in manifest["tables"]], list(CATALOG_TABLES))
@@ -608,7 +461,7 @@ class TestPackageArtifactContracts(unittest.TestCase):
         mutated._fingerprints = ["1:before"] + [f"1:{index}" for index in range(5)]
         directory = self.package_dir("mutated")
         with self.assertRaises(CatalogError) as captured:
-            write_package(mutated, CURRENT_SOURCE, str(directory), DOCUMENTED_V1_CHECKSUM)
+            write_package(mutated, str(directory), DOCUMENTED_V1_CHECKSUM)
         self.assertIn("changed while the bundle was generated", str(captured.exception))
         self.assertFalse(directory.exists(), "a mutated export must not leave a package behind")
 
@@ -616,7 +469,7 @@ class TestPackageArtifactContracts(unittest.TestCase):
         """An export never overwrites an earlier package: artifacts are immutable evidence."""
         directory, _ = self.build_package()
         with self.assertRaises(CatalogError) as captured:
-            write_package(fake_database(), CURRENT_SOURCE, str(directory), DOCUMENTED_V1_CHECKSUM)
+            write_package(fake_database(), str(directory), DOCUMENTED_V1_CHECKSUM)
         self.assertIn("refusing to overwrite", str(captured.exception))
         self.assertTrue((directory / BUNDLE_NAME).is_file())
 
@@ -633,8 +486,7 @@ class TestPackageArtifactContracts(unittest.TestCase):
 
         with mock.patch.object(module, "_write_owner_only", fail_on_manifest):
             with self.assertRaises(OSError):
-                write_package(fake_database(), CURRENT_SOURCE, str(directory),
-                              DOCUMENTED_V1_CHECKSUM)
+                write_package(fake_database(), str(directory), DOCUMENTED_V1_CHECKSUM)
         self.assertFalse(directory.exists(), "a partial package must be removed")
 
     def test_read_package_requires_strict_manifest_field_types(self):
@@ -651,7 +503,6 @@ class TestPackageArtifactContracts(unittest.TestCase):
             "negative row count": lambda manifest: manifest["tables"][0].update(rows=-1),
             "float row count": lambda manifest: manifest["tables"][0].update(rows=1.0),
             "numeric database": lambda manifest: manifest.update(database=1),
-            "numeric source schema": lambda manifest: manifest.update(source_schema=1),
             "boolean format version": lambda manifest: manifest.update(format_version=True),
             "boolean v1 checksum": lambda manifest: manifest.update(v1_checksum=True),
             "numeric bundle name": lambda manifest: manifest.update(bundle=1),
@@ -699,9 +550,9 @@ class TestPackageArtifactContracts(unittest.TestCase):
         """Every deviation of the package format is rejected before a single row is restored."""
         directory, facts = self.build_package()
         package = read_package(str(directory))
-        self.assertEqual(CURRENT_SOURCE, package["manifest"]["source_schema"])
+        self.assertNotIn("source_schema", package["manifest"])
         self.assertEqual(str(directory / BUNDLE_NAME), package["bundle"])
-        self.assertEqual(CURRENT_SOURCE, package_facts(package)["source_schema"])
+        self.assertNotIn("source_schema", package_facts(package))
 
         def manifest_of(path):
             return json.loads((path / MANIFEST_NAME).read_text())
@@ -716,7 +567,6 @@ class TestPackageArtifactContracts(unittest.TestCase):
             "missing manifest key": lambda manifest: manifest.pop("tables"),
             "future format version": lambda manifest: manifest.update(format_version=2),
             "foreign target schema": lambda manifest: manifest.update(target_schema="future-v1"),
-            "foreign source schema": lambda manifest: manifest.update(source_schema="unknown"),
             "row count disagreeing with digest": lambda manifest: manifest["tables"][0].update(
                 rows=2
             ),
@@ -812,12 +662,6 @@ class TestErrorSanitizationContracts(unittest.TestCase):
         self.assertNotIn("secret-agent", sanitize_error(message))
         self.assertEqual("unknown failure", sanitize_error(""))
 
-    def test_validation_summaries_never_surface_row_names(self):
-        """Rejected source rows are counted by rule; their stored names stay inside the helper."""
-        summary = _format_violations({"config is invalid": [SECRET_ROW_VALUE, "another-row"]})
-        self.assertEqual("config is invalid (2 row(s))", summary)
-        self.assertNotIn(SECRET_ROW_VALUE, summary)
-
     def test_failure_logs_keep_only_safe_sqlstate_categories(self):
         """A retained restore log keeps safe categories, never a message that could quote a row."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -887,6 +731,18 @@ class TestErrorSanitizationContracts(unittest.TestCase):
         self.assertEqual(1, status)
         self.assertIn("RuntimeError", stderr.getvalue())
         self.assertNotIn(SECRET_ROW_VALUE, stderr.getvalue())
+
+    def test_helper_unknown_arguments_do_not_reflect_values(self):
+        """The private helper also rejects an accidental secret option without copying its value."""
+        secret = "fake-helper-password-value"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            status = importlib.import_module("scripts.ops.agent_catalog").main(
+                ["plan", "--credential=" + secret]
+            )
+        self.assertEqual(1, status)
+        self.assertIn("invalid command arguments", stderr.getvalue())
+        self.assertNotIn(secret, stderr.getvalue())
 
     def test_connection_settings_stay_out_of_the_psql_arg_list(self):
         """libpq settings are inherited from the environment, never spelled out as arguments."""
@@ -1002,6 +858,7 @@ printf '%s|%s|%s|%s\\n' "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE"
 [ "$PGPASSWORD" = fixture-secret ]
 [ -z "${VPS_POSTGRES_PASSWORD+x}" ]
 [ -z "${PGSERVICE+x}" ]
+[ -z "${PGHOSTADDR+x}" ]
 """,
             {
                 "PGHOST": "pg-host",
@@ -1009,6 +866,7 @@ printf '%s|%s|%s|%s\\n' "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE"
                 "PGUSER": "pg-user",
                 "PGDATABASE": "pg_db",
                 "PGSERVICE": "ambient-service",
+                "PGHOSTADDR": "192.0.2.10",
                 "VPS_POSTGRES_HOST": "vps-host",
                 "VPS_POSTGRES_PORT": "2222",
                 "VPS_POSTGRES_USERNAME": "vps-user",
@@ -1038,6 +896,17 @@ printf '%s|%s|%s|%s\\n' "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE"
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual("vps-host|2222|vps-user|vps_db", result.stdout.strip())
+
+    def test_pure_libpq_preserves_hostaddr(self):
+        """Without a CLI/VPS host override, native libpq PGHOSTADDR remains available."""
+        result = run_library_snippet(
+            """
+configure_connection '' '' '' ''
+[ "$PGHOSTADDR" = 192.0.2.10 ]
+""",
+            {"PGHOSTADDR": "192.0.2.10", "VPS_POSTGRES_HOST": None},
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_password_only_can_authenticate_a_libpq_service(self):
         """A VPS password alone maps to libpq without disabling an existing service endpoint."""
@@ -1255,26 +1124,46 @@ configure_connection '' '' '' ''
         )
         self.assertIn("report_value", IMPORT_SCRIPT.read_text())
         self.assertIn("require_report_value", function_body(IMPORT_SCRIPT, "restore_package"))
-        self.assertIn("source_schema", EXPORT_SCRIPT.read_text() + IMPORT_SCRIPT.read_text())
+        self.assertNotIn("source_schema", EXPORT_SCRIPT.read_text() + IMPORT_SCRIPT.read_text())
 
     def test_unknown_arguments_and_missing_package_are_refused(self):
-        """A script never guesses: an unknown option or a missing --package is an error."""
-        unknown = subprocess.run(
-            ["bash", str(EXPORT_SCRIPT), "--not-an-option"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env={**os.environ, "KK_STUDIO_REPO_ROOT": str(REPOSITORY_ROOT)},
-        )
-        self.assertNotEqual(0, unknown.returncode)
-        self.assertIn("unknown argument", unknown.stderr)
+        """Unknown/empty options fail before connecting and never reflect their raw value."""
+        secret = "fake-cli-password-value"
+        safe_environment = {
+            "PATH": os.environ["PATH"],
+            "HOME": tempfile.gettempdir(),
+            "KK_STUDIO_REPO_ROOT": str(REPOSITORY_ROOT),
+        }
+        for script in (EXPORT_SCRIPT, RESET_SCRIPT, IMPORT_SCRIPT):
+            with self.subTest(script=script.name, case="unknown"):
+                unknown = subprocess.run(
+                    ["bash", str(script), f"--password={secret}"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=safe_environment,
+                )
+                self.assertNotEqual(0, unknown.returncode)
+                self.assertIn("unknown argument", unknown.stderr)
+                self.assertNotIn(secret, unknown.stdout + unknown.stderr)
+            for arguments in (["--host", ""], ["--host", "--dry-run"]):
+                with self.subTest(script=script.name, case=arguments):
+                    invalid = subprocess.run(
+                        ["bash", str(script), *arguments],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        env=safe_environment,
+                    )
+                    self.assertNotEqual(0, invalid.returncode)
+                    self.assertIn("--host requires a value", invalid.stderr)
 
         missing = subprocess.run(
             ["bash", str(IMPORT_SCRIPT), "--dry-run"],
             capture_output=True,
             text=True,
             check=False,
-            env={**os.environ, "KK_STUDIO_REPO_ROOT": str(REPOSITORY_ROOT)},
+            env=safe_environment,
         )
         self.assertNotEqual(0, missing.returncode)
         self.assertIn("--package is required", missing.stderr)

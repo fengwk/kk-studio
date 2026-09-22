@@ -548,7 +548,8 @@ export VPS_POSTGRES_DATABASE=
 
 标准 libpq 的 `PGHOST`、`PGPORT`、`PGUSER`、`PGDATABASE`、`PGPASSFILE`、`PGSERVICE` 和 TLS
 参数仍可单独使用。只要提供了任一 CLI/VPS 非密码连接项，脚本就使用直接连接模式，不与
-`PGSERVICE` 混合；未覆盖的字段仍可从对应 `PG*` 变量继承。
+`PGSERVICE` 混合；未覆盖的字段仍可从对应 `PG*` 变量继承。CLI 或 VPS 显式提供 host 时还会清除
+`PGHOSTADDR`，保证实际 socket 目标与所选 host 一致；纯 libpq 模式则保留 `PGHOSTADDR`。
 
 密码没有命令行参数，只能来自 `VPS_POSTGRES_PASSWORD` 或标准 libpq 的
 `PGPASSWORD`/`PGPASSFILE`。所有客户端均使用 `--no-password`，缺少凭据时直接失败，不弹出交互式
@@ -586,10 +587,9 @@ export VPS_POSTGRES_DATABASE=
 ./scripts/ops/export-agent-catalog.sh
 ```
 
-导出识别 `current` 与 `legacy-main` 两种源结构，并要求三张 catalog 表的列集合精确匹配。legacy
-投影会映射工具名、保留 subagents、初始化 `inheritParentEnvironment=true`；无法表达的 Skill
-引用、工具映射或配置会 fail closed。输出目录为 `0700`，`catalog.sql`、`manifest.json` 与
-`sha256sums.txt` 均为 `0600`。
+导出只承认当前 V1 的三张 catalog 表及其精确列集合。任何旧结构、额外列或缺失列都会在写产物前
+fail closed；常驻维护入口不包含旧结构判别、字段投影或工具标识迁移。输出目录为 `0700`，
+`catalog.sql`、`manifest.json` 与 `sha256sums.txt` 均为 `0600`。
 
 2. 备份并重建空库：
 

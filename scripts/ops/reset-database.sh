@@ -22,6 +22,7 @@ set -euo pipefail
 umask 077
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck disable=SC1091 # dynamic path resolves next to this entrypoint
 . "$SCRIPT_DIR/lib/database-maintenance.sh"
 
 WORK_DIR=${KK_STUDIO_RESET_DIR:-"$DEFAULT_MAINTENANCE_DIR/backup"}
@@ -473,27 +474,27 @@ main() {
         shift
         ;;
       --work-dir)
-        [ $# -ge 2 ] || fail "--work-dir requires a path"
+        require_option_value "--work-dir" "$#" "${2:-}"
         WORK_DIR=$2
         shift 2
         ;;
       --host)
-        [ $# -ge 2 ] || fail "--host requires a value"
+        require_option_value "--host" "$#" "${2:-}"
         CLI_HOST=$2
         shift 2
         ;;
       --port)
-        [ $# -ge 2 ] || fail "--port requires a value"
+        require_option_value "--port" "$#" "${2:-}"
         CLI_PORT=$2
         shift 2
         ;;
       --username)
-        [ $# -ge 2 ] || fail "--username requires a value"
+        require_option_value "--username" "$#" "${2:-}"
         CLI_USERNAME=$2
         shift 2
         ;;
       --database)
-        [ $# -ge 2 ] || fail "--database requires a value"
+        require_option_value "--database" "$#" "${2:-}"
         CLI_DATABASE=$2
         shift 2
         ;;
@@ -503,7 +504,7 @@ main() {
         ;;
       *)
         usage >&2
-        fail "unknown argument: $1"
+        fail "unknown argument"
         ;;
     esac
   done
