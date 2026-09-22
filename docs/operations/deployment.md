@@ -362,7 +362,7 @@ gateway `wss://<studio-origin>/api/harness/environment-daemon/v1`。安装机制
 registration credential 和 Plugin 主密钥不进入本仓库、Docker build context、image layer、日志
 或报告；registration token 经 owner-only 凭证文件传递（`--registration-token-file`），不出现
 在 Daemon argv 或环境变量中。本机 preview 的配置文件同样留在仓库之外、只有 owner 可读，脚本
-只把它当作数据面输入，不打印其中的值。Agent 停止边界与共享数据库重建见
+只把它当作数据面输入，不打印其中的值。应用停止边界与共享数据库维护流程（导出 Catalog、重建空库、Flyway V1 初始化与回灌）见
 [开发与测试](development-and-testing.md#共享数据库重建)。
 
 ---

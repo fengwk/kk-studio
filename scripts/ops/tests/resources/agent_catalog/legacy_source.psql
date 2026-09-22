@@ -1,8 +1,10 @@
--- Minimal origin/main-shaped source for the shared-database rebuild integration test.
+-- Minimal origin/main-shaped source for the Agent catalog maintenance tests.
 --
--- It declares exactly the durable columns the legacy baseline had, plus the marker tables that
--- identify the baseline and `mcp_tool`, which resolves legacy `mcp.<32 hex uuid>` Agent tool
--- references.  Every value is deterministic, non-secret test data.
+-- It declares exactly the durable columns the legacy baseline had, plus `mcp_tool`, which
+-- resolves legacy `mcp.<32 hex uuid>` Agent tool references.  `environment`,
+-- `environment_skill_source` and `environment_skill` are unrelated legacy tables: the export
+-- must ignore them completely, because detection reads the Provider/Model/Agent columns only.
+-- Every value is deterministic, non-secret test data.
 
 create table environment (
     id                  uuid          primary key,

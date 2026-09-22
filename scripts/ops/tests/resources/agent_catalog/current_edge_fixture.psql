@@ -1,0 +1,38 @@
+-- Deterministic edge-character fixture for the current V1 baseline.
+--
+-- The catalog is carried through a COPY CSV stream, so the values stress every encoding hazard at
+-- once: JSON with escapes, NULL next to the empty string, and text containing a newline, a tab, a
+-- backslash, both quote characters, a `\.` sequence and Unicode.  Only the three migrated tables
+-- are populated; every value is deterministic, non-secret test data.
+
+insert into agent_provider (name, description, provider_type, base_url, credential, config,
+    connection_generation_id, created_at, updated_at, version) values
+    ('probe-edge-provider', E'line\nbreak\ttab\\backslash\\.dot"quote''apostrophe-日本語-🚀',
+     'openai', 'https://probe.invalid/v1?x="y"\\z',
+     E'credential\nwith\ttabs\\and"quotes', '{"modelCallTimeoutMillis": 600000}'::jsonb,
+     '88888888-8888-4888-8888-888888888888',
+     '2024-03-03 00:00:00.001+00', '2024-03-04 00:00:00.002+00', 1),
+    ('probe-empty-provider', '', 'anthropic', null, '', '{}'::jsonb,
+     '99999999-9999-4999-8999-999999999999',
+     '2024-03-05 00:00:00+00', '2024-03-05 00:00:00+00', 0),
+    ('probe-null-provider', null, 'google', null, null, '{}'::jsonb,
+     'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+     '2024-03-06 00:00:00+00', '2024-03-06 00:00:00+00', 0);
+
+insert into agent_model (provider_name, name, model_id, description, config, created_at,
+    updated_at, version) values
+    ('probe-edge-provider', 'probe-edge-model', 'probe-edge-wire-model',
+     E'line\nbreak\ttab\\backslash\\.dot"quote''apostrophe-日本語-🚀',
+     '{"variants": [{"id": "variant\nwith\nescape"}]}'::jsonb,
+     '2024-03-07 00:00:00.003+00', '2024-03-08 00:00:00.004+00', 2);
+
+insert into agent_definition (name, description, system_prompt, model_provider_name, model_name,
+    variant, config, created_at, updated_at, version) values
+    ('probe-edge-agent', E'line\nbreak\ttab\\backslash\\.dot"quote''apostrophe-日本語-🚀',
+     E'line\nbreak\ttab\\backslash\\.dot"quote''apostrophe-日本語-🚀', 'probe-edge-provider',
+     'probe-edge-model', 'probe-variant',
+     '{"tools": ["read"], "skills": [{"packageName": "probe-edge-package", "name": "probe-skill"}], "subagents": [], "inheritParentEnvironment": false}'::jsonb,
+     '2024-03-12 00:00:00.123+02:00', '2024-03-12 23:00:00.456-08:00', 9),
+    ('probe-null-agent', null, '', 'probe-edge-provider', 'probe-edge-model', null,
+     '{"tools": [], "skills": [], "subagents": [], "inheritParentEnvironment": true}'::jsonb,
+     '2024-03-13 00:00:00+00', '2024-03-13 00:00:00+00', 0);
