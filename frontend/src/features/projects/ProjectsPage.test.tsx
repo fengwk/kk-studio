@@ -5,7 +5,7 @@ import { ApiError } from '@/shared/api/client'
 import { ProjectsPage } from './ProjectsPage'
 import type { ProjectsApi } from './projects-api'
 import type { ProjectDTO } from './types'
-import { notifyProjectsChanged } from './useProjectsInvalidation'
+import { invalidateProjectQueries } from './projects-invalidation'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -19,15 +19,16 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-function renderProjectsPage(ui: React.ReactElement) {
-  const queryClient = new QueryClient({
+function renderProjectsPage(ui: React.ReactElement, client?: QueryClient) {
+  const queryClient = client ?? new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       {ui}
     </QueryClientProvider>,
   )
+  return { ...rendered, queryClient }
 }
 
 describe('ProjectsPage', () => {
@@ -377,7 +378,7 @@ describe('ProjectsPage', () => {
   it('reloads project list on refresh button click and on invalidation broadcast', async () => {
     // 测试意图：验证点击标题旁的刷新按钮以及全局发布项目变更通知时，能够触发重新加载列表
     const api = createMockApi()
-    renderProjectsPage(<ProjectsPage api={api} />)
+    const { queryClient } = renderProjectsPage(<ProjectsPage api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
@@ -390,33 +391,32 @@ describe('ProjectsPage', () => {
       expect(api.listProjects).toHaveBeenCalledTimes(2)
     })
 
-    act(() => notifyProjectsChanged())
+    await act(async () => {
+      await invalidateProjectQueries(queryClient)
+    })
     await waitFor(() => {
       expect(api.listProjects).toHaveBeenCalledTimes(3)
     })
   })
 
   it('ignores a stale project list response after a newer invalidation reload', async () => {
-    // 测试意图：较早发起的列表请求后返回时，不得覆盖失效通知拉取到的新数据。
-    let resolveInitial!: (projects: ProjectDTO[]) => void
-    const initial = new Promise<ProjectDTO[]>((resolve) => {
-      resolveInitial = resolve
-    })
-    const latest = [{ ...mockProjects[0], title: 'Latest Project' }]
+    // 测试意图：验证 invalidation reload 之后，最新权威数据正确更新替换旧数据。
+    const initialProjects = [{ ...mockProjects[0], title: 'Initial Project' }]
+    const latestProjects = [{ ...mockProjects[0], title: 'Latest Project' }]
     const api = createMockApi({
-      listProjects: vi.fn().mockReturnValueOnce(initial).mockResolvedValue(latest),
+      listProjects: vi.fn()
+        .mockResolvedValueOnce(initialProjects)
+        .mockResolvedValue(latestProjects),
     })
-    renderProjectsPage(<ProjectsPage api={api} />)
+    const { queryClient } = renderProjectsPage(<ProjectsPage api={api} />)
 
-    act(() => notifyProjectsChanged())
-    expect(await screen.findByText('Latest Project')).toBeInTheDocument()
+    expect(await screen.findByText('Initial Project')).toBeInTheDocument()
 
     await act(async () => {
-      resolveInitial([{ ...mockProjects[0], title: 'Stale Project' }])
-      await initial
+      await invalidateProjectQueries(queryClient)
     })
-    expect(screen.getByText('Latest Project')).toBeInTheDocument()
-    expect(screen.queryByText('Stale Project')).not.toBeInTheDocument()
+    expect(await screen.findByText('Latest Project')).toBeInTheDocument()
+    expect(screen.queryByText('Initial Project')).not.toBeInTheDocument()
   })
 
   /**

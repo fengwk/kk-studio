@@ -19,7 +19,6 @@ import { IssueDetailModal } from './components/IssueDetailModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import type { IssueStatus } from './types'
-import { useProjectsInvalidation } from './useProjectsInvalidation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
 
@@ -54,9 +53,6 @@ export function ProjectDetailPage({
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
-
-  // Invalidation subscription: SSE 推送时自动使得 queryKey 失效并拉取最新状态
-  useProjectsInvalidation()
 
   const invalidateSnapshot = async () => {
     await queryClient.invalidateQueries({
@@ -319,6 +315,7 @@ export function ProjectDetailPage({
 
       <IssueDetailModal
         isOpen={Boolean(selectedIssueId)}
+        projectId={projectId}
         issueId={selectedIssueId}
         projectIssues={snapshot.issues}
         onClose={() => setSelectedIssueId(null)}

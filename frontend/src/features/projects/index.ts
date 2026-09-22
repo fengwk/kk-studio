@@ -40,10 +40,6 @@ export {
   type ProjectsApiOptions,
 } from './projects-api'
 export {
-  useProjectsInvalidation,
-  notifyProjectsChanged,
-} from './useProjectsInvalidation'
-export {
   decodeProject,
   decodeProjectList,
   decodeProjectSnapshot,

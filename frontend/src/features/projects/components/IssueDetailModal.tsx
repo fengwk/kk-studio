@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
@@ -23,11 +25,11 @@ import type {
   ProjectIssueSnapshotDTO,
   ReviewDecision,
 } from '../types'
-import { useProjectsInvalidation } from '../useProjectsInvalidation'
 
 export interface IssueDetailModalProps {
   isOpen: boolean
   issueId: string | null
+  projectId: string
   projectIssues?: ProjectIssueSnapshotDTO[]
   onClose: () => void
   onUpdated: () => void
@@ -39,15 +41,29 @@ type TabKey = 'spec' | 'deps' | 'inputs' | 'runs'
 export function IssueDetailModal({
   isOpen,
   issueId,
+  projectId,
   projectIssues = [],
   onClose,
   onUpdated,
   api = projectsApi,
 }: IssueDetailModalProps) {
-  const [detail, setDetail] = useState<IssueDetailDTO | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const queryClient = useQueryClient()
+  const issueQueryKey = queryKeys.projects.issue(projectId, issueId ?? '')
+
+  const {
+    data: detail,
+    isLoading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: issueQueryKey,
+    queryFn: () => api.getIssue(issueId!),
+    enabled: isOpen && Boolean(issueId),
+  })
+
   const [activeTab, setActiveTab] = useState<TabKey>('spec')
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
 
   // Edit Spec state
   const [isEditingSpec, setIsEditingSpec] = useState(false)
@@ -83,47 +99,42 @@ export function IssueDetailModal({
 
   // Retry state
   const [isRetrying, setIsRetrying] = useState(false)
-  const loadRequestIdRef = useRef(0)
 
-  const loadDetail = useCallback(async (id: string, preserveSpecDraft = false) => {
-    const requestId = ++loadRequestIdRef.current
-    setIsLoading(true)
-    setErrorMessage(null)
-    try {
-      const data = await api.getIssue(id)
-      if (loadRequestIdRef.current !== requestId) {
-        return
-      }
-      setDetail(data)
-      if (!preserveSpecDraft) {
-        setDraftTitle(data.issue.title)
-        setDraftDescription(data.issue.description)
-        setDraftAssignee(data.issue.assigneeAgentName ?? '')
-        setDraftReviewer(data.issue.reviewerAgentName ?? '')
-        setDraftExpectedVersion(data.issue.version)
-      }
-    } catch (err) {
-      if (loadRequestIdRef.current === requestId) {
-        setErrorMessage(err instanceof Error ? err.message : '获取 Issue 详情失败')
-      }
-    } finally {
-      if (loadRequestIdRef.current === requestId) {
-        setIsLoading(false)
-      }
-    }
-  }, [api])
-
+  // Reset transient modal states on issue or open change
   useEffect(() => {
     if (isOpen && issueId) {
-      void loadDetail(issueId)
       setIsEditingSpec(false)
       setSpecConflict(null)
       setIsCanceling(false)
       setCancelReason('')
       setInputBody('')
       setActiveTab('spec')
+      setActionError(null)
     }
-  }, [isOpen, issueId, loadDetail])
+  }, [isOpen, issueId])
+
+  // Synchronize drafts with detail when not actively editing spec,
+  // while preserving drafts when refetch occurs during editing.
+  const lastSyncedIssueIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!isOpen) {
+      lastSyncedIssueIdRef.current = null
+      return
+    }
+    if (!detail) {
+      return
+    }
+    const issueChanged = lastSyncedIssueIdRef.current !== detail.issue.id
+    if (!isEditingSpec || issueChanged) {
+      setDraftTitle(detail.issue.title)
+      setDraftDescription(detail.issue.description ?? '')
+      setDraftAssignee(detail.issue.assigneeAgentName ?? '')
+      setDraftReviewer(detail.issue.reviewerAgentName ?? '')
+      setDraftExpectedVersion(detail.issue.version)
+      lastSyncedIssueIdRef.current = detail.issue.id
+    }
+  }, [isOpen, detail, isEditingSpec])
 
   useEffect(() => {
     if (!isOpen) {
@@ -139,16 +150,6 @@ export function IssueDetailModal({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, isEditingSpec, onClose])
 
-  useProjectsInvalidation((payload) => {
-    if (
-      isOpen
-      && issueId
-      && (!payload?.projectId || !detail || payload.projectId === detail.issue.projectId)
-    ) {
-      void loadDetail(issueId, isEditingSpec)
-    }
-  })
-
   if (!isOpen || !issueId) {
     return null
   }
@@ -162,7 +163,7 @@ export function IssueDetailModal({
       return
     }
     setIsSavingSpec(true)
-    setErrorMessage(null)
+    setActionError(null)
     try {
       const updated = await api.updateIssue(issue.id, {
         expectedVersion: draftExpectedVersion,
@@ -171,7 +172,9 @@ export function IssueDetailModal({
         assigneeAgentName: draftAssignee.trim() || null,
         reviewerAgentName: draftReviewer.trim() || null,
       })
-      setDetail((prev) => (prev ? { ...prev, issue: updated } : null))
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated } : prev,
+      )
       setIsEditingSpec(false)
       setSpecConflict(null)
       onUpdated()
@@ -183,7 +186,7 @@ export function IssueDetailModal({
           detail: presentation?.detail || '版本已冲突，您的草稿已保留。',
         })
       } else {
-        setErrorMessage(err instanceof Error ? err.message : '保存修改失败')
+        setActionError(err instanceof Error ? err.message : '保存修改失败')
       }
     } finally {
       setIsSavingSpec(false)
@@ -196,10 +199,11 @@ export function IssueDetailModal({
     }
     try {
       const fresh = await api.getIssue(issue.id)
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, fresh)
       setDraftExpectedVersion(fresh.issue.version)
       setSpecConflict(null)
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '重新同步版本号失败')
+      setActionError(err instanceof Error ? err.message : '重新同步版本号失败')
     }
   }
 
@@ -208,16 +212,18 @@ export function IssueDetailModal({
     if (!issue) {
       return
     }
-    setErrorMessage(null)
+    setActionError(null)
     try {
       const updated = await api.changeIssueStatus(issue.id, {
         expectedVersion: issue.version,
         status: targetStatus,
       })
-      setDetail((prev) => (prev ? { ...prev, issue: updated } : null))
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated } : prev,
+      )
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '变更状态失败')
+      setActionError(err instanceof Error ? err.message : '变更状态失败')
     }
   }
 
@@ -227,18 +233,20 @@ export function IssueDetailModal({
     if (!issue) {
       return
     }
-    setErrorMessage(null)
+    setActionError(null)
     try {
       const updated = await api.cancelIssue(issue.id, {
         expectedVersion: issue.version,
         reason: cancelReason.trim() || null,
       })
-      setDetail((prev) => (prev ? { ...prev, issue: updated } : null))
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated } : prev,
+      )
       setIsCanceling(false)
       setCancelReason('')
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '取消 Issue 失败')
+      setActionError(err instanceof Error ? err.message : '取消 Issue 失败')
     }
   }
 
@@ -247,15 +255,17 @@ export function IssueDetailModal({
     if (!issue) {
       return
     }
-    setErrorMessage(null)
+    setActionError(null)
     try {
       const updated = await api.archiveIssue(issue.id, {
         expectedVersion: issue.version,
       })
-      setDetail((prev) => (prev ? { ...prev, issue: updated } : null))
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated } : prev,
+      )
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '归档失败')
+      setActionError(err instanceof Error ? err.message : '归档失败')
     }
   }
 
@@ -263,15 +273,17 @@ export function IssueDetailModal({
     if (!issue) {
       return
     }
-    setErrorMessage(null)
+    setActionError(null)
     try {
       const updated = await api.unarchiveIssue(issue.id, {
         expectedVersion: issue.version,
       })
-      setDetail((prev) => (prev ? { ...prev, issue: updated } : null))
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated } : prev,
+      )
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '取消归档失败')
+      setActionError(err instanceof Error ? err.message : '取消归档失败')
     }
   }
 
@@ -281,17 +293,17 @@ export function IssueDetailModal({
       return
     }
     setIsAddingDep(true)
-    setErrorMessage(null)
+    setActionError(null)
     try {
       await api.addIssueDependency(issue.id, {
         expectedVersion: issue.version,
         dependsOnIssueId: selectedDepIssueId,
       })
       setSelectedDepIssueId('')
-      await loadDetail(issue.id)
+      await refetch()
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '添加依赖失败')
+      setActionError(err instanceof Error ? err.message : '添加依赖失败')
     } finally {
       setIsAddingDep(false)
     }
@@ -302,13 +314,13 @@ export function IssueDetailModal({
     if (!issue) {
       return
     }
-    setErrorMessage(null)
+    setActionError(null)
     try {
       await api.removeIssueDependency(issue.id, dependsOnIssueId, issue.version)
-      await loadDetail(issue.id)
+      await refetch()
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '移除依赖失败')
+      setActionError(err instanceof Error ? err.message : '移除依赖失败')
     }
   }
 
@@ -319,7 +331,7 @@ export function IssueDetailModal({
       return
     }
     setIsAppendingInput(true)
-    setErrorMessage(null)
+    setActionError(null)
     try {
       await api.appendIssueInput(issue.id, {
         idempotencyKey: createUuid(),
@@ -327,10 +339,10 @@ export function IssueDetailModal({
         body: inputBody.trim(),
       })
       setInputBody('')
-      await loadDetail(issue.id)
+      await refetch()
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '追加输入失败')
+      setActionError(err instanceof Error ? err.message : '追加输入失败')
     } finally {
       setIsAppendingInput(false)
     }
@@ -343,7 +355,7 @@ export function IssueDetailModal({
       return
     }
     setIsSubmittingReview(true)
-    setErrorMessage(null)
+    setActionError(null)
     try {
       await api.reviewIssue(issue.id, {
         decision: reviewDecision,
@@ -354,10 +366,10 @@ export function IssueDetailModal({
       })
       setReviewSummary('')
       setReviewVerification('')
-      await loadDetail(issue.id)
+      await refetch()
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '提交审核失败')
+      setActionError(err instanceof Error ? err.message : '提交审核失败')
     } finally {
       setIsSubmittingReview(false)
     }
@@ -369,15 +381,15 @@ export function IssueDetailModal({
       return
     }
     setIsRetrying(true)
-    setErrorMessage(null)
+    setActionError(null)
     try {
       await api.retryIssue(issue.id, {
         idempotencyKey: createUuid(),
       })
-      await loadDetail(issue.id)
+      await refetch()
       onUpdated()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '重试 Run 失败')
+      setActionError(err instanceof Error ? err.message : '重试 Run 失败')
     } finally {
       setIsRetrying(false)
     }
