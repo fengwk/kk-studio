@@ -45,7 +45,9 @@ worktree 根），因此不受调用者 cwd 影响。任务级细节见
 | 安装、升级、查询、卸载 Environment Daemon（Linux/macOS） | [daemon/install.sh](daemon/install.sh) `install` / `upgrade` / `status` / `uninstall` | 源码 checkout、JDK 21、Maven、合规的 token 文件；Linux 需可用的 `systemctl --user`，macOS 需可用的 `gui/$(id -u)` 域 | 构建 daemon、写 `$HOME/.local/lib/kk-studio`、写平台服务定义（systemd user unit 或 LaunchAgent plist）并重启用户服务；`uninstall` 只删除受管定义与 JAR，保留 token 文件与数据目录 | 否 |
 | 安装、升级、查询、卸载 Environment Daemon（Windows 10/11） | [daemon/install.ps1](daemon/install.ps1) `install` / `upgrade` / `status` / `uninstall` | 源码 checkout、JDK 21、Maven（`mvn.cmd`）、DACL 合规的 token 文件、ScheduledTasks 模块、`bash.exe`（Git for Windows 或兼容 Bash） | 构建 daemon、写 `%LOCALAPPDATA%\kk-studio\daemon`、注册当前用户 AtLogOn 计划任务；`uninstall` 停止并注销任务、删除 JAR，保留 token 文件与数据目录 | 否 |
 | 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) | JDK 21、已构建的 shaded JAR、sha256sum | 整体重建 `harness/daemon/target/release` | 是 |
-| 重建共享 PostgreSQL 库 | [ops/rebuild-database.sh](ops/rebuild-database.sh) | Docker、python3、可访问的数据库容器与主应用容器 | 先备份再清空重建共享库，操作前必须确认 | 否 |
+| 导出 Agent catalog（Provider / Model / Agent 定义） | [ops/export-agent-catalog.sh](ops/export-agent-catalog.sh) | 原生 libpq 客户端（`psql`）、python3、继承的 libpq 连接设置（无 Docker / 无主应用容器） | 只读目标库；在仓库外 owner-only 目录写入版本化包（`catalog.sql`、`manifest.json`、`sha256sums.txt`，权限 0600） | 否 |
+| 备份、冻结旧库并以原元数据重建空库 | [ops/reset-database.sh](ops/reset-database.sh) | 原生 libpq 客户端（`psql`、`pg_dump`、`pg_restore`、`createdb`）、python3、目标库 owner 角色（或 superuser）且具备 CREATEDB、继承的 libpq 连接设置（无其他活跃会话；无 Docker / 无主应用容器） | 在仓库外写入完整 custom-format 备份与 sha256 校验文件，目标库重命名为带时间戳快照并禁止连接，先以临时名建好空库再改名成目标库名；非 `--yes` 需交互输入库名确认 | 否 |
+| 回灌 Agent catalog 包 | [ops/import-agent-catalog.sh](ops/import-agent-catalog.sh) `--package PATH` | 原生 libpq 客户端（`psql`）、python3、继承的 libpq 连接设置，目标库已由应用正常启动执行过 Flyway V1 且三张表为空、V1 checksum 一致（无 Docker / 无主应用容器） | 单事务恢复 agent_provider、agent_model、agent_definition 三张表数据（事务内加锁、复查空表并比对指纹后才提交），失败整体回滚；失败时在仓库外保留只含 SQLSTATE 与安全类别的 mode 0600 日志 | 否 |
 
 Environment Daemon 的平台差异（Linux `systemd --user`、macOS LaunchAgent、Windows 10/11 计划任务）、
 参数与故障处理见 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
@@ -56,7 +58,7 @@ Environment Daemon 的平台差异（Linux `systemd --user`、macOS LaunchAgent�
 - `dev/verify/<capability>/` 放该能力的入口与实现，`<capability>/tests/` 只放该能力自己的测试与
   测试资源；测试不跨能力堆在同一个目录里。CI 直接用 `scripts/*/tests` 与
   `scripts/dev/verify/*/tests` 发现测试，因此新增能力不需要改 workflow。
-- 表格里的入口是公开入口；`dev/lib/` 是 dev 能力之间共享的私有实现（跨能力共享的开发自动化代码），同目录下的 `lib/`、`cases/`、`ui/`、`fixtures/` 与 `tests/` 是实现与
+- 表格里的入口是公开入口；`dev/lib/` 是 dev 能力之间共享的私有实现（跨能力共享的开发自动化代码），`ops/lib/` 是数据库维护入口共享的私有实现（底层 helper 为 `ops/agent_catalog.py`），同目录下的 `lib/`、`cases/`、`ui/`、`fixtures/` 与 `tests/` 是实现与
   测试细节，均不是公开入口、不单独作为命令承诺。
 - 宿主人类/CI 工作流属于本目录；Compose、Dockerfile、容器内 entrypoint 与 mock 运行时资产属于
   [deploy](../deploy/local/README.md)，容器内入口不从这里启动。

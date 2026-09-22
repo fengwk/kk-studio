@@ -1,0 +1,28 @@
+-- The Flyway history table and the successful V1 row exactly as Flyway writes them.
+--
+-- The integration tests cannot start the application, so they reproduce what a normal application
+-- start leaves behind on an empty database: a recorded V1 whose `checksum` equals the checksum
+-- Flyway computed for this repository's V1__schema.sql.  The checksum is supplied as the psql
+-- variable `v1_checksum`; without it the insert fails, so the fixture cannot silently pretend a
+-- target is ready to import.
+
+create table public."flyway_schema_history" (
+    "installed_rank" integer not null,
+    "version" varchar(50),
+    "description" varchar(200) not null,
+    "type" varchar(20) not null,
+    "script" varchar(1000) not null,
+    "checksum" integer,
+    "installed_by" varchar(100) not null,
+    "installed_on" timestamp not null default now(),
+    "execution_time" integer not null,
+    "success" boolean not null,
+    constraint "flyway_schema_history_pk" primary key ("installed_rank")
+);
+
+create index "flyway_schema_history_s_idx" on public."flyway_schema_history" ("success");
+
+insert into public."flyway_schema_history"
+    ("installed_rank", "version", "description", "type", "script", "checksum", "installed_by",
+     "execution_time", "success")
+values (1, '1', 'schema', 'SQL', 'V1__schema.sql', :v1_checksum, 'probe-flyway', 1200, true);
