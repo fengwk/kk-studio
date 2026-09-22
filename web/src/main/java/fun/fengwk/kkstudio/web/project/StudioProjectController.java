@@ -15,35 +15,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
-import fun.fengwk.kkstudio.platform.project.session.ProjectHarnessSessionBootstrapService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectArchiveRequestDTO;
-import fun.fengwk.kkstudio.share.project.ProjectCommandRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.share.project.ProjectUnarchiveRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO;
-import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
 import java.util.List;
 import java.util.Objects;
@@ -56,9 +38,6 @@ import java.util.UUID;
 public class StudioProjectController {
 
   private final ProjectService projectService;
-  private final ProjectHarnessSessionBootstrapService projectHarnessSessionBootstrapService;
-  private final HarnessCommandAcceptanceOrchestrator harnessCommandAcceptanceOrchestrator;
-  private final HarnessRuntime harnessRuntime;
   private final HarnessOwnerQueryService harnessOwnerQueryService;
   private final ProjectSnapshotAssembler projectSnapshotAssembler;
   private final ProjectDtoMapper mapper;
@@ -141,78 +120,13 @@ public class StudioProjectController {
     return Results.ok(mapper.toDto(unarchived));
   }
 
-  @PostMapping("/{projectId}/commands")
-  public ResponseEntity<Result<HarnessAcceptedCommandsDTO>> commands(
-      @PathVariable("projectId") String projectIdStr,
-      @RequestBody ProjectCommandRequestDTO request) {
+  @GetMapping("/{projectId}/sessions")
+  public Result<List<HarnessSessionSummaryDTO>> listSessions(
+      @PathVariable("projectId") String projectIdStr) {
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
-    if (request.getMessage() == null || request.getMessage().trim().isEmpty()) {
-      throw new IllegalArgumentException("message must not be blank");
-    }
-    UUID idempotencyKey = ProjectDtoMapper.parseUuid(request.getIdempotencyKey(), "idempotencyKey");
-
-    ProjectSession sessionRelation = projectService.getCoordinatorSession(projectId);
-    AcceptedCommands accepted;
-
-    if (sessionRelation == null) {
-      // 首次会话：原子 bootstrap
-      UUID sessionId = UUID.randomUUID();
-      UUID threadId =
-          request.getThreadId() != null && !request.getThreadId().isBlank()
-              ? ProjectDtoMapper.parseUuid(request.getThreadId(), "threadId")
-              : UUID.randomUUID();
-      accepted =
-          projectHarnessSessionBootstrapService.bootstrapProjectSession(
-              projectId, sessionId, threadId, idempotencyKey, request.getMessage().trim());
-    } else {
-      // 既有会话：向既有或首个 thread 发送用户消息
-      UUID sessionId = sessionRelation.getSessionId();
-      UUID targetThreadId;
-      if (request.getThreadId() != null && !request.getThreadId().isBlank()) {
-        targetThreadId = ProjectDtoMapper.parseUuid(request.getThreadId(), "threadId");
-      } else {
-        List<HarnessThreadSummaryDTO> threads =
-            harnessOwnerQueryService.listThreadSummaries(sessionId);
-        if (threads.isEmpty()) {
-          throw new IllegalStateException("No thread found for project session");
-        }
-        targetThreadId =
-            ProjectDtoMapper.parseUuid(threads.get(0).getThreadId(), "coordinatorThreadId");
-      }
-
-      ThreadSnapshot currentSnapshot = harnessRuntime.getThreadSnapshot(targetThreadId);
-      UUID expectedHead =
-          request.getExpectedHeadEntryId() != null && !request.getExpectedHeadEntryId().isBlank()
-              ? ProjectDtoMapper.parseUuid(request.getExpectedHeadEntryId(), "expectedHeadEntryId")
-              : currentSnapshot.thread().headEntryId();
-      long expectedNextSeq =
-          request.getExpectedNextCommandSequence() != null
-                  && !request.getExpectedNextCommandSequence().isBlank()
-              ? ProjectDtoMapper.parseNonNegativeLong(
-                  request.getExpectedNextCommandSequence(), "expectedNextCommandSequence")
-              : currentSnapshot.thread().nextCommandSequence();
-
-      UserMessageCommandPayload payload =
-          new UserMessageCommandPayload(
-              new AgentMessage(
-                  AgentMessageRole.USER,
-                  List.of(new TextMessageContent(request.getMessage().trim()))));
-      NewThreadCommand command = new NewThreadCommand(payload, idempotencyKey);
-
-      AcceptCommandsTarget.Thread target =
-          new AcceptCommandsTarget.Thread(targetThreadId, expectedHead, expectedNextSeq);
-      AcceptCommandsCommand acceptCommand = new AcceptCommandsCommand(target, List.of(command));
-
-      accepted =
-          harnessCommandAcceptanceOrchestrator.accept(
-              new OwnerRef(OwnerType.PROJECT, projectId), acceptCommand);
-    }
-
-    ThreadSnapshot currentSnapshot = harnessRuntime.getThreadSnapshot(accepted.thread().id());
-    HarnessAcceptedCommandsDTO dto =
-        HarnessRuntimeResponseMapper.toAcceptedCommandsDto(accepted, currentSnapshot);
-
-    return ResponseEntity.status(HttpStatus.ACCEPTED).body(Results.ok(dto));
+    List<HarnessSessionSummaryDTO> sessions =
+        harnessOwnerQueryService.listProjectSessions(projectId);
+    return Results.ok(sessions);
   }
 
   @GetMapping("/{projectId}/snapshot")

@@ -97,7 +97,7 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  /** 映射 owner，并只允许产品公开的 CHAT/CANVAS discriminator。 */
+  /** 映射 owner，并只允许产品公开的 CHAT/CANVAS/PROJECT discriminator。 */
   public static OwnerRef toOwner(HarnessCommandOwnerDTO dto) {
     requireNonNull(dto, "owner");
     String type = requireText(dto.getType(), "owner.type");
@@ -105,7 +105,13 @@ public final class HarnessRuntimeRequestMapper {
     try {
       ownerType = OwnerType.valueOf(type);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("owner.type must be CHAT or CANVAS: " + type, error);
+      throw new IllegalArgumentException(
+          "owner.type must be CHAT, CANVAS, or PROJECT: " + type, error);
+    }
+    if (ownerType != OwnerType.CHAT
+        && ownerType != OwnerType.CANVAS
+        && ownerType != OwnerType.PROJECT) {
+      throw new IllegalArgumentException("owner.type must be CHAT, CANVAS, or PROJECT: " + type);
     }
     return new OwnerRef(ownerType, parseUuid(dto.getId(), "owner.id"));
   }

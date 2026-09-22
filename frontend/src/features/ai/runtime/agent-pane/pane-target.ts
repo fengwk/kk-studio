@@ -63,7 +63,7 @@ function isEnvironmentName(value: unknown): value is string | null {
 
 function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
   return isRecord(value)
-    && (value.type === 'CHAT' || value.type === 'CANVAS')
+    && (value.type === 'CHAT' || value.type === 'CANVAS' || value.type === 'PROJECT')
     && nonBlank(value.id)
 }
 

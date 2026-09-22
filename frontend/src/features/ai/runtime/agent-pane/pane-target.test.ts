@@ -128,6 +128,17 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
   })
 
+  it('supports PROJECT owner type for target storage', () => {
+    // 测试意图：验证 PROJECT owner 能够正确保存与恢复 PaneTarget
+    const owner = { type: 'PROJECT' as const, id: 'proj-1' }
+    const storage = memoryStorage()
+    savePaneTarget(owner, 'pane-coordinator', { kind: 'BOUND_THREAD', threadId: 'thread-p1' }, storage)
+    expect(loadPaneTarget(owner, 'pane-coordinator', storage)).toEqual({
+      kind: 'BOUND_THREAD',
+      threadId: 'thread-p1',
+    })
+  })
+
   it('fails closed when browser storage is unavailable or contains malformed pending data', () => {
     const owner = { type: 'CANVAS' as const, id: 'canvas-1' }
     const malformedStorage = memoryStorage()

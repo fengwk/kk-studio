@@ -17,14 +17,12 @@ import type {
   ChangeIssueStatusRequest,
   CreateIssueRequest,
   CreateProjectRequest,
-  HarnessAcceptedCommandsDTO,
   IssueDTO,
   IssueDependencyDTO,
   IssueDetailDTO,
   IssueInputDTO,
   IssueRunSummaryDTO,
   ProjectArchiveRequest,
-  ProjectCommandRequest,
   ProjectDTO,
   ProjectSnapshotDTO,
   ProjectUnarchiveRequest,
@@ -94,16 +92,6 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
         request,
       )
       return decodeProject(raw)
-    },
-
-    sendProjectCommand: async (
-      projectId: string,
-      request: ProjectCommandRequest,
-    ): Promise<HarnessAcceptedCommandsDTO> => {
-      return client.post<HarnessAcceptedCommandsDTO>(
-        `/projects/${encodeURIComponent(projectId)}/commands`,
-        request,
-      )
     },
 
     getProjectSnapshot: async (projectId: string): Promise<ProjectSnapshotDTO> => {

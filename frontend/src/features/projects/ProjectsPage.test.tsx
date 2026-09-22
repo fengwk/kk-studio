@@ -64,7 +64,6 @@ describe('ProjectsPage', () => {
     deleteProject: vi.fn().mockResolvedValue(undefined),
     archiveProject: vi.fn().mockResolvedValue({ ...mockProjects[0], archivedAt: 'now' }),
     unarchiveProject: vi.fn().mockResolvedValue({ ...mockProjects[1], archivedAt: null }),
-    sendProjectCommand: vi.fn().mockResolvedValue({}),
     getProjectSnapshot: vi.fn().mockResolvedValue({
       project: mockProjects[0],
       issues: [],

@@ -365,13 +365,10 @@ Coordinator Session/Thread）。[IssueBoard](../../frontend/src/features/project
 固定六列 backlog、待办、执行中、等待人类、审核、完成，已取消的 Issue 单独成道；
 IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot。
 [CoordinatorConversation](../../frontend/src/features/projects/components/CoordinatorConversation.tsx)
-的首条 command 可在尚无 Session/Thread 时发送，会话历史来自 Harness Thread Snapshot，
-Project feature 不复制 Harness durable state。
+接入并托管底座 `AgentPane`（配置单 Session 与归档只读能力约束），首条 command 可在尚无 Session/Thread 时作为草稿发送，会话历史与运行时交互完全复用 AI 运行时底座，Project feature 不维护重复状态机。
 
 [useProjectsInvalidation](../../frontend/src/features/projects/useProjectsInvalidation.ts)
-由 ExtensionHost overlay 桥接：订阅 `{kind: "projects"}`，每个 `subscribed` ack（含首连
-与重连）和资源级 `error` 都触发权威回读；它不维护本地事件日志，也不在本地 mutation
-后伪造 WebSocket event。
+由 ExtensionHost overlay 桥接：订阅 `{kind: "projects"}`，通知直连 TanStack Query 精确失效（`snapshot` 与 `detail`）；它不维护本地事件日志，也不自建 module-global listeners。
 
 ### Canvas
 

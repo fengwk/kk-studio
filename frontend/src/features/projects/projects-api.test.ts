@@ -106,23 +106,6 @@ describe('projectsApi', () => {
     })
   })
 
-  it('sendProjectCommand should post commands to /projects/:id/commands', async () => {
-    // 测试意图：验证向 Coordinator Session 发送命令接口的正确路径与 body
-    const acceptedMock = {
-      session: { sessionId: 'f0000000-0000-0000-0000-000000000001' },
-      thread: { threadId: 'f0000000-0000-0000-0000-000000000002' },
-      acceptedCommands: [],
-    }
-    vi.mocked(mockClient.post).mockResolvedValueOnce(acceptedMock)
-    const cmdReq = {
-      idempotencyKey: 'c0000000-0000-0000-0000-000000000001',
-      message: 'Create plan',
-    }
-    const res = await api.sendProjectCommand(mockProject.id, cmdReq)
-    expect(mockClient.post).toHaveBeenCalledWith(`/projects/${mockProject.id}/commands`, cmdReq)
-    expect(res).toEqual(acceptedMock)
-  })
-
   it('getProjectSnapshot should query /projects/:id/snapshot and decode', async () => {
     // 测试意图：验证读取权威 Snapshot 面
     const snapshotRaw = {

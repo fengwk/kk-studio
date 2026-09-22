@@ -84,11 +84,31 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
 
 const DISABLED_KEY = 'ai.runtime.command.disabledReason'
 
+export interface ThreadCommandOptions {
+  manualCompaction?: ManualCompactionAvailability | null
+  allowNewSession?: boolean
+  readOnly?: boolean
+  canBranchFromRoot?: boolean
+}
+
+function isThreadCommandOptions(value: unknown): value is ThreadCommandOptions {
+  return (
+    value != null
+    && typeof value === 'object'
+    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value)
+  )
+}
+
 export function threadCommandsForTarget(
   target: PaneTarget,
-  manualCompaction?: ManualCompactionAvailability | null,
+  manualCompactionOrOptions?: ManualCompactionAvailability | ThreadCommandOptions | null,
 ): ThreadCommand[] {
+  const options: ThreadCommandOptions = isThreadCommandOptions(manualCompactionOrOptions)
+    ? manualCompactionOrOptions
+    : { manualCompaction: manualCompactionOrOptions }
+  const manualCompaction = options.manualCompaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
+
   return THREAD_COMMANDS.map((item) => {
     const targetEnabled = enabled.has(item.id)
     const compactDisabled =
@@ -96,14 +116,34 @@ export function threadCommandsForTarget(
       && target.kind === 'BOUND_THREAD'
       && manualCompaction != null
       && !manualCompaction.available
-    const disabled = !targetEnabled || compactDisabled
+
+    const readOnlyDisabled =
+      Boolean(options.readOnly)
+      && item.id !== 'shortcuts'
+      && item.id !== 'tree'
+      && item.id !== 'debug'
+
+    const newDisabled =
+      item.id === 'new'
+      && options.allowNewSession === false
+      && options.canBranchFromRoot === false
+
+    const disabled = !targetEnabled || compactDisabled || readOnlyDisabled || newDisabled
+    let disabledReason: string | undefined
+    if (readOnlyDisabled) {
+      disabledReason = '只读模式'
+    } else if (compactDisabled) {
+      disabledReason = manualCompaction?.disabledReason ?? undefined
+    } else if (newDisabled) {
+      disabledReason = '当前项目仅支持单会话'
+    }
+
     return {
       ...item,
       disabled,
-      disabledReason: compactDisabled
-        ? manualCompaction?.disabledReason ?? undefined
-        : undefined,
-      disabledReasonKey: disabled && !compactDisabled ? DISABLED_KEY : undefined,
+      disabledReason,
+      disabledReasonKey:
+        disabled && !compactDisabled && !readOnlyDisabled && !newDisabled ? DISABLED_KEY : undefined,
     }
   })
 }
