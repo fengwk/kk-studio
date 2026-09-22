@@ -507,240 +507,130 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 
 ### 共享数据库重建
 
-共享数据库的维护与升级采用职责分离的三段式工作流。旧有的单体脚本已被三个独立的公开入口替代：
+数据库维护由三个独立入口组成：
 
 - [scripts/ops/export-agent-catalog.sh](../../scripts/ops/export-agent-catalog.sh)：只读导出 durable Agent catalog（Provider / Model / Agent 定义）为版本化包；
 - [scripts/ops/reset-database.sh](../../scripts/ops/reset-database.sh)：安全备份旧库、重命名冻结并以原元数据创建同名空库；
-- [scripts/ops/import-agent-catalog.sh](../../scripts/ops/import-agent-catalog.sh)：在应用执行 Flyway V1 后的空表上单事务回灌 catalog 包。
+- [scripts/ops/import-agent-catalog.sh](../../scripts/ops/import-agent-catalog.sh)：在外部完成 Flyway V1 初始化后，单事务回灌 catalog 包。
 
-三个入口共享底层连接封装 [scripts/ops/lib/database-maintenance.sh](../../scripts/ops/lib/database-maintenance.sh) 与数据结构投影 helper [scripts/ops/agent_catalog.py](../../scripts/ops/agent_catalog.py)（两者均为私有实现，非公开入口）。
+三个脚本只连接 PostgreSQL，不管理任何应用、容器或其他服务的生命周期。连接存在时，
+`reset-database.sh` 只读拒绝且不终止会话；`import-agent-catalog.sh` 通过事务锁、空表复查和指纹校验
+处理并发写入。部署侧无需向脚本暴露自身的编排方式。
 
-#### 架构基线与自迭代禁令
+#### 连接
 
-代码仓库只保留完整声明当前结构的 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)，不维护增量 migration 链。修改 V1 必须先停止应用，并在 Human 明确批准的维护窗口内重建空库。**普通自迭代严禁重置共享 database 或删除共享 bucket**。
+最直接的配置方式是导出以下变量：
 
-#### 迁移范围与影响
+```bash
+export VPS_POSTGRES_HOST=
+export VPS_POSTGRES_PORT=
+export VPS_POSTGRES_USERNAME=
+export VPS_POSTGRES_PASSWORD=
+export VPS_POSTGRES_DATABASE=
+```
 
-维护脚本**仅迁移**以下三张持久 catalog 表（按外键依赖顺序）：
+也可以把非敏感连接项直接传给任一入口：
+
+```bash
+./scripts/ops/export-agent-catalog.sh \
+  --host <host> \
+  --port <port> \
+  --username <username> \
+  --database <database> \
+  --dry-run
+```
+
+连接项的优先级为：
+
+```text
+命令行参数 > VPS_POSTGRES_* > 标准 libpq 配置
+```
+
+标准 libpq 的 `PGHOST`、`PGPORT`、`PGUSER`、`PGDATABASE`、`PGPASSFILE`、`PGSERVICE` 和 TLS
+参数仍可单独使用。只要提供了任一 CLI/VPS 非密码连接项，脚本就使用直接连接模式，不与
+`PGSERVICE` 混合；未覆盖的字段仍可从对应 `PG*` 变量继承。
+
+密码没有命令行参数，只能来自 `VPS_POSTGRES_PASSWORD` 或标准 libpq 的
+`PGPASSWORD`/`PGPASSFILE`。所有客户端均使用 `--no-password`，缺少凭据时直接失败，不弹出交互式
+提示。目标库必须是普通 PostgreSQL 标识符，URI 和 conninfo 字符串会被拒绝。
+
+部署基线是 PostgreSQL 17；`pg_dump` 不得比服务端旧。`reset-database.sh` 使用 PostgreSQL 15+
+的 `createdb --locale-provider`，并通过 `KK_STUDIO_MAINTENANCE_DB` 选择维护库（默认 `postgres`）。
+托管服务若禁止 `CREATE DATABASE` 或 `ALTER DATABASE ... RENAME`，仍可使用 export/import，但 reset
+应改用服务商提供的数据库生命周期能力。
+
+#### 数据范围
+
+只迁移以下三张表：
 
 1. `agent_provider`
 2. `agent_model`
 3. `agent_definition`
 
-以下数据与状态**明确不迁移**：
-- `environment` 注册行：不迁移，且**不可自动恢复**。注册令牌（`registration_token`）只存在于这一行里，因此重建后既有的 Daemon token 文件一定无法再通过认证：维护人员必须为每个环境重新创建 Environment Card、把新令牌写回对应主机的 token 文件，随后 Daemon 才能重连并重建 `environment_connection` 这一行运行投影。仅当 Daemon 带着有效令牌重连时，`environment_connection` 才会自动重建；
-- `skill_package` 与 `plugin_credential`：不迁移。重建后需由管理员或用户重新创建；
-- Platform MCP 配置（`mcp_server`、`mcp_tool`）：不迁移。重建后按需重新创建配置或重新发现；
-- `system_setting`：不迁移。应用启动时由 V1 自动插入一行安全的默认聚合配置；
-- 全部运行时数据：Chat、Canvas、Project、Issue、Harness Work/Thread/Session、Storage Blob/Upload 等运行事实均不保留。
+以下内容不迁移：
 
-详细数据说明见 [Schema 模块](../modules/schema.md#修改-v1-的代价)。
+- `environment` 与注册令牌。维护后必须重新创建 Environment Card，并用新令牌替换各主机上的
+  Daemon token 文件；只有有效令牌重连后才会重新生成 `environment_connection`；
+- `skill_package`、`plugin_credential`、`mcp_server`、`mcp_tool`；
+- Chat、Canvas、Project、Issue、Harness、Storage 等运行数据；
+- `system_setting` 数据；V1 初始化会创建默认配置。
 
-#### 连接契约与环境配置
+详细语义见 [Schema 模块](../modules/schema.md#修改-v1-的代价)。
 
-维护脚本全部通过系统已安装的原生 libpq 客户端（`psql`、`pg_dump`、`pg_restore`、`createdb`）与继承的连接设置访问数据库：
-- **无容器与应用依赖**：脚本不依赖 Docker，不假设容器名称，不依赖主应用容器，不假设 SSH 配置，不解析 JDBC URL，绝不通过命令行参数传递口令；
-- **非交互式强制失败**：所有 libpq 命令一律附带 `--no-password`，凭据缺失或错误时立即报错退出，绝不挂起等待交互式口令输入；
-- **纯数据库标识符**：`PGDATABASE` 若指定必须为纯 PostgreSQL 标识符（字母、数字、下划线），显式拒绝 URI 或包含口令的 conninfo 连接串，防止连接歧义与日志回显泄露；未指定时默认使用 libpq 连接的当前库（`select current_database()`）；
-- **维护数据库**：只有 `reset-database.sh` 需要连接非目标库执行改名与建库，通过 `KK_STUDIO_MAINTENANCE_DB` 指定非敏感的维护库名（默认 `postgres`）；导出与回灌只连接目标库本身；
-- **版本边界**：部署基线是 PostgreSQL 17。原生客户端必须与服务端兼容，且 `pg_dump` 不得比服务端旧（用旧客户端 dump 新服务端会被拒绝或漏掉新特性）；`reset-database.sh` 依赖 `createdb --locale-provider`（PostgreSQL 15+）与 `ALTER DATABASE ... ALLOW_CONNECTIONS`（PostgreSQL 14+），因此 reset 面向 15+ 服务端与 15+ 客户端；
-- **外部产物路径**：所有备份、catalog 包与失败日志必须落在代码仓库之外，且目录强制赋予 `0700`、文件赋予 `0600` 属主独占权限。默认基准路径为 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance`（可通过 `KK_STUDIO_MAINTENANCE_DIR` 覆盖），各入口对应子路径默认为 `catalog`（`KK_STUDIO_CATALOG_DIR`）、`backup`（`KK_STUDIO_RESET_DIR`）与 `log`（`KK_STUDIO_IMPORT_DIR`），亦可使用各脚本的 `--work-dir` 参数覆盖。
+#### 执行
 
-#### 部署拓扑与连接传输
-
-脚本运行在本地机器（如运维工作站或宿主机），四种典型部署拓扑仅作为可选的网络传输手段：
-
-| 拓扑场景 | 连接配置方式 | 说明 |
-| --- | --- | --- |
-| 1. 直接网络连接（TCP/TLS） | 配置 `~/.pg_service.conf` 服务节与 `~/.pgpass` | 运维机直接通过网络连接目标 PostgreSQL，备份与导出包存放在运维机 |
-| 2. 堡垒机 / SSH 隧道 | 本地端口转发：`ssh -N -L 54322:127.0.0.1:5432 user@bastion` | 脚本在运维工作站运行并通过 `127.0.0.1:54322` 连接，敏感产物完整保留在工作站 |
-| 3. Docker 宿主端口发布 | 容器将端口映射到宿主（如 `127.0.0.1:5432`） | 脚本在宿主机运行并通过本地端口与 libpq 客户端连接，不需要 Docker 容器内的客户端 |
-| 4. 托管或云 PostgreSQL 实例 | 注入 `PGSERVICE` 或标准 `PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE` 环境变量 | 脚本直接访问云服务商提供的数据库端点 |
-
-脚本绝不要求 Docker，绝不要求主应用容器处于运行状态。通过 SSH 隧道执行时，备份和包文件完整保存在执行脚本的机器本地。
-
-**适用边界**：公司自管的非 SSH 直连（含 TLS）部署只要网络可达、且连接角色具备库与角色的生命周期权限，三个脚本都完整可用；托管服务若禁止 `ALTER DATABASE ... RENAME` 或 `CREATE DATABASE`（部分全托管实例），`reset-database.sh` **不可用**：此时导出与回灌仍然可用，重建空库这一步必须改用服务商提供的生命周期能力（例如控制台的 reset/restore 或服务商 CLI），之后照常执行步骤 4 起的流程。
-
-**NAS 部署的具体编排**：NAS 上的 App 与数据库由 `vps-dockers-scripts-v2` 管理，停机与启动属于该编排，不属于便携数据库脚本。下面的命令按顺序对应 [标准执行流程](#标准执行流程) 的步骤 1、4、5、7，其中 `~` 是 NAS 上的运维账号家目录：
+1. 导出并记录输出的 `package_dir`：
 
 ```bash
-# 步骤 1：在 NAS 上停止 App（保留数据库容器）——外部编排命令，位于 vps-dockers-scripts-v2
-cd ~/vps-dockers-scripts-v2 && ./vps-docker-compose.sh docker/nas stop vps-kk-studio
-```
-
-随后在运维工作站本地执行三个便携脚本。若工作站无法直连 NAS 数据库，先用 SSH 隧道把数据库端口映射到本地（对应上表拓扑 2）：
-
-```bash
-# 可选：在单独终端保持此前台进程，把 NAS 数据库端口映射到本机 54322
-ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:54322:127.0.0.1:5432 <nas-user>@<nas-host>
-# 本地 libpq 连接设置（无口令入 argv）：口令文件保持 0600，真实口令只写在 ~/.pgpass
-export PGSERVICE=kk_studio_nas PGPASSFILE="$HOME/.pgpass"
-# 服务节示例：host=127.0.0.1 / port=54322（直连时改为 5432）/ dbname=kk_studio / user=<owner-role>
-
-# 步骤 2：导出 catalog 包（只读）
 ./scripts/ops/export-agent-catalog.sh --dry-run
 ./scripts/ops/export-agent-catalog.sh
-# 步骤 3：备份旧库、冻结并重建空库
+```
+
+导出识别 `current` 与 `legacy-main` 两种源结构，并要求三张 catalog 表的列集合精确匹配。legacy
+投影会映射工具名、保留 subagents、初始化 `inheritParentEnvironment=true`；无法表达的 Skill
+引用、工具映射或配置会 fail closed。输出目录为 `0700`，`catalog.sql`、`manifest.json` 与
+`sha256sums.txt` 均为 `0600`。
+
+2. 备份并重建空库：
+
+```bash
 ./scripts/ops/reset-database.sh --dry-run
 ./scripts/ops/reset-database.sh
 ```
 
-```bash
-# 步骤 4：在 NAS 上启动 App，让 Flyway 在空库上执行 V1——外部编排命令
-cd ~/vps-dockers-scripts-v2 && ./vps-docker-compose.sh docker/nas up -d --no-deps vps-kk-studio
-# 等待 vps-kk-studio 健康检查通过，确认 Flyway 已完成后再执行步骤 5
-./vps-docker-compose.sh docker/nas ps vps-kk-studio
-# 步骤 5：再次停止 App，保证回灌时三张表无并发写入——外部编排命令
-cd ~/vps-dockers-scripts-v2 && ./vps-docker-compose.sh docker/nas stop vps-kk-studio
-```
+reset 在任何改库操作前检查权限、目标库状态和其他会话；发现其他会话时直接拒绝，不主动终止。
+随后写入并验证完整 custom-format 备份，把旧库冻结为 `<db>_pre_<UTCstamp>`，以原
+owner/encoding/locale/tablespace/connection limit 创建空库。创建或改名失败时自动删除不完整空库并
+恢复原库名。默认备份目录为
+`${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/backup`。
+
+3. 通过部署侧既有的 schema/Flyway 初始化路径在空库上应用当前
+[`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
+脚本；import 会验证目标列集合以及本地、导出包、`flyway_schema_history` 三方 V1 checksum。
+
+4. 回灌：
 
 ```bash
-# 步骤 6：本地单事务回灌
 ./scripts/ops/import-agent-catalog.sh --package <package-dir> --dry-run
 ./scripts/ops/import-agent-catalog.sh --package <package-dir>
-# 步骤 7：在 NAS 上恢复服务——外部编排命令
-cd ~/vps-dockers-scripts-v2 && ./vps-docker-compose.sh docker/nas up -d --no-deps vps-kk-studio
 ```
 
-`docker/nas` 参数是编排脚本约定的 NAS compose 项目目录，`app.env` 与其他私密文件由该仓库在运行时注入，本仓库的维护脚本既不读取也不关心它们。
+恢复事务先排他锁定三张表并复查为空，再按外键顺序 COPY，提交前逐表比对包内指纹；锁超时、并发
+写入、脏表或指纹不符都会整体回滚。失败日志只保留 SQLSTATE 与固定安全类别，不保留行值。
 
-推荐的属主独占服务与免密凭据配置：
-
-```bash
-# 1. 创建（已有文件不清空）并编辑属主独占的服务配置文件
-touch ~/.pg_service.conf && chmod 600 ~/.pg_service.conf
-# 编辑 ~/.pg_service.conf 添加目标配置节：
-# [kk_studio_prod]
-# host=127.0.0.1
-# port=5432
-# dbname=kk_studio
-# user=postgres
-
-# 2. 创建（已有文件不清空）并编辑属主独占的口令文件（格式：host:port:database:user:password）
-touch ~/.pgpass && chmod 600 ~/.pgpass
-# 编辑 ~/.pgpass 添加连接凭据：
-# 127.0.0.1:5432:*:postgres:YOUR_SECRET_PASSWORD
-
-# 3. 指定服务名与口令文件环境变量
-export PGSERVICE=kk_studio_prod
-export PGPASSFILE="$HOME/.pgpass"
-```
-
-口令文件必须是 `0600` 且只有属主可读；`sslmode`、证书路径等 TLS 设置同样通过连接设置继承（脚本不覆盖它们）。
-
-#### 权限要求与安全规范
+#### 权限、产物与清理
 
 - **重置权限**：`reset-database.sh` 需要能改目标库、能建库、并能把新库交给原 owner 的角色，**不要求 superuser**。具体检查（全部只读，缺哪一项就只读失败）：
   - 目标库的 owner 必须就是当前连接角色（或当前角色是 superuser）——`ALTER DATABASE ... RENAME` / `ALLOW_CONNECTIONS` 要求库所有权；
   - 非 superuser 角色必须拥有 `CREATEDB`；
   - 非 superuser 角色必须能对原 owner 角色 `SET ROLE`（即拥有其成员资格），否则 `createdb --owner=<原 owner>` 会被拒绝；
-  - `pg_dump` 必须能读取库内全部表（应用角色通常就是这些表的所有者，因此以该角色连接即可）；这一项由备份步骤在**任何变更之前**自然验证，读不到就直接失败并保留原库；
+  - `pg_dump` 必须能读取库内全部表；备份步骤会在任何数据库变更前验证这一点；
 - **导出与回灌权限**：`export-agent-catalog.sh` 与 `import-agent-catalog.sh` 只需要对三张 catalog 表拥有读/写权限，回灌时还需要读取 `flyway_schema_history`；两者都**不需要**访问维护数据库；
-- **敏感凭据安全**：导出的 catalog 包（含 Provider 凭据明文）与旧库冻结快照/备份属于敏感数据，绝不可提交到 Git、写进文档、粘贴到日志或工单，亦不可上传至公共存储；维护结束并确认系统恢复后，由 Human 依据部署策略安全处置或销毁。
-
-#### 标准执行流程
-
-维护操作严格按以下八步顺序执行：
-
-```text
-1. 停止写入端（停止应用服务）
-  -> 2. 导出 catalog 包（export-agent-catalog.sh）
-  -> 3. 备份旧库、冻结并重建空库（reset-database.sh）
-  -> 4. 正常启动应用，由 Flyway 在空库上执行 V1
-  -> 5. 再次停止应用，确保无并发写入
-  -> 6. 单事务回灌 catalog 包（import-agent-catalog.sh）
-  -> 7. 启动应用恢复正常对外服务，验证健康状态并重新登记 Environment/Daemon
-  -> 8. 按策略归档或清理备份快照与包文件
-```
-
-##### 步骤 1：停止应用服务
-
-在维护窗口内停止所有 kk-studio 应用实例，确保没有任何写入端正在向数据库提交事务。
-
-##### 步骤 2：导出 Agent Catalog 包
-
-```bash
-# 只读预检；探测源库结构与数据行数，不写出文件
-./scripts/ops/export-agent-catalog.sh --dry-run
-
-# 执行导出
-./scripts/ops/export-agent-catalog.sh
-```
-
-- **参数与选项**：
-  - `--work-dir PATH`：指定包输出根目录（默认：`${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/catalog`）；
-  - `--dry-run`：只读模式，探测源库结构并输出计划，不写出任何文件。
-- **行为与校验**：
-  - 结构识别只读三张持久 catalog 表的列集合：`agent_definition.environment_id` 是否存在决定源结构是 `legacy-main` 还是 `current`，随后按该结构要求三张表的列集合完全精确匹配；skill、plugin、environment 等**不迁移**域的表是否存在与结构识别无关（结构不匹配时直接失败，不做降级推测）；
-  - 若为 `legacy-main`，将 Agent 配置映射为当前契约：`toolIds` 映射为内建名称或已发现的 `mcp_tool.model_name`，`subagents` 原样保留，`inheritParentEnvironment` 设为 `true`；
-  - **Fail-Closed 规则**：结构未知或不完整（列缺失、多出列或不匹配任一结构）、遗留 `skills` 引用非空（环境绑定 Skill 来源不是全局 Git 仓库包）、工具无法映射或产生重名、配置非法等情况立即报错中止；导出期间对比生成 bundle 前后的数据指纹，若检测到源库数据发生变动则直接终止导出，并删除已写出一半的包目录；
-  - **产物**：在输出目录下创建以 UTC 时间戳命名的目录（权限 `0700`），包含 `catalog.sql`（`0600`，COPY 格式 bundle）、`manifest.json`（`0600`，非敏感元数据、源库结构、V1 checksum、行数与指纹）与 `sha256sums.txt`（`0600`，bundle sha256 校验文件）；输出信息仅包含结构类别、行数与指纹，绝不打印行内容。
-
-##### 步骤 3：重置目标数据库
-
-```bash
-# 只读预检与重置计划；不备份、不冻结、不改库
-./scripts/ops/reset-database.sh --dry-run
-
-# 执行重置（交互式输入数据库名称以确认）
-./scripts/ops/reset-database.sh
-
-# 自动化执行（跳过交互确认）：
-# ./scripts/ops/reset-database.sh --yes
-```
-
-- **参数与选项**：
-  - `--work-dir PATH`：指定备份文件存放目录（默认：`${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/backup`）；
-  - `--yes`：跳过交互式输入数据库名确认；
-  - `--dry-run`：只读预检并打印重置计划。
-- **行为与安全机制**：
-  - **只读预检**：目标库必须存在、非模板库、允许连接、无其他活跃连接会话（发现其他会话时直接拒绝并提示停止写入端，绝不主动 kill 连接）、无自定义 ACL 或角色配置、目标库与维护库不同名、快照名与本次运行的临时建库名都未被占用、当前角色具备上文权限要求里的各项能力；实际执行在确认后、写备份前创建 owner-only 目录，并要求文件系统可用空间不低于目标库体积加 64 MiB；
-  - **交互式确认**：未提供 `--yes` 时，必须由操作人员手动输入目标数据库名方可继续；
-  - **全量安全备份**：使用 `pg_dump --format=custom --create` 写入完整备份并生成 sha256 校验文件，备份生成后立即通过 `pg_restore --list` 校验归档完整性；
-  - **冻结旧库**：将原数据库原地重命名为 `<db>_pre_<UTCstamp>`，并设置 `allow_connections=false` 禁止任何后续连接；禁连后再次检查快照库的活动会话，若有写入端在预检后抢先接入则立即安全失败、解冻并恢复原库名，脚本绝不主动终止该会话；脚本**不提供** `--skip-snapshot` 选项，成功重置后快照库必须完整保留；
-  - **重建空库**：以原库的 owner、encoding、locale provider/settings（`libc`、`icu`、`builtin` 及对应的 collate/ctype/icu-rules）、tablespace 与 connection limit 创建全新空库。由于 `createdb` 没有 connection limit 选项，脚本先在临时名 `<db>__kk_partial_<UTCstamp>` 下建库并套用连接数限制，最后把它改名为目标库名：目标库名要么不存在，要么已经是一个完整可用的空库，不会短暂暴露一个尚未套用连接数限制的新库；
-  - **失败回滚**：任何一步失败都回到「目标库名指向原有数据」的状态。若新库已经建出（无论是否已改名），脚本先 `DROP DATABASE ... WITH (FORCE)` 清掉它（此时它是空库），再把快照库 `allow_connections` 打开并重命名回目标库名；顺序不可颠倒，否则改名会因目标库名被占用而失败。只有在改名回退本身失败时才停止自动修复，并明确报告数据现存于哪个快照库与哪个备份文件。
-
-##### 步骤 4：启动应用执行 Flyway V1
-
-正常启动应用。应用启动过程中，Flyway 自动在全新的空数据库上执行 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)，建立完整的表结构与默认设置，并在 `flyway_schema_history` 表中写入 V1 记录与 checksum。应用必须由当前 revision 构建的镜像启动：回灌会把仓库 V1、包 manifest 与目标库 `flyway_schema_history` 三者的 checksum 精确比对，不一致时拒绝回灌并保留空库。
-
-##### 步骤 5：再次停止应用
-
-在回灌 catalog 前短暂停止应用节点，确保目标库中的三张 catalog 表处于无任何并发写入的干净状态（race-free）。
-
-##### 步骤 6：回灌 Agent Catalog 包
-
-```bash
-# 校验包完整性与目标库状态；不写入数据
-./scripts/ops/import-agent-catalog.sh --package <package-dir> --dry-run
-
-# 执行单事务回灌
-./scripts/ops/import-agent-catalog.sh --package <package-dir>
-```
-
-- **参数与选项**：
-  - `--package PATH`（必填）：步骤 2 导出的时间戳包目录路径；
-  - `--work-dir PATH`：指定脱敏失败日志目录（默认：`${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance/log`）；
-  - `--dry-run`：校验包与目标库状态，不修改数据库。
-- **行为与校验机制**：
-  - **严格校验**：校验包目录与每个产物的属主独占权限（组/其他可读即拒绝）、产物不得是符号链接、manifest 字段类型严格（行数为非负整数、结构名与库名为字符串）、包内 manifest 与 bundle 文件的 sha256 摘要；校验本地当前代码 revision 的 V1 checksum、包 manifest 中的 V1 checksum、以及目标库 `flyway_schema_history` 表记录的 V1 checksum 三者精确相等；要求目标库列集合精确为当前 V1 形状，且 `agent_provider`、`agent_model`、`agent_definition` 三张表行数必须全为 0；
-  - **事务内权威校验**：预检的空表检查只是提前拒绝。真正的恢复在 `psql --single-transaction -v ON_ERROR_STOP=1` 中执行 bundle，bundle 自身先取得三张表的排他锁（锁等待上限 5 秒，超时即失败）并复查三张表为空，再逐表 COPY，最后在提交前逐表比对与包一致的期望指纹；并发写入、脏表或指纹不符都会让整次事务回滚并保持事务开始前的状态（原本为空则仍全空），绝不提交与包不符的数据；
-  - **非事务执行被拒绝**：`LOCK TABLE` 只能在事务块内执行，因此若有人手工用 `psql -f` 而不带 `--single-transaction` 运行 bundle，PostgreSQL 会直接报错中止；
-  - **日志脱敏保护**：bundle 使用 `\set VERBOSITY sqlstate`，恢复期间 stdout 全部丢弃；若回灌失败，仅在 `--work-dir` 下保留一份权限为 `0600` 的脱敏失败日志，其中只有 SQLSTATE 错误码与脚本自己映射的安全类别说明（如 `check-constraint violation (SQLSTATE 23514)`），绝不保留可能引用行值的 PostgreSQL 原始报文，也不保留执行语句；
-  - **提交后复核**：提交成功后脚本会再次计算三张表的内容指纹作为纵深防御；此时不符只可能来自提交后的并发写入，脚本会按「导入后 catalog 被并发修改」报告，并提示该次导入本身已在事务内校验通过；
-  - **完全独立**：脚本不启动、不停止、也不检查应用，操作人员自主掌控应用启停节奏。
-
-##### 步骤 7：恢复服务并验证
-
-启动应用恢复对外正常服务：
-1. 访问应用健康检查端点验证系统就绪；
-2. **重新登记执行环境**（`environment` 行与注册令牌都不会迁移）：在应用里为每个环境重新创建 Environment Card，并把它签发的新注册令牌写入对应主机上的 Daemon token 文件（替换旧文件），然后重启/重连 Daemon。只有完成这一步 Daemon 才能通过认证，并重建 `environment_connection` 这一行运行投影；旧 token 文件在重建后一定认证失败，不要期待 Daemon 自动重新注册；
-3. 根据业务需要重新创建 Skill packages、Plugin 凭据或 Platform MCP 配置。
-
-##### 步骤 8：快照与敏感产物清理
-
-导出的 catalog 包与全库冻结快照/备份包含真实凭据，在确认业务完全正常后，依据部署侧数据保留策略，由 Human 手动删除或离线归档冻结快照库（`<db>_pre_<UTCstamp>`）与本地临时包文件。
+- **敏感产物**：catalog 包、冻结快照和全库备份都可能含真实 Provider 凭据；不得提交、粘贴到日志或上传公共存储；
+- **本地产物**：默认都位于 `${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance`，目录为
+  `0700`、文件为 `0600`，也可通过各入口的 `--work-dir` 覆盖；
+- **维护后操作**：重新登记 Environment/Daemon，并按需重建 Skill package、Plugin credential 与
+  Platform MCP 配置；验证完成后按部署侧策略归档或清理本地包、备份和冻结快照。
 
 ### 自迭代闭环
 

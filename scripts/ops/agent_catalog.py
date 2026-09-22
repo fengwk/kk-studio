@@ -6,8 +6,9 @@ This module is not a public entrypoint: `scripts/ops/export-agent-catalog.sh`,
 contract.  It owns everything that depends on the shape of a PostgreSQL catalog:
 
 * read the connected database read-only through the installed libpq `psql` client and the
-  inherited connection settings (`PGSERVICE`/`PGHOST`/`PGPORT`/`PGUSER`/`PGDATABASE`/
-  `PGPASSFILE`/TLS...);
+  connection settings the shell entrypoints inherit and export (`VPS_POSTGRES_*` and the
+  `--host`/`--port`/`--username`/`--database` parameters are mapped there into `PGHOST`/`PGPORT`/
+  `PGUSER`/`PGDATABASE`/`PGPASSWORD`, next to `PGSERVICE`/`PGPASSFILE`/TLS...);
 * detect and reject partial or unknown catalog shapes before the shell writes any artifact;
 * project the legacy `main` baseline onto the current V1 wire shape, failing closed on every
   configuration the current contract cannot represent;
@@ -599,15 +600,16 @@ def resolve_target(db: PgDatabase) -> str:
     kind = detect_source_kind(columns.get("agent_definition", []))
     if kind != CURRENT_SOURCE:
         raise CatalogError(
-            "the target database does not declare the current V1 schema; start the application "
-            "once so Flyway applies V1 on the empty database before importing"
+            "the target database does not declare the current V1 schema; apply the V1 schema "
+            "(external schema/Flyway initialization) on the empty database before importing"
         )
     try:
         verify_source_columns(kind, columns)
     except CatalogError as error:
         raise CatalogError(
-            f"the target database does not declare the current V1 schema ({error}); start the "
-            "application once so Flyway applies V1 on the empty database before importing"
+            f"the target database does not declare the current V1 schema ({error}); apply the "
+            "V1 schema (external schema/Flyway initialization) on the empty database before "
+            "importing"
         )
     return kind
 

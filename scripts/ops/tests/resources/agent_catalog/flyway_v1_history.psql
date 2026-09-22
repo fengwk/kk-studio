@@ -1,10 +1,9 @@
 -- The Flyway history table and the successful V1 row exactly as Flyway writes them.
 --
--- The integration tests cannot start the application, so they reproduce what a normal application
--- start leaves behind on an empty database: a recorded V1 whose `checksum` equals the checksum
--- Flyway computed for this repository's V1__schema.sql.  The checksum is supplied as the psql
--- variable `v1_checksum`; without it the insert fails, so the fixture cannot silently pretend a
--- target is ready to import.
+-- The integration tests reproduce the external Flyway initialization result on an empty database:
+-- a recorded V1 whose `checksum` equals the checksum Flyway computed for this repository's
+-- V1__schema.sql. The checksum is supplied as the psql variable `v1_checksum`; without it the insert
+-- fails, so the fixture cannot silently pretend a target is ready to import.
 
 create table public."flyway_schema_history" (
     "installed_rank" integer not null,

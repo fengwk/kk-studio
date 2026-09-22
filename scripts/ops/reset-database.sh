@@ -2,19 +2,21 @@
 #
 # 把目标库替换成一个「完全空、但元数据与原来一致」的新库。
 #
-# 不依赖导出包、不依赖应用、不接触任何容器：
+# 不依赖导出包、不管理任何服务的生命周期：
 #
 #   1. 只读预检：目标库存在、不是模板、允许连接、没有其他活动会话，且当前角色确实有需要的权限；
 #   2. 写一份完整的 custom-format 备份到仓库外（owner-only），并用 pg_restore --list 验证；
-#   3. 把旧库改名为带时间戳的快照库并禁止连接（不删除、也不 kill 任何应用会话）；
+#   3. 把旧库改名为带时间戳的快照库并禁止连接（不删除、也不 kill 任何会话）；
 #   4. 用原 owner/encoding/locale provider/tablespace/connection limit 建一个空库；
 #   5. 任何一步失败都回到「目标库名仍指向原有数据」的状态，或准确报告无法回滚到什么程度。
 #
 # 建库阶段先在临时名下把库建完（含连接数限制），最后才改名成目标库名：目标库名要么不存在，
 # 要么已经是一个完整可用的空库，不会短暂暴露一个还没套用连接数限制的新库。
 #
-# 之后由应用正常启动执行 Flyway V1：本脚本不启动、不检查、也不知道应用的存在。
-# 数据库访问全部走原生 libpq 客户端与继承的连接设置，脚本不会提示输入口令。
+# 之后由外部 schema/Flyway 初始化在空库上执行 V1：本脚本不启动、不检查、也不管理任何服务的
+# 生命周期。数据库访问全部走原生 libpq 客户端与继承的连接设置，脚本不会提示输入口令。
+#
+# 连接来源按优先级合并：--host/--port/--username/--database > VPS_POSTGRES_* > 标准 libpq。
 
 set -euo pipefail
 umask 077
@@ -32,6 +34,10 @@ SNAPSHOT_DB=
 PARTIAL_DB=
 BACKUP_FILE=
 CHECKSUM_FILE=
+CLI_HOST=
+CLI_PORT=
+CLI_USERNAME=
+CLI_DATABASE=
 
 # 变更阶段的状态，只用于让 on_exit 准确回滚或准确报告：
 #   RENAMED         快照库名已经持有原库（目标库名空闲）
@@ -58,8 +64,8 @@ usage() {
 Usage: scripts/ops/reset-database.sh [options]
 
 Back up, freeze and replace the target database with a completely empty database that keeps
-its owner, encoding, locale provider/settings, tablespace and connection limit.  The
-application then runs Flyway on the empty database during its normal start.
+its owner, encoding, locale provider/settings, tablespace and connection limit.  The V1 schema
+is then applied by the external schema/Flyway initialization, not by this script.
 
 Options:
   --work-dir PATH  owner-only backup directory (default: ~/.local/state/kk-studio/maintenance/backup)
@@ -67,12 +73,18 @@ Options:
   --dry-run        read-only preflight and plan; writes nothing and changes nothing
   -h, --help       Show this help
 
-Connection (inherited libpq settings; no connection flag, no password in argv):
-  PGSERVICE + PGPASSFILE are the recommended pair; PGHOST, PGPORT, PGUSER, PGDATABASE,
-  PGSSLMODE and the certificate settings also work.  PGDATABASE is required to be a plain
-  database name (a URI/conninfo is rejected: the maintenance connection overrides the
-  database, so the target must be named explicitly).  psql/pg_dump/pg_restore/createdb are
-  always used with --no-password, so the script fails instead of prompting.
+Connection (no password is ever taken from the command line):
+  --host HOST      database host to connect to
+  --port PORT      database port, 1-65535
+  --username USER  role to connect as
+  --database NAME  plain database name to reset; the database libpq connects to when omitted
+
+  A flag wins over the matching VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME or
+  VPS_POSTGRES_DATABASE variable; without any of them the standard libpq settings apply
+  (PGSERVICE + PGPASSFILE, or PGHOST/PGPORT/PGUSER/PGDATABASE and the TLS settings).  The
+  password only ever comes from VPS_POSTGRES_PASSWORD, PGPASSWORD or PGPASSFILE:
+  psql/pg_dump/pg_restore/createdb always run with --no-password, so a missing credential fails
+  instead of prompting.
 
 Refused before any change:
   other sessions still connected to the target (nothing is killed), a template database,
@@ -86,10 +98,12 @@ Refused before any change:
   step has to be done with whatever lifecycle feature the provider offers.
 
 Environment:
-  KK_STUDIO_RESET_DIR         default: $KK_STUDIO_MAINTENANCE_DIR/backup
-  KK_STUDIO_MAINTENANCE_DIR   default: ${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance
-  KK_STUDIO_MAINTENANCE_DB    default: postgres
-  KK_STUDIO_REPO_ROOT         repository root override
+  VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME, VPS_POSTGRES_PASSWORD,
+  VPS_POSTGRES_DATABASE         connection overrides (see above)
+  KK_STUDIO_RESET_DIR           default: $KK_STUDIO_MAINTENANCE_DIR/backup
+  KK_STUDIO_MAINTENANCE_DIR     default: ${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance
+  KK_STUDIO_MAINTENANCE_DB      default: postgres
+  KK_STUDIO_REPO_ROOT           repository root override
 EOF
 }
 
@@ -119,7 +133,6 @@ preflight() {
   require_command pg_dump
   require_command pg_restore
   require_command createdb
-  resolve_target_database
   require_maintenance_database
   [ ${#SNAPSHOT_DB} -le 63 ] || fail "the snapshot database name exceeds 63 bytes"
   require_external_directory "$WORK_DIR" "the backup directory"
@@ -148,7 +161,7 @@ preflight() {
     "select count(*) from pg_stat_activity
       where datname = '$TARGET_DB' and pid <> pg_backend_pid()")
   [ "$sessions" = 0 ] \
-    || fail "refusing to reset: $sessions other session(s) are still connected to the target; stop the writer first"
+    || fail "refusing to reset: $sessions other session(s) are still connected to the target; wait for them to finish and retry"
 
   local custom_acl
   custom_acl=$(database_scalar "$MAINTENANCE_DB" \
@@ -282,7 +295,7 @@ show_plan() {
   echo "  2. Rename the target to $SNAPSHOT_DB and disable connections to it."
   echo "  3. Create the empty database as $PARTIAL_DB, apply the metadata, then rename it"
   echo "     to $TARGET_DB; a failure here drops it and restores $TARGET_DB."
-  echo "  4. Start the application normally so Flyway applies V1 on the empty database."
+  echo "  4. Apply the V1 schema with the external schema/Flyway initialization."
 }
 
 confirm_operation() {
@@ -464,6 +477,26 @@ main() {
         WORK_DIR=$2
         shift 2
         ;;
+      --host)
+        [ $# -ge 2 ] || fail "--host requires a value"
+        CLI_HOST=$2
+        shift 2
+        ;;
+      --port)
+        [ $# -ge 2 ] || fail "--port requires a value"
+        CLI_PORT=$2
+        shift 2
+        ;;
+      --username)
+        [ $# -ge 2 ] || fail "--username requires a value"
+        CLI_USERNAME=$2
+        shift 2
+        ;;
+      --database)
+        [ $# -ge 2 ] || fail "--database requires a value"
+        CLI_DATABASE=$2
+        shift 2
+        ;;
       -h | --help)
         usage
         return
@@ -476,6 +509,7 @@ main() {
   done
 
   WORK_DIR=$(resolve_absolute_path "$WORK_DIR")
+  configure_connection "$CLI_HOST" "$CLI_PORT" "$CLI_USERNAME" "$CLI_DATABASE"
   resolve_target_database
   configure_paths
   preflight
@@ -498,8 +532,8 @@ main() {
   echo "  backup checksum: $CHECKSUM_FILE"
   echo "  frozen snapshot: $SNAPSHOT_DB"
   echo
-  echo "Next: start the application normally so Flyway applies V1 on the empty database,"
-  echo "      then import the catalog package."
+  echo "Next: apply the V1 schema with the external schema/Flyway initialization, then import"
+  echo "      the catalog package."
 }
 
 trap on_exit EXIT

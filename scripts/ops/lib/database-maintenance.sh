@@ -6,12 +6,16 @@
 # 数据库，因此这里集中承载它们共有的、只有一份实现才有意义的机制：
 #
 #   * 仓库根解析，以及「产物必须落在仓库外」的强制约束；
-#   * 库名与标识符校验：PGDATABASE 只接受纯库名，URI/conninfo 一律拒绝；
+#   * 连接解析：CLI 非敏感参数 > VPS_POSTGRES_* > 标准 libpq PG*/PGSERVICE，并集中校验端口与库名；
+#   * 库名与标识符校验：库名只接受纯标识符，URI/conninfo 一律拒绝；
 #   * libpq 调用封装：永不交互提示、永不把口令放进参数、固定可复现的会话默认值；
 #   * 仓库 V1 baseline 的 Flyway checksum 与文件 sha256。
 #
-# 维护约定：本文件不实现业务步骤（顺序由各入口持有）、不接触容器或应用、不打印任何行值；
+# 维护约定：本文件不实现业务步骤（顺序由各入口持有）、不管理任何服务的生命周期、不打印任何行值；
 # 错误信息不回显可能带口令的连接设置值。
+#
+# 目标库的选择（psql -d、pg_dump --dbname、createdb --maintenance-db）是工具自身的行为，库名已在
+# 校验后由脚本打印；host/port/username/password 只经环境变量下发，其中 password 不出现在 argv。
 
 OPS_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 OPS_DIR=$(dirname "$OPS_LIB_DIR")
@@ -87,6 +91,88 @@ require_identifier() {
   esac
 }
 
+# 端口必须是 1-65535 的十进制数字。取值不回显：带口令的连接串不允许借端口位进入日志。
+require_port() {
+  local value=$1
+  local label=$2
+  case "$value" in
+    '' | *[!0-9]*)
+      fail "$label must be a decimal port number between 1 and 65535"
+      ;;
+  esac
+  # 先按长度拒绝过长取值，再做数值比较，避免依赖某种整数解析的溢出行为。
+  if [ "${#value}" -gt 5 ] || [ "$((10#$value))" -lt 1 ] || [ "$((10#$value))" -gt 65535 ]; then
+    fail "$label must be a decimal port number between 1 and 65535"
+  fi
+}
+
+# 连接解析。三个入口共用的唯一一份映射实现：
+#
+#   优先级 CLI 非敏感参数 > VPS_POSTGRES_* > 标准 libpq（PG*/PGSERVICE）；
+#   结果只写进 PGHOST/PGPORT/PGUSER/PGDATABASE/PGPASSWORD 环境变量，由 psql、pg_dump、pg_restore、
+#   createdb 与私有 Python helper 继承；
+#   口令没有参数形式：它只可能来自 VPS_POSTGRES_PASSWORD，或 libpq 自己的 PGPASSWORD/PGPASSFILE。
+#
+# 入参：CLI 提供的 host/port/username/database，空字符串表示该入口没有提供对应参数。
+configure_connection() {
+  local cli_host=$1
+  local cli_port=$2
+  local cli_username=$3
+  local cli_database=$4
+
+  local host=${cli_host:-${VPS_POSTGRES_HOST:-}}
+  local port=${cli_port:-${VPS_POSTGRES_PORT:-}}
+  local username=${cli_username:-${VPS_POSTGRES_USERNAME:-}}
+  local database=${cli_database:-${VPS_POSTGRES_DATABASE:-}}
+
+  # 先校验、后导出：非法取值在任何数据库访问之前失败，且不回显取值。
+  if [ -n "$port" ]; then
+    if [ -n "$cli_port" ]; then
+      require_port "$port" "--port"
+    else
+      require_port "$port" "VPS_POSTGRES_PORT"
+    fi
+  fi
+  if [ -n "$database" ]; then
+    if [ -n "$cli_database" ]; then
+      require_identifier "$database" "--database"
+    else
+      require_identifier "$database" "VPS_POSTGRES_DATABASE"
+    fi
+  fi
+
+  if [ -n "$host" ]; then
+    PGHOST=$host
+    export PGHOST
+  fi
+  if [ -n "$port" ]; then
+    PGPORT=$port
+    export PGPORT
+  fi
+  if [ -n "$username" ]; then
+    PGUSER=$username
+    export PGUSER
+  fi
+  if [ -n "$database" ]; then
+    PGDATABASE=$database
+    export PGDATABASE
+  fi
+  # 未提供口令时保留 libpq 自己的 PGPASSWORD/PGPASSFILE，由 libpq 决定用哪一个。
+  if [ -n "${VPS_POSTGRES_PASSWORD:-}" ]; then
+    PGPASSWORD=$VPS_POSTGRES_PASSWORD
+    export PGPASSWORD
+    unset VPS_POSTGRES_PASSWORD
+  fi
+
+  # libpq service file 会覆盖同名的 PG* 默认值。只要选择了 CLI/VPS 的直接连接模式，就不混用
+  # PGSERVICE；未指定的字段仍可从标准 PGHOST/PGPORT/PGUSER/PGDATABASE 继承。仅提供密码时保留
+  # PGSERVICE，使 VPS_POSTGRES_PASSWORD 也能为既有 service 提供认证。
+  if [ -n "$cli_host$cli_port$cli_username$cli_database" ] \
+      || [ -n "${VPS_POSTGRES_HOST:-}${VPS_POSTGRES_PORT:-}${VPS_POSTGRES_USERNAME:-}${VPS_POSTGRES_DATABASE:-}" ]; then
+    unset PGSERVICE
+  fi
+}
+
 libpq_psql() {
   PGOPTIONS="${PGOPTIONS:+$PGOPTIONS }$DATABASE_SESSION_OPTIONS" \
     psql -X -q -v ON_ERROR_STOP=1 --no-password "$@"
@@ -108,7 +194,8 @@ database_scalar() {
   psql_database "$database" -A -t -c "$query"
 }
 
-# 目标库解析：PGDATABASE 给出纯库名时以它为准，否则用 libpq 默认连接的当前库。
+# 目标库解析：PGDATABASE 给出纯库名时以它为准（它可能来自 --database/VPS_POSTGRES_DATABASE 的映射），
+# 否则用 libpq 默认连接的当前库。
 # 出参：TARGET_DB。
 resolve_target_database() {
   local resolved
@@ -117,7 +204,7 @@ resolve_target_database() {
     resolved=$PGDATABASE
   else
     resolved=$(libpq_default_scalar 'select current_database()') \
-      || fail "cannot determine the target database; set PGDATABASE to the target database name"
+      || fail "cannot determine the target database; name it with --database, VPS_POSTGRES_DATABASE or PGDATABASE"
     require_identifier "$resolved" "the connected database name"
   fi
   TARGET_DB=$resolved
