@@ -17,7 +17,7 @@ import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
+import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 
@@ -232,7 +232,7 @@ export function EnvironmentsPage() {
   return (
     <section className="screen active">
       <nav className="subbar">
-        <NavigationSlot />
+        <AiNavigation />
       </nav>
       <div className="screen-body">
         {environmentsQuery.isLoading && <StateBlock title={t('ai.environment.loading')} />}

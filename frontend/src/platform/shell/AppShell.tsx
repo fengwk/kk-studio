@@ -1,74 +1,92 @@
-import {
-  Bot,
-  FolderKanban,
-  Grid2X2,
-  Menu,
-  Settings,
-  UserRound,
-  Wrench,
-  X,
-} from 'lucide-react'
-import { useEffect, useRef, useState, type PropsWithChildren } from 'react'
-import { Link, useLocation } from 'react-router'
-import { isCanonicalUuid } from '@/features/canvas/uuid'
+import { Menu, UserRound, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, matchRoutes, useLocation, type Location } from 'react-router'
+import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
+import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
+import type { PageContribution } from '@/platform/extensions/types'
+import type { AppShellProps, PrimaryNavItem } from '@/platform/shell/types'
 import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
-
-function isAiRoute(pathname: string) {
-  return (
-    pathname === '/'
-    || pathname.startsWith('/chats')
-    || pathname.startsWith('/agents')
-    || pathname.startsWith('/models')
-    || pathname.startsWith('/providers')
-    || pathname.startsWith('/environments')
-  )
-}
-
-function isToolsRoute(pathname: string) {
-  return pathname.startsWith('/comfyui') || pathname.startsWith('/tools')
-}
-
-/** Chat 工作区沉浸页：仅 `/chats/:chatId`（可带尾斜杠），不含列表与更深子路径。 */
-function isChatWorkspaceRoute(pathname: string) {
-  return /^\/chats\/[^/]+\/?$/.test(pathname)
-}
 
 /** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */
 function isInsideOpenMenuTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[role="listbox"], [role="menu"]') != null
 }
 
-/** Canvas 编辑器沉浸页：仅合法 `/canvas/:canvasId`（canonical UUID），`/canvas` Library 保留全局顶栏。 */
-function isCanvasWorkspaceRoute(pathname: string) {
-  const match = /^\/canvas\/([^/]+)\/?$/.exec(pathname)
-  return match != null && isCanonicalUuid(match[1] as string)
+interface ResolvedLayout {
+  activeGroupId: string
+  immersive: boolean
+  immersiveClass?: string
 }
 
-export function AppShell({ children }: PropsWithChildren) {
+function resolveRouteLayout(
+  pages: readonly PageContribution[],
+  navItems: readonly PrimaryNavItem[],
+  location: Location,
+): ResolvedLayout {
+  if (location.pathname === '/' || location.pathname === '') {
+    return { activeGroupId: navItems[0]?.groupId ?? 'ai', immersive: false }
+  }
+
+  if (pages.length > 0) {
+    const routes = pages.map((page) => ({
+      path: page.path.startsWith('/') ? page.path : `/${page.path}`,
+      page,
+    }))
+
+    const matches = matchRoutes(routes, location)
+    const matchedRoute = matches?.[0]
+
+    if (matchedRoute) {
+      const page = matchedRoute.route.page
+      const params = matchedRoute.params
+      const activeGroupId = page.navGroup ?? ''
+
+      const isWorkspace =
+        typeof page.workspace === 'function'
+          ? page.workspace(params)
+          : Boolean(page.workspace)
+
+      if (isWorkspace) {
+        const immersiveClass = activeGroupId === 'canvas' ? 'canvas-immersive' : 'chat-immersive'
+        return { activeGroupId, immersive: true, immersiveClass }
+      }
+
+      return { activeGroupId, immersive: false }
+    }
+  }
+
+  // 路由未匹配（或缺少 pages 时的回退）：按 navItems 路径前缀回退识别分组，不开启沉浸
+  for (const item of navItems) {
+    if (
+      location.pathname === item.to
+      || (item.to !== '/' && location.pathname.startsWith(`${item.to}/`))
+    ) {
+      return { activeGroupId: item.groupId, immersive: false }
+    }
+  }
+
+  return { activeGroupId: '', immersive: false }
+}
+
+export function AppShell({
+  children,
+  pages: explicitPages,
+  navItems = PRIMARY_NAV_ITEMS,
+}: AppShellProps) {
   const location = useLocation()
+  const host = useOptionalExtensionHostSnapshot()
   const { t } = useI18n()
-  const canvasMode = location.pathname.startsWith('/canvas')
-  const projectsMode = location.pathname.startsWith('/projects')
-  const toolsMode = isToolsRoute(location.pathname)
-  const settingsMode = location.pathname.startsWith('/settings')
-  const chatWorkspaceMode = isChatWorkspaceRoute(location.pathname)
-  const canvasWorkspaceMode = isCanvasWorkspaceRoute(location.pathname)
-  const immersive = chatWorkspaceMode || canvasWorkspaceMode
-  const aiActive =
-    !canvasMode
-    && !projectsMode
-    && !toolsMode
-    && !settingsMode
-    && isAiRoute(location.pathname)
-  const homePath = projectsMode
-    ? '/projects'
-    : canvasMode
-      ? '/canvas'
-      : toolsMode
-        ? '/comfyui'
-        : '/chats'
+
+  const { activeGroupId, immersive, immersiveClass } = useMemo(() => {
+    const pages = explicitPages ?? host?.pages.list() ?? []
+    return resolveRouteLayout(pages, navItems, location)
+  }, [explicitPages, host, navItems, location])
+
+  const activeNavItem = navItems.find((item) => item.groupId === activeGroupId)
+  const homePath = activeNavItem?.to ?? navItems[0]?.to ?? '/chats'
+
   const [navOpen, setNavOpen] = useState(false)
   const navToggleRef = useRef<HTMLButtonElement>(null)
 
@@ -109,7 +127,7 @@ export function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div
-      className={`app-frame${chatWorkspaceMode ? ' chat-immersive' : ''}${canvasWorkspaceMode ? ' canvas-immersive' : ''}`}
+      className={`app-frame${immersiveClass ? ` ${immersiveClass}` : ''}`}
       data-nav-open={navOpen ? 'true' : 'false'}
     >
       {!immersive ? (
@@ -140,56 +158,23 @@ export function AppShell({ children }: PropsWithChildren) {
           </button>
           <div className="topbar-center">
             <nav id="primary-navigation" className="topnav" aria-label={t('platform.primaryNavigation')}>
-              <Link
-                className={aiActive ? 'active' : undefined}
-                to="/chats"
-                aria-label={t('platform.nav.aiAria')}
-                onClick={() => setNavOpen(false)}
-              >
-                <Bot aria-hidden="true" />
-                <span>{t('platform.nav.ai')}</span>
-                <small aria-hidden="true">AI</small>
-              </Link>
-              <Link
-                className={projectsMode ? 'active' : undefined}
-                to="/projects"
-                aria-label={t('platform.nav.projectsAria')}
-                onClick={() => setNavOpen(false)}
-              >
-                <FolderKanban aria-hidden="true" />
-                <span>{t('platform.nav.projects')}</span>
-                <small aria-hidden="true">Projects</small>
-              </Link>
-              <Link
-                className={canvasMode ? 'active' : undefined}
-                to="/canvas"
-                aria-label={t('platform.nav.canvasAria')}
-                onClick={() => setNavOpen(false)}
-              >
-                <Grid2X2 aria-hidden="true" />
-                <span>{t('platform.nav.canvas')}</span>
-                <small aria-hidden="true">Canvas</small>
-              </Link>
-              <Link
-                className={toolsMode ? 'active' : undefined}
-                to="/comfyui"
-                aria-label={t('platform.nav.toolsAria')}
-                onClick={() => setNavOpen(false)}
-              >
-                <Wrench aria-hidden="true" />
-                <span>{t('platform.nav.tools')}</span>
-                <small aria-hidden="true">Tools</small>
-              </Link>
-              <Link
-                className={settingsMode ? 'active' : undefined}
-                to="/settings"
-                aria-label={t('platform.nav.settingsAria')}
-                onClick={() => setNavOpen(false)}
-              >
-                <Settings aria-hidden="true" />
-                <span>{t('platform.nav.settings')}</span>
-                <small aria-hidden="true">Settings</small>
-              </Link>
+              {navItems.map((item) => {
+                const Icon = item.icon
+                const active = item.groupId === activeGroupId
+                return (
+                  <Link
+                    key={item.id}
+                    className={active ? 'active' : undefined}
+                    to={item.to}
+                    aria-label={t(item.ariaKey)}
+                    onClick={() => setNavOpen(false)}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>{t(item.labelKey)}</span>
+                    <small aria-hidden="true">{item.shortLabel}</small>
+                  </Link>
+                )
+              })}
               <LocaleSelector />
               {/* 移动端收起后并入汉堡面板；桌面由 .topbar-right 展示 */}
               <div

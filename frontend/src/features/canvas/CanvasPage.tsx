@@ -5,7 +5,7 @@ import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
 import { CanvasRuntimeProvider, useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
-import { isCanonicalUuid } from '@/features/canvas/uuid'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type { UUIDString } from '@/shared/api/contracts/studio'
 import '@/features/canvas/canvas.css'
 

@@ -1,59 +1,25 @@
-import { act, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
 import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
-import { NavigationSlot } from '@/platform/workbench/WorkbenchSlots'
-import { setLocale } from '@/shared/i18n'
+import { OverlayHost } from '@/platform/workbench/WorkbenchSlots'
 
-describe('NavigationSlot', () => {
-  it('renders all AI secondary navigation labels in order and switches English live', () => {
+describe('OverlayHost', () => {
+  it('renders registered dialogs and overlays reactively', () => {
     const host = new ExtensionHost()
     host.register({
-      id: 'ai',
-      navigation: [
-        { id: 'ai.nav.chats', label: 'Chat', labelKey: 'ai.nav.chats', path: 'chats' },
-        { id: 'ai.nav.agents', label: 'Agent', labelKey: 'ai.nav.agents', path: 'agents' },
-        { id: 'ai.nav.models', label: 'Model', labelKey: 'ai.nav.models', path: 'models' },
-        { id: 'ai.nav.providers', label: 'Provider', labelKey: 'ai.nav.providers', path: 'providers' },
-        {
-          id: 'ai.nav.environments',
-          label: 'Environment',
-          labelKey: 'ai.nav.environments',
-          path: 'environments',
-        },
-
-      ],
+      id: 'test',
+      dialogs: [{ id: 'test.dialog', component: () => <div data-testid="dialog">Dialog content</div> }],
+      overlays: [{ id: 'test.overlay', component: () => <div data-testid="overlay">Overlay content</div> }],
     })
 
-    act(() => {
-      setLocale('zh-CN')
-    })
     render(
       <ExtensionHostProvider host={host}>
-        <MemoryRouter initialEntries={['/chats']}>
-          <NavigationSlot />
-        </MemoryRouter>
+        <OverlayHost />
       </ExtensionHostProvider>,
     )
 
-    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
-      '对话',
-      '代理',
-      '模型',
-      '提供商',
-      '环境',
-    ])
-
-    act(() => {
-      setLocale('en-US')
-    })
-    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual([
-      'Chat',
-      'Agent',
-      'Model',
-      'Provider',
-      'Environment',
-    ])
+    expect(screen.getByTestId('dialog')).toHaveTextContent('Dialog content')
+    expect(screen.getByTestId('overlay')).toHaveTextContent('Overlay content')
   })
 })

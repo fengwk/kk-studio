@@ -17,8 +17,8 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-vi.mock('@/platform/workbench/WorkbenchSlots', () => ({
-  NavigationSlot: () => <div data-testid="navigation-slot" />,
+vi.mock('@/features/ai/extensions/AiNavigation', () => ({
+  AiNavigation: () => <div data-testid="navigation-slot" />,
 }))
 
 function samplePackage(overrides: Partial<SkillPackageDTO> = {}): SkillPackageDTO {

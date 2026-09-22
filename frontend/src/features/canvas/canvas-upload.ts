@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
-import { isCanonicalUuid } from '@/features/canvas/uuid'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import {
   createWorkerHasher,
   validateUploadFile,

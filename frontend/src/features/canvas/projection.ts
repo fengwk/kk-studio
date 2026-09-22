@@ -1,5 +1,5 @@
 import type { Edge, Node } from '@xyflow/react'
-import { isCanonicalUuid } from '@/features/canvas/uuid'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type { CanvasSnapshot, Link } from '@/features/canvas/domain'
 import type {
   CanvasFlowNodeData,
