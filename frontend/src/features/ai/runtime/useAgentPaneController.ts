@@ -29,6 +29,7 @@ import {
 import { harnessService } from '@/shared/api/harness-service'
 import { chatService } from '@/shared/api/chat-service'
 import { listCanvasSessions } from '@/shared/api/studio-service'
+import { ownerService } from '@/shared/api/owner-service'
 import {
   presentConflict,
   type ConflictPresentation,
@@ -96,6 +97,11 @@ export interface RenameTarget {
   backTo: 'thread-sessions' | 'thread-threads' | null
 }
 
+export interface AgentPaneCapabilities {
+  allowNewSession?: boolean
+  readOnly?: boolean
+}
+
 export interface AgentPaneDefaults {
   agentName?: string
   yoloEnabled?: boolean
@@ -109,6 +115,8 @@ export interface UseAgentPaneControllerOptions {
   defaults: AgentPaneDefaults
   focused: boolean
   onFocus?: () => void
+  initialTarget?: PaneTarget
+  capabilities?: AgentPaneCapabilities
 }
 
 export function useAgentPaneController({
@@ -119,14 +127,23 @@ export function useAgentPaneController({
   defaults,
   focused,
   onFocus,
+  initialTarget,
+  capabilities,
 }: UseAgentPaneControllerOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
   const composerScope = `agent-pane:${owner.type}:${owner.id}:${paneId}`
   const [target, setTargetState] = useState<PaneTarget>(
-    () => loadPaneTarget(owner, paneId),
+    () => initialTarget ?? loadPaneTarget(owner, paneId),
   )
+
+  useEffect(() => {
+    if (initialTarget) {
+      targetRef.current = initialTarget
+      setTargetState(initialTarget)
+    }
+  }, [initialTarget])
   const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
@@ -253,20 +270,22 @@ export function useAgentPaneController({
             }
           })
         }
-        unsubscribe = applicationEvents.subscribe(
-          { kind: 'thread', id: threadId },
-          {
-            onSubscribed: refresh,
-            onEvent: (name) => {
-              if (name === 'version') {
-                refresh()
-              }
+        if (applicationEvents != null) {
+          unsubscribe = applicationEvents.subscribe(
+            { kind: 'thread', id: threadId },
+            {
+              onSubscribed: refresh,
+              onEvent: (name) => {
+                if (name === 'version') {
+                  refresh()
+                }
+              },
+              onResync: refresh,
+              onError: refresh,
             },
-            onResync: refresh,
-            onError: refresh,
-          },
-        )
-        backgroundSubscriptionRef.current = { threadId, unsubscribe }
+          )
+          backgroundSubscriptionRef.current = { threadId, unsubscribe }
+        }
       }
     }
     previousBoundThreadRef.current = boundThreadId || null
@@ -284,9 +303,18 @@ export function useAgentPaneController({
       : null
   const sessionsQuery = useQuery({
     queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
-    queryFn: () => owner.type === 'CHAT'
-      ? chatService.listChatSessions(owner.id)
-      : listCanvasSessions(owner.id),
+    queryFn: () => {
+      if (owner.type === 'CHAT') {
+        return chatService.listChatSessions(owner.id)
+      }
+      if (owner.type === 'CANVAS') {
+        return listCanvasSessions(owner.id)
+      }
+      if (owner.type === 'PROJECT') {
+        return ownerService.listProjectSessions(owner.id)
+      }
+      return Promise.resolve([])
+    },
     enabled: interaction === 'thread-sessions' || interaction === 'rename-session',
   })
   const threadsQuery = useQuery({
@@ -684,6 +712,9 @@ export function useAgentPaneController({
   }
 
   function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
+    if (capabilities?.readOnly) {
+      return
+    }
     if (isBoundTarget(target)) {
       void controller.submitMessage(payloadParts, localDraftParts)
       return
@@ -746,6 +777,22 @@ export function useAgentPaneController({
         setInteraction('tree')
         return
       case 'new':
+        if (capabilities?.readOnly) {
+          return
+        }
+        if (capabilities?.allowNewSession === false) {
+          if (currentSessionId && rootEntryId) {
+            changeTarget(
+              { kind: 'NEW_THREAD_DRAFT', sessionId: currentSessionId, startEntryId: rootEntryId },
+              activeDraft,
+            )
+            return
+          }
+          if (!currentSessionId) {
+            changeTarget({ kind: 'NEW_SESSION_DRAFT' }, activeDraft)
+          }
+          return
+        }
         changeTarget({ kind: 'NEW_SESSION_DRAFT' }, activeDraft)
         return
       case 'agent':
@@ -840,9 +887,18 @@ export function useAgentPaneController({
 
   const boundViews = useBoundThreadPanelViews(boundThreadId, controller)
   const boundLabels = useBoundThreadPanelLabels(environments, controller)
+  const rootEntryId = controller.entries?.find((e) => e.parentEntryId == null)?.entryId
+    ?? treeEntriesQuery.data?.find((e) => e.parentEntryId == null)?.entryId
+    ?? null
+  const canBranchFromRoot = rootEntryId != null
   const commands = threadCommandsForTarget(
     target,
-    isBoundTarget(target) ? controller.manualCompaction : null,
+    {
+      manualCompaction: isBoundTarget(target) ? controller.manualCompaction : null,
+      allowNewSession: capabilities?.allowNewSession,
+      readOnly: capabilities?.readOnly,
+      canBranchFromRoot,
+    },
   )
   // queuedCommands 不并入 Composer pending/disabled：运行中 Thread 仍应接受
   // 新 batch 并保留当前 draft 编辑；target 切换栅栏由 hasPendingOperation 独立维护。
@@ -858,7 +914,8 @@ export function useAgentPaneController({
     parts: composerDraft,
     pending,
     disabled:
-      pending
+      Boolean(capabilities?.readOnly)
+      || pending
       || (isBoundTarget(target)
         ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
         : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null)),
@@ -980,6 +1037,9 @@ export function useAgentPaneController({
       invocationId: string,
       decision: 'ALLOW' | 'DENY',
     ) => {
+      if (capabilities?.readOnly) {
+        return
+      }
       void controller.decideApproval(invocationId, decision, threadId)
     },
     sessionSelectionItem,

@@ -7,7 +7,11 @@ import {
   expectHttpError,
   pageResults,
 } from '../lib/http.mjs'
-import { waitForQuiescentThread } from '../lib/harness.mjs'
+import {
+  acceptCommandBatch,
+  listProjectSessions,
+  waitForQuiescentThread,
+} from '../lib/harness.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -66,15 +70,30 @@ registerCase({
       )
       assert(project.version === '1', JSON.stringify(project))
 
-      const accepted = envelopeData(
-        (
-          await ctx.call('POST', `/api/projects/${project.id}/commands`, {
+      const sessionId = cid()
+      const threadId = cid()
+      const accepted = await acceptCommandBatch(ctx, {
+        owner: { type: 'PROJECT', id: project.id },
+        target: {
+          type: 'NEW_SESSION',
+          sessionId,
+          threadId,
+          rootSettings: {
+            agentName: coordinatorAgentName,
+          },
+          yoloEnabled: false,
+        },
+        commands: [
+          {
+            type: 'USER_MESSAGE',
             idempotencyKey: cid(),
-            message: 'Create an execution plan for this project.',
-            threadId: null,
-          })
-        ).json,
-      )
+            content: {
+              type: 'TEXT',
+              text: 'Create an execution plan for this project.',
+            },
+          },
+        ],
+      })
       assertCanonicalUuid(accepted.session.sessionId, 'coordinator session id')
       assertCanonicalUuid(accepted.thread.threadId, 'coordinator thread id')
       assert(accepted.replayed === false, JSON.stringify(accepted))
@@ -82,6 +101,12 @@ registerCase({
         timeoutMs: 60_000,
         intervalMs: 100,
       })
+
+      const projectSessions = await listProjectSessions(ctx, project.id)
+      assert(
+        projectSessions.some((s) => s.sessionId === accepted.session.sessionId),
+        'created session should be listed in project sessions',
+      )
 
       const dependency = envelopeData(
         (

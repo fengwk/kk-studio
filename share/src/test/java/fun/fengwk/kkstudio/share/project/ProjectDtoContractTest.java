@@ -22,9 +22,6 @@ class ProjectDtoContractTest {
     "ProjectDTO.archivedAt",
     "CreateProjectRequestDTO.description",
     "UpdateProjectRequestDTO.description",
-    "ProjectCommandRequestDTO.threadId",
-    "ProjectCommandRequestDTO.expectedHeadEntryId",
-    "ProjectCommandRequestDTO.expectedNextCommandSequence",
     "IssueDTO.assigneeAgentName",
     "IssueDTO.reviewerAgentName",
     "IssueDTO.archivedAt",
@@ -125,9 +122,6 @@ class ProjectDtoContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ProjectUnarchiveRequestDTO().rejectUnknownField("unknownField", "junk"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProjectCommandRequestDTO().rejectUnknownField("unexpected", "junk"));
     assertThrows(
         IllegalArgumentException.class,
         () -> new CreateIssueRequestDTO().rejectUnknownField("unexpected", "junk"));

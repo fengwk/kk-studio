@@ -59,14 +59,6 @@ export interface ProjectUnarchiveRequest {
   expectedVersion: string
 }
 
-export interface ProjectCommandRequest {
-  idempotencyKey: string
-  message: string
-  threadId?: string | null
-  expectedHeadEntryId?: string | null
-  expectedNextCommandSequence?: string | null
-}
-
 export type IssueStatus =
   | 'BACKLOG'
   | 'TODO'

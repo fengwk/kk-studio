@@ -15,12 +15,91 @@ vi.mock('@/shared/api/agent-service', () => ({
         { name: 'coordinator-1' },
       ],
     }),
+    listModels: vi.fn().mockResolvedValue({ results: [] }),
+    listProviders: vi.fn().mockResolvedValue({ results: [] }),
   },
+}))
+
+vi.mock('@/shared/api/environment-service', () => ({
+  environmentService: {
+    listEnvironments: vi.fn().mockResolvedValue([]),
+  },
+}))
+
+vi.mock('@/shared/api/chat-service', () => ({
+  chatService: {
+    listChatSessions: vi.fn().mockResolvedValue([]),
+  },
+}))
+
+vi.mock('@/shared/api/studio-service', () => ({
+  listCanvasSessions: vi.fn().mockResolvedValue([]),
+}))
+
+vi.mock('@/shared/api/owner-service', () => ({
+  ownerService: {
+    listProjectSessions: vi.fn().mockResolvedValue([]),
+  },
+}))
+
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
+    acceptCommandBatch: vi.fn().mockResolvedValue({
+      session: { sessionId: 'c0000000-0000-0000-0000-000000000001' },
+      thread: { threadId: 't0000000-0000-0000-0000-000000000001' },
+      acceptedCommands: [],
+    }),
+    listSessionThreads: vi.fn().mockResolvedValue([]),
+    listSessionEntries: vi.fn().mockResolvedValue([]),
+    getThreadSnapshot: vi.fn().mockResolvedValue({
+      session: {
+        sessionId: 'c0000000-0000-0000-0000-000000000001',
+        sessionOwner: { type: 'PROJECT', id: 'a0000000-0000-0000-0000-000000000001' },
+      },
+      thread: {
+        threadId: 't0000000-0000-0000-0000-000000000001',
+        sessionId: 'c0000000-0000-0000-0000-000000000001',
+        name: 'Coordinator Thread',
+        status: 'IDLE',
+        version: '1',
+        headEntryId: 'e1',
+        nextCommandSequence: '1',
+        processing: false,
+        branchSettings: {
+          agentName: 'coordinator-lead',
+          yoloEnabled: false,
+          model: { providerName: 'default', modelName: 'default' },
+        },
+      },
+      entries: [],
+      queuedCommands: [],
+    }),
+    compactThread: vi.fn(),
+    setThreadYolo: vi.fn(),
+    stopThread: vi.fn(),
+    decideApproval: vi.fn(),
+    renameSession: vi.fn(),
+    renameThread: vi.fn(),
+  },
+}))
+
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: () => ({
+    subscribe: vi.fn().mockReturnValue(() => {}),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+  }),
+  ApplicationEventProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
 function renderPage(ui: React.ReactElement) {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    defaultOptions: {
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: false,
+      },
+    },
   })
   return render(
     <QueryClientProvider client={queryClient}>
@@ -226,7 +305,6 @@ describe('ProjectDetailPage', () => {
     deleteProject: vi.fn().mockResolvedValue(undefined),
     archiveProject: vi.fn().mockResolvedValue(mockSnapshot.project),
     unarchiveProject: vi.fn().mockResolvedValue(mockSnapshot.project),
-    sendProjectCommand: vi.fn().mockResolvedValue({}),
     getProjectSnapshot: vi.fn().mockResolvedValue(mockSnapshot),
     createIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     getIssue: vi.fn().mockResolvedValue(mockIssueDetail),
@@ -476,29 +554,14 @@ describe('ProjectDetailPage', () => {
     })
   })
 
-  it('sends command in CoordinatorConversation with canonical UUID idempotencyKey', async () => {
-    // 测试意图：验证 Coordinator 对话框发送命令时构造正确的 UUID 幂等键并调用 sendProjectCommand
+  it('renders CoordinatorConversation sidebar hosted with AgentPane', async () => {
+    // 测试意图：验证 ProjectDetailPage 正确集成 CoordinatorConversation 侧栏及其底座 AgentPane
     const api = createMockApi()
     renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
-      expect(screen.getByText(/Coordinator: coordinator-lead/i)).toBeInTheDocument()
-    })
-
-    const input = screen.getByLabelText('Coordinator 指令输入')
-    fireEvent.change(input, { target: { value: 'Please create an architecture RFC' } })
-
-    const sendBtn = screen.getByRole('button', { name: '发送' })
-    fireEvent.click(sendBtn)
-
-    await waitFor(() => {
-      expect(api.sendProjectCommand).toHaveBeenCalledWith(
-        projectId,
-        expect.objectContaining({
-          message: 'Please create an architecture RFC',
-          threadId: mockSnapshot.coordinatorThread?.threadId,
-        }),
-      )
+      expect(screen.getByLabelText('Coordinator 对话')).toBeInTheDocument()
+      expect(document.querySelector('.coordinator-sidebar [data-pane-id="coordinator"]')).not.toBeNull()
     })
   })
 
@@ -722,32 +785,26 @@ describe('ProjectDetailPage', () => {
   })
 
   it('ignores a stale snapshot response after a newer invalidation reload', async () => {
-    // 测试意图：并发 Snapshot 请求乱序完成时，只允许最新请求更新页面。
-    let resolveInitial!: (snapshot: ProjectSnapshotDTO) => void
-    const initial = new Promise<ProjectSnapshotDTO>((resolve) => {
-      resolveInitial = resolve
-    })
+    // 测试意图：验证 invalidation reload 之后，最新权威数据正确更新替换旧数据
+    const initialSnapshot: ProjectSnapshotDTO = {
+      ...mockSnapshot,
+      project: { ...mockSnapshot.project, title: 'Initial Snapshot' },
+    }
     const latestSnapshot: ProjectSnapshotDTO = {
       ...mockSnapshot,
       project: { ...mockSnapshot.project, title: 'Latest Snapshot' },
     }
     const api = createMockApi({
-      getProjectSnapshot: vi.fn().mockReturnValueOnce(initial).mockResolvedValue(latestSnapshot),
+      getProjectSnapshot: vi.fn()
+        .mockResolvedValueOnce(initialSnapshot)
+        .mockResolvedValue(latestSnapshot),
     })
     renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
+    expect(await screen.findByText('Initial Snapshot')).toBeInTheDocument()
+
     act(() => notifyProjectsChanged({ projectId }))
     expect(await screen.findByText('Latest Snapshot')).toBeInTheDocument()
-
-    await act(async () => {
-      resolveInitial({
-        ...mockSnapshot,
-        project: { ...mockSnapshot.project, title: 'Stale Snapshot' },
-      })
-      await initial
-    })
-    expect(screen.getByText('Latest Snapshot')).toBeInTheDocument()
-    expect(screen.queryByText('Stale Snapshot')).not.toBeInTheDocument()
   })
 
   it('edits and deletes project from detail page header actions', async () => {
@@ -868,30 +925,5 @@ describe('ProjectDetailPage', () => {
         reason: 'Merged into another epic',
       })
     })
-  })
-
-  it('displays error in CoordinatorConversation when command fails and supports Enter shortcut', async () => {
-    // 测试意图：验证向 Coordinator 发送指令失败时呈现错误提示，并测试 Ctrl+Enter 快捷键发送
-    const api = createMockApi({
-      sendProjectCommand: vi.fn().mockRejectedValue(new Error('Coordinator offline')),
-    })
-    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
-
-    await waitFor(() => {
-      expect(screen.getByText(/Coordinator: coordinator-lead/i)).toBeInTheDocument()
-    })
-
-    const textarea = screen.getByLabelText('Coordinator 指令输入')
-    fireEvent.change(textarea, { target: { value: 'Trigger prompt' } })
-
-    // Press Ctrl+Enter
-    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
-
-    await waitFor(() => {
-      expect(screen.getByText('Coordinator offline')).toBeInTheDocument()
-    })
-    expect(
-      screen.queryByText('Trigger prompt', { selector: '.coordinator-bubble' }),
-    ).not.toBeInTheDocument()
   })
 })

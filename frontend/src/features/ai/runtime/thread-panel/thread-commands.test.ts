@@ -83,4 +83,30 @@ describe('AgentPane command registry', () => {
     expect(commandIdsForTarget(bound)).toContain('rename-session')
     expect(commandIdsForTarget(bound)).toContain('rename-thread')
   })
+
+  it('disables mutation commands when readOnly is enabled', () => {
+    // 测试意图：验证只读模式（如项目已归档）下，状态修改类命令均被禁用，仅保留查看类命令
+    const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
+    const commands = threadCommandsForTarget(bound, { readOnly: true })
+    const stopCommand = commands.find((c) => c.id === 'stop')
+    const newCommand = commands.find((c) => c.id === 'new')
+    const treeCommand = commands.find((c) => c.id === 'tree')
+    const shortcutsCommand = commands.find((c) => c.id === 'shortcuts')
+
+    expect(stopCommand?.disabled).toBe(true)
+    expect(stopCommand?.disabledReason).toBe('只读模式')
+    expect(newCommand?.disabled).toBe(true)
+    expect(newCommand?.disabledReason).toBe('只读模式')
+    expect(treeCommand?.disabled).toBe(false)
+    expect(shortcutsCommand?.disabled).toBe(false)
+  })
+
+  it('disables new command when allowNewSession is false and cannot branch from root', () => {
+    // 测试意图：单会话约束下，当无法从 root 分叉时禁用 new 按钮，不伪造按钮功能
+    const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
+    const commands = threadCommandsForTarget(bound, { allowNewSession: false, canBranchFromRoot: false })
+    const newCommand = commands.find((c) => c.id === 'new')
+    expect(newCommand?.disabled).toBe(true)
+    expect(newCommand?.disabledReason).toBe('当前项目仅支持单会话')
+  })
 })

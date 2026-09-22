@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Archive,
@@ -17,8 +18,9 @@ import { IssueBoard } from './components/IssueBoard'
 import { IssueDetailModal } from './components/IssueDetailModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
-import type { IssueStatus, ProjectSnapshotDTO } from './types'
+import type { IssueStatus } from './types'
 import { useProjectsInvalidation } from './useProjectsInvalidation'
+import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
 
 export interface ProjectDetailPageProps {
@@ -32,50 +34,36 @@ export function ProjectDetailPage({
   onBack,
   api = projectsApi,
 }: ProjectDetailPageProps) {
-  const [snapshot, setSnapshot] = useState<ProjectSnapshotDTO | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+
+  // 统一通过 TanStack Query 管理 Project Snapshot 权威状态
+  const {
+    data: snapshot,
+    isLoading,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: queryKeys.projects.snapshot(projectId),
+    queryFn: () => api.getProjectSnapshot(projectId),
+  })
+
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Dialogs
   const [isEditProjectOpen, setIsEditProjectOpen] = useState(false)
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
-  const loadRequestIdRef = useRef(0)
 
-  const loadSnapshot = useCallback(async () => {
-    const requestId = ++loadRequestIdRef.current
-    setIsLoading(true)
-    setErrorMessage(null)
-    try {
-      const data = await api.getProjectSnapshot(projectId)
-      if (loadRequestIdRef.current === requestId) {
-        setSnapshot(data)
-      }
-    } catch (err) {
-      if (loadRequestIdRef.current === requestId) {
-        setErrorMessage(err instanceof Error ? err.message : '获取项目 Snapshot 失败')
-      }
-    } finally {
-      if (loadRequestIdRef.current === requestId) {
-        setIsLoading(false)
-      }
-    }
-  }, [api, projectId])
+  // Invalidation subscription: SSE 推送时自动使得 queryKey 失效并拉取最新状态
+  useProjectsInvalidation()
 
-  useEffect(() => {
-    void loadSnapshot()
-    return () => {
-      loadRequestIdRef.current += 1
-    }
-  }, [loadSnapshot])
-
-  // Invalidation subscription
-  useProjectsInvalidation((payload) => {
-    if (!payload?.projectId || payload.projectId === projectId) {
-      void loadSnapshot()
-    }
-  })
+  const invalidateSnapshot = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.projects.snapshot(projectId),
+      exact: true,
+    })
+  }
 
   // Status transitions from board
   const handleChangeIssueStatus = async (
@@ -84,39 +72,43 @@ export function ProjectDetailPage({
     status: IssueStatus,
   ) => {
     try {
+      setActionError(null)
       await api.changeIssueStatus(issueId, { expectedVersion, status })
-      await loadSnapshot()
+      await invalidateSnapshot()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '变更 Issue 状态失败')
+      setActionError(err instanceof Error ? err.message : '变更 Issue 状态失败')
     }
   }
 
   // Cancel Issue from board
   const handleCancelIssue = async (issueId: string, expectedVersion: string) => {
     try {
+      setActionError(null)
       await api.cancelIssue(issueId, { expectedVersion })
-      await loadSnapshot()
+      await invalidateSnapshot()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '取消 Issue 失败')
+      setActionError(err instanceof Error ? err.message : '取消 Issue 失败')
     }
   }
 
   // Archive / Unarchive Issue from board
   const handleArchiveIssue = async (issueId: string, expectedVersion: string) => {
     try {
+      setActionError(null)
       await api.archiveIssue(issueId, { expectedVersion })
-      await loadSnapshot()
+      await invalidateSnapshot()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '归档 Issue 失败')
+      setActionError(err instanceof Error ? err.message : '归档 Issue 失败')
     }
   }
 
   const handleUnarchiveIssue = async (issueId: string, expectedVersion: string) => {
     try {
+      setActionError(null)
       await api.unarchiveIssue(issueId, { expectedVersion })
-      await loadSnapshot()
+      await invalidateSnapshot()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '取消归档 Issue 失败')
+      setActionError(err instanceof Error ? err.message : '取消归档 Issue 失败')
     }
   }
 
@@ -127,16 +119,19 @@ export function ProjectDetailPage({
     }
     const project = snapshot.project
     try {
+      setActionError(null)
       if (project.archivedAt) {
         await api.unarchiveProject(project.id, { expectedVersion: project.version })
       } else {
         await api.archiveProject(project.id, { expectedVersion: project.version })
       }
-      await loadSnapshot()
+      await invalidateSnapshot()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '项目归档操作失败')
+      setActionError(err instanceof Error ? err.message : '项目归档操作失败')
     }
   }
+
+  const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
 
   if (isLoading && !snapshot) {
     return (
@@ -186,21 +181,23 @@ export function ProjectDetailPage({
             <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600, color: 'var(--fg)' }}>
               {project.title}
             </h1>
-            {project.archivedAt && (
-              <span className="badge badge-archived">已归档</span>
-            )}
+            {project.archivedAt && <span className="badge badge-archived">已归档</span>}
           </div>
 
           <div className="project-detail-nav-right">
             <button
               type="button"
               className="ghost-btn"
-              onClick={() => void loadSnapshot()}
+              onClick={() => void refetch()}
               disabled={isLoading}
               title="刷新 Snapshot"
               aria-label="刷新项目 Snapshot"
             >
-              <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
+              <RefreshCw
+                size={14}
+                className={isLoading ? 'animate-spin' : ''}
+                aria-hidden="true"
+              />
             </button>
 
             <button
@@ -239,9 +236,7 @@ export function ProjectDetailPage({
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Bot size={14} aria-hidden="true" />
             <span>Coordinator:</span>
-            <strong style={{ color: 'var(--fg)' }}>
-              {project.coordinatorAgentName}
-            </strong>
+            <strong style={{ color: 'var(--fg)' }}>{project.coordinatorAgentName}</strong>
           </span>
 
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -254,7 +249,15 @@ export function ProjectDetailPage({
           </span>
 
           {project.description && (
-            <span style={{ color: 'var(--fg-muted)', maxWidth: '400px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span
+              style={{
+                color: 'var(--fg-muted)',
+                maxWidth: '400px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {project.description}
             </span>
           )}
@@ -282,10 +285,10 @@ export function ProjectDetailPage({
 
         {/* Right: Coordinator conversation */}
         <CoordinatorConversation
+          key={projectId}
           projectId={projectId}
           snapshot={snapshot}
-          onCommandAccepted={() => void loadSnapshot()}
-          api={api}
+          isLoadingSnapshot={isLoading}
         />
       </div>
 
@@ -294,7 +297,7 @@ export function ProjectDetailPage({
         isOpen={isEditProjectOpen}
         project={project}
         onClose={() => setIsEditProjectOpen(false)}
-        onSuccess={() => void loadSnapshot()}
+        onSuccess={() => void invalidateSnapshot()}
         api={api}
       />
 
@@ -310,7 +313,7 @@ export function ProjectDetailPage({
         isOpen={isCreateIssueOpen}
         projectId={projectId}
         onClose={() => setIsCreateIssueOpen(false)}
-        onSuccess={() => void loadSnapshot()}
+        onSuccess={() => void invalidateSnapshot()}
         api={api}
       />
 
@@ -319,7 +322,7 @@ export function ProjectDetailPage({
         issueId={selectedIssueId}
         projectIssues={snapshot.issues}
         onClose={() => setSelectedIssueId(null)}
-        onUpdated={() => void loadSnapshot()}
+        onUpdated={() => void invalidateSnapshot()}
         api={api}
       />
     </div>

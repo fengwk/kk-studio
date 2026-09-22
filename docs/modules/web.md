@@ -119,7 +119,7 @@ result status 对齐。
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
 | Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
-| Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|commands|snapshot` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 Coordinator Harness command |
+| Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|sessions|snapshot` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 owner Sessions 查询（Coordinator Harness command 统一走 `/api/harness/command-batches`） |
 | Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/status|dependencies|inputs|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、六态迁移、依赖、追加输入、Run 人工动作与归档 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
 | Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |

@@ -94,6 +94,12 @@ class HarnessRuntimeRequestMapperTest {
     assertEquals(OwnerType.CANVAS, mappedOwner.type());
     assertEquals(id(10), mappedOwner.id());
 
+    owner.setType("PROJECT");
+    owner.setId(idText(11));
+    OwnerRef projectOwner = HarnessRuntimeRequestMapper.toOwner(owner);
+    assertEquals(OwnerType.PROJECT, projectOwner.type());
+    assertEquals(id(11), projectOwner.id());
+
     AcceptCommandsCommand newSession =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
             request(newSessionTarget(), userCommand("new-session")));

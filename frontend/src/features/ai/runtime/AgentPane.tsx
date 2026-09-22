@@ -11,16 +11,18 @@ import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import {
   useAgentPaneController,
+  type AgentPaneCapabilities,
   type AgentPaneDefaults,
 } from '@/features/ai/runtime/useAgentPaneController'
 import { Pencil as PencilIcon } from 'lucide-react'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import { useI18n } from '@/shared/i18n'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 
-export type { AgentPaneDefaults }
+export type { AgentPaneCapabilities, AgentPaneDefaults }
 
 export function AgentPane({
   owner,
@@ -30,6 +32,8 @@ export function AgentPane({
   defaults = {},
   focused = false,
   onFocus,
+  initialTarget,
+  capabilities,
 }: {
   owner: AgentRuntimeOwnerDTO
   paneId: string
@@ -38,6 +42,8 @@ export function AgentPane({
   defaults?: AgentPaneDefaults
   focused?: boolean
   onFocus?: () => void
+  initialTarget?: PaneTarget
+  capabilities?: AgentPaneCapabilities
 }) {
   const { t } = useI18n()
   const pane = useAgentPaneController({
@@ -48,6 +54,8 @@ export function AgentPane({
     defaults,
     focused,
     onFocus,
+    initialTarget,
+    capabilities,
   })
   const interactionPanel = renderInteractionPanel()
   const onDismissActionError = () => {
@@ -170,7 +178,7 @@ export function AgentPane({
           className="agent-pane-thread-rename"
           aria-label={t('ai.runtime.rename.titleAria')}
           title={t('ai.runtime.rename.titleAria')}
-          disabled={name == null || pane.renamePending}
+          disabled={name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
           onClick={() => {
             if (name != null && pane.target.kind === 'BOUND_THREAD') {
               pane.renameThread(pane.target.threadId, name)

@@ -311,7 +311,7 @@ export interface ManualCompactionDTO {
 }
 
 export interface AgentRuntimeOwnerDTO {
-  type: 'CHAT' | 'CANVAS'
+  type: 'CHAT' | 'CANVAS' | 'PROJECT'
   id: string
 }
 

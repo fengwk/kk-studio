@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -52,6 +53,7 @@ import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
@@ -472,6 +474,33 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
     assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_RUN_OWNER, runCmd));
+  }
+
+  @Test
+  void rejectsProjectAcceptanceWhenProjectIsArchived() {
+    // 测试意图：归档的项目禁止接受任何命令，统一 backend 防线拦截
+    Project archivedProject = mock(Project.class);
+    when(archivedProject.isArchived()).thenReturn(true);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(archivedProject);
+
+    AcceptCommandsCommand cmd = newSession(user(new TextMessageContent("hello")));
+    IllegalArgumentException ex =
+        assertThrows(IllegalArgumentException.class, () -> service.accept(PROJECT_OWNER, cmd));
+    assertTrue(ex.getMessage().contains("archived"));
+  }
+
+  @Test
+  void rejectsNewSessionWhenProjectAlreadyBoundToDifferentSession() {
+    // 测试意图：Project 仅允许绑定一个 Session，尝试发第二个不同 SessionId 的 NEW_SESSION 将被确定性拒绝
+    UUID existingSessionId = UUID.randomUUID();
+    when(projectSessionRepository.findByProjectId(PROJECT_ID))
+        .thenReturn(
+            ProjectSession.builder().projectId(PROJECT_ID).sessionId(existingSessionId).build());
+
+    AcceptCommandsCommand cmd = newSession(user(new TextMessageContent("another session")));
+    IllegalArgumentException ex =
+        assertThrows(IllegalArgumentException.class, () -> service.accept(PROJECT_OWNER, cmd));
+    assertTrue(ex.getMessage().contains("already bound to a different session"));
   }
 
   @Test

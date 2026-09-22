@@ -31,7 +31,6 @@ describe('EditIssueModal', () => {
     deleteProject: vi.fn(),
     archiveProject: vi.fn(),
     unarchiveProject: vi.fn(),
-    sendProjectCommand: vi.fn(),
     getProjectSnapshot: vi.fn(),
     createIssue: vi.fn(),
     getIssue: vi.fn(),

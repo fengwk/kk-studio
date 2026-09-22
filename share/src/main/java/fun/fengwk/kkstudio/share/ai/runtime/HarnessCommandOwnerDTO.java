@@ -8,7 +8,7 @@ import lombok.Data;
 @Data
 public class HarnessCommandOwnerDTO {
 
-  /** owner 类型：CHAT 或 CANVAS。 */
+  /** owner 类型：CHAT、CANVAS 或 PROJECT。 */
   private String type;
 
   /** owner 的 canonical UUID string。 */

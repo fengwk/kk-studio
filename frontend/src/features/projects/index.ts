@@ -66,7 +66,6 @@ export type {
   UpdateProjectRequest,
   ProjectArchiveRequest,
   ProjectUnarchiveRequest,
-  ProjectCommandRequest,
   IssueStatus,
   IssueDTO,
   CreateIssueRequest,

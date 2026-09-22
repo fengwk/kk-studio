@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
+import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
@@ -127,6 +128,12 @@ public class HarnessCommandAcceptanceOrchestrator {
     switch (target) {
       case AcceptCommandsTarget.NewSession newSession -> {
         lockOwnerForKeyShare(owner);
+        if (owner.type() == OwnerType.PROJECT) {
+          ProjectSession existing = projectSessionRepository.findByProjectId(owner.id());
+          if (existing != null && !existing.getSessionId().equals(newSession.sessionId())) {
+            throw new IllegalArgumentException("Project is already bound to a different session");
+          }
+        }
         if (sessionExists(newSession.sessionId())) {
           requireOwnedSession(owner, newSession.sessionId());
         }
@@ -161,8 +168,12 @@ public class HarnessCommandAcceptanceOrchestrator {
         }
       }
       case PROJECT -> {
-        if (projectRepository.lockForKeyShare(owner.id()) == null) {
+        Project project = projectRepository.lockForKeyShare(owner.id());
+        if (project == null) {
           throw new IllegalArgumentException("Project owner does not exist");
+        }
+        if (project.isArchived()) {
+          throw new IllegalArgumentException("Cannot accept commands for archived project");
         }
       }
       case ISSUE_RUN -> {
