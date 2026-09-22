@@ -2,9 +2,9 @@
 #
 # 把导出的 Agent catalog 包回灌到目标库。
 #
-# 前置条件由脚本自己验证，不依赖应用配合、不接触任何容器：
+# 前置条件由脚本自己验证，不管理任何服务的生命周期：
 #
-#   1. 目标库已经由应用正常启动执行过 Flyway V1：flyway_schema_history 里的 V1 checksum
+#   1. 目标库已经由外部 schema/Flyway 初始化执行过 V1：flyway_schema_history 里的 V1 checksum
 #      必须等于本仓库 revision 的 V1 checksum，列集合必须正是当前 V1 的形状；
 #   2. agent_provider / agent_model / agent_definition 三张表必须为空；
 #   3. 包内 manifest 的 V1 checksum 与本地一致，bundle 的 sha256 与 manifest 一致。
@@ -16,6 +16,8 @@
 # 恢复脚本自身用 `\set VERBOSITY sqlstate`：失败时 psql 只报错误码，日志里不会出现任何行值。
 # stdout 全部丢弃，失败时只保留一份 mode-0600 的、只含 SQLSTATE 与安全类别说明的日志。
 # 提交之后仍会再核对一次指纹（纵深防御）：此时不符只可能来自并发写入。
+#
+# 连接来源按优先级合并：--host/--port/--username/--database > VPS_POSTGRES_* > 标准 libpq。
 
 set -euo pipefail
 umask 077
@@ -35,14 +37,19 @@ ACTUAL_V1_CHECKSUM=
 PACKAGE_REPORT=
 TARGET_REPORT=
 RAW_LOG=
+CLI_HOST=
+CLI_PORT=
+CLI_USERNAME=
+CLI_DATABASE=
 
 usage() {
   cat <<'EOF'
 Usage: scripts/ops/import-agent-catalog.sh --package PATH [options]
 
 Restore an Agent catalog package exported by export-agent-catalog.sh into the connected
-database.  The target must have run the application once, so Flyway V1 is recorded and the
-three catalog tables exist empty with the current V1 columns.
+database.  The target must already have V1 applied by the external schema/Flyway initialization,
+so the V1 history is recorded and the three catalog tables exist empty with the current V1
+columns.
 
 Options:
   --package PATH   exported package directory (required)
@@ -51,20 +58,27 @@ Options:
   --dry-run        validate the package and the target without changing anything
   -h, --help       Show this help
 
-Connection (inherited libpq settings; no connection flag, no password in argv):
-  PGSERVICE + PGPASSFILE are the recommended pair; PGHOST, PGPORT, PGUSER, PGDATABASE,
-  PGSSLMODE and the certificate settings also work.  PGDATABASE must be a plain database
-  name when it is set, otherwise the database libpq connects to is used.
+Connection (no password is ever taken from the command line):
+  --host HOST      database host to connect to
+  --port PORT      database port, 1-65535
+  --username USER  role to connect as
+  --database NAME  plain database name to import into; the database libpq connects to when omitted
 
-The import never starts, stops or inspects the application: for a race-free import, stop the
-application after Flyway V1 has been applied, import, then start it again.
+  A flag wins over the matching VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME or
+  VPS_POSTGRES_DATABASE variable; without any of them the standard libpq settings apply
+  (PGSERVICE + PGPASSFILE, or PGHOST/PGPORT/PGUSER/PGDATABASE and the TLS settings).  The
+  password only ever comes from VPS_POSTGRES_PASSWORD, PGPASSWORD or PGPASSFILE: psql always runs
+  with --no-password, so a missing credential fails instead of prompting.
 
-The restore runs in a single transaction: it locks the three catalog tables, re-checks that they
-are empty, copies every row and compares all three fingerprints before committing, so a
-concurrent writer, a dirty table or a mismatch rolls the whole import back.  A failure log keeps
-SQLSTATE codes and safe categories only, never a row value.
+The import never starts, stops or inspects any service and never needs one to be paused: the
+restore runs in a single transaction that locks the three catalog tables, re-checks that they are
+empty, copies every row and compares all three fingerprints before committing, so a concurrent
+writer, a dirty table or a mismatch rolls the whole import back.  A failure log keeps SQLSTATE
+codes and safe categories only, never a row value.
 
 Environment:
+  VPS_POSTGRES_HOST, VPS_POSTGRES_PORT, VPS_POSTGRES_USERNAME, VPS_POSTGRES_PASSWORD,
+  VPS_POSTGRES_DATABASE        connection overrides (see above)
   KK_STUDIO_IMPORT_DIR        default: $KK_STUDIO_MAINTENANCE_DIR/log
   KK_STUDIO_MAINTENANCE_DIR   default: ${XDG_STATE_HOME:-$HOME/.local/state}/kk-studio/maintenance
   KK_STUDIO_REPO_ROOT         repository root override
@@ -72,6 +86,7 @@ EOF
 }
 
 preflight() {
+  configure_connection "$CLI_HOST" "$CLI_PORT" "$CLI_USERNAME" "$CLI_DATABASE"
   require_command python3
   require_command psql
   require_command mktemp
@@ -111,7 +126,7 @@ preflight() {
   history_present=$(database_scalar "$TARGET_DB" \
     "select to_regclass('public.flyway_schema_history') is not null")
   [ "$history_present" = t ] \
-    || fail "the target database has no Flyway history; start the application once so Flyway applies V1"
+    || fail "the target database has no Flyway history; apply the V1 schema first"
   ACTUAL_V1_CHECKSUM=$(database_scalar "$TARGET_DB" \
     "select checksum from flyway_schema_history
       where version = '1' and success order by installed_rank desc limit 1")
@@ -212,6 +227,26 @@ main() {
       --work-dir)
         [ $# -ge 2 ] || fail "--work-dir requires a path"
         WORK_DIR=$2
+        shift 2
+        ;;
+      --host)
+        [ $# -ge 2 ] || fail "--host requires a value"
+        CLI_HOST=$2
+        shift 2
+        ;;
+      --port)
+        [ $# -ge 2 ] || fail "--port requires a value"
+        CLI_PORT=$2
+        shift 2
+        ;;
+      --username)
+        [ $# -ge 2 ] || fail "--username requires a value"
+        CLI_USERNAME=$2
+        shift 2
+        ;;
+      --database)
+        [ $# -ge 2 ] || fail "--database requires a value"
+        CLI_DATABASE=$2
         shift 2
         ;;
       -h | --help)

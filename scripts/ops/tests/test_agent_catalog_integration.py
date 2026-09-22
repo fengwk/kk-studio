@@ -557,7 +557,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
         self.assertEqual(new_owner, orig_owner)
         self.assertEqual(int(new_connlimit), 7)
 
-        # 3. Simulate application startup running Flyway V1 migration on the empty database.
+        # 3. Simulate the external schema/Flyway initialization on the empty database.
         self.run_psql_file(db_name, V1_SCHEMA_SQL)
         self.run_psql_file(
             db_name,
@@ -1528,7 +1528,7 @@ class TestAgentCatalogIntegration(unittest.TestCase):
             ).split()
             self.assertEqual(["true", "3", "postgres", "UTF8"], metadata)
 
-            # A reset leaves a completely empty database: the application applies Flyway next.
+            # A reset leaves a completely empty database for the external schema initialization.
             self.assertEqual(
                 int(
                     self.run_psql_command(
@@ -1712,6 +1712,99 @@ class TestAgentCatalogIntegration(unittest.TestCase):
                 res_reset.returncode, 0, f"Service reset preflight failed: {sanitize_error(res_reset.stderr)}"
             )
             self.assertIn("maintenance db: postgres", res_reset.stdout)
+
+    # -------------------------------------------------------------------------
+    # Test 9: VPS_POSTGRES_* and CLI connection sources
+    # -------------------------------------------------------------------------
+
+    def test_09_vps_environment_and_cli_connection_sources(self) -> None:
+        # Test intent:
+        # Prove the documented VPS_POSTGRES_* contract performs real password authentication,
+        # overrides conflicting PG* defaults, and never reflects the password. Also prove the four
+        # non-secret CLI options override conflicting VPS endpoint values on another public entry.
+        suffix = uuid.uuid4().hex[:8]
+        source = self.register_db(f"probe_conn_source_{suffix}")
+        target = self.register_db(f"probe_conn_target_{suffix}")
+        self.create_empty_db(source)
+        self.run_psql_file(source, LEGACY_SOURCE_SQL)
+        self.create_v1_database(target)
+
+        vps_environment = {
+            "PGHOST": "127.0.0.2",
+            "PGPORT": "1",
+            "PGUSER": "wrong-role",
+            "PGDATABASE": "wrong_database",
+            "PGPASSWORD": None,
+            "PGPASSFILE": None,
+            "PGSERVICE": "wrong-service",
+            "VPS_POSTGRES_HOST": "127.0.0.1",
+            "VPS_POSTGRES_PORT": str(self.pg_port),
+            "VPS_POSTGRES_USERNAME": "postgres",
+            "VPS_POSTGRES_PASSWORD": FIXTURE_PASSWORD,
+            "VPS_POSTGRES_DATABASE": source,
+        }
+        export_dir = Path(self.test_dir.name) / "vps_env_export"
+        exported = self.run_script(
+            EXPORT_SCRIPT,
+            ["--work-dir", str(export_dir)],
+            env_override=vps_environment,
+        )
+        self.assertEqual(
+            exported.returncode,
+            0,
+            f"VPS environment connection failed: {sanitize_error(exported.stderr)}",
+        )
+        package = self.parse_facts(exported.stdout)["package_dir"]
+        self.assertIn("source_schema=legacy-main", exported.stdout)
+
+        reset_dry_run = self.run_script(
+            RESET_SCRIPT,
+            ["--dry-run", "--work-dir", str(Path(self.test_dir.name) / "vps_env_backup")],
+            env_override=vps_environment,
+        )
+        self.assertEqual(
+            reset_dry_run.returncode,
+            0,
+            f"VPS reset connection failed: {sanitize_error(reset_dry_run.stderr)}",
+        )
+
+        cli_environment = {
+            "PGHOST": "127.0.0.2",
+            "PGPORT": "1",
+            "PGUSER": "wrong-role",
+            "PGDATABASE": "wrong_database",
+            "PGPASSWORD": None,
+            "PGPASSFILE": None,
+            "PGSERVICE": "wrong-service",
+            "VPS_POSTGRES_HOST": "127.0.0.2",
+            "VPS_POSTGRES_PORT": "1",
+            "VPS_POSTGRES_USERNAME": "wrong-role",
+            "VPS_POSTGRES_PASSWORD": FIXTURE_PASSWORD,
+            "VPS_POSTGRES_DATABASE": "wrong_database",
+        }
+        imported = self.run_script(
+            IMPORT_SCRIPT,
+            [
+                "--package",
+                package,
+                "--dry-run",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(self.pg_port),
+                "--username",
+                "postgres",
+                "--database",
+                target,
+            ],
+            env_override=cli_environment,
+        )
+        self.assertEqual(
+            imported.returncode,
+            0,
+            f"CLI connection failed: {sanitize_error(imported.stderr)}",
+        )
+        self.assertIn("Dry-run complete", imported.stdout)
 
     # -------------------------------------------------------------------------
     # Test 6: Credential non-disclosure

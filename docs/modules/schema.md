@@ -180,14 +180,14 @@ Plugin opaque payload，不按 provider token 字段建列；管理查询永远�
 
 ## 修改 V1 的代价
 
-`V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库由 NAS 上的 App 节点与访问它的本机 preview 同时使用，所以这条路径有硬性安全要求：
+`V1__schema.sql` 是**不可变 baseline**：它已经被共享数据库执行过，Flyway 校验它的 checksum，因此修改它的含义是「重建数据库」，不是「打补丁」。共享数据库可能有多个客户端，所以这条路径有硬性安全要求：
 
 - 普通自迭代**不得**改写已运行数据库的 V1 历史，也不得重置共享 database 或删除共享 bucket。`dev` 分支中未合并的 schema 变更不得应用到共享库；涉及 schema 的改动必须先完成 Review 与 `main` 集成。
-- 需要重建时必须先停止 App 节点，并在 Human 明确批准的维护窗口内执行。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable Agent catalog 搬回去」：只有 `agent_provider`、`agent_model` 和 `agent_definition` 三张表会迁移回灌；`environment`、`skill_package` 与 `plugin_credential` 不再由维护脚本迁移（`environment` 行连同注册令牌一起丢失，因此已有 Daemon token 文件无法再认证：必须重新创建 Environment Card 并把新令牌写回各主机，Daemon 才能重连并重建 `environment_connection` 运行投影；`skill_package` 与 `plugin_credential` 在重建后需重新创建）；Platform MCP 配置（`mcp_server`/`mcp_tool`）在重建后按需重新创建或发现；`system_setting` 取 V1 默认聚合；全部运行时数据（会话/Harness/Canvas/Project/Issue/Storage）都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
+- 重建只能在 Human 明确批准的维护窗口内执行。维护脚本不管理任何服务生命周期：reset 在存在其他数据库会话时只读拒绝，import 用事务锁、空表复查和指纹校验防止并发提交。重建在结构上等价于「用一个由新 V1 建出的空库替换旧库，再把 durable Agent catalog 搬回去」：只有 `agent_provider`、`agent_model` 和 `agent_definition` 三张表会迁移回灌；`environment`、`skill_package` 与 `plugin_credential` 不再由维护脚本迁移（`environment` 行连同注册令牌一起丢失，因此已有 Daemon token 文件无法再认证：必须重新创建 Environment Card 并把新令牌写回各主机，Daemon 才能重连并重建 `environment_connection` 运行投影；`skill_package` 与 `plugin_credential` 在重建后需重新创建）；Platform MCP 配置（`mcp_server`/`mcp_tool`）在重建后按需重新创建或发现；`system_setting` 取 V1 默认聚合；全部运行时数据（会话/Harness/Canvas/Project/Issue/Storage）都不保留。因此新增的非空约束必须有 V1 默认值或应用代码兜底，否则重建会丢掉无法回灌的运行时行。
 - 回灌只承认两种源结构：与当前 V1 完全一致的库（`current`），以及 `main` 上正在运行的旧结构（`legacy-main`）；判别只读三张 catalog 表的列集合（`agent_definition.environment_id` 是否存在），并要求该结构的列集合精确匹配，skill、plugin、environment 等不迁移域的表是否存在与其无关。旧结构里 Environment 既持有 Agent 定义关系又持有 Skill 包，Agent 定义的 `config.skills` 与 Environment 属性表都是独立事实；投影到当前 V1 时：`toolIds` 按内建标识映射或改写为已发现的 `mcp_tool.model_name`，`subagents` 原样保留，`inheritParentEnvironment` 在旧结构里不存在，按当前默认值 `true` 初始化；只有旧结构里本来就是空数组的 `skills` 才会投影为当前空列表，非空 Skill 引用意味着当前 V1 没有可承接的 durable 事实（环境绑定的 Skill 来源并非全局 Git 仓库包），在预检阶段直接失败，不会被静默清空。旧结构里「Agent 定义归属某个 Environment」也不再是 durable 配置：执行环境改由 Thread/Session 侧在发起时决定，因此 `agent_definition.environment_id` 在投影时被明确丢弃、不回灌。Skill 引用非空、工具标识无法映射或重名、配置非法、列集合既不匹配当前 V1 也不匹配旧结构时，预检直接失败并保留原库，不做任何降级推测。
 - 导出的 catalog 包与全库冻结快照/备份含 Provider credential 等敏感数据，必须按敏感数据处理：禁止提交到 Git、写进文档、粘贴到日志或工单、上传公共存储；维护完成且验证通过后，按部署侧备份策略安全清理或留存。
 
-就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：需要先停止全部 App 节点，执行放宽语句，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则 App 启动时 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
+就地放宽既有列的约束（例如 `varchar(n)` → `text`）可以避免重建空库，但仍属于维护窗口操作：由 PostgreSQL 的 DDL lock 保证执行边界，再把 `flyway_schema_history` 中该 version 的 `checksum` 更新为新 V1 的 checksum，否则后续 Flyway 校验失败。`varchar(n)` → `text` 在 PostgreSQL 是二进制兼容变更，不重写表数据；放宽后的结构必须与空库直接应用新 V1 的结果完全一致。
 
 完整的执行步骤、脚本参数、失败处理和清理约定见 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建)。
 

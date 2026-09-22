@@ -1,9 +1,9 @@
 """Permanent contracts of the Agent catalog maintenance scripts.
 
-The maintenance flow is three small steps around one normal application start: export the durable
-Agent catalog read-only, reset the database to a completely empty one, let the application's Flyway
-apply V1, then import the catalog.  Three properties must never regress and cannot be proven by an
-integration test alone, because they are properties of the artifacts and of the shell contract:
+The maintenance flow has three small database-only steps around an external schema initialization:
+export the durable Agent catalog read-only, reset the database to a completely empty one, apply V1,
+then import the catalog. Three properties must never regress and cannot be proven by an integration
+test alone, because they are properties of the artifacts and of the shell contract:
 
 * the migrated table set and the explicit target columns stay identical to the V1 baseline;
 * the package is a fixed, versioned, owner-only format whose manifest never carries a row value;
@@ -953,16 +953,21 @@ class TestShellEntrypointContracts(unittest.TestCase):
             for forbidden in ("docker", "kubectl", "jdbc", "container", "ssh", "psycopg"):
                 self.assertNotIn(forbidden, source.lower(), f"{path.name} mentions {forbidden}")
 
-    def test_never_uses_a_password_option_or_a_password_variable(self):
-        """Passwords never travel through argv, and libpq is always told not to prompt."""
+    def test_never_uses_a_password_option(self):
+        """Passwords may come from environment variables, but never travel through client argv."""
         for path in PRODUCTION_FILES:
             source = path.read_text()
-            for forbidden in ("PGPASSWORD", "--password", " -W ", "password="):
+            for forbidden in ("--password", " -W ", "password="):
                 self.assertNotIn(forbidden, source, f"{path.name} mentions {forbidden}")
 
         # The library and the helper are the only places that build a libpq client argv.
         self.assertIn("--no-password", LIBRARY.read_text())
         self.assertIn("--no-password", HELPER.read_text())
+        connection = function_body(LIBRARY, "configure_connection")
+        self.assertIn("PGPASSWORD=$VPS_POSTGRES_PASSWORD", connection)
+        self.assertIn("unset VPS_POSTGRES_PASSWORD", connection)
+        for script in (EXPORT_SCRIPT, RESET_SCRIPT, IMPORT_SCRIPT):
+            self.assertNotIn("--password)", function_body(script, "main"))
 
         # A direct shell client invocation must carry the flag on the spot; psql goes through the
         # library wrappers, which already apply it.  Comment lines are prose, not invocations.
@@ -974,6 +979,107 @@ class TestShellEntrypointContracts(unittest.TestCase):
                     continue
                 with self.subTest(file=path.name, line=stripped):
                     self.assertIn("--no-password", stripped)
+
+    def test_connection_options_are_consistent_across_entrypoints(self):
+        """Every public script accepts the same four non-secret connection options."""
+        expected = ("--host", "--port", "--username", "--database")
+        for script in (EXPORT_SCRIPT, RESET_SCRIPT, IMPORT_SCRIPT):
+            source = script.read_text()
+            main = function_body(script, "main")
+            with self.subTest(script=script.name):
+                for option in expected:
+                    self.assertIn(option, source)
+                    self.assertIn(option + ")", main)
+                self.assertIn("configure_connection", source)
+                self.assertIn("VPS_POSTGRES_PASSWORD", source)
+
+    def test_connection_precedence_and_password_mapping(self):
+        """CLI wins over VPS variables, which win over direct PG variables."""
+        result = run_library_snippet(
+            """
+configure_connection cli-host 6543 cli-user cli_db
+printf '%s|%s|%s|%s\\n' "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE"
+[ "$PGPASSWORD" = fixture-secret ]
+[ -z "${VPS_POSTGRES_PASSWORD+x}" ]
+[ -z "${PGSERVICE+x}" ]
+""",
+            {
+                "PGHOST": "pg-host",
+                "PGPORT": "1111",
+                "PGUSER": "pg-user",
+                "PGDATABASE": "pg_db",
+                "PGSERVICE": "ambient-service",
+                "VPS_POSTGRES_HOST": "vps-host",
+                "VPS_POSTGRES_PORT": "2222",
+                "VPS_POSTGRES_USERNAME": "vps-user",
+                "VPS_POSTGRES_PASSWORD": "fixture-secret",
+                "VPS_POSTGRES_DATABASE": "vps_db",
+            },
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("cli-host|6543|cli-user|cli_db", result.stdout.strip())
+        self.assertNotIn("fixture-secret", result.stdout + result.stderr)
+
+        result = run_library_snippet(
+            """
+configure_connection '' '' '' ''
+printf '%s|%s|%s|%s\\n' "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE"
+""",
+            {
+                "PGHOST": "pg-host",
+                "PGPORT": "1111",
+                "PGUSER": "pg-user",
+                "PGDATABASE": "pg_db",
+                "VPS_POSTGRES_HOST": "vps-host",
+                "VPS_POSTGRES_PORT": "2222",
+                "VPS_POSTGRES_USERNAME": "vps-user",
+                "VPS_POSTGRES_DATABASE": "vps_db",
+            },
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("vps-host|2222|vps-user|vps_db", result.stdout.strip())
+
+    def test_password_only_can_authenticate_a_libpq_service(self):
+        """A VPS password alone maps to libpq without disabling an existing service endpoint."""
+        result = run_library_snippet(
+            """
+configure_connection '' '' '' ''
+[ "$PGPASSWORD" = fixture-secret ]
+[ "$PGSERVICE" = fixture-service ]
+[ -z "${VPS_POSTGRES_PASSWORD+x}" ]
+""",
+            {
+                "PGSERVICE": "fixture-service",
+                "VPS_POSTGRES_PASSWORD": "fixture-secret",
+                "VPS_POSTGRES_HOST": None,
+                "VPS_POSTGRES_PORT": None,
+                "VPS_POSTGRES_USERNAME": None,
+                "VPS_POSTGRES_DATABASE": None,
+            },
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("fixture-secret", result.stdout + result.stderr)
+
+    def test_connection_port_and_database_are_validated_without_echoing_values(self):
+        """Malformed endpoint values fail before database access and are not reflected."""
+        for port in ("0", "65536", "not-a-port", "123456"):
+            with self.subTest(port=port):
+                result = run_library_snippet(
+                    "configure_connection '' '' '' ''",
+                    {"VPS_POSTGRES_PORT": port},
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("decimal port number", result.stderr)
+                self.assertNotIn(port, result.stderr)
+
+        secret = "dbname=x password=connection-secret"
+        result = run_library_snippet(
+            "configure_connection '' '' '' ''",
+            {"VPS_POSTGRES_DATABASE": secret},
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("plain PostgreSQL identifier", result.stderr)
+        self.assertNotIn("connection-secret", result.stdout + result.stderr)
 
     def test_lib_and_helper_agree_on_the_migrated_tables(self):
         """The shell and the helper must migrate exactly the same tables in the same order."""
