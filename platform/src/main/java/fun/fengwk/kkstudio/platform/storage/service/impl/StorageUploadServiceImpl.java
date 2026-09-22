@@ -38,11 +38,20 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -190,19 +199,124 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     S3ObjectMetadata head = headObjectWithChecksumOrFail(uploadId, tempKey);
     verifyObject(head, upload);
     StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
+    UUID blobId = materializeAndBind(upload, facts, false);
+    return toDTO(upload.getId(), blobId, upload.getExpiresAt(), null);
+  }
 
+  @Override
+  public StagedUpload stage(String filename, String mediaType, InputStream content, long maxBytes) {
+    rejectActiveTransaction();
+    Objects.requireNonNull(content, "content must not be null");
+    if (maxBytes <= 0) {
+      throw new IllegalArgumentException("maxBytes must be positive");
+    }
+    String normalizedFilename = validateFilename(filename);
+    String normalizedMediaType = normalizeMediaType(mediaType);
+    Path spool = null;
+    try {
+      spool = Files.createTempFile("storage-stage-", ".tmp");
+      MessageDigest digest = newSha256();
+      long total = 0;
+      try (OutputStream output = Files.newOutputStream(spool)) {
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = content.read(buffer)) != -1) {
+          total += read;
+          if (total > maxBytes) {
+            throw new IllegalArgumentException(
+                "staged content must not exceed " + maxBytes + " bytes");
+          }
+          digest.update(buffer, 0, read);
+          output.write(buffer, 0, read);
+        }
+      }
+      validateSize(total);
+      return stageSpooled(
+          normalizedFilename,
+          normalizedMediaType,
+          spool,
+          new FileFacts(total, HexFormat.of().formatHex(digest.digest())));
+    } catch (IOException error) {
+      throw new UncheckedIOException("failed to spool staged content", error);
+    } finally {
+      if (spool != null) {
+        try {
+          Files.deleteIfExists(spool);
+        } catch (IOException error) {
+          log.warn("failed to delete storage stage spool {}", spool);
+        }
+      }
+    }
+  }
+
+  private StagedUpload stageSpooled(
+      String filename, String mediaType, Path content, FileFacts fileFacts) {
+    UUID uploadId = UUID.randomUUID();
+    UUID candidateBlobId = UUID.randomUUID();
+    Instant expiresAt = clock.instant().plusSeconds(storageMedia.uploadExpiresSeconds());
+    StorageUpload upload =
+        newUpload(
+            uploadId,
+            candidateBlobId,
+            null,
+            filename,
+            mediaType,
+            fileFacts.sizeBytes(),
+            fileFacts.sha256(),
+            expiresAt);
+    transactionTemplate.executeWithoutResult(
+        status -> {
+          if (!uploadRepository.insert(upload)) {
+            throw new IllegalStateException("insert storage upload failed: " + uploadId);
+          }
+        });
+
+    try {
+      String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
+      try (InputStream input = Files.newInputStream(content)) {
+        // content 是本方法私有 spool：摘要与长度在写完并关闭后冻结，PUT 读取的正是该文件。
+        s3StorageService.putObject(tempKey, input, fileFacts.sizeBytes(), mediaType);
+      } catch (IOException error) {
+        throw new UncheckedIOException("failed to read staged content", error);
+      }
+      S3ObjectMetadata head = headObjectWithChecksumOrFail(uploadId, tempKey);
+      verifyObject(head, upload);
+      StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
+      UUID blobId = materializeAndBind(upload, facts, true);
+      StorageBlob blob = blobManager.getBlob(blobId);
+      if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+        throw new IllegalStateException("staged upload resolved to a missing blob");
+      }
+      return new StagedUpload(
+          uploadId, blobId, filename, blob.getMediaType(), blob.getSizeBytes(), blob.getSha256());
+    } catch (RuntimeException failure) {
+      requestFailedStageCleanup(upload);
+      throw failure;
+    }
+  }
+
+  private UUID materializeAndBind(
+      StorageUpload upload, StorageMediaFacts facts, boolean bestEffortObjectCleanup) {
+    String tempKey = StorageObjectKeys.uploadOriginal(upload.getId());
     // 先物化候选 blob 的最终对象，再让 DB 引用它：DB 绝不引用缺失的最终对象。
-    String candidateKey = StorageObjectKeys.blobOriginal(upload.getCandidateBlobId());
-    s3StorageService.copyObject(tempKey, candidateKey);
-
+    s3StorageService.copyObject(
+        tempKey, StorageObjectKeys.blobOriginal(upload.getCandidateBlobId()));
     UUID blobId = transactionTemplate.execute(status -> resolveBlobAndBindUpload(upload, facts));
     if (!blobId.equals(upload.getCandidateBlobId())) {
       // 去重落败：未使用的候选对象幂等清理（预览先于原始）；READY 上传行（candidate_blob_id）
       // 是崩溃窗口的恢复证据。
-      cleanupCandidateObjects(upload.getCandidateBlobId());
+      if (bestEffortObjectCleanup) {
+        cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
+      } else {
+        cleanupCandidateObjects(upload.getCandidateBlobId());
+      }
     }
-    s3StorageService.deleteObjectIfExists(tempKey);
-    return toDTO(uploadId, blobId, upload.getExpiresAt(), null);
+    if (bestEffortObjectCleanup) {
+      deleteObjectBestEffort(tempKey);
+    } else {
+      s3StorageService.deleteObjectIfExists(tempKey);
+    }
+    return blobId;
   }
 
   @Override
@@ -326,6 +440,34 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private void cleanupCandidateObjects(UUID candidateBlobId) {
     s3StorageService.deleteObjectIfExists(StorageObjectKeys.blobPreview(candidateBlobId));
     s3StorageService.deleteObjectIfExists(StorageObjectKeys.blobOriginal(candidateBlobId));
+  }
+
+  private void cleanupCandidateObjectsBestEffort(UUID candidateBlobId) {
+    deleteObjectBestEffort(StorageObjectKeys.blobPreview(candidateBlobId));
+    deleteObjectBestEffort(StorageObjectKeys.blobOriginal(candidateBlobId));
+  }
+
+  private void deleteObjectBestEffort(String key) {
+    try {
+      s3StorageService.deleteObjectIfExists(key);
+    } catch (RuntimeException error) {
+      log.warn("deferred cleanup for storage object {}", key);
+    }
+  }
+
+  /** Stage 失败时优先留下耐久 cleanup request；若过期回收已并发删除行，则直接幂等清理已知对象键，避免存活进程继续写出无事实对象。 */
+  private void requestFailedStageCleanup(StorageUpload upload) {
+    try {
+      delete(upload.getId());
+      return;
+    } catch (StorageResourceNotFoundException | StorageVerificationException ignored) {
+      // 回收器可能已 claim 或删除该行；下面直接幂等清理确定性对象键。
+    } catch (RuntimeException error) {
+      log.warn("failed to request cleanup for staged upload {}", upload.getId());
+      return;
+    }
+    deleteObjectBestEffort(StorageObjectKeys.uploadOriginal(upload.getId()));
+    cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
   }
 
   private void cleanupUploadObjects(StorageUpload upload) {
@@ -484,6 +626,22 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     blob.setState(StorageBlobState.ACTIVE);
     return blob;
   }
+
+  private static void rejectActiveTransaction() {
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      throw new IllegalStateException("storage staging must run without an active transaction");
+    }
+  }
+
+  private static MessageDigest newSha256() {
+    try {
+      return MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 is not available", error);
+    }
+  }
+
+  private record FileFacts(long sizeBytes, String sha256) {}
 
   private static StorageUploadDTO toDTO(
       UUID uploadId, UUID blobId, Instant expiresAt, StoragePresignedUrlDTO presignedPut) {

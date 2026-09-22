@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.storage.service;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 
+import java.io.InputStream;
 import java.util.UUID;
 
 /**
@@ -24,6 +25,23 @@ public interface StorageUploadService {
 
   /** 完成上传：校验直传对象并绑定 blob，返回 READY。 */
   StorageUploadDTO complete(UUID uploadId);
+
+  /**
+   * 服务端有界 spool 输入流并准备一个可消费的 READY upload。调用前不得存在活动事务；实现先以独立短事务登记 PENDING
+   * candidate，再在事务外执行对象写入、媒体探针与复制，最后以短事务完成去重绑定。输入流由调用方关闭。
+   *
+   * @param maxBytes 允许的最大字节数
+   */
+  StagedUpload stage(String filename, String mediaType, InputStream content, long maxBytes);
+
+  /** 服务端 staging 完成后的权威事实；媒体类型来自探针，不信任调用方声明。 */
+  record StagedUpload(
+      UUID uploadId,
+      UUID blobId,
+      String filename,
+      String mediaType,
+      long sizeBytes,
+      String sha256) {}
 
   /**
    * 删除上传：请求线程只在短事务内持久化 cleanup request 并快速返回，后台再幂等删除临时/候选对象与上传行；READY 在首次标记时同事务 release

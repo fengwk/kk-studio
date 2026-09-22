@@ -272,6 +272,7 @@ class ToolExecutionGatewayEffectsTest {
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             resourceStore,
+            resourceStore,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -360,6 +361,7 @@ class ToolExecutionGatewayEffectsTest {
             new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
+            resourceStore,
             resourceStore,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
@@ -458,6 +460,7 @@ class ToolExecutionGatewayEffectsTest {
             new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
+            resourceStore,
             resourceStore,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,

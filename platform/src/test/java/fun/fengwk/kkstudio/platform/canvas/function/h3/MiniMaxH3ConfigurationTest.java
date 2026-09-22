@@ -12,7 +12,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 /** 配置测试覆盖默认关闭装配、启用时的 token fail-fast 与聚合 runtime 边界。 */
 class MiniMaxH3ConfigurationTest {
@@ -45,7 +46,8 @@ class MiniMaxH3ConfigurationTest {
             mock(HarnessOneShotService.class),
             workflowBuilder,
             mock(ObjectProvider.class),
-            mock(StorageBlobIngestService.class),
+            mock(StorageUploadService.class),
+            mock(SessionBlobRefManager.class),
             mapper));
   }
 
@@ -65,7 +67,8 @@ class MiniMaxH3ConfigurationTest {
             mock(HarnessOneShotService.class),
             configuration.h3WorkflowBuilder(mapper),
             mock(ObjectProvider.class),
-            mock(StorageBlobIngestService.class),
+            mock(StorageUploadService.class),
+            mock(SessionBlobRefManager.class),
             mapper));
   }
 

@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmiss
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -62,6 +63,7 @@ public class HarnessToolGatewayConfiguration {
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
+      StorageUploadService storageUploadService,
       SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
       @Qualifier("toolExecutionAdmission") ConcurrencyAdmission admission,
@@ -76,6 +78,7 @@ public class HarnessToolGatewayConfiguration {
         permissionEvaluator,
         toolSettingsProvider,
         resourceStore,
+        new StorageUploadToolResourceStager(storageUploadService, resourceMaxBytes),
         resourceMaxBytes,
         toolGatewayExecutor,
         () ->

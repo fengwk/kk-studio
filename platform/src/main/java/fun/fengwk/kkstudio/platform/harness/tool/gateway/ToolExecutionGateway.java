@@ -129,6 +129,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ResourceStore resourceStore,
+      ToolResourceStager resourceStager,
       int resourceMaxBytes,
       ExecutorService executor,
       Supplier<Duration> retryDelay,
@@ -144,7 +145,9 @@ public final class ToolExecutionGateway implements ToolGateway {
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.finalizer =
         new ToolResultFinalizer(
-            Objects.requireNonNull(resourceStore, "resourceStore"), resourceMaxBytes);
+            Objects.requireNonNull(resourceStore, "resourceStore"),
+            Objects.requireNonNull(resourceStager, "resourceStager"),
+            resourceMaxBytes);
     this.executor = Objects.requireNonNull(executor, "executor");
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");

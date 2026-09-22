@@ -27,6 +27,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * {@link ToolResultFinalizer} 单元测试：
@@ -95,7 +96,7 @@ class ToolResultFinalizerTest {
   @Test
   void inlinesWhenBothBytesAndLinesAreWithinThreshold() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
 
     ToolResult result =
         new ToolResult(
@@ -120,7 +121,7 @@ class ToolResultFinalizerTest {
   @Test
   void externalizesWhenUtf8BytesExceedThreshold() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
 
     String largeText = "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
     ToolResult result =
@@ -147,7 +148,7 @@ class ToolResultFinalizerTest {
   @Test
   void externalizesWhenPhysicalLinesExceedThreshold() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
 
     // 2001 行，每行 "a\n"，总字节 4002（远小于 50 KiB），但行数超出 2000 行
     StringBuilder sb = new StringBuilder();
@@ -173,7 +174,7 @@ class ToolResultFinalizerTest {
   @Test
   void singleJsonExternalizedGetsJsonMediaTypeAndExtension() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
 
     String largeJson =
         "{\"field\":\"" + "y".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES) + "\"}";
@@ -195,7 +196,7 @@ class ToolResultFinalizerTest {
   @Test
   void multipleContentsPreservesNonTextAndReplacesAtFirstTextIndex() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
 
     byte[] bin1 = new byte[] {1, 2};
     byte[] bin2 = new byte[] {3, 4};
@@ -242,7 +243,7 @@ class ToolResultFinalizerTest {
   void hardLimitExceededReturnsOutputTooLarge() {
     RecordingResourceStore store = new RecordingResourceStore();
     int limit = 100;
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, limit);
+    ToolResultFinalizer finalizer = finalizer(store, limit);
 
     ToolResult result =
         new ToolResult(
@@ -259,7 +260,7 @@ class ToolResultFinalizerTest {
   @Test
   void invalidUnicodeReturnsInvalidResult() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
 
     // 孤立未配对高代理项
     String badUnicode = "bad: \uD800 tail";
@@ -277,7 +278,14 @@ class ToolResultFinalizerTest {
   @Test
   void storeFailureReturnsResourceStoreFailed() {
     FailingResourceStore store = new FailingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer =
+        new ToolResultFinalizer(
+            store,
+            stager(
+                (mediaType, name, content) -> {
+                  throw new IllegalStateException("disk full");
+                }),
+            ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
 
     String largeText = "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
     ToolResult result =
@@ -294,7 +302,7 @@ class ToolResultFinalizerTest {
   @Test
   void binaryOversizedOrInvalidMediaTypeIsRejected() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, 100);
 
     // 超过 100 字节的 binary
     ToolResult oversized =
@@ -321,7 +329,7 @@ class ToolResultFinalizerTest {
   @Test
   void spooledResourceResultValidation() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, 1000);
+    ToolResultFinalizer finalizer = finalizer(store, 1000);
 
     String text = "line\n".repeat(4) + "x".repeat(80);
     byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
@@ -369,7 +377,7 @@ class ToolResultFinalizerTest {
   @Test
   void daemonTextBinaryIsPersistedWithRecomputedMetadataAndPreview() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
     String text = "hello\nworld\n";
     byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
     BinaryResultContent binary =
@@ -391,7 +399,7 @@ class ToolResultFinalizerTest {
   @Test
   void daemonTextBinaryRejectsInvalidUtf8OrLineMetadataBeforeStorage() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
     BinaryResultContent invalidUtf8 =
         new BinaryResultContent(
             "text/plain", new byte[] {(byte) 0xC3, (byte) 0x28}, new TextArtifactMetadata(2, 1));
@@ -421,7 +429,7 @@ class ToolResultFinalizerTest {
   @Test
   void rejectsUnmanagedResourceWithoutEchoingItsUri() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store);
+    ToolResultFinalizer finalizer = finalizer(store);
     String secretUri = "https://example.com/private-token";
     ResourceRef external = new ResourceRef(secretUri, "image/png", "image.png", 1L, "a".repeat(64));
 
@@ -442,7 +450,7 @@ class ToolResultFinalizerTest {
   @Test
   void daemonUploadReferencePassesThroughWithoutResourceStoreIo() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, 100);
     byte[] bytes = new byte[] {1, 2, 3};
     ResourceRef upload =
         new ResourceRef(
@@ -468,7 +476,7 @@ class ToolResultFinalizerTest {
   @Test
   void daemonUploadReferenceRejectsTextMetadataAndOversize() {
     RecordingResourceStore store = new RecordingResourceStore();
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, 100);
     byte[] bytes = new byte[] {1, 2, 3};
     ResourceRef upload =
         new ResourceRef(
@@ -489,7 +497,7 @@ class ToolResultFinalizerTest {
                 false,
                 "{}"));
     ToolResultFinalizer.Outcome oversized =
-        new ToolResultFinalizer(store, 2)
+        finalizer(store, 2)
             .finalizeResult(
                 TOOL_NAME,
                 new ToolResult("call-2", List.of(new ResourceResultContent(upload)), false, "{}"));
@@ -502,6 +510,129 @@ class ToolResultFinalizerTest {
         assertInstanceOf(ToolResultFinalizer.Outcome.Failed.class, oversized).error().kind());
     assertEquals(0, store.reads);
     assertTrue(store.puts.isEmpty());
+  }
+
+  private static ToolResultFinalizer finalizer(RecordingResourceStore store) {
+    return finalizer(store, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+  }
+
+  private static ToolResultFinalizer finalizer(RecordingResourceStore store, int resourceMaxBytes) {
+    ToolResourceStager stager =
+        stager(
+            (mediaType, name, content) -> {
+              store.puts.add(new RecordingResourceStore.PutRecord(mediaType, name, content));
+              return new ResourceRef(
+                  ResourceRef.blobUploadUri(UUID.randomUUID()),
+                  mediaType,
+                  name,
+                  (long) content.length,
+                  sha256Hex(content));
+            });
+    return new ToolResultFinalizer(store, stager, resourceMaxBytes);
+  }
+
+  @Test
+  void storageStagerConvertsManagedAndBinaryResourcesToBlobUploads() {
+    // 生产准备器在全部 plan 校验后统一转换资源，history 不再需要回读 ResourceStore。
+    RecordingResourceStore store = new RecordingResourceStore();
+    byte[] managedBytes = "managed".getBytes(StandardCharsets.UTF_8);
+    ResourceRef managed = store.seed("text/plain", "managed.txt", managedBytes);
+    List<String> stagedNames = new ArrayList<>();
+    ToolResourceStager stager =
+        stager(
+            (mediaType, name, content) -> {
+              stagedNames.add(name);
+              return new ResourceRef(
+                  ResourceRef.blobUploadUri(UUID.randomUUID()),
+                  mediaType,
+                  name,
+                  (long) content.length,
+                  sha256Hex(content));
+            });
+    ToolResultFinalizer finalizer =
+        new ToolResultFinalizer(store, stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+
+    ToolResultFinalizer.Outcome outcome =
+        finalizer.finalizeResult(
+            TOOL_NAME,
+            new ToolResult(
+                "call-1",
+                List.of(
+                    new ResourceResultContent(managed),
+                    new BinaryResultContent(
+                        "application/octet-stream", new byte[] {1, 2, 3}, null)),
+                false,
+                "{}"));
+
+    ToolResult result =
+        assertInstanceOf(ToolResultFinalizer.Outcome.Success.class, outcome).result();
+    assertEquals(List.of("managed.txt", "demo_tool-result-2"), stagedNames);
+    assertTrue(
+        result.contents().stream()
+            .map(ResourceResultContent.class::cast)
+            .allMatch(content -> content.resource().blobUploadId() != null));
+  }
+
+  @Test
+  void partialStagingFailureDiscardsAlreadyPreparedResources() {
+    // 第二个资源准备失败时，第一个 READY upload 必须立即请求清理；TTL 只保留为兜底。
+    RecordingResourceStore store = new RecordingResourceStore();
+    List<ResourceRef> discarded = new ArrayList<>();
+    AtomicInteger calls = new AtomicInteger();
+    ToolResourceStager stager =
+        new ToolResourceStager() {
+          @Override
+          public ResourceRef stage(String mediaType, String name, byte[] content) {
+            if (calls.incrementAndGet() == 2) {
+              throw new IllegalStateException("second stage failed");
+            }
+            return new ResourceRef(
+                ResourceRef.blobUploadUri(UUID.randomUUID()),
+                mediaType,
+                name,
+                (long) content.length,
+                sha256Hex(content));
+          }
+
+          @Override
+          public void discard(ResourceRef resource) {
+            discarded.add(resource);
+          }
+        };
+    ToolResultFinalizer finalizer =
+        new ToolResultFinalizer(store, stager, ToolResultFinalizer.DEFAULT_RESOURCE_MAX_BYTES);
+
+    ToolResultFinalizer.Outcome outcome =
+        finalizer.finalizeResult(
+            TOOL_NAME,
+            new ToolResult(
+                "call-1",
+                List.of(
+                    new BinaryResultContent("application/octet-stream", new byte[] {1}),
+                    new BinaryResultContent("application/octet-stream", new byte[] {2})),
+                false,
+                "{}"));
+
+    assertInstanceOf(ToolResultFinalizer.Outcome.StoreFailed.class, outcome);
+    assertEquals(1, discarded.size());
+    assertNotNull(discarded.getFirst().blobUploadId());
+  }
+
+  private static ToolResourceStager stager(StagingFunction stagingFunction) {
+    return new ToolResourceStager() {
+      @Override
+      public ResourceRef stage(String mediaType, String name, byte[] content) {
+        return stagingFunction.stage(mediaType, name, content);
+      }
+
+      @Override
+      public void discard(ResourceRef resource) {}
+    };
+  }
+
+  @FunctionalInterface
+  private interface StagingFunction {
+    ResourceRef stage(String mediaType, String name, byte[] content);
   }
 
   private static final class RecordingResourceStore implements ResourceStore {

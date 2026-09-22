@@ -14,7 +14,6 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -30,13 +29,11 @@ import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.HeadOnlyStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlSessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobIngestService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
@@ -187,24 +184,6 @@ public class S3StorageConfiguration {
     return new PostgresqlSessionBlobRefManager(refRepository, blobManager);
   }
 
-  /** 服务端字节内容的 blob 摄入：Tool/Daemon Resource 外部化的存储入口（MANDATORY 事务）。 */
-  @Bean
-  public StorageBlobIngestService storageBlobIngestService(
-      StorageBlobRepository blobRepository,
-      StorageBlobManager blobManager,
-      SessionBlobRefManager refManager,
-      S3StorageService s3StorageService,
-      ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
-      PlatformTransactionManager transactionManager) {
-    return new PostgresqlStorageBlobIngestService(
-        blobRepository,
-        blobManager,
-        refManager,
-        s3StorageService,
-        maintenanceWakeup,
-        transactionManager);
-  }
-
   /** Provider attempt 的 Resource 物化端口（支持的媒体有界内联为 Base64，绝不产生 URL，瞬时 source 绝不持久化）。 */
   @Bean
   public ProviderResourceMaterializer providerResourceMaterializer(
@@ -218,18 +197,14 @@ public class S3StorageConfiguration {
    */
   @Bean
   public GlobalStorageToolResultHistoryMaterializer globalStorageToolResultHistoryMaterializer(
-      StorageBlobIngestService ingestService,
       StorageUploadService uploadService,
       SessionBlobRefManager refManager,
       StorageBlobManager blobManager,
-      ResourceStore resourceStore,
       SystemSettingsSnapshot snapshot) {
     return new GlobalStorageToolResultHistoryMaterializer(
-        ingestService,
         uploadService,
         blobManager,
         refManager,
-        resourceStore,
         Math.toIntExact(snapshot.get().advanced().resourceMaxBytes()));
   }
 

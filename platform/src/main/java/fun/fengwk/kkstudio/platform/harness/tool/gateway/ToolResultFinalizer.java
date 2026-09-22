@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -83,14 +84,13 @@ public final class ToolResultFinalizer {
       Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
 
   private final ResourceStore resourceStore;
+  private final ToolResourceStager resourceStager;
   private final int resourceMaxBytes;
 
-  public ToolResultFinalizer(ResourceStore resourceStore) {
-    this(resourceStore, DEFAULT_RESOURCE_MAX_BYTES);
-  }
-
-  public ToolResultFinalizer(ResourceStore resourceStore, int resourceMaxBytes) {
+  public ToolResultFinalizer(
+      ResourceStore resourceStore, ToolResourceStager resourceStager, int resourceMaxBytes) {
     this.resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
+    this.resourceStager = Objects.requireNonNull(resourceStager, "resourceStager");
     if (resourceMaxBytes <= 0) {
       throw new IllegalArgumentException("resourceMaxBytes must be positive");
     }
@@ -120,6 +120,7 @@ public final class ToolResultFinalizer {
     }
 
     List<ResultContent> finalContents = new ArrayList<>(plan.items().size());
+    List<ResourceRef> stagedResources = new ArrayList<>();
     for (PlanItem item : plan.items()) {
       if (item instanceof PlanItem.PassThrough pass) {
         finalContents.add(pass.content());
@@ -127,11 +128,17 @@ public final class ToolResultFinalizer {
         ResourceRef returned;
         try {
           returned =
-              resourceStore.put(store.planned().mediaType(), store.planned().name(), store.bytes());
+              resourceStager.stage(
+                  store.planned().mediaType(), store.planned().name(), store.bytes());
         } catch (RuntimeException failure) {
+          discard(stagedResources);
           return Outcome.storeFailed();
         }
-        if (!store.planned().equals(returned)) {
+        if (returned != null && returned.blobUploadId() != null) {
+          stagedResources.add(returned);
+        }
+        if (!sameContentFacts(store.planned(), returned, resourceMaxBytes)) {
+          discard(stagedResources);
           return Outcome.storeFailed();
         }
         finalContents.add(new ResourceResultContent(returned, store.preview(), store.metadata()));
@@ -140,6 +147,16 @@ public final class ToolResultFinalizer {
 
     return Outcome.success(
         new ToolResult(result.toolCallId(), finalContents, result.error(), result.detailsJson()));
+  }
+
+  private void discard(List<ResourceRef> resources) {
+    for (int index = resources.size() - 1; index >= 0; index--) {
+      try {
+        resourceStager.discard(resources.get(index));
+      } catch (RuntimeException ignored) {
+        // Staged uploads also have durable expiry; cleanup failure must not mask UNKNOWN.
+      }
+    }
   }
 
   /** 计划阶段：无副作用完成所有内容校验、文本聚合、尺寸与物理行测量、ResourceRef 规划及最终 ToolResult JSON 尺寸核验。 */
@@ -175,7 +192,7 @@ public final class ToolResultFinalizer {
                     bytes, binary.textMetadata(), "binary content at index " + index);
         String name = resourceName(toolName, index + 1, null);
         ResourceRef planned =
-            resourceStore.reference(binary.mediaType(), name, (long) binary.size(), sha256(bytes));
+            plannedReference(binary.mediaType(), name, (long) binary.size(), sha256(bytes));
         binaryPieces.add(new BinaryPiece(index, planned, bytes, textArtifact));
       } else if (content instanceof ResourceResultContent res) {
         ResourceRef ref = res.resource();
@@ -205,15 +222,22 @@ public final class ToolResultFinalizer {
         if (bytes.length != ref.size() || !ref.sha256().equals(sha256(bytes))) {
           throw new ResourceStoreException();
         }
+        String stagedName =
+            ref.name() == null ? resourceName(toolName, index + 1, null) : ref.name();
         if (res.textMetadata() != null) {
           TextArtifact textArtifact =
               validateTextArtifact(bytes, res.textMetadata(), "resource content at index " + index);
+          ResourceRef planned =
+              stagedReference(ref.mediaType(), stagedName, ref.size(), ref.sha256());
+          ResourceResultContent validated =
+              new ResourceResultContent(planned, textArtifact.preview(), textArtifact.metadata());
+          resourcePieces.add(new ResourcePiece(index, validated, bytes));
+        } else {
+          ResourceRef planned =
+              stagedReference(ref.mediaType(), stagedName, ref.size(), ref.sha256());
           resourcePieces.add(
               new ResourcePiece(
-                  index,
-                  new ResourceResultContent(ref, textArtifact.preview(), textArtifact.metadata())));
-        } else {
-          resourcePieces.add(new ResourcePiece(index, res));
+                  index, new ResourceResultContent(planned, res.preview(), null), bytes));
         }
       } else {
         throw new IllegalArgumentException(
@@ -261,7 +285,7 @@ public final class ToolResultFinalizer {
         String ext = singleJson ? "json" : "txt";
         String name = toolName + "-result." + ext;
         String sha = sha256Utf8(joinedText, "tool output");
-        plannedTextRef = resourceStore.reference(mediaType, name, totalTextBytes, sha);
+        plannedTextRef = plannedReference(mediaType, name, totalTextBytes, sha);
         textPreview = extractRawPreview(joinedText);
         textMeta = new TextArtifactMetadata(totalTextBytes, totalTextLines);
         textBytes = joinedText.getBytes(StandardCharsets.UTF_8);
@@ -315,7 +339,16 @@ public final class ToolResultFinalizer {
       ResourcePiece rp =
           resourcePieces.stream().filter(r -> r.index() == currentIndex).findFirst().orElse(null);
       if (rp != null) {
-        items.add(new PlanItem.PassThrough(rp.content()));
+        if (rp.bytes() == null) {
+          items.add(new PlanItem.PassThrough(rp.content()));
+        } else {
+          items.add(
+              new PlanItem.StoreToResource(
+                  rp.content().resource(),
+                  rp.content().preview(),
+                  rp.content().textMetadata(),
+                  rp.bytes()));
+        }
         projected.add(rp.content());
       }
     }
@@ -471,6 +504,27 @@ public final class ToolResultFinalizer {
     return toolName + "-result-" + callIndex + (extension == null ? "" : "." + extension);
   }
 
+  private static ResourceRef stagedReference(
+      String mediaType, String name, Long size, String sha256) {
+    return new ResourceRef(
+        ResourceRef.blobUploadUri(new UUID(0L, 0L)), mediaType, name, size, sha256);
+  }
+
+  private ResourceRef plannedReference(String mediaType, String name, Long size, String sha256) {
+    return stagedReference(mediaType, name, size, sha256);
+  }
+
+  private static boolean sameContentFacts(
+      ResourceRef expected, ResourceRef actual, int resourceMaxBytes) {
+    return actual != null
+        && actual.blobUploadId() != null
+        && actual.size() != null
+        && actual.size() <= resourceMaxBytes
+        && Objects.equals(expected.name(), actual.name())
+        && Objects.equals(expected.size(), actual.size())
+        && expected.sha256().equals(actual.sha256());
+  }
+
   private static String sha256(byte[] content) {
     MessageDigest digest = newSha256();
     digest.update(content);
@@ -559,7 +613,11 @@ public final class ToolResultFinalizer {
   private record BinaryPiece(
       int index, ResourceRef planned, byte[] content, TextArtifact textArtifact) {}
 
-  private record ResourcePiece(int index, ResourceResultContent content) {}
+  private record ResourcePiece(int index, ResourceResultContent content, byte[] bytes) {
+    private ResourcePiece(int index, ResourceResultContent content) {
+      this(index, content, null);
+    }
+  }
 
   private record TextArtifact(String preview, TextArtifactMetadata metadata) {}
 

@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 
+import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -302,6 +303,12 @@ class StorageMaintenanceTest {
 
     @Override
     public StorageUploadDTO complete(UUID uploadId) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public StagedUpload stage(
+        String filename, String mediaType, InputStream content, long maxBytes) {
       throw new UnsupportedOperationException();
     }
 

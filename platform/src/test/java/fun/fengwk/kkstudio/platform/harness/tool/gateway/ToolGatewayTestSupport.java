@@ -316,6 +316,7 @@ final class ToolGatewayTestSupport {
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
+        store,
         resourceMaxBytes,
         executor,
         OVERLOAD_RETRY_DELAY,
@@ -337,6 +338,7 @@ final class ToolGatewayTestSupport {
         transport,
         new PermissionEvaluator(new ObjectMapper(), new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
+        store,
         store,
         RESOURCE_MAX_BYTES,
         executor,
@@ -538,14 +540,31 @@ final class ToolGatewayTestSupport {
   }
 
   /** 内存 ResourceStore：记录 put 参数，可按需抛确定性 / IO 失败；reference 与 put 返回同一规范引用。 */
-  static final class FakeResourceStore implements ResourceStore {
+  static final class FakeResourceStore implements ResourceStore, ToolResourceStager {
     final List<PutRecord> puts = new CopyOnWriteArrayList<>();
     final List<PutRecord> resources = new CopyOnWriteArrayList<>();
+    final List<ResourceRef> discarded = new CopyOnWriteArrayList<>();
     volatile RuntimeException referenceFailure;
     volatile RuntimeException putFailure;
     volatile boolean mismatchReturnedRef;
 
     record PutRecord(String mediaType, String name, byte[] content) {}
+
+    @Override
+    public ResourceRef stage(String mediaType, String name, byte[] content) {
+      ResourceRef stored = put(mediaType, name, content);
+      return new ResourceRef(
+          ResourceRef.blobUploadUri(UUID.randomUUID()),
+          stored.mediaType(),
+          stored.name(),
+          mismatchReturnedRef ? stored.size() + 1 : stored.size(),
+          stored.sha256());
+    }
+
+    @Override
+    public void discard(ResourceRef resource) {
+      discarded.add(resource);
+    }
 
     @Override
     public ResourceRef put(String mediaType, String name, byte[] content) {
@@ -559,14 +578,6 @@ final class ToolGatewayTestSupport {
       puts.add(stored);
       resources.add(stored);
       ResourceRef planned = reference(mediaType, name, payload.length, sha);
-      if (mismatchReturnedRef) {
-        return new ResourceRef(
-            planned.uri() + "-mismatch",
-            planned.mediaType(),
-            planned.name(),
-            planned.size(),
-            planned.sha256());
-      }
       return planned;
     }
 
