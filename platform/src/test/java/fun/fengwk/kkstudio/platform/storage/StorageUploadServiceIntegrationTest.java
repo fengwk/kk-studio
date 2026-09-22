@@ -34,7 +34,13 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 
+import javax.sql.DataSource;
+
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -71,6 +77,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private RecordingS3PresignService s3Presigner;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ObjectMapper objectMapper;
 
@@ -97,6 +104,62 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   // ------------------------------------------------------------------
   // reserve
   // ------------------------------------------------------------------
+
+  @Test
+  void serverStageRegistersAndCompletesRecoverableUploadOutsideTransaction() {
+    // 服务端 staging 应返回与浏览器 complete 相同的 READY upload，供后续短事务原子消费。
+    byte[] content = "staged".getBytes(StandardCharsets.UTF_8);
+
+    StorageUploadService.StagedUpload staged =
+        storageUploadService.stage(
+            "result.txt", "text/plain", new ByteArrayInputStream(content), content.length);
+
+    assertNotNull(staged.blobId());
+    assertEquals(
+        staged.blobId(),
+        jdbc.queryForObject(
+            "select blob_id from storage_upload where id = ?", UUID.class, staged.uploadId()));
+    assertArrayEquals(content, s3Storage.download(StorageObjectKeys.blobOriginal(staged.blobId())));
+  }
+
+  @Test
+  void serverStageHoldsNoUploadOrBlobRowLockDuringObjectIo() {
+    // 每次 S3 网络调用发生时，用独立 PG 连接 NOWAIT 锁定全部 upload/blob 行；任一调用方事务仍持锁都会立即失败。
+    byte[] content = "lock-free-stage".getBytes(StandardCharsets.UTF_8);
+    List<InMemoryS3StorageService.NetworkCall> observed = new ArrayList<>();
+    s3Storage.setNetworkCallObserver(
+        call -> {
+          observed.add(call);
+          assertAllStorageRowsLockableNowait();
+        });
+
+    StorageUploadService.StagedUpload staged =
+        storageUploadService.stage(
+            "result.txt", "text/plain", new ByteArrayInputStream(content), content.length);
+
+    assertNotNull(staged.blobId());
+    assertFalse(observed.isEmpty());
+  }
+
+  @Test
+  void serverStageRejectsActiveCallerTransactionBeforeAnyObjectIo() {
+    // 禁止通过内部新事务掩盖调用方仍持锁的事实；拒绝发生在 PENDING 登记和 S3 I/O 之前。
+    byte[] content = "staged".getBytes(StandardCharsets.UTF_8);
+    int callsBefore = s3Storage.networkCalls().size();
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            tx.executeWithoutResult(
+                status ->
+                    storageUploadService.stage(
+                        "result.txt",
+                        "text/plain",
+                        new ByteArrayInputStream(content),
+                        content.length)));
+
+    assertEquals(callsBefore, s3Storage.networkCalls().size());
+  }
 
   @Test
   void reserveMissReturnsPendingWithChecksummedCreateOnlyPut() throws Exception {
@@ -992,6 +1055,18 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   private void putUploadContent(String uploadId, byte[] content, String contentType) {
     s3Storage.putDirect(
         StorageObjectKeys.uploadOriginal(UUID.fromString(uploadId)), content, contentType);
+  }
+
+  private void assertAllStorageRowsLockableNowait() {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement()) {
+      connection.setAutoCommit(false);
+      statement.execute("select id from storage_upload for update nowait");
+      statement.execute("select id from storage_blob for update nowait");
+      connection.rollback();
+    } catch (SQLException error) {
+      throw new AssertionError("storage rows were locked during S3 I/O", error);
+    }
   }
 
   /** 完成一次新上传并返回 blob id（blob ref_count = 1）。 */

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.canvas.function.h3;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,17 +27,27 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** adapter stage machine 覆盖主链、每项上传 checkpoint/reuse、双 SUBMITTING 防重放、cancel 与 materialize。 */
 class MiniMaxH3CanvasFunctionAdapterTest {
@@ -47,11 +58,16 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   private static final UUID TARGET = new UUID(0L, 99L);
   private static final UUID SOURCE_NODE = new UUID(0L, 2L);
   private static final UUID RESOURCE = new UUID(0L, 11L);
+  private static final UUID SECOND_RESOURCE = new UUID(0L, 12L);
   private static final UUID THREAD_ID = new UUID(0L, 55L);
+  private static final UUID SESSION_ID = new UUID(0L, 56L);
+  private static final UUID UPLOAD_ID = new UUID(0L, 57L);
+  private static final UUID BLOB_ID = new UUID(0L, 58L);
 
   private final ObjectMapper mapper = new ObjectMapper();
   private HarnessOneShotService oneShot;
-  private StorageBlobIngestService ingestService;
+  private StorageUploadService uploadService;
+  private SessionBlobRefManager refManager;
 
   private StandardComfyuiClient comfy;
   private MiniMaxH3CanvasFunctionAdapter adapter;
@@ -62,7 +78,14 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   void setUp() {
     oneShot = mock(HarnessOneShotService.class);
     comfy = mock(StandardComfyuiClient.class);
-    ingestService = mock(StorageBlobIngestService.class);
+    uploadService = mock(StorageUploadService.class);
+    refManager = mock(SessionBlobRefManager.class);
+    when(uploadService.stage(any(), any(), any(InputStream.class), anyLong()))
+        .thenReturn(
+            new StorageUploadService.StagedUpload(
+                UPLOAD_ID, BLOB_ID, "source.png", "image/png", 3L, "a".repeat(64)));
+    when(uploadService.lockReady(UPLOAD_ID))
+        .thenReturn(new StorageUploadService.ReadyUpload(BLOB_ID, "source.png"));
     snapshot = new SystemSettingsSnapshot(settings(h3Settings(true, 1L, 1_000L)));
     adapter = newAdapter(snapshot);
   }
@@ -78,7 +101,8 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         oneShot,
         new H3WorkflowBuilder(mapper),
         clients,
-        ingestService,
+        uploadService,
+        refManager,
         mapper);
   }
 
@@ -144,6 +168,78 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     assertNull(context.lastPresign);
     assertEquals(TARGET, context.materializedTarget);
     assertEquals(List.of(9, 8, 7), context.materializedBytes);
+  }
+
+  @Test
+  void preflightTransfersStagedMediaIntoDurableMessage() {
+    // 测试意图：实际执行 one-shot preflight，证明 READY upload 在接受事务内转为 Session 引用与 durable RESOURCE。
+    AtomicReference<List<NewThreadCommand>> preparedCommands = new AtomicReference<>();
+    when(oneShot.submit(anyString(), anyString(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              AgentMessage prompt = invocation.getArgument(2);
+              AcceptancePreflight preflight = invocation.getArgument(3);
+              NewThreadCommand command =
+                  new NewThreadCommand(new CustomMessageCommandPayload(prompt), UUID.randomUUID());
+              preparedCommands.set(
+                  preflight.prepare(
+                      mock(HarnessStore.Transaction.class),
+                      new Session(SESSION_ID, "h3", Instant.EPOCH),
+                      List.of(command)));
+              return THREAD_ID;
+            });
+    when(oneShot.await(any(), any(), any()))
+        .thenThrow(new IllegalStateException("stop after preflight"));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> adapter.execute(new RecordingContext(), run("QUEUED", Map.of())));
+
+    CustomMessageCommandPayload payload =
+        assertInstanceOf(
+            CustomMessageCommandPayload.class, preparedCommands.get().get(0).payload());
+    ResourceMessageContent resource =
+        assertInstanceOf(ResourceMessageContent.class, payload.message().contents().get(2));
+    assertEquals(BLOB_ID, resource.blobId());
+    assertEquals("source.png", resource.name());
+    verify(refManager).retainRef(SESSION_ID, BLOB_ID);
+    verify(uploadService).delete(UPLOAD_ID);
+  }
+
+  @Test
+  void submitFailureDiscardsPreparedMedia() {
+    // 测试意图：覆盖 preflight 前或接受事务内失败后的立即补偿，不把 READY upload 留给 TTL 回收。
+    when(oneShot.submit(anyString(), anyString(), any(), any()))
+        .thenThrow(new IllegalStateException("submit failed"));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> adapter.execute(new RecordingContext(), run("QUEUED", Map.of())));
+
+    verify(uploadService).delete(UPLOAD_ID);
+  }
+
+  @Test
+  void stagingFailureDiscardsPreviouslyPreparedMedia() {
+    // 测试意图：多资源 staging 中途失败时，已成功准备的 upload 必须立即释放。
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    InputStream first = new ByteArrayInputStream(new byte[] {1, 2, 3});
+    when(context.openOriginal(any()))
+        .thenReturn(new CanvasFunctionResourceStream(first, 3L, first::close))
+        .thenThrow(new IllegalStateException("second source unavailable"));
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            adapter.execute(
+                context,
+                run(
+                    "QUEUED",
+                    Map.of(),
+                    List.of(imageReference(RESOURCE), imageReference(SECOND_RESOURCE)))));
+
+    verify(uploadService).delete(UPLOAD_ID);
+    verify(oneShot, never()).submit(anyString(), anyString(), any(), any());
   }
 
   @Test
@@ -271,19 +367,11 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   }
 
   private CanvasFunctionFrozenRun run(String stage, Map<String, Object> state) {
-    CanvasFunctionFrozenReference image =
-        new CanvasFunctionFrozenReference(
-            SOURCE_NODE,
-            0,
-            RESOURCE,
-            RESOURCE,
-            CanvasResourceKind.IMAGE,
-            "source.png",
-            "image/png",
-            3L,
-            512L,
-            512L,
-            null);
+    return run(stage, state, List.of(imageReference(RESOURCE)));
+  }
+
+  private CanvasFunctionFrozenRun run(
+      String stage, Map<String, Object> state, List<CanvasFunctionFrozenReference> manifest) {
     return new CanvasFunctionFrozenRun(
         CANVAS,
         NODE,
@@ -292,11 +380,26 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         adapter.models().get(0),
         new CanvasFunctionConfig(
             List.of(new TextSegment("animate it")), Map.of("ratio", "16:9", "duration", 5)),
-        List.of(image),
+        manifest,
         "result",
         TARGET,
         stage,
         state);
+  }
+
+  private static CanvasFunctionFrozenReference imageReference(UUID resourceId) {
+    return new CanvasFunctionFrozenReference(
+        SOURCE_NODE,
+        0,
+        resourceId,
+        resourceId,
+        CanvasResourceKind.IMAGE,
+        "source.png",
+        "image/png",
+        3L,
+        512L,
+        512L,
+        null);
   }
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {

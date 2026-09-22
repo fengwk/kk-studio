@@ -582,6 +582,12 @@ preview → original → 条件删除 Blob 行。
    object，再用 cleanup token 做 fenced finalize；删除或 finalize 失败时保留 lease，
    下一次 maintenance 重试。
 
+服务端内容统一调用 `stage(InputStream, maxBytes)`：入口显式拒绝活动事务，先在本地做有界
+spool 并单遍计算 size/SHA-256，再以短事务登记 PENDING upload 和 candidate；随后在事务外
+执行 PUT、checksum HEAD、probe 与 copy，最后复用 complete 的去重绑定。
+因此对象写入后的 crash、媒体校验失败、去重落败和业务消费回滚都保留可由既有
+cleanup request/lease 回收的 upload 证据。
+
 [StorageMaintenance](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage/StorageMaintenance.java)
 是 `SmartLifecycle`，拥有单一 daemon scheduled executor，启动立即 wake 并合并并发
 wake，同时以 fixed-delay poll 驱动 upload expire 与 DELETING blob sweep；所有 S3 I/O
@@ -592,19 +598,18 @@ Tool 终态结果由
 统一对所有工具的完整投影做无副作用 plan 与 hard-limit 校验，不按工具名建立旁路。超过
 50 KiB 或 2000 行的 Platform 文本结果转为有界 preview 加全局 Blob；模型投影给出
 `kkstudio:/resources/<blobId>`，后续由 `read` 分页读取。普通 Backend Tool 的 Binary/Resource
-按 plan 写入 `ResourceStore`，返回引用必须与 plan 完全一致，已有 Resource 也必须经同一
-Store 读取并复核 size/SHA-256。Daemon Binary 则在终态前通过 invocation-scoped
+在 plan 阶段从受管 `ResourceStore` 读取并复核 size/SHA-256；全部确定性校验通过后，Gateway
+在投递 listener 之前通过统一 stage 转为 `blob-upload`。Daemon Binary 则在终态前通过 invocation-scoped
 `RESOURCE_UPLOAD_REQUEST/TICKET/COMMIT` 取得预签名 PUT 并由 Daemon 直传 S3，WebSocket
 只携带 `uploadId/mediaType/name/size/sha256/preview`，绝不携带 Base64、二进制帧、
 预签名 URL 或 Daemon 本地 URI。
 
 [GlobalStorageToolResultHistoryMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/GlobalStorageToolResultHistoryMaterializer.java)
-在调用方 mandatory transaction 中分两条路径收敛：普通 managed Resource 从
-`ResourceStore` 读取并复核完整性后摄入 `storage_blob`；`blob-upload:<uploadId>` 瞬时
+在调用方 mandatory transaction 中只消费数据库事实：所有 `blob-upload:<uploadId>` 瞬时
 引用先 `lockReady`，以权威 `storage_blob` 复核媒体类型/大小/SHA-256，再
 `retain session_blob_ref -> delete upload owner` 原子转移引用，durable 名称取上传行。
-两条路径最终都只把 `blobId`、权威名称与有界 preview 写入 Harness history；任何一步
-失败都使调用方事务回滚。
+宿主已验证的文本 metadata 与有界 preview 随转换后的引用进入 history；物化器不读取
+`ResourceStore`、不执行 S3 I/O。任何一步失败都使调用方事务回滚，未消费 upload 由过期清理回收。
 
 Platform Plugin 不借 `ResourceStore` 的 `byte[]` 接口搬运大媒体。
 `PluginResourceGateway` 用 Thread 解析当前 Session，并在签发输入前校验

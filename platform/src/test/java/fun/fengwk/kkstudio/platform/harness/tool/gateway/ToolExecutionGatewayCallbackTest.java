@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -16,6 +15,7 @@ import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
@@ -247,7 +247,7 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   @Test
-  void existingResourceContentPassesThroughWithoutStoreWrite() {
+  void existingManagedResourceIsStagedBeforeDelivery() {
     byte[] existing = new byte[] {1, 2, 3};
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
     ResourceRef ref = store.seed("text/plain", "existing", existing);
@@ -256,10 +256,13 @@ class ToolExecutionGatewayCallbackTest {
         new ToolResult(
             "call-1", List.of(existingContent, new TextResultContent("inline")), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
-    assertTrue(listener.store.puts.isEmpty());
+    assertEquals(1, listener.store.puts.size());
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
-    assertSame(existingContent, succeeded.result().contents().get(0));
+    ResourceResultContent staged =
+        assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().get(0));
+    assertTrue(staged.resource().uri().startsWith("blob-upload:"));
+    assertEquals(existingContent.preview(), staged.preview());
   }
 
   @Test
@@ -333,18 +336,29 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   @Test
-  void storeReferenceInvalidInputIsDeterministicInvalidResult() {
+  void uploadReferenceWithTextMetadataIsDeterministicInvalidResult() {
     ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    store.referenceFailure = new IllegalArgumentException("content too large");
+    ResourceRef upload =
+        new ResourceRef(
+            ResourceRef.blobUploadUri(UUID.randomUUID()),
+            "image/png",
+            "image.png",
+            (long) BINARY_BYTES.length,
+            ToolGatewayTestSupport.sha256(BINARY_BYTES));
     ToolResult result =
         new ToolResult(
-            "call-1", List.of(new BinaryResultContent("image/png", BINARY_BYTES)), false, "{}");
+            "call-1",
+            List.of(
+                new ResourceResultContent(
+                    upload, null, new TextArtifactMetadata((long) BINARY_BYTES.length, 1L))),
+            false,
+            "{}");
     ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
     assertFalse(failed.failure().retryable());
-    assertTrue(store.puts.isEmpty(), "reference rejection must happen before any put");
+    assertTrue(store.puts.isEmpty(), "invalid upload references must be rejected before staging");
   }
 
   @Test

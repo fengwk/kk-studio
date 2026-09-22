@@ -9,7 +9,8 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobIngestService;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.time.Duration;
 
@@ -57,7 +58,8 @@ public class MiniMaxH3Configuration {
       HarnessOneShotService oneShotService,
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
-      StorageBlobIngestService ingestService,
+      StorageUploadService uploadService,
+      SessionBlobRefManager refManager,
       ObjectMapper objectMapper) {
     return new MiniMaxH3CanvasFunctionAdapter(
         snapshot,
@@ -66,7 +68,8 @@ public class MiniMaxH3Configuration {
         oneShotService,
         workflowBuilder,
         comfyClients,
-        ingestService,
+        uploadService,
+        refManager,
         objectMapper);
   }
 }

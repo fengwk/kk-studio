@@ -25,8 +25,8 @@ public interface SessionBlobRefManager {
   void releaseRef(UUID sessionId, UUID blobId);
 
   /**
-   * 事务内只插入 ref 行（不 retain），返回是否新插入。仅供 {@code StorageBlobIngestService} 的新行路径配对使用：新 blob 行 创建时
-   * {@code ref_count = 1} 已计入该 ref，调用方必须保证与恰好一个 ref 行同事务提交。
+   * 事务内只插入 ref 行（不 retain），返回是否新插入。仅供创建时已把该引用计入 {@code ref_count} 的新 blob 行配对使用，调用方必须保证与恰好一个 ref
+   * 行同事务提交。
    */
   boolean insertRefIfAbsent(UUID sessionId, UUID blobId);
 

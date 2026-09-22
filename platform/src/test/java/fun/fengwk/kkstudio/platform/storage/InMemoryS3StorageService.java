@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 /**
  * 测试用内存 S3 实现：对象按 key 存字节与 content type，HEAD（含 checksum mode）如实报告存储内容的大小与 SHA-256， 使 complete
@@ -31,6 +32,7 @@ public class InMemoryS3StorageService implements S3StorageService {
   private final Map<String, String> contentTypes = new ConcurrentHashMap<>();
   private final List<NetworkCall> networkCalls = new CopyOnWriteArrayList<>();
   private final Map<String, RuntimeException> deleteFailures = new ConcurrentHashMap<>();
+  private volatile Consumer<NetworkCall> networkCallObserver = ignored -> {};
 
   /** 清空全部对象（每个测试前调用）。 */
   public void clear() {
@@ -38,6 +40,7 @@ public class InMemoryS3StorageService implements S3StorageService {
     contentTypes.clear();
     networkCalls.clear();
     deleteFailures.clear();
+    networkCallObserver = ignored -> {};
   }
 
   public void clearNetworkCalls() {
@@ -64,6 +67,10 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   public void failNextDelete(String key, RuntimeException error) {
     deleteFailures.put(key, error);
+  }
+
+  public void setNetworkCallObserver(Consumer<NetworkCall> networkCallObserver) {
+    this.networkCallObserver = networkCallObserver;
   }
 
   /** 模拟浏览器直传：直接写入 uploads/{uploadId}/original 对象。 */
@@ -175,9 +182,11 @@ public class InMemoryS3StorageService implements S3StorageService {
   }
 
   private void record(String operation, String key) {
-    networkCalls.add(
+    NetworkCall call =
         new NetworkCall(
-            operation, key, TransactionSynchronizationManager.isActualTransactionActive()));
+            operation, key, TransactionSynchronizationManager.isActualTransactionActive());
+    networkCalls.add(call);
+    networkCallObserver.accept(call);
   }
 
   static byte[] sha256(byte[] content) {
