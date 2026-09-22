@@ -9,9 +9,7 @@ contract.  It owns everything that depends on the shape of a PostgreSQL catalog:
   connection settings the shell entrypoints inherit and export (`VPS_POSTGRES_*` and the
   `--host`/`--port`/`--username`/`--database` parameters are mapped there into `PGHOST`/`PGPORT`/
   `PGUSER`/`PGDATABASE`/`PGPASSWORD`, next to `PGSERVICE`/`PGPASSFILE`/TLS...);
-* detect and reject partial or unknown catalog shapes before the shell writes any artifact;
-* project the legacy `main` baseline onto the current V1 wire shape, failing closed on every
-  configuration the current contract cannot represent;
+* reject any catalog shape other than the current V1 before the shell writes an artifact;
 * write and verify the versioned package (SQL COPY bundle + non-sensitive manifest + checksum)
   that carries exactly `agent_provider`, `agent_model` and `agent_definition`.
 
@@ -30,11 +28,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Dict, List, Optional, Sequence, Tuple
-
-#: The two source baselines this tool can read.
-CURRENT_SOURCE = "current"
-LEGACY_SOURCE = "legacy-main"
+from typing import Dict, List, Optional, Sequence
 
 #: The migrated catalog tables in restore order; foreign keys require providers before models
 #: and models before agent definitions.
@@ -89,57 +83,6 @@ ORDER_COLUMNS = {
     "agent_definition": ("name",),
 }
 
-#: The origin/main baseline carries `agent_definition.environment_id` between `variant` and
-#: `config`; its Provider and Model tables already match the current V1 column for column.
-LEGACY_AGENT_DEFINITION_COLUMNS = (
-    "name",
-    "description",
-    "system_prompt",
-    "model_provider_name",
-    "model_name",
-    "variant",
-    "environment_id",
-    "config",
-    "created_at",
-    "updated_at",
-    "version",
-)
-
-#: `mcp_tool` resolves the legacy `mcp.<32 hex UUID>` Agent tool references; the origin/main
-#: baseline always declares it.  It is the only table outside the migrated three that the
-#: legacy projection reads, and only because a legacy `config` names tools by that table.
-LEGACY_MCP_TABLE = "mcp_tool"
-LEGACY_MCP_COLUMNS = ("id", "model_name")
-
-LEGACY_CONFIG_FIELDS = frozenset(("toolIds", "skills", "subagents"))
-
-#: Legacy selectable built-in AgentToolId -> current model-visible tool name.  Internal tools
-#: (`base.task`, `base.load-skill`) were never selectable and therefore have no target name.
-LEGACY_BUILTIN_TOOLS = (
-    ("base.read", "read"),
-    ("base.write", "write"),
-    ("base.edit", "edit"),
-    ("base.bash", "bash"),
-    ("base.grep", "grep"),
-    ("base.find", "find"),
-    ("base.lsp-goto-definition", "lsp_goto_definition"),
-    ("base.lsp-workspace-symbols", "lsp_workspace_symbols"),
-    ("base.lsp-java-decompile", "lsp_java_decompile"),
-    ("base.goal.create", "create_goal"),
-    ("base.goal.get", "get_goal"),
-    ("base.goal.update", "update_goal"),
-)
-
-#: Legacy MCP AgentToolId: `mcp.` + canonical lowercase 32 hex UUID of `mcp_tool.id`.
-LEGACY_MCP_TOOL_ID = re.compile(r"mcp\.[0-9a-f]{32}\Z")
-
-#: Model-visible tool name contract shared with ToolDescriptor.
-TOOL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
-TOOL_NAME_MAX_LENGTH = 64
-
-SHORT_NAME_FORBIDDEN = (":", "/", "@", "\\")
-SHORT_NAME_MAX_LENGTH = 128
-
 #: Pin the session formatting so exported and restored fingerprints are comparable regardless of
 #: server defaults; every query below goes through this option set.
 PSQL_SESSION_OPTIONS = "-c timezone=UTC -c datestyle=ISO"
@@ -158,7 +101,6 @@ MANIFEST_KEYS = (
     "format",
     "format_version",
     "target_schema",
-    "source_schema",
     "database",
     "v1_checksum",
     "bundle",
@@ -231,6 +173,13 @@ SECONDARY_ERROR_PREFIXES = (
 
 class CatalogError(RuntimeError):
     """A rejection that must abort the maintenance step before or instead of a side effect."""
+
+
+class SafeArgumentParser(argparse.ArgumentParser):
+    """Argparse variant whose errors never repeat a possibly secret argv value."""
+
+    def error(self, message: str) -> None:
+        raise CatalogError("invalid command arguments")
 
 
 def sanitize_error(message: str) -> str:
@@ -348,36 +297,9 @@ class PgDatabase:
         }
 
 
-def detect_source_kind(agent_definition_columns: Sequence[str]) -> str:
-    """Classify the source catalog from the migrated tables alone.
-
-    The durable catalog contract is exactly Provider/Model/Agent-definition, so detection reads
-    no table of a deliberately unmigrated domain (skill packages, plugin credentials, legacy
-    environment-skill markers): whether those tables exist says nothing about the catalog shape,
-    and depending on them would couple this tool to domains it must not know about.
-    `agent_definition.environment_id` is the version discriminator; `verify_source_columns`
-    then requires the exact column set of the detected baseline, so every intermediate shape
-    still fails closed.
-    """
-    if "environment_id" in agent_definition_columns:
-        return LEGACY_SOURCE
-    return CURRENT_SOURCE
-
-
-def expected_source_columns(kind: str) -> Dict[str, Sequence[str]]:
-    """Column set that every migrated table of the detected source kind must declare exactly."""
-    columns = {table: TARGET_COLUMNS[table] for table in ("agent_provider", "agent_model")}
-    columns["agent_definition"] = (
-        TARGET_COLUMNS["agent_definition"]
-        if kind == CURRENT_SOURCE
-        else LEGACY_AGENT_DEFINITION_COLUMNS
-    )
-    return columns
-
-
-def verify_source_columns(kind: str, columns: Dict[str, List[str]]) -> None:
-    """Reject any migrated table whose column set is not exactly the detected baseline shape."""
-    for table, expected in expected_source_columns(kind).items():
+def verify_source_columns(columns: Dict[str, List[str]]) -> None:
+    """Reject any migrated table whose column set is not exactly the current V1 shape."""
+    for table, expected in TARGET_COLUMNS.items():
         actual = columns.get(table)
         if actual is None:
             raise CatalogError(f"catalog table is missing from the source schema: {table}")
@@ -388,66 +310,8 @@ def verify_source_columns(kind: str, columns: Dict[str, List[str]]) -> None:
                 f"unexpected source columns for {table}: "
                 f"extra: {', '.join(extra) or 'none'}; missing: {', '.join(missing) or 'none'}"
             )
-    if kind == LEGACY_SOURCE:
-        # The legacy projection resolves MCP tool references through this table.
-        actual = columns.get(LEGACY_MCP_TABLE)
-        if actual is None:
-            raise CatalogError(
-                f"the origin/main source schema is missing {LEGACY_MCP_TABLE}, which resolves "
-                "legacy `mcp.<32 hex UUID>` Agent tool references"
-            )
-        missing = [column for column in LEGACY_MCP_COLUMNS if column not in actual]
-        if missing:
-            raise CatalogError(
-                f"unexpected source columns for {LEGACY_MCP_TABLE}: missing: {', '.join(missing)}"
-            )
-
-
-def legacy_config_sql(alias: str) -> str:
-    """Current-shape jsonb projection of a legacy `agent_definition.config` column."""
-    builtin_values = ",\n                                 ".join(
-        f"('{agent_tool_id}', '{model_name}')"
-        for agent_tool_id, model_name in LEGACY_BUILTIN_TOOLS
-    )
-    mcp_pattern = LEGACY_MCP_TOOL_ID.pattern.replace("\\Z", "$")
-    return (
-        "jsonb_build_object(\n"
-        "        'tools', (\n"
-        "            select coalesce(jsonb_agg(mapped.model_name order by mapped.position), '[]'::jsonb)\n"
-        "              from (\n"
-        "                select coalesce(\n"
-        "                           (select builtin.model_name\n"
-        "                              from (values\n"
-        f"                                 {builtin_values}) as builtin(agent_tool_id, model_name)\n"
-        "                             where builtin.agent_tool_id = tool.tool_id),\n"
-        "                           (select mcp.model_name\n"
-        "                              from public.mcp_tool mcp\n"
-        f"                             where tool.tool_id ~ '{mcp_pattern}'\n"
-        "                               and mcp.id = substring(tool.tool_id from 5)::uuid)\n"
-        "                       ) as model_name,\n"
-        "                       tool.position\n"
-        f"                  from jsonb_array_elements_text({alias}.config -> 'toolIds')\n"
-        "                       with ordinality as tool(tool_id, position)\n"
-        "            ) mapped\n"
-        "        ),\n"
-        "        'skills', '[]'::jsonb,\n"
-        f"        'subagents', {alias}.config -> 'subagents',\n"
-        "        'inheritParentEnvironment', true\n"
-        "    )"
-    )
-
-
-def source_projection(kind: str, table: str) -> str:
-    """Explicit target-column `select` for one migrated table of the detected source kind."""
-    if kind == LEGACY_SOURCE and table == "agent_definition":
-        return (
-            "select d.name, d.description, d.system_prompt, d.model_provider_name, d.model_name,\n"
-            "           d.variant,\n"
-            f"           {legacy_config_sql('d')} as config,\n"
-            "           d.created_at, d.updated_at, d.version\n"
-            "      from public.agent_definition d\n"
-            "      order by d.name"
-        )
+def source_projection(table: str) -> str:
+    """Explicit current-V1-column `select` for one migrated table."""
     columns = ", ".join(f"source.{column}" for column in TARGET_COLUMNS[table])
     order = ", ".join(f"source.{column}" for column in ORDER_COLUMNS[table])
     return f"select {columns} from public.{table} source order by {order}"
@@ -464,112 +328,6 @@ def fingerprint_query(projection: str, columns: Sequence[str]) -> str:
     )
 
 
-def legacy_agent_configs(db: PgDatabase) -> List[Tuple[str, object]]:
-    """Every legacy Agent definition as `(name, parsed config)`; values never leave this module."""
-    return [
-        (row[0], json.loads(row[1]))
-        for row in db.csv_rows(
-            "select name, config::text from public.agent_definition order by name"
-        )
-    ]
-
-
-def _is_short_name(value: object) -> bool:
-    """Canonical short name contract shared by the legacy and current Agent config codecs."""
-    if not isinstance(value, str) or not value.strip():
-        return False
-    if value != value.strip() or len(value) > SHORT_NAME_MAX_LENGTH:
-        return False
-    return not any(character in value for character in SHORT_NAME_FORBIDDEN)
-
-
-def collect_config_violations(configs: Sequence[Tuple[str, object]]) -> Dict[str, List[str]]:
-    """Rule -> Agent names for every legacy config the current wire shape cannot represent."""
-    violations: Dict[str, List[str]] = {}
-
-    def report(name: str, rule: str) -> None:
-        violations.setdefault(rule, []).append(name)
-
-    for name, config in configs:
-        if not isinstance(config, dict):
-            report(name, "config is not a JSON object")
-            continue
-        unknown = sorted(set(config) - LEGACY_CONFIG_FIELDS)
-        if unknown:
-            report(name, "config has unknown fields " + ", ".join(unknown))
-        missing = sorted(LEGACY_CONFIG_FIELDS - set(config))
-        if missing:
-            report(name, "config is missing fields " + ", ".join(missing))
-        if not isinstance(config.get("toolIds"), list):
-            report(name, "toolIds is not a JSON array")
-        skills = config.get("skills")
-        if not isinstance(skills, list):
-            report(name, "skills is not a JSON array")
-        elif skills:
-            report(
-                name,
-                "skills is not empty (environment-bound Skill sources are not global Git packages)",
-            )
-        subagents = config.get("subagents")
-        if not isinstance(subagents, list):
-            report(name, "subagents is not a JSON array")
-        elif not all(_is_short_name(subagent) for subagent in subagents):
-            report(name, "subagents must be canonical short names")
-        elif len(set(subagents)) != len(subagents):
-            report(name, "subagents must not contain duplicates")
-    return violations
-
-
-def collect_tool_violations(projected: Sequence[Tuple[str, int, object]]) -> Dict[str, List[str]]:
-    """Rule -> Agent names for projected tool lists that lost, duplicated or mangled an id."""
-    violations: Dict[str, List[str]] = {}
-    for name, input_count, tools in projected:
-        if not isinstance(tools, list) or not all(
-            isinstance(tool, str) and TOOL_NAME.match(tool) and len(tool) <= TOOL_NAME_MAX_LENGTH
-            for tool in tools
-        ):
-            violations.setdefault("toolIds contain an unmapped or invalid tool id", []).append(name)
-        elif len(tools) != input_count:
-            violations.setdefault("toolIds were dropped during projection", []).append(name)
-        elif len(set(tools)) != len(tools):
-            violations.setdefault("toolIds map onto duplicate tool names", []).append(name)
-    return violations
-
-
-def _format_violations(violations: Dict[str, List[str]]) -> str:
-    """Summarize rejected rows without printing their names or any other stored value."""
-    return "; ".join(
-        f"{rule} ({len(names)} row(s))" for rule, names in sorted(violations.items())
-    )
-
-
-def validate_legacy_source(db: PgDatabase) -> None:
-    """Fail closed on every legacy Agent configuration the current wire shape cannot carry."""
-    violations = collect_config_violations(legacy_agent_configs(db))
-    if violations:
-        raise CatalogError(
-            "legacy agent definition configuration is not migratable: "
-            + _format_violations(violations)
-        )
-    projected = [
-        (row[0], int(row[1]), json.loads(row[2]))
-        for row in db.csv_rows(
-            "select projected.name,"
-            " coalesce(jsonb_array_length(projected.input_tools), 0)::text,"
-            " coalesce(projected.tools, '[]'::jsonb)::text"
-            " from (select d.name, d.config -> 'toolIds' as input_tools,"
-            f" ({legacy_config_sql('d')}) -> 'tools' as tools"
-            " from public.agent_definition d)"
-            " projected order by projected.name"
-        )
-    ]
-    violations = collect_tool_violations(projected)
-    if violations:
-        raise CatalogError(
-            "legacy agent definition tools are not migratable: " + _format_violations(violations)
-        )
-
-
 def require_utf8_source(db: PgDatabase) -> None:
     """Reject a source whose encoding the CSV bundle could not carry without corruption."""
     encoding = db.scalar(
@@ -582,50 +340,37 @@ def require_utf8_source(db: PgDatabase) -> None:
         )
 
 
-def resolve_source(db: PgDatabase) -> str:
-    """Detect the source kind and fail closed on any shape the projection cannot carry."""
+def resolve_source(db: PgDatabase) -> None:
+    """Require the source to declare exactly the current V1 catalog shape."""
     require_utf8_source(db)
-    columns = db.table_columns()
-    kind = detect_source_kind(columns.get("agent_definition", []))
-    verify_source_columns(kind, columns)
-    if kind == LEGACY_SOURCE:
-        validate_legacy_source(db)
-    return kind
+    verify_source_columns(db.table_columns())
 
 
-def resolve_target(db: PgDatabase) -> str:
-    """Detect the target kind of an import; only the current V1 baseline is importable."""
+def resolve_target(db: PgDatabase) -> None:
+    """Require the import target to declare exactly the current V1 catalog shape."""
     require_utf8_source(db)
-    columns = db.table_columns()
-    kind = detect_source_kind(columns.get("agent_definition", []))
-    if kind != CURRENT_SOURCE:
-        raise CatalogError(
-            "the target database does not declare the current V1 schema; apply the V1 schema "
-            "(external schema/Flyway initialization) on the empty database before importing"
-        )
     try:
-        verify_source_columns(kind, columns)
+        verify_source_columns(db.table_columns())
     except CatalogError as error:
         raise CatalogError(
             f"the target database does not declare the current V1 schema ({error}); apply the "
             "V1 schema (external schema/Flyway initialization) on the empty database before "
             "importing"
         )
-    return kind
 
 
 def catalog_counts(db: PgDatabase) -> Dict[str, str]:
-    """Row count of every migrated table; both baselines declare all three of them."""
+    """Row count of every migrated table."""
     return {
         f"rows.{table}": db.scalar(f"select count(*) from public.{table}")
         for table in CATALOG_TABLES
     }
 
 
-def catalog_fingerprints(db: PgDatabase, kind: str) -> Dict[str, str]:
-    """Projected count-plus-digest of every migrated table, keyed by table."""
+def catalog_fingerprints(db: PgDatabase) -> Dict[str, str]:
+    """Count-plus-digest of every migrated table, keyed by table."""
     return {
-        table: db.scalar(fingerprint_query(source_projection(kind, table), TARGET_COLUMNS[table]))
+        table: db.scalar(fingerprint_query(source_projection(table), TARGET_COLUMNS[table]))
         for table in CATALOG_TABLES
     }
 
@@ -662,7 +407,7 @@ def restore_verify_sql(expected: Dict[str, str]) -> str:
     the entire import back.
     """
     checks = ",\n      ".join(
-        f"('{table}', ({fingerprint_query(source_projection(CURRENT_SOURCE, table), TARGET_COLUMNS[table])})"
+        f"('{table}', ({fingerprint_query(source_projection(table), TARGET_COLUMNS[table])})"
         f" is distinct from '{expected[table]}')"
         for table in CATALOG_TABLES
     )
@@ -684,9 +429,7 @@ def restore_verify_sql(expected: Dict[str, str]) -> str:
     )
 
 
-def write_bundle(
-    db: PgDatabase, kind: str, stream: io.TextIOBase, expected: Dict[str, str]
-) -> None:
+def write_bundle(db: PgDatabase, stream: io.TextIOBase, expected: Dict[str, str]) -> None:
     """Write the psql COPY bundle: transaction guard, explicit columns, footer verification."""
     stream.write("-- kk-studio Agent catalog bundle for the current V1 baseline.\n")
     stream.write(
@@ -694,7 +437,7 @@ def write_bundle(
     )
     stream.write("-- The guard holds the three tables and re-checks that they are empty; the\n")
     stream.write("-- footer proves the restored rows before the transaction commits.\n")
-    stream.write(f"-- source={kind} wrapper={PACKAGE_FORMAT_VERSION} tables={len(CATALOG_TABLES)}\n")
+    stream.write(f"-- wrapper={PACKAGE_FORMAT_VERSION} tables={len(CATALOG_TABLES)}\n")
     stream.write("-- SENSITIVE: contains Provider credentials; never copy, log or upload it.\n")
     # `sqlstate` makes psql report bare SQLSTATE codes, so a restore failure can be retained in
     # a log without ever quoting the offending row.
@@ -705,7 +448,7 @@ def write_bundle(
     rows_total = 0
     for table in CATALOG_TABLES:
         columns = ", ".join(TARGET_COLUMNS[table])
-        projection = source_projection(kind, table)
+        projection = source_projection(table)
         expected_rows = int(db.scalar(f"select count(*) from ({projection}) projected"))
         data = db.csv_text(projection)
         records = sum(1 for record in csv.reader(io.StringIO(data)) if record)
@@ -765,20 +508,18 @@ def _discard_package(directory: Path) -> None:
         return
 
 
-def write_package(
-    db: PgDatabase, kind: str, package_dir: str, v1_checksum: str
-) -> Dict[str, str]:
+def write_package(db: PgDatabase, package_dir: str, v1_checksum: str) -> Dict[str, str]:
     """Write the versioned package and return its facts; a mutating source aborts the export."""
     directory = Path(package_dir)
     if directory.exists():
         raise CatalogError(f"refusing to overwrite an existing package directory: {directory}")
-    expected = catalog_fingerprints(db, kind)
+    expected = catalog_fingerprints(db)
     stream = io.StringIO()
-    write_bundle(db, kind, stream, expected)
+    write_bundle(db, stream, expected)
     payload = stream.getvalue().encode("utf-8")
     # Bundle generation is the longest read: a source that changed around it must not be exported
     # as if the package matched the rows the manifest will claim.
-    after = catalog_fingerprints(db, kind)
+    after = catalog_fingerprints(db)
     if expected != after:
         changed = ", ".join(sorted(table for table in expected if expected[table] != after[table]))
         raise CatalogError(
@@ -795,7 +536,6 @@ def write_package(
             "format": PACKAGE_FORMAT,
             "format_version": PACKAGE_FORMAT_VERSION,
             "target_schema": TARGET_SCHEMA,
-            "source_schema": kind,
             "database": db.database_name(),
             "v1_checksum": int(v1_checksum),
             "bundle": BUNDLE_NAME,
@@ -821,7 +561,6 @@ def write_package(
         raise
     return {
         "database": db.database_name(),
-        "source_schema": kind,
         **{f"rows.{table}": after[table].split(":", 1)[0] for table in CATALOG_TABLES},
         **{f"fingerprint.{table}": after[table] for table in CATALOG_TABLES},
         "package_dir": str(directory),
@@ -897,9 +636,6 @@ def read_package(package_dir: str) -> Dict[str, object]:
         )
     if _require_text(manifest["target_schema"], "target_schema") != TARGET_SCHEMA:
         raise CatalogError(f"unsupported package target schema: {manifest['target_schema']}")
-    source_schema = _require_text(manifest["source_schema"], "source_schema")
-    if source_schema not in (CURRENT_SOURCE, LEGACY_SOURCE):
-        raise CatalogError(f"unsupported package source schema: {manifest['source_schema']}")
     _require_text(manifest["database"], "database")
     _require_integer(manifest["v1_checksum"], "v1_checksum")
     if _require_text(manifest["bundle"], "bundle") != BUNDLE_NAME:
@@ -947,11 +683,10 @@ def require_local_v1_checksum(package: Dict[str, object], v1_checksum: str) -> N
 
 
 def package_facts(package: Dict[str, object]) -> Dict[str, str]:
-    """Non-sensitive facts of a validated package: schema kind, counts, digests and paths."""
+    """Non-sensitive facts of a validated package: counts, digests and paths."""
     manifest = package["manifest"]
     tables = manifest["tables"]
     return {
-        "source_schema": str(manifest["source_schema"]),
         "v1_checksum": str(manifest["v1_checksum"]),
         **{f"rows.{entry['table']}": str(entry["rows"]) for entry in tables},
         **{f"fingerprint.{entry['table']}": str(entry["fingerprint"]) for entry in tables},
@@ -966,7 +701,7 @@ def target_facts(db: PgDatabase) -> Dict[str, str]:
     resolve_target(db)
     fingerprints = {
         table: db.scalar(
-            fingerprint_query(source_projection(CURRENT_SOURCE, table), TARGET_COLUMNS[table])
+            fingerprint_query(source_projection(table), TARGET_COLUMNS[table])
         )
         for table in CATALOG_TABLES
     }
@@ -984,7 +719,7 @@ def print_facts(facts: Dict[str, str]) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = SafeArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan", help="read-only source detection, counts and digests")
     export = commands.add_parser("export", help="write the versioned catalog package")
@@ -1000,8 +735,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str]) -> int:
-    arguments = build_parser().parse_args(argv)
     try:
+        arguments = build_parser().parse_args(argv)
         if arguments.command == "sanitize":
             sanitize_log(Path(arguments.log))
             return 0
@@ -1013,17 +748,16 @@ def main(argv: Sequence[str]) -> int:
             require_local_v1_checksum(package, arguments.v1_checksum)
             facts = package_facts(package)
         elif arguments.command == "export":
-            kind = resolve_source(db)
-            facts = write_package(db, kind, arguments.package, arguments.v1_checksum)
+            resolve_source(db)
+            facts = write_package(db, arguments.package, arguments.v1_checksum)
         else:
-            kind = resolve_source(db)
+            resolve_source(db)
             facts = {
                 "database": db.database_name(),
-                "source_schema": kind,
                 **catalog_counts(db),
                 **{
                     f"fingerprint.{table}": value
-                    for table, value in catalog_fingerprints(db, kind).items()
+                    for table, value in catalog_fingerprints(db).items()
                 },
             }
         print_facts(facts)

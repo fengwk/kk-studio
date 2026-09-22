@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2034 # sourced library exports shared variables to its entrypoints
 #
 # scripts/ops 下三个数据库维护入口的私有共享实现，不是公开入口。
 #
@@ -44,6 +45,16 @@ fail() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"
+}
+
+# 带值选项不接受空值或另一个选项。解析必须在任何连接尝试之前 fail closed，且错误不回显取值。
+require_option_value() {
+  local option=$1
+  local argument_count=$2
+  local value=${3:-}
+  if [ "$argument_count" -lt 2 ] || [ -z "$value" ] || [[ "$value" == -* ]]; then
+    fail "$option requires a value"
+  fi
 }
 
 resolve_repository_root() {
@@ -144,6 +155,8 @@ configure_connection() {
   if [ -n "$host" ]; then
     PGHOST=$host
     export PGHOST
+    # libpq 优先用 PGHOSTADDR 建立连接；显式 CLI/VPS host 必须同时成为真实 socket 目标。
+    unset PGHOSTADDR
   fi
   if [ -n "$port" ]; then
     PGPORT=$port
