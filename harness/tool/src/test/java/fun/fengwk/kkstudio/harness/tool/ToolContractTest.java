@@ -21,6 +21,16 @@ import java.util.Set;
 /** Tool schema、执行与结果契约测试。 */
 class ToolContractTest {
 
+  /** 调用身份必须完整且与 descriptor 对应，避免在参数归一化前接受无身份或错配调用。 */
+  @Test
+  void validatesToolCallIdentity() {
+    assertThrows(IllegalArgumentException.class, () -> new ToolCall(" ", "search", "{}"));
+    assertThrows(IllegalArgumentException.class, () -> new ToolCall("call-1", " ", "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolCall("call-1", "other", "{}").validateFor(descriptor()));
+  }
+
   /** 递归 schema 校验必须拒绝缺失 required、未知字段和不匹配的数组元素。 */
   @Test
   void validatesNestedArgumentsAgainstDescriptor() {

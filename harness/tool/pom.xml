@@ -46,6 +46,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
+                                        <include>fun/fengwk/kkstudio/harness/tool/ToolCall</include>
                                         <include>fun/fengwk/kkstudio/harness/tool/codec/AgentToolDefinitionJsonCodec</include>
                                     </includes>
                                     <limits>
