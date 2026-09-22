@@ -5,7 +5,7 @@ import { ApiError } from '@/shared/api/client'
 import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
 import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
-import { notifyProjectsChanged } from './useProjectsInvalidation'
+import { invalidateProjectQueries } from './projects-invalidation'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -92,8 +92,8 @@ vi.mock('@/shared/app-events', () => ({
   ApplicationEventProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
-function renderPage(ui: React.ReactElement) {
-  const queryClient = new QueryClient({
+function renderPage(ui: React.ReactElement, client?: QueryClient) {
+  const queryClient = client ?? new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
@@ -101,11 +101,12 @@ function renderPage(ui: React.ReactElement) {
       },
     },
   })
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       {ui}
     </QueryClientProvider>,
   )
+  return { ...rendered, queryClient }
 }
 
 describe('ProjectDetailPage', () => {
@@ -529,7 +530,7 @@ describe('ProjectDetailPage', () => {
         .mockResolvedValue(refreshedDetail),
       updateIssue: vi.fn().mockResolvedValue(mockIssueDetail.issue),
     })
-    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+    const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await screen.findByText('Implement REST API')
     fireEvent.click(screen.getByLabelText('Issue #2 Implement REST API'))
@@ -538,7 +539,9 @@ describe('ProjectDetailPage', () => {
     const titleInput = screen.getByLabelText(/标题/i)
     fireEvent.change(titleInput, { target: { value: 'Unsaved Issue draft' } })
 
-    act(() => notifyProjectsChanged({ projectId }))
+    await act(async () => {
+      await invalidateProjectQueries(queryClient, { projectId })
+    })
     await waitFor(() => expect(api.getIssue).toHaveBeenCalledTimes(2))
     expect(titleInput).toHaveValue('Unsaved Issue draft')
 
@@ -552,6 +555,27 @@ describe('ProjectDetailPage', () => {
         }),
       )
     })
+  })
+
+  it('does not refetch an active issue query when targeted invalidation belongs to a different project', async () => {
+    // 测试意图：验证其他 project 的精准失效不会导致当前项目已打开的 Issue 重新请求
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue(mockIssueDetail),
+    })
+    const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+
+    await screen.findByText('Implement REST API')
+    fireEvent.click(screen.getByLabelText('Issue #2 Implement REST API'))
+    await screen.findByText('编辑规格')
+    expect(api.getIssue).toHaveBeenCalledTimes(1)
+
+    // 发起针对另一个 project 的精准失效
+    await act(async () => {
+      await invalidateProjectQueries(queryClient, { projectId: 'different-project-id' })
+    })
+
+    // 当前项目的 getIssue 绝不应被重新调用
+    expect(api.getIssue).toHaveBeenCalledTimes(1)
   })
 
   it('renders CoordinatorConversation sidebar hosted with AgentPane', async () => {
@@ -761,14 +785,16 @@ describe('ProjectDetailPage', () => {
         .mockResolvedValueOnce(mockSnapshot)
         .mockResolvedValue(refreshedSnapshot),
     })
-    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+    const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await screen.findByText('Awesome Platform')
     fireEvent.click(screen.getByRole('button', { name: /编辑/i }))
     const titleInput = screen.getByLabelText(/项目名称/i)
     fireEvent.change(titleInput, { target: { value: 'Unsaved project draft' } })
 
-    act(() => notifyProjectsChanged({ projectId }))
+    await act(async () => {
+      await invalidateProjectQueries(queryClient, { projectId })
+    })
     await waitFor(() => expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2))
     expect(titleInput).toHaveValue('Unsaved project draft')
 
@@ -799,11 +825,13 @@ describe('ProjectDetailPage', () => {
         .mockResolvedValueOnce(initialSnapshot)
         .mockResolvedValue(latestSnapshot),
     })
-    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+    const { queryClient } = renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     expect(await screen.findByText('Initial Snapshot')).toBeInTheDocument()
 
-    act(() => notifyProjectsChanged({ projectId }))
+    await act(async () => {
+      await invalidateProjectQueries(queryClient, { projectId })
+    })
     expect(await screen.findByText('Latest Snapshot')).toBeInTheDocument()
   })
 

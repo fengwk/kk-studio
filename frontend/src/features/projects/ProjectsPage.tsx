@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Archive,
@@ -18,7 +19,7 @@ import { EditProjectModal } from './components/EditProjectModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import type { ProjectDTO } from './types'
-import { useProjectsInvalidation } from './useProjectsInvalidation'
+import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
 
 export interface ProjectsPageProps {
@@ -30,49 +31,26 @@ export function ProjectsPage({
   onSelectProject,
   api = projectsApi,
 }: ProjectsPageProps) {
-  const [projects, setProjects] = useState<ProjectDTO[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [includeArchived, setIncludeArchived] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const {
+    data: projects = [],
+    isLoading,
+    isFetching,
+    error: queryError,
+    refetch,
+  } = useQuery({
+    queryKey: queryKeys.projects.list(includeArchived),
+    queryFn: () => api.listProjects(includeArchived),
+  })
 
   // Modals
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<ProjectDTO | null>(null)
   const [deletingProject, setDeletingProject] = useState<ProjectDTO | null>(null)
-  const loadRequestIdRef = useRef(0)
-
-  const loadProjects = useCallback(async () => {
-    const requestId = ++loadRequestIdRef.current
-    setIsLoading(true)
-    setErrorMessage(null)
-    try {
-      const data = await api.listProjects(includeArchived)
-      if (loadRequestIdRef.current === requestId) {
-        setProjects(data)
-      }
-    } catch (err) {
-      if (loadRequestIdRef.current === requestId) {
-        setErrorMessage(err instanceof Error ? err.message : '获取项目列表失败')
-      }
-    } finally {
-      if (loadRequestIdRef.current === requestId) {
-        setIsLoading(false)
-      }
-    }
-  }, [api, includeArchived])
-
-  useEffect(() => {
-    void loadProjects()
-    return () => {
-      loadRequestIdRef.current += 1
-    }
-  }, [loadProjects])
-
-  // Invalidation subscription
-  useProjectsInvalidation(() => {
-    void loadProjects()
-  })
 
   const filteredProjects = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -89,16 +67,29 @@ export function ProjectsPage({
 
   const handleArchiveToggle = async (project: ProjectDTO) => {
     try {
+      setActionError(null)
       if (project.archivedAt) {
         await api.unarchiveProject(project.id, { expectedVersion: project.version })
       } else {
         await api.archiveProject(project.id, { expectedVersion: project.version })
       }
-      await loadProjects()
+      await queryClient.invalidateQueries({ queryKey: queryKeys.projects.lists() })
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '归档操作失败')
+      setActionError(err instanceof Error ? err.message : '归档操作失败')
     }
   }
+
+  const refreshProjects = async () => {
+    setActionError(null)
+    await refetch()
+  }
+
+  const invalidateProjectLists = async () => {
+    setActionError(null)
+    await queryClient.invalidateQueries({ queryKey: queryKeys.projects.lists() })
+  }
+
+  const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
 
   return (
     <main className="projects-container">
@@ -108,12 +99,12 @@ export function ProjectsPage({
           <button
             type="button"
             className="ghost-btn"
-            onClick={() => void loadProjects()}
-            disabled={isLoading}
+            onClick={() => void refreshProjects()}
+            disabled={isFetching}
             title="刷新列表"
             aria-label="刷新项目列表"
           >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
+            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} aria-hidden="true" />
           </button>
         </div>
 
@@ -281,7 +272,7 @@ export function ProjectsPage({
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onSuccess={(created) => {
-          void loadProjects()
+          void invalidateProjectLists()
           onSelectProject?.(created.id)
         }}
         api={api}
@@ -291,7 +282,7 @@ export function ProjectsPage({
         isOpen={Boolean(editingProject)}
         project={editingProject}
         onClose={() => setEditingProject(null)}
-        onSuccess={() => void loadProjects()}
+        onSuccess={() => void invalidateProjectLists()}
         api={api}
       />
 
@@ -299,7 +290,7 @@ export function ProjectsPage({
         isOpen={Boolean(deletingProject)}
         project={deletingProject}
         onClose={() => setDeletingProject(null)}
-        onSuccess={() => void loadProjects()}
+        onSuccess={() => void invalidateProjectLists()}
         api={api}
       />
     </main>

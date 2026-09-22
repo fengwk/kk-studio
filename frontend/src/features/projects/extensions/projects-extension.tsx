@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { notifyProjectsChanged } from '@/features/projects/useProjectsInvalidation'
+import { useQueryClient } from '@tanstack/react-query'
+import { invalidateProjectQueries } from '@/features/projects/projects-invalidation'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
 import { useApplicationEvents } from '@/shared/app-events'
 import { useI18n } from '@/shared/i18n'
@@ -37,15 +38,20 @@ export function ProjectDetailRoute({ children }: ExtensionComponentProps) {
   return (
     <>
       <Suspense fallback={<div className="state-block" role="status">{t('platform.loadingProject')}</div>}>
-        <ProjectDetailPage projectId={projectId} onBack={() => navigate('/projects')} />
+        <ProjectDetailPage
+          key={projectId}
+          projectId={projectId}
+          onBack={() => navigate('/projects')}
+        />
       </Suspense>
       {children}
     </>
   )
 }
 
-/** Bridges the global projects WebSocket resource into feature-local invalidation hooks. */
+/** Bridges the global projects WebSocket resource into TanStack Query cache invalidations. */
 export function ProjectsInvalidationBridge() {
+  const queryClient = useQueryClient()
   const events = useApplicationEvents()
 
   useEffect(
@@ -53,21 +59,29 @@ export function ProjectsInvalidationBridge() {
       events.subscribe(
         { kind: 'projects' },
         {
-          onSubscribed: () => notifyProjectsChanged(),
+          onSubscribed: () => {
+            void invalidateProjectQueries(queryClient)
+          },
           onEvent: (name, data) => {
             if (name !== 'changed' || typeof data !== 'object' || data == null) {
               return
             }
             const projectId = (data as { projectId?: unknown }).projectId
             if (typeof projectId === 'string') {
-              notifyProjectsChanged({ projectId })
+              void invalidateProjectQueries(queryClient, { projectId })
+            } else {
+              void invalidateProjectQueries(queryClient)
             }
           },
-          onResync: () => notifyProjectsChanged(),
-          onError: () => notifyProjectsChanged(),
+          onResync: () => {
+            void invalidateProjectQueries(queryClient)
+          },
+          onError: () => {
+            void invalidateProjectQueries(queryClient)
+          },
         },
       ),
-    [events],
+    [events, queryClient],
   )
 
   return null

@@ -367,8 +367,12 @@ IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 S
 [CoordinatorConversation](../../frontend/src/features/projects/components/CoordinatorConversation.tsx)
 接入并托管底座 `AgentPane`（配置单 Session 与归档只读能力约束），首条 command 可在尚无 Session/Thread 时作为草稿发送，会话历史与运行时交互完全复用 AI 运行时底座，Project feature 不维护重复状态机。
 
-[useProjectsInvalidation](../../frontend/src/features/projects/useProjectsInvalidation.ts)
-由 ExtensionHost overlay 桥接：订阅 `{kind: "projects"}`，通知直连 TanStack Query 精确失效（`snapshot` 与 `detail`）；它不维护本地事件日志，也不自建 module-global listeners。
+[ProjectsInvalidationBridge](../../frontend/src/features/projects/extensions/projects-extension.tsx)
+作为 ExtensionHost overlay 订阅 `{kind: "projects"}`，并通过
+[projects-invalidation](../../frontend/src/features/projects/projects-invalidation.ts)
+直连 TanStack Query：定向通知失效列表、目标 Project 的 detail/snapshot 与其 Issue
+详情；重连、resync 和订阅错误失效整个 Project 查询族。该链路不维护本地事件日志或
+module-global listeners。
 
 ### Canvas
 
@@ -459,7 +463,7 @@ coverage threshold 是 lines/functions/branches/statements 各 `80`。
   [`thread-events.test.ts`](../../frontend/src/features/ai/runtime/thread-events.test.ts)。
 - [`useCanvasController`](../../frontend/src/features/canvas/useCanvasController.ts) 所在的
   [`features/canvas/__tests__`](../../frontend/src/features/canvas/__tests__/)、
-  [`useProjectsInvalidation.test.ts`](../../frontend/src/features/projects/useProjectsInvalidation.test.ts)、
+  [`projects-invalidation.test.ts`](../../frontend/src/features/projects/projects-invalidation.test.ts)、
   [`system-settings-schema-renderer.test.tsx`](../../frontend/src/features/settings/system-settings-schema-renderer.test.tsx)。
 - [`client.test.ts`](../../frontend/src/shared/api/client.test.ts) 与
   [`shared/app-events/__tests__`](../../frontend/src/shared/app-events/__tests__)。
