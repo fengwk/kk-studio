@@ -6,11 +6,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 
 import java.util.Arrays;
 import java.util.List;
@@ -23,15 +22,13 @@ public class ProjectToolConfiguration {
   @ConditionalOnMissingBean
   public ProjectThreadOwnerResolver projectThreadOwnerResolver(
       ObjectProvider<HarnessStore> harnessStoreProvider,
-      ProjectSessionRepository projectSessionRepository,
-      IssueRunSessionRepository issueRunSessionRepository,
+      IssueAgentSessionRepository issueAgentSessionRepository,
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueRunRepository issueRunRepository) {
     return ProjectThreadOwnerResolver.withStoreSupplier(
         harnessStoreProvider::getIfAvailable,
-        projectSessionRepository,
-        issueRunSessionRepository,
+        issueAgentSessionRepository,
         projectRepository,
         issueRepository,
         issueRunRepository);

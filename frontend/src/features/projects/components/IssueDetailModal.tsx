@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   Trash2,
   X,
 } from 'lucide-react'
@@ -17,10 +18,13 @@ import { isConflictError } from '@/shared/api/client'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
+import { useCatalogAgentNames } from '../useCatalogAgentNames'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type {
+  IssueActivityDTO,
   IssueDetailDTO,
+  IssueRunRole,
   IssueStatus,
   ProjectIssueSnapshotDTO,
   ReviewDecision,
@@ -36,7 +40,7 @@ export interface IssueDetailModalProps {
   api?: ProjectsApi
 }
 
-type TabKey = 'spec' | 'deps' | 'inputs' | 'runs'
+type TabKey = 'spec' | 'deps' | 'activities' | 'runs'
 
 export function IssueDetailModal({
   isOpen,
@@ -78,27 +82,60 @@ export function IssueDetailModal({
     detail: string
   } | null>(null)
 
+  const { agentOptions } = useCatalogAgentNames({
+    preserveNames: [
+      detail?.issue?.assigneeAgentName,
+      detail?.issue?.reviewerAgentName,
+      draftAssignee,
+      draftReviewer,
+    ],
+    enabled: isOpen && Boolean(issueId),
+  })
+
   // Cancel state
   const [isCanceling, setIsCanceling] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
+
+  // Block state
+  const [isBlocking, setIsBlocking] = useState(false)
+  const [blockReason, setBlockReason] = useState('')
+  const [isSubmittingBlock, setIsSubmittingBlock] = useState(false)
+
+  // Recover state
+  const [isRecovering, setIsRecovering] = useState(false)
+  const [recoverToBacklog, setRecoverToBacklog] = useState(false)
+  const [recoverComment, setRecoverComment] = useState('')
+  const [isSubmittingRecover, setIsSubmittingRecover] = useState(false)
 
   // Add dependency state
   const [selectedDepIssueId, setSelectedDepIssueId] = useState('')
   const [isAddingDep, setIsAddingDep] = useState(false)
 
-  // Append input state
-  const [inputBody, setInputBody] = useState('')
-  const [inputKind, setInputKind] = useState<'HUMAN' | 'SYSTEM'>('HUMAN')
-  const [isAppendingInput, setIsAppendingInput] = useState(false)
+  // Activity list & pagination state
+  const [activities, setActivities] = useState<IssueActivityDTO[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [isLoadingMoreActivities, setIsLoadingMoreActivities] = useState(false)
+
+  // Append Activity state
+  const [activityBody, setActivityBody] = useState('')
+  const [activityTargetRole, setActivityTargetRole] = useState<IssueRunRole | ''>('')
+  const [isAppendingActivity, setIsAppendingActivity] = useState(false)
 
   // Human review state
   const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('APPROVE')
-  const [reviewSummary, setReviewSummary] = useState('')
-  const [reviewVerification, setReviewVerification] = useState('')
+  const [reviewReason, setReviewReason] = useState('')
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
 
   // Retry state
   const [isRetrying, setIsRetrying] = useState(false)
+
+  // Sync activities from detail query
+  useEffect(() => {
+    if (detail) {
+      setActivities(detail.activities ?? [])
+      setNextCursor(detail.nextActivityCursor ?? null)
+    }
+  }, [detail])
 
   // Reset transient modal states on issue or open change
   useEffect(() => {
@@ -107,14 +144,19 @@ export function IssueDetailModal({
       setSpecConflict(null)
       setIsCanceling(false)
       setCancelReason('')
-      setInputBody('')
+      setIsBlocking(false)
+      setBlockReason('')
+      setIsRecovering(false)
+      setRecoverToBacklog(false)
+      setRecoverComment('')
+      setActivityBody('')
+      setActivityTargetRole('')
       setActiveTab('spec')
       setActionError(null)
     }
   }, [isOpen, issueId])
 
-  // Synchronize drafts with detail when not actively editing spec,
-  // while preserving drafts when refetch occurs during editing.
+  // Synchronize drafts with detail when not actively editing spec
   const lastSyncedIssueIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -156,7 +198,7 @@ export function IssueDetailModal({
 
   const issue = detail?.issue
 
-  // 1. Save Spec edit with CAS conflict preservation
+  // 1. Save Spec edit
   const handleSaveSpec = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) {
@@ -227,7 +269,67 @@ export function IssueDetailModal({
     }
   }
 
-  // 3. Cancel Issue
+  // 3. Block Issue (POST /block with required reason)
+  const handleBlockIssue = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!issue) {
+      return
+    }
+    const trimmedReason = blockReason.trim()
+    if (!trimmedReason) {
+      setActionError('阻塞理由不能为空')
+      return
+    }
+    setIsSubmittingBlock(true)
+    setActionError(null)
+    try {
+      const updated = await api.blockIssue(issue.id, {
+        expectedVersion: issue.version,
+        reason: trimmedReason,
+      })
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated, blocked: true } : prev,
+      )
+      setIsBlocking(false)
+      setBlockReason('')
+      await refetch()
+      onUpdated()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '阻塞 Issue 失败')
+    } finally {
+      setIsSubmittingBlock(false)
+    }
+  }
+
+  // 4. Recover Issue (POST /recover with toBacklog and optional comment)
+  const handleRecoverIssue = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!issue) {
+      return
+    }
+    setIsSubmittingRecover(true)
+    setActionError(null)
+    try {
+      const updated = await api.recoverIssue(issue.id, {
+        expectedVersion: issue.version,
+        toBacklog: recoverToBacklog,
+        comment: recoverComment.trim() || null,
+      })
+      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
+        prev ? { ...prev, issue: updated, blocked: false } : prev,
+      )
+      setIsRecovering(false)
+      setRecoverComment('')
+      await refetch()
+      onUpdated()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
+    } finally {
+      setIsSubmittingRecover(false)
+    }
+  }
+
+  // 5. Cancel Issue
   const handleCancelIssue = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) {
@@ -250,7 +352,7 @@ export function IssueDetailModal({
     }
   }
 
-  // 4. Archive / Unarchive
+  // 6. Archive / Unarchive
   const handleArchive = async () => {
     if (!issue) {
       return
@@ -287,7 +389,7 @@ export function IssueDetailModal({
     }
   }
 
-  // 5. Add Dependency
+  // 7. Add / Remove Dependency
   const handleAddDependency = async () => {
     if (!issue || !selectedDepIssueId) {
       return
@@ -309,7 +411,6 @@ export function IssueDetailModal({
     }
   }
 
-  // 6. Remove Dependency
   const handleRemoveDependency = async (dependsOnIssueId: string) => {
     if (!issue) {
       return
@@ -324,31 +425,56 @@ export function IssueDetailModal({
     }
   }
 
-  // 7. Append Input
-  const handleAppendInput = async (e: React.FormEvent) => {
+  // 8. Append Activity
+  const handleAppendActivity = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!issue || !inputBody.trim()) {
+    if (!issue || !activityBody.trim()) {
       return
     }
-    setIsAppendingInput(true)
+    setIsAppendingActivity(true)
     setActionError(null)
     try {
-      await api.appendIssueInput(issue.id, {
+      const appended = await api.appendIssueActivity(issue.id, {
+        body: activityBody.trim(),
+        targetRole: activityTargetRole || null,
         idempotencyKey: createUuid(),
-        kind: inputKind,
-        body: inputBody.trim(),
       })
-      setInputBody('')
+      setActivities((prev) => [...prev, appended])
+      setActivityBody('')
+      setActivityTargetRole('')
       await refetch()
       onUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '追加输入失败')
+      setActionError(err instanceof Error ? err.message : '追加活动失败')
     } finally {
-      setIsAppendingInput(false)
+      setIsAppendingActivity(false)
     }
   }
 
-  // 8. Human Review
+  // 9. Load more activities
+  const handleLoadMoreActivities = async () => {
+    if (!issue || !nextCursor) {
+      return
+    }
+    setIsLoadingMoreActivities(true)
+    setActionError(null)
+    try {
+      const nextPage = await api.listActivities(issue.id, nextCursor, 50)
+      setActivities((prev) => [...prev, ...nextPage])
+      // Calculate next cursor: if page size reached limit, last sequence is next cursor
+      if (nextPage.length >= 50) {
+        setNextCursor(nextPage[nextPage.length - 1].sequence)
+      } else {
+        setNextCursor(null)
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '加载更多活动失败')
+    } finally {
+      setIsLoadingMoreActivities(false)
+    }
+  }
+
+  // 10. Human Review
   const handleReview = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) {
@@ -359,13 +485,10 @@ export function IssueDetailModal({
     try {
       await api.reviewIssue(issue.id, {
         decision: reviewDecision,
-        summary: reviewSummary.trim() || null,
-        verification: reviewVerification.trim() || null,
-        observedSpecRevision: issue.specRevision,
-        observedInputSequence: issue.inputSequence,
+        reason: reviewReason.trim() || null,
+        idempotencyKey: createUuid(),
       })
-      setReviewSummary('')
-      setReviewVerification('')
+      setReviewReason('')
       await refetch()
       onUpdated()
     } catch (err) {
@@ -375,7 +498,7 @@ export function IssueDetailModal({
     }
   }
 
-  // 9. Retry Run
+  // 11. Retry Run
   const handleRetryRun = async () => {
     if (!issue) {
       return
@@ -395,6 +518,7 @@ export function IssueDetailModal({
     }
   }
 
+  const isBlocked = Boolean(detail?.blocked) || issue?.status === 'BLOCKED'
   const isTerminal = issue?.status === 'DONE' || issue?.status === 'CANCELED'
   const canHumanReview =
     issue?.status === 'IN_REVIEW' && issue?.reviewerAgentName === null
@@ -406,7 +530,7 @@ export function IssueDetailModal({
     detail?.latestRun?.status === 'FAILED' ||
     detail?.latestRun?.status === 'UNKNOWN'
 
-  // Available dependency candidates: other unarchived issues
+  // Dependency candidates
   const existingDepIds = new Set(detail?.dependencies.map((d) => d.dependsOnIssueId) ?? [])
   const depCandidates = projectIssues.filter(
     (item) =>
@@ -427,7 +551,7 @@ export function IssueDetailModal({
     >
       <div
         className="modal-card resource-modal-card"
-        style={{ maxWidth: '800px', width: '90%' }}
+        style={{ maxWidth: '820px', width: '92%' }}
         role="dialog"
         aria-modal="true"
         aria-label={`Issue #${issue?.number || ''} 详情`}
@@ -442,7 +566,7 @@ export function IssueDetailModal({
                 {issue.status}
               </span>
             )}
-            {detail?.blocked && (
+            {isBlocked && (
               <span className="badge badge-blocked">
                 <AlertCircle size={12} aria-hidden="true" />
                 BLOCKED
@@ -479,10 +603,10 @@ export function IssueDetailModal({
           </button>
           <button
             type="button"
-            className={`modal-tab-button ${activeTab === 'inputs' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('inputs')}
+            className={`modal-tab-button ${activeTab === 'activities' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('activities')}
           >
-            输入流 ({detail?.inputs.length ?? 0})
+            活动流 ({activities.length})
           </button>
           <button
             type="button"
@@ -493,7 +617,7 @@ export function IssueDetailModal({
           </button>
         </nav>
 
-        <div className="modal-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+        <div className="modal-body" style={{ maxHeight: '68vh', overflowY: 'auto' }}>
           {errorMessage && (
             <div className="form-error-banner" role="alert" style={{ marginBottom: '14px' }}>
               <AlertTriangle size={14} aria-hidden="true" />
@@ -509,6 +633,38 @@ export function IssueDetailModal({
 
           {detail && issue && activeTab === 'spec' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {isBlocked && (
+                <div
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f87171', fontWeight: 600 }}>
+                    <ShieldAlert size={16} aria-hidden="true" />
+                    <span>Issue 当前处于阻塞状态 (BLOCKED)，自动推进已停止</span>
+                  </div>
+                  {!isRecovering && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ fontSize: '0.8125rem', height: '28px', padding: '0 12px' }}
+                      onClick={() => setIsRecovering(true)}
+                    >
+                      <RotateCcw size={12} style={{ marginRight: '4px' }} aria-hidden="true" />
+                      恢复 Issue
+                    </button>
+                  )}
+                </div>
+              )}
+
               {isWaitingHuman && (
                 <div
                   style={{
@@ -530,9 +686,9 @@ export function IssueDetailModal({
                       type="button"
                       className="btn-primary"
                       style={{ fontSize: '0.8125rem', height: '28px', padding: '0 10px' }}
-                      onClick={() => setActiveTab('inputs')}
+                      onClick={() => setActiveTab('activities')}
                     >
-                      前往“输入流”追加答复
+                      前往“活动流”追加答复
                     </button>
                   </div>
                 </div>
@@ -585,23 +741,36 @@ export function IssueDetailModal({
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                     <div className="form-group">
-                      <label htmlFor="edit-spec-assignee">Assignee Agent</label>
-                      <input
+                      <label htmlFor="edit-spec-assignee">执行 Agent (EXECUTOR)</label>
+                      <select
                         id="edit-spec-assignee"
-                        type="text"
                         value={draftAssignee}
                         onChange={(e) => setDraftAssignee(e.target.value)}
-                      />
+                        aria-label="执行 Agent (EXECUTOR)"
+                      >
+                        <option value="">未指定</option>
+                        {agentOptions.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div className="form-group">
-                      <label htmlFor="edit-spec-reviewer">Reviewer Agent</label>
-                      <input
+                      <label htmlFor="edit-spec-reviewer">审查 Agent (REVIEWER)</label>
+                      <select
                         id="edit-spec-reviewer"
-                        type="text"
                         value={draftReviewer}
                         onChange={(e) => setDraftReviewer(e.target.value)}
-                        placeholder="留空为人工审核"
-                      />
+                        aria-label="审查 Agent (REVIEWER)"
+                      >
+                        <option value="">人工审核</option>
+                        {agentOptions.map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
@@ -657,13 +826,13 @@ export function IssueDetailModal({
                     }}
                   >
                     <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>Assignee Agent: </span>
+                      <span style={{ color: 'var(--fg-muted)' }}>执行 Agent (EXECUTOR): </span>
                       <strong style={{ color: 'var(--fg)' }}>
                         {issue.assigneeAgentName || '未指定'}
                       </strong>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>Reviewer Agent: </span>
+                      <span style={{ color: 'var(--fg-muted)' }}>审查 Agent (REVIEWER): </span>
                       <strong style={{ color: 'var(--fg)' }}>
                         {issue.reviewerAgentName || '人工 Review'}
                       </strong>
@@ -673,14 +842,206 @@ export function IssueDetailModal({
                       <code>{issue.version}</code>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>Spec Revision: </span>
-                      <code>{issue.specRevision}</code>
-                    </div>
-                    <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>Input Sequence: </span>
-                      <code>{issue.inputSequence}</code>
+                      <span style={{ color: 'var(--fg-muted)' }}>状态: </span>
+                      <code>{issue.status}</code>
                     </div>
                   </div>
+
+                  {/* Agent Sessions & Work Branches */}
+                  {detail.sessions && detail.sessions.length > 0 && (
+                    <div>
+                      <h4 style={{ margin: '8px 0 6px 0', fontSize: '0.875rem', color: 'var(--fg-muted)' }}>
+                        Agent 稳定归属与工作分支 (Sessions)
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {detail.sessions.map((sess) => (
+                          <div
+                            key={sess.id}
+                            style={{
+                              padding: '10px 12px',
+                              background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+                              border: '1px solid var(--border)',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '0.8125rem',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                              <span style={{ fontWeight: 600 }}>
+                                {sess.role === 'EXECUTOR' ? '执行' : '审查'}角色: {sess.agentName}
+                              </span>
+                              <span className="badge badge-status" style={{ fontSize: '0.75rem' }}>
+                                Branch: {sess.branchId.slice(0, 8)}...
+                              </span>
+                            </div>
+                            <div style={{ color: 'var(--fg-muted)', fontSize: '0.75rem', marginTop: '4px' }}>
+                              Session: <code>{sess.sessionId}</code>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recover Form */}
+                  {isRecovering && (
+                    <form
+                      onSubmit={handleRecoverIssue}
+                      style={{
+                        background: 'rgba(59, 130, 246, 0.08)',
+                        border: '1px solid rgba(59, 130, 246, 0.3)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                      }}
+                    >
+                      <h4 style={{ margin: 0, color: '#60a5fa' }}>人工恢复 Issue</h4>
+                      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
+                        恢复将解除阻塞并开启新的打回计数区间，旧的未处理提交不重新获得审查资格。
+                      </p>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="recoverTarget"
+                            checked={!recoverToBacklog}
+                            onChange={() => setRecoverToBacklog(false)}
+                          />
+                          <span>恢复至 TODO（要求不变，直接就绪自动推进）</span>
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="recoverTarget"
+                            checked={recoverToBacklog}
+                            onChange={() => setRecoverToBacklog(true)}
+                          />
+                          <span>恢复至 BACKLOG（放回需求池，需先修改要求再重新开始）</span>
+                        </label>
+                      </div>
+
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label htmlFor="recover-comment">恢复说明 (可选)</label>
+                        <textarea
+                          id="recover-comment"
+                          placeholder="说明恢复原因或指导意见..."
+                          value={recoverComment}
+                          onChange={(e) => setRecoverComment(e.target.value)}
+                          rows={2}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="submit"
+                          className="btn-primary"
+                          disabled={isSubmittingRecover}
+                        >
+                          {isSubmittingRecover ? '恢复中...' : '确认恢复'}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => setIsRecovering(false)}
+                          disabled={isSubmittingRecover}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Block Form */}
+                  {isBlocking && (
+                    <form
+                      onSubmit={handleBlockIssue}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                      }}
+                    >
+                      <h4 style={{ margin: 0, color: '#f87171' }}>显式阻塞 Issue</h4>
+                      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
+                        阻塞会停止自动推进并将 Issue 转入 BLOCKED 状态，必须填写阻塞原因。
+                      </p>
+
+                      <div className="form-group" style={{ margin: 0 }}>
+                        <label htmlFor="block-reason">
+                          阻塞原因 <span style={{ color: 'var(--danger)' }}>*</span>
+                        </label>
+                        <textarea
+                          id="block-reason"
+                          placeholder="详细说明业务障碍或待决问题..."
+                          value={blockReason}
+                          onChange={(e) => setBlockReason(e.target.value)}
+                          rows={3}
+                          required
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="submit"
+                          className="btn-primary danger"
+                          disabled={isSubmittingBlock || !blockReason.trim()}
+                        >
+                          {isSubmittingBlock ? '阻塞中...' : '确认阻塞'}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => setIsBlocking(false)}
+                          disabled={isSubmittingBlock}
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Cancel Form */}
+                  {isCanceling && (
+                    <form
+                      onSubmit={handleCancelIssue}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.05)',
+                        border: '1px solid rgba(239, 68, 68, 0.2)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <h4 style={{ margin: 0, color: '#f87171' }}>确认取消 Issue #{issue.number}</h4>
+                      <input
+                        type="text"
+                        placeholder="可选：取消原因"
+                        value={cancelReason}
+                        onChange={(e) => setCancelReason(e.target.value)}
+                        aria-label="取消原因"
+                      />
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button type="submit" className="btn-primary danger">
+                          确认取消
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => setIsCanceling(false)}
+                        >
+                          返回
+                        </button>
+                      </div>
+                    </form>
+                  )}
 
                   {/* Actions Toolbar */}
                   <div
@@ -734,6 +1095,28 @@ export function IssueDetailModal({
                       </button>
                     )}
 
+                    {isBlocked && !isRecovering && (
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={() => setIsRecovering(true)}
+                      >
+                        <RotateCcw size={14} aria-hidden="true" />
+                        恢复 Issue
+                      </button>
+                    )}
+
+                    {!isTerminal && !isBlocked && !isBlocking && (
+                      <button
+                        type="button"
+                        className="ghost-btn danger"
+                        onClick={() => setIsBlocking(true)}
+                      >
+                        <AlertCircle size={14} aria-hidden="true" />
+                        阻塞 Issue
+                      </button>
+                    )}
+
                     {!isTerminal && !isCanceling && (
                       <button
                         type="button"
@@ -752,7 +1135,7 @@ export function IssueDetailModal({
                         onClick={handleArchive}
                       >
                         <Archive size={14} aria-hidden="true" />
-                        归档 Issue
+                        归档
                       </button>
                     )}
 
@@ -762,45 +1145,11 @@ export function IssueDetailModal({
                         className="ghost-btn"
                         onClick={handleUnarchive}
                       >
+                        <RotateCcw size={14} aria-hidden="true" />
                         取消归档
                       </button>
                     )}
                   </div>
-
-                  {isCanceling && (
-                    <form
-                      onSubmit={handleCancelIssue}
-                      style={{
-                        background: 'rgba(239, 68, 68, 0.05)',
-                        border: '1px solid rgba(239, 68, 68, 0.2)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '12px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                      }}
-                    >
-                      <h5 style={{ margin: 0, color: '#f87171' }}>确认取消此 Issue</h5>
-                      <input
-                        type="text"
-                        placeholder="可选取消原因..."
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                      />
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button type="submit" className="btn-primary danger">
-                          确认取消
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={() => setIsCanceling(false)}
-                        >
-                          放弃
-                        </button>
-                      </div>
-                    </form>
-                  )}
                 </div>
               )}
             </div>
@@ -898,19 +1247,19 @@ export function IssueDetailModal({
             </div>
           )}
 
-          {detail && activeTab === 'inputs' && (
+          {detail && activeTab === 'activities' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.875rem' }}>历史输入流</h4>
-                {detail.inputs.length === 0 ? (
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.875rem' }}>唯一有序事实流 (Activities)</h4>
+                {activities.length === 0 ? (
                   <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: 0 }}>
-                    暂无输入记录。
+                    暂无活动记录。
                   </p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {detail.inputs.map((inp) => (
+                    {activities.map((act) => (
                       <div
-                        key={inp.sequence}
+                        key={act.sequence}
                         style={{
                           background: 'var(--bg-subtle, rgba(255,255,255,0.03))',
                           border: '1px solid var(--border)',
@@ -926,52 +1275,95 @@ export function IssueDetailModal({
                             fontSize: '0.75rem',
                             color: 'var(--fg-muted)',
                             marginBottom: '4px',
+                            gap: '8px',
+                            flexWrap: 'wrap',
                           }}
                         >
-                          <span style={{ fontWeight: 600 }}>
-                            #{inp.sequence} · {inp.kind}
-                          </span>
-                          <span>{inp.createdAt}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: 600 }}>#{act.sequence}</span>
+                            <span className="badge badge-status" style={{ fontSize: '0.7rem' }}>
+                              {act.kind}
+                            </span>
+                            <span>
+                              {act.actorType === 'AGENT'
+                                ? `Agent: ${act.actorAgentName}`
+                                : act.actorType}
+                            </span>
+                            {act.targetRole && (
+                              <span className="badge badge-waiting" style={{ fontSize: '0.7rem' }}>
+                                @{act.targetRole}
+                              </span>
+                            )}
+                            {act.decision && (
+                              <span className="badge badge-run" style={{ fontSize: '0.7rem' }}>
+                                {act.decision}
+                              </span>
+                            )}
+                          </div>
+                          <span>{act.createdAt}</span>
                         </div>
-                        <div style={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap' }}>
-                          {inp.body}
+                        <div style={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                          {act.body}
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
+
+                {nextCursor && (
+                  <div style={{ marginTop: '12px', textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      onClick={handleLoadMoreActivities}
+                      disabled={isLoadingMoreActivities}
+                    >
+                      {isLoadingMoreActivities ? '加载中...' : '加载更早的活动记录'}
+                    </button>
+                  </div>
+                )}
               </div>
 
+              {/* Append Activity Form */}
               <form
-                onSubmit={handleAppendInput}
+                onSubmit={handleAppendActivity}
                 style={{
                   borderTop: '1px solid var(--border)',
                   paddingTop: '14px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '8px',
+                  gap: '10px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label htmlFor="append-input-body" style={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                    追加输入 (向 Issue 投递新指示或答复)
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                  <label htmlFor="append-activity-body" style={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                    追加活动记录 / 定向指示
                   </label>
-                  <select
-                    value={inputKind}
-                    onChange={(e) => setInputKind(e.target.value as 'HUMAN' | 'SYSTEM')}
-                    style={{ width: '120px', fontSize: '0.75rem' }}
-                    aria-label="输入类型"
-                  >
-                    <option value="HUMAN">HUMAN</option>
-                    <option value="SYSTEM">SYSTEM</option>
-                  </select>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--fg-muted)' }}>目标角色:</span>
+                    <select
+                      value={activityTargetRole}
+                      onChange={(e) => setActivityTargetRole(e.target.value as IssueRunRole | '')}
+                      style={{ fontSize: '0.75rem', padding: '2px 8px' }}
+                      aria-label="目标职责"
+                    >
+                      <option value="">无定向 (普通评论 COMMENT)</option>
+                      <option value="EXECUTOR">@EXECUTOR (定向指示)</option>
+                      <option value="REVIEWER">@REVIEWER (定向指示)</option>
+                    </select>
+                  </div>
                 </div>
 
                 <textarea
-                  id="append-input-body"
-                  value={inputBody}
-                  onChange={(e) => setInputBody(e.target.value)}
-                  placeholder="输入要向执行上下文传递的内容..."
+                  id="append-activity-body"
+                  aria-label="活动内容"
+                  value={activityBody}
+                  onChange={(e) => setActivityBody(e.target.value)}
+                  placeholder={
+                    activityTargetRole
+                      ? `输入对 ${activityTargetRole} 的定向补充说明或指令...`
+                      : '输入评论留言...'
+                  }
                   rows={3}
                   required
                 />
@@ -980,9 +1372,9 @@ export function IssueDetailModal({
                   <button
                     type="submit"
                     className="btn-primary"
-                    disabled={isAppendingInput || !inputBody.trim()}
+                    disabled={isAppendingActivity || !activityBody.trim()}
                   >
-                    {isAppendingInput ? '提交中...' : '提交输入'}
+                    {isAppendingActivity ? '提交中...' : '追加活动'}
                   </button>
                 </div>
               </form>
@@ -1033,24 +1425,13 @@ export function IssueDetailModal({
                   </div>
 
                   <div className="form-group" style={{ margin: 0 }}>
-                    <label htmlFor="review-summary">审核摘要 (Summary)</label>
-                    <input
-                      id="review-summary"
-                      type="text"
-                      placeholder="简短说明审核意见"
-                      value={reviewSummary}
-                      onChange={(e) => setReviewSummary(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label htmlFor="review-verification">验证依据 (Verification)</label>
+                    <label htmlFor="review-reason">审核理由 / 反馈说明</label>
                     <textarea
-                      id="review-verification"
-                      placeholder="测试结果或审查记录"
-                      value={reviewVerification}
-                      onChange={(e) => setReviewVerification(e.target.value)}
-                      rows={2}
+                      id="review-reason"
+                      placeholder="说明审核意见或修改要求..."
+                      value={reviewReason}
+                      onChange={(e) => setReviewReason(e.target.value)}
+                      rows={3}
                     />
                   </div>
 
@@ -1075,29 +1456,27 @@ export function IssueDetailModal({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
+                    gap: '12px',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  <div>
-                    <strong style={{ color: '#f87171' }}>最近 Run 处于 FAILED 或 UNKNOWN 状态</strong>
-                    <div style={{ fontSize: '0.8125rem', color: 'var(--fg-muted)', marginTop: '2px' }}>
-                      可通过重试向 Issue 追加 RETRY 输入，Controller 将调度新 Run。
-                    </div>
+                  <div style={{ color: '#f87171', fontSize: '0.875rem' }}>
+                    Run 执行失败或处于未知状态，可执行显式重试。
                   </div>
                   <button
                     type="button"
                     className="btn-primary"
                     onClick={handleRetryRun}
                     disabled={isRetrying}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   >
-                    <RotateCcw size={14} aria-hidden="true" />
+                    <RefreshCw size={14} className={isRetrying ? 'animate-spin' : ''} aria-hidden="true" />
                     <span>{isRetrying ? '重试中...' : '重试 Run'}</span>
                   </button>
                 </div>
               )}
 
               <div>
-                <h4 style={{ margin: '0 0 10px 0', fontSize: '0.875rem' }}>Runs 执行列表</h4>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.875rem' }}>历史 Run 记录</h4>
                 {detail.runs.length === 0 ? (
                   <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: 0 }}>
                     暂无 Run 记录。
@@ -1108,10 +1487,13 @@ export function IssueDetailModal({
                       <div
                         key={run.id}
                         style={{
-                          background: 'var(--bg-subtle, rgba(255,255,255,0.03))',
+                          background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
                           border: '1px solid var(--border)',
                           borderRadius: 'var(--radius-sm)',
                           padding: '12px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
                         }}
                       >
                         <div
@@ -1119,49 +1501,50 @@ export function IssueDetailModal({
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            marginBottom: '6px',
+                            flexWrap: 'wrap',
+                            gap: '8px',
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <strong>#{run.ordinal} {run.role}</strong>
-                            <span className="badge badge-run">{run.status}</span>
+                            <strong style={{ fontSize: '0.875rem' }}>
+                              Run #{run.ordinal} ({run.role === 'REVIEWER' ? '审核' : '执行'})
+                            </strong>
+                            <span className="badge badge-status">{run.status}</span>
                             {run.outcome && (
-                              <span className="badge badge-status">
-                                结果: {run.outcome}
-                              </span>
+                              <span className="badge badge-run">{run.outcome}</span>
                             )}
                           </div>
                           <span style={{ fontSize: '0.75rem', color: 'var(--fg-muted)' }}>
-                            {run.actorType}: {run.agentName || 'HUMAN'}
+                            {run.createdAt}
                           </span>
                         </div>
 
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
+                          Agent: <strong style={{ color: 'var(--fg)' }}>{run.agentName || '人工'}</strong>
+                          {run.continuationCount > 0 && ` · 轮次: ${run.continuationCount}/${run.maxContinuations}`}
+                          {run.observedActivitySequence && ` · 已消费活动: #${run.observedActivitySequence}`}
+                        </div>
+
                         {run.waitingReason && (
-                          <div style={{ fontSize: '0.8125rem', color: '#fbbf24', margin: '4px 0' }}>
-                            等待原因：{run.waitingReason}
+                          <div style={{ fontSize: '0.8125rem', color: '#fbbf24' }}>
+                            等待原因: {run.waitingReason}
                           </div>
                         )}
 
                         {run.result && (
-                          <div style={{ fontSize: '0.8125rem', color: 'var(--fg-muted)', margin: '4px 0' }}>
-                            执行结果：{run.result}
+                          <div
+                            style={{
+                              fontSize: '0.8125rem',
+                              background: 'rgba(0,0,0,0.15)',
+                              padding: '8px',
+                              borderRadius: 'var(--radius-sm)',
+                              marginTop: '4px',
+                              whiteSpace: 'pre-wrap',
+                            }}
+                          >
+                            {run.result}
                           </div>
                         )}
-
-                        <div
-                          style={{
-                            display: 'flex',
-                            gap: '12px',
-                            fontSize: '0.75rem',
-                            color: 'var(--fg-muted)',
-                            marginTop: '6px',
-                          }}
-                        >
-                          <span>延续次数: {run.continuationCount} / {run.maxContinuations}</span>
-                          <span>创建: {run.createdAt}</span>
-                          {run.completedAt && <span>完成: {run.completedAt}</span>}
-                          {run.sessionId && <span>Session: {run.sessionId.slice(0, 8)}...</span>}
-                        </div>
                       </div>
                     ))}
                   </div>

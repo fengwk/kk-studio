@@ -11,7 +11,8 @@ public class ProjectDO {
   private UUID id;
   private String title;
   private String description;
-  private String coordinatorAgentName;
+  private Boolean yoloEnabled;
+  private Integer maxReviewRejections;
   private Long nextIssueNumber;
   private Long version;
   private Instant archivedAt;

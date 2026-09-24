@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, Pencil, AlertTriangle, RefreshCw } from 'lucide-react'
-import { Select } from '@/shared/ui/console/Select'
-import { useCoordinatorAgents } from '../useCoordinatorAgents'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
 import type { ProjectsApi } from '../projects-api'
@@ -25,7 +23,8 @@ export function EditProjectModal({
 }: EditProjectModalProps) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [coordinatorAgentName, setCoordinatorAgentName] = useState('')
+  const [yoloEnabled, setYoloEnabled] = useState(true)
+  const [maxReviewRejections, setMaxReviewRejections] = useState<number | ''>(3)
   const [expectedVersion, setExpectedVersion] = useState('0')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isReloading, setIsReloading] = useState(false)
@@ -35,13 +34,6 @@ export function EditProjectModal({
     detail: string
   } | null>(null)
   const initializedProjectIdRef = useRef<string | null>(null)
-
-  const {
-    options: agentOptions,
-    isLoading: isAgentsLoading,
-    isError: isAgentsError,
-    isCoordinatorValid,
-  } = useCoordinatorAgents(project?.coordinatorAgentName, isOpen && Boolean(project))
 
   useEffect(() => {
     if (!isOpen || !project) {
@@ -54,7 +46,8 @@ export function EditProjectModal({
     initializedProjectIdRef.current = project.id
     setTitle(project.title)
     setDescription(project.description)
-    setCoordinatorAgentName(project.coordinatorAgentName)
+    setYoloEnabled(project.yoloEnabled)
+    setMaxReviewRejections(parseInt(project.maxReviewRejections, 10) || 3)
     setExpectedVersion(project.version)
     setErrorMessage(null)
     setConflictDetail(null)
@@ -83,7 +76,6 @@ export function EditProjectModal({
     setErrorMessage(null)
     try {
       const fresh = await api.getProject(project.id)
-      // 更新最新版本号，清除冲突状态；保留用户当前表单草稿
       setExpectedVersion(fresh.version)
       setConflictDetail(null)
     } catch (err) {
@@ -100,7 +92,8 @@ export function EditProjectModal({
       const fresh = await api.getProject(project.id)
       setTitle(fresh.title)
       setDescription(fresh.description)
-      setCoordinatorAgentName(fresh.coordinatorAgentName)
+      setYoloEnabled(fresh.yoloEnabled)
+      setMaxReviewRejections(parseInt(fresh.maxReviewRejections, 10) || 3)
       setExpectedVersion(fresh.version)
       setConflictDetail(null)
     } catch (err) {
@@ -117,9 +110,9 @@ export function EditProjectModal({
       setErrorMessage('项目名称不能为空')
       return
     }
-    const trimmedCoordinatorAgentName = coordinatorAgentName.trim()
-    if (!trimmedCoordinatorAgentName || !isCoordinatorValid(trimmedCoordinatorAgentName)) {
-      setErrorMessage('请选择有效的 Coordinator Agent')
+    const rejections = typeof maxReviewRejections === 'number' ? maxReviewRejections : 3
+    if (rejections <= 0) {
+      setErrorMessage('最大打回次数必须为正整数')
       return
     }
 
@@ -130,7 +123,8 @@ export function EditProjectModal({
         expectedVersion,
         title: trimmedTitle,
         description: description.trim() || null,
-        coordinatorAgentName: trimmedCoordinatorAgentName,
+        yoloEnabled,
+        maxReviewRejections: rejections,
       })
       onSuccess(updated)
       onClose()
@@ -199,7 +193,7 @@ export function EditProjectModal({
                     disabled={isReloading}
                   >
                     <RefreshCw size={14} aria-hidden="true" />
-                    {isReloading ? '同步中...' : '同步最新版本号并重试'}
+                    保留草稿并重新加载最新版本号
                   </button>
                   <button
                     type="button"
@@ -207,7 +201,7 @@ export function EditProjectModal({
                     onClick={handleDiscardAndReset}
                     disabled={isReloading}
                   >
-                    放弃草稿重置为服务端内容
+                    放弃更改并完全刷新
                   </button>
                 </div>
               </div>
@@ -246,35 +240,43 @@ export function EditProjectModal({
             </div>
 
             <div className="form-group">
-              <label id="edit-project-coordinator-label" htmlFor="edit-project-coordinator">
-                Coordinator Agent 名称 <span style={{ color: 'var(--danger)' }}>*</span>
+              <label htmlFor="edit-project-max-rejections">
+                最大审查打回次数 <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
-              <Select
-                id="edit-project-coordinator"
-                value={coordinatorAgentName}
-                options={agentOptions}
-                onChange={setCoordinatorAgentName}
-                disabled={isSubmitting || isAgentsLoading || isAgentsError}
-                placeholder={
-                  isAgentsLoading
-                    ? '正在加载 Agent 列表...'
-                    : isAgentsError
-                      ? '加载 Agent 列表失败'
-                      : '请选择 Coordinator Agent'
-                }
-                aria-label="Coordinator Agent 名称"
+              <input
+                id="edit-project-max-rejections"
+                type="number"
+                min={1}
+                value={maxReviewRejections}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setMaxReviewRejections(val === '' ? '' : parseInt(val, 10))
+                }}
                 required
+                aria-label="最大审查打回次数"
               />
-              {isAgentsError ? (
-                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
-                  加载 Agent 列表失败，请稍后重试
-                </p>
-              ) : null}
-              {coordinatorAgentName && !isCoordinatorValid(coordinatorAgentName) ? (
-                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
-                  当前 Coordinator Agent 不可用，请重新选择有效的 Agent
-                </p>
-              ) : null}
+              <span className="field-hint" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
+                连续打回达到该次数后单据转入 BLOCKED 状态
+              </span>
+            </div>
+
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+              <input
+                id="edit-project-yolo"
+                type="checkbox"
+                checked={yoloEnabled}
+                onChange={(e) => setYoloEnabled(e.target.checked)}
+                style={{ marginTop: '3px' }}
+                aria-label="YOLO 模式"
+              />
+              <div>
+                <label htmlFor="edit-project-yolo" style={{ cursor: 'pointer', fontWeight: 500 }}>
+                  YOLO 模式 (自动执行)
+                </label>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block' }}>
+                  新建 Issue 时自动启动 Agent Run 分支，无需手动触发
+                </span>
+              </div>
             </div>
           </div>
 
@@ -290,9 +292,13 @@ export function EditProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim() || !isCoordinatorValid(coordinatorAgentName)}
+              disabled={
+                isSubmitting ||
+                !title.trim() ||
+                (typeof maxReviewRejections === 'number' && maxReviewRejections <= 0)
+              }
             >
-              {isSubmitting ? '保存中...' : '保存修改'}
+              {isSubmitting ? '保存中...' : '保存更改'}
             </button>
           </div>
         </form>

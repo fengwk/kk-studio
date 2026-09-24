@@ -8,6 +8,7 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 public sealed interface ThreadCommandPayload
     permits UserMessageCommandPayload,
         CustomMessageCommandPayload,
+        GoalCommandPayload,
         SetAgentCommandPayload,
         SetModelCommandPayload,
         SetEnvironmentCommandPayload {

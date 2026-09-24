@@ -13,13 +13,15 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
 import java.util.List;
@@ -34,20 +36,21 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** 验证 IssueDependency 依赖边管理及无环 DAG 保证： 包含同项目复合外键校验、自环禁止、递归 CTE 环检测以及并发反向边尝试下的绝对无环保证。 */
+/** 验证 IssueDependency 依赖边管理及无环 DAG 保证： 包含同项目外键校验、自环禁止、递归 CTE 环检测以及并发反向边尝试下的绝对无环保证。 */
 class IssueDependencyIntegrationTest extends ProjectTestSupport {
 
   @Autowired private IssueService issueService;
   @Autowired private ProjectService projectService;
   @Autowired private IssueRepository issueRepository;
   @Autowired private IssueDependencyRepository issueDependencyRepository;
-  @Autowired private IssueControllerWorkStore controllerWorkStore;
+  @Autowired private IssueWorkStore workStore;
 
   @Test
   void testSameProjectAndSelfDependencyEnforcement() {
+    // 测试意图：验证自依赖禁止、跨项目依赖拒绝、同项目依赖成功以及重复依赖拒绝。
     String agent = createTestAgent();
-    Project proj1 = projectService.createProject("Project 1", "Desc", agent);
-    Project proj2 = projectService.createProject("Project 2", "Desc", agent);
+    Project proj1 = projectService.createProject("Project 1", "Desc", true, 3);
+    Project proj2 = projectService.createProject("Project 2", "Desc", true, 3);
 
     Issue issueA =
         issueService.createIssue(proj1.getId(), "Issue A", "Desc", agent, null, IssueStatus.TODO);
@@ -67,12 +70,12 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
         AiValidationException.class,
         () -> issueService.addDependency(issueA.getId(), issueOther.getId(), 0L));
 
-    // 同项目依赖成功；返回值必须包含数据库生成时间，供 REST 直接映射权威事实。
+    // 同项目依赖成功；返回值必须包含数据库生成时间
     IssueDependency added = issueService.addDependency(issueA.getId(), issueB.getId(), 0L);
     assertNotNull(added.getCreatedAt());
     List<IssueDependency> deps = issueService.listDependencies(issueA.getId());
     assertEquals(1, deps.size());
-    assertEquals(issueB.getId(), deps.getFirst().getDependsOnIssueId());
+    assertEquals(issueB.getId(), deps.get(0).getDependsOnIssueId());
 
     // 重复依赖拒绝
     assertThrows(
@@ -81,26 +84,30 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
   }
 
   @Test
-  void testSpecRevisionAndWorkRequestOnDependencyModification() {
+  void testActivityAndWorkRequestOnDependencyModification() {
+    // 测试意图：验证添加/移除依赖时记录 SPEC_CHANGE Activity、递增 Issue 版本、请求 Work 并限制仅在 BACKLOG/TODO 允许修改。
     String agent = createTestAgent();
-    Project proj = projectService.createProject("Dep Lifecycle", "Desc", agent);
+    Project proj = projectService.createProject("Dep Lifecycle", "Desc", true, 3);
     Issue issueA =
         issueService.createIssue(proj.getId(), "A", "Desc", agent, null, IssueStatus.TODO);
     Issue issueB =
         issueService.createIssue(proj.getId(), "B", "Desc", agent, null, IssueStatus.TODO);
 
-    long initialSpecRev = issueA.getSpecRevision();
-
-    // 添加依赖递增被阻塞 Issue 的 specRevision 并请求 Work
+    // 添加依赖递增版本、记录 Activity 并请求 Work
     issueService.addDependency(issueA.getId(), issueB.getId(), 0L);
     Issue refreshedA = issueService.getIssue(issueA.getId());
-    assertEquals(initialSpecRev + 1, refreshedA.getSpecRevision());
-    assertNotNull(controllerWorkStore.getWork(issueA.getId()));
+    assertEquals(1L, refreshedA.getVersion());
+    assertNotNull(workStore.getWork(issueA.getId()));
 
-    // 移除依赖再次递增 specRevision
+    List<IssueActivity> activities = issueService.listActivities(issueA.getId());
+    assertEquals(2, activities.size());
+    assertEquals(IssueActivityKind.SPEC_CHANGE, activities.get(1).getKind());
+
+    // 移除依赖再次递增版本并记录 Activity
     issueService.removeDependency(issueA.getId(), issueB.getId(), refreshedA.getVersion());
     Issue refreshedA2 = issueService.getIssue(issueA.getId());
-    assertEquals(initialSpecRev + 2, refreshedA2.getSpecRevision());
+    assertEquals(2L, refreshedA2.getVersion());
+    assertEquals(3, issueService.listActivities(issueA.getId()).size());
 
     // 只能对 BACKLOG 或 TODO 状态的 Issue 添加/移除依赖
     refreshedA2.setStatus(IssueStatus.IN_PROGRESS);
@@ -114,8 +121,9 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testCycleDetectionDirectTransitiveAndDiamondDag() {
+    // 测试意图：验证直接反向边成环、传递反向边成环被拦截，而菱形（Diamond）合法 DAG 被允许。
     String agent = createTestAgent();
-    Project proj = projectService.createProject("DAG Test", "Desc", agent);
+    Project proj = projectService.createProject("DAG Test", "Desc", true, 3);
     Issue a = issueService.createIssue(proj.getId(), "A", "Desc", agent, null, IssueStatus.TODO);
     Issue b = issueService.createIssue(proj.getId(), "B", "Desc", agent, null, IssueStatus.TODO);
     Issue c = issueService.createIssue(proj.getId(), "C", "Desc", agent, null, IssueStatus.TODO);
@@ -149,10 +157,10 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testConcurrentReverseEdgeAttemptsMaintainAcyclicDag() throws InterruptedException {
+    // 测试意图：验证高并发下多组双向边同时尝试添加时，受锁与环检测保护，至多只有单向边成功，绝不出现环。
     String agent = createTestAgent();
-    Project proj = projectService.createProject("Concurrency DAG", "Desc", agent);
+    Project proj = projectService.createProject("Concurrency DAG", "Desc", true, 3);
 
-    // 验证多组并发反向边竞争：每组中线程 1 尝试 X -> Y，线程 2 尝试 Y -> X
     int pairs = 5;
     for (int p = 0; p < pairs; p++) {
       Issue nodeX =
@@ -181,7 +189,6 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
                 successCount.incrementAndGet();
                 xDependsOnY.set(true);
               } catch (Exception ignored) {
-                // 环检测、版本冲突或锁等待失败
               } finally {
                 doneLatch.countDown();
               }
@@ -196,7 +203,6 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
                 successCount.incrementAndGet();
                 yDependsOnX.set(true);
               } catch (Exception ignored) {
-                // 环检测、版本冲突或锁等待失败
               } finally {
                 doneLatch.countDown();
               }
@@ -209,7 +215,7 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
         executor.shutdownNow();
       }
 
-      // 铁律：绝不能两者都成功（形成双向死环）！成功数至多为 1
+      // 绝不能两者都成功（形成双向死环）
       assertFalse(
           xDependsOnY.get() && yDependsOnX.get(),
           "Both reverse edges succeeded simultaneously, violating acyclic DAG invariant!");
@@ -228,8 +234,9 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testDependencyValidationsAndRepositoryQueries() {
+    // 测试意图：验证不存在 ID、CAS 版本冲突、不存在依赖删除（幂等 no-op）及仓储层反向查询。
     String agent = createTestAgent();
-    Project proj = projectService.createProject("Dep Val Proj", "Desc", agent);
+    Project proj = projectService.createProject("Dep Val Proj", "Desc", true, 3);
     Issue a = issueService.createIssue(proj.getId(), "A", "Desc", agent, null, IssueStatus.TODO);
     Issue b = issueService.createIssue(proj.getId(), "B", "Desc", agent, null, IssueStatus.TODO);
 
@@ -268,8 +275,9 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testFourNodeDisjointConcurrentCycleDetection() throws Exception {
+    // 测试意图：验证四节点 DAG 中并发添加两条不相邻边时，Project 级锁保证串行化，恰有一个成功、另一个被环检测拦截。
     String agent = createTestAgent();
-    Project proj = projectService.createProject("4-Node Cycle Test", "Desc", agent);
+    Project proj = projectService.createProject("4-Node Cycle Test", "Desc", true, 3);
 
     // 四节点 DAG：预建 B -> C 以及 D -> A
     Issue a = issueService.createIssue(proj.getId(), "A", "Desc", agent, null, IssueStatus.TODO);
@@ -285,8 +293,6 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
     // 并发新增两条端点完全不重叠的边：
     // Task 1: A depends on B (A -> B)
     // Task 2: C depends on D (C -> D)
-    // 若两者同时成功，将形成 D -> A -> B -> C -> D 的 4 节点死环！
-    // 得益于 Project 级排他锁互斥，两任务必被串行化，恰一个成功、另一个被环检测拦截抛出 AiValidationException。
     CyclicBarrier barrier = new CyclicBarrier(2);
     ExecutorService executor = Executors.newFixedThreadPool(2);
 
@@ -325,7 +331,7 @@ class IssueDependencyIntegrationTest extends ProjectTestSupport {
           abWon || cdWon,
           "Exactly one edge must succeed and the other must be rejected by cycle detection");
 
-      // 最终遍历/CTE 断言无任意自达环，不能只数边！
+      // CTE 断言无自环
       UUID[] allNodes = {a.getId(), b.getId(), c.getId(), d.getId()};
       for (UUID node : allNodes) {
         assertFalse(

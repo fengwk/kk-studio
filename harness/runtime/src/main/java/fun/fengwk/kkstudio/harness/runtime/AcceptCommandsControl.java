@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -406,11 +407,15 @@ final class AcceptCommandsControl {
 
   /**
    * 派生初始 Session 名称：只检查 validate 后的末尾 user-like message（初始 batch 恰以一条 user-like 结尾），取该消息第一个非空白
-   * 文本内容（仅 text 内容，不看附件 / resource 名称），规范化折叠为单行并取前 40 个 Unicode 码点（无省略号）；无文本时回退为 {@code session-} +
-   * session UUID 前 8 位。
+   * 文本内容（仅 text 内容，不看附件 / resource 名称），规范化折叠为单行并取前 40 个 Unicode 码点（无省略号）；typed GOAL 用其目标正文
+   * 派生；无文本时回退为 {@code session-} + session UUID 前 8 位。
    */
   private static String initialSessionName(List<NewThreadCommand> commands, UUID sessionId) {
     NewThreadCommand trailing = commands.get(commands.size() - 1);
+    if (trailing.payload() instanceof GoalCommandPayload goal) {
+      String name = Names.sessionNameFromUserText(goal.text());
+      return name == null ? Names.defaultSessionName(sessionId) : name;
+    }
     AgentMessage message = userMessage(trailing);
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof TextMessageContent text) {
@@ -481,12 +486,12 @@ final class AcceptCommandsControl {
 
   /**
    * 命令 batch 的 shape admission：SET_* 必须以固定顺序（SET_AGENT -&gt; SET_MODEL -&gt;
-   * SET_ENVIRONMENT）、至多一次且全部出现在消息之前；任何 target 都要求<b>恰有一条</b>末尾 USER 消息。非法 batch 是请求校验 错误，抛 {@link
-   * IllegalArgumentException} 而非业务冲突。
+   * SET_ENVIRONMENT）、至多一次且全部出现在消息之前；任何 target 都要求<b>恰有一条</b>末尾 user-like 输入，即一条 USER/CUSTOM 消息或一条
+   * typed GOAL 命令（typed GOAL 不可与普通消息同批）。非法 batch 是请求校验错误，抛 {@link IllegalArgumentException} 而非业务冲突。
    */
   private static void validateBatchShape(
       AcceptCommandsTarget target, List<NewThreadCommand> commands) {
-    int userMessageCount = 0;
+    int userLikeCount = 0;
     int lastSetOrder = -1;
     boolean sawMessage = false;
     for (NewThreadCommand command : commands) {
@@ -504,18 +509,19 @@ final class AcceptCommandsControl {
         continue;
       }
       sawMessage = true;
-      if (isUserMessage(command)) {
-        userMessageCount++;
+      if (isUserLike(command)) {
+        userLikeCount++;
       }
     }
-    if (userMessageCount != 1 || !isUserMessage(commands.get(commands.size() - 1))) {
-      throw invalidBatch(target, "batches must end with exactly one USER message");
+    if (userLikeCount != 1 || !isUserLike(commands.get(commands.size() - 1))) {
+      throw invalidBatch(target, "batches must end with exactly one user-like input");
     }
   }
 
-  private static boolean isUserMessage(NewThreadCommand command) {
+  private static boolean isUserLike(NewThreadCommand command) {
     return command.payload() instanceof UserMessageCommandPayload
-        || command.payload() instanceof CustomMessageCommandPayload;
+        || command.payload() instanceof CustomMessageCommandPayload
+        || command.payload() instanceof GoalCommandPayload;
   }
 
   private static IllegalArgumentException invalidBatch(

@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -65,14 +66,17 @@ class StudioHarnessThreadControllerTest {
 
   private HarnessRuntime runtime;
   private ModelRequestDebugService modelRequestDebugService;
+  private ProjectThreadOwnerResolver projectThreadOwnerResolver;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
     modelRequestDebugService = mock(ModelRequestDebugService.class);
+    projectThreadOwnerResolver = mock(ProjectThreadOwnerResolver.class);
     StudioHarnessThreadController controller =
-        new StudioHarnessThreadController(runtime, modelRequestDebugService);
+        new StudioHarnessThreadController(
+            runtime, modelRequestDebugService, projectThreadOwnerResolver);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -387,9 +391,10 @@ class StudioHarnessThreadControllerTest {
     verify(runtime, never()).renameThread(any(RenameThreadCommand.class));
   }
 
-  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 执行 CAS 更新并返回权威当前 Thread。 */
+  /** 意图：验证 PUT /api/harness/threads/{threadId}/yolo 对非 Issue 归属 Thread 执行 CAS 更新并返回权威当前 Thread。 */
   @Test
   void yoloCarriesVersionCasAndReturnsCurrentThread() throws Exception {
+    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(false);
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.thread(id(1)));
     when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
@@ -406,7 +411,68 @@ class StudioHarnessThreadControllerTest {
     ArgumentCaptor<SetThreadYoloCommand> captor =
         ArgumentCaptor.forClass(SetThreadYoloCommand.class);
     verify(runtime).setThreadYolo(captor.capture());
+    verify(projectThreadOwnerResolver).isIssueAgentBranch(id(1));
     assertEquals(3L, captor.getValue().expectedVersion());
+  }
+
+  /**
+   * 意图：Issue Agent Branch（含无活动 Run 的 idle 情形）的公开 YOLO 覆盖必须在任何 runtime 变更前以 409 拒绝，既不调用 CAS 也不读取快照。
+   */
+  @Test
+  void yoloRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
+    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+        .andExpect(status().isConflict());
+
+    // 拒绝必须发生在 runtime 变更之前：归属检查不依赖 Run 状态，也不允许经 CAS 绕过 Project 策略。
+    verifyNoInteractions(runtime);
+  }
+
+  /** 意图：缺失 Thread（resolver 判定为 false）保持既有 404 翻译，不发明新的错误语义。 */
+  @Test
+  void yoloKeepsNotFoundTranslationForMissingThread() throws Exception {
+    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(false);
+    when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
+        .thenThrow(new HarnessRuntimeNotFoundException("thread is missing"));
+
+    mockMvc
+        .perform(
+            put("/api/harness/threads/" + idText(1) + "/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+        .andExpect(status().isNotFound());
+  }
+
+  /** 意图：非 canonical threadId 在归属判定与 runtime 变更之前以 400 拒绝（Issue Agent Branch 判定不得先于形状校验）。 */
+  @Test
+  void yoloRejectsNonCanonicalThreadIdBeforeOwnershipCheck() throws Exception {
+    mockMvc
+        .perform(
+            put("/api/harness/threads/not-a-uuid/yolo")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"3\",\"yoloEnabled\":true}"))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(projectThreadOwnerResolver);
+    verifyNoInteractions(runtime);
+  }
+
+  @Test
+  void stopRejectsIssueAgentBranchWithoutTouchingRuntime() throws Exception {
+    // 测试意图：Issue Agent 的停止须先经过 Issue 工作流，通用 stop 不得直接撤销其 Turn 或命令。
+    when(projectThreadOwnerResolver.isIssueAgentBranch(id(1))).thenReturn(true);
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + idText(1) + "/stop")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"stopRequestId\":\"" + idText(9) + "\",\"expectedVersion\":\"3\"}"))
+        .andExpect(status().isConflict());
+    verifyNoInteractions(runtime);
   }
 
   /** 意图：验证 POST stop 与 PUT tool approval 路径与方法映射正常工作。 */

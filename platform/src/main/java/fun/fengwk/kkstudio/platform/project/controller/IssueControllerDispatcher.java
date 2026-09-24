@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.platform.project.controller;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
-import fun.fengwk.kkstudio.platform.project.model.ClaimedControllerWork;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
+import fun.fengwk.kkstudio.platform.project.model.ClaimedIssueWork;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -23,17 +23,17 @@ import java.util.function.Consumer;
 /**
  * Issue Controller 的有界 Work 调度器。
  *
- * <p>职责边界：dispatcher 只负责 Issue Controller work 的 claim、bounded handoff、合并 wake、 periodic poll 与
- * stop 生命周期。它绝不读取 Issue / Project 业务状态（claim 是 claim-only 短事务）， 业务状态由 {@link IssueReconciler}
+ * <p>职责边界：dispatcher 只负责 {@code project_issue_work} 的 claim、bounded handoff、合并 wake、 periodic poll
+ * 与 stop 生命周期。它绝不读取 Issue / Project 业务状态（claim 是 claim-only 短事务）， 业务状态由 {@link IssueReconciler}
  * 在行锁与租约 fencing 保护下推进。
  */
 @Slf4j
 public final class IssueControllerDispatcher implements AutoCloseable {
 
-  public static final String CHANNEL = "issue_controller_work_due";
+  public static final String CHANNEL = "project_issue_work_due";
 
-  private final IssueControllerWorkStore workStore;
-  private final Consumer<ClaimedControllerWork> reconciler;
+  private final IssueWorkStore workStore;
+  private final Consumer<ClaimedIssueWork> reconciler;
   private final IssueControllerProperties properties;
   private final Clock clock;
   private final Executor drainExecutor;
@@ -49,7 +49,7 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   private ScheduledFuture<?> pollFuture;
 
   public IssueControllerDispatcher(
-      IssueControllerWorkStore workStore,
+      IssueWorkStore workStore,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
       Clock clock,
@@ -67,8 +67,8 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   }
 
   IssueControllerDispatcher(
-      IssueControllerWorkStore workStore,
-      Consumer<ClaimedControllerWork> reconciler,
+      IssueWorkStore workStore,
+      Consumer<ClaimedIssueWork> reconciler,
       IssueControllerProperties properties,
       Clock clock,
       Executor drainExecutor,
@@ -186,7 +186,7 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   /** 单次 drain 扫描：claim 直到 capacity 满、无 due 或需要结束。 */
   private void drainOnce() {
     while (!stopped && dispatchCapacity.get() < properties.getMaxDispatchTasks()) {
-      ClaimedControllerWork claim = claimNext();
+      ClaimedIssueWork claim = claimNext();
       if (claim == null) {
         break;
       }
@@ -202,14 +202,14 @@ public final class IssueControllerDispatcher implements AutoCloseable {
     }
   }
 
-  private ClaimedControllerWork claimNext() {
+  private ClaimedIssueWork claimNext() {
     Instant now = clock.instant();
     String token = UUID.randomUUID().toString();
     Instant leaseUntil = now.plus(properties.getLeaseDuration());
     return workStore.claimNext(now, token, leaseUntil).orElse(null);
   }
 
-  private boolean handoff(ClaimedControllerWork claim) {
+  private boolean handoff(ClaimedIssueWork claim) {
     AtomicBoolean taskStarted = new AtomicBoolean();
     dispatchCapacity.incrementAndGet();
     try {
@@ -246,7 +246,7 @@ public final class IssueControllerDispatcher implements AutoCloseable {
     }
   }
 
-  private void runHandoff(ClaimedControllerWork claim) {
+  private void runHandoff(ClaimedIssueWork claim) {
     try {
       try {
         reconciler.accept(claim);
@@ -264,7 +264,7 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   }
 
   /** 归还 claim：用 fencing 的 rescheduleWork(... now+rejectionDelay)；归还失败仅留 lease 自愈。 */
-  private void returnClaim(ClaimedControllerWork claim) {
+  private void returnClaim(ClaimedIssueWork claim) {
     try {
       Instant now = clock.instant();
       workStore.rescheduleWork(
@@ -282,7 +282,7 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   }
 
   /** reconciler 失败重试：用 fencing 的 rescheduleWork(... now+retryDelay)；失败则留 lease 过期。 */
-  private void tryRescheduleOnFailure(ClaimedControllerWork claim) {
+  private void tryRescheduleOnFailure(ClaimedIssueWork claim) {
     try {
       Instant now = clock.instant();
       workStore.rescheduleWork(

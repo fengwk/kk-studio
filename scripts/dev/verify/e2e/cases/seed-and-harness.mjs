@@ -179,7 +179,7 @@ registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
   title: '内部 HOST Tool 不进入 Agent 可选目录',
-  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools',
+  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；Goal contributor 只贡献 get_goal/update_goal（目标正文由用户维护，无创建工具）',
   async run(ctx) {
     const tools = envelopeData((await ctx.call('GET', '/api/ai/catalog/tools')).json)
     assert(Array.isArray(tools), JSON.stringify(tools))
@@ -191,8 +191,9 @@ registerCase({
       `Tool catalog entries must not expose id/version: ${JSON.stringify(tools)}`,
     )
     assert(
-      ['create_goal', 'get_goal', 'update_goal'].every((name) => names.includes(name)),
-      `Goal contributor tools must remain selectable: ${JSON.stringify(tools)}`,
+      ['get_goal', 'update_goal'].every((name) => names.includes(name)) &&
+        !names.includes('create_goal'),
+      `Goal contributor must expose get_goal/update_goal and no create_goal: ${JSON.stringify(tools)}`,
     )
   },
 })
@@ -276,7 +277,7 @@ registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',
-  docs: 'agentName/model/environmentName 与 yoloEnabled 原样持久化并投影；Chat 默认值独立',
+  docs: 'agentName/model/environmentName 与 yoloEnabled 原样持久化并投影，goal 始终显式投影（未设置时 null）；Chat 默认值独立',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -290,6 +291,9 @@ registerCase({
       model: modelSelectionOf(ctx),
       environmentName: null,
     }
+    // 请求方向不携带 goal（Goal 只由 typed GOAL 命令设置为用户维护的事实）；完整快照语义要求
+    // Thread 投影总是显式出现 goal，未设置时为 null。
+    const expectedSettings = { ...requested, goal: null }
     const accepted = await createNewSession(ctx, {
       owner: chatOwner(chat.id),
       sessionId: cid(),
@@ -300,17 +304,63 @@ registerCase({
     })
     assert(accepted.thread.yoloEnabled === true, JSON.stringify(accepted.thread))
     assert(
-      isDeepStrictEqual(accepted.thread.branchSettings, requested),
-      JSON.stringify({ expected: requested, actual: accepted.thread.branchSettings }),
+      isDeepStrictEqual(accepted.thread.branchSettings, expectedSettings),
+      JSON.stringify({ expected: expectedSettings, actual: accepted.thread.branchSettings }),
     )
     // Thread branchSettings 独立于 Chat 默认值：Chat 仍保存自身 defaults。
     assert(chat.yoloEnabled === false, JSON.stringify(chat))
     // reread 同一 Thread：投影稳定。
     const reread = await getThreadSnapshot(ctx, accepted.thread.threadId)
     assert(
-      isDeepStrictEqual(reread.thread.branchSettings, requested),
+      isDeepStrictEqual(reread.thread.branchSettings, expectedSettings),
       JSON.stringify(reread.thread.branchSettings),
     )
+  },
+})
+
+registerCase({
+  id: 'thread.goal_typed_persistence',
+  level: 'L1',
+  title: 'typed GOAL 在 PostgreSQL 持久接受、设置与清除',
+  docs: 'Chat owner 的 GOAL 命令可在真实 PostgreSQL 接受并被消费为 branchSettings.goal（id/text），单独清除后 goal:null；使用不存在的 Agent 让模型规划确定性失败，不调用付费 Provider',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-goal-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
+    })
+    const owner = chatOwner(chat.id)
+    const threadId = cid()
+    const text = `ship goal ${cid()}`
+    const accepted = await createNewSession(ctx, {
+      owner,
+      sessionId: cid(),
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `missing-goal-agent-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      commands: [{ type: 'GOAL', text, idempotencyKey: cid() }],
+    })
+    assert(accepted.acceptedCommands[0].type === 'GOAL', JSON.stringify(accepted.acceptedCommands))
+    const afterSet = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const goal = afterSet.branchSettings.goal
+    assert(goal?.text === text && /^[0-9a-f-]{36}$/.test(goal?.id), JSON.stringify(goal))
+
+    const cleared = await acceptCommandBatch(ctx, {
+      owner,
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: afterSet.headEntryId,
+        expectedNextCommandSequence: afterSet.nextCommandSequence,
+      }),
+      commands: [{ type: 'GOAL', text: null, idempotencyKey: cid() }],
+    })
+    assert(cleared.acceptedCommands[0].type === 'GOAL', JSON.stringify(cleared.acceptedCommands))
+    const afterClear = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    assert(afterClear.branchSettings.goal === null, JSON.stringify(afterClear.branchSettings))
   },
 })
 
@@ -503,7 +553,7 @@ registerCase({
   id: 'thread.product_http_rejects_custom_message',
   level: 'L1',
   title: '产品 HTTP 面拒绝 CUSTOM_MESSAGE 且命令 shape 严格',
-  docs: 'CUSTOM_MESSAGE（SYSTEM/USER 均不可）在产品 HTTP command-batches 面确定性 400；两条 USER_MESSAGE 同一 batch、非末尾 USER_MESSAGE、乱序 SET、未知类型 => 400；同 batch 非法 shape 不推进 cursor',
+  docs: 'CUSTOM_MESSAGE（SYSTEM/USER 均不可）在产品 HTTP command-batches 面确定性 400；同一 batch 的 user-like（USER_MESSAGE 或 typed GOAL）必须恰一条且在末尾，故两条 USER_MESSAGE、非末尾 user-like、乱序 SET、未知类型 => 400；同 batch 非法 shape 不推进 cursor',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -551,7 +601,8 @@ registerCase({
         { status: 400 },
       )
     }
-    // 两条 USER_MESSAGE 同一 batch => 400（HTTP 面只允许恰一条末尾 USER_MESSAGE）。
+    // 两条 USER_MESSAGE 同一 batch => 400：typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入，
+    // HTTP 面只允许恰一条且必须在末尾。
     await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
@@ -561,7 +612,7 @@ registerCase({
             userMessageCommand('second', cid()),
           ],
         }),
-      { status: 400, messageIncludes: /USER_MESSAGE/i },
+      { status: 400, messageIncludes: /terminal user-like command|USER_MESSAGE/i },
     )
     // USER_MESSAGE 不在末尾 => 400。
     await expectHttpError(
@@ -1379,6 +1430,8 @@ registerCase({
         variant: modelSelection.variant,
       },
       environmentName: null,
+      // SET_* 不触碰 goal：未设置 Goal 的 branch 投影始终显式携带 goal:null。
+      goal: null,
     }
     assert(
       isDeepStrictEqual(finalSnapshot.thread.branchSettings, expectedSettings),

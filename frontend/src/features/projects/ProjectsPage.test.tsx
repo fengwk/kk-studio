@@ -7,18 +7,6 @@ import type { ProjectsApi } from './projects-api'
 import type { ProjectDTO } from './types'
 import { invalidateProjectQueries } from './projects-invalidation'
 
-vi.mock('@/shared/api/agent-service', () => ({
-  agentService: {
-    listAgents: vi.fn().mockResolvedValue({
-      results: [
-        { name: 'coordinator-1' },
-        { name: 'coordinator-2' },
-        { name: 'agent-gamma' },
-      ],
-    }),
-  },
-}))
-
 function renderProjectsPage(ui: React.ReactElement, client?: QueryClient) {
   const queryClient = client ?? new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -37,7 +25,8 @@ describe('ProjectsPage', () => {
       id: 'a0000000-0000-0000-0000-000000000001',
       title: 'Alpha Project',
       description: 'First project for testing',
-      coordinatorAgentName: 'coordinator-1',
+      yoloEnabled: true,
+      maxReviewRejections: '3',
       nextIssueNumber: '5',
       version: '1',
       archivedAt: null,
@@ -48,7 +37,8 @@ describe('ProjectsPage', () => {
       id: 'a0000000-0000-0000-0000-000000000002',
       title: 'Beta Project',
       description: 'Second project',
-      coordinatorAgentName: 'coordinator-2',
+      yoloEnabled: false,
+      maxReviewRejections: '1',
       nextIssueNumber: '1',
       version: '0',
       archivedAt: '2026-09-14T01:00:00Z',
@@ -69,17 +59,17 @@ describe('ProjectsPage', () => {
       project: mockProjects[0],
       issues: [],
       dependencies: [],
-      coordinatorSessionId: null,
-      coordinatorSession: null,
-      coordinatorThread: null,
     }),
     createIssue: vi.fn(),
     getIssue: vi.fn(),
+    listActivities: vi.fn(),
     updateIssue: vi.fn(),
     changeIssueStatus: vi.fn(),
+    blockIssue: vi.fn(),
+    recoverIssue: vi.fn(),
     addIssueDependency: vi.fn(),
     removeIssueDependency: vi.fn(),
-    appendIssueInput: vi.fn(),
+    appendIssueActivity: vi.fn(),
     reviewIssue: vi.fn(),
     cancelIssue: vi.fn(),
     retryIssue: vi.fn(),
@@ -119,13 +109,14 @@ describe('ProjectsPage', () => {
   })
 
   it('creates a new project and triggers onSelectProject', async () => {
-    // 测试意图：验证新建项目弹窗提交成功后触发刷新并进入新项目
+    // 测试意图：验证新建项目弹窗提交成功后触发刷新并进入新项目（携带 yoloEnabled 与 maxReviewRejections）
     const onSelectProject = vi.fn()
     const newProj: ProjectDTO = {
       id: 'a0000000-0000-0000-0000-000000000003',
       title: 'Gamma Project',
       description: 'Brand new project',
-      coordinatorAgentName: 'agent-gamma',
+      yoloEnabled: true,
+      maxReviewRejections: '3',
       nextIssueNumber: '1',
       version: '0',
       archivedAt: null,
@@ -153,12 +144,6 @@ describe('ProjectsPage', () => {
     const descInput = screen.getByLabelText(/项目描述/i)
     fireEvent.change(descInput, { target: { value: 'Brand new project' } })
 
-    const coordinatorTrigger = screen.getByRole('button', { name: /Coordinator Agent 名称/i })
-    await waitFor(() => expect(coordinatorTrigger).not.toBeDisabled())
-    fireEvent.click(coordinatorTrigger)
-    const option = await screen.findByRole('option', { name: 'agent-gamma' })
-    fireEvent.click(option)
-
     const submitBtn = screen.getByRole('button', { name: '创建项目' })
     fireEvent.click(submitBtn)
 
@@ -166,7 +151,8 @@ describe('ProjectsPage', () => {
       expect(api.createProject).toHaveBeenCalledWith({
         title: 'Gamma Project',
         description: 'Brand new project',
-        coordinatorAgentName: 'agent-gamma',
+        yoloEnabled: true,
+        maxReviewRejections: 3,
       })
       expect(onSelectProject).toHaveBeenCalledWith(newProj.id)
     })
@@ -205,7 +191,7 @@ describe('ProjectsPage', () => {
     fireEvent.change(titleInput, { target: { value: 'My Custom Draft' } })
 
     // Submit
-    const saveBtn = screen.getByRole('button', { name: '保存修改' })
+    const saveBtn = screen.getByRole('button', { name: '保存更改' })
     await waitFor(() => {
       expect(saveBtn).not.toBeDisabled()
     })
@@ -221,8 +207,8 @@ describe('ProjectsPage', () => {
       'My Custom Draft',
     )
 
-    // Click "同步最新版本号并重试"
-    const reloadBtn = screen.getByRole('button', { name: /同步最新版本号并重试/i })
+    // Click "保留草稿并重新加载最新版本号"
+    const reloadBtn = screen.getByRole('button', { name: /保留草稿并重新加载最新版本号/i })
     fireEvent.click(reloadBtn)
 
     await waitFor(() => {
@@ -231,16 +217,17 @@ describe('ProjectsPage', () => {
 
     // Submit again with updated expectedVersion
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '保存修改' })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: '保存更改' })).not.toBeDisabled()
     })
-    fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
 
     await waitFor(() => {
       expect(api.updateProject).toHaveBeenCalledWith(mockProjects[0].id, {
         expectedVersion: '2',
         title: 'My Custom Draft',
         description: mockProjects[0].description,
-        coordinatorAgentName: mockProjects[0].coordinatorAgentName,
+        yoloEnabled: true,
+        maxReviewRejections: 3,
       })
     })
   })
@@ -400,7 +387,7 @@ describe('ProjectsPage', () => {
   })
 
   it('ignores a stale project list response after a newer invalidation reload', async () => {
-    // 测试意图：验证 invalidation reload 之后，最新权威数据正确更新替换旧数据。
+    // 测试意图：验证 invalidation reload 之后，最新权威数据正确更新替换旧数据
     const initialProjects = [{ ...mockProjects[0], title: 'Initial Project' }]
     const latestProjects = [{ ...mockProjects[0], title: 'Latest Project' }]
     const api = createMockApi({
@@ -419,10 +406,8 @@ describe('ProjectsPage', () => {
     expect(screen.queryByText('Initial Project')).not.toBeInTheDocument()
   })
 
-  /**
-   * 测试意图：验证 UI 一致性规范，包括全局唯张创建卡、项目卡片继承 info-card 以及已归档过滤使用现代 Checkbox
-   */
   it('enforces UI consistency with single CreateCard as first item, info-card inheritance, and modern checkbox', async () => {
+    // 测试意图：验证 UI 一致性规范，包括全局唯一张创建卡、项目卡片继承 info-card 以及已归档过滤使用现代 Checkbox
     const api = createMockApi()
     renderProjectsPage(<ProjectsPage api={api} />)
 
@@ -430,12 +415,10 @@ describe('ProjectsPage', () => {
       expect(screen.getByText('Alpha Project')).toBeInTheDocument()
     })
 
-    // 验证整个页面仅有唯一个创建入口（即网格首张 CreateCard，header 无重复创建按钮）
     const createButtons = screen.getAllByRole('button', { name: '新建项目' })
     expect(createButtons).toHaveLength(1)
     expect(createButtons[0]).toHaveClass('create-card')
 
-    // 验证项目卡片继承经典 info-card 样式类
     const projectCards = screen.getAllByRole('article')
     expect(projectCards).toHaveLength(2)
     for (const card of projectCards) {
@@ -443,7 +426,6 @@ describe('ProjectsPage', () => {
       expect(card).toHaveClass('project-card')
     }
 
-    // 验证“显示已归档”使用基于原生 input 的现代 Checkbox
     const archiveCheckbox = screen.getByRole('checkbox', { name: '显示已归档' })
     expect(archiveCheckbox).toBeInTheDocument()
     expect(archiveCheckbox).toHaveClass('ui-checkbox-input')

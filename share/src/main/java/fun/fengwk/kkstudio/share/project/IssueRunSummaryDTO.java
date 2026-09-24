@@ -18,7 +18,6 @@ public class IssueRunSummaryDTO {
   private String issueId;
   private String ordinal;
   private String role;
-  private String actorType;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String agentName;

@@ -46,6 +46,7 @@ import type {
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import {
   buildAcceptanceRequest,
+  buildGoalAcceptanceRequest,
   isDefiniteAcceptanceFailure,
   prependFrozenComposerParts,
   preserveCurrentBranchDraft,
@@ -53,6 +54,10 @@ import {
   shouldRefreshAfterAcceptanceFailure,
   type FrozenCommandBatchRequest,
 } from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
+import {
+  parseGoalProgress,
+  type BranchGoalProgressResult,
+} from '@/features/ai/runtime/goal-progress'
 import {
   clearPendingAcceptance,
   isBoundTarget,
@@ -79,6 +84,7 @@ export type PaneInteraction =
   | 'thread-threads'
   | 'rename-session'
   | 'rename-thread'
+  | 'goal'
   | null
 
 export type RenameKind = 'session' | 'thread'
@@ -310,7 +316,7 @@ export function useAgentPaneController({
       if (owner.type === 'CANVAS') {
         return listCanvasSessions(owner.id)
       }
-      if (owner.type === 'PROJECT') {
+      if (owner.type === 'ISSUE_AGENT_SESSION') {
         return ownerService.listProjectSessions(owner.id)
       }
       return Promise.resolve([])
@@ -628,6 +634,62 @@ export function useAgentPaneController({
     void submitFrozenAcceptance(pending)
   }
 
+  function startGoalAcceptance(frozen: FrozenCommandBatchRequest): void {
+    const pending = makePending(frozen)
+    pendingAcceptanceRef.current = pending
+    setPendingAcceptance(pending)
+    savePendingAcceptance(owner, paneId, pending)
+    void submitFrozenAcceptance(pending)
+  }
+
+  function submitGoal(
+    goalText: string | null,
+    options?: {
+      localParts?: ComposerPart[]
+    },
+  ): void {
+    if (capabilities?.readOnly) {
+      return
+    }
+    if (owner.type !== 'CHAT' && owner.type !== 'CANVAS') {
+      return
+    }
+    if (hasPendingOperation()) {
+      setActionError(t('ai.runtime.action.operationPending'))
+      return
+    }
+    const currentThread = isBoundTarget(target) ? controller.thread : null
+    const effectiveBase = isBoundTarget(target)
+      ? branchPanel.effectiveBase
+      : entryBaseDraft
+    const draft = activeDraft
+    if (!draft || !effectiveBase) {
+      setActionError(t('ai.runtime.action.threadNotLoaded'))
+      return
+    }
+    try {
+      const frozenParts = options?.localParts ?? parts
+      const frozen = buildGoalAcceptanceRequest({
+        owner,
+        target,
+        draft,
+        base: effectiveBase,
+        goalText,
+        localParts: frozenParts,
+        thread: currentThread,
+      })
+      onFocus?.()
+      startGoalAcceptance(frozen)
+      setInteraction(null)
+    } catch (error) {
+      setActionError(errorMessage(error, t('ai.runtime.goal.submitFailed')))
+    }
+  }
+
+  function clearGoal(): void {
+    submitGoal(null)
+  }
+
   async function invalidateAcceptanceResult(threadId: string): Promise<void> {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
@@ -821,6 +883,12 @@ export function useAgentPaneController({
       case 'rename-thread':
         openRenameForTarget('thread')
         return
+      case 'goal':
+        if (owner.type !== 'CHAT' && owner.type !== 'CANVAS') {
+          return
+        }
+        setInteraction('goal')
+        return
       case 'compact':
       case 'stop':
         controller.runCommand(command)
@@ -898,8 +966,23 @@ export function useAgentPaneController({
       allowNewSession: capabilities?.allowNewSession,
       readOnly: capabilities?.readOnly,
       canBranchFromRoot,
+      owner,
     },
   )
+  const boundGoal = isBoundTarget(target) && controller.thread?.branchSettings?.goal != null
+    ? controller.thread.branchSettings.goal
+    : null
+
+  const boundGoalProgress: BranchGoalProgressResult = useMemo(() => {
+    if (!isBoundTarget(target) || !boundGoal) {
+      return { active: null, stale: null }
+    }
+    return parseGoalProgress(
+      controller.entries ?? [],
+      boundGoal.id,
+    )
+  }, [target, controller.entries, boundGoal])
+
   // queuedCommands 不并入 Composer pending/disabled：运行中 Thread 仍应接受
   // 新 batch 并保留当前 draft 编辑；target 切换栅栏由 hasPendingOperation 独立维护。
   const pending = pendingAcceptance != null
@@ -924,6 +1007,9 @@ export function useAgentPaneController({
       ? (next) => controller.setDraft(next, 'history')
       : undefined,
     onSubmit: handleSubmit,
+    onSubmitGoal: (goalText: string, localDraft?: ComposerPart[]) => {
+      submitGoal(goalText, { localParts: localDraft })
+    },
     onCommand: handleCommand,
     commands,
     focusOnEscape: focused,
@@ -1014,6 +1100,10 @@ export function useAgentPaneController({
     branchPanel,
     boundViews,
     boundLabels,
+    boundGoal,
+    boundGoalProgress,
+    submitGoal,
+    clearGoal,
     composer,
     pendingAcceptance,
     pending,

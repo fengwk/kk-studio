@@ -15,7 +15,7 @@ import java.util.List;
 @Data
 public class HarnessCommandCreateDTO {
 
-  /** USER_MESSAGE、SET_AGENT、SET_MODEL 或 SET_ENVIRONMENT。 */
+  /** USER_MESSAGE、GOAL、SET_AGENT、SET_MODEL 或 SET_ENVIRONMENT。 */
   private String type;
 
   /** canonical UUID string 幂等键。 */
@@ -39,9 +39,22 @@ public class HarnessCommandCreateDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentName;
 
+  /**
+   * GOAL 的目标正文；null 表示清除该 branch 的 Goal。
+   *
+   * <p>与 SET_ENVIRONMENT 相同，该字段是否出现由 {@link #hasTextField()} 单独跟踪：GOAL 必须显式携带它（即使为 null），
+   * 其余命令携带即拒绝。空字符串不是清除，且会被 canonical 校验拒绝。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String text;
+
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean contentsFieldPresent;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean textFieldPresent;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
@@ -91,6 +104,12 @@ public class HarnessCommandCreateDTO {
     this.environmentNameFieldPresent = true;
   }
 
+  @JsonSetter("text")
+  public void setText(Object value) {
+    this.text = HarnessRuntimeDtoSupport.requireJsonString(value, "command.text");
+    this.textFieldPresent = true;
+  }
+
   @JsonIgnore
   public boolean hasContentsField() {
     return contentsFieldPresent;
@@ -109,6 +128,11 @@ public class HarnessCommandCreateDTO {
   @JsonIgnore
   public boolean hasEnvironmentNameField() {
     return environmentNameFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasTextField() {
+    return textFieldPresent;
   }
 
   @JsonAnySetter

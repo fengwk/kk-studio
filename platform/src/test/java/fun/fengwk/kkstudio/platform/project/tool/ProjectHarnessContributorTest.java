@@ -26,7 +26,7 @@ import java.util.Optional;
  *
  * <ul>
  *   <li>验证 Contributor 标识符为 project 且能通过 HarnessCatalog 成功冻结解析；
- *   <li>验证 12 个角色工具全部以 INTERNAL 可见性注册且顺序严格对齐设计；
+ *   <li>验证 3 个角色工具全部以 INTERNAL 可见性注册且顺序严格对齐设计；
  *   <li>验证每个工具的副作用分类（READ_ONLY、NON_IDEMPOTENT、IDEMPOTENT）准确无误；
  *   <li>验证构造器防御性检查：缺失、重复或非法的工具列表坚决拒绝。
  * </ul>
@@ -58,17 +58,13 @@ class ProjectHarnessContributorTest {
   }
 
   @Test
-  void harnessCatalog_freezesAndExposesAll12InternalToolsInExactOrder() {
-    // 验证 12 个角色工具由 HarnessCatalog 统一解析，全部为 INTERNAL 可见，且副作用与声明一致
+  void harnessCatalog_freezesAndExposesAll3InternalToolsInExactOrder() {
+    // 验证 3 个角色工具由 HarnessCatalog 统一解析，全部为 INTERNAL 可见，且副作用与声明一致
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
-    List<String> expectedToolNames = ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR);
-    List<String> executorAndReviewer =
-        new ArrayList<>(ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
-    executorAndReviewer.addAll(ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
-    List<String> allToolNames = new ArrayList<>(expectedToolNames);
-    allToolNames.addAll(executorAndReviewer);
-    assertEquals(12, allToolNames.size());
+    List<String> allToolNames =
+        Arrays.stream(ProjectRoleToolType.values()).map(ProjectRoleToolType::modelName).toList();
+    assertEquals(3, allToolNames.size());
 
     for (String toolName : allToolNames) {
       Optional<ToolContribution> found = catalog.findTool(toolName);
@@ -85,34 +81,7 @@ class ProjectHarnessContributorTest {
     // 验证副作用精确分类
     assertEquals(
         ToolSideEffect.READ_ONLY,
-        catalog.findTool("project_read").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.READ_ONLY,
         catalog.findTool("issue_read").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.READ_ONLY,
-        catalog.findTool("issue_list").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.NON_IDEMPOTENT,
-        catalog.findTool("issue_create").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.NON_IDEMPOTENT,
-        catalog.findTool("issue_update").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.NON_IDEMPOTENT,
-        catalog.findTool("issue_add_dependency").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.NON_IDEMPOTENT,
-        catalog.findTool("issue_remove_dependency").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.NON_IDEMPOTENT,
-        catalog.findTool("issue_set_status").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.NON_IDEMPOTENT,
-        catalog.findTool("issue_cancel").orElseThrow().tool().descriptor().sideEffect());
-    assertEquals(
-        ToolSideEffect.IDEMPOTENT,
-        catalog.findTool("issue_submit").orElseThrow().tool().descriptor().sideEffect());
     assertEquals(
         ToolSideEffect.NON_IDEMPOTENT,
         catalog.findTool("issue_request_input").orElseThrow().tool().descriptor().sideEffect());

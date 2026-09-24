@@ -12,10 +12,14 @@ import {
 import { createModelAttemptFailureMessage } from '@/features/ai/runtime/thread-timeline/model-attempt-failure'
 import {
   projectEmptyMessageEntry,
-  projectRootEntry,
+  projectInvalidSettings,
+  projectRootSettings,
+  projectSettingsChanges,
+  parseSettingsSnapshot,
   projectUnknownEntry,
   projectUnsupportedMessageEntry,
 } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
+import type { SettingsSnapshot } from '@/features/ai/runtime/thread-timeline/entry-event-projection'
 import { projectTurnUsageFromAssistantMetadata } from '@/features/ai/runtime/thread-timeline/meta-projection'
 import { translate } from '@/shared/i18n'
 
@@ -25,6 +29,7 @@ import { translate } from '@/shared/i18n'
  */
 export interface EntryProjectionContext {
   pendingTurnSummary: MetaDialogueMessage | null
+  lastSettings: SettingsSnapshot | null
 }
 
 export function projectDurableEntry(
@@ -36,7 +41,9 @@ export function projectDurableEntry(
   const payload = parsePayload(entry.payloadJson)
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
-    messages.push(projectRootEntry(entry))
+    const settings = parseSettingsSnapshot(payload.settings)
+    context.lastSettings = settings
+    messages.push(settings ? projectRootSettings(entry, settings) : projectInvalidSettings(entry))
     return
   }
   if (entryType === 'TURN_START' || entryType === 'COMPACTION' || entryType === 'TURN_END') {
@@ -51,6 +58,15 @@ export function projectDurableEntry(
     } else {
       // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
       context.pendingTurnSummary = null
+      if (entryType === 'TURN_START' && getString(payload.reason) !== 'COMPACTION') {
+        const settings = parseSettingsSnapshot(payload.settings)
+        if (settings === null) {
+          messages.push(projectInvalidSettings(entry))
+        } else if (context.lastSettings !== null) {
+          messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
+        }
+        context.lastSettings = settings
+      }
     }
     return
   }

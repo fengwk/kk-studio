@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   Archive,
   ArrowRight,
-  Bot,
   Calendar,
   Pencil,
   RefreshCw,
@@ -60,8 +59,7 @@ export function ProjectsPage({
     return projects.filter(
       (p) =>
         p.title.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q) ||
-        p.coordinatorAgentName.toLowerCase().includes(q),
+        p.description.toLowerCase().includes(q),
     )
   }, [projects, searchQuery])
 
@@ -161,7 +159,7 @@ export function ProjectsPage({
       <div className="cards-grid">
         <CreateCard
           title="新建项目"
-          subtitle="配置 Coordinator 编排与多 Issue 看板"
+          subtitle="支持多 Issue 看板、独立 Agent 分支与审查工作流"
           onClick={() => setIsCreateOpen(true)}
         />
 
@@ -192,12 +190,16 @@ export function ProjectsPage({
 
               <div className="project-meta-list">
                 <div className="project-meta-row">
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Bot size={14} aria-hidden="true" />
-                    <span>Coordinator:</span>
-                  </span>
+                  <span>YOLO 模式:</span>
                   <strong style={{ color: 'var(--fg)' }}>
-                    {project.coordinatorAgentName}
+                    {project.yoloEnabled ? '开启' : '关闭'}
+                  </strong>
+                </div>
+
+                <div className="project-meta-row">
+                  <span>最大打回次数:</span>
+                  <strong style={{ color: 'var(--fg)' }}>
+                    {project.maxReviewRejections}
                   </strong>
                 </div>
 

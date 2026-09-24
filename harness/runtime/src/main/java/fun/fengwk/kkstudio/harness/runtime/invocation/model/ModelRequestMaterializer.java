@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -21,6 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
@@ -35,6 +39,9 @@ import java.util.UUID;
  * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩摘要调用通过 basis
  * EntryPath 末尾 owned {@code TURN_START.compaction}（{@link #compactionStartAtHead}）识别——closed
  * Invocation 后仍可从 Entry 恢复 fallback / split 元数据，不再在请求内复制 compaction facts。
+ *
+ * <p>压缩感知历史投影还把当前生效的用户 Goal 作为有界 USER 级历史背景放在摘要之后、真实近期消息之前：原始 Goal 输入消息仍在近期消息 中时不重复插入；已被切掉时插入当前
+ * Goal 原文（或当前无 Goal 的事实说明）。Goal 只作为用户级背景，绝不提升为 SYSTEM， 背景也不是新指令。
  *
  * <p>历史 native 资格按次判定：toolName 必须在当前 {@code toolBindings} 中，且环境工具冻结的 Environment 名必须与当前 binding
  * 一致；其余调用及结果在投影时降级为 USER 自然语言上下文，durable Entry 永不被改写。
@@ -137,6 +144,7 @@ public final class ModelRequestMaterializer {
           ProviderMessageProjector.ProjectedMessage.of(
               AgentMessage.user(
                   CompactionPrompts.compactedContext(complete.result().summaryText()))));
+      appendGoalBackground(path, entries, cutIndex, projectedMessages);
       walkStart = cutIndex;
       compactionResultIndex = complete.resultIndex();
     }
@@ -169,6 +177,58 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
     }
+  }
+
+  /**
+   * 压缩后当前 Goal 的用户级历史背景：找出最近一次 Goal 变更（settings 快照切换）所对应的冻结 USER 输入消息，只有它已被 {@code cutIndex}
+   * 切掉时才插入背景；Goal 从未变更则没有需要补的背景。背景文本由当前 settings 快照派生，因此清除后不会 复活旧目标。
+   */
+  private static void appendGoalBackground(
+      EntryPath path,
+      List<Entry> entries,
+      int cutIndex,
+      List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
+    GoalSetting goal = path.baseSettings().goal();
+    int transitionIndex = -1;
+    GoalSetting effective = ((RootPayload) entries.get(0).payload()).settings().goal();
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).payload() instanceof TurnStartPayload start
+          && start.reason() != TurnStartReason.COMPACTION
+          && !Objects.equals(start.settings().goal(), effective)) {
+        effective = start.settings().goal();
+        transitionIndex = i;
+      }
+    }
+    if (goal == null && transitionIndex < 0) {
+      return;
+    }
+    if (transitionIndex >= 0 && goalInputMessageRetained(entries, transitionIndex, cutIndex)) {
+      return;
+    }
+    projectedMessages.add(
+        ProviderMessageProjector.ProjectedMessage.of(
+            goal == null
+                ? GoalMessages.backgroundCleared()
+                : GoalMessages.backgroundSet(goal.text())));
+  }
+
+  /**
+   * 该次 Goal 变更的冻结 USER 输入消息是否仍在真实近期消息中（cut entry 本身属于保留区间）。Goal 输入消息是变更 TURN_START 之后、下一个
+   * TURN_START 之前的首条 USER Message；找不到（例如路径被截断）时视为已切掉。
+   */
+  private static boolean goalInputMessageRetained(
+      List<Entry> entries, int transitionIndex, int cutIndex) {
+    for (int i = transitionIndex + 1; i < entries.size(); i++) {
+      EntryPayload payload = entries.get(i).payload();
+      if (payload instanceof TurnStartPayload || payload instanceof TurnEndPayload) {
+        return false;
+      }
+      if (payload instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.USER) {
+        return i >= cutIndex;
+      }
+    }
+    return false;
   }
 
   private List<ProviderToolDefinition> providerTools(List<ToolBinding> toolBindings) {

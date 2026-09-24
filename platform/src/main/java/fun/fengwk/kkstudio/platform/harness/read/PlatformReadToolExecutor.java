@@ -243,8 +243,9 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
     }
 
     try {
-      byte[] bytes = resourceReader.readResource(context.threadId(), blobId);
-      String text = ReadTextWindow.format(bytes, offset, limit, columnOffset, path, "unsupported");
+      String text =
+          resourceReader.readResourceText(
+              context.threadId(), blobId, offset, limit, columnOffset, path);
       listener.onComplete(
           new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}"));
     } catch (PlatformReadException e) {

@@ -16,4 +16,7 @@ public interface BranchView {
 
   /** 返回匹配 customType 的最新（head 最近）状态快照；没有匹配返回 empty。 */
   Optional<CustomStateSnapshot> latestCustomEntry(String customType);
+
+  /** 返回当前 branch 生效 settings 中用户设定的 Goal；未设置或已被用户清除时返回 empty。 */
+  Optional<GoalSnapshot> goal();
 }

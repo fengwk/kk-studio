@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -128,12 +129,12 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(
         "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
-            + ",\"environmentName\":null},\"subagentContext\":null}",
+            + ",\"environmentName\":null,\"goal\":null},\"subagentContext\":null}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
             + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
-            + ",\"environmentName\":null},"
+            + ",\"environmentName\":null,\"goal\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
             + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null}",
@@ -294,6 +295,53 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(
         new RootPayload(withEnvironment),
         CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(withEnvironment))));
+  }
+
+  /** 测试意图：goal 属于 settings 完整快照——null 与 {id,text} 精确往返；缺失字段、缺 text、非对象、非法 UUID 都确定性拒绝。 */
+  @Test
+  void roundTripsGoalSettingAndRejectsMalformedShapes() {
+    BranchSettings withGoal = settings().withGoal(new GoalSetting(id(700L), "ship it"));
+    assertEquals(
+        new RootPayload(withGoal),
+        CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(withGoal))));
+    assertEquals(
+        new RootPayload(settings()),
+        CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(settings()))));
+
+    String base =
+        "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
+            + "\"variant\":\"v\"},\"environmentName\":null";
+    // 缺失 goal 字段（旧 shape）拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(EntryType.ROOT, "{\"settings\":{" + base + "},\"subagentContext\":null}"));
+    // 缺 text / 非对象 / 非 UUID id 拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{"
+                    + base
+                    + ",\"goal\":{\"id\":\""
+                    + id(700L)
+                    + "\"}},\"subagentContext\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{" + base + ",\"goal\":\"x\"},\"subagentContext\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.ROOT,
+                "{\"settings\":{"
+                    + base
+                    + ",\"goal\":{\"id\":\"not-a-uuid\",\"text\":\"x\"}},"
+                    + "\"subagentContext\":null}"));
   }
 
   @Test

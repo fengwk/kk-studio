@@ -88,7 +88,8 @@ public class PostgresqlProjectRepository implements ProjectRepository {
     target.setId(project.getId());
     target.setTitle(project.getTitle());
     target.setDescription(project.getDescription());
-    target.setCoordinatorAgentName(project.getCoordinatorAgentName());
+    target.setYoloEnabled(project.isYoloEnabled());
+    target.setMaxReviewRejections(project.getMaxReviewRejections());
     target.setNextIssueNumber(project.getNextIssueNumber());
     target.setVersion(project.getVersion());
     target.setArchivedAt(project.getArchivedAt());
@@ -105,7 +106,9 @@ public class PostgresqlProjectRepository implements ProjectRepository {
         .id(row.getId())
         .title(row.getTitle())
         .description(row.getDescription())
-        .coordinatorAgentName(row.getCoordinatorAgentName())
+        .yoloEnabled(row.getYoloEnabled() != null ? row.getYoloEnabled() : true)
+        .maxReviewRejections(
+            row.getMaxReviewRejections() != null ? row.getMaxReviewRejections() : 3)
         .nextIssueNumber(row.getNextIssueNumber() != null ? row.getNextIssueNumber() : 1L)
         .version(row.getVersion() != null ? row.getVersion() : 0L)
         .archivedAt(row.getArchivedAt())

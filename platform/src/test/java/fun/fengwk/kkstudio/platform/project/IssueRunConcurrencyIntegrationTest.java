@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -11,16 +10,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
@@ -37,9 +36,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 验证 IssueRun 并发操作、终态幂等 Exact Replay 竞态收敛及互斥安全： 1. duplicate submitRun、agent reviewRun、human
- * reviewRun 并发 exact replay，两调用方均成功获得同一 Run 实例，且 CHANGES_REQUESTED 仅追加一条 feedback 输入流； 2. submit 与
- * cancel 并发竞态，无死锁、无半迁移，最终状态严格收敛； 3. 跨 Issue 与同 Issue 并发 startExecutorRun 单活跃与 ordinal 严格保证。
+ * 验证 IssueRun 并发操作、终态幂等 Exact Replay 竞态收敛及互斥安全： 1. duplicate completeExecutorRun、agent
+ * reviewByAgent、human reviewByHuman 并发 exact replay，两调用方均成功获得同一 Run 实例，且 CHANGES_REQUESTED 仅追加一条
+ * REVIEW_DECISION Activity； 2. complete 与 cancel 并发竞态，无死锁、无半迁移，最终状态严格收敛； 3. 跨 Issue 与同 Issue 并发
+ * startExecutorRun 单活跃与 ordinal 严格保证。
  */
 class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
 
@@ -47,12 +47,12 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
   @Autowired private IssueService issueService;
   @Autowired private ProjectService projectService;
   @Autowired private IssueRunRepository issueRunRepository;
-  @Autowired private IssueInputRepository issueInputRepository;
+  @Autowired private IssueActivityRepository issueActivityRepository;
 
   @Test
   void testDuplicateSubmitExactReplayConcurrency() throws Exception {
     String agent = createTestAgent();
-    Project proj = projectService.createProject("Submit Concurrency", "Desc", agent);
+    Project proj = projectService.createProject("Submit Concurrency", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(proj.getId(), "Issue", "Desc", agent, null, IssueStatus.TODO);
     IssueRun run =
@@ -66,25 +66,15 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
       Callable<IssueRun> task1 =
           () -> {
             barrier.await();
-            return issueRunService.submitRun(
-                run.getId(),
-                actionId,
-                run.getObservedSpecRevision(),
-                run.getObservedInputSequence(),
-                "Summary",
-                "Verification");
+            return issueRunService.completeExecutorRun(
+                run.getId(), actionId, "Summary", "Verification");
           };
 
       Callable<IssueRun> task2 =
           () -> {
             barrier.await();
-            return issueRunService.submitRun(
-                run.getId(),
-                actionId,
-                run.getObservedSpecRevision(),
-                run.getObservedInputSequence(),
-                "Summary",
-                "Verification");
+            return issueRunService.completeExecutorRun(
+                run.getId(), actionId, "Summary", "Verification");
           };
 
       Future<IssueRun> f1 = executor.submit(task1);
@@ -115,7 +105,7 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
   void testDuplicateAgentReviewExactReplayConcurrency() throws Exception {
     String executorAgent = createTestAgent();
     String reviewerAgent = createTestAgent();
-    Project proj = projectService.createProject("Agent Review Concurrency", "Desc", executorAgent);
+    Project proj = projectService.createProject("Agent Review Concurrency", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(
             proj.getId(), "Review Issue", "Desc", executorAgent, reviewerAgent, IssueStatus.TODO);
@@ -123,13 +113,8 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
     IssueRun execRun =
         issueRunService.startExecutorRun(
             issue.getId(), executorAgent, Instant.now().plusSeconds(3600), 0);
-    issueRunService.submitRun(
-        execRun.getId(),
-        "submit-" + UUID.randomUUID(),
-        execRun.getObservedSpecRevision(),
-        execRun.getObservedInputSequence(),
-        "Done work",
-        "Passed tests");
+    issueRunService.completeExecutorRun(
+        execRun.getId(), "submit-" + UUID.randomUUID(), "Done work", "Passed tests");
 
     IssueRun revRun =
         issueRunService.startReviewerRun(
@@ -143,33 +128,15 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
       Callable<IssueRun> task1 =
           () -> {
             barrier.await();
-            return issueRunService.reviewRun(
-                issue.getId(),
-                revRun.getId(),
-                IssueRunActorType.AGENT,
-                reviewerAgent,
-                actionId,
-                revRun.getObservedSpecRevision(),
-                revRun.getObservedInputSequence(),
-                ReviewDecision.APPROVE,
-                "LGTM",
-                "Verified");
+            return issueRunService.reviewByAgent(
+                revRun.getId(), reviewerAgent, actionId, ReviewDecision.APPROVE, "LGTM");
           };
 
       Callable<IssueRun> task2 =
           () -> {
             barrier.await();
-            return issueRunService.reviewRun(
-                issue.getId(),
-                revRun.getId(),
-                IssueRunActorType.AGENT,
-                reviewerAgent,
-                actionId,
-                revRun.getObservedSpecRevision(),
-                revRun.getObservedInputSequence(),
-                ReviewDecision.APPROVE,
-                "LGTM",
-                "Verified");
+            return issueRunService.reviewByAgent(
+                revRun.getId(), reviewerAgent, actionId, ReviewDecision.APPROVE, "LGTM");
           };
 
       Future<IssueRun> f1 = executor.submit(task1);
@@ -185,6 +152,12 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
 
       Issue refreshed = issueService.getIssue(issue.getId());
       assertEquals(IssueStatus.DONE, refreshed.getStatus());
+
+      // 仅记录 1 条 REVIEW_DECISION Activity（包含初始 SPEC_CHANGE 共 2 条）
+      List<IssueActivity> activities = issueActivityRepository.listByIssueId(issue.getId());
+      assertEquals(2, activities.size());
+      assertEquals(IssueActivityKind.SPEC_CHANGE, activities.get(0).getKind());
+      assertEquals(IssueActivityKind.REVIEW_DECISION, activities.get(1).getKind());
     } finally {
       executor.shutdownNow();
     }
@@ -193,7 +166,7 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
   @Test
   void testDuplicateHumanReviewExactReplayConcurrency() throws Exception {
     String executorAgent = createTestAgent();
-    Project proj = projectService.createProject("Human Review Concurrency", "Desc", executorAgent);
+    Project proj = projectService.createProject("Human Review Concurrency", "Desc", true, 3);
     // reviewerAgentName 为空，允许人工评审
     Issue issue =
         issueService.createIssue(
@@ -202,74 +175,48 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
     IssueRun execRun =
         issueRunService.startExecutorRun(
             issue.getId(), executorAgent, Instant.now().plusSeconds(3600), 0);
-    issueRunService.submitRun(
-        execRun.getId(),
-        "submit-" + UUID.randomUUID(),
-        execRun.getObservedSpecRevision(),
-        execRun.getObservedInputSequence(),
-        "Executor summary",
-        "Executor verify");
+    issueRunService.completeExecutorRun(
+        execRun.getId(), "submit-" + UUID.randomUUID(), "Executor summary", "Executor verify");
 
-    assertEquals(0L, issueService.getIssue(issue.getId()).getInputSequence());
-
-    String actionId = "human-review-action-" + UUID.randomUUID();
+    String idempotencyKey = "human-review-key-" + UUID.randomUUID();
     CyclicBarrier barrier = new CyclicBarrier(2);
     ExecutorService executor = Executors.newFixedThreadPool(2);
 
     try {
-      Callable<IssueRun> task1 =
+      Callable<Void> task1 =
           () -> {
             barrier.await();
-            return issueRunService.reviewRun(
-                issue.getId(),
-                null,
-                IssueRunActorType.HUMAN,
-                null,
-                actionId,
-                execRun.getObservedSpecRevision(),
-                execRun.getObservedInputSequence(),
-                ReviewDecision.REQUEST_CHANGES,
-                "Need fix",
-                "Checked");
+            issueRunService.reviewByHuman(
+                issue.getId(), ReviewDecision.REQUEST_CHANGES, "Need fix", idempotencyKey);
+            return null;
           };
 
-      Callable<IssueRun> task2 =
+      Callable<Void> task2 =
           () -> {
             barrier.await();
-            return issueRunService.reviewRun(
-                issue.getId(),
-                null,
-                IssueRunActorType.HUMAN,
-                null,
-                actionId,
-                execRun.getObservedSpecRevision(),
-                execRun.getObservedInputSequence(),
-                ReviewDecision.REQUEST_CHANGES,
-                "Need fix",
-                "Checked");
+            issueRunService.reviewByHuman(
+                issue.getId(), ReviewDecision.REQUEST_CHANGES, "Need fix", idempotencyKey);
+            return null;
           };
 
-      Future<IssueRun> f1 = executor.submit(task1);
-      Future<IssueRun> f2 = executor.submit(task2);
+      Future<Void> f1 = executor.submit(task1);
+      Future<Void> f2 = executor.submit(task2);
 
-      IssueRun r1 = f1.get(10, TimeUnit.SECONDS);
-      IssueRun r2 = f2.get(10, TimeUnit.SECONDS);
-
-      assertEquals(r1.getId(), r2.getId());
-      assertEquals(IssueRunRole.REVIEWER, r1.getRole());
-      assertEquals(IssueRunActorType.HUMAN, r1.getActorType());
-      assertEquals(IssueRunOutcome.CHANGES_REQUESTED, r1.getOutcome());
-      assertEquals(actionId, r1.getTerminalActionId());
+      f1.get(10, TimeUnit.SECONDS);
+      f2.get(10, TimeUnit.SECONDS);
 
       Issue refreshed = issueService.getIssue(issue.getId());
       assertEquals(IssueStatus.TODO, refreshed.getStatus());
 
-      // 幂等断言：虽然有两个并发 caller，但只能生成一条 feedback input，且 inputSequence 恰好递增 1 次！
-      assertEquals(1L, refreshed.getInputSequence());
-      List<IssueInput> inputs = issueInputRepository.listByIssueId(issue.getId());
-      assertEquals(1, inputs.size());
-      assertEquals("Need fix", inputs.getFirst().getBody());
-      assertNull(inputs.getFirst().getIdempotencyKey());
+      // 幂等断言：无论并发线程谁先提交，数据库中只能产生 1 条 REVIEW_DECISION Activity（共 2 条含初始 SPEC_CHANGE）
+      List<IssueActivity> activities = issueActivityRepository.listByIssueId(issue.getId());
+      assertEquals(2, activities.size());
+      assertEquals(IssueActivityKind.SPEC_CHANGE, activities.get(0).getKind());
+      IssueActivity reviewActivity = activities.get(1);
+      assertEquals(IssueActivityKind.REVIEW_DECISION, reviewActivity.getKind());
+      assertEquals(IssueActivityActorType.HUMAN, reviewActivity.getActorType());
+      assertEquals("Need fix", reviewActivity.getBody());
+      assertEquals(idempotencyKey, reviewActivity.getIdempotencyKey());
     } finally {
       executor.shutdownNow();
     }
@@ -278,7 +225,7 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
   @Test
   void testSubmitVsCancelConcurrency() throws Exception {
     String agent = createTestAgent();
-    Project proj = projectService.createProject("Submit vs Cancel", "Desc", agent);
+    Project proj = projectService.createProject("Submit vs Cancel", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(proj.getId(), "Issue", "Desc", agent, null, IssueStatus.TODO);
     IssueRun run =
@@ -293,13 +240,7 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
           () -> {
             barrier.await();
             try {
-              issueRunService.submitRun(
-                  run.getId(),
-                  submitActionId,
-                  run.getObservedSpecRevision(),
-                  run.getObservedInputSequence(),
-                  "Summ",
-                  "Ver");
+              issueRunService.completeExecutorRun(run.getId(), submitActionId, "Summ", "Ver");
               return "SUBMIT_OK";
             } catch (AiValidationException e) {
               return "SUBMIT_FAILED";
@@ -310,7 +251,6 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
           () -> {
             barrier.await();
             try {
-              // 取得当前版本后发起取消
               Issue cur = issueService.getIssue(issue.getId());
               issueService.cancelIssue(issue.getId(), cur.getVersion(), "Cancelling");
               return "CANCEL_OK";
@@ -329,7 +269,7 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
       IssueRun finalRun = issueRunService.getRun(run.getId());
 
       if ("SUBMIT_OK".equals(rSubmit)) {
-        // Submit 成功执行：Run 变为 COMPLETED / SUBMITTED
+        // Complete 成功执行：Run 变为 COMPLETED / SUBMITTED
         assertEquals(IssueRunStatus.COMPLETED, finalRun.getStatus());
         assertEquals(IssueRunOutcome.SUBMITTED, finalRun.getOutcome());
         if ("CANCEL_OK".equals(rCancel)) {
@@ -354,7 +294,7 @@ class IssueRunConcurrencyIntegrationTest extends ProjectTestSupport {
   @Test
   void testStartExecutorRunConcurrency() throws Exception {
     String agent = createTestAgent();
-    Project proj = projectService.createProject("Start Run Concurrency", "Desc", agent);
+    Project proj = projectService.createProject("Start Run Concurrency", "Desc", true, 3);
 
     // 1. 两个不同 Issue 并发启动：均应成功且各自序号 ordinal = 1
     Issue issueA =

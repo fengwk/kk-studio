@@ -16,10 +16,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectArchiveRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
@@ -31,14 +29,24 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Project 领域 REST 控制器。 */
+/**
+ * Project 领域 REST 控制器。
+ *
+ * <p>Project 只拥有配置（YOLO 启动策略与打回阈值）与 Issue 集合；Issue Agent Session 归属按 {@code (issueId, agentName)} 由
+ * Issue 详情暴露，因此本控制器不提供项目级 Session 路由。
+ */
 @AllArgsConstructor
 @RestController
 @RequestMapping("/api/projects")
 public class StudioProjectController {
 
+  /** 未显式指定时，新项目开启 YOLO。 */
+  private static final boolean DEFAULT_YOLO_ENABLED = true;
+
+  /** 未显式指定时，正式审查连续打回阈值取 3。 */
+  private static final int DEFAULT_MAX_REVIEW_REJECTIONS = 3;
+
   private final ProjectService projectService;
-  private final HarnessOwnerQueryService harnessOwnerQueryService;
   private final ProjectSnapshotAssembler projectSnapshotAssembler;
   private final ProjectDtoMapper mapper;
 
@@ -54,9 +62,15 @@ public class StudioProjectController {
   public ResponseEntity<Result<ProjectDTO>> createProject(
       @RequestBody CreateProjectRequestDTO request) {
     Objects.requireNonNull(request, "request");
+    boolean yoloEnabled =
+        request.getYoloEnabled() == null ? DEFAULT_YOLO_ENABLED : request.getYoloEnabled();
+    int maxReviewRejections =
+        request.getMaxReviewRejections() == null
+            ? DEFAULT_MAX_REVIEW_REJECTIONS
+            : request.getMaxReviewRejections();
     Project created =
         projectService.createProject(
-            request.getTitle(), request.getDescription(), request.getCoordinatorAgentName());
+            request.getTitle(), request.getDescription(), yoloEnabled, maxReviewRejections);
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
   }
 
@@ -74,6 +88,7 @@ public class StudioProjectController {
   public Result<ProjectDTO> updateProject(
       @PathVariable("projectId") String projectIdStr,
       @RequestBody UpdateProjectRequestDTO request) {
+    Objects.requireNonNull(request, "request");
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
@@ -83,7 +98,8 @@ public class StudioProjectController {
             expectedVersion,
             request.getTitle(),
             request.getDescription(),
-            request.getCoordinatorAgentName());
+            request.getYoloEnabled(),
+            request.getMaxReviewRejections());
     return Results.ok(mapper.toDto(updated));
   }
 
@@ -118,15 +134,6 @@ public class StudioProjectController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project unarchived = projectService.unarchiveProject(projectId, expectedVersion);
     return Results.ok(mapper.toDto(unarchived));
-  }
-
-  @GetMapping("/{projectId}/sessions")
-  public Result<List<HarnessSessionSummaryDTO>> listSessions(
-      @PathVariable("projectId") String projectIdStr) {
-    UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
-    List<HarnessSessionSummaryDTO> sessions =
-        harnessOwnerQueryService.listProjectSessions(projectId);
-    return Results.ok(sessions);
   }
 
   @GetMapping("/{projectId}/snapshot")

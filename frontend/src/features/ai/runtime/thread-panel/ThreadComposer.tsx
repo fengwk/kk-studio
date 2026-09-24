@@ -61,6 +61,25 @@ import { useI18n } from '@/shared/i18n'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
 
+export function extractGoalCommand(parts: ComposerPart[]): { isGoalCommand: boolean; objective: string | null } {
+  let text = ''
+  for (const part of parts) {
+    if (part.type === 'text') {
+      text += part.text
+    }
+  }
+  const match = text.match(/^\/goal(?:\s+(.*))?$/s)
+  if (!match) {
+    return { isGoalCommand: false, objective: null }
+  }
+  const rawArg = match[1] ?? ''
+  const trimmed = rawArg.trim()
+  return {
+    isGoalCommand: true,
+    objective: trimmed.length > 0 ? trimmed : null,
+  }
+}
+
 /**
  * 共享的 ordered Pill Composer（OpenCode 风格）。
  *
@@ -79,6 +98,7 @@ export function ThreadComposer({
   onPartsChange,
   onHistoryPartsChange = onPartsChange,
   onSubmit,
+  onSubmitGoal,
   onCommand,
   commands = THREAD_COMMANDS,
   historicalUserMessages = EMPTY_USER_MESSAGES,
@@ -102,6 +122,7 @@ export function ThreadComposer({
    *   PendingAcceptance——恢复比对只命中本地 id 草稿。
    */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
+  onSubmitGoal?: (goalText: string, localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
   historicalUserMessages?: readonly string[]
@@ -220,7 +241,10 @@ export function ThreadComposer({
     markDetached,
   } = useAttachmentUploads({ storageService, hashFile, onError: handleUploadError })
 
-  const slashQuery = slashQueryOf(parts)
+  const goalCommandInfo = extractGoalCommand(parts)
+  const isGoalCommand = goalCommandInfo.isGoalCommand
+  const isGoalWithObjective = isGoalCommand && goalCommandInfo.objective != null
+  const slashQuery = isGoalWithObjective ? null : slashQueryOf(parts)
   const slashMode = slashQuery != null
   const paletteMode = plusMenuOpen ? 'menu' : slashMode ? 'slash' : null
   const paletteOpen = paletteMode != null
@@ -233,8 +257,8 @@ export function ThreadComposer({
 
   // 进行中的 HTTP 变更不能阻塞连续提交；附件未全部 ready 时也不能发送。
   const canSend = useMemo(
-    () => !disabled && !slashMode && canSubmitParts(parts, uploads),
-    [disabled, parts, slashMode, uploads],
+    () => !disabled && !slashMode && (isGoalCommand || canSubmitParts(parts, uploads)),
+    [disabled, isGoalCommand, parts, slashMode, uploads],
   )
 
   // 全局 Escape 的覆盖层关闭：control menu 优先，其次 palette（slash 模式同时
@@ -248,10 +272,10 @@ export function ThreadComposer({
     if (paletteMode != null) {
       setPlusMenuOpen(false)
       if (paletteMode === 'slash') {
-        changeDraft([])
+        changeDraft(parts.filter((part) => part.type !== 'text'))
       }
     }
-  }, [changeDraft, controlMenu, paletteMode])
+  }, [changeDraft, controlMenu, paletteMode, parts])
 
   // 组合焦点状态机：定时重试/覆盖层关闭后恢复/active 恢复/Escape/pending
   // 完成后自动聚焦/卸载清理。
@@ -276,10 +300,10 @@ export function ThreadComposer({
   const closeCommandPalette = useCallback((forceCaretAtEnd = false) => {
     setPlusMenuOpen(false)
     if (paletteMode === 'slash') {
-      changeDraft([])
+      changeDraft(parts.filter((part) => part.type !== 'text'))
     }
     focusComposer(forceCaretAtEnd)
-  }, [changeDraft, focusComposer, paletteMode])
+  }, [changeDraft, focusComposer, paletteMode, parts])
 
   const changeControlMenu = useCallback((
     next: ThreadComposerControlMenu,
@@ -409,6 +433,41 @@ export function ThreadComposer({
     if (!canSend) {
       return
     }
+    const goalInfo = extractGoalCommand(parts)
+    if (goalInfo.isGoalCommand && goalInfo.objective != null) {
+      const goalCommand = commands.find((cmd) => cmd.id === 'goal')
+      if (!goalCommand || goalCommand.disabled) {
+        showToast(goalCommand?.disabledReason || t('ai.runtime.goal.notAllowed'))
+        return
+      }
+      if (Array.from(goalInfo.objective).length > 2000) {
+        showToast(t('ai.runtime.goal.errorTooLong'))
+        return
+      }
+      setPlusMenuOpen(false)
+      const localDraft = trimMessageParts(parts)
+      commit(localDraft)
+      const remainingParts = parts.filter((part) => part.type !== 'text')
+      try {
+        if (onSubmitGoal) {
+          onSubmitGoal(goalInfo.objective, localDraft)
+        }
+        changeDraft(remainingParts)
+      } catch {
+        // preserve draft on sync error
+      }
+      return
+    }
+    if (goalInfo.isGoalCommand && goalInfo.objective == null) {
+      const goalCommand = commands.find((cmd) => cmd.id === 'goal')
+      if (!goalCommand || goalCommand.disabled) {
+        showToast(goalCommand?.disabledReason || t('ai.runtime.goal.notAllowed'))
+        return
+      }
+      setPlusMenuOpen(false)
+      onCommand(goalCommand)
+      return
+    }
     setPlusMenuOpen(false)
     // 草稿始终引用客户端 localId；提交 payload 在序列化前解析为服务端 upload
     // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
@@ -423,10 +482,15 @@ export function ThreadComposer({
     if (command.disabled) {
       return
     }
-    const consumeSlashCommand = paletteMode === 'slash'
+    const consumeSlashCommand = paletteMode === 'slash' && command.id !== 'goal'
     setPlusMenuOpen(false)
     if (consumeSlashCommand) {
-      changeDraft([])
+      changeDraft(parts.filter((part) => part.type !== 'text'))
+    }
+    if (command.id === 'goal') {
+      focusComposer()
+      onCommand(command)
+      return
     }
     if (command.id === 'upload') {
       fileInputRef.current?.click()

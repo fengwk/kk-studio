@@ -6,6 +6,7 @@ import { IssueCard } from './IssueCard'
 
 export interface IssueBoardProps {
   issues: ProjectIssueSnapshotDTO[]
+  maxReviewRejections: string
   onSelectIssue: (issueId: string) => void
   onCreateIssue: () => void
   onChangeIssueStatus: (issueId: string, expectedVersion: string, status: IssueStatus) => void
@@ -22,6 +23,7 @@ interface ColumnDefinition {
 
 export function IssueBoard({
   issues,
+  maxReviewRejections,
   onSelectIssue,
   onCreateIssue,
   onChangeIssueStatus,
@@ -75,6 +77,11 @@ export function IssueBoard({
         key: 'IN_REVIEW',
         title: '审核中 (In Review)',
         predicate: (item) => item.issue.status === 'IN_REVIEW',
+      },
+      {
+        key: 'BLOCKED',
+        title: '已阻塞 (Blocked)',
+        predicate: (item) => item.issue.status === 'BLOCKED',
       },
       {
         key: 'DONE',
@@ -147,6 +154,7 @@ export function IssueBoard({
                     <IssueCard
                       key={item.issue.id}
                       item={item}
+                      maxReviewRejections={maxReviewRejections}
                       onClick={() => onSelectIssue(item.issue.id)}
                       onChangeStatus={(status) =>
                         onChangeIssueStatus(item.issue.id, item.issue.version, status)
@@ -184,6 +192,7 @@ export function IssueBoard({
                   <IssueCard
                     key={item.issue.id}
                     item={item}
+                    maxReviewRejections={maxReviewRejections}
                     onClick={() => onSelectIssue(item.issue.id)}
                     onChangeStatus={(status) =>
                       onChangeIssueStatus(item.issue.id, item.issue.version, status)

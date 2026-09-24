@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.project.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -19,11 +20,13 @@ import java.util.UUID;
  * <p>测试意图：
  *
  * <ul>
- *   <li>验证 Coordinator(9)、Executor(2)、Reviewer(1) 角色模型可见工具名的精确数量与声明顺序；
+ *   <li>验证 Executor(2)、Reviewer(3) 角色模型可见工具名的精确数量与声明顺序；
  *   <li>验证角色工具名集合在任何情况下均为严格不可变列表；
  *   <li>验证 null 角色防护与构造参数防御性校验；
  *   <li>验证根据反查的所有权上下文正确投影出相应的工具集合；
- *   <li>验证未解析或不存在的所有权返回空不可变列表。
+ *   <li>验证未解析或不存在的所有权返回空不可变列表；
+ *   <li>验证 Issue Agent 归属判定委托给 owner resolver（与活动 Run 无关）；
+ *   <li>验证 ProjectRole 枚举完整性（EXECUTOR、REVIEWER）。
  * </ul>
  */
 class ProjectRoleToolSelectorTest {
@@ -44,27 +47,15 @@ class ProjectRoleToolSelectorTest {
 
   @Test
   void exactRoleToolNamesAndOrder() {
-    // 验证 Coordinator 精确包含 9 个内部工具且顺序严格对齐设计
-    assertEquals(
-        List.of(
-            "project_read",
-            "issue_read",
-            "issue_list",
-            "issue_create",
-            "issue_update",
-            "issue_add_dependency",
-            "issue_remove_dependency",
-            "issue_set_status",
-            "issue_cancel"),
-        ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR));
-
     // 验证 Executor 精确包含 2 个内部工具且顺序严格对齐设计
     assertEquals(
-        List.of("issue_submit", "issue_request_input"),
+        List.of("issue_read", "issue_request_input"),
         ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
 
-    // 验证 Reviewer 精确包含 1 个内部工具且顺序严格对齐设计
-    assertEquals(List.of("issue_review"), ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
+    // 验证 Reviewer 精确包含 3 个内部工具且顺序严格对齐设计
+    assertEquals(
+        List.of("issue_read", "issue_request_input", "issue_review"),
+        ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
   }
 
   @Test
@@ -80,29 +71,10 @@ class ProjectRoleToolSelectorTest {
     // 验证角色工具名列表的不可变性
     assertThrows(
         UnsupportedOperationException.class,
-        () -> ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR).add("extra_tool"));
-    assertThrows(
-        UnsupportedOperationException.class,
         () -> ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR).remove(0));
     assertThrows(
         UnsupportedOperationException.class,
         () -> ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER).clear());
-  }
-
-  @Test
-  void select_coordinator_returnsImmutable9Tools() {
-    // 验证 Coordinator 角色线程选出 9 个工具且返回结果不可修改
-    when(ownerResolver.resolve(THREAD_ID))
-        .thenReturn(
-            Optional.of(
-                new ProjectThreadOwnerContext(
-                    ProjectRole.COORDINATOR, PROJECT_ID, null, null, "coordinator-agent")));
-
-    List<String> tools = selector.select(THREAD_ID);
-
-    assertEquals(9, tools.size());
-    assertEquals(ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR), tools);
-    assertThrows(UnsupportedOperationException.class, () -> tools.add("extra_tool"));
   }
 
   @Test
@@ -122,8 +94,8 @@ class ProjectRoleToolSelectorTest {
   }
 
   @Test
-  void select_reviewer_returnsImmutable1Tool() {
-    // 验证 Reviewer 角色线程选出 1 个工具且返回结果不可修改
+  void select_reviewer_returnsImmutable3Tools() {
+    // 验证 Reviewer 角色线程选出 3 个工具且返回结果不可修改
     when(ownerResolver.resolve(THREAD_ID))
         .thenReturn(
             Optional.of(
@@ -132,7 +104,7 @@ class ProjectRoleToolSelectorTest {
 
     List<String> tools = selector.select(THREAD_ID);
 
-    assertEquals(1, tools.size());
+    assertEquals(3, tools.size());
     assertEquals(ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER), tools);
     assertThrows(UnsupportedOperationException.class, () -> tools.add("extra_tool"));
   }
@@ -155,12 +127,21 @@ class ProjectRoleToolSelectorTest {
   }
 
   @Test
+  void isIssueAgentBranch_delegatesToStableOwnershipRegardlessOfActiveRun() {
+    // 验证 Issue Agent 归属判定委托给 owner resolver：该判定必须与「是否有活动 Run」解耦，供 turn resolver 关闭 Goal 工具面。
+    when(ownerResolver.isIssueAgentBranch(THREAD_ID)).thenReturn(true);
+    assertTrue(selector.isIssueAgentBranch(THREAD_ID));
+
+    when(ownerResolver.isIssueAgentBranch(THREAD_ID)).thenReturn(false);
+    assertFalse(selector.isIssueAgentBranch(THREAD_ID));
+  }
+
+  @Test
   void projectRole_enumCoverage() {
     // 验证 ProjectRole 枚举完整性
-    assertEquals(ProjectRole.COORDINATOR, ProjectRole.valueOf("COORDINATOR"));
     assertEquals(ProjectRole.EXECUTOR, ProjectRole.valueOf("EXECUTOR"));
     assertEquals(ProjectRole.REVIEWER, ProjectRole.valueOf("REVIEWER"));
-    assertEquals(3, ProjectRole.values().length);
+    assertEquals(2, ProjectRole.values().length);
   }
 
   private static UUID id(long value) {

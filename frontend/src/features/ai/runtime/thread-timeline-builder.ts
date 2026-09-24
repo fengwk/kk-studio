@@ -45,7 +45,7 @@ export function buildThreadTimeline(
   const queuedMessages: QueuedThreadMessage[] = []
   const durableToolArguments = new Map<string, string[]>()
   // Turn usage 挂起上下文：summary 在相应 TURN_END 之后投影。
-  const projectionContext: EntryProjectionContext = { pendingTurnSummary: null }
+  const projectionContext: EntryProjectionContext = { pendingTurnSummary: null, lastSettings: null }
   let hasPendingInputs = false
   let inCompactionTurn = false
   let latestTurnIsCompaction = false

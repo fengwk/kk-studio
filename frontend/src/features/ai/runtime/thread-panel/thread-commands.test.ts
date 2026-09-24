@@ -22,6 +22,7 @@ describe('AgentPane command registry', () => {
       'compact',
       'rename-session',
       'rename-thread',
+      'goal',
     ])
   })
 
@@ -64,6 +65,7 @@ describe('AgentPane command registry', () => {
       'upload',
       'shortcuts',
       'rename-session',
+      'goal',
     ])
     expect(THREAD_COMMANDS.every((command) => command.disabled === undefined)).toBe(true)
   })

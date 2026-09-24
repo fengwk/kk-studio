@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 /** {@link ReadTextWindow} 文本窗口格式化工具的单元测试。 */
@@ -178,13 +180,39 @@ class ReadTextWindowTest {
         PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 200, null, hugePath));
   }
 
-  /** 输入源字节数超过 8 MiB 上限时直接抛出异常 */
+  /** 测试意图：大源文件只保留窗口；扫描到文件尾才能准确返回总行数，不以 8 MiB 拒绝。 */
   @Test
-  void exceedingMaxSourceBytesThrowsException() {
-    byte[] hugeBytes = new byte[ReadTextWindow.MAX_SOURCE_BYTES + 1];
-    assertThrows(
-        PlatformReadException.class,
-        () -> ReadTextWindow.format(hugeBytes, 1, 200, null, "huge.txt"));
+  void streamsMoreThanEightMiBWithAccurateLineCount() {
+    int bytes = 9 * 1024 * 1024;
+    InputStream generated =
+        new InputStream() {
+          private int index;
+
+          @Override
+          public int read() {
+            return index++ < bytes ? (index % 100 == 0 ? '\n' : 'a') : -1;
+          }
+        };
+    String result = ReadTextWindow.format(generated, 1, 1, null, "huge.txt", "unsupported");
+    assertTrue(result.contains("1|" + "a".repeat(99)));
+    assertTrue(result.contains("of " + ((bytes - 1) / 100 + 1) + "."));
+  }
+
+  /** 测试意图：严格 UTF-8 解码跨缓冲区仍保留完整 code point 与 CRLF 行语义。 */
+  @Test
+  void streamDecodesCodePointAcrossBufferBoundaries() {
+    String content = "a".repeat(8191) + "😀\r\nnext";
+    String result =
+        ReadTextWindow.format(
+            new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)),
+            1,
+            1,
+            8192,
+            "emoji.txt",
+            "unsupported");
+    assertTrue(result.contains("1|😀"));
+    assertTrue(result.contains("of 8192 on line 1"));
+    assertTrue(result.contains("[Showing 0") == false);
   }
 
   /** offset 小于 1 时抛出异常 */

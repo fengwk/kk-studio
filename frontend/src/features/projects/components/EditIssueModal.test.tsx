@@ -1,9 +1,40 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { EditIssueModal } from './EditIssueModal'
 import type { ProjectsApi } from '../projects-api'
 import type { IssueDTO, IssueDetailDTO } from '../types'
+
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listAgents: vi.fn().mockResolvedValue({
+      results: [
+        { name: 'agent-1' },
+        { name: 'agent-2' },
+        { name: 'agent-new' },
+      ],
+      totalCount: 3,
+      pageNumber: 1,
+      pageSize: 50,
+    }),
+  },
+}))
+
+function renderWithClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {ui}
+    </QueryClientProvider>,
+  )
+}
 
 describe('EditIssueModal', () => {
   const mockIssue: IssueDTO = {
@@ -16,8 +47,6 @@ describe('EditIssueModal', () => {
     assigneeAgentName: 'agent-1',
     reviewerAgentName: 'agent-2',
     version: '5',
-    specRevision: '1',
-    inputSequence: '1',
     archivedAt: null,
     createdAt: '2026-09-14T00:00:00Z',
     updatedAt: '2026-09-14T00:00:00Z',
@@ -34,11 +63,14 @@ describe('EditIssueModal', () => {
     getProjectSnapshot: vi.fn(),
     createIssue: vi.fn(),
     getIssue: vi.fn(),
+    listActivities: vi.fn(),
     updateIssue: vi.fn().mockResolvedValue(mockIssue),
     changeIssueStatus: vi.fn(),
+    blockIssue: vi.fn(),
+    recoverIssue: vi.fn(),
     addIssueDependency: vi.fn(),
     removeIssueDependency: vi.fn(),
-    appendIssueInput: vi.fn(),
+    appendIssueActivity: vi.fn(),
     reviewIssue: vi.fn(),
     cancelIssue: vi.fn(),
     retryIssue: vi.fn(),
@@ -50,7 +82,7 @@ describe('EditIssueModal', () => {
   it('renders issue form fields populated with current issue data', () => {
     // 测试意图：验证打开弹窗时正确加载 Issue 当前标题、规格描述、Assignee 和 Reviewer
     const api = createMockApi()
-    render(
+    renderWithClient(
       <EditIssueModal
         isOpen={true}
         issue={mockIssue}
@@ -65,8 +97,8 @@ describe('EditIssueModal', () => {
     expect((screen.getByLabelText(/规格与详细要求/i) as HTMLTextAreaElement).value).toBe(
       'Original description',
     )
-    expect((screen.getByLabelText(/Assignee Agent/i) as HTMLInputElement).value).toBe('agent-1')
-    expect((screen.getByLabelText(/Reviewer Agent/i) as HTMLInputElement).value).toBe('agent-2')
+    expect((screen.getByLabelText(/Assignee Agent/i) as HTMLSelectElement).value).toBe('agent-1')
+    expect((screen.getByLabelText(/Reviewer Agent/i) as HTMLSelectElement).value).toBe('agent-2')
   })
 
   it('submits updated issue data successfully and invokes onSuccess', async () => {
@@ -85,7 +117,7 @@ describe('EditIssueModal', () => {
       updateIssue: vi.fn().mockResolvedValue(updatedIssue),
     })
 
-    render(
+    renderWithClient(
       <EditIssueModal
         isOpen={true}
         issue={mockIssue}
@@ -100,6 +132,11 @@ describe('EditIssueModal', () => {
 
     const descInput = screen.getByLabelText(/规格与详细要求/i)
     fireEvent.change(descInput, { target: { value: 'New spec text' } })
+
+    // 等待 catalog 选项加载就绪
+    await waitFor(() => {
+      expect(screen.getAllByRole('option', { name: 'agent-new' }).length).toBeGreaterThanOrEqual(1)
+    })
 
     const assigneeInput = screen.getByLabelText(/Assignee Agent/i)
     fireEvent.change(assigneeInput, { target: { value: 'agent-new' } })
@@ -134,7 +171,9 @@ describe('EditIssueModal', () => {
       },
       blocked: false,
       dependencies: [],
-      inputs: [],
+      sessions: [],
+      activities: [],
+      nextActivityCursor: null,
       runs: [],
       currentRun: null,
       latestRun: null,
@@ -148,7 +187,7 @@ describe('EditIssueModal', () => {
       getIssue: vi.fn().mockResolvedValue(freshDetail),
     })
 
-    render(
+    renderWithClient(
       <EditIssueModal
         isOpen={true}
         issue={mockIssue}
@@ -201,12 +240,14 @@ describe('EditIssueModal', () => {
         version: '8',
         title: 'Server Authoritative Title',
         description: 'Server spec',
-        assigneeAgentName: 'new-agent',
-        reviewerAgentName: 'human-review',
+        assigneeAgentName: 'agent-1',
+        reviewerAgentName: null,
       },
       blocked: false,
       dependencies: [],
-      inputs: [],
+      sessions: [],
+      activities: [],
+      nextActivityCursor: null,
       runs: [],
       currentRun: null,
       latestRun: null,
@@ -217,7 +258,7 @@ describe('EditIssueModal', () => {
       getIssue: vi.fn().mockResolvedValue(freshDetail),
     })
 
-    render(
+    renderWithClient(
       <EditIssueModal
         isOpen={true}
         issue={mockIssue}
@@ -249,7 +290,7 @@ describe('EditIssueModal', () => {
   it('closes on Escape key press and backdrop click', () => {
     // 测试意图：验证 Escape 快捷键和点击遮罩触发 onClose
     const onClose = vi.fn()
-    const { container } = render(
+    const { container } = renderWithClient(
       <EditIssueModal
         isOpen={true}
         issue={mockIssue}
@@ -266,5 +307,69 @@ describe('EditIssueModal', () => {
     expect(backdrop).toBeInTheDocument()
     fireEvent.click(backdrop!)
     expect(onClose).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves stale assigned agent not in catalog transparently without overwriting it', async () => {
+    // 测试意图：验证当 Issue 当前分配的 Agent 已下线（不在 Catalog 中）时，下拉框透明保全该名称且不会被静默重置为空或覆盖
+    const staleIssue: IssueDTO = {
+      ...mockIssue,
+      assigneeAgentName: 'retired-agent-99',
+      reviewerAgentName: 'retired-reviewer-88',
+    }
+
+    renderWithClient(
+      <EditIssueModal
+        isOpen={true}
+        issue={staleIssue}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={createMockApi()}
+      />,
+    )
+
+    const assigneeSelect = screen.getByLabelText(/Assignee Agent/i) as HTMLSelectElement
+    const reviewerSelect = screen.getByLabelText(/Reviewer Agent/i) as HTMLSelectElement
+
+    // 初始值正确回显为历史已分配 Agent
+    expect(assigneeSelect.value).toBe('retired-agent-99')
+    expect(reviewerSelect.value).toBe('retired-reviewer-88')
+
+    // 验证 options 列表中包含此 stale Agent，同时包含 catalog 中的其他已知 Agent 及空白项
+    await waitFor(() => {
+      const assigneeOptionValues = Array.from(assigneeSelect.options).map((o) => o.value)
+      expect(assigneeOptionValues).toContain('retired-agent-99')
+      expect(assigneeOptionValues).toContain('agent-1')
+      expect(assigneeOptionValues).toContain('agent-new')
+      expect(assigneeOptionValues).toContain('')
+    })
+  })
+
+  it('restricts role selectors to known agents and blank option without arbitrary free text', async () => {
+    // 测试意图：验证 Agent 选择器为受控原生 select，不允许自由文本输入，仅能选择 catalog 中合法 Agent 或空白
+    renderWithClient(
+      <EditIssueModal
+        isOpen={true}
+        issue={mockIssue}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={createMockApi()}
+      />,
+    )
+
+    const assigneeSelect = screen.getByLabelText(/Assignee Agent/i) as HTMLSelectElement
+    expect(assigneeSelect.tagName.toLowerCase()).toBe('select')
+
+    // 等待 catalog 选项加载就绪
+    await waitFor(() => {
+      expect(screen.getAllByRole('option', { name: 'agent-new' }).length).toBeGreaterThanOrEqual(1)
+    })
+
+    // 切换到已知 agent
+    fireEvent.change(assigneeSelect, { target: { value: 'agent-new' } })
+    expect(assigneeSelect.value).toBe('agent-new')
+
+    // 切换到空白项 (未指定)
+    fireEvent.change(assigneeSelect, { target: { value: '' } })
+    expect(assigneeSelect.value).toBe('')
   })
 })

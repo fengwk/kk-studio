@@ -2,63 +2,65 @@ package fun.fengwk.kkstudio.platform.project.model;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** Issue 状态迁移的单一事实源，维护基于 Action 的状态迁移白名单与合法状态对校验。 */
+/**
+ * Issue 七态迁移的唯一事实源。
+ *
+ * <p>迁移以 Action 为索引，并允许一个动作有多个合法目标：正式打回 {@link IssueTransitionAction#REQUEST_CHANGES}
+ * 是同一业务动作，未达项目阈值回到 TODO，达到阈值转 BLOCKED。阈值只决定目标，不改变动作本身。
+ */
 public final class IssueStatusTransition {
 
-  private static final Map<IssueTransitionAction, Map<IssueStatus, IssueStatus>> TRANSITIONS;
+  /** Action -> (from -> 合法 to 集合)。 */
+  private static final Map<IssueTransitionAction, Map<IssueStatus, Set<IssueStatus>>> TRANSITIONS;
+
   private static final Set<String> ALLOWED_PAIRS;
 
   static {
-    Map<IssueTransitionAction, Map<IssueStatus, IssueStatus>> transitions =
+    Map<IssueTransitionAction, Map<IssueStatus, Set<IssueStatus>>> transitions =
         new EnumMap<>(IssueTransitionAction.class);
 
-    // READY: BACKLOG -> TODO
-    transitions.put(IssueTransitionAction.READY, Map.of(IssueStatus.BACKLOG, IssueStatus.TODO));
-
-    // DEFER: TODO -> BACKLOG
-    transitions.put(IssueTransitionAction.DEFER, Map.of(IssueStatus.TODO, IssueStatus.BACKLOG));
-
-    // START_EXECUTION: TODO -> IN_PROGRESS
+    transitions.put(IssueTransitionAction.READY, single(IssueStatus.BACKLOG, IssueStatus.TODO));
+    transitions.put(IssueTransitionAction.DEFER, single(IssueStatus.TODO, IssueStatus.BACKLOG));
     transitions.put(
-        IssueTransitionAction.START_EXECUTION, Map.of(IssueStatus.TODO, IssueStatus.IN_PROGRESS));
-
-    // SUBMIT: IN_PROGRESS -> IN_REVIEW
+        IssueTransitionAction.START_EXECUTION, single(IssueStatus.TODO, IssueStatus.IN_PROGRESS));
     transitions.put(
-        IssueTransitionAction.SUBMIT, Map.of(IssueStatus.IN_PROGRESS, IssueStatus.IN_REVIEW));
-
-    // REQUEST_CHANGES: IN_REVIEW -> TODO
+        IssueTransitionAction.SUBMIT, single(IssueStatus.IN_PROGRESS, IssueStatus.IN_REVIEW));
     transitions.put(
-        IssueTransitionAction.REQUEST_CHANGES, Map.of(IssueStatus.IN_REVIEW, IssueStatus.TODO));
-
-    // APPROVE: IN_REVIEW -> DONE
-    transitions.put(IssueTransitionAction.APPROVE, Map.of(IssueStatus.IN_REVIEW, IssueStatus.DONE));
-
-    // CANCEL: 非终态 (BACKLOG, TODO, IN_PROGRESS, IN_REVIEW) -> CANCELED
+        IssueTransitionAction.REQUEST_CHANGES,
+        targets(
+            single(IssueStatus.IN_REVIEW, IssueStatus.TODO),
+            single(IssueStatus.IN_REVIEW, IssueStatus.BLOCKED)));
+    transitions.put(IssueTransitionAction.APPROVE, single(IssueStatus.IN_REVIEW, IssueStatus.DONE));
+    transitions.put(IssueTransitionAction.RECOVER, single(IssueStatus.BLOCKED, IssueStatus.TODO));
+    transitions.put(
+        IssueTransitionAction.RECOVER_TO_BACKLOG, single(IssueStatus.BLOCKED, IssueStatus.BACKLOG));
     transitions.put(
         IssueTransitionAction.CANCEL,
-        Map.of(
-            IssueStatus.BACKLOG, IssueStatus.CANCELED,
-            IssueStatus.TODO, IssueStatus.CANCELED,
-            IssueStatus.IN_PROGRESS, IssueStatus.CANCELED,
-            IssueStatus.IN_REVIEW, IssueStatus.CANCELED));
-
-    // REOPEN: 终态 (DONE, CANCELED) -> TODO
+        targets(
+            single(IssueStatus.BACKLOG, IssueStatus.CANCELED),
+            single(IssueStatus.TODO, IssueStatus.CANCELED),
+            single(IssueStatus.IN_PROGRESS, IssueStatus.CANCELED),
+            single(IssueStatus.IN_REVIEW, IssueStatus.CANCELED),
+            single(IssueStatus.BLOCKED, IssueStatus.CANCELED)));
     transitions.put(
         IssueTransitionAction.REOPEN,
-        Map.of(
-            IssueStatus.DONE, IssueStatus.TODO,
-            IssueStatus.CANCELED, IssueStatus.TODO));
+        targets(
+            single(IssueStatus.DONE, IssueStatus.TODO),
+            single(IssueStatus.CANCELED, IssueStatus.TODO)));
 
     TRANSITIONS = Collections.unmodifiableMap(transitions);
 
     Set<String> pairs = new HashSet<>();
-    for (Map<IssueStatus, IssueStatus> m : TRANSITIONS.values()) {
-      for (Map.Entry<IssueStatus, IssueStatus> entry : m.entrySet()) {
-        pairs.add(pairKey(entry.getKey(), entry.getValue()));
+    for (Map<IssueStatus, Set<IssueStatus>> bySource : TRANSITIONS.values()) {
+      for (Map.Entry<IssueStatus, Set<IssueStatus>> entry : bySource.entrySet()) {
+        for (IssueStatus target : entry.getValue()) {
+          pairs.add(pairKey(entry.getKey(), target));
+        }
       }
     }
     ALLOWED_PAIRS = Collections.unmodifiableSet(pairs);
@@ -79,26 +81,52 @@ public final class IssueStatusTransition {
     if (from == null || to == null || action == null) {
       return false;
     }
-    Map<IssueStatus, IssueStatus> actionTransitions = TRANSITIONS.get(action);
-    if (actionTransitions == null) {
-      return false;
-    }
-    return to == actionTransitions.get(from);
+    return targets(from, action).contains(to);
   }
 
-  /** 获取指定 action 作用于 from 状态后的目标状态；若不合法抛出 IllegalStateException。 */
-  public static IssueStatus transition(IssueStatus from, IssueTransitionAction action) {
+  /** 返回指定 action 在 from 阶段的全部合法目标；无合法迁移时返回空集合。 */
+  public static Set<IssueStatus> targets(IssueStatus from, IssueTransitionAction action) {
     if (from == null || action == null) {
-      throw new IllegalArgumentException("from and action must not be null");
+      return Set.of();
     }
-    Map<IssueStatus, IssueStatus> actionTransitions = TRANSITIONS.get(action);
-    if (actionTransitions == null || !actionTransitions.containsKey(from)) {
-      throw new IllegalStateException("Invalid transition from " + from + " via action " + action);
+    Map<IssueStatus, Set<IssueStatus>> bySource = TRANSITIONS.get(action);
+    if (bySource == null) {
+      return Set.of();
     }
-    return actionTransitions.get(from);
+    Set<IssueStatus> targets = bySource.get(from);
+    return targets == null ? Set.of() : targets;
+  }
+
+  /** 返回唯一目标阶段；动作在该阶段存在多个合法目标时要求调用方显式选择（打回按阈值决定 TODO/BLOCKED）。 */
+  public static IssueStatus transition(IssueStatus from, IssueTransitionAction action) {
+    Set<IssueStatus> targets = targets(from, action);
+    if (targets.size() != 1) {
+      throw new IllegalStateException(
+          "Transition from " + from + " by " + action + " is not unique");
+    }
+    return targets.iterator().next();
+  }
+
+  private static Map<IssueStatus, Set<IssueStatus>> single(IssueStatus from, IssueStatus to) {
+    Map<IssueStatus, Set<IssueStatus>> map = new EnumMap<>(IssueStatus.class);
+    map.put(from, EnumSet.of(to));
+    return Collections.unmodifiableMap(map);
+  }
+
+  /** 合并多个来源映射，允许一个动作在同一来源阶段之外携带多个合法起点。 */
+  @SafeVarargs
+  private static Map<IssueStatus, Set<IssueStatus>> targets(
+      Map<IssueStatus, Set<IssueStatus>>... sources) {
+    Map<IssueStatus, Set<IssueStatus>> merged = new EnumMap<>(IssueStatus.class);
+    for (Map<IssueStatus, Set<IssueStatus>> source : sources) {
+      source.forEach(
+          (from, to) ->
+              merged.computeIfAbsent(from, key -> EnumSet.noneOf(IssueStatus.class)).addAll(to));
+    }
+    return Collections.unmodifiableMap(merged);
   }
 
   private static String pairKey(IssueStatus from, IssueStatus to) {
-    return from.name() + "->" + to.name();
+    return from + "->" + to;
   }
 }

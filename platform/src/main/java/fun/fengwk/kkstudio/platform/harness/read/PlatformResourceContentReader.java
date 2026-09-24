@@ -5,7 +5,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -20,7 +19,7 @@ import java.util.function.Supplier;
  * <ol>
  *   <li>通过 {@code threadId} 从 {@link HarnessStore} 解析关联的 {@code sessionId}；
  *   <li>校验当前 Session 是否已引用该 Blob（鉴权失败必须与不存在区分不了地拒绝，避免信息泄露）；
- *   <li>通过 {@link StorageBlobContentService} 安全读取 ACTIVE 状态的 Blob 字节，应用相同的大小上限。
+ *   <li>通过 {@link StorageBlobContentService} 流式读取 ACTIVE Blob，并在回调内格式化有界窗口。
  * </ol>
  */
 public class PlatformResourceContentReader {
@@ -42,14 +41,20 @@ public class PlatformResourceContentReader {
   }
 
   /**
-   * 读取当前 Thread 对应 Session 授权的 Blob 原始内容字节。
+   * 读取当前 Thread 对应 Session 授权的 Blob 文本窗口。
    *
    * @param threadId 当前 Harness Thread ID，非空
    * @param blobId 目标 Blob ID，非空
-   * @return Blob 原始内容字节
+   * @return 格式化的文本窗口
    * @throws PlatformReadException Thread 不存在、Session 未引用该资源、资源不存在或读取失败时抛出
    */
-  public byte[] readResource(UUID threadId, UUID blobId) {
+  public String readResourceText(
+      UUID threadId,
+      UUID blobId,
+      Integer offset,
+      Integer limit,
+      Integer columnOffset,
+      String displayPath) {
     if (threadId == null) {
       throw new PlatformReadException("threadId must not be null");
     }
@@ -73,16 +78,18 @@ public class PlatformResourceContentReader {
     }
 
     try {
-      StorageBlobContent content =
-          storageBlobContentService.readBlobContent(blobId, ReadTextWindow.MAX_SOURCE_BYTES);
-      if (content == null || content.getBytes() == null) {
+      String text =
+          storageBlobContentService.withBlobStream(
+              blobId,
+              stream ->
+                  ReadTextWindow.format(
+                      stream, offset, limit, columnOffset, displayPath, "unsupported"));
+      if (text == null) {
         throw new PlatformReadException("resource content is unavailable: " + blobId);
       }
-      return content.getBytes();
+      return text;
     } catch (StorageResourceNotFoundException e) {
       throw new PlatformReadException("resource not found: " + blobId, e);
-    } catch (IllegalArgumentException e) {
-      throw new PlatformReadException("resource size exceeds limit: " + blobId, e);
     } catch (PlatformReadException e) {
       throw e;
     } catch (Exception e) {

@@ -9,7 +9,12 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import java.util.Objects;
 import java.util.UUID;
 
-/** 使用 Harness append-only Entry path 构造作用域受限的冻结 contributor branch view。 */
+/**
+ * 使用 Harness append-only Entry path 构造作用域受限的冻结 contributor branch view。
+ *
+ * <p>两条读取都刻意走窄查询：contributor 自定义状态用 {@code loadContributorCustomEntriesOnPath}，用户 Goal 用 {@code
+ * loadBranchSettings}，因此工具执行绝不物化完整 EntryPath。
+ */
 @Component
 @ConditionalOnBean(HarnessStore.class)
 public class DatabaseContributorBranchViewLoader implements ContributorBranchViewLoader {
@@ -28,6 +33,7 @@ public class DatabaseContributorBranchViewLoader implements ContributorBranchVie
         tx ->
             new ScopedBranchView(
                 tx.loadContributorCustomEntriesOnPath(assistantEntryId, contributorId),
-                contributorId));
+                contributorId,
+                tx.loadBranchSettings(assistantEntryId).goal()));
   }
 }

@@ -13,22 +13,23 @@ import org.springframework.beans.factory.annotation.Autowired;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
-import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -38,8 +39,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 验证 IssueRunService 运行生命周期及围栏校验： 包含 Executor 启动约束、Submit/Review 观察游标（observed
- * cursors）围栏、AGENT/HUMAN 评审双模式、 失败不改 Issue 状态、明确 Retry 追加输入流以及 Run Session 绑定约束。
+ * 验证 IssueRunService 运行生命周期及围栏校验： 包含 Executor 启动约束、Complete/Review 状态机跃迁、AGENT/HUMAN 评审双模式、 失败不改
+ * Issue 状态、明确 Retry 追加事实流、打回阈值迁移至 BLOCKED 以及稳定的 IssueAgentSession 归属查询。
  */
 class IssueRunServiceIntegrationTest extends ProjectTestSupport {
 
@@ -48,14 +49,15 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
   @Autowired private ProjectService projectService;
   @Autowired private IssueRepository issueRepository;
   @Autowired private IssueRunRepository issueRunRepository;
-  @Autowired private IssueRunSessionRepository issueRunSessionRepository;
+  @Autowired private IssueActivityRepository issueActivityRepository;
+  @Autowired private IssueAgentSessionRepository issueAgentSessionRepository;
   @Autowired private IssueDependencyRepository issueDependencyRepository;
 
   @Test
   void testStartExecutorRunSuccessAndFences() {
     String agent1 = createTestAgent();
     String agent2 = createTestAgent();
-    Project project = projectService.createProject("Run Proj", "Desc", agent1);
+    Project project = projectService.createProject("Run Proj", "Desc", true, 3);
     UUID projId = project.getId();
 
     Issue issue = issueService.createIssue(projId, "Task", "Desc", agent1, null, IssueStatus.TODO);
@@ -73,12 +75,10 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     assertNotNull(run.getId());
     assertEquals(1L, run.getOrdinal());
     assertEquals(IssueRunRole.EXECUTOR, run.getRole());
-    assertEquals(IssueRunActorType.AGENT, run.getActorType());
     assertEquals(agent1, run.getAgentName());
     assertEquals(IssueRunStatus.RUNNING, run.getStatus());
     assertNull(run.getOutcome());
-    assertEquals(1L, run.getObservedSpecRevision());
-    assertEquals(0L, run.getObservedInputSequence());
+    assertEquals(0L, run.getObservedActivitySequence());
 
     // Issue 状态同步跃迁至 IN_PROGRESS
     Issue currentIssue = issueService.getIssue(issueId);
@@ -94,7 +94,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
   @Test
   void testStartExecutorRunBlockedByDependencyFails() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Blocked Run Proj", "Desc", agent);
+    Project project = projectService.createProject("Blocked Run Proj", "Desc", true, 3);
     UUID projId = project.getId();
 
     Issue dep = issueService.createIssue(projId, "Dep", "Desc", agent, null, IssueStatus.TODO);
@@ -127,9 +127,9 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
   }
 
   @Test
-  void testSubmitRunCursorFencesAndSuccess() {
+  void testCompleteExecutorRunSuccess() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Submit Proj", "Desc", agent);
+    Project project = projectService.createProject("Submit Proj", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(
             project.getId(), "Submit Issue", "Desc", agent, null, IssueStatus.TODO);
@@ -139,21 +139,15 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
         issueRunService.startExecutorRun(issueId, agent, Instant.now().plusSeconds(3600), 10);
     UUID runId = run.getId();
 
-    // 模拟在运行期间人类追加了一条新输入，导致 Issue inputSequence 改变
-    issueService.appendInput(issueId, IssueInputKind.HUMAN, "New question", "k1");
-
-    // Agent 使用过期的 observedInputSequence（0 vs 1）提交必须被围栏拒绝
-    assertThrows(
-        AiValidationException.class,
-        () -> issueRunService.submitRun(runId, "action:1", 1L, 0L, "Summary", "Verification"));
-
-    // 使用匹配当前 Issue 的游标提交成功
+    // completeExecutorRun 成功完成 Run 并将 Issue 推进至 IN_REVIEW
     IssueRun submitted =
-        issueRunService.submitRun(runId, "action:1", 1L, 1L, "Summary", "Verification");
+        issueRunService.completeExecutorRun(runId, "action:1", "Summary", "Verification");
     assertEquals(IssueRunStatus.COMPLETED, submitted.getStatus());
     assertEquals(IssueRunOutcome.SUBMITTED, submitted.getOutcome());
     assertEquals("action:1", submitted.getTerminalActionId());
     assertNotNull(submitted.getCompletedAt());
+    assertTrue(submitted.getResult().contains("Summary"));
+    assertTrue(submitted.getResult().contains("Verification"));
 
     // Issue 状态同步跃迁至 IN_REVIEW
     assertEquals(IssueStatus.IN_REVIEW, issueService.getIssue(issueId).getStatus());
@@ -162,7 +156,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
   @Test
   void testRequestInputLeavesRunWaitingHuman() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Request Input Proj", "Desc", agent);
+    Project project = projectService.createProject("Request Input Proj", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(project.getId(), "Task", "Desc", agent, null, IssueStatus.TODO);
     UUID issueId = issue.getId();
@@ -172,18 +166,25 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     UUID runId = run.getId();
 
     // requestInput 成功后 Run 变为 WAITING_HUMAN，Issue 仍保持 IN_PROGRESS
-    IssueRun waiting =
-        issueRunService.requestInput(runId, 1L, 0L, "Need clarification?", "Detail context");
+    IssueRun waiting = issueRunService.requestInput(runId, "Need clarification?", "Detail context");
     assertEquals(IssueRunStatus.WAITING_HUMAN, waiting.getStatus());
     assertEquals("Need clarification?\n\nContext:\nDetail context", waiting.getWaitingReason());
     assertEquals(IssueStatus.IN_PROGRESS, issueService.getIssue(issueId).getStatus());
+
+    // Activity 事实流记录：初始 SPEC_CHANGE 与追加的 INSTRUCTION
+    List<IssueActivity> activities = issueActivityRepository.listByIssueId(issueId);
+    assertEquals(2, activities.size());
+    assertEquals(IssueActivityKind.SPEC_CHANGE, activities.get(0).getKind());
+    assertEquals(IssueActivityKind.INSTRUCTION, activities.get(1).getKind());
+    assertEquals(IssueActivityActorType.AGENT, activities.get(1).getActorType());
+    assertEquals(agent, activities.get(1).getActorAgentName());
   }
 
   @Test
   void testAgentReviewApproveAndRequestChanges() {
     String execAgent = createTestAgent();
     String revAgent = createTestAgent();
-    Project project = projectService.createProject("Review Proj", "Desc", execAgent);
+    Project project = projectService.createProject("Review Proj", "Desc", true, 3);
     UUID projId = project.getId();
 
     // 创建带 reviewerAgent 的 Issue
@@ -195,65 +196,49 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     // Executor 执行并提交
     IssueRun execRun =
         issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
-    issueRunService.submitRun(execRun.getId(), "exec:1", 1L, 0L, "Done", "Passed");
+    issueRunService.completeExecutorRun(execRun.getId(), "exec:1", "Done", "Passed");
 
     // 启动 Reviewer Run
     IssueRun revRun =
         issueRunService.startReviewerRun(issueId, revAgent, Instant.now().plusSeconds(3600), 10);
     assertEquals(IssueRunRole.REVIEWER, revRun.getRole());
-    assertEquals(IssueRunActorType.AGENT, revRun.getActorType());
+    assertEquals(revAgent, revRun.getAgentName());
     assertEquals(execRun.getId(), revRun.getSubmissionRunId());
 
-    // 分支 1: REQUEST_CHANGES 导致 Issue 退回 TODO 并自动追加 REVIEW_FEEDBACK
+    // 分支 1: REQUEST_CHANGES 导致 Issue 退回 TODO 并记录 REVIEW_DECISION Activity
     IssueRun reviewed =
-        issueRunService.reviewRun(
-            issueId,
-            revRun.getId(),
-            IssueRunActorType.AGENT,
-            revAgent,
-            "rev:1",
-            1L,
-            0L,
-            ReviewDecision.REQUEST_CHANGES,
-            "Please fix bug",
-            "See test failure");
+        issueRunService.reviewByAgent(
+            revRun.getId(), revAgent, "rev:1", ReviewDecision.REQUEST_CHANGES, "Please fix bug");
     assertEquals(IssueRunStatus.COMPLETED, reviewed.getStatus());
     assertEquals(IssueRunOutcome.CHANGES_REQUESTED, reviewed.getOutcome());
 
     Issue issueAfterChanges = issueService.getIssue(issueId);
     assertEquals(IssueStatus.TODO, issueAfterChanges.getStatus());
-    assertEquals(1L, issueAfterChanges.getInputSequence());
-    List<IssueInput> inputs = issueService.listInputs(issueId);
-    assertEquals(1, inputs.size());
-    assertEquals(IssueInputKind.REVIEW_FEEDBACK, inputs.getFirst().getKind());
+
+    List<IssueActivity> activities = issueActivityRepository.listByIssueId(issueId);
+    assertEquals(2, activities.size());
+    assertEquals(IssueActivityKind.SPEC_CHANGE, activities.get(0).getKind());
+    assertEquals(IssueActivityKind.REVIEW_DECISION, activities.get(1).getKind());
+    assertEquals(ReviewDecision.REQUEST_CHANGES, activities.get(1).getDecision());
 
     // 重新执行 Executor -> Submit -> Reviewer -> APPROVE -> Issue DONE
     IssueRun execRun2 =
         issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
-    issueRunService.submitRun(execRun2.getId(), "exec:2", 1L, 1L, "Fixed", "Passed");
+    issueRunService.completeExecutorRun(execRun2.getId(), "exec:2", "Fixed", "Passed");
 
     IssueRun revRun2 =
         issueRunService.startReviewerRun(issueId, revAgent, Instant.now().plusSeconds(3600), 10);
-    issueRunService.reviewRun(
-        issueId,
-        revRun2.getId(),
-        IssueRunActorType.AGENT,
-        revAgent,
-        "rev:2",
-        1L,
-        1L,
-        ReviewDecision.APPROVE,
-        "Looks good",
-        "Verified");
+    issueRunService.reviewByAgent(
+        revRun2.getId(), revAgent, "rev:2", ReviewDecision.APPROVE, "Looks good");
 
     Issue finalIssue = issueService.getIssue(issueId);
     assertEquals(IssueStatus.DONE, finalIssue.getStatus());
   }
 
   @Test
-  void testHumanReviewOnlyWhenReviewerAgentIsNull() {
+  void testHumanReviewApproveAndRequestChanges() {
     String execAgent = createTestAgent();
-    Project project = projectService.createProject("Human Review Proj", "Desc", execAgent);
+    Project project = projectService.createProject("Human Review Proj", "Desc", true, 3);
     UUID projId = project.getId();
 
     // reviewerAgentName 为空表示人工评审
@@ -264,35 +249,60 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
 
     IssueRun execRun =
         issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
-    issueRunService.submitRun(execRun.getId(), "exec:sub", 1L, 0L, "Done", "Passed");
+    issueRunService.completeExecutorRun(execRun.getId(), "exec:sub", "Done", "Passed");
 
     // 人工直接评审批准
-    IssueRun humanRun =
-        issueRunService.reviewRun(
-            issueId,
-            null,
-            IssueRunActorType.HUMAN,
-            null,
-            "human:appr",
-            1L,
-            0L,
-            ReviewDecision.APPROVE,
-            "Manual review approved",
-            "Inspected code");
+    issueRunService.reviewByHuman(
+        issueId, ReviewDecision.APPROVE, "Manual review approved", "human:appr");
 
-    assertEquals(IssueRunRole.REVIEWER, humanRun.getRole());
-    assertEquals(IssueRunActorType.HUMAN, humanRun.getActorType());
-    assertNull(humanRun.getAgentName());
-    assertEquals(execRun.getId(), humanRun.getSubmissionRunId());
-    assertEquals(IssueRunStatus.COMPLETED, humanRun.getStatus());
-    assertEquals(IssueRunOutcome.APPROVED, humanRun.getOutcome());
     assertEquals(IssueStatus.DONE, issueService.getIssue(issueId).getStatus());
+    List<IssueActivity> activities = issueActivityRepository.listByIssueId(issueId);
+    assertEquals(2, activities.size());
+    assertEquals(IssueActivityKind.SPEC_CHANGE, activities.get(0).getKind());
+    assertEquals(IssueActivityKind.REVIEW_DECISION, activities.get(1).getKind());
+    assertEquals(IssueActivityActorType.HUMAN, activities.get(1).getActorType());
+    assertEquals(ReviewDecision.APPROVE, activities.get(1).getDecision());
   }
 
   @Test
-  void testFailRunDoesNotAlterIssueStatusAndRetryAppendsInput() {
+  void testHumanReviewChangesRequestedAndMaxRejectionsToBlocked() {
+    String execAgent = createTestAgent();
+    Project project = projectService.createProject("Blocked Threshold Proj", "Desc", true, 2);
+    UUID projId = project.getId();
+
+    Issue issue =
+        issueService.createIssue(
+            projId, "Threshold Task", "Desc", execAgent, null, IssueStatus.TODO);
+    UUID issueId = issue.getId();
+
+    // 第 1 次执行与打回（累计 1 < 2，退回 TODO）
+    IssueRun r1 =
+        issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
+    issueRunService.completeExecutorRun(r1.getId(), "sub:1", "Done", "Passed");
+    issueRunService.reviewByHuman(
+        issueId, ReviewDecision.REQUEST_CHANGES, "Fix 1", "human:reject:1");
+    assertEquals(IssueStatus.TODO, issueService.getIssue(issueId).getStatus());
+
+    // 第 2 次执行与打回（累计 2 >= 2，达到阈值，转为 BLOCKED）
+    IssueRun r2 =
+        issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
+    issueRunService.completeExecutorRun(r2.getId(), "sub:2", "Done again", "Passed");
+    issueRunService.reviewByHuman(
+        issueId, ReviewDecision.REQUEST_CHANGES, "Fix 2", "human:reject:2");
+    assertEquals(IssueStatus.BLOCKED, issueService.getIssue(issueId).getStatus());
+
+    // BLOCKED 状态下禁止自动启动 Executor Run
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            issueRunService.startExecutorRun(
+                issueId, execAgent, Instant.now().plusSeconds(3600), 10));
+  }
+
+  @Test
+  void testFailRunDoesNotAlterIssueStatusAndRetryAppendsActivity() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Fail Proj", "Desc", agent);
+    Project project = projectService.createProject("Fail Proj", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(
             project.getId(), "Fail Task", "Desc", agent, null, IssueStatus.TODO);
@@ -302,58 +312,65 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
         issueRunService.startExecutorRun(issueId, agent, Instant.now().plusSeconds(3600), 10);
     UUID runId = run.getId();
 
-    // failRun 将 Run 置为 FAILED，但 Issue 必须保持 IN_PROGRESS，等待人类处理
+    // failRun 将 Run 置为 FAILED，但 Issue 必须保持 IN_PROGRESS，等待处理
     IssueRun failed = issueRunService.failRun(runId, IssueRunStatus.FAILED, "Budget exhausted");
     assertEquals(IssueRunStatus.FAILED, failed.getStatus());
     assertEquals("Budget exhausted", failed.getWaitingReason());
     assertEquals(IssueStatus.IN_PROGRESS, issueService.getIssue(issueId).getStatus());
 
-    // 明确 retry 追加 RETRY 输入，不复活旧 Run
-    IssueInput retryInput = issueRunService.retryRun(issueId, "retry-key-1");
-    assertEquals(IssueInputKind.RETRY, retryInput.getKind());
-    assertEquals(1L, retryInput.getSequence());
-    assertEquals(1L, issueService.getIssue(issueId).getInputSequence());
+    // 明确 retry 追加 RETRY Activity，不复活旧 Run
+    IssueActivity retryActivity = issueRunService.retryRun(issueId, "retry-key-1");
+    assertEquals(IssueActivityKind.RETRY, retryActivity.getKind());
+    assertEquals("retry-key-1", retryActivity.getIdempotencyKey());
+
+    // 幂等重放返回同一 Activity
+    IssueActivity retryReplay = issueRunService.retryRun(issueId, "retry-key-1");
+    assertEquals(retryActivity.getSequence(), retryReplay.getSequence());
   }
 
   @Test
-  void testSessionBindingFailsForHumanRun() {
+  void testIssueAgentSessionLookups() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Session Proj", "Desc", agent);
+    Project project = projectService.createProject("Session Proj", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(
             project.getId(), "Session Task", "Desc", agent, null, IssueStatus.TODO);
     UUID issueId = issue.getId();
 
-    IssueRun execRun =
-        issueRunService.startExecutorRun(issueId, agent, Instant.now().plusSeconds(3600), 10);
     UUID sessionId = createHarnessSession();
+    UUID threadId = createHarnessThread(sessionId);
+    UUID agentSessionId = UUID.randomUUID();
 
-    // AGENT run 绑定 Session 成功（通过 repository 直接建立关系以测试服务查询）
-    assertTrue(issueRunSessionRepository.bindSession(execRun.getId(), sessionId));
-    IssueRunSession bound = issueRunService.getRunSession(execRun.getId());
-    assertNotNull(bound);
-    assertEquals(sessionId, bound.getSessionId());
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(agentSessionId)
+            .issueId(issueId)
+            .agentName(agent)
+            .sessionId(sessionId)
+            .threadId(threadId)
+            .build();
+    issueAgentSessionRepository.bindOrGet(agentSession);
 
-    // 提交并由 HUMAN 评审
-    issueRunService.submitRun(execRun.getId(), "sub:1", 1L, 0L, "Done", "Passed");
-    IssueRun humanRun =
-        issueRunService.reviewRun(
-            issueId,
-            null,
-            IssueRunActorType.HUMAN,
-            null,
-            "human-action-approve",
-            1L,
-            0L,
-            ReviewDecision.APPROVE,
-            "Ok",
-            "Ok");
+    // 查询验证
+    IssueAgentSession byIssueAgent = issueRunService.getAgentSession(issueId, agent);
+    assertNotNull(byIssueAgent);
+    assertEquals(agentSessionId, byIssueAgent.getId());
+    assertEquals(sessionId, byIssueAgent.getSessionId());
+    assertEquals(threadId, byIssueAgent.getThreadId());
+
+    IssueAgentSession bySession = issueRunService.findAgentSession(sessionId);
+    assertNotNull(bySession);
+    assertEquals(agentSessionId, bySession.getId());
+
+    IssueAgentSession byThread = issueRunService.findAgentSessionByThreadId(threadId);
+    assertNotNull(byThread);
+    assertEquals(agentSessionId, byThread.getId());
   }
 
   @Test
   void testRunLookupsAndRepositoryDirectOperations() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Lookups Proj", "Desc", agent);
+    Project project = projectService.createProject("Lookups Proj", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(project.getId(), "T", "D", agent, null, IssueStatus.TODO);
     UUID issueId = issue.getId();
@@ -374,17 +391,6 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     List<IssueRun> runs = issueRunService.listRuns(issueId);
     assertEquals(1, runs.size());
 
-    // findRunSession
-    UUID sessionId = createHarnessSession();
-    assertTrue(issueRunSessionRepository.bindSession(runId1, sessionId));
-    IssueRunSession found = issueRunService.findRunSession(sessionId);
-    assertNotNull(found);
-    assertEquals(runId1, found.getRunId());
-
-    // deleteByRunId
-    assertTrue(issueRunSessionRepository.deleteByRunId(runId1));
-    assertNull(issueRunService.getRunSession(runId1));
-
     // getLatestRun
     issueRunService.failRun(runId1, IssueRunStatus.FAILED, "error");
     assertNull(issueRunService.getActiveRun(issueId));
@@ -399,7 +405,7 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
   @Test
   void testRunValidationsAndEdgeCases() {
     String agent = createTestAgent();
-    Project project = projectService.createProject("Edge Proj", "Desc", agent);
+    Project project = projectService.createProject("Edge Proj", "Desc", true, 3);
     Issue issue =
         issueService.createIssue(project.getId(), "T", "D", agent, null, IssueStatus.TODO);
     UUID issueId = issue.getId();
@@ -419,23 +425,20 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
 
     // requestInput validations
     assertThrows(
-        AiValidationException.class,
-        () -> issueRunService.requestInput(run.getId(), 1L, 0L, "  ", "ctx"));
-    assertThrows(
-        AiValidationException.class,
-        () -> issueRunService.requestInput(run.getId(), 999L, 0L, "q", "ctx"));
+        AiValidationException.class, () -> issueRunService.requestInput(run.getId(), "  ", "ctx"));
 
     // retryRun idempotency replay
     issueRunService.failRun(run.getId(), IssueRunStatus.FAILED, "reason");
-    IssueInput retry1 = issueRunService.retryRun(issueId, "k-replay");
-    IssueInput retry2 = issueRunService.retryRun(issueId, "k-replay");
+    IssueActivity retry1 = issueRunService.retryRun(issueId, "k-replay");
+    IssueActivity retry2 = issueRunService.retryRun(issueId, "k-replay");
     assertEquals(retry1.getSequence(), retry2.getSequence());
   }
 
   @Test
-  void testMoreRunValidationsAndHumanReviewChangesRequested() {
+  void testMoreRunValidationsAndEdgeCases() {
     String execAgent = createTestAgent();
-    Project project = projectService.createProject("More Val Proj", "Desc", execAgent);
+    String revAgent = createTestAgent();
+    Project project = projectService.createProject("More Val Proj", "Desc", true, 3);
     UUID projId = project.getId();
 
     // startExecutorRun blank agent or not found
@@ -462,31 +465,20 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
             issueRunService.startReviewerRun(
                 UUID.randomUUID(), execAgent, Instant.now().plusSeconds(3600), 10));
 
-    // submitRun not found
+    // completeExecutorRun not found
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> issueRunService.submitRun(UUID.randomUUID(), "act", 1L, 0L, "s", "v"));
+        () -> issueRunService.completeExecutorRun(UUID.randomUUID(), "act", "s", "v"));
 
     // requestInput not found
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> issueRunService.requestInput(UUID.randomUUID(), 1L, 0L, "q", "ctx"));
+        () -> issueRunService.requestInput(UUID.randomUUID(), "q", "ctx"));
 
-    // reviewRun issue not found
+    // reviewByHuman issue not found
     assertThrows(
         AiResourceNotFoundException.class,
-        () ->
-            issueRunService.reviewRun(
-                UUID.randomUUID(),
-                null,
-                IssueRunActorType.HUMAN,
-                null,
-                "act",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "s",
-                "v"));
+        () -> issueRunService.reviewByHuman(UUID.randomUUID(), ReviewDecision.APPROVE, "s", "k"));
 
     // failRun not found
     assertThrows(
@@ -497,170 +489,51 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     assertThrows(
         AiResourceNotFoundException.class, () -> issueRunService.retryRun(UUID.randomUUID(), "k"));
 
-    // 人工评审 REQUEST_CHANGES 流程
-    Issue issue =
-        issueService.createIssue(
-            projId, "Human Changes Task", "Desc", execAgent, null, IssueStatus.TODO);
-    UUID issueId = issue.getId();
-
-    IssueRun execRun =
-        issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
-    issueRunService.submitRun(execRun.getId(), "exec:act", 1L, 0L, "done", "passed");
-
-    // 人工评审打回
-    IssueRun humanRev =
-        issueRunService.reviewRun(
-            issueId,
-            null,
-            IssueRunActorType.HUMAN,
-            null,
-            "human-action-changes",
-            1L,
-            0L,
-            ReviewDecision.REQUEST_CHANGES,
-            "Needs more work",
-            "Failed verification");
-    assertEquals(IssueRunRole.REVIEWER, humanRev.getRole());
-    assertEquals(IssueRunOutcome.CHANGES_REQUESTED, humanRev.getOutcome());
-    assertEquals(IssueStatus.TODO, issueService.getIssue(issueId).getStatus());
-
     // UNKNOWN 运行支持 retryRun
-    IssueRun execRun2 =
-        issueRunService.startExecutorRun(issueId, execAgent, Instant.now().plusSeconds(3600), 10);
-    issueRunService.failRun(execRun2.getId(), IssueRunStatus.UNKNOWN, "lost connection");
-    IssueInput unknownRetry = issueRunService.retryRun(issueId, "k-unknown");
-    assertEquals(IssueInputKind.RETRY, unknownRetry.getKind());
+    Issue issue =
+        issueService.createIssue(projId, "Unknown Task", "Desc", execAgent, null, IssueStatus.TODO);
+    IssueRun execRun =
+        issueRunService.startExecutorRun(
+            issue.getId(), execAgent, Instant.now().plusSeconds(3600), 10);
+    issueRunService.failRun(execRun.getId(), IssueRunStatus.UNKNOWN, "lost connection");
+    IssueActivity unknownRetry = issueRunService.retryRun(issue.getId(), "k-unknown");
+    assertEquals(IssueActivityKind.RETRY, unknownRetry.getKind());
   }
 
   @Test
-  void testSubmitAndReviewEdgeFences() {
-    String execAgent = createTestAgent();
-    String revAgent = createTestAgent();
-    Project project = projectService.createProject("Fence Proj", "Desc", execAgent);
-    UUID projId = project.getId();
+  void testReviewerAgentSameAsExecutorAssigneeRejected() {
+    String agent = createTestAgent();
+    Project project = projectService.createProject("Self Review Proj", "Desc", true, 3);
 
-    Issue dep = issueService.createIssue(projId, "Dep", "Desc", execAgent, null, IssueStatus.TODO);
-    Issue target =
-        issueService.createIssue(projId, "Target", "Desc", execAgent, revAgent, IssueStatus.TODO);
-    UUID targetId = target.getId();
+    // 1. 创建 Issue 时 assigneeAgent 与 reviewerAgent 同名直接拒绝
+    AiValidationException exCreate =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                issueService.createIssue(
+                    project.getId(), "Self Review", "Desc", agent, agent, IssueStatus.TODO));
+    assertEquals(
+        "assigneeAgentName and reviewerAgentName must not be the same agent",
+        exCreate.getMessage());
 
-    // 先把 dep 变为 DONE，允许 target 启动 Executor
-    dep.setStatus(IssueStatus.DONE);
-    issueRepository.updateById(dep, dep.getVersion());
-    issueDependencyRepository.addDependency(
-        IssueDependency.builder()
-            .issueId(targetId)
-            .dependsOnIssueId(dep.getId())
-            .projectId(projId)
-            .build());
+    // 2. 正常 Issue 在执行完成后，非指定 reviewerAgent 尝试启动审查 Run 被拒绝
+    String reviewer = createTestAgent();
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Normal Task", "Desc", agent, reviewer, IssueStatus.TODO);
+    UUID issueId = issue.getId();
 
     IssueRun execRun =
-        issueRunService.startExecutorRun(targetId, execAgent, Instant.now().plusSeconds(3600), 10);
+        issueRunService.startExecutorRun(issueId, agent, Instant.now().plusSeconds(3600), 10);
+    issueRunService.completeExecutorRun(execRun.getId(), "exec:done", "Done", "Passed");
 
-    // 此时若 dep 突然变成 CANCELED（非 DONE），submitRun 必须被依赖围栏拒绝
-    Issue depInDb = issueRepository.getById(dep.getId());
-    depInDb.setStatus(IssueStatus.CANCELED);
-    issueRepository.updateById(depInDb, depInDb.getVersion());
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.submitRun(
-                execRun.getId(), "act:sub", target.getSpecRevision(), 0L, "s", "v"));
-
-    // 恢复 dep 为 DONE，使提交成功
-    depInDb = issueRepository.getById(dep.getId());
-    depInDb.setStatus(IssueStatus.DONE);
-    issueRepository.updateById(depInDb, depInDb.getVersion());
-    issueRunService.submitRun(execRun.getId(), "act:sub", target.getSpecRevision(), 0L, "s", "v");
-
-    // startReviewerRun reviewerAgent mismatch
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.startReviewerRun(
-                targetId, "wrong-agent", Instant.now().plusSeconds(3600), 10));
-
-    // 启动合法 Reviewer Run
-    IssueRun revRun =
-        issueRunService.startReviewerRun(targetId, revAgent, Instant.now().plusSeconds(3600), 10);
-
-    // agent review: blank terminalActionId
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.reviewRun(
-                targetId,
-                revRun.getId(),
-                IssueRunActorType.AGENT,
-                revAgent,
-                "  ",
-                target.getSpecRevision(),
-                0L,
-                ReviewDecision.APPROVE,
-                "s",
-                "v"));
-
-    // reviewRun: stale cursor
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.reviewRun(
-                targetId,
-                revRun.getId(),
-                IssueRunActorType.AGENT,
-                revAgent,
-                "act:rev",
-                999L,
-                0L,
-                ReviewDecision.APPROVE,
-                "s",
-                "v"));
-
-    // 人工评审被禁止（因为配置了 reviewerAgentName）
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.reviewRun(
-                targetId,
-                null,
-                IssueRunActorType.HUMAN,
-                null,
-                "act:human",
-                target.getSpecRevision(),
-                0L,
-                ReviewDecision.APPROVE,
-                "s",
-                "v"));
-
-    // startReviewerRun when no submitted run exists on fresh issue
-    Issue freshIssue =
-        issueService.createIssue(projId, "Fresh", "D", execAgent, revAgent, IssueStatus.TODO);
-    freshIssue.setStatus(IssueStatus.IN_REVIEW);
-    issueRepository.updateById(freshIssue, freshIssue.getVersion());
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.startReviewerRun(
-                freshIssue.getId(), revAgent, Instant.now().plusSeconds(3600), 10));
-
-    // human review on issue with no submitted run
-    Issue freshHumanIssue =
-        issueService.createIssue(projId, "Fresh H", "D", execAgent, null, IssueStatus.TODO);
-    freshHumanIssue.setStatus(IssueStatus.IN_REVIEW);
-    issueRepository.updateById(freshHumanIssue, freshHumanIssue.getVersion());
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            issueRunService.reviewRun(
-                freshHumanIssue.getId(),
-                null,
-                IssueRunActorType.HUMAN,
-                null,
-                null,
-                freshHumanIssue.getSpecRevision(),
-                0L,
-                ReviewDecision.APPROVE,
-                "s",
-                "v"));
+    AiValidationException exStart =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                issueRunService.startReviewerRun(
+                    issueId, agent, Instant.now().plusSeconds(3600), 10));
+    assertEquals(
+        "Cannot start reviewer run: agentName mismatch with issue reviewer", exStart.getMessage());
   }
 }

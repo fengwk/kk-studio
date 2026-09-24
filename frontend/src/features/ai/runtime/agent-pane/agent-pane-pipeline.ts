@@ -36,6 +36,17 @@ export interface AcceptanceBuildInput {
   createId?: () => string
 }
 
+export interface GoalAcceptanceBuildInput {
+  owner: AgentRuntimeOwnerDTO
+  target: PaneTarget
+  draft: BranchDraft
+  base: BranchDraft
+  goalText: string | null
+  localParts?: ComposerPart[]
+  thread?: HarnessThreadDTO | null
+  createId?: () => string
+}
+
 export interface FrozenCommandBatchRequest {
   owner: AgentRuntimeOwnerDTO
   target: PaneTarget
@@ -62,6 +73,7 @@ export function createBranchSettings(draft: BranchDraft): HarnessBranchSettingsD
     agentName: draft.agentName,
     model: { ...draft.model },
     environmentName: draft.environmentName,
+    goal: null,
   }
 }
 
@@ -116,6 +128,55 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
         : { ...command, idempotencyKey: undefined }),
       branchDraft: input.draft,
       parts: partsKey(payloadParts),
+    }),
+  }
+}
+
+export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): FrozenCommandBatchRequest {
+  const createId = input.createId ?? createIdempotencyKey
+  const text = input.goalText
+  if (text !== null) {
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      throw new Error('Goal text must not be empty')
+    }
+    if (text !== text.trim()) {
+      throw new Error('Goal text must not contain surrounding whitespace')
+    }
+    if (Array.from(text).length > 2000) {
+      throw new Error('Goal text must be <= 2000 code points')
+    }
+  }
+  const goalCommand: HarnessCommandCreateDTO = {
+    type: 'GOAL',
+    idempotencyKey: createId(),
+    text,
+  }
+  const commands =
+    input.target.kind === 'NEW_SESSION_DRAFT'
+      ? [goalCommand]
+      : [
+          ...buildBranchDiffCommands(input.base, input.draft, createId),
+          goalCommand,
+        ]
+  const target = buildTarget(input.target, input.draft, input.thread)
+  const request: AgentCommandBatchRequestDTO = {
+    owner: { ...input.owner },
+    target,
+    commands,
+  }
+  const composerParts = trimMessageParts(input.localParts ?? [])
+  return {
+    owner: { ...input.owner },
+    target: input.target,
+    request,
+    branchDraft: copyBranchDraft(input.draft),
+    composerParts,
+    identity: JSON.stringify({
+      owner: input.owner,
+      target: input.target,
+      commands: commands.map((command) => ({ ...command, idempotencyKey: undefined })),
+      branchDraft: input.draft,
+      goalText: text,
     }),
   }
 }

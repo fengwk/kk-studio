@@ -44,8 +44,9 @@ import java.util.stream.Collectors;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (13 tools: 1 read + 8 environment + 1 internal task + 3 goal),
- * visibility/requirements/capability 映射, 稳定模型可见 name, goal state ownership/projector, 和全局唯一性。
+ * <p>验证 exact inventory (12 tools: 1 read + 8 environment + 1 internal task + 2 goal),
+ * visibility/requirements/capability 映射, 稳定模型可见 name, goal.progress ownership（无 Goal projector）,
+ * 和全局唯一性。
  */
 class BuiltinHarnessContributorTest {
 
@@ -113,7 +114,7 @@ class BuiltinHarnessContributorTest {
   }
 
   @Test
-  void catalogFreezesExactInventoryOf13ToolsAndAssociatedCapabilities() {
+  void catalogFreezesExactInventoryOf12ToolsAndAssociatedCapabilities() {
     ReadTool readTool = stubReadTool();
     Tool task = stubTool("task", ToolRequirements.none());
     BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(readTool, task);
@@ -125,13 +126,13 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertTrue(catalog.findDescriptor(new ContributorId("builtin")).isPresent());
 
-    // Tools inventory: exactly 13 tools
+    // Tools inventory: exactly 12 tools（Goal 正文由用户维护，没有 create_goal）
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(13, tools.size(), "exact total 13 tools expected");
+    assertEquals(12, tools.size(), "exact total 12 tools expected");
 
-    // Selectable tools: 1 read + 8 environment + 3 goal = 12 tools (task is INTERNAL)
+    // Selectable tools: 1 read + 8 environment + 2 goal = 11 tools (task is INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
-    assertEquals(12, selectables.size(), "exact 12 selectable tools expected");
+    assertEquals(11, selectables.size(), "exact 11 selectable tools expected");
 
     // 统一 read 工具（SELECTABLE, localName=read, name=read, OPTIONAL, ReadTool 实例）
     assertReadTool(catalog);
@@ -197,28 +198,26 @@ class BuiltinHarnessContributorTest {
     // 1 个 Internal 工具 (INTERNAL visibility, NONE requirements)
     assertInternalTool(catalog, "task", "runtime.task", ToolRequirements.none());
 
-    // 3 个 Goal 工具 (SELECTABLE visibility, NONE requirements + state access)
-    assertGoalTool(
-        catalog, "create_goal", "goal.create", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
+    // 2 个 Goal 工具 (SELECTABLE visibility, NONE requirements + progress state access)
+    assertTrue(catalog.findTool("create_goal").isEmpty(), "Goal 正文由用户维护，没有创建工具");
     assertGoalTool(catalog, "get_goal", "goal.get", ToolSideEffect.READ_ONLY, StateMode.READ);
     assertGoalTool(
         catalog, "update_goal", "goal.update", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
 
-    // Custom entry types: exactly goal.state ownership
+    // Custom entry types: exactly goal.progress ownership
     assertEquals(1, catalog.customEntryTypes().size());
-    assertTrue(catalog.findCustomEntryType(new ContributorId("builtin"), "goal.state").isPresent());
+    assertTrue(
+        catalog.findCustomEntryType(new ContributorId("builtin"), "goal.progress").isPresent());
     assertEquals(
-        "goal.state-type",
+        "goal.progress-type",
         catalog
-            .findCustomEntryType(new ContributorId("builtin"), "goal.state")
+            .findCustomEntryType(new ContributorId("builtin"), "goal.progress")
             .orElseThrow()
             .id()
             .localName());
 
-    // Context projectors: exactly goal.context
-    assertEquals(1, catalog.contextProjectors().size());
-    ContributionId projectorId = new ContributionId(new ContributorId("builtin"), "goal.context");
-    assertTrue(catalog.findContextProjector(projectorId).isPresent());
+    // 没有任何 Goal context projector：Goal 绝不提升为 systemInstruction。
+    assertTrue(catalog.contextProjectors().isEmpty());
 
     // Ensure all model-visible tool names and ContributionIds are unique
     Set<String> names = new HashSet<>();
@@ -392,7 +391,7 @@ class BuiltinHarnessContributorTest {
     assertEquals(
         new ToolRequirements(
             EnvironmentSupport.NONE,
-            List.of(new StateDeclaration(BuiltinHarnessContributor.GOAL_STATE_TYPE, mode))),
+            List.of(new StateDeclaration(BuiltinHarnessContributor.GOAL_PROGRESS_TYPE, mode))),
         tool.requirements());
 
     ToolDescriptor descriptor = tool.definition().descriptor();

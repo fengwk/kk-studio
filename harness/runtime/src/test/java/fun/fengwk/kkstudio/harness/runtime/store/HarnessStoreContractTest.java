@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 
 import java.lang.reflect.Method;
@@ -35,6 +36,7 @@ class HarnessStoreContractTest {
               "findRootEntry",
               "loadEntryPath",
               "loadContributorCustomEntriesOnPath",
+              "loadBranchSettings",
               "loadEntriesBySessionId",
               "insertThread",
               "findThread",
@@ -97,8 +99,9 @@ class HarnessStoreContractTest {
     assertEquals(ALLOWED_PRIMITIVES, actual);
   }
 
+  /** 测试意图：读取原语只能返回 Optional / 不可变 List / EntryPath / BranchSettings 这四类只读投影。 */
   @Test
-  void allReadsReturnOptionalOrImmutableListOrEntryPath() {
+  void allReadsReturnOptionalOrImmutableListOrEntryPathOrBranchSettings() {
     for (Method method : HarnessStore.Transaction.class.getDeclaredMethods()) {
       if (method.isSynthetic()) {
         continue;
@@ -115,7 +118,8 @@ class HarnessStoreContractTest {
       assertTrue(
           Optional.class.isAssignableFrom(returnType)
               || List.class.isAssignableFrom(returnType)
-              || EntryPath.class.isAssignableFrom(returnType),
+              || EntryPath.class.isAssignableFrom(returnType)
+              || BranchSettings.class.isAssignableFrom(returnType),
           "unexpected read return type " + returnType + " on " + method.getName());
     }
   }

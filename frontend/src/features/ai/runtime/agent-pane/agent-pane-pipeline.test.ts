@@ -88,6 +88,7 @@ describe('AgentPane acceptance pipeline', () => {
       agentName: 'assistant',
       model: baseDraft.model,
       environmentName: null,
+      goal: null,
     })
 
     const settingsWithString = createBranchSettings({
@@ -98,6 +99,7 @@ describe('AgentPane acceptance pipeline', () => {
       agentName: 'assistant',
       model: baseDraft.model,
       environmentName: 'isolated-docker',
+      goal: null,
     })
   })
 
@@ -269,7 +271,7 @@ describe('AgentPane acceptance pipeline', () => {
   it('projects one command matrix for Chat and Canvas across all three targets', () => {
     const expected = {
       NEW_SESSION_DRAFT: ['thread', 'agent', 'yolo', 'models', 'upload', 'shortcuts'],
-      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'tree', 'new', 'upload', 'shortcuts', 'rename-session'],
+      NEW_THREAD_DRAFT: ['thread', 'agent', 'yolo', 'models', 'tree', 'new', 'upload', 'shortcuts', 'rename-session', 'goal'],
       BOUND_THREAD: THREAD_COMMANDS.map((command) => command.id),
     } as const
     for (const kind of Object.keys(expected) as Array<keyof typeof expected>) {
@@ -278,7 +280,7 @@ describe('AgentPane acceptance pipeline', () => {
         : kind === 'NEW_THREAD_DRAFT'
           ? { kind, sessionId: 's1', startEntryId: 'e1' }
           : { kind, threadId: thread.threadId }
-      const commands = threadCommandsForTarget(target)
+      const commands = threadCommandsForTarget(target, { owner: { type: 'CHAT', id: 'chat-1' } })
       expect(commands.filter((command) => !command.disabled).map((command) => command.id))
         .toEqual(expected[kind])
     }

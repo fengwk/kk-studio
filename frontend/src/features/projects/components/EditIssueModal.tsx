@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Pencil, RefreshCw, X } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
+import { useCatalogAgentNames } from '../useCatalogAgentNames'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { IssueDTO } from '../types'
@@ -33,6 +34,16 @@ export function EditIssueModal({
     reason: string
     detail: string
   } | null>(null)
+
+  const { agentOptions } = useCatalogAgentNames({
+    preserveNames: [
+      issue?.assigneeAgentName,
+      issue?.reviewerAgentName,
+      assigneeAgentName,
+      reviewerAgentName,
+    ],
+    enabled: isOpen && Boolean(issue),
+  })
 
   useEffect(() => {
     if (isOpen && issue) {
@@ -229,25 +240,37 @@ export function EditIssueModal({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div className="form-group">
-                <label htmlFor="edit-issue-assignee">Assignee Agent</label>
-                <input
+                <label htmlFor="edit-issue-assignee">Assignee Agent (EXECUTOR)</label>
+                <select
                   id="edit-issue-assignee"
-                  type="text"
                   value={assigneeAgentName}
                   onChange={(e) => setAssigneeAgentName(e.target.value)}
-                  placeholder="可选，执行者 Agent"
-                />
+                  aria-label="Assignee Agent (EXECUTOR)"
+                >
+                  <option value="">未指定</option>
+                  {agentOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="form-group">
-                <label htmlFor="edit-issue-reviewer">Reviewer Agent</label>
-                <input
+                <label htmlFor="edit-issue-reviewer">Reviewer Agent (REVIEWER)</label>
+                <select
                   id="edit-issue-reviewer"
-                  type="text"
                   value={reviewerAgentName}
                   onChange={(e) => setReviewerAgentName(e.target.value)}
-                  placeholder="留空表示人工 Review"
-                />
+                  aria-label="Reviewer Agent (REVIEWER)"
+                >
+                  <option value="">人工审核</option>
+                  {agentOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

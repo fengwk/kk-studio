@@ -10,7 +10,9 @@ import lombok.NoArgsConstructor;
 /**
  * Project 公开传输对象。
  *
- * <p>UUID 以 canonical lowercase string 传输，版本号与计数以 canonical non-negative decimal string 传输。
+ * <p>UUID 以 canonical lowercase string 传输，版本号与计数以 canonical non-negative decimal string 传输。 {@code
+ * yoloEnabled} 是新 Issue Agent Branch 的 Run 启动策略，{@code maxReviewRejections} 是正式审查打回转 {@code
+ * BLOCKED} 的项目阈值。
  */
 @Data
 @Builder
@@ -21,7 +23,8 @@ public class ProjectDTO {
   private String id;
   private String title;
   private String description;
-  private String coordinatorAgentName;
+  private Boolean yoloEnabled;
+  private String maxReviewRejections;
   private String nextIssueNumber;
   private String version;
 

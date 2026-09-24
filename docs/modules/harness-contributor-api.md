@@ -108,7 +108,7 @@ durable 事实。
 
 ## 分支状态与副作用
 
-[`BranchView`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 是只读视图，只有 `customEntries(customType)` 与 `latestCustomEntry(customType)` 两个查询。视图严格限定在当前 Contributor 与当前 Assistant 分支的 root-to-head 路径上：兄弟分支与其他 owner 的状态不可见，底层存储句柄与全量会话历史都不暴露。
+[`BranchView`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java) 是只读视图：`customEntries(customType)` 与 `latestCustomEntry(customType)` 读取当前 Contributor 自己的自定义状态，`goal()` 读取该 branch 生效 settings 中的用户 Goal（[`GoalSnapshot`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/GoalSnapshot.java)，nullable）。视图严格限定在当前 Contributor 与当前 Assistant 分支的 root-to-head 路径上：兄弟分支与其他 owner 的状态不可见，底层存储句柄与全量会话历史都不暴露；Platform 用窄查询解析 branch settings，不为只读视图物化完整 EntryPath。
 
 [`StateDeclaration`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/StateDeclaration.java) 用 `READ` / `WRITE` 声明访问意图，它的用途不只是文档：同一 Assistant 的多个工具共享同一份冻结分支快照，因此同一 `(contributorId, customType)` 一旦已被先前 sibling 声明 WRITE，后续的 READ 或 WRITE 都必然读到陈旧快照，Runtime 在 dispatch 之前就把它确定性拒绝并提示下一轮再调用（[`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 的 sibling state conflict 检查）；READ 之后再来 WRITE 则允许并发。
 

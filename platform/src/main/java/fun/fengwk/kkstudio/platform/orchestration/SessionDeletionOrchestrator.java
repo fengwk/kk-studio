@@ -12,14 +12,11 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.util.ArrayList;
@@ -41,10 +38,9 @@ public class SessionDeletionOrchestrator {
   private final ChatRepository chatRepository;
   private final CanvasStore canvasStore;
   private final ProjectRepository projectRepository;
-  private final ProjectSessionRepository projectSessionRepository;
   private final IssueRepository issueRepository;
-  private final IssueRunRepository issueRunRepository;
-  private final IssueRunSessionRepository issueRunSessionRepository;
+  private final IssueAgentSessionRepository issueAgentSessionRepository;
+  private final IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private final ObjectProvider<HarnessStore> stores;
   private final SessionBlobRefManager refManager;
 
@@ -54,10 +50,9 @@ public class SessionDeletionOrchestrator {
       ChatRepository chatRepository,
       CanvasStore canvasStore,
       ProjectRepository projectRepository,
-      ProjectSessionRepository projectSessionRepository,
       IssueRepository issueRepository,
-      IssueRunRepository issueRunRepository,
-      IssueRunSessionRepository issueRunSessionRepository,
+      IssueAgentSessionRepository issueAgentSessionRepository,
+      IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository,
       ObjectProvider<HarnessStore> stores,
       SessionBlobRefManager refManager) {
     this.chatSessionRepository =
@@ -67,12 +62,12 @@ public class SessionDeletionOrchestrator {
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
-    this.projectSessionRepository =
-        Objects.requireNonNull(projectSessionRepository, "projectSessionRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
-    this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
-    this.issueRunSessionRepository =
-        Objects.requireNonNull(issueRunSessionRepository, "issueRunSessionRepository");
+    this.issueAgentSessionRepository =
+        Objects.requireNonNull(issueAgentSessionRepository, "issueAgentSessionRepository");
+    this.issueAgentSessionOwnershipRepository =
+        Objects.requireNonNull(
+            issueAgentSessionOwnershipRepository, "issueAgentSessionOwnershipRepository");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
@@ -93,14 +88,8 @@ public class SessionDeletionOrchestrator {
             switch (owner.type()) {
               case CHAT -> chatSessionRepository.listSessionIds(ownerId);
               case CANVAS -> canvasSessionRepository.listSessionIds(ownerId);
-              case PROJECT -> {
-                ProjectSession session = projectSessionRepository.findByProjectId(ownerId);
-                yield session != null ? List.of(session.getSessionId()) : List.of();
-              }
-              case ISSUE_RUN -> {
-                IssueRunSession session = issueRunSessionRepository.findByRunId(ownerId);
-                yield session != null ? List.of(session.getSessionId()) : List.of();
-              }
+              case ISSUE_AGENT_SESSION -> issueAgentSessionOwnershipRepository.listSessionIds(
+                  ownerId);
             });
     sessionIds.sort(UuidOrder.COMPARATOR);
     if (sessionIds.isEmpty()) {
@@ -122,12 +111,16 @@ public class SessionDeletionOrchestrator {
               presentSessions.add(sessionId);
             }
           }
-          // 阶段 2：跨全部 Session 收集并按 UUID 排序 Thread，保证 THREAD rank 全局单调递增。
+          // 阶段 2：产品归属 relation 行（FK RESTRICT）必须先于 harness Thread/Session 行删除：
+          // session_owner 行以及 project_issue_agent_session 行都持有指向 Session/Thread 的外键。
+          for (UUID sessionId : presentSessions) {
+            deleteRelation(owner, sessionId);
+          }
+          // 阶段 3：跨全部 Session 收集并按 UUID 排序 Thread，保证 THREAD rank 全局单调递增。
           deleteThreadsDeep(tx, presentSessions);
-          // 阶段 3：blob ref 释放（无 harness 锁）与 relation/Entry/Session 清理（均不取 harness 锁）。
+          // 阶段 4：blob ref 释放与 Entry/Session 清理（均不取 harness 锁）。
           for (UUID sessionId : presentSessions) {
             releaseSessionBlobRefs(sessionId);
-            deleteRelation(owner, sessionId);
             tx.deleteEntries(sessionId);
             tx.deleteSession(sessionId);
           }
@@ -140,13 +133,12 @@ public class SessionDeletionOrchestrator {
     return switch (owner.type()) {
       case CHAT -> chatRepository.lockById(owner.id()) != null;
       case CANVAS -> canvasStore.lockDocument(owner.id()).isPresent();
-      case PROJECT -> projectRepository.lockById(owner.id()) != null;
-      case ISSUE_RUN -> {
-        IssueRun run = issueRunRepository.getById(owner.id());
-        if (run == null) {
+      case ISSUE_AGENT_SESSION -> {
+        IssueAgentSession binding = issueAgentSessionRepository.getById(owner.id());
+        if (binding == null) {
           yield false;
         }
-        Issue issue = issueRepository.getById(run.getIssueId());
+        Issue issue = issueRepository.getById(binding.getIssueId());
         if (issue == null) {
           yield false;
         }
@@ -157,7 +149,10 @@ public class SessionDeletionOrchestrator {
         if (issueRepository.lockById(issue.getId()) == null) {
           yield false;
         }
-        yield issueRunRepository.lockById(owner.id()) != null;
+        IssueAgentSession lockedBinding =
+            issueAgentSessionRepository.findByIssueIdAndAgentName(
+                issue.getId(), binding.getAgentName());
+        yield lockedBinding != null && lockedBinding.getId().equals(owner.id());
       }
     };
   }
@@ -187,13 +182,18 @@ public class SessionDeletionOrchestrator {
     }
   }
 
-  /** relation 行（FK RESTRICT）先于 Session 行删除。 */
+  /**
+   * relation 行（FK RESTRICT）先于 Session/Thread 行删除：先删 session_owner 归属边，再删 Issue+Agent 的稳定归属行 （其
+   * thread_id 指向将被删除的 harness Thread）。
+   */
   private void deleteRelation(OwnerRef owner, UUID sessionId) {
     switch (owner.type()) {
       case CHAT -> chatSessionRepository.deleteBySessionId(sessionId);
       case CANVAS -> canvasSessionRepository.deleteBySessionId(sessionId);
-      case PROJECT -> projectSessionRepository.deleteByProjectId(owner.id());
-      case ISSUE_RUN -> issueRunSessionRepository.deleteByRunId(owner.id());
+      case ISSUE_AGENT_SESSION -> {
+        issueAgentSessionOwnershipRepository.deleteBySessionId(sessionId);
+        issueAgentSessionRepository.deleteById(owner.id());
+      }
     }
   }
 }

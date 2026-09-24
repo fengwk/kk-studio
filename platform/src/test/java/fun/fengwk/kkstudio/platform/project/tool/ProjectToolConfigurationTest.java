@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.project.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -11,13 +10,10 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -43,12 +39,9 @@ class ProjectToolConfigurationTest {
 
   private static ApplicationContextRunner baseRunner() {
     return new ApplicationContextRunner()
-        .withBean(ProjectSessionRepository.class, () -> mock(ProjectSessionRepository.class))
-        .withBean(IssueRunSessionRepository.class, () -> mock(IssueRunSessionRepository.class))
+        .withBean(IssueAgentSessionRepository.class, () -> mock(IssueAgentSessionRepository.class))
         .withBean(ProjectRepository.class, () -> mock(ProjectRepository.class))
         .withBean(IssueRepository.class, () -> mock(IssueRepository.class))
-        .withBean(IssueDependencyRepository.class, () -> mock(IssueDependencyRepository.class))
-        .withBean(IssueInputRepository.class, () -> mock(IssueInputRepository.class))
         .withBean(IssueRunRepository.class, () -> mock(IssueRunRepository.class))
         .withBean(ProjectService.class, () -> mock(ProjectService.class))
         .withBean(IssueService.class, () -> mock(IssueService.class))
@@ -85,7 +78,8 @@ class ProjectToolConfigurationTest {
 
   @Test
   void contextCanBuildBeforeCompositionRootProvidesHarnessStore() {
-    // 验证 platform 独立测试上下文可冻结 Contributor；实际解析时缺 Store 则 fail closed
+    // 验证 platform 独立测试上下文可冻结 Contributor；缺 HarnessStore 时解析必须 fail closed 且不抛异常，
+    // 即未绑定 IssueAgentSession 的线程不获得任何 Project 角色工具。
     baseRunner()
         .run(
             context -> {
@@ -93,10 +87,7 @@ class ProjectToolConfigurationTest {
               assertEquals(1, context.getBeanNamesForType(ProjectHarnessContributor.class).length);
               ProjectThreadOwnerResolver resolver =
                   context.getBean(ProjectThreadOwnerResolver.class);
-              IllegalStateException error =
-                  assertThrows(
-                      IllegalStateException.class, () -> resolver.resolve(UUID.randomUUID()));
-              assertEquals("Project thread ownership is inconsistent", error.getMessage());
+              assertTrue(resolver.resolve(UUID.randomUUID()).isEmpty());
             });
   }
 }

@@ -11,75 +11,14 @@ vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listAgents: vi.fn().mockResolvedValue({
       results: [
-        { name: 'coordinator-lead' },
-        { name: 'coordinator-1' },
+        { name: 'backend-dev' },
+        { name: 'db-specialist' },
+        { name: 'reviewer-agent' },
       ],
+      totalCount: 3,
+      pageNumber: 1,
+      pageSize: 50,
     }),
-    listModels: vi.fn().mockResolvedValue({ results: [] }),
-    listProviders: vi.fn().mockResolvedValue({ results: [] }),
-  },
-}))
-
-vi.mock('@/shared/api/environment-service', () => ({
-  environmentService: {
-    listEnvironments: vi.fn().mockResolvedValue([]),
-  },
-}))
-
-vi.mock('@/shared/api/chat-service', () => ({
-  chatService: {
-    listChatSessions: vi.fn().mockResolvedValue([]),
-  },
-}))
-
-vi.mock('@/shared/api/studio-service', () => ({
-  listCanvasSessions: vi.fn().mockResolvedValue([]),
-}))
-
-vi.mock('@/shared/api/owner-service', () => ({
-  ownerService: {
-    listProjectSessions: vi.fn().mockResolvedValue([]),
-  },
-}))
-
-vi.mock('@/shared/api/harness-service', () => ({
-  harnessService: {
-    acceptCommandBatch: vi.fn().mockResolvedValue({
-      session: { sessionId: 'c0000000-0000-0000-0000-000000000001' },
-      thread: { threadId: 't0000000-0000-0000-0000-000000000001' },
-      acceptedCommands: [],
-    }),
-    listSessionThreads: vi.fn().mockResolvedValue([]),
-    listSessionEntries: vi.fn().mockResolvedValue([]),
-    getThreadSnapshot: vi.fn().mockResolvedValue({
-      session: {
-        sessionId: 'c0000000-0000-0000-0000-000000000001',
-        sessionOwner: { type: 'PROJECT', id: 'a0000000-0000-0000-0000-000000000001' },
-      },
-      thread: {
-        threadId: 't0000000-0000-0000-0000-000000000001',
-        sessionId: 'c0000000-0000-0000-0000-000000000001',
-        name: 'Coordinator Thread',
-        status: 'IDLE',
-        version: '1',
-        headEntryId: 'e1',
-        nextCommandSequence: '1',
-        processing: false,
-        branchSettings: {
-          agentName: 'coordinator-lead',
-          yoloEnabled: false,
-          model: { providerName: 'default', modelName: 'default' },
-        },
-      },
-      entries: [],
-      queuedCommands: [],
-    }),
-    compactThread: vi.fn(),
-    setThreadYolo: vi.fn(),
-    stopThread: vi.fn(),
-    decideApproval: vi.fn(),
-    renameSession: vi.fn(),
-    renameThread: vi.fn(),
   },
 }))
 
@@ -117,8 +56,9 @@ describe('ProjectDetailPage', () => {
       id: projectId,
       title: 'Awesome Platform',
       description: 'Building next gen studio',
-      coordinatorAgentName: 'coordinator-lead',
-      nextIssueNumber: '4',
+      yoloEnabled: true,
+      maxReviewRejections: '3',
+      nextIssueNumber: '5',
       version: '2',
       archivedAt: null,
       createdAt: '2026-09-14T00:00:00Z',
@@ -136,13 +76,12 @@ describe('ProjectDetailPage', () => {
           assigneeAgentName: null,
           reviewerAgentName: null,
           version: '1',
-          specRevision: '0',
-          inputSequence: '0',
           archivedAt: null,
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T00:00:00Z',
         },
         blocked: false,
+        reviewRejectionCount: '0',
         currentOrLatestRun: null,
       },
       {
@@ -156,13 +95,12 @@ describe('ProjectDetailPage', () => {
           assigneeAgentName: 'backend-dev',
           reviewerAgentName: null,
           version: '2',
-          specRevision: '1',
-          inputSequence: '1',
           archivedAt: null,
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T01:00:00Z',
         },
         blocked: true,
+        reviewRejectionCount: '1',
         currentOrLatestRun: {
           id: 'd0000000-0000-0000-0000-000000000001',
           issueId: 'b0000000-0000-0000-0000-000000000002',
@@ -189,39 +127,35 @@ describe('ProjectDetailPage', () => {
           assigneeAgentName: null,
           reviewerAgentName: null,
           version: '1',
-          specRevision: '0',
-          inputSequence: '0',
           archivedAt: null,
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T01:00:00Z',
         },
         blocked: false,
+        reviewRejectionCount: '0',
+        currentOrLatestRun: null,
+      },
+      {
+        issue: {
+          id: 'b0000000-0000-0000-0000-000000000004',
+          projectId,
+          number: '4',
+          title: 'Blocked upstream task',
+          description: 'Waiting on external service',
+          status: 'BLOCKED',
+          assigneeAgentName: null,
+          reviewerAgentName: null,
+          version: '1',
+          archivedAt: null,
+          createdAt: '2026-09-14T00:00:00Z',
+          updatedAt: '2026-09-14T01:00:00Z',
+        },
+        blocked: true,
+        reviewRejectionCount: '2',
         currentOrLatestRun: null,
       },
     ],
     dependencies: [],
-    coordinatorSessionId: 'f0000000-0000-0000-0000-000000000001',
-    coordinatorSession: {
-      sessionId: 'f0000000-0000-0000-0000-000000000001',
-      name: 'Main Coordinator Session',
-      createdAt: '2026-09-14T00:00:00Z',
-      lastActivityAt: '2026-09-14T01:00:00Z',
-      firstMessagePreview: 'Coordinator ready',
-      threadCount: 1,
-    },
-    coordinatorThread: {
-      threadId: 'f0000000-0000-0000-0000-000000000002',
-      name: 'main',
-      createdAt: '2026-09-14T00:00:00Z',
-      updatedAt: '2026-09-14T01:00:00Z',
-      status: 'IDLE',
-      model: {
-        providerName: 'openai',
-        modelName: 'gpt-4o',
-        variant: 'default',
-      },
-      headMessagePreview: 'Coordinator ready',
-    },
   }
 
   const mockIssueDetail: IssueDetailDTO = {
@@ -235,14 +169,28 @@ describe('ProjectDetailPage', () => {
         createdAt: '2026-09-14T00:00:00Z',
       },
     ],
-    inputs: [
+    activities: [
       {
+        id: 'act-001',
         issueId: mockSnapshot.issues[1].issue.id,
         sequence: '1',
-        kind: 'HUMAN',
+        actorType: 'HUMAN',
+        actorName: 'Operator',
+        kind: 'COMMENT',
         body: 'Use REST API please',
-        idempotencyKey: null,
+        targetRole: 'EXECUTOR',
         createdAt: '2026-09-14T00:35:00Z',
+      },
+    ],
+    sessions: [
+      {
+        id: 'sess-item-01',
+        issueId: mockSnapshot.issues[1].issue.id,
+        agentName: 'backend-dev',
+        role: 'EXECUTOR',
+        sessionId: 'sess-dev-01',
+        branchId: 'branch-dev-01',
+        createdAt: '2026-09-14T00:30:00Z',
       },
     ],
     runs: [
@@ -256,19 +204,9 @@ describe('ProjectDetailPage', () => {
         submissionRunId: null,
         status: 'WAITING_HUMAN',
         outcome: null,
-        observedSpecRevision: '1',
-        observedInputSequence: '0',
-        continuationCount: 1,
-        maxContinuations: 10,
-        deadline: null,
         waitingReason: 'Choose between REST or gRPC',
-        result: null,
-        terminalActionId: null,
-        version: '1',
         createdAt: '2026-09-14T00:30:00Z',
-        updatedAt: '2026-09-14T00:30:00Z',
         completedAt: null,
-        sessionId: 'f0000000-0000-0000-0000-000000000003',
       },
     ],
     currentRun: {
@@ -281,19 +219,9 @@ describe('ProjectDetailPage', () => {
       submissionRunId: null,
       status: 'WAITING_HUMAN',
       outcome: null,
-      observedSpecRevision: '1',
-      observedInputSequence: '0',
-      continuationCount: 1,
-      maxContinuations: 10,
-      deadline: null,
       waitingReason: 'Choose between REST or gRPC',
-      result: null,
-      terminalActionId: null,
-      version: '1',
       createdAt: '2026-09-14T00:30:00Z',
-      updatedAt: '2026-09-14T00:30:00Z',
       completedAt: null,
-      sessionId: 'f0000000-0000-0000-0000-000000000003',
     },
     latestRun: null,
   }
@@ -309,40 +237,44 @@ describe('ProjectDetailPage', () => {
     getProjectSnapshot: vi.fn().mockResolvedValue(mockSnapshot),
     createIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
     getIssue: vi.fn().mockResolvedValue(mockIssueDetail),
+    listActivities: vi.fn().mockResolvedValue([]),
     updateIssue: vi.fn().mockResolvedValue(mockSnapshot.issues[1].issue),
     changeIssueStatus: vi.fn().mockResolvedValue(mockSnapshot.issues[0].issue),
+    blockIssue: vi.fn().mockResolvedValue(undefined),
+    recoverIssue: vi.fn().mockResolvedValue(undefined),
     addIssueDependency: vi.fn().mockResolvedValue(mockIssueDetail.dependencies[0]),
     removeIssueDependency: vi.fn().mockResolvedValue(undefined),
-    appendIssueInput: vi.fn().mockResolvedValue(mockIssueDetail.inputs[0]),
-    reviewIssue: vi.fn().mockResolvedValue({
-      id: 'd0000000-0000-0000-0000-000000000002',
-      issueId: mockSnapshot.issues[1].issue.id,
-      ordinal: '2',
-      role: 'REVIEWER',
-      actorType: 'HUMAN',
-      agentName: null,
-      submissionRunId: null,
-      status: 'COMPLETED',
-      outcome: 'APPROVED',
-      waitingReason: null,
-      createdAt: '2026-09-14T00:40:00Z',
-      completedAt: '2026-09-14T00:41:00Z',
-    }),
+    appendIssueActivity: vi.fn().mockImplementation((_issueId, req) =>
+      Promise.resolve({
+        id: 'act-002',
+        issueId: mockSnapshot.issues[1].issue.id,
+        sequence: '2',
+        actorType: 'HUMAN',
+        actorName: 'Operator',
+        kind: 'COMMENT',
+        body: req.body,
+        targetRole: req.targetRole ?? null,
+        createdAt: '2026-09-14T00:36:00Z',
+      }),
+    ),
+    reviewIssue: vi.fn().mockResolvedValue(undefined),
     cancelIssue: vi.fn().mockResolvedValue({ ...mockSnapshot.issues[1].issue, status: 'CANCELED' }),
-    retryIssue: vi.fn().mockResolvedValue(mockIssueDetail.inputs[0]),
+    retryIssue: vi.fn().mockResolvedValue(mockIssueDetail.activities[0]),
     archiveIssue: vi.fn().mockResolvedValue({ ...mockSnapshot.issues[0].issue, archivedAt: 'now' }),
     unarchiveIssue: vi.fn().mockResolvedValue({ ...mockSnapshot.issues[0].issue, archivedAt: null }),
     ...overrides,
   })
 
-  it('renders project header and 6 columns accurately classifying issues', async () => {
-    // 测试意图：验证六列看板按 issue.status 与 run.status 正确归类 Issue（如 WAITING_HUMAN 归入等待人类列）
+  it('renders project header and 7 status columns accurately classifying issues', async () => {
+    // 测试意图：验证项目详情页展示 YOLO 状态及打回上限，看板按 7 种状态与 run.status 正确归类 Issue
     const api = createMockApi()
     renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
     await waitFor(() => {
       expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
-      expect(screen.getAllByText(/coordinator-lead/i).length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText('YOLO:')).toBeInTheDocument()
+      expect(screen.getByText('开启')).toBeInTheDocument()
+      expect(screen.getByText('最大打回:')).toBeInTheDocument()
     })
 
     // Issue #1 is BACKLOG -> should be in Backlog column
@@ -352,8 +284,18 @@ describe('ProjectDetailPage', () => {
     const waitingCol = screen.getByText('等待人类 (Waiting Human)').closest('.board-column')
     expect(waitingCol).toHaveTextContent('Implement REST API')
 
-    // Issue #2 should also show BLOCKED badge
-    expect(screen.getByText('BLOCKED')).toBeInTheDocument()
+    // Issue #4 is BLOCKED status -> should be in Blocked column
+    const blockedCol = screen.getByText('已阻塞 (Blocked)').closest('.board-column')
+    expect(blockedCol).toHaveTextContent('Blocked upstream task')
+
+    // Issue #2 should also show BLOCKED badge because blocked=true
+    expect(screen.getAllByText('BLOCKED').length).toBeGreaterThanOrEqual(1)
+
+    // BLOCKED cards should show review rejection count against project maxReviewRejections (3)
+    // Issue #4: reviewRejectionCount = 2 -> '2 / 3'
+    // Issue #2: reviewRejectionCount = 1 -> '1 / 3'
+    expect(screen.getByText('2 / 3')).toBeInTheDocument()
+    expect(screen.getByText('1 / 3')).toBeInTheDocument()
 
     // Canceled issue should be hidden by default
     expect(screen.queryByText('Old dropped feature')).not.toBeInTheDocument()
@@ -401,8 +343,8 @@ describe('ProjectDetailPage', () => {
     })
   })
 
-  it('opens IssueDetailModal, navigates tabs and appends input', async () => {
-    // 测试意图：验证点击卡片打开详情弹窗，可在输入流标签页追加人类输入
+  it('opens IssueDetailModal, navigates tabs and appends activity', async () => {
+    // 测试意图：验证点击卡片打开详情弹窗，可在活动流标签页追加指定角色的活动
     const api = createMockApi()
     renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
 
@@ -419,27 +361,31 @@ describe('ProjectDetailPage', () => {
       expect(screen.getByText('规格与状态')).toBeInTheDocument()
     })
 
-    // Switch to inputs tab
-    const inputsTabBtn = screen.getByRole('button', { name: /^输入流/ })
-    fireEvent.click(inputsTabBtn)
+    // Switch to activities tab
+    const activitiesTabBtn = screen.getByRole('button', { name: /^活动流/ })
+    fireEvent.click(activitiesTabBtn)
 
     await waitFor(() => {
       expect(screen.getByText('Use REST API please')).toBeInTheDocument()
     })
 
-    // Append new input
-    const inputArea = screen.getByPlaceholderText(/输入要向执行上下文传递的内容/i)
-    fireEvent.change(inputArea, { target: { value: 'Proceed with REST option' } })
+    // Set target role
+    const targetRoleSelect = screen.getByLabelText('目标职责')
+    fireEvent.change(targetRoleSelect, { target: { value: 'EXECUTOR' } })
 
-    const submitInputBtn = screen.getByRole('button', { name: '提交输入' })
-    fireEvent.click(submitInputBtn)
+    // Append new activity
+    const activityInput = screen.getByLabelText('活动内容')
+    fireEvent.change(activityInput, { target: { value: 'Proceed with REST option' } })
+
+    const submitActivityBtn = screen.getByRole('button', { name: '追加活动' })
+    fireEvent.click(submitActivityBtn)
 
     await waitFor(() => {
-      expect(api.appendIssueInput).toHaveBeenCalledWith(
+      expect(api.appendIssueActivity).toHaveBeenCalledWith(
         mockSnapshot.issues[1].issue.id,
         expect.objectContaining({
-          kind: 'HUMAN',
           body: 'Proceed with REST option',
+          targetRole: 'EXECUTOR',
         }),
       )
     })
@@ -578,17 +524,6 @@ describe('ProjectDetailPage', () => {
     expect(api.getIssue).toHaveBeenCalledTimes(1)
   })
 
-  it('renders CoordinatorConversation sidebar hosted with AgentPane', async () => {
-    // 测试意图：验证 ProjectDetailPage 正确集成 CoordinatorConversation 侧栏及其底座 AgentPane
-    const api = createMockApi()
-    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Coordinator 对话')).toBeInTheDocument()
-      expect(document.querySelector('.coordinator-sidebar [data-pane-id="coordinator"]')).not.toBeNull()
-    })
-  })
-
   it('performs human review when issue is IN_REVIEW and reviewerAgentName is null', async () => {
     // 测试意图：验证处于 IN_REVIEW 且 reviewerAgentName 为空时，人类可提交 APPROVE 或 REQUEST_CHANGES 审核决定
     const inReviewIssue = {
@@ -629,12 +564,9 @@ describe('ProjectDetailPage', () => {
       expect(screen.getByText(/人工审核/i)).toBeInTheDocument()
     })
 
-    // Fill review form
-    const summaryInput = screen.getByLabelText(/审核摘要/i)
-    fireEvent.change(summaryInput, { target: { value: 'Approved after verification' } })
-
-    const verifyInput = screen.getByLabelText(/验证依据/i)
-    fireEvent.change(verifyInput, { target: { value: 'Manual test passed' } })
+    // Fill review reason
+    const reasonInput = screen.getByLabelText(/审核理由 \/ 反馈说明/i)
+    fireEvent.change(reasonInput, { target: { value: 'Approved after verification' } })
 
     const submitReviewBtn = screen.getByRole('button', { name: '提交审核决定' })
     fireEvent.click(submitReviewBtn)
@@ -644,8 +576,7 @@ describe('ProjectDetailPage', () => {
         inReviewIssue.id,
         expect.objectContaining({
           decision: 'APPROVE',
-          summary: 'Approved after verification',
-          verification: 'Manual test passed',
+          reason: 'Approved after verification',
         }),
       )
     })
@@ -682,7 +613,7 @@ describe('ProjectDetailPage', () => {
     fireEvent.click(runsTab)
 
     await waitFor(() => {
-      expect(screen.getByText(/最近 Run 处于 FAILED 或 UNKNOWN 状态/i)).toBeInTheDocument()
+      expect(screen.getByText(/Run 执行失败或处于未知状态/i)).toBeInTheDocument()
     })
 
     const retryBtn = screen.getByRole('button', { name: /重试 Run/i })
@@ -798,7 +729,7 @@ describe('ProjectDetailPage', () => {
     await waitFor(() => expect(api.getProjectSnapshot).toHaveBeenCalledTimes(2))
     expect(titleInput).toHaveValue('Unsaved project draft')
 
-    fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
     await waitFor(() => {
       expect(api.updateProject).toHaveBeenCalledWith(
         projectId,
@@ -847,12 +778,13 @@ describe('ProjectDetailPage', () => {
 
     // Edit project
     fireEvent.click(screen.getByRole('button', { name: /编辑/i }))
+
     expect(screen.getByText('编辑项目', { selector: 'h3' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/项目名称/i), { target: { value: 'Renamed Platform' } })
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '保存修改' })).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: '保存更改' })).not.toBeDisabled()
     })
-    fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
 
     await waitFor(() => {
       expect(api.updateProject).toHaveBeenCalledWith(
@@ -941,7 +873,7 @@ describe('ProjectDetailPage', () => {
     // Click "取消 Issue" button to show confirmation sub-form
     fireEvent.click(screen.getByText('取消 Issue'))
 
-    const reasonInput = screen.getByPlaceholderText('可选取消原因...')
+    const reasonInput = screen.getByLabelText('取消原因')
     fireEvent.change(reasonInput, { target: { value: 'Merged into another epic' } })
 
     const confirmCancelBtn = screen.getByRole('button', { name: '确认取消' })
@@ -953,5 +885,84 @@ describe('ProjectDetailPage', () => {
         reason: 'Merged into another epic',
       })
     })
+  })
+
+  it('renders zero/reset rejection count on BLOCKED cards and updates when project threshold changes', async () => {
+    // 测试意图：验证 BLOCKED 卡片在打回数为 0 时展示重置后的 "0 / <threshold>"，并在项目阈值变更时正确更新分母
+    const customSnapshot: ProjectSnapshotDTO = {
+      ...mockSnapshot,
+      project: {
+        ...mockSnapshot.project,
+        maxReviewRejections: '5',
+      },
+      issues: [
+        {
+          issue: {
+            ...mockSnapshot.issues[3].issue,
+            id: 'b0000000-0000-0000-0000-000000000099',
+            number: '99',
+            title: 'Reset blocked issue',
+          },
+          blocked: true,
+          reviewRejectionCount: '0',
+          currentOrLatestRun: null,
+        },
+      ],
+    }
+
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue(customSnapshot),
+    })
+
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Reset blocked issue')).toBeInTheDocument()
+    })
+
+    // 验证重置计数 0 及新项目阈值 5
+    expect(screen.getByText('0 / 5')).toBeInTheDocument()
+  })
+
+  it('provides controlled agent selection in CreateIssueModal with catalog options and blank', async () => {
+    // 测试意图：验证新建 Issue 弹窗中 Assignee 与 Reviewer 为受控原生 select，仅含 catalog 中的 Agent 与空白项
+    const api = createMockApi()
+    renderPage(<ProjectDetailPage projectId={projectId} api={api} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Awesome Platform')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '新建 Issue' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('新建 Issue', { selector: 'h3' })).toBeInTheDocument()
+    })
+
+    const assigneeSelect = screen.getByLabelText(/Assignee Agent/i) as HTMLSelectElement
+    const reviewerSelect = screen.getByLabelText(/Reviewer Agent/i) as HTMLSelectElement
+
+    // 检查标签类型为 select，而非 input text
+    expect(assigneeSelect.tagName.toLowerCase()).toBe('select')
+    expect(reviewerSelect.tagName.toLowerCase()).toBe('select')
+
+    // 验证选项包含空白选项与 catalog 中的 agent
+    await waitFor(() => {
+      const assigneeOptionValues = Array.from(assigneeSelect.options).map((o) => o.value)
+      expect(assigneeOptionValues).toContain('')
+      expect(assigneeOptionValues).toContain('backend-dev')
+      expect(assigneeOptionValues).toContain('db-specialist')
+      expect(assigneeOptionValues).toContain('reviewer-agent')
+    })
+
+    // 选择已知 agent 与空白选项
+    fireEvent.change(assigneeSelect, { target: { value: 'backend-dev' } })
+    expect(assigneeSelect.value).toBe('backend-dev')
+
+    fireEvent.change(reviewerSelect, { target: { value: 'reviewer-agent' } })
+    expect(reviewerSelect.value).toBe('reviewer-agent')
+
+    fireEvent.change(reviewerSelect, { target: { value: '' } })
+    expect(reviewerSelect.value).toBe('')
   })
 })

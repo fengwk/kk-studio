@@ -59,15 +59,6 @@ public class PostgresqlIssueRepository implements IssueRepository {
   }
 
   @Override
-  public long incrementInputSequence(UUID id) {
-    Long seq = issueMapper.incrementInputSequence(id);
-    if (seq == null) {
-      throw new IllegalStateException("Failed to increment issue input sequence");
-    }
-    return seq;
-  }
-
-  @Override
   public boolean deleteById(UUID id, long expectedVersion) {
     return issueMapper.deleteById(id, expectedVersion) == 1;
   }
@@ -86,8 +77,6 @@ public class PostgresqlIssueRepository implements IssueRepository {
     target.setAssigneeAgentName(issue.getAssigneeAgentName());
     target.setReviewerAgentName(issue.getReviewerAgentName());
     target.setVersion(issue.getVersion());
-    target.setSpecRevision(issue.getSpecRevision());
-    target.setInputSequence(issue.getInputSequence());
     target.setArchivedAt(issue.getArchivedAt());
     target.setCreatedAt(issue.getCreatedAt());
     target.setUpdatedAt(issue.getUpdatedAt());
@@ -108,8 +97,6 @@ public class PostgresqlIssueRepository implements IssueRepository {
         .assigneeAgentName(row.getAssigneeAgentName())
         .reviewerAgentName(row.getReviewerAgentName())
         .version(row.getVersion() != null ? row.getVersion() : 0L)
-        .specRevision(row.getSpecRevision() != null ? row.getSpecRevision() : 0L)
-        .inputSequence(row.getInputSequence() != null ? row.getInputSequence() : 0L)
         .archivedAt(row.getArchivedAt())
         .createdAt(row.getCreatedAt())
         .updatedAt(row.getUpdatedAt())

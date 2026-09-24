@@ -4,13 +4,14 @@ package fun.fengwk.kkstudio.harness.runtime.thread.command;
 public enum ThreadCommandType {
   USER_MESSAGE,
   CUSTOM_MESSAGE,
+  GOAL,
   SET_AGENT,
   SET_MODEL,
   SET_ENVIRONMENT;
 
-  /** 该 command 是否贡献一条会话消息。 */
+  /** 该 command 是否贡献一条会话消息（含 typed GOAL 产生的冻结 USER 消息）。 */
   public boolean isMessage() {
-    return this == USER_MESSAGE || this == CUSTOM_MESSAGE;
+    return this == USER_MESSAGE || this == CUSTOM_MESSAGE || this == GOAL;
   }
 
   /** 该 command 是否只变更 branch settings（不产生 message Entry）。 */

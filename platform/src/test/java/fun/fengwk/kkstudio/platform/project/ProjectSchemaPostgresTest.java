@@ -71,11 +71,12 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     Set<String> expectedTables =
         Set.of(
             "project",
-            "issue",
-            "issue_dependency",
-            "issue_input",
-            "issue_run",
-            "issue_controller_work",
+            "project_issue",
+            "project_issue_dependency",
+            "project_issue_agent_session",
+            "project_issue_run",
+            "project_issue_activity",
+            "project_issue_work",
             "session_owner");
 
     Set<String> actualTables = new HashSet<>();
@@ -94,59 +95,92 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void projectCoordinatorForeignKeyIsEnforced() throws SQLException {
+  void projectConstraintsAndColumnsAreEnforced() throws SQLException {
     UUID projectId = UUID.randomUUID();
-    // Inserting project referencing non-existent agent_definition must fail with
-    // fk_project_coordinator
+
+    // 1. project 表绝不包含 coordinator_agent_name 列
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "select column_name from information_schema.columns "
+                    + "where table_schema = 'public' and table_name = 'project' and column_name = 'coordinator_agent_name'")) {
+      ResultSet rs = stmt.executeQuery();
+      assertTrue(!rs.next(), "project table must have no coordinator_agent_name column");
+    }
+
+    // 2. max_review_rejections < 1 违反 chk_project_max_review_rejections
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "fk_project_coordinator",
+          "chk_project_max_review_rejections",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into project (id, title, description, coordinator_agent_name) "
-                        + "values (?, 'Project 1', 'Desc', 'non-existent-agent')")) {
+                    "insert into project (id, title, max_review_rejections) values (?, 'Project 1', 0)")) {
               stmt.setObject(1, projectId);
               stmt.executeUpdate();
             }
           });
     }
 
-    // Insert valid agent and then project succeeds
-    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
-    insertAgentDefinition(agentName);
-    try (Connection conn = newConnection();
-        PreparedStatement stmt =
-            conn.prepareStatement(
-                "insert into project (id, title, description, coordinator_agent_name) "
-                    + "values (?, 'Project 1', 'Desc', ?)")) {
-      stmt.setObject(1, projectId);
-      stmt.setString(2, agentName);
-      assertEquals(1, stmt.executeUpdate());
-    }
-
-    // Deleting agent_definition must be restricted by fk_project_coordinator
+    // 3. next_issue_number < 1 违反 chk_project_next_issue_number
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "fk_project_coordinator",
+          "chk_project_next_issue_number",
           () -> {
             try (PreparedStatement stmt =
-                conn.prepareStatement("delete from agent_definition where name = ?")) {
-              stmt.setString(1, agentName);
+                conn.prepareStatement(
+                    "insert into project (id, title, next_issue_number) values (?, 'Project 1', 0)")) {
+              stmt.setObject(1, projectId);
               stmt.executeUpdate();
             }
           });
+    }
+
+    // 4. blank title 违反 chk_project_title_not_blank
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_title_not_blank",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement("insert into project (id, title) values (?, '   ')")) {
+              stmt.setObject(1, projectId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // 5. 插入合法 project 成功，默认 yolo_enabled 为 true，max_review_rejections 为 3
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into project (id, title, description) values (?, 'Project 1', 'Desc')")) {
+      stmt.setObject(1, projectId);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "select yolo_enabled, max_review_rejections, next_issue_number, version from project where id = ?")) {
+      stmt.setObject(1, projectId);
+      try (ResultSet rs = stmt.executeQuery()) {
+        assertTrue(rs.next());
+        assertTrue(rs.getBoolean("yolo_enabled"), "default yolo_enabled must be true");
+        assertEquals(
+            3, rs.getInt("max_review_rejections"), "default max_review_rejections must be 3");
+        assertEquals(1L, rs.getLong("next_issue_number"), "default next_issue_number must be 1");
+        assertEquals(0L, rs.getLong("version"), "default version must be 0");
+      }
     }
   }
 
   @Test
   void issueUniqueProjectNumberAndArchivedCheckAreEnforced() throws SQLException {
-    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
-    insertAgentDefinition(agentName);
     UUID projectId = UUID.randomUUID();
-    insertProject(projectId, agentName);
+    insertProject(projectId);
 
     UUID issueId1 = UUID.randomUUID();
     UUID issueId2 = UUID.randomUUID();
@@ -155,23 +189,40 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue (id, project_id, number, title, status) "
+                "insert into project_issue (id, project_id, number, title, status) "
                     + "values (?, ?, 1, 'Issue 1', 'TODO')")) {
       stmt.setObject(1, issueId1);
       stmt.setObject(2, projectId);
       assertEquals(1, stmt.executeUpdate());
     }
 
-    // Duplicate (project_id, number) must violate uk_issue_project_number
+    // Duplicate (project_id, number) must violate uk_project_issue_project_number
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "uk_issue_project_number",
+          "uk_project_issue_project_number",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue (id, project_id, number, title, status) "
+                    "insert into project_issue (id, project_id, number, title, status) "
                         + "values (?, ?, 1, 'Issue 2', 'TODO')")) {
+              stmt.setObject(1, issueId2);
+              stmt.setObject(2, projectId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // Invalid status violates chk_project_issue_status
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_issue_status",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue (id, project_id, number, title, status) "
+                        + "values (?, ?, 2, 'Issue 2', 'UNKNOWN_STATUS')")) {
               stmt.setObject(1, issueId2);
               stmt.setObject(2, projectId);
               stmt.executeUpdate();
@@ -183,11 +234,31 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_archived_status",
+          "chk_project_issue_archived_status",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "update issue set archived_at = clock_timestamp() where id = ?")) {
+                    "update project_issue set archived_at = clock_timestamp() where id = ?")) {
+              stmt.setObject(1, issueId1);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // BLOCKED status is allowed, but cannot be archived
+    try (Connection conn = newConnection()) {
+      try (PreparedStatement stmt =
+          conn.prepareStatement("update project_issue set status = 'BLOCKED' where id = ?")) {
+        stmt.setObject(1, issueId1);
+        assertEquals(1, stmt.executeUpdate());
+      }
+      assertConstraintViolation(
+          conn,
+          "chk_project_issue_archived_status",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "update project_issue set archived_at = clock_timestamp() where id = ?")) {
               stmt.setObject(1, issueId1);
               stmt.executeUpdate();
             }
@@ -198,7 +269,7 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       try (PreparedStatement stmt =
           conn.prepareStatement(
-              "update issue set status = 'DONE', archived_at = clock_timestamp() where id = ?")) {
+              "update project_issue set status = 'DONE', archived_at = clock_timestamp() where id = ?")) {
         stmt.setObject(1, issueId1);
         assertEquals(1, stmt.executeUpdate());
       }
@@ -207,12 +278,10 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
 
   @Test
   void dependencyEnforcesSameProjectAndNoSelf() throws SQLException {
-    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
-    insertAgentDefinition(agentName);
     UUID proj1 = UUID.randomUUID();
     UUID proj2 = UUID.randomUUID();
-    insertProject(proj1, agentName);
-    insertProject(proj2, agentName);
+    insertProject(proj1);
+    insertProject(proj2);
 
     UUID issueA = UUID.randomUUID();
     UUID issueB = UUID.randomUUID();
@@ -221,15 +290,15 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     insertIssue(issueB, proj1, 2, "TODO");
     insertIssue(issueOtherProject, proj2, 1, "TODO");
 
-    // Self dependency violates chk_issue_dependency_no_self
+    // Self dependency violates chk_project_issue_dependency_no_self
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_dependency_no_self",
+          "chk_project_issue_dependency_no_self",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_dependency (issue_id, depends_on_issue_id, project_id) "
+                    "insert into project_issue_dependency (issue_id, depends_on_issue_id, project_id) "
                         + "values (?, ?, ?)")) {
               stmt.setObject(1, issueA);
               stmt.setObject(2, issueA);
@@ -239,15 +308,15 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           });
     }
 
-    // Cross-project dependency violates fk_issue_dependency_depends_on
+    // Cross-project dependency violates fk_project_issue_dependency_depends_on
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "fk_issue_dependency_depends_on",
+          "fk_project_issue_dependency_depends_on",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_dependency (issue_id, depends_on_issue_id, project_id) "
+                    "insert into project_issue_dependency (issue_id, depends_on_issue_id, project_id) "
                         + "values (?, ?, ?)")) {
               stmt.setObject(1, issueA);
               stmt.setObject(2, issueOtherProject);
@@ -261,7 +330,7 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue_dependency (issue_id, depends_on_issue_id, project_id) "
+                "insert into project_issue_dependency (issue_id, depends_on_issue_id, project_id) "
                     + "values (?, ?, ?)")) {
       stmt.setObject(1, issueA);
       stmt.setObject(2, issueB);
@@ -271,11 +340,109 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
   }
 
   @Test
+  void projectIssueAgentSessionConstraintsAreEnforced() throws SQLException {
+    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
+    insertAgentDefinition(agentName);
+    UUID proj = UUID.randomUUID();
+    insertProject(proj);
+    UUID issueId = UUID.randomUUID();
+    insertIssue(issueId, proj, 1, "IN_PROGRESS");
+
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      createHarnessSession(conn, sessionId);
+      createHarnessThread(conn, threadId, sessionId);
+    }
+
+    UUID agentSessionId = UUID.randomUUID();
+    // 插入合法 project_issue_agent_session
+    try (Connection conn = newConnection();
+        PreparedStatement stmt =
+            conn.prepareStatement(
+                "insert into project_issue_agent_session (id, issue_id, agent_name, session_id, thread_id) "
+                    + "values (?, ?, ?, ?, ?)")) {
+      stmt.setObject(1, agentSessionId);
+      stmt.setObject(2, issueId);
+      stmt.setString(3, agentName);
+      stmt.setObject(4, sessionId);
+      stmt.setObject(5, threadId);
+      assertEquals(1, stmt.executeUpdate());
+    }
+
+    // 重复 (issue_id, agent_name) 违背 uk_project_issue_agent_session_issue_agent
+    UUID secondSessionId = UUID.randomUUID();
+    UUID secondThreadId = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      createHarnessSession(conn, secondSessionId);
+      createHarnessThread(conn, secondThreadId, secondSessionId);
+      assertConstraintViolation(
+          conn,
+          "uk_project_issue_agent_session_issue_agent",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_agent_session (id, issue_id, agent_name, session_id, thread_id) "
+                        + "values (?, ?, ?, ?, ?)")) {
+              stmt.setObject(1, UUID.randomUUID());
+              stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.setObject(4, secondSessionId);
+              stmt.setObject(5, secondThreadId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // 重复 session_id 违背 uk_project_issue_agent_session_session
+    String otherAgent = "agent-" + FIXTURE_IDS.incrementAndGet();
+    insertAgentDefinition(otherAgent);
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "uk_project_issue_agent_session_session",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_agent_session (id, issue_id, agent_name, session_id, thread_id) "
+                        + "values (?, ?, ?, ?, ?)")) {
+              stmt.setObject(1, UUID.randomUUID());
+              stmt.setObject(2, issueId);
+              stmt.setString(3, otherAgent);
+              stmt.setObject(4, sessionId);
+              stmt.setObject(5, secondThreadId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // 重复 thread_id 违背 uk_project_issue_agent_session_thread
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "uk_project_issue_agent_session_thread",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_agent_session (id, issue_id, agent_name, session_id, thread_id) "
+                        + "values (?, ?, ?, ?, ?)")) {
+              stmt.setObject(1, UUID.randomUUID());
+              stmt.setObject(2, issueId);
+              stmt.setString(3, otherAgent);
+              stmt.setObject(4, secondSessionId);
+              stmt.setObject(5, threadId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+  }
+
+  @Test
   void issueRunEnforcesRoleActorAndSingleActiveConstraints() throws SQLException {
     String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
     insertAgentDefinition(agentName);
     UUID proj = UUID.randomUUID();
-    insertProject(proj, agentName);
+    insertProject(proj);
     UUID issueId = UUID.randomUUID();
     insertIssue(issueId, proj, 1, "IN_PROGRESS");
 
@@ -284,25 +451,26 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status) "
-                    + "values (?, ?, 1, 'EXECUTOR', 'AGENT', ?, 'RUNNING')")) {
+                "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status) "
+                    + "values (?, ?, 1, 'EXECUTOR', ?, 'RUNNING')")) {
       stmt.setObject(1, execRunId);
       stmt.setObject(2, issueId);
       stmt.setString(3, agentName);
       assertEquals(1, stmt.executeUpdate());
     }
 
-    // Cannot insert a second active run on the same issue -> violates uk_issue_run_single_active
+    // Cannot insert a second active run on the same issue -> violates
+    // uk_project_issue_run_single_active
     UUID secondRunId = UUID.randomUUID();
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "uk_issue_run_single_active",
+          "uk_project_issue_run_single_active",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason) "
-                        + "values (?, ?, 2, 'EXECUTOR', 'AGENT', ?, 'WAITING_HUMAN', 'need input')")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, waiting_reason) "
+                        + "values (?, ?, 2, 'EXECUTOR', ?, 'WAITING_HUMAN', 'need input')")) {
               stmt.setObject(1, secondRunId);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -311,35 +479,37 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           });
     }
 
-    // Executor cannot be HUMAN -> violates chk_issue_run_role
+    // Executor with submission_run_id -> violates chk_project_issue_run_role
     UUID invalidExecId = UUID.randomUUID();
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_role",
+          "chk_project_issue_run_role",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, status, completed_at, terminal_action_id, outcome, result) "
-                        + "values (?, ?, 3, 'EXECUTOR', 'HUMAN', 'COMPLETED', clock_timestamp(), 'act-3', 'SUBMITTED', '{\"summary\":\"s\"}'::jsonb)")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, submission_run_id, status, completed_at, terminal_action_id, outcome, result) "
+                        + "values (?, ?, 3, 'EXECUTOR', ?, ?, 'COMPLETED', clock_timestamp(), 'act-3', 'SUBMITTED', '{\"summary\":\"s\"}'::jsonb)")) {
               stmt.setObject(1, invalidExecId);
               stmt.setObject(2, issueId);
+              stmt.setString(3, agentName);
+              stmt.setObject(4, execRunId);
               stmt.executeUpdate();
             }
           });
     }
 
-    // Reviewer requires submission_run_id -> violates chk_issue_run_role if missing
+    // Reviewer requires submission_run_id -> violates chk_project_issue_run_role if missing
     UUID invalidRevId = UUID.randomUUID();
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_role",
+          "chk_project_issue_run_role",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, completed_at, terminal_action_id, outcome, result) "
-                        + "values (?, ?, 4, 'REVIEWER', 'AGENT', ?, 'COMPLETED', clock_timestamp(), 'act-4', 'APPROVED', '{\"summary\":\"s\"}'::jsonb)")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, completed_at, terminal_action_id, outcome, result) "
+                        + "values (?, ?, 4, 'REVIEWER', ?, 'COMPLETED', clock_timestamp(), 'act-4', 'APPROVED', '{\"summary\":\"s\"}'::jsonb)")) {
               stmt.setObject(1, invalidRevId);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -348,57 +518,130 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           });
     }
 
-    // Reviewer with submission_run_id referencing same issue succeeds
-    // (Mark first run COMPLETED so we can add another run or complete reviewer)
+    // Reviewer with submission_run_id from DIFFERENT issue -> violates
+    // fk_project_issue_run_submission
+    UUID otherIssueId = UUID.randomUUID();
+    insertIssue(otherIssueId, proj, 2, "IN_PROGRESS");
+    UUID foreignRevId = UUID.randomUUID();
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "fk_project_issue_run_submission",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, submission_run_id, status, outcome, completed_at, terminal_action_id, result) "
+                        + "values (?, ?, 1, 'REVIEWER', ?, ?, 'COMPLETED', 'APPROVED', clock_timestamp(), 'act-rev-diff', '{\"summary\":\"approved\"}'::jsonb)")) {
+              stmt.setObject(1, foreignRevId);
+              stmt.setObject(2, otherIssueId);
+              stmt.setString(3, agentName);
+              stmt.setObject(4, execRunId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // Complete first executor run
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "update issue_run set status = 'COMPLETED', outcome = 'SUBMITTED', completed_at = clock_timestamp(), terminal_action_id = 'act-exec-1', result = '{\"summary\":\"done\"}'::jsonb where id = ?")) {
+                "update project_issue_run set status = 'COMPLETED', outcome = 'SUBMITTED', completed_at = clock_timestamp(), terminal_action_id = 'act-exec-1', result = '{\"summary\":\"done\"}'::jsonb where id = ?")) {
       stmt.setObject(1, execRunId);
       assertEquals(1, stmt.executeUpdate());
     }
 
+    // Reviewer with valid submission_run_id on same issue succeeds
     UUID revRunId = UUID.randomUUID();
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue_run (id, issue_id, ordinal, role, actor_type, submission_run_id, status, outcome, completed_at, terminal_action_id, result) "
-                    + "values (?, ?, 2, 'REVIEWER', 'HUMAN', ?, 'COMPLETED', 'APPROVED', clock_timestamp(), 'act-rev-1', '{\"summary\":\"approved\"}'::jsonb)")) {
+                "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, submission_run_id, status, outcome, completed_at, terminal_action_id, result) "
+                    + "values (?, ?, 2, 'REVIEWER', ?, ?, 'COMPLETED', 'APPROVED', clock_timestamp(), 'act-rev-1', '{\"summary\":\"approved\"}'::jsonb)")) {
       stmt.setObject(1, revRunId);
       stmt.setObject(2, issueId);
-      stmt.setObject(3, execRunId);
+      stmt.setString(3, agentName);
+      stmt.setObject(4, execRunId);
       assertEquals(1, stmt.executeUpdate());
     }
   }
 
   @Test
-  void issueInputIdempotencyIsEnforced() throws SQLException {
+  void issueActivityConstraintsAreEnforced() throws SQLException {
     String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
     insertAgentDefinition(agentName);
     UUID proj = UUID.randomUUID();
-    insertProject(proj, agentName);
+    insertProject(proj);
     UUID issueId = UUID.randomUUID();
     insertIssue(issueId, proj, 1, "TODO");
 
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue_input (issue_id, sequence, kind, body, idempotency_key) "
-                    + "values (?, 1, 'HUMAN', 'Hello', 'key-123')")) {
+                "insert into project_issue_activity (issue_id, sequence, kind, actor_type, body, idempotency_key) "
+                    + "values (?, 1, 'HUMAN_INPUT', 'HUMAN', 'Hello', 'key-123')")) {
       stmt.setObject(1, issueId);
       assertEquals(1, stmt.executeUpdate());
     }
 
-    // Duplicate idempotency_key on same issue violates uk_issue_input_idempotency
+    // Duplicate idempotency_key on same issue violates uk_project_issue_activity_idempotency
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "uk_issue_input_idempotency",
+          "uk_project_issue_activity_idempotency",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_input (issue_id, sequence, kind, body, idempotency_key) "
-                        + "values (?, 2, 'HUMAN', 'Hello again', 'key-123')")) {
+                    "insert into project_issue_activity (issue_id, sequence, kind, actor_type, body, idempotency_key) "
+                        + "values (?, 2, 'HUMAN_INPUT', 'HUMAN', 'Hello again', 'key-123')")) {
+              stmt.setObject(1, issueId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // AGENT actor_type requires non-null actor_agent_name
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_issue_activity_actor",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_activity (issue_id, sequence, kind, actor_type, body) "
+                        + "values (?, 3, 'INSTRUCTION', 'AGENT', 'do this')")) {
+              stmt.setObject(1, issueId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // HUMAN actor_type with non-null actor_agent_name violates chk_project_issue_activity_actor
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_issue_activity_actor",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_activity (issue_id, sequence, kind, actor_type, actor_agent_name, body) "
+                        + "values (?, 4, 'HUMAN_INPUT', 'HUMAN', ?, 'hello')")) {
+              stmt.setObject(1, issueId);
+              stmt.setString(2, agentName);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // REVIEW_DECISION requires non-null decision and non-null submission_run_id
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_issue_activity_decision_shape",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "insert into project_issue_activity (issue_id, sequence, kind, actor_type, body) "
+                        + "values (?, 5, 'REVIEW_DECISION', 'HUMAN', 'review done')")) {
               stmt.setObject(1, issueId);
               stmt.executeUpdate();
             }
@@ -407,34 +650,47 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void issueControllerWorkTableOperatesCorrectly() throws SQLException {
-    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
-    insertAgentDefinition(agentName);
+  void issueWorkTableOperatesCorrectly() throws SQLException {
     UUID proj = UUID.randomUUID();
-    insertProject(proj, agentName);
+    insertProject(proj);
     UUID issueId = UUID.randomUUID();
     insertIssue(issueId, proj, 1, "TODO");
 
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue_controller_work (issue_id, wake_version, due_at) "
+                "insert into project_issue_work (issue_id, wake_version, due_at) "
                     + "values (?, 1, clock_timestamp())")) {
       stmt.setObject(1, issueId);
       assertEquals(1, stmt.executeUpdate());
     }
 
-    // Foreign key to issue is enforced
+    // Foreign key to project_issue is enforced
     UUID nonExistentIssueId = UUID.randomUUID();
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "fk_issue_controller_work_issue",
+          "fk_project_issue_work_issue",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_controller_work (issue_id, wake_version) values (?, 1)")) {
+                    "insert into project_issue_work (issue_id, wake_version) values (?, 1)")) {
               stmt.setObject(1, nonExistentIssueId);
+              stmt.executeUpdate();
+            }
+          });
+    }
+
+    // wake_version <= 0 违背 chk_project_issue_work_wake
+    try (Connection conn = newConnection()) {
+      assertConstraintViolation(
+          conn,
+          "chk_project_issue_work_wake",
+          () -> {
+            try (PreparedStatement stmt =
+                conn.prepareStatement(
+                    "update project_issue_work set wake_version = 0 where issue_id = ?")) {
+              stmt.setObject(1, issueId);
               stmt.executeUpdate();
             }
           });
@@ -443,8 +699,6 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
 
   @Test
   void testProjectAndIssueDescriptionLengthConstraints() throws SQLException {
-    String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
-    insertAgentDefinition(agentName);
     UUID proj = UUID.randomUUID();
 
     // 超过 65536 字节的 project description 被拒绝
@@ -456,11 +710,9 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into project (id, title, description, coordinator_agent_name) "
-                        + "values (?, 'Proj', ?, ?)")) {
+                    "insert into project (id, title, description) values (?, 'Proj', ?)")) {
               stmt.setObject(1, proj);
               stmt.setString(2, oversizedDesc);
-              stmt.setString(3, agentName);
               stmt.executeUpdate();
             }
           });
@@ -471,11 +723,9 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into project (id, title, description, coordinator_agent_name) "
-                    + "values (?, 'Proj', ?, ?)")) {
+                "insert into project (id, title, description) values (?, 'Proj', ?)")) {
       stmt.setObject(1, proj);
       stmt.setString(2, exactDesc);
-      stmt.setString(3, agentName);
       assertEquals(1, stmt.executeUpdate());
     }
 
@@ -484,11 +734,11 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_description_len",
+          "chk_project_issue_description_len",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue (id, project_id, number, title, description, status) "
+                    "insert into project_issue (id, project_id, number, title, description, status) "
                         + "values (?, ?, 1, 'Issue', ?, 'TODO')")) {
               stmt.setObject(1, issueId);
               stmt.setObject(2, proj);
@@ -504,7 +754,7 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     String agentName = "agent-" + FIXTURE_IDS.incrementAndGet();
     insertAgentDefinition(agentName);
     UUID proj = UUID.randomUUID();
-    insertProject(proj, agentName);
+    insertProject(proj);
     UUID issueId = UUID.randomUUID();
     insertIssue(issueId, proj, 1, "IN_PROGRESS");
 
@@ -513,12 +763,12 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_lifecycle",
+          "chk_project_issue_run_lifecycle",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason) "
-                        + "values (?, ?, 1, 'EXECUTOR', 'AGENT', ?, 'RUNNING', 'some reason')")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, waiting_reason) "
+                        + "values (?, ?, 1, 'EXECUTOR', ?, 'RUNNING', 'some reason')")) {
               stmt.setObject(1, run1);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -532,12 +782,12 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_lifecycle",
+          "chk_project_issue_run_lifecycle",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason) "
-                        + "values (?, ?, 2, 'EXECUTOR', 'AGENT', ?, 'WAITING_HUMAN', '   ')")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, waiting_reason) "
+                        + "values (?, ?, 2, 'EXECUTOR', ?, 'WAITING_HUMAN', '   ')")) {
               stmt.setObject(1, run2);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -551,12 +801,12 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_lifecycle",
+          "chk_project_issue_run_lifecycle",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, result) "
-                        + "values (?, ?, 3, 'EXECUTOR', 'AGENT', ?, 'COMPLETED', null)")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, result) "
+                        + "values (?, ?, 3, 'EXECUTOR', ?, 'COMPLETED', null)")) {
               stmt.setObject(1, run3);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -570,12 +820,12 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_lifecycle",
+          "chk_project_issue_run_lifecycle",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason, completed_at) "
-                        + "values (?, ?, 4, 'EXECUTOR', 'AGENT', ?, 'FAILED', null, clock_timestamp())")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, waiting_reason, completed_at) "
+                        + "values (?, ?, 4, 'EXECUTOR', ?, 'FAILED', null, clock_timestamp())")) {
               stmt.setObject(1, run4);
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -584,17 +834,17 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
           });
     }
 
-    // FAILED 状态仅 waiting_reason > 16384 bytes，稳定违背 chk_issue_run_waiting_reason_len
+    // FAILED 状态仅 waiting_reason > 16384 bytes，稳定违背 chk_project_issue_run_waiting_reason_len
     String oversizedReason = "f".repeat(16385);
     try (Connection conn = newConnection()) {
       assertConstraintViolation(
           conn,
-          "chk_issue_run_waiting_reason_len",
+          "chk_project_issue_run_waiting_reason_len",
           () -> {
             try (PreparedStatement stmt =
                 conn.prepareStatement(
-                    "insert into issue_run (id, issue_id, ordinal, role, actor_type, agent_name, status, waiting_reason, completed_at) "
-                        + "values (?, ?, 5, 'EXECUTOR', 'AGENT', ?, 'FAILED', ?, clock_timestamp())")) {
+                    "insert into project_issue_run (id, issue_id, ordinal, role, agent_name, status, waiting_reason, completed_at) "
+                        + "values (?, ?, 5, 'EXECUTOR', ?, 'FAILED', ?, clock_timestamp())")) {
               stmt.setObject(1, UUID.randomUUID());
               stmt.setObject(2, issueId);
               stmt.setString(3, agentName);
@@ -638,14 +888,12 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     }
   }
 
-  private void insertProject(UUID id, String coordinator) throws SQLException {
+  private void insertProject(UUID id) throws SQLException {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into project (id, title, description, coordinator_agent_name) "
-                    + "values (?, 'Project', 'Desc', ?)")) {
+                "insert into project (id, title, description) values (?, 'Project', 'Desc')")) {
       stmt.setObject(1, id);
-      stmt.setString(2, coordinator);
       stmt.executeUpdate();
     }
   }
@@ -655,13 +903,47 @@ class ProjectSchemaPostgresTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection();
         PreparedStatement stmt =
             conn.prepareStatement(
-                "insert into issue (id, project_id, number, title, status) "
+                "insert into project_issue (id, project_id, number, title, status) "
                     + "values (?, ?, ?, 'Issue', ?)")) {
       stmt.setObject(1, id);
       stmt.setObject(2, projectId);
       stmt.setLong(3, number);
       stmt.setString(4, status);
       stmt.executeUpdate();
+    }
+  }
+
+  private static void createHarnessSession(Connection conn, UUID id) throws SQLException {
+    try (PreparedStatement stmt =
+        conn.prepareStatement(
+            "insert into harness_session (id, name, created_at) values (?, 'session', clock_timestamp())")) {
+      stmt.setObject(1, id);
+      stmt.executeUpdate();
+    }
+  }
+
+  private static void createHarnessThread(Connection conn, UUID threadId, UUID sessionId)
+      throws SQLException {
+    UUID rootEntryId = UUID.randomUUID();
+    try (PreparedStatement entry =
+            conn.prepareStatement(
+                "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
+                    + " values (?, ?, 'ROOT', '{}'::jsonb, clock_timestamp())");
+        PreparedStatement thread =
+            conn.prepareStatement(
+                "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
+                    + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, '"
+                    + "0".repeat(64)
+                    + "', 'test-thread', false, 1, 0, clock_timestamp(), clock_timestamp())")) {
+      entry.setObject(1, rootEntryId);
+      entry.setObject(2, sessionId);
+      entry.executeUpdate();
+
+      thread.setObject(1, threadId);
+      thread.setObject(2, sessionId);
+      thread.setObject(3, rootEntryId);
+      thread.executeUpdate();
     }
   }
 }

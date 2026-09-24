@@ -16,10 +16,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SettingsReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestResult;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -35,12 +35,13 @@ import java.util.function.Supplier;
  * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath 与 queued Command 快照构造完整合法 candidate
  * EntryPath，不接触 Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
- * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT），保留全部 USER_MESSAGE 与
- * CUSTOM_MESSAGE（含 max-turn 等内部 steering 提醒）；INPUT 消费到首条 user-like message 为止的命令前缀，并先做可选 history
- * normalization（synthetic UNKNOWN/HISTORY_CUT ToolResult + CANCELLED TURN_END），再追加
- * TURN_START(INPUT)、生效 SET_* 变更的 {@link SettingsReminder} USER 消息与按 sequence 顺序的 USER/CUSTOM
- * Message； COMPACTION 只追加 TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的
- * {@link CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
+ * <p>CONTINUATION 消费普通配置命令（SET_AGENT / SET_MODEL / SET_ENVIRONMENT），保留全部
+ * USER_MESSAGE、CUSTOM_MESSAGE 与 GOAL（含 max-turn 等内部 steering 提醒）；INPUT 消费到首条 user-like
+ * 输入为止的命令前缀（typed GOAL 也是 user-like），并先做可选 history normalization（synthetic UNKNOWN/HISTORY_CUT
+ * ToolResult + CANCELLED TURN_END），再追加 TURN_START(INPUT) 与按 sequence 顺序的 USER/CUSTOM Message；SET_*
+ * 仅冻结在 TURN_START.settings，不生成模型可见消息。typed GOAL 在同一 TURN_START 快照内写入新 settings.goal， 并追加一条冻结 USER
+ * 消息；COMPACTION 只追加 TURN_START(COMPACTION)（settings 快照为当前 branch），消费零 Command，切分事实由调用方传入的 {@link
+ * CompactionPreparation} 承载。candidate Entry 使用调用方提供的 ID 分配器，createdAt 使用调用方时钟。
  */
 final class TurnPlanBuilder {
 
@@ -83,8 +84,8 @@ final class TurnPlanBuilder {
         && (consumedCommands.isEmpty() || !isUserLike(consumedCommands.getLast()))) {
       throw new IllegalArgumentException("INPUT plan requires one queued user-like message");
     }
-    CommandHarvestResult harvest =
-        harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands);
+    var settings =
+        harvestReducer.reduce(threadId, sourcePath.baseSettings(), consumedCommands, idAllocator);
 
     UUID sessionId = sourcePath.root().sessionId();
     long cutoffSequence =
@@ -107,7 +108,7 @@ final class TurnPlanBuilder {
             parentId,
             new TurnStartPayload(
                 reason,
-                harvest.branchSettings(),
+                settings,
                 threadId,
                 null,
                 null,
@@ -115,24 +116,6 @@ final class TurnPlanBuilder {
             now));
     parentId = turnStartEntryId;
     if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
-      // SET_* 变更提醒采用固定前缀顺序，紧邻本 turn 的 user-like 消息之前。CONTINUATION 同样需要这条 durable
-      // USER 提醒：设置只有进入对话，模型才知道自己已经在新的 agent/model/environment 下工作。
-      for (CommandHarvestResult.SettingsChange change : harvest.changes()) {
-        UUID entryId = idAllocator.get();
-        candidateEntries.add(
-            new Entry(
-                entryId,
-                sessionId,
-                parentId,
-                new CustomMessagePayload(
-                    CustomMessagePayload.CORE_CONTRIBUTOR_ID,
-                    CustomMessagePayload.CORE_CUSTOM_TYPE,
-                    CustomMessagePayload.CORE_RENDERER_KEY,
-                    SettingsReminder.message(change),
-                    CustomMessagePayload.CORE_DETAILS_JSON),
-                now));
-        parentId = entryId;
-      }
       for (ThreadCommand command : plannedCommands) {
         if (command.type() == ThreadCommandType.USER_MESSAGE
             && consumedCommands.contains(command)) {
@@ -144,6 +127,23 @@ final class TurnPlanBuilder {
                   parentId,
                   new MessagePayload(
                       ((UserMessageCommandPayload) command.payload()).message(), null, null),
+                  now));
+          parentId = entryId;
+        } else if (command.type() == ThreadCommandType.GOAL && consumedCommands.contains(command)) {
+          // 设置与清除走同一原子路径：settings 快照与这条冻结 USER 消息同属本 TURN_START。
+          GoalCommandPayload goal = (GoalCommandPayload) command.payload();
+          UUID entryId = idAllocator.get();
+          candidateEntries.add(
+              new Entry(
+                  entryId,
+                  sessionId,
+                  parentId,
+                  new MessagePayload(
+                      goal.text() == null
+                          ? GoalMessages.inputCleared()
+                          : GoalMessages.inputSet(goal.text()),
+                      null,
+                      null),
                   now));
           parentId = entryId;
         } else if (command.type() == ThreadCommandType.CUSTOM_MESSAGE
@@ -196,10 +196,9 @@ final class TurnPlanBuilder {
     return command.type().isSetting();
   }
 
-  /** user-like：最终用户输入，含 contributor / runtime 注入的 USER CUSTOM_MESSAGE。 */
+  /** user-like：最终用户输入，含 contributor / runtime 注入的 USER CUSTOM_MESSAGE 与 typed GOAL。 */
   private static boolean isUserLike(ThreadCommand command) {
-    return command.type() == ThreadCommandType.USER_MESSAGE
-        || command.type() == ThreadCommandType.CUSTOM_MESSAGE;
+    return command.type().isMessage();
   }
 
   /**

@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
@@ -45,6 +46,10 @@ public class StudioHarnessCommandBatchController {
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               OwnerRef owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());
+              if (owner.type() == OwnerType.ISSUE_AGENT_SESSION) {
+                throw new IllegalArgumentException(
+                    "Issue Agent Session commands must use the Issue business workflow");
+              }
               AcceptCommandsCommand command =
                   HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request);
               AcceptedCommands accepted = acceptanceService.accept(owner, command);

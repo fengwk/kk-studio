@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -29,7 +30,8 @@ final class HistoryValueCodecs {
   static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
-      orderedSet("agentName", "model", "environmentName");
+      orderedSet("agentName", "model", "environmentName", "goal");
+  private static final Set<String> GOAL_FIELDS = orderedSet("id", "text");
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
@@ -73,6 +75,15 @@ final class HistoryValueCodecs {
     } else {
       node.put("environmentName", settings.environmentName());
     }
+    // goal 是完整快照的一部分：null（用户未设置或已清除）必须显式输出。
+    if (settings.goal() == null) {
+      node.putNull("goal");
+    } else {
+      ObjectNode goal = NODES.objectNode();
+      goal.put("id", settings.goal().id().toString());
+      goal.put("text", settings.goal().text());
+      node.set("goal", goal);
+    }
     return node;
   }
 
@@ -82,7 +93,28 @@ final class HistoryValueCodecs {
     return new BranchSettings(
         requiredText(node, "agentName", context),
         decodeModelSelection(node.get("model"), context + ".model"),
-        nullableEnvironmentName(node, "environmentName", context));
+        nullableEnvironmentName(node, "environmentName", context),
+        nullableGoal(node, "goal", context));
+  }
+
+  /** 解码可空 Goal 快照：null 或精确 2 字段对象；任何其它形状确定性拒绝。 */
+  static GoalSetting nullableGoal(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null) {
+      throw new IllegalArgumentException(context + " must declare " + field);
+    }
+    if (value.isNull()) {
+      return null;
+    }
+    ObjectNode goal = requireObject(value, context + "." + field);
+    requireExactFields(goal, GOAL_FIELDS, context + "." + field);
+    UUID id;
+    try {
+      id = UUID.fromString(requiredText(goal, "id", context + "." + field));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + ".id must be a UUID", error);
+    }
+    return new GoalSetting(id, requiredText(goal, "text", context + "." + field));
   }
 
   /** 解码可空 Environment 名：text 或 null；其他类型拒绝，非 null 文本走 canonical 校验。 */

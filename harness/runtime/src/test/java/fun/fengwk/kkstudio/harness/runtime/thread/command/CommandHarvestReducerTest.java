@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -16,6 +17,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /** 有序 command harvest 归并：YOLO 不经过 mailbox，reducer 只归并 branch settings。 */
 class CommandHarvestReducerTest {
@@ -24,12 +27,22 @@ class CommandHarvestReducerTest {
   private static final BranchSettings BASE =
       new BranchSettings(
           "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
-  private final CommandHarvestReducer reducer = new CommandHarvestReducer();
+
+  /** 测试用确定性 goal id 分配器：每次调用产生新 id，因此断言到的 id 序列同时证明「每条 typed GOAL 设置恰分配一个新 id」。 */
+  private static Supplier<UUID> goalIds() {
+    AtomicLong sequence = new AtomicLong();
+    return () -> id(1_000L + sequence.incrementAndGet());
+  }
+
+  private static BranchSettings reduce(
+      UUID threadId, BranchSettings base, List<ThreadCommand> commands) {
+    return new CommandHarvestReducer().reduce(threadId, base, commands, goalIds());
+  }
 
   @Test
   void appliesCommandsInSequenceWithLastWriteWins() {
-    CommandHarvestResult result =
-        reducer.reduce(
+    BranchSettings result =
+        reduce(
             id(7L),
             BASE,
             List.of(
@@ -51,66 +64,53 @@ class CommandHarvestReducerTest {
     assertEquals(
         new BranchSettings(
             "agent-b", new ModelSelection("anthropic", "claude-opus", "thinking"), "local"),
-        result.branchSettings());
+        result);
   }
 
-  /**
-   * 测试意图：{@code changes()} 同时承担「哪些设置真的变了」与「提醒顺序」两个契约：no-op 设置命令（与当前值相同）不产生
-   * change，因此调用方不会为未发生的变化注入提醒；产生变化的命令按 command 顺序记录应用后的完整快照。
-   */
+  /** 测试意图：设置命令按顺序生效；重复设置、消息命令不影响最终快照。 */
   @Test
-  void changesRecordOnlyEffectiveSettingsInCommandOrder() {
-    CommandHarvestResult result =
-        reducer.reduce(
+  void ignoresNoOpSettingsAndMessages() {
+    BranchSettings result =
+        reduce(
             id(7L),
             BASE,
             List.of(
-                // no-op：与 BASE 相同，不得产生 change。
+                // no-op：与 BASE 相同。
                 queued(id(1L), 1L, new SetAgentCommandPayload("coding")),
                 queued(id(2L), 2L, new SetAgentCommandPayload("reviewer")),
                 queued(id(3L), 3L, new SetModelCommandPayload(BASE.model())),
                 queued(id(4L), 4L, new SetEnvironmentCommandPayload("local")),
-                // 消息永远不产生 change。
+                // 消息不改变设置。
                 queued(id(5L), 5L, new CustomMessageCommandPayload(user("custom")))));
-
-    assertEquals(
-        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.SET_ENVIRONMENT),
-        result.changes().stream().map(CommandHarvestResult.SettingsChange::type).toList());
-    assertEquals("reviewer", result.changes().get(0).settings().agentName());
-    assertEquals(
-        new ModelSelection("anthropic", "claude-sonnet", "default"),
-        result.changes().get(0).settings().model());
-    assertEquals("local", result.changes().get(1).settings().environmentName());
-    // 每个 change 都携带该命令应用后的完整快照，而不是增量。
-    assertEquals(result.branchSettings(), result.changes().get(1).settings());
+    assertEquals(BASE.withAgentName("reviewer").withEnvironmentName("local"), result);
   }
 
   /** 测试意图：SET_ENVIRONMENT 的显式 null 是「解除环境选择」，必须真实写回 settings 而不是被当作 no-op。 */
   @Test
   void environmentSelectionIsAtomicallySetAndClearedByNull() {
     BranchSettings withEnvironment = BASE.withEnvironmentName("local");
-    CommandHarvestResult selected =
-        reducer.reduce(
+    BranchSettings selected =
+        reduce(
             id(7L), BASE, List.of(queued(id(1L), 1L, new SetEnvironmentCommandPayload("shared"))));
-    assertEquals("shared", selected.branchSettings().environmentName());
+    assertEquals("shared", selected.environmentName());
 
-    CommandHarvestResult cleared =
-        reducer.reduce(
+    BranchSettings cleared =
+        reduce(
             id(7L),
             withEnvironment,
             List.of(queued(id(1L), 1L, new SetEnvironmentCommandPayload(null))));
-    assertNull(cleared.branchSettings().environmentName());
+    assertNull(cleared.environmentName());
 
     // 环境变更不得隐式影响 agent 与 model。
-    assertEquals(BASE.agentName(), cleared.branchSettings().agentName());
-    assertEquals(BASE.model(), cleared.branchSettings().model());
+    assertEquals(BASE.agentName(), cleared.agentName());
+    assertEquals(BASE.model(), cleared.model());
   }
 
   @Test
   void modelSelectionIsAtomicAndMessagesDoNotChangeSettings() {
     ModelSelection replacement = new ModelSelection("openai", "gpt-4.1", "default");
-    CommandHarvestResult result =
-        reducer.reduce(
+    BranchSettings result =
+        reduce(
             id(7L),
             BASE,
             List.of(
@@ -118,13 +118,13 @@ class CommandHarvestReducerTest {
                 queued(id(2L), 2L, new SetModelCommandPayload(replacement)),
                 queued(id(3L), 3L, new CustomMessageCommandPayload(user("custom")))));
 
-    assertEquals("coding", result.branchSettings().agentName());
-    assertEquals(replacement, result.branchSettings().model());
+    assertEquals("coding", result.agentName());
+    assertEquals(replacement, result.model());
   }
 
   @Test
   void rejectsWrongThreadNonQueuedAndNonMonotonicCommands() {
-    assertThrows(NullPointerException.class, () -> reducer.reduce(null, BASE, List.of()));
+    assertThrows(NullPointerException.class, () -> reduce(null, BASE, List.of()));
 
     ThreadCommand foreign = queued(id(1L), 1L, new SetAgentCommandPayload("coding"), id(8L));
     ThreadCommand applied = applied(id(2L), 2L);
@@ -139,16 +139,13 @@ class CommandHarvestReducerTest {
             id(3L),
             CREATED.plusSeconds(1),
             CREATED);
-    assertThrows(
-        IllegalArgumentException.class, () -> reducer.reduce(id(7L), BASE, List.of(foreign)));
-    assertThrows(
-        IllegalArgumentException.class, () -> reducer.reduce(id(7L), BASE, List.of(applied)));
-    assertThrows(
-        IllegalArgumentException.class, () -> reducer.reduce(id(7L), BASE, List.of(cancelled)));
+    assertThrows(IllegalArgumentException.class, () -> reduce(id(7L), BASE, List.of(foreign)));
+    assertThrows(IllegalArgumentException.class, () -> reduce(id(7L), BASE, List.of(applied)));
+    assertThrows(IllegalArgumentException.class, () -> reduce(id(7L), BASE, List.of(cancelled)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            reducer.reduce(
+            reduce(
                 id(7L),
                 BASE,
                 List.of(
@@ -157,7 +154,7 @@ class CommandHarvestReducerTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            reducer.reduce(
+            reduce(
                 id(7L),
                 BASE,
                 List.of(
@@ -167,9 +164,9 @@ class CommandHarvestReducerTest {
 
   @Test
   void emptyCommandListLeavesBranchSettingsUnchanged() {
-    CommandHarvestResult result = reducer.reduce(id(7L), BASE, List.of());
+    BranchSettings result = reduce(id(7L), BASE, List.of());
 
-    assertEquals(BASE, result.branchSettings());
+    assertEquals(BASE, result);
   }
 
   private static ThreadCommand queued(UUID id, long sequence, ThreadCommandPayload payload) {
@@ -210,5 +207,67 @@ class CommandHarvestReducerTest {
 
   private static AgentMessage message(AgentMessageRole role, String text) {
     return new AgentMessage(role, List.of(new TextMessageContent(text)));
+  }
+
+  /**
+   * 测试意图：typed GOAL 命令把新目标 id + 正文写入 TURN_START settings 快照，且与同批 SET_* 互不干扰；它不产生任何设置提醒
+   * carrier，模型可见载体是同 turn 的冻结 USER 消息。
+   */
+  @Test
+  void goalCommandWritesSnapshotWithoutTouchingOtherSettings() {
+    BranchSettings result =
+        reduce(
+            id(7L),
+            BASE,
+            List.of(
+                queued(id(1L), 1L, new GoalCommandPayload("ship it")),
+                queued(id(2L), 2L, new SetAgentCommandPayload("agent-a"))));
+
+    assertEquals(new GoalSetting(id(1_001L), "ship it"), result.goal());
+    assertEquals("agent-a", result.agentName());
+    assertEquals(BASE.model(), result.model());
+    assertNull(result.environmentName());
+  }
+
+  /** 测试意图：相同文本的再次设置仍是新目标（新 id，旧报告因此失效），清除把 Goal 置回 null；两者都只改 settings。 */
+  @Test
+  void repeatedGoalTextGetsFreshIdAndClearDropsGoal() {
+    BranchSettings first =
+        reduce(id(7L), BASE, List.of(queued(id(1L), 1L, new GoalCommandPayload("same"))));
+    BranchSettings second =
+        reduce(
+            id(7L),
+            first,
+            List.of(
+                queued(id(1L), 2L, new GoalCommandPayload("same")),
+                queued(id(2L), 3L, new GoalCommandPayload(null))));
+
+    assertEquals(new GoalSetting(id(1_001L), "same"), first.goal());
+    assertNull(second.goal());
+    // Goal 的创改不得影响 agent / model / environment。
+    assertEquals(first.agentName(), second.agentName());
+    assertEquals(first.model(), second.model());
+    assertEquals(first.environmentName(), second.environmentName());
+  }
+
+  /** 测试意图：不涉及 GOAL 的命令批次不消耗 goal id，排除「空批也分配 id」这类破坏「设置即新目标」语义的实现。 */
+  @Test
+  void nonGoalCommandsDoNotAllocateGoalIds() {
+    AtomicLong allocations = new AtomicLong();
+    BranchSettings result =
+        new CommandHarvestReducer()
+            .reduce(
+                id(7L),
+                BASE,
+                List.of(
+                    queued(id(1L), 1L, new SetAgentCommandPayload("agent-a")),
+                    queued(id(2L), 2L, new UserMessageCommandPayload(user("hello")))),
+                () -> {
+                  allocations.incrementAndGet();
+                  return id(9_000L);
+                });
+
+    assertEquals("agent-a", result.agentName());
+    assertEquals(0L, allocations.get());
   }
 }

@@ -6,10 +6,6 @@ export {
 export { IssueBoard, type IssueBoardProps } from './components/IssueBoard'
 export { IssueCard, type IssueCardProps } from './components/IssueCard'
 export {
-  CoordinatorConversation,
-  type CoordinatorConversationProps,
-} from './components/CoordinatorConversation'
-export {
   CreateProjectModal,
   type CreateProjectModalProps,
 } from './components/CreateProjectModal'
@@ -34,6 +30,11 @@ export {
   type IssueDetailModalProps,
 } from './components/IssueDetailModal'
 export {
+  useCatalogAgentNames,
+  fetchAllCatalogAgentNames,
+  type UseCatalogAgentNamesOptions,
+} from './useCatalogAgentNames'
+export {
   projectsApi,
   createProjectsApi,
   type ProjectsApi,
@@ -47,8 +48,9 @@ export {
   decodeIssueDetail,
   decodeIssueDependency,
   decodeIssueDependencyList,
-  decodeIssueInput,
-  decodeIssueInputList,
+  decodeIssueAgentSession,
+  decodeIssueActivity,
+  decodeIssueActivityList,
   decodeIssueRun,
   decodeIssueRunSummary,
   decodeProjectIssueSnapshot,
@@ -67,13 +69,16 @@ export type {
   CreateIssueRequest,
   UpdateIssueRequest,
   ChangeIssueStatusRequest,
+  BlockIssueRequest,
+  RecoverIssueRequest,
   IssueDependencyDTO,
   AddIssueDependencyRequest,
-  IssueInputKind,
-  IssueInputDTO,
-  AppendIssueInputRequest,
+  IssueAgentSessionDTO,
+  IssueActivityKind,
+  IssueActivityActorType,
+  IssueActivityDTO,
+  AppendIssueActivityRequest,
   IssueRunRole,
-  IssueRunActorType,
   IssueRunStatus,
   IssueRunOutcome,
   IssueRunSummaryDTO,

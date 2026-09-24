@@ -923,6 +923,7 @@ create table harness_thread_command (
     constraint ck_harness_thread_command_type check (
         command_type in (
             'USER_MESSAGE',
+            'GOAL',
             'CUSTOM_MESSAGE',
             'SET_AGENT',
             'SET_MODEL',
@@ -1148,37 +1149,40 @@ comment on index idx_harness_work_available is 'claimNextWork 按 (available_at,
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
 ------------------------------------------------------------------------------
--- 3. Project / Issue orchestration and global Session ownership
+-- 3. Project / Issue business facts and global Session ownership
+--
+-- Project 只是容器和项目级设置，不持有 Agent、Session 与执行状态；它拥有的
+-- 下级表统一使用 project_ 前缀，跨领域/运行时表（session_owner、harness_*）保持本名。
 ------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------------
 -- Project
 ------------------------------------------------------------------------------
 create table project (
-    id                     uuid          not null,
-    title                  varchar(255)  not null,
-    description            text          not null default '',
-    coordinator_agent_name varchar(128)  not null,
-    next_issue_number      bigint        not null default 1,
-    version                bigint        not null default 0,
-    archived_at            timestamptz(3),
-    created_at             timestamptz(3) not null default clock_timestamp(),
-    updated_at             timestamptz(3) not null default clock_timestamp(),
+    id                    uuid          not null,
+    title                 varchar(255)  not null,
+    description           text          not null default '',
+    yolo_enabled          boolean       not null default true,
+    max_review_rejections int           not null default 3,
+    next_issue_number     bigint        not null default 1,
+    version               bigint        not null default 0,
+    archived_at           timestamptz(3),
+    created_at            timestamptz(3) not null default clock_timestamp(),
+    updated_at            timestamptz(3) not null default clock_timestamp(),
     constraint pk_project primary key (id),
-    constraint fk_project_coordinator foreign key (coordinator_agent_name)
-        references agent_definition (name) on delete restrict,
     constraint chk_project_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
     constraint chk_project_description_len check (octet_length(description) <= 65536),
-    constraint chk_project_coordinator_not_blank check (length(trim(coordinator_agent_name)) > 0 and coordinator_agent_name = btrim(coordinator_agent_name)),
+    constraint chk_project_max_review_rejections check (max_review_rejections >= 1),
     constraint chk_project_next_issue_number check (next_issue_number >= 1),
     constraint chk_project_version check (version >= 0)
 );
 
-comment on table project is 'Project 核心实体：目标、约束、Coordinator 配置与 Issue 编号单调分配器';
+comment on table project is 'Project 核心实体：项目资料、YOLO 与审查打回阈值及 Issue 编号单调分配器';
 comment on column project.id is '项目 UUID 主键（应用生成）';
 comment on column project.title is '展示标题，非空';
 comment on column project.description is '自洽目标、约束与验收规范描述';
-comment on column project.coordinator_agent_name is 'Coordinator 引用现存 AgentDefinition 名称（RESTRICT）';
+comment on column project.yolo_enabled is 'Project 下 Issue 工作 Branch 的 YOLO 策略：跳过普通工具审批预检，不跳过 Issue/Run 身份校验与资源授权；默认 true';
+comment on column project.max_review_rejections is '本 Issue 连续被正式审查打回后转 BLOCKED 的阈值，正整数，默认 3';
 comment on column project.next_issue_number is '项目内单调递增 Issue 编号分配器，>= 1';
 comment on column project.version is '乐观锁版本号，>= 0';
 comment on column project.archived_at is '归档时间戳，为空表示活跃';
@@ -1188,7 +1192,7 @@ comment on column project.updated_at is '更新时间戳（毫秒精度）';
 ------------------------------------------------------------------------------
 -- Issue
 ------------------------------------------------------------------------------
-create table issue (
+create table project_issue (
     id                  uuid          not null,
     project_id          uuid          not null,
     number              bigint        not null,
@@ -1198,161 +1202,166 @@ create table issue (
     assignee_agent_name varchar(128),
     reviewer_agent_name varchar(128),
     version             bigint        not null default 0,
-    spec_revision       bigint        not null default 0,
-    input_sequence      bigint        not null default 0,
     archived_at         timestamptz(3),
     created_at          timestamptz(3) not null default clock_timestamp(),
     updated_at          timestamptz(3) not null default clock_timestamp(),
-    constraint pk_issue primary key (id),
-    constraint fk_issue_project foreign key (project_id)
+    constraint pk_project_issue primary key (id),
+    constraint fk_project_issue_project foreign key (project_id)
         references project (id) on delete restrict,
-    constraint fk_issue_assignee foreign key (assignee_agent_name)
+    constraint fk_project_issue_assignee foreign key (assignee_agent_name)
         references agent_definition (name) on delete restrict,
-    constraint fk_issue_reviewer foreign key (reviewer_agent_name)
+    constraint fk_project_issue_reviewer foreign key (reviewer_agent_name)
         references agent_definition (name) on delete restrict,
-    constraint uk_issue_project_number unique (project_id, number),
-    constraint uk_issue_id_project unique (id, project_id),
-    constraint chk_issue_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
-    constraint chk_issue_description_len check (octet_length(description) <= 65536),
-    constraint chk_issue_assignee_not_blank check (assignee_agent_name is null or (length(trim(assignee_agent_name)) > 0 and assignee_agent_name = btrim(assignee_agent_name))),
-    constraint chk_issue_reviewer_not_blank check (reviewer_agent_name is null or (length(trim(reviewer_agent_name)) > 0 and reviewer_agent_name = btrim(reviewer_agent_name))),
-    constraint chk_issue_number check (number >= 1),
-    constraint chk_issue_status check (status in ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CANCELED')),
-    constraint chk_issue_version check (version >= 0),
-    constraint chk_issue_spec_revision check (spec_revision >= 0),
-    constraint chk_issue_input_sequence check (input_sequence >= 0),
-    constraint chk_issue_archived_status check (archived_at is null or status in ('DONE', 'CANCELED'))
+    constraint uk_project_issue_project_number unique (project_id, number),
+    constraint uk_project_issue_id_project unique (id, project_id),
+    constraint chk_project_issue_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
+    constraint chk_project_issue_description_len check (octet_length(description) <= 65536),
+    constraint chk_project_issue_assignee_not_blank check (assignee_agent_name is null or (length(trim(assignee_agent_name)) > 0 and assignee_agent_name = btrim(assignee_agent_name))),
+    constraint chk_project_issue_reviewer_not_blank check (reviewer_agent_name is null or (length(trim(reviewer_agent_name)) > 0 and reviewer_agent_name = btrim(reviewer_agent_name))),
+    constraint chk_project_issue_number check (number >= 1),
+    constraint chk_project_issue_status check (status in ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED', 'DONE', 'CANCELED')),
+    constraint chk_project_issue_version check (version >= 0),
+    constraint chk_project_issue_archived_status check (archived_at is null or status in ('DONE', 'CANCELED'))
 );
 
-create index idx_issue_project on issue (project_id);
-create index idx_issue_project_status on issue (project_id, status);
+create index idx_project_issue_project on project_issue (project_id);
+create index idx_project_issue_project_status on project_issue (project_id, status);
 
-comment on table issue is 'Issue 核心实体：六态生命周期、执行/评审分配及游标版本';
-comment on column issue.id is 'Issue UUID 主键（应用生成）';
-comment on column issue.project_id is '归属项目 UUID';
-comment on column issue.number is '项目内单调递增编号，>= 1';
-comment on column issue.title is 'Issue 标题';
-comment on column issue.description is 'Issue 规格说明与验收要求描述';
-comment on column issue.status is '状态：BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, DONE, CANCELED';
-comment on column issue.assignee_agent_name is '分配执行者 Agent 名称（可空）';
-comment on column issue.reviewer_agent_name is '分配评审者 Agent 名称（可空，空表示人工评审）';
-comment on column issue.version is '乐观锁行版本，>= 0';
-comment on column issue.spec_revision is '规格版本游标，>= 0';
-comment on column issue.input_sequence is '输入序列游标，>= 0';
-comment on column issue.archived_at is '归档时间戳（仅允许终态 Issue 归档）';
+comment on table project_issue is 'Issue 核心实体：七态生命周期与执行/审查角色分配';
+comment on column project_issue.id is 'Issue UUID 主键（应用生成）';
+comment on column project_issue.project_id is '归属项目 UUID';
+comment on column project_issue.number is '项目内单调递增编号，>= 1';
+comment on column project_issue.title is 'Issue 标题';
+comment on column project_issue.description is 'Issue 当前要求、约束与验收依据描述';
+comment on column project_issue.status is '状态：BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, BLOCKED, DONE, CANCELED';
+comment on column project_issue.assignee_agent_name is '执行者（EXECUTOR）Agent 名称（可空）';
+comment on column project_issue.reviewer_agent_name is '审查者（REVIEWER）Agent 名称（可空，空表示人工审查）';
+comment on column project_issue.version is '乐观锁行版本，>= 0';
+comment on column project_issue.archived_at is '归档时间戳（仅允许终态 Issue 归档；BLOCKED 不允许归档）';
 
 ------------------------------------------------------------------------------
 -- Issue dependencies
 ------------------------------------------------------------------------------
-create table issue_dependency (
+create table project_issue_dependency (
     issue_id            uuid          not null,
     depends_on_issue_id uuid          not null,
     project_id          uuid          not null,
     created_at          timestamptz(3) not null default clock_timestamp(),
-    constraint pk_issue_dependency primary key (issue_id, depends_on_issue_id),
-    constraint fk_issue_dependency_issue foreign key (issue_id, project_id)
-        references issue (id, project_id) on delete restrict,
-    constraint fk_issue_dependency_depends_on foreign key (depends_on_issue_id, project_id)
-        references issue (id, project_id) on delete restrict,
-    constraint chk_issue_dependency_no_self check (issue_id <> depends_on_issue_id)
+    constraint pk_project_issue_dependency primary key (issue_id, depends_on_issue_id),
+    constraint fk_project_issue_dependency_issue foreign key (issue_id, project_id)
+        references project_issue (id, project_id) on delete restrict,
+    constraint fk_project_issue_dependency_depends_on foreign key (depends_on_issue_id, project_id)
+        references project_issue (id, project_id) on delete restrict,
+    constraint chk_project_issue_dependency_no_self check (issue_id <> depends_on_issue_id)
 );
 
-create index idx_issue_dependency_depends_on on issue_dependency (depends_on_issue_id);
-create index idx_issue_dependency_project on issue_dependency (project_id);
+create index idx_project_issue_dependency_depends_on on project_issue_dependency (depends_on_issue_id);
+create index idx_project_issue_dependency_project on project_issue_dependency (project_id);
 
-comment on table issue_dependency is 'Issue 间依赖边：复合外键保障同项目，禁止自环';
-comment on column issue_dependency.issue_id is '被阻塞 Issue UUID';
-comment on column issue_dependency.depends_on_issue_id is '前提 Issue UUID';
-comment on column issue_dependency.project_id is '冗余项目 UUID，保证依赖两端必须归属同一项目';
+comment on table project_issue_dependency is 'Issue 间依赖边：复合外键保障同项目，禁止自环';
+comment on column project_issue_dependency.issue_id is '被阻塞 Issue UUID';
+comment on column project_issue_dependency.depends_on_issue_id is '前提 Issue UUID';
+comment on column project_issue_dependency.project_id is '冗余项目 UUID，保证依赖两端必须归属同一项目';
 
 ------------------------------------------------------------------------------
--- Issue inputs
+-- Stable Issue + Agent session and work branch ownership
+--
+-- 同一 Issue 的不同 Agent 各有独立 Session 与工作 Branch；同一 (Issue, Agent) 的
+-- 后续 Run 复用自己的 Session 和工作 Branch，Run 每次新建。Session owner 绑定这条
+-- 稳定关联，而不是会终结的 Run。
 ------------------------------------------------------------------------------
-create table issue_input (
-    issue_id        uuid          not null,
-    sequence        bigint        not null,
-    kind            varchar(32)   not null,
-    body            text          not null,
-    idempotency_key varchar(128),
-    created_at      timestamptz(3) not null default clock_timestamp(),
-    constraint pk_issue_input primary key (issue_id, sequence),
-    constraint fk_issue_input_issue foreign key (issue_id)
-        references issue (id) on delete restrict,
-    constraint uk_issue_input_idempotency unique (issue_id, idempotency_key),
-    constraint chk_issue_input_sequence check (sequence >= 1),
-    constraint chk_issue_input_kind check (kind in ('HUMAN', 'REVIEW_FEEDBACK', 'RETRY', 'SYSTEM')),
-    constraint chk_issue_input_body_not_blank check (length(trim(body)) > 0),
-    constraint chk_issue_input_body_len check (octet_length(body) <= 1048576),
-    constraint chk_issue_input_idempotency_not_blank check (idempotency_key is null or (length(trim(idempotency_key)) > 0 and idempotency_key = btrim(idempotency_key)))
+create table project_issue_agent_session (
+    id          uuid          not null,
+    issue_id    uuid          not null,
+    agent_name  varchar(128)  not null,
+    session_id  uuid          not null,
+    thread_id   uuid          not null,
+    created_at  timestamptz(3) not null default clock_timestamp(),
+    updated_at  timestamptz(3) not null default clock_timestamp(),
+    constraint pk_project_issue_agent_session primary key (id),
+    constraint fk_project_issue_agent_session_issue foreign key (issue_id)
+        references project_issue (id) on delete restrict,
+    constraint fk_project_issue_agent_session_agent foreign key (agent_name)
+        references agent_definition (name) on delete restrict,
+    -- 归属行先于 Harness Session/Thread 建立（owner 授权要求归属先存在），三者在同一次接受、同一物理事务内提交，
+    -- 形成无法用插入顺序化解的循环依赖，因此这两个外键延迟到提交时校验；删除侧 ON DELETE RESTRICT 仍立即生效，
+    -- 完整性不变：Session/Thread 被删除前必须已由 SessionDeletionOrchestrator 先行移除归属关系。
+    constraint fk_project_issue_agent_session_session foreign key (session_id)
+        references harness_session (id) on delete restrict deferrable initially deferred,
+    constraint fk_project_issue_agent_session_thread foreign key (thread_id)
+        references harness_thread (id) on delete restrict deferrable initially deferred,
+    constraint uk_project_issue_agent_session_issue_agent unique (issue_id, agent_name),
+    constraint uk_project_issue_agent_session_id_issue unique (id, issue_id),
+    constraint uk_project_issue_agent_session_session unique (session_id),
+    constraint uk_project_issue_agent_session_thread unique (thread_id),
+    constraint chk_project_issue_agent_session_agent_not_blank check (
+        length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)
+    )
 );
 
-comment on table issue_input is 'Issue 追加输入流：人类输入、评审反馈、重试标记与系统指令';
-comment on column issue_input.issue_id is '关联 Issue UUID';
-comment on column issue_input.sequence is 'Issue 内单调递增序号，>= 1';
-comment on column issue_input.kind is '输入类别：HUMAN, REVIEW_FEEDBACK, RETRY, SYSTEM';
-comment on column issue_input.body is '输入正文纯文本（最大 1 MiB）';
-comment on column issue_input.idempotency_key is '同 Issue 幂等键';
+comment on table project_issue_agent_session is 'Issue+Agent 稳定归属：唯一的 (issue_id, agent_name) 到 Session 与工作 Branch 的绑定';
+comment on column project_issue_agent_session.id is '归属 UUID 主键（应用生成），作为 session_owner 的 owner 标识';
+comment on column project_issue_agent_session.issue_id is '归属 Issue UUID';
+comment on column project_issue_agent_session.agent_name is 'Issue 参与者身份（不是模型名）';
+comment on column project_issue_agent_session.session_id is '该 Agent 在该 Issue 上的私有 Harness Session';
+comment on column project_issue_agent_session.thread_id is '该 Agent 在该 Issue 上的工作 Branch（Harness Thread）';
 
 ------------------------------------------------------------------------------
 -- Issue runs
 ------------------------------------------------------------------------------
-create table issue_run (
-    id                      uuid          not null,
-    issue_id                uuid          not null,
-    ordinal                 bigint        not null,
-    role                    varchar(32)   not null,
-    actor_type              varchar(32)   not null,
-    agent_name              varchar(128),
-    submission_run_id       uuid,
-    status                  varchar(32)   not null,
-    outcome                 varchar(32),
-    observed_spec_revision  bigint        not null default 0,
-    observed_input_sequence bigint        not null default 0,
-    continuation_count      int           not null default 0,
-    max_continuations       int           not null default 10,
-    deadline                timestamptz(3),
-    waiting_reason          text,
-    result                  jsonb,
-    terminal_action_id      varchar(255),
-    version                 bigint        not null default 0,
-    created_at              timestamptz(3) not null default clock_timestamp(),
-    updated_at              timestamptz(3) not null default clock_timestamp(),
-    completed_at            timestamptz(3),
-    constraint pk_issue_run primary key (id),
-    constraint fk_issue_run_issue foreign key (issue_id)
-        references issue (id) on delete restrict,
-    constraint fk_issue_run_agent foreign key (agent_name)
+create table project_issue_run (
+    id                         uuid          not null,
+    issue_id                   uuid          not null,
+    ordinal                    bigint        not null,
+    role                       varchar(32)   not null,
+    agent_name                 varchar(128)  not null,
+    submission_run_id          uuid,
+    status                     varchar(32)   not null,
+    outcome                    varchar(32),
+    observed_activity_sequence bigint        not null default 0,
+    continuation_count         int           not null default 0,
+    max_continuations          int           not null default 10,
+    deadline                   timestamptz(3),
+    waiting_reason             text,
+    result                     jsonb,
+    terminal_action_id         varchar(255),
+    version                    bigint        not null default 0,
+    created_at                 timestamptz(3) not null default clock_timestamp(),
+    updated_at                 timestamptz(3) not null default clock_timestamp(),
+    completed_at               timestamptz(3),
+    constraint pk_project_issue_run primary key (id),
+    constraint fk_project_issue_run_issue foreign key (issue_id)
+        references project_issue (id) on delete restrict,
+    constraint fk_project_issue_run_agent foreign key (agent_name)
         references agent_definition (name) on delete restrict,
-    constraint uk_issue_run_issue_ordinal unique (issue_id, ordinal),
-    constraint uk_issue_run_id_issue unique (id, issue_id),
-    constraint fk_issue_run_submission foreign key (submission_run_id, issue_id)
-        references issue_run (id, issue_id) on delete restrict,
-    constraint uk_issue_run_terminal_action unique (terminal_action_id),
-    constraint chk_issue_run_ordinal check (ordinal >= 1),
-    constraint chk_issue_run_role check (
-        (role = 'EXECUTOR' and actor_type = 'AGENT' and submission_run_id is null) or
-        (role = 'REVIEWER' and submission_run_id is not null and (actor_type <> 'HUMAN' or status = 'COMPLETED'))
+    constraint uk_project_issue_run_issue_ordinal unique (issue_id, ordinal),
+    constraint uk_project_issue_run_id_issue unique (id, issue_id),
+    constraint fk_project_issue_run_submission foreign key (submission_run_id, issue_id)
+        references project_issue_run (id, issue_id) on delete restrict,
+    constraint uk_project_issue_run_terminal_action unique (terminal_action_id),
+    constraint chk_project_issue_run_ordinal check (ordinal >= 1),
+    constraint chk_project_issue_run_role check (
+        (role = 'EXECUTOR' and submission_run_id is null) or
+        (role = 'REVIEWER' and submission_run_id is not null)
     ),
-    constraint chk_issue_run_actor_agent check (
-        (actor_type = 'AGENT' and agent_name is not null and length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)) or
-        (actor_type = 'HUMAN' and agent_name is null)
+    constraint chk_project_issue_run_agent_not_blank check (
+        length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)
     ),
-    constraint chk_issue_run_status check (status in ('RUNNING', 'WAITING_HUMAN', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
-    constraint chk_issue_run_outcome check (outcome is null or outcome in ('SUBMITTED', 'APPROVED', 'CHANGES_REQUESTED')),
-    constraint chk_issue_run_observed_spec check (observed_spec_revision >= 0),
-    constraint chk_issue_run_observed_input check (observed_input_sequence >= 0),
-    constraint chk_issue_run_continuation_limit check (
+    constraint chk_project_issue_run_status check (status in ('RUNNING', 'WAITING_HUMAN', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
+    constraint chk_project_issue_run_outcome check (outcome is null or outcome in ('SUBMITTED', 'APPROVED', 'CHANGES_REQUESTED')),
+    constraint chk_project_issue_run_observed_activity check (observed_activity_sequence >= 0),
+    constraint chk_project_issue_run_continuation_limit check (
         continuation_count >= 0 and max_continuations >= 0 and continuation_count <= max_continuations
     ),
-    constraint chk_issue_run_version check (version >= 0),
-    constraint chk_issue_run_terminal_action_not_blank check (
+    constraint chk_project_issue_run_version check (version >= 0),
+    constraint chk_project_issue_run_terminal_action_not_blank check (
         terminal_action_id is null or (length(trim(terminal_action_id)) > 0 and terminal_action_id = btrim(terminal_action_id))
     ),
-    constraint chk_issue_run_waiting_reason_len check (
+    constraint chk_project_issue_run_waiting_reason_len check (
         waiting_reason is null or (length(trim(waiting_reason)) > 0 and octet_length(waiting_reason) <= 16384 and waiting_reason = btrim(waiting_reason))
     ),
-    constraint chk_issue_run_result_len check (result is null or octet_length(result::text) <= 65536),
-    constraint chk_issue_run_lifecycle check (
+    constraint chk_project_issue_run_result_len check (result is null or octet_length(result::text) <= 65536),
+    constraint chk_project_issue_run_lifecycle check (
         (
             status = 'RUNNING' and
             waiting_reason is null and
@@ -1399,43 +1408,111 @@ create table issue_run (
     )
 );
 
-create unique index uk_issue_run_single_active on issue_run (issue_id)
+create unique index uk_project_issue_run_single_active on project_issue_run (issue_id)
     where status in ('RUNNING', 'WAITING_HUMAN');
-create index idx_issue_run_issue on issue_run (issue_id);
+create index idx_project_issue_run_issue on project_issue_run (issue_id);
 
-comment on table issue_run is 'IssueRun 运行实体：执行/评审周期记录与围栏状态';
-comment on column issue_run.id is 'Run UUID 主键（应用生成）';
-comment on column issue_run.issue_id is '归属 Issue UUID';
-comment on column issue_run.ordinal is 'Issue 内单调运行编号，>= 1';
-comment on column issue_run.role is '角色：EXECUTOR, REVIEWER';
-comment on column issue_run.actor_type is '行为者类型：AGENT, HUMAN';
-comment on column issue_run.agent_name is '冻结的 AgentDefinition 名称（AGENT 必填，HUMAN 为空）';
-comment on column issue_run.submission_run_id is 'REVIEWER 必填，指向被评审的 EXECUTOR Run（同 Issue 约束）';
-comment on column issue_run.status is '状态：RUNNING, WAITING_HUMAN, COMPLETED, FAILED, CANCELLED, UNKNOWN';
-comment on column issue_run.outcome is '终态结果：SUBMITTED, APPROVED, CHANGES_REQUESTED';
-comment on column issue_run.observed_spec_revision is '观察到的 spec revision 游标';
-comment on column issue_run.observed_input_sequence is '观察到的 input sequence 游标';
-comment on column issue_run.continuation_count is '已投递 continuation 计数';
-comment on column issue_run.max_continuations is '允许最大 continuation 计数';
-comment on column issue_run.deadline is 'Run 绝对截止时间戳';
-comment on column issue_run.waiting_reason is '等待或失败原因说明（最大 16 KiB）';
-comment on column issue_run.result is '终态结构化结果 JSONB（最大 64 KiB）';
-comment on column issue_run.terminal_action_id is '终态动作唯一幂等标识';
+comment on table project_issue_run is 'IssueRun 运行实体：执行/审查周期记录与围栏状态；人的审查动作不伪造 Agent Run';
+comment on column project_issue_run.id is 'Run UUID 主键（应用生成）';
+comment on column project_issue_run.issue_id is '归属 Issue UUID';
+comment on column project_issue_run.ordinal is 'Issue 内单调运行编号，>= 1';
+comment on column project_issue_run.role is '职责：EXECUTOR, REVIEWER';
+comment on column project_issue_run.agent_name is '冻结的 AgentDefinition 名称，即 Issue 参与者身份';
+comment on column project_issue_run.submission_run_id is 'REVIEWER 必填，指向被审查的 EXECUTOR Run（同 Issue 约束）';
+comment on column project_issue_run.status is '状态：RUNNING, WAITING_HUMAN, COMPLETED, FAILED, CANCELLED, UNKNOWN';
+comment on column project_issue_run.outcome is '终态业务结果：SUBMITTED, APPROVED, CHANGES_REQUESTED';
+comment on column project_issue_run.observed_activity_sequence is '已投递的 Activity sequence 游标';
+comment on column project_issue_run.continuation_count is '已投递 continuation 计数';
+comment on column project_issue_run.max_continuations is '允许最大 continuation 计数';
+comment on column project_issue_run.deadline is 'Run 绝对截止时间戳';
+comment on column project_issue_run.waiting_reason is '等待或失败原因说明（最大 16 KiB）';
+comment on column project_issue_run.result is '终态结构化结果 JSONB（最大 64 KiB）';
+comment on column project_issue_run.terminal_action_id is '终态动作唯一幂等标识';
+
+------------------------------------------------------------------------------
+-- Issue Activity
+--
+-- Activity 是 Issue 唯一有序事实流：一条记录保留类型、操作者、目标角色/Run（若有）、
+-- 相关 Run/提交、正文、时间与幂等键。投递游标指向本表的 sequence，因此不再另存
+-- 规格版本或计数；打回次数由本表按“不同有效提交”确定性计算。
+------------------------------------------------------------------------------
+create table project_issue_activity (
+    issue_id          uuid          not null,
+    sequence          bigint        not null,
+    kind              varchar(32)   not null,
+    actor_type        varchar(32)   not null,
+    actor_agent_name  varchar(128),
+    target_role       varchar(32),
+    run_id            uuid,
+    submission_run_id uuid,
+    decision          varchar(32),
+    body              text          not null,
+    idempotency_key   varchar(128),
+    created_at        timestamptz(3) not null default clock_timestamp(),
+    constraint pk_project_issue_activity primary key (issue_id, sequence),
+    constraint fk_project_issue_activity_issue foreign key (issue_id)
+        references project_issue (id) on delete restrict,
+    constraint fk_project_issue_activity_agent foreign key (actor_agent_name)
+        references agent_definition (name) on delete restrict,
+    constraint fk_project_issue_activity_run foreign key (run_id, issue_id)
+        references project_issue_run (id, issue_id) on delete restrict,
+    constraint fk_project_issue_activity_submission foreign key (submission_run_id, issue_id)
+        references project_issue_run (id, issue_id) on delete restrict,
+    constraint uk_project_issue_activity_idempotency unique (issue_id, idempotency_key),
+    constraint chk_project_issue_activity_sequence check (sequence >= 1),
+    constraint chk_project_issue_activity_kind check (
+        kind in ('SPEC_CHANGE', 'INSTRUCTION', 'COMMENT', 'HUMAN_INPUT', 'REVIEW_DECISION', 'RECOVERY', 'RETRY', 'SYSTEM')
+    ),
+    constraint chk_project_issue_activity_actor check (
+        (actor_type = 'AGENT' and actor_agent_name is not null and length(trim(actor_agent_name)) > 0 and actor_agent_name = btrim(actor_agent_name)) or
+        (actor_type in ('HUMAN', 'SYSTEM') and actor_agent_name is null)
+    ),
+    constraint chk_project_issue_activity_target_role check (
+        target_role is null or target_role in ('EXECUTOR', 'REVIEWER')
+    ),
+    constraint chk_project_issue_activity_decision check (
+        decision is null or decision in ('APPROVE', 'REQUEST_CHANGES')
+    ),
+    constraint chk_project_issue_activity_decision_shape check (
+        (kind = 'REVIEW_DECISION' and decision is not null and submission_run_id is not null) or
+        (kind <> 'REVIEW_DECISION' and decision is null and submission_run_id is null)
+    ),
+    constraint chk_project_issue_activity_body_shape check (
+        body = btrim(body)
+        and (kind in ('SPEC_CHANGE', 'REVIEW_DECISION') or length(trim(body)) > 0)
+    ),
+    constraint chk_project_issue_activity_body_len check (octet_length(body) <= 1048576),
+    constraint chk_project_issue_activity_idempotency_not_blank check (
+        idempotency_key is null or (length(trim(idempotency_key)) > 0 and idempotency_key = btrim(idempotency_key))
+    )
+);
+
+comment on table project_issue_activity is 'Issue 有序幂等事实流：要求修改、指示、评论、人工输入、审查决定、人工恢复、重试与系统指令';
+comment on column project_issue_activity.issue_id is '关联 Issue UUID';
+comment on column project_issue_activity.sequence is 'Issue 内单调递增序号，>= 1，同时是输入投递位置';
+comment on column project_issue_activity.kind is '类型：SPEC_CHANGE, INSTRUCTION, COMMENT, HUMAN_INPUT, REVIEW_DECISION, RECOVERY, RETRY, SYSTEM';
+comment on column project_issue_activity.actor_type is '操作者类型：AGENT, HUMAN, SYSTEM';
+comment on column project_issue_activity.actor_agent_name is '操作者 Agent 身份（AGENT 必填，HUMAN/SYSTEM 为空）';
+comment on column project_issue_activity.target_role is '定向目标职责 EXECUTOR/REVIEWER（可空表示无目标）';
+comment on column project_issue_activity.run_id is '相关 Run（同 Issue 约束，可空）';
+comment on column project_issue_activity.submission_run_id is '正式审查决定绑定的被审查提交 Run（仅 REVIEW_DECISION）';
+comment on column project_issue_activity.decision is '正式审查决定：APPROVE, REQUEST_CHANGES（仅 REVIEW_DECISION）';
+comment on column project_issue_activity.body is '正文纯文本（最大 1 MiB，不含首尾空白）：要求修改与审查决定允许空正文，其余类型必须非空白';
+comment on column project_issue_activity.idempotency_key is '同 Issue 幂等键，重放同一动作不产生新记录';
 
 ------------------------------------------------------------------------------
 -- Session ownership
 --
 -- 一行只允许一个非空 owner 外键，以关系约束直接表达排他弧；session_id 主键保证
--- Chat、Canvas、Project、IssueRun 四类 owner 全局互斥。Project 和 IssueRun 额外
--- 唯一，分别至多绑定一个长期 Session；Chat 和 Canvas 可以持有多个 Session。
+-- Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。IssueAgentSession owner 唯一，
+-- 使同一 (Issue, Agent) 的独立 Session 稳定复用于后续 Run。
 ------------------------------------------------------------------------------
 create table session_owner (
-    session_id   uuid          not null,
-    chat_id      uuid,
-    canvas_id    uuid,
-    project_id   uuid,
-    issue_run_id uuid,
-    created_at   timestamptz(3) not null default clock_timestamp(),
+    session_id             uuid          not null,
+    chat_id                uuid,
+    canvas_id              uuid,
+    issue_agent_session_id uuid,
+    created_at             timestamptz(3) not null default clock_timestamp(),
     constraint pk_session_owner primary key (session_id),
     constraint fk_session_owner_session foreign key (session_id)
         references harness_session (id) on delete restrict,
@@ -1443,14 +1520,11 @@ create table session_owner (
         references chat (id) on delete restrict,
     constraint fk_session_owner_canvas foreign key (canvas_id)
         references canvas_document (id) on delete restrict,
-    constraint fk_session_owner_project foreign key (project_id)
-        references project (id) on delete restrict,
-    constraint fk_session_owner_issue_run foreign key (issue_run_id)
-        references issue_run (id) on delete restrict,
-    constraint uk_session_owner_project unique (project_id),
-    constraint uk_session_owner_issue_run unique (issue_run_id),
+    constraint fk_session_owner_issue_agent_session foreign key (issue_agent_session_id)
+        references project_issue_agent_session (id) on delete restrict,
+    constraint uk_session_owner_issue_agent_session unique (issue_agent_session_id),
     constraint ck_session_owner_exactly_one check (
-        num_nonnulls(chat_id, canvas_id, project_id, issue_run_id) = 1
+        num_nonnulls(chat_id, canvas_id, issue_agent_session_id) = 1
     )
 );
 
@@ -1462,62 +1536,61 @@ create index idx_session_owner_canvas
     on session_owner (canvas_id, created_at desc, session_id desc)
     where canvas_id is not null;
 
-comment on table session_owner is 'Harness Session 的产品归属排他弧：每行恰有一个 Chat、Canvas、Project 或 IssueRun owner';
+comment on table session_owner is 'Harness Session 的产品归属排他弧：每行恰有一个 Chat、Canvas 或 IssueAgentSession owner';
 comment on column session_owner.session_id is 'Harness Session UUID（主键，全局至多一个 owner）';
 comment on column session_owner.chat_id is 'Chat owner；非空时其他 owner 列必须为空';
 comment on column session_owner.canvas_id is 'Canvas owner；非空时其他 owner 列必须为空';
-comment on column session_owner.project_id is 'Project owner；非空时其他 owner 列必须为空，且每 Project 至多一行';
-comment on column session_owner.issue_run_id is 'IssueRun owner；非空时其他 owner 列必须为空，且每 IssueRun 至多一行';
+comment on column session_owner.issue_agent_session_id is 'Issue+Agent 稳定归属 owner；非空时其他 owner 列必须为空，且每条归属至多一行';
 comment on column session_owner.created_at is '归属边建立时间（毫秒精度）';
 comment on index idx_session_owner_chat is '按 Chat 枚举 Session，覆盖最近归属优先排序';
 comment on index idx_session_owner_canvas is '按 Canvas 枚举 Session，覆盖最近归属优先排序';
 
 ------------------------------------------------------------------------------
--- Issue Controller work
+-- Issue work
 ------------------------------------------------------------------------------
-create table issue_controller_work (
+create table project_issue_work (
     issue_id     uuid          not null,
     wake_version bigint        not null default 1,
     due_at       timestamptz(3) not null default clock_timestamp(),
     lease_token  varchar(128),
     lease_until  timestamptz(3),
     updated_at   timestamptz(3) not null default clock_timestamp(),
-    constraint pk_issue_controller_work primary key (issue_id),
-    constraint fk_issue_controller_work_issue foreign key (issue_id)
-        references issue (id) on delete restrict,
-    constraint chk_issue_controller_work_wake check (wake_version > 0),
-    constraint chk_issue_controller_work_lease check (
+    constraint pk_project_issue_work primary key (issue_id),
+    constraint fk_project_issue_work_issue foreign key (issue_id)
+        references project_issue (id) on delete restrict,
+    constraint chk_project_issue_work_wake check (wake_version > 0),
+    constraint chk_project_issue_work_lease check (
         (lease_token is null and lease_until is null) or
         (lease_token is not null and lease_until is not null and length(trim(lease_token)) > 0 and length(trim(lease_token)) <= 128 and lease_token = btrim(lease_token))
     )
 );
 
-create index idx_issue_controller_work_due on issue_controller_work (due_at);
+create index idx_project_issue_work_due on project_issue_work (due_at);
 
-comment on table issue_controller_work is 'Issue Controller 调度工作：每 Issue 最多单行，确定性 lease/wake 围栏';
-comment on column issue_controller_work.issue_id is '所属 Issue UUID（主键）';
-comment on column issue_controller_work.wake_version is '唤醒版本号，每次请求唤醒递增，> 0';
-comment on column issue_controller_work.due_at is '下次可调度时间戳';
-comment on column issue_controller_work.lease_token is '当前持有节点租约令牌';
-comment on column issue_controller_work.lease_until is '租约截止时间戳';
-comment on column issue_controller_work.updated_at is '更新时间戳';
+comment on table project_issue_work is 'Issue 调度工作：每 Issue 最多单行，确定性 lease/wake 围栏';
+comment on column project_issue_work.issue_id is '所属 Issue UUID（主键）';
+comment on column project_issue_work.wake_version is '唤醒版本号，每次请求唤醒递增，> 0';
+comment on column project_issue_work.due_at is '下次可调度时间戳';
+comment on column project_issue_work.lease_token is '当前持有节点租约令牌';
+comment on column project_issue_work.lease_until is '租约截止时间戳';
+comment on column project_issue_work.updated_at is '更新时间戳';
 
 ------------------------------------------------------------------------------
--- Issue Controller due-work notification hint
+-- Issue work due notification hint
 ------------------------------------------------------------------------------
-create or replace function notify_issue_controller_work_due()
+create or replace function notify_project_issue_work_due()
 returns trigger as $$
 begin
     if new.due_at <= clock_timestamp() and (new.lease_until is null or new.lease_until <= clock_timestamp()) then
-        perform pg_notify('issue_controller_work_due', new.issue_id::text);
+        perform pg_notify('project_issue_work_due', new.issue_id::text);
     end if;
     return new;
 end;
 $$ language plpgsql;
 
-create trigger trg_issue_controller_work_due
-    after insert or update on issue_controller_work
-    for each row execute function notify_issue_controller_work_due();
+create trigger trg_project_issue_work_due
+    after insert or update on project_issue_work
+    for each row execute function notify_project_issue_work_due();
 
 ------------------------------------------------------------------------------
 -- 4. Project/Issue snapshot invalidation hint
@@ -1530,8 +1603,8 @@ returns trigger as $$
 declare
     target_project_id uuid;
     target_issue_id uuid;
-    target_run_id uuid;
-    target_session_id uuid;
+    target_thread_id uuid;
+    target_agent_session_id uuid;
 begin
     if tg_table_name = 'project' then
         if tg_op = 'DELETE' then
@@ -1539,58 +1612,44 @@ begin
         else
             target_project_id := new.id;
         end if;
-    elsif tg_table_name in ('issue', 'issue_dependency') then
+    elsif tg_table_name in ('project_issue', 'project_issue_dependency') then
         if tg_op = 'DELETE' then
             target_project_id := old.project_id;
         else
             target_project_id := new.project_id;
         end if;
-    elsif tg_table_name in ('issue_input', 'issue_run') then
+    elsif tg_table_name in ('project_issue_activity', 'project_issue_run', 'project_issue_agent_session') then
         if tg_op = 'DELETE' then
             target_issue_id := old.issue_id;
         else
             target_issue_id := new.issue_id;
         end if;
-        select project_id into target_project_id
-        from issue
-        where id = target_issue_id;
     elsif tg_table_name = 'session_owner' then
         if tg_op = 'DELETE' then
-            if old.project_id is not null then
-                target_project_id := old.project_id;
-            else
-                target_run_id := old.issue_run_id;
-            end if;
+            target_agent_session_id := old.issue_agent_session_id;
         else
-            if new.project_id is not null then
-                target_project_id := new.project_id;
-            else
-                target_run_id := new.issue_run_id;
-            end if;
+            target_agent_session_id := new.issue_agent_session_id;
         end if;
-        if target_project_id is null and target_run_id is not null then
-            select i.project_id into target_project_id
-            from issue_run r
-            join issue i on i.id = r.issue_id
-            where r.id = target_run_id;
+        if target_agent_session_id is not null then
+            select pias.issue_id into target_issue_id
+            from project_issue_agent_session pias
+            where pias.id = target_agent_session_id;
         end if;
     elsif tg_table_name = 'harness_thread' then
         if tg_op = 'DELETE' then
-            target_session_id := old.session_id;
+            target_thread_id := old.id;
         else
-            target_session_id := new.session_id;
+            target_thread_id := new.id;
         end if;
-        select project_id into target_project_id
-        from session_owner
-        where session_id = target_session_id;
+        select pias.issue_id into target_issue_id
+        from project_issue_agent_session pias
+        where pias.thread_id = target_thread_id;
+    end if;
 
-        if target_project_id is null then
-            select i.project_id into target_project_id
-            from session_owner so
-            join issue_run r on r.id = so.issue_run_id
-            join issue i on i.id = r.issue_id
-            where so.session_id = target_session_id;
-        end if;
+    if target_project_id is null and target_issue_id is not null then
+        select pi.project_id into target_project_id
+        from project_issue pi
+        where pi.id = target_issue_id;
     end if;
 
     if target_project_id is not null then
@@ -1605,19 +1664,23 @@ create trigger trg_project_issue_changed_project
     for each row execute function project_issue_changed_notify();
 
 create trigger trg_project_issue_changed_issue
-    after insert or update or delete on issue
+    after insert or update or delete on project_issue
     for each row execute function project_issue_changed_notify();
 
 create trigger trg_project_issue_changed_dependency
-    after insert or update or delete on issue_dependency
+    after insert or update or delete on project_issue_dependency
     for each row execute function project_issue_changed_notify();
 
-create trigger trg_project_issue_changed_input
-    after insert or update or delete on issue_input
+create trigger trg_project_issue_changed_activity
+    after insert or update or delete on project_issue_activity
     for each row execute function project_issue_changed_notify();
 
 create trigger trg_project_issue_changed_run
-    after insert or update or delete on issue_run
+    after insert or update or delete on project_issue_run
+    for each row execute function project_issue_changed_notify();
+
+create trigger trg_project_issue_changed_agent_session
+    after insert or update or delete on project_issue_agent_session
     for each row execute function project_issue_changed_notify();
 
 create trigger trg_project_issue_changed_session_owner

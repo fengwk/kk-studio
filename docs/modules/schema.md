@@ -37,8 +37,7 @@ erDiagram
     SESSION_OWNER }o--|| HARNESS_SESSION : binds
     SESSION_OWNER }o--o| CANVAS_DOCUMENT : canvas_owner
     SESSION_OWNER }o--o| CHAT : chat_owner
-    SESSION_OWNER }o--o| PROJECT : project_owner
-    SESSION_OWNER }o--o| ISSUE_RUN : issue_run_owner
+    SESSION_OWNER }o--o| ISSUE_AGENT_SESSION : issue_agent_session_owner
     CANVAS_DOCUMENT ||--o{ CANVAS_NODE : contains
     CANVAS_DOCUMENT ||--o{ CANVAS_GROUP : contains
     CANVAS_NODE ||--o{ CANVAS_LINK : links
@@ -48,11 +47,12 @@ erDiagram
     STORAGE_BLOB ||--o{ CANVAS_RESOURCE : backs
     STORAGE_BLOB ||--o{ STORAGE_UPLOAD : completes_to
     STORAGE_BLOB ||--o{ SESSION_BLOB_REF : retained_by
-    PROJECT ||--o{ ISSUE : contains
-    ISSUE ||--o{ ISSUE_DEPENDENCY : blocked_side
-    ISSUE ||--o{ ISSUE_INPUT : receives
-    ISSUE ||--o{ ISSUE_RUN : attempts
-    ISSUE ||--o| ISSUE_CONTROLLER_WORK : schedules
+    PROJECT ||--o{ PROJECT_ISSUE : contains
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_DEPENDENCY : blocked_side
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_ACTIVITY : receives
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_AGENT_SESSION : binds
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_RUN : attempts
+    PROJECT_ISSUE ||--o| PROJECT_ISSUE_WORK : schedules
 ```
 
 `storage_upload.completes_to` 表达的是 PENDING → READY 的状态迁移（`blob_id` 由空变非空），不是级联关系：`blob_id` 是 RESTRICT 外键，而 PENDING 时预分配的 `candidate_blob_id` 故意不建外键，因为 blob 行要到 complete 时才创建。同理 `chat.agent_name` 也没有外键，理由写在列注释里。
@@ -66,7 +66,7 @@ erDiagram
 | MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控） |
 | Environment | `environment`、`environment_connection` |
 | Chat / Canvas | `chat`、`canvas_document`、`canvas_group`、`canvas_node`、`canvas_link`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
-| Project / Issue | `project`、`issue`、`issue_dependency`、`issue_input`、`issue_run`、`issue_controller_work` |
+| Project / Issue | `project`、`project_issue`、`project_issue_dependency`、`project_issue_activity`、`project_issue_agent_session`、`project_issue_run`、`project_issue_work` |
 | Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
 | Session 归属 | 单行排他弧 `session_owner` |
 | Global Storage | `storage_blob`、`storage_upload`、`session_blob_ref` |
@@ -150,7 +150,7 @@ Plugin opaque payload，不按 provider token 字段建列；管理查询永远�
 
 ### Session 全局唯一归属
 
-`session_owner` 每行恰好一个非空 owner 列（`ck_session_owner_exactly_one`：`num_nonnulls(chat_id, canvas_id, project_id, issue_run_id) = 1`），`session_id` 是 PK，因此一个 Session 全局至多属于一个产品 owner。Project 与 IssueRun 另有 unique 约束，保证各自至多绑定一个长期 Session；Chat 与 Canvas 可以持有多个 Session。整个约束不需要 guard 表或归属 trigger。
+`session_owner` 每行恰好一个非空 owner 列（`ck_session_owner_exactly_one`：`num_nonnulls(chat_id, canvas_id, issue_agent_session_id) = 1`），`session_id` 是 PK，因此一个 Session 全局至多属于一个产品 owner。`project_issue_agent_session` 另有 unique 约束，保证一个 `(issue_id, agent_name)` 至多绑定一个长期 Session；Chat 与 Canvas 可以持有多个 Session。整个约束不需要 guard 表或归属 trigger。
 
 ### Blob 生命周期
 
@@ -165,7 +165,7 @@ Plugin opaque payload，不按 provider token 字段建列；管理查询永远�
 - Harness Entry 的 ROOT 唯一、parent shape 与 `entry_type` 由 check 与部分唯一索引固定；Thread head 必须属于同一 Session；Thread Command 以 `(thread_id, sequence)` 与 `(thread_id, idempotency_key)` 保证顺序与精确回放。
 - `harness_work` 以 `(target_type, target_id)` 唯一表示 THREAD/MODEL/TOOL 调度事实，`wake_version` 为正，lease token 与 until 成对；`target_id` 是多态引用，刻意不建外键，因此 `required_environment_id` 非空时由 check 限定只能出现在 TOOL Work 上。
 - `system_setting` 恒为一行（`ck_system_setting_id` 要求 `id = 1`），`config` 必须是 JSON object，`version` 是非负 CAS 令牌。
-- 七个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`system_settings_changed`（version 文本）、`skill_package_changed`（package name）、`issue_controller_work_due`（issue id）、`project_issue_changed`（project id）、`harness_thread_version`（`id:version`）、`canvas_version`（`id:version`）、`canvas_function_work`（空 payload）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。Skill listener 建连或重连后全量回读 Package，弥补通知丢失。
+- 七个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`system_settings_changed`（version 文本）、`skill_package_changed`（package name）、`project_issue_work_due`（issue id）、`project_issue_changed`（project id）、`harness_thread_version`（`id:version`）、`canvas_version`（`id:version`）、`canvas_function_work`（空 payload）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。Skill listener 建连或重连后全量回读 Package，弥补通知丢失。
 - V1 全文没有 `IF NOT EXISTS`（文件开头的注释明确说明这一点），任何声明冲突都会让迁移直接失败，而不是留下一个 drift 过的库。业务实体 id 全部由应用生成：仓库里没有 `create sequence`、`serial` 或 generated identity，`PostgresqlSchemaStructureTest` 对此有专门断言。
 
 ## Profile seeds

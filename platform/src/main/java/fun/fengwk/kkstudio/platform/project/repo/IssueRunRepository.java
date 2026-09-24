@@ -17,6 +17,9 @@ public interface IssueRunRepository {
 
   IssueRun lockActiveByIssueId(UUID issueId);
 
+  /** 该 Project 下是否存在活动 Run（任一 Issue、任一角色的 RUNNING / WAITING_HUMAN）。 */
+  boolean hasActiveByProjectId(UUID projectId);
+
   IssueRun findByTerminalActionId(String terminalActionId);
 
   IssueRun findLatestByIssueId(UUID issueId);

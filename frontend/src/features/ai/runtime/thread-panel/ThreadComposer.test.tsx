@@ -46,10 +46,14 @@ describe('ThreadComposer and commands', () => {
       'compact',
       'rename-session',
       'rename-thread',
+      'goal',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.some((c) => c.id === 'session')).toBe(false)
-    const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
+    const blank = threadCommandsForTarget(
+      { kind: 'NEW_SESSION_DRAFT' },
+      { owner: { type: 'CHAT', id: 'chat-1' } },
+    )
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // 空面板还没有 Thread，因此 `/tree`/`/stop`/`/new`/`/debug`/`/compact`
     // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
@@ -81,8 +85,14 @@ describe('ThreadComposer and commands', () => {
   })
 
   it('projects the same command matrix for Chat and Canvas bound targets', () => {
-    const chatBound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
-    const canvasBound = threadCommandsForTarget({ kind: 'BOUND_THREAD', threadId: 't1' })
+    const chatBound = threadCommandsForTarget(
+      { kind: 'BOUND_THREAD', threadId: 't1' },
+      { owner: { type: 'CHAT', id: 'chat-1' } },
+    )
+    const canvasBound = threadCommandsForTarget(
+      { kind: 'BOUND_THREAD', threadId: 't1' },
+      { owner: { type: 'CANVAS', id: 'canvas-1' } },
+    )
     expect(canvasBound.map((command) => command.id)).toEqual(chatBound.map((command) => command.id))
     expect(canvasBound.filter((command) => !command.disabled).map((command) => command.id))
       .toEqual(THREAD_COMMANDS.map((command) => command.id))

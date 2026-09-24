@@ -4,13 +4,11 @@ import {
   AlertTriangle,
   Archive,
   ArrowLeft,
-  Bot,
   Calendar,
   Pencil,
   RefreshCw,
   Trash2,
 } from 'lucide-react'
-import { CoordinatorConversation } from './components/CoordinatorConversation'
 import { CreateIssueModal } from './components/CreateIssueModal'
 import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
@@ -230,9 +228,13 @@ export function ProjectDetailPage({
 
         <div className="project-detail-info-row">
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Bot size={14} aria-hidden="true" />
-            <span>Coordinator:</span>
-            <strong style={{ color: 'var(--fg)' }}>{project.coordinatorAgentName}</strong>
+            <span>YOLO:</span>
+            <strong style={{ color: 'var(--fg)' }}>{project.yoloEnabled ? '开启' : '关闭'}</strong>
+          </span>
+
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span>最大打回:</span>
+            <strong style={{ color: 'var(--fg)' }}>{project.maxReviewRejections} 次</strong>
           </span>
 
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -268,23 +270,15 @@ export function ProjectDetailPage({
       )}
 
       <div className="project-detail-body">
-        {/* Left: 6-Column Issue Board */}
         <IssueBoard
           issues={snapshot.issues}
+          maxReviewRejections={project.maxReviewRejections}
           onSelectIssue={(id) => setSelectedIssueId(id)}
           onCreateIssue={() => setIsCreateIssueOpen(true)}
           onChangeIssueStatus={handleChangeIssueStatus}
           onCancelIssue={handleCancelIssue}
           onArchiveIssue={handleArchiveIssue}
           onUnarchiveIssue={handleUnarchiveIssue}
-        />
-
-        {/* Right: Coordinator conversation */}
-        <CoordinatorConversation
-          key={projectId}
-          projectId={projectId}
-          snapshot={snapshot}
-          isLoadingSnapshot={isLoading}
         />
       </div>
 

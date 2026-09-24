@@ -1,36 +1,9 @@
-import type { HarnessModelSelectionDTO } from '@/shared/api/contracts/ai-runtime'
-
-export interface HarnessSessionSummaryDTO {
-  sessionId: string
-  name: string
-  createdAt: string
-  lastActivityAt: string
-  firstMessagePreview: string | null
-  threadCount: number
-}
-
-export interface HarnessThreadSummaryDTO {
-  threadId: string
-  name: string
-  createdAt: string
-  updatedAt: string
-  status: string
-  model: HarnessModelSelectionDTO
-  headMessagePreview: string | null
-}
-
-export interface HarnessAcceptedCommandsDTO {
-  session?: unknown
-  thread?: unknown
-  acceptedCommands?: unknown[]
-  replayed?: boolean | null
-}
-
 export interface ProjectDTO {
   id: string
   title: string
   description: string
-  coordinatorAgentName: string
+  yoloEnabled: boolean
+  maxReviewRejections: string
   nextIssueNumber: string
   version: string
   archivedAt: string | null
@@ -41,14 +14,16 @@ export interface ProjectDTO {
 export interface CreateProjectRequest {
   title: string
   description?: string | null
-  coordinatorAgentName: string
+  yoloEnabled?: boolean | null
+  maxReviewRejections?: number | null
 }
 
 export interface UpdateProjectRequest {
   expectedVersion: string
-  title: string
+  title?: string | null
   description?: string | null
-  coordinatorAgentName: string
+  yoloEnabled?: boolean | null
+  maxReviewRejections?: number | null
 }
 
 export interface ProjectArchiveRequest {
@@ -64,6 +39,7 @@ export type IssueStatus =
   | 'TODO'
   | 'IN_PROGRESS'
   | 'IN_REVIEW'
+  | 'BLOCKED'
   | 'DONE'
   | 'CANCELED'
 
@@ -77,8 +53,6 @@ export interface IssueDTO {
   assigneeAgentName: string | null
   reviewerAgentName: string | null
   version: string
-  specRevision: string
-  inputSequence: string
   archivedAt: string | null
   createdAt: string
   updatedAt: string
@@ -94,7 +68,7 @@ export interface CreateIssueRequest {
 
 export interface UpdateIssueRequest {
   expectedVersion: string
-  title: string
+  title?: string | null
   description?: string | null
   assigneeAgentName?: string | null
   reviewerAgentName?: string | null
@@ -103,6 +77,17 @@ export interface UpdateIssueRequest {
 export interface ChangeIssueStatusRequest {
   expectedVersion: string
   status: IssueStatus
+}
+
+export interface BlockIssueRequest {
+  expectedVersion: string
+  reason: string
+}
+
+export interface RecoverIssueRequest {
+  expectedVersion: string
+  toBacklog?: boolean | null
+  comment?: string | null
 }
 
 export interface IssueDependencyDTO {
@@ -117,25 +102,52 @@ export interface AddIssueDependencyRequest {
   dependsOnIssueId: string
 }
 
-export type IssueInputKind = 'HUMAN' | 'REVIEW_FEEDBACK' | 'RETRY' | 'SYSTEM'
+export type IssueRunRole = 'EXECUTOR' | 'REVIEWER'
 
-export interface IssueInputDTO {
+export interface IssueAgentSessionDTO {
+  id: string
+  issueId: string
+  agentName: string
+  role: IssueRunRole
+  sessionId: string
+  branchId: string
+  createdAt: string
+}
+
+export type IssueActivityKind =
+  | 'SPEC_CHANGE'
+  | 'INSTRUCTION'
+  | 'COMMENT'
+  | 'HUMAN_INPUT'
+  | 'REVIEW_DECISION'
+  | 'RECOVERY'
+  | 'RETRY'
+  | 'SYSTEM'
+
+export type IssueActivityActorType = 'HUMAN' | 'AGENT' | 'SYSTEM'
+
+export interface IssueActivityDTO {
   issueId: string
   sequence: string
-  kind: IssueInputKind
+  kind: IssueActivityKind
+  actorType: IssueActivityActorType
+  actorAgentName: string | null
+  targetRole: IssueRunRole | null
+  runId: string | null
+  submissionRunId: string | null
+  decision: string | null
   body: string
   idempotencyKey: string | null
   createdAt: string
 }
 
-export interface AppendIssueInputRequest {
+export interface AppendIssueActivityRequest {
   body: string
+  kind?: string | null
+  targetRole?: IssueRunRole | null
   idempotencyKey?: string | null
-  kind?: IssueInputKind | null
 }
 
-export type IssueRunRole = 'EXECUTOR' | 'REVIEWER'
-export type IssueRunActorType = 'AGENT' | 'HUMAN'
 export type IssueRunStatus =
   | 'RUNNING'
   | 'WAITING_HUMAN'
@@ -143,6 +155,7 @@ export type IssueRunStatus =
   | 'FAILED'
   | 'CANCELLED'
   | 'UNKNOWN'
+
 export type IssueRunOutcome = 'SUBMITTED' | 'APPROVED' | 'CHANGES_REQUESTED' | null
 
 export interface IssueRunSummaryDTO {
@@ -150,7 +163,6 @@ export interface IssueRunSummaryDTO {
   issueId: string
   ordinal: string
   role: IssueRunRole
-  actorType: IssueRunActorType
   agentName: string | null
   submissionRunId: string | null
   status: IssueRunStatus
@@ -165,13 +177,13 @@ export interface IssueRunDTO {
   issueId: string
   ordinal: string
   role: IssueRunRole
-  actorType: IssueRunActorType
   agentName: string | null
+  agentSessionId: string | null
+  sessionId: string | null
   submissionRunId: string | null
   status: IssueRunStatus
   outcome: IssueRunOutcome
-  observedSpecRevision: string
-  observedInputSequence: string
+  observedActivitySequence: string
   continuationCount: number
   maxContinuations: number
   deadline: string | null
@@ -182,18 +194,14 @@ export interface IssueRunDTO {
   createdAt: string
   updatedAt: string
   completedAt: string | null
-  sessionId: string | null
 }
 
 export type ReviewDecision = 'APPROVE' | 'REQUEST_CHANGES'
 
 export interface ReviewIssueRequest {
   decision: ReviewDecision
-  summary?: string | null
-  verification?: string | null
-  observedSpecRevision?: string | null
-  observedInputSequence?: string | null
-  terminalActionId?: string | null
+  reason?: string | null
+  idempotencyKey?: string | null
 }
 
 export interface CancelIssueRequest {
@@ -216,6 +224,7 @@ export interface UnarchiveIssueRequest {
 export interface ProjectIssueSnapshotDTO {
   issue: IssueDTO
   blocked: boolean
+  reviewRejectionCount: string
   currentOrLatestRun: IssueRunSummaryDTO | null
 }
 
@@ -223,16 +232,15 @@ export interface ProjectSnapshotDTO {
   project: ProjectDTO
   issues: ProjectIssueSnapshotDTO[]
   dependencies: IssueDependencyDTO[]
-  coordinatorSessionId: string | null
-  coordinatorSession: HarnessSessionSummaryDTO | null
-  coordinatorThread: HarnessThreadSummaryDTO | null
 }
 
 export interface IssueDetailDTO {
   issue: IssueDTO
   blocked: boolean
   dependencies: IssueDependencyDTO[]
-  inputs: IssueInputDTO[]
+  sessions: IssueAgentSessionDTO[]
+  activities: IssueActivityDTO[]
+  nextActivityCursor: string | null
   runs: IssueRunDTO[]
   currentRun: IssueRunDTO | null
   latestRun: IssueRunDTO | null

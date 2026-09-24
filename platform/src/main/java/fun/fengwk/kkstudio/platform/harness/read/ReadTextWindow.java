@@ -1,23 +1,23 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CharsetDecoder;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /**
- * 将原始字节格式化为与 daemon {@code fs.read} 文本窗口语义完全一致的有界文本。
+ * 流式格式化文本窗口；只保留请求范围内每行最多 2000 个 code point。
  *
  * <p>核心规格与约束：
  *
  * <ul>
- *   <li>输入字节数上限：8 MiB（{@link #MAX_SOURCE_BYTES} = 8,388,608 字节），超过直接抛出 {@link
- *       PlatformReadException}。
  *   <li>二进制判定：包含 NUL 字符（{@code \u0000}）或不是合法 UTF-8 编码时，抛出 {@link PlatformReadException}。
  *   <li>行分隔统一按 LF 处理（CRLF 与单独 CR 均记一次换行）；空文件总行数为 0；文件以换行结尾时 {@code ends_with_newline: yes}。
  *   <li>响应 UTF-8 字节上限为 48 KiB（{@link #MAX_RESPONSE_BYTES} = 49,152 字节）；超出时提前截断并输出分页
@@ -41,8 +41,7 @@ public final class ReadTextWindow {
   /** 整个格式化响应的 UTF-8 字节数严格上限（48 KiB）。 */
   public static final int MAX_RESPONSE_BYTES = 48 * 1024;
 
-  /** 单次读取允许的最大源字节数（8 MiB）。 */
-  public static final int MAX_SOURCE_BYTES = 8 * 1024 * 1024;
+  private static final long MAX_SCAN_NANOS = TimeUnit.SECONDS.toNanos(30);
 
   private ReadTextWindow() {}
 
@@ -82,13 +81,21 @@ public final class ReadTextWindow {
       String displayPath,
       String lspStatus) {
     Objects.requireNonNull(bytes, "bytes");
+    return format(
+        new ByteArrayInputStream(bytes), offset, limit, columnOffset, displayPath, lspStatus);
+  }
+
+  /** 消费但不关闭输入流；调用方负责在解析成功或失败后关闭资源。 */
+  public static String format(
+      InputStream stream,
+      Integer offset,
+      Integer limit,
+      Integer columnOffset,
+      String displayPath,
+      String lspStatus) {
+    Objects.requireNonNull(stream, "stream");
     Objects.requireNonNull(displayPath, "displayPath");
     Objects.requireNonNull(lspStatus, "lspStatus");
-
-    if (bytes.length > MAX_SOURCE_BYTES) {
-      throw new PlatformReadException(
-          "file exceeds maximum size limit of " + MAX_SOURCE_BYTES + " bytes: " + displayPath);
-    }
 
     if (offset != null && offset < 1) {
       throw new PlatformReadException("offset must be a positive integer");
@@ -108,8 +115,9 @@ public final class ReadTextWindow {
       throw new PlatformReadException("limit must be between 1 and " + MAX_LIMIT);
     }
 
-    DecodedText decodedText = decodeStrictUtf8(bytes, displayPath);
-    List<String> lines = decodedText.lines();
+    DecodedText decodedText =
+        decodeStrictUtf8(stream, displayPath, resolvedOffset, resolvedLimit, columnOffset);
+    List<LineData> lines = decodedText.lines();
     int totalLines = decodedText.totalLines();
     boolean endsWithNewline = decodedText.endsWithNewline();
 
@@ -127,12 +135,12 @@ public final class ReadTextWindow {
 
     int width = Math.max(1, Integer.toString(Math.max(1, totalLines)).length());
     int actualEnd = resolvedOffset - 1;
-    int maxWanted = Math.min(totalLines, resolvedOffset + resolvedLimit - 1);
+    int maxWanted = (int) Math.min(totalLines, (long) resolvedOffset + resolvedLimit - 1);
     List<String> bodyLines = new ArrayList<>();
     List<String> columnFooters = new ArrayList<>();
 
     for (int index = resolvedOffset; index <= maxWanted; index++) {
-      String line = lines.get(index - 1);
+      LineData line = lines.get(index - resolvedOffset);
       LineSlice slice = sliceLine(line, index, width, columnOffset);
 
       List<String> candidateBody = new ArrayList<>(bodyLines);
@@ -170,84 +178,103 @@ public final class ReadTextWindow {
     return String.join("\n", assembleOutput(headers, bodyLines, footers));
   }
 
-  private static DecodedText decodeStrictUtf8(byte[] bytes, String displayPath) {
-    int bomLength = 0;
-    if (bytes.length >= 3
-        && (bytes[0] & 0xFF) == 0xEF
-        && (bytes[1] & 0xFF) == 0xBB
-        && (bytes[2] & 0xFF) == 0xBF) {
-      bomLength = 3;
-    }
-
-    CharsetDecoder decoder =
+  private static DecodedText decodeStrictUtf8(
+      InputStream stream, String displayPath, int offset, int limit, Integer columnOffset) {
+    var decoder =
         StandardCharsets.UTF_8
             .newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT);
-    ByteBuffer byteBuffer = ByteBuffer.wrap(bytes, bomLength, bytes.length - bomLength);
-    CharBuffer charBuffer;
+    BufferedReader reader = new BufferedReader(new InputStreamReader(stream, decoder));
+    List<LineData> window = new ArrayList<>();
+    StringBuilder slice = new StringBuilder();
+    long startedAt = System.nanoTime();
+    int lines = 0;
+    int columns = 0;
+    boolean pendingCr = false;
+    boolean endsWithNewline = false;
+    boolean first = true;
+    int columnStart = columnOffset == null ? 1 : columnOffset;
     try {
-      charBuffer = decoder.decode(byteBuffer);
-    } catch (CharacterCodingException e) {
-      throw new PlatformReadException("file appears to be binary: " + displayPath, e);
-    }
-
-    for (int i = 0; i < charBuffer.length(); i++) {
-      if (charBuffer.charAt(i) == '\u0000') {
-        throw new PlatformReadException("file appears to be binary: " + displayPath);
-      }
-    }
-
-    List<String> lines = new ArrayList<>();
-    StringBuilder currentLine = new StringBuilder();
-    boolean sawCr = false;
-    boolean endedWithNewline = false;
-    int totalLines = 0;
-
-    for (int i = 0; i < charBuffer.length(); i++) {
-      char value = charBuffer.charAt(i);
-      if (sawCr) {
-        sawCr = false;
-        totalLines++;
-        endedWithNewline = true;
-        lines.add(currentLine.toString());
-        currentLine.setLength(0);
-        if (value == '\n') {
+      int value;
+      while ((value = reader.read()) != -1) {
+        if (Thread.currentThread().isInterrupted()
+            || System.nanoTime() - startedAt > MAX_SCAN_NANOS) {
+          throw new PlatformReadException("resource read interrupted or timed out: " + displayPath);
+        }
+        if (first) {
+          first = false;
+          if (value == '\uFEFF') {
+            continue;
+          }
+        }
+        if (pendingCr) {
+          lines = finishLine(window, slice, lines, columns, offset, limit);
+          columns = 0;
+          pendingCr = false;
+          endsWithNewline = true;
+          if (value == '\n') {
+            continue;
+          }
+        }
+        if (value == '\r') {
+          pendingCr = true;
           continue;
         }
-        endedWithNewline = false;
+        if (value == '\n') {
+          lines = finishLine(window, slice, lines, columns, offset, limit);
+          columns = 0;
+          endsWithNewline = true;
+          continue;
+        }
+        if (value == 0) {
+          throw new PlatformReadException("file appears to be binary: " + displayPath);
+        }
+        int codePoint = value;
+        if (Character.isHighSurrogate((char) value)) {
+          int low = reader.read();
+          if (low == -1 || !Character.isLowSurrogate((char) low)) {
+            throw new PlatformReadException("file appears to be binary: " + displayPath);
+          }
+          codePoint = Character.toCodePoint((char) value, (char) low);
+        }
+        columns = Math.addExact(columns, 1);
+        endsWithNewline = false;
+        if ((long) lines + 1 >= offset
+            && (long) lines + 1 < (long) offset + limit
+            && columns >= columnStart
+            && (long) columns < (long) columnStart + MAX_LINE_CODE_POINTS) {
+          slice.appendCodePoint(codePoint);
+        }
       }
-      if (value == '\r') {
-        sawCr = true;
-        continue;
+      if (pendingCr) {
+        lines = finishLine(window, slice, lines, columns, offset, limit);
+        endsWithNewline = true;
+      } else if (columns > 0) {
+        lines = finishLine(window, slice, lines, columns, offset, limit);
       }
-      if (value == '\n') {
-        totalLines++;
-        endedWithNewline = true;
-        lines.add(currentLine.toString());
-        currentLine.setLength(0);
-        continue;
-      }
-      endedWithNewline = false;
-      currentLine.append(value);
+      return new DecodedText(window, lines, endsWithNewline);
+    } catch (IOException e) {
+      throw new PlatformReadException(
+          "file appears to be binary or cannot be read: " + displayPath, e);
+    } catch (ArithmeticException e) {
+      throw new PlatformReadException(
+          "resource text exceeds supported line/column count: " + displayPath, e);
     }
-
-    if (sawCr) {
-      totalLines++;
-      lines.add(currentLine.toString());
-      endedWithNewline = true;
-    } else if (currentLine.length() > 0) {
-      totalLines++;
-      lines.add(currentLine.toString());
-      endedWithNewline = false;
-    }
-
-    boolean finalEndsWithNewline = endedWithNewline && totalLines > 0;
-    return new DecodedText(lines, totalLines, finalEndsWithNewline);
   }
 
-  private static LineSlice sliceLine(String line, int index, int width, Integer columnOffset) {
-    int totalLineCodePoints = line.codePointCount(0, line.length());
+  private static int finishLine(
+      List<LineData> window, StringBuilder slice, int lines, int columns, int offset, int limit) {
+    int next = Math.addExact(lines, 1);
+    if (next >= offset && (long) next < (long) offset + limit) {
+      window.add(new LineData(slice.toString(), columns));
+    }
+    slice.setLength(0);
+    return next;
+  }
+
+  private static LineSlice sliceLine(LineData line, int index, int width, Integer columnOffset) {
+    int totalLineCodePoints = line.codePoints();
     int colStart = columnOffset != null ? columnOffset : 1;
     if (colStart > totalLineCodePoints) {
       if (columnOffset != null) {
@@ -256,11 +283,8 @@ public final class ReadTextWindow {
       }
       return new LineSlice(String.format("%" + width + "d|", index), null);
     }
-    int colEnd = Math.min(totalLineCodePoints, colStart + MAX_LINE_CODE_POINTS - 1);
-    int charStart = line.offsetByCodePoints(0, colStart - 1);
-    int charEnd = line.offsetByCodePoints(0, colEnd);
-    String fragment = line.substring(charStart, charEnd);
-    String formatted = String.format("%" + width + "d|%s", index, fragment);
+    int colEnd = (int) Math.min(totalLineCodePoints, (long) colStart + MAX_LINE_CODE_POINTS - 1);
+    String formatted = String.format("%" + width + "d|%s", index, line.slice());
 
     String columnFooter;
     if (colEnd < totalLineCodePoints) {
@@ -338,7 +362,9 @@ public final class ReadTextWindow {
     return bytes;
   }
 
-  private record DecodedText(List<String> lines, int totalLines, boolean endsWithNewline) {}
+  private record DecodedText(List<LineData> lines, int totalLines, boolean endsWithNewline) {}
+
+  private record LineData(String slice, int codePoints) {}
 
   private record LineSlice(String formatted, String columnFooter) {}
 }

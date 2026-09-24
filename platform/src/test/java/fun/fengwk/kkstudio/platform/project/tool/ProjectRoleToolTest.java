@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,13 +23,16 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
-import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
@@ -53,12 +55,15 @@ import java.util.UUID;
  * <p>测试意图：
  *
  * <ul>
- *   <li>验证 12 个真实工具的 JSON Schema 严格性：未知字段拦截、必填字段检查与枚举校验；
- *   <li>验证 Coordinator(9)、Executor(2)、Reviewer(1) 全部 12 个工具正向 dispatch 链路与参数传递；
- *   <li>验证 submit、request_input、review 工具的 terminalActionId 必须由 tool:{invocationId} 生成；
- *   <li>验证权限与范围控制：无属主、角色不匹配、缺失上下文或跨项目访问均被严格拒绝；
+ *   <li>验证 3 个真实工具（issue_read, issue_request_input, issue_review）的 JSON Schema
+ *       严格性：未知字段拦截、必填字段检查与枚举/类型校验；
+ *   <li>验证 Executor(2)、Reviewer(3) 角色工具正向 dispatch 链路与参数传递；
+ *   <li>验证 issue_review 工具的 terminalActionId 必须由 tool:{invocationId} 自动生成且绑定被审查提交；
+ *   <li>验证权限与角色控制：无属主、角色不匹配（如 Executor 尝试调用 issue_review）、缺失上下文或跨 Issue 访问均被严格拒绝；
+ *   <li>验证业务参数校验（空白问题/理由、负数游标、超范围 activity_limit、非法 UUID/枚举、畸形 JSON）；
  *   <li>验证安全脱敏：非法 UUID 与 Enum 原值不回显，业务异常去标识，未捕获异常不保留内部 cause；
- *   <li>验证 ToolExecutionListener 的回调严格互斥且恰好触发一次。
+ *   <li>验证 ToolExecutionListener 的回调严格互斥且恰好触发一次；
+ *   <li>验证 Tool.type()、descriptor() 与 historyRenderer() 完整可用。
  * </ul>
  */
 class ProjectRoleToolTest {
@@ -67,8 +72,10 @@ class ProjectRoleToolTest {
   private static final UUID ISSUE_ID = UUID.fromString("00000000-0000-0000-0000-000000000020");
   private static final UUID DEP_ISSUE_ID = UUID.fromString("00000000-0000-0000-0000-000000000030");
   private static final UUID RUN_ID = UUID.fromString("00000000-0000-0000-0000-000000000040");
+  private static final UUID REVIEW_RUN_ID = UUID.fromString("00000000-0000-0000-0000-000000000045");
   private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-000000000050");
   private static final UUID INVOCATION_ID = UUID.fromString("00000000-0000-0000-0000-000000000060");
+  private static final UUID SESSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000070");
   private static final String CALL_ID = "call-123";
 
   private ProjectService projectService;
@@ -77,7 +84,6 @@ class ProjectRoleToolTest {
   private ProjectRoleToolService toolService;
   private ProjectThreadOwnerResolver ownerResolver;
 
-  private ProjectThreadOwnerContext coordinatorOwner;
   private ProjectThreadOwnerContext executorOwner;
   private ProjectThreadOwnerContext reviewerOwner;
   private ToolExecutionContext executionContext;
@@ -91,15 +97,12 @@ class ProjectRoleToolTest {
 
     toolService = new ProjectRoleToolService(projectService, issueService, issueRunService);
 
-    coordinatorOwner =
-        new ProjectThreadOwnerContext(
-            ProjectRole.COORDINATOR, PROJECT_ID, null, null, "coordinator-agent");
     executorOwner =
         new ProjectThreadOwnerContext(
             ProjectRole.EXECUTOR, PROJECT_ID, ISSUE_ID, RUN_ID, "coder-agent");
     reviewerOwner =
         new ProjectThreadOwnerContext(
-            ProjectRole.REVIEWER, PROJECT_ID, ISSUE_ID, RUN_ID, "reviewer-agent");
+            ProjectRole.REVIEWER, PROJECT_ID, ISSUE_ID, REVIEW_RUN_ID, "reviewer-agent");
 
     BranchView branchView = mock(BranchView.class);
     executionContext =
@@ -140,8 +143,8 @@ class ProjectRoleToolTest {
   // --- 1. Schema 严格性验证 ---
 
   @Test
-  void schemaValidation_rejectsUnknownFieldsAcrossAll12Tools() {
-    // 验证所有工具都从各自最小合法参数出发，仅因 additionalProperties=false 拒绝未知字段
+  void schemaValidation_rejectsUnknownPropertiesAcrossAll3Tools() {
+    // 验证全部 3 个工具从最小合法参数出发，均因 additionalProperties=false 严格拒绝未知字段
     for (ProjectRoleToolType type : ProjectRoleToolType.values()) {
       ToolDescriptor desc = type.descriptor();
       String validArguments = minimumValidArguments(type);
@@ -165,103 +168,301 @@ class ProjectRoleToolTest {
   }
 
   @Test
-  void schemaValidation_requiresCursorsAndRejectsTypesAndEnums() {
-    // 验证三个 Run 工具均强制显式回传双 cursor，且 schema 在执行前拒绝错误类型和枚举
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_SUBMIT, "{\"observed_input_sequence\":0,\"summary\":\"done\"}");
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_SUBMIT, "{\"observed_spec_revision\":0,\"summary\":\"done\"}");
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_REQUEST_INPUT,
-        "{\"observed_input_sequence\":0,\"question\":\"help\"}");
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_REQUEST_INPUT,
-        "{\"observed_spec_revision\":0,\"question\":\"help\"}");
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_REVIEW,
-        "{\"observed_input_sequence\":0,\"decision\":\"APPROVE\",\"summary\":\"ok\"}");
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_REVIEW,
-        "{\"observed_spec_revision\":0,\"decision\":\"APPROVE\",\"summary\":\"ok\"}");
-    assertSchemaRejected(ProjectRoleToolType.ISSUE_READ, "{\"issue_id\":123}");
-    assertSchemaRejected(
-        ProjectRoleToolType.ISSUE_REVIEW,
-        "{\"observed_spec_revision\":0,\"observed_input_sequence\":0,\"decision\":\"DENY\",\"summary\":\"ok\"}");
+  void schemaValidation_requiresMandatoryFields() {
+    // 验证 issue_request_input 必填 question，issue_review 必填 decision 与 reason
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REQUEST_INPUT, "{}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REQUEST_INPUT, "{\"context\":\"details\"}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REVIEW, "{}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REVIEW, "{\"decision\":\"APPROVE\"}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REVIEW, "{\"reason\":\"ok\"}");
   }
 
-  // --- 2. Coordinator 9 项工具正向测试 ---
+  @Test
+  void schemaValidation_rejectsInvalidDecisionEnum() {
+    // 验证 issue_review 的 decision 仅允许 APPROVE 或 REQUEST_CHANGES
+    assertSchemaRejected(
+        ProjectRoleToolType.ISSUE_REVIEW, "{\"decision\":\"DENY\",\"reason\":\"ok\"}");
+    assertSchemaRejected(
+        ProjectRoleToolType.ISSUE_REVIEW, "{\"decision\":\"REJECT\",\"reason\":\"ok\"}");
+  }
 
   @Test
-  void execute_projectRead_success() {
-    // 验证 project_read 能够正确投影项目及排序后的 issues
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.PROJECT_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
+  void schemaValidation_rejectsWrongDataTypes() {
+    // 验证 Schema 拒绝非预期的字段数据类型
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_READ, "{\"issue_id\":123}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_READ, "{\"activity_limit\":\"many\"}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REQUEST_INPUT, "{\"question\":123}");
+    assertSchemaRejected(ProjectRoleToolType.ISSUE_REVIEW, "{\"decision\":123,\"reason\":\"ok\"}");
+  }
 
-    Project project =
-        Project.builder()
-            .id(PROJECT_ID)
-            .title("Test Project")
-            .description("Desc")
-            .coordinatorAgentName("coordinator-agent")
-            .nextIssueNumber(2)
-            .version(1L)
-            .build();
-    when(projectService.getProject(PROJECT_ID)).thenReturn(project);
+  // --- 2. 角色权限与范围控制 ---
 
-    Issue issue =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .title("Task")
-            .status(IssueStatus.TODO)
-            .version(0L)
-            .specRevision(1L)
-            .inputSequence(0L)
+  @Test
+  void execute_executorCanExecuteIssueReadAndRequestInput() {
+    // 验证 Executor 角色有权调用 issue_read 与 issue_request_input
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
             .build();
-    when(issueService.listIssues(PROJECT_ID, false)).thenReturn(List.of(issue));
-    when(issueService.isBlocked(ISSUE_ID)).thenReturn(false);
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
+        .thenReturn(
+            Issue.builder()
+                .id(ISSUE_ID)
+                .projectId(PROJECT_ID)
+                .status(IssueStatus.IN_PROGRESS)
+                .build());
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).title("Test Project").build());
+    when(issueService.listActivitiesPage(ISSUE_ID, 0L, 51)).thenReturn(List.of());
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(0L);
+    when(issueService.listDependencies(ISSUE_ID)).thenReturn(List.of());
+
+    ProjectRoleTool readTool = createTool(ProjectRoleToolType.ISSUE_READ);
+    TestListener readListener = new TestListener();
+    readTool.execute(createRequest(readTool.descriptor(), "{}", executionContext), readListener);
+    assertNotNull(readListener.outcome);
+    assertFalse(readListener.outcome.result().error());
+
+    ProjectRoleTool inputTool = createTool(ProjectRoleToolType.ISSUE_REQUEST_INPUT);
+    when(issueRunService.requestInput(RUN_ID, "Need help", null))
+        .thenReturn(
+            IssueRun.builder()
+                .id(RUN_ID)
+                .issueId(ISSUE_ID)
+                .role(IssueRunRole.EXECUTOR)
+                .agentName("coder-agent")
+                .status(IssueRunStatus.WAITING_HUMAN)
+                .waitingReason("Need help")
+                .build());
+    TestListener inputListener = new TestListener();
+    inputTool.execute(
+        createRequest(inputTool.descriptor(), "{\"question\":\"Need help\"}", executionContext),
+        inputListener);
+    assertNotNull(inputListener.outcome);
+    assertFalse(inputListener.outcome.result().error());
+  }
+
+  @Test
+  void execute_executorDeniedIssueReview() {
+    // 验证 Executor 角色被严格拒绝调用 issue_review 工具
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    ProjectRoleTool reviewTool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    String args = "{\"decision\":\"APPROVE\",\"reason\":\"Looks good\"}";
+    ToolExecutionRequest request = createRequest(reviewTool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    reviewTool.execute(request, listener);
+
+    assertNotNull(listener.outcome);
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    String text = ((TextResultContent) result.contents().get(0)).text();
+    assertEquals("Tool not permitted for current role or unowned session", text);
+  }
+
+  @Test
+  void execute_reviewerCanExecuteAll3Tools() {
+    // 验证 Reviewer 角色拥有全部 3 个工具的执行权限
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .submissionRunId(RUN_ID)
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(REVIEW_RUN_ID)).thenReturn(run);
+    when(issueRunService.getRun(RUN_ID))
+        .thenReturn(
+            IssueRun.builder()
+                .id(RUN_ID)
+                .issueId(ISSUE_ID)
+                .role(IssueRunRole.EXECUTOR)
+                .agentName("coder-agent")
+                .status(IssueRunStatus.COMPLETED)
+                .outcome(IssueRunOutcome.SUBMITTED)
+                .build());
+    when(issueService.getIssue(ISSUE_ID))
+        .thenReturn(
+            Issue.builder()
+                .id(ISSUE_ID)
+                .projectId(PROJECT_ID)
+                .status(IssueStatus.IN_REVIEW)
+                .build());
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).title("Test Project").build());
+    when(issueService.listActivitiesPage(ISSUE_ID, 0L, 51)).thenReturn(List.of());
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(0L);
+    when(issueService.listDependencies(ISSUE_ID)).thenReturn(List.of());
+
+    // 1. issue_read
+    ProjectRoleTool readTool = createTool(ProjectRoleToolType.ISSUE_READ);
+    TestListener readListener = new TestListener();
+    readTool.execute(createRequest(readTool.descriptor(), "{}", executionContext), readListener);
+    assertFalse(readListener.outcome.result().error());
+
+    // 2. issue_request_input
+    ProjectRoleTool inputTool = createTool(ProjectRoleToolType.ISSUE_REQUEST_INPUT);
+    when(issueRunService.requestInput(REVIEW_RUN_ID, "Clarify design", null))
+        .thenReturn(
+            IssueRun.builder()
+                .id(REVIEW_RUN_ID)
+                .issueId(ISSUE_ID)
+                .role(IssueRunRole.REVIEWER)
+                .agentName("reviewer-agent")
+                .status(IssueRunStatus.WAITING_HUMAN)
+                .build());
+    TestListener inputListener = new TestListener();
+    inputTool.execute(
+        createRequest(
+            inputTool.descriptor(), "{\"question\":\"Clarify design\"}", executionContext),
+        inputListener);
+    assertFalse(inputListener.outcome.result().error());
+
+    // 3. issue_review
+    ProjectRoleTool reviewTool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    when(issueRunService.reviewByAgent(
+            REVIEW_RUN_ID,
+            "reviewer-agent",
+            "tool:" + INVOCATION_ID,
+            ReviewDecision.APPROVE,
+            "Looks good"))
+        .thenReturn(
+            IssueRun.builder()
+                .id(REVIEW_RUN_ID)
+                .issueId(ISSUE_ID)
+                .role(IssueRunRole.REVIEWER)
+                .agentName("reviewer-agent")
+                .status(IssueRunStatus.COMPLETED)
+                .outcome(IssueRunOutcome.APPROVED)
+                .build());
+    TestListener reviewListener = new TestListener();
+    reviewTool.execute(
+        createRequest(
+            reviewTool.descriptor(),
+            "{\"decision\":\"APPROVE\",\"reason\":\"Looks good\"}",
+            executionContext),
+        reviewListener);
+    assertFalse(reviewListener.outcome.result().error());
+  }
+
+  @Test
+  void execute_missingInvocationContext_returnsErrorToolResult() {
+    // 验证缺失 invocation context 时返回通用错误
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", null);
+
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "Missing invocation context", ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_missingThreadIdInContext_returnsErrorToolResult() {
+    // 验证 context 中 threadId 为 null 时返回 Missing invocation context
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    ToolExecutionContext invalidContext = mock(ToolExecutionContext.class);
+    when(invalidContext.threadId()).thenReturn(null);
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", invalidContext);
+
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "Missing invocation context", ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_unownedThread_returnsErrorToolResult() {
+    // 验证未解析到属主的线程返回权限与未认领会话错误
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.empty());
 
     ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
     TestListener listener = new TestListener();
     tool.execute(request, listener);
 
-    assertNotNull(listener.outcome);
     ToolResult result = listener.outcome.result();
-    assertFalse(result.error());
-    assertEquals(CALL_ID, result.toolCallId());
-    String text = ((TextResultContent) result.contents().get(0)).text();
-    assertTrue(text.contains("Test Project"));
-    assertTrue(text.contains("Task"));
+    assertTrue(result.error());
+    assertEquals(
+        "Tool not permitted for current role or unowned session",
+        ((TextResultContent) result.contents().get(0)).text());
   }
 
+  // --- 3. 正向执行与 Payload 结构验证 ---
+
   @Test
-  void execute_issueRead_successWithDependenciesInputsRuns() {
-    // 验证 issue_read 能够读取 issue 详情、依赖（包含 target 详情）、输入及执行记录，且过滤掉敏感字段
+  void execute_issueRead_executor_success_returnsPayloadAndDesensitizes() {
+    // 验证 issue_read 能够正确读取项目摘要、Issue 详情、依赖（包含 target 详情）、本 Run 摘要与分页 Activity
     ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .ordinal(1L)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .observedActivitySequence(2L)
+            .continuationCount(0)
+            .maxContinuations(5)
+            .terminalActionId("tool:secret-terminal-action-id")
+            .createdAt(Instant.now())
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
 
     Issue issue =
         Issue.builder()
             .id(ISSUE_ID)
             .projectId(PROJECT_ID)
             .number(1L)
-            .title("Issue 1")
-            .description("Body")
+            .title("Implement Feature")
+            .description("Detailed requirement description")
             .status(IssueStatus.IN_PROGRESS)
+            .assigneeAgentName("coder-agent")
+            .reviewerAgentName("reviewer-agent")
             .version(2L)
-            .specRevision(1L)
-            .inputSequence(1L)
+            .createdAt(Instant.now())
+            .updatedAt(Instant.now())
             .build();
     when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
-    when(issueService.isBlocked(ISSUE_ID)).thenReturn(false);
+
+    Project project =
+        Project.builder()
+            .id(PROJECT_ID)
+            .title("Test Project")
+            .description("Project Description")
+            .yoloEnabled(true)
+            .maxReviewRejections(3)
+            .nextIssueNumber(2L)
+            .version(1L)
+            .build();
+    when(projectService.getProject(PROJECT_ID)).thenReturn(project);
 
     Issue targetDep =
         Issue.builder()
             .id(DEP_ISSUE_ID)
             .projectId(PROJECT_ID)
             .number(99L)
-            .title("Dep Issue")
+            .title("Prerequisite Task")
             .status(IssueStatus.DONE)
             .build();
     when(issueService.getIssue(DEP_ISSUE_ID)).thenReturn(targetDep);
@@ -274,31 +475,28 @@ class ProjectRoleToolTest {
                     .projectId(PROJECT_ID)
                     .build()));
 
-    IssueInput input =
-        IssueInput.builder()
+    IssueActivity activity1 =
+        IssueActivity.builder()
             .issueId(ISSUE_ID)
             .sequence(1L)
-            .kind(IssueInputKind.HUMAN)
-            .body("User prompt")
+            .kind(IssueActivityKind.SPEC_CHANGE)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Initial requirements")
             .idempotencyKey("secret-idempotency-key")
             .createdAt(Instant.now())
             .build();
-    when(issueService.listInputs(ISSUE_ID)).thenReturn(List.of(input));
+    when(issueService.listActivitiesPage(ISSUE_ID, 0L, 51)).thenReturn(List.of(activity1));
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(0L);
 
-    IssueRun run =
-        IssueRun.builder()
-            .id(RUN_ID)
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
             .issueId(ISSUE_ID)
-            .ordinal(1L)
-            .role(IssueRunRole.EXECUTOR)
-            .actorType(IssueRunActorType.AGENT)
             .agentName("coder-agent")
-            .status(IssueRunStatus.RUNNING)
-            .observedSpecRevision(1L)
-            .observedInputSequence(1L)
-            .terminalActionId("tool:secret-terminal-action-id")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
             .build();
-    when(issueRunService.listRuns(ISSUE_ID)).thenReturn(List.of(run));
+    when(issueRunService.getAgentSession(ISSUE_ID, "coder-agent")).thenReturn(agentSession);
 
     String args = String.format("{\"issue_id\":\"%s\"}", ISSUE_ID);
     ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
@@ -309,248 +507,669 @@ class ProjectRoleToolTest {
     assertFalse(result.error());
     String text = ((TextResultContent) result.contents().get(0)).text();
 
-    assertTrue(text.contains("Issue 1"));
-    assertTrue(text.contains("Dep Issue"));
-    assertTrue(text.contains("User prompt"));
+    assertTrue(text.contains("Implement Feature"));
+    assertTrue(text.contains("Test Project"));
+    assertTrue(text.contains("Prerequisite Task"));
+    assertTrue(text.contains("Initial requirements"));
+    assertTrue(text.contains("\"satisfied\" : true"));
     assertFalse(text.contains("secret-idempotency-key"), "idempotencyKey must not be exposed");
     assertFalse(text.contains("secret-terminal-action-id"), "terminalActionId must not be exposed");
   }
 
   @Test
-  void execute_issueList_success() {
-    // 验证 issue_list 支持按 status 过滤
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_LIST);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    Issue issue1 =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .status(IssueStatus.TODO)
-            .build();
-    Issue issue2 =
-        Issue.builder()
-            .id(DEP_ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(2L)
-            .status(IssueStatus.BACKLOG)
-            .build();
-    when(issueService.listIssues(PROJECT_ID, false)).thenReturn(List.of(issue1, issue2));
-
-    ToolExecutionRequest request =
-        createRequest(tool.descriptor(), "{\"status\":\"TODO\"}", executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
-    assertTrue(text.contains(ISSUE_ID.toString()));
-    assertFalse(text.contains(DEP_ISSUE_ID.toString()));
-  }
-
-  @Test
-  void execute_issueCreate_success() {
-    // 验证 issue_create 参数解析与创建成功
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_CREATE);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    Issue created =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .title("New Issue")
-            .description("Body")
-            .status(IssueStatus.TODO)
-            .assigneeAgentName("coder")
-            .reviewerAgentName("reviewer")
-            .version(0L)
-            .specRevision(1L)
-            .inputSequence(0L)
-            .build();
-    when(issueService.createIssue(
-            eq(PROJECT_ID),
-            eq("New Issue"),
-            eq("Body"),
-            eq("coder"),
-            eq("reviewer"),
-            eq(IssueStatus.TODO)))
-        .thenReturn(created);
-
-    String args =
-        "{\"title\":\"New Issue\",\"description\":\"Body\",\"assignee_agent_name\":\"coder\",\"reviewer_agent_name\":\"reviewer\",\"initial_status\":\"TODO\"}";
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertFalse(listener.outcome.result().error());
-    verify(issueService)
-        .createIssue(PROJECT_ID, "New Issue", "Body", "coder", "reviewer", IssueStatus.TODO);
-  }
-
-  @Test
-  void execute_issueUpdate_partialAndClearAssignee() {
-    // 验证 issue_update 支持 partial update 以及使用空字符串清空 assignee
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_UPDATE);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    Issue existing =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .title("Old Title")
-            .description("Old Desc")
-            .assigneeAgentName("old-coder")
-            .reviewerAgentName("old-reviewer")
-            .status(IssueStatus.TODO)
-            .version(1L)
-            .build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(existing);
-
-    Issue updated =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .title("Old Title")
-            .description("Old Desc")
-            .assigneeAgentName(null) // 已清空
-            .reviewerAgentName("old-reviewer")
-            .status(IssueStatus.TODO)
-            .version(2L)
-            .build();
-    when(issueService.updateIssue(
-            eq(ISSUE_ID), eq(1L), eq("Old Title"), eq("Old Desc"), eq(null), eq("old-reviewer")))
-        .thenReturn(updated);
-
-    String args =
-        String.format(
-            "{\"issue_id\":\"%s\",\"expected_version\":1,\"assignee_agent_name\":\"\"}", ISSUE_ID);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertFalse(listener.outcome.result().error());
-    verify(issueService).updateIssue(ISSUE_ID, 1L, "Old Title", "Old Desc", null, "old-reviewer");
-  }
-
-  @Test
-  void execute_issueUpdate_noMutableFields_fails() {
-    // 验证 issue_update 必须提供至少一个更新字段
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_UPDATE);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    String args = String.format("{\"issue_id\":\"%s\",\"expected_version\":1}", ISSUE_ID);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertTrue(listener.outcome.result().error());
-    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
-    assertTrue(text.contains("At least one mutable field must be provided"));
-  }
-
-  @Test
-  void execute_issueUpdate_titleAndReviewer_success() {
-    // 验证 issue_update 正常更新 title 与 reviewer
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_UPDATE);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    Issue existing =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .title("Old Title")
-            .description("Old Desc")
-            .assigneeAgentName("coder")
-            .reviewerAgentName("old-reviewer")
-            .status(IssueStatus.TODO)
-            .version(1L)
-            .build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(existing);
-
-    Issue updated =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .title("New Title")
-            .description("New Desc")
-            .assigneeAgentName("coder")
-            .reviewerAgentName(null)
-            .status(IssueStatus.TODO)
-            .version(2L)
-            .build();
-    when(issueService.updateIssue(
-            eq(ISSUE_ID), eq(1L), eq("New Title"), eq("New Desc"), eq("coder"), eq(null)))
-        .thenReturn(updated);
-
-    String args =
-        String.format(
-            "{\"issue_id\":\"%s\",\"expected_version\":1,\"title\":\"New Title\",\"description\":\"New Desc\",\"reviewer_agent_name\":\"\"}",
-            ISSUE_ID);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertFalse(listener.outcome.result().error());
-    verify(issueService).updateIssue(ISSUE_ID, 1L, "New Title", "New Desc", "coder", null);
-  }
-
-  @Test
-  void execute_issueRead_whenTargetDepNotFound_returnsInconsistentOwnershipError() {
-    // 验证 issue_read 依赖项的目标 issue 不存在时返回脱敏的数据所有权不一致错误
+  void execute_issueRead_reviewerWithSubmissionRun_includesSubmissionRun() {
+    // 验证 Reviewer 角色的 issue_read 会额外返回被审查提交 Run 的详情
     ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    IssueRun reviewerRun =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .ordinal(2L)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .submissionRunId(RUN_ID)
+            .status(IssueRunStatus.RUNNING)
+            .createdAt(Instant.now())
+            .build();
+    when(issueRunService.getRun(REVIEW_RUN_ID)).thenReturn(reviewerRun);
+
+    IssueRun executorSubmission =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .ordinal(1L)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.COMPLETED)
+            .outcome(IssueRunOutcome.SUBMITTED)
+            .result("Execution completed and verified")
+            .createdAt(Instant.now())
+            .completedAt(Instant.now())
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(executorSubmission);
 
     Issue issue =
         Issue.builder()
             .id(ISSUE_ID)
             .projectId(PROJECT_ID)
             .number(1L)
-            .title("Issue 1")
-            .description("Body")
-            .status(IssueStatus.IN_PROGRESS)
+            .title("Feature")
+            .status(IssueStatus.IN_REVIEW)
             .build();
     when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
-    when(issueService.isBlocked(ISSUE_ID)).thenReturn(false);
-    when(issueService.getIssue(DEP_ISSUE_ID)).thenReturn(null); // 不存在的目标依赖
-    when(issueService.listDependencies(ISSUE_ID))
-        .thenReturn(
-            List.of(
-                IssueDependency.builder()
-                    .issueId(ISSUE_ID)
-                    .dependsOnIssueId(DEP_ISSUE_ID)
-                    .projectId(PROJECT_ID)
-                    .build()));
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).title("Test Project").build());
+    when(issueService.listActivitiesPage(ISSUE_ID, 0L, 51)).thenReturn(List.of());
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(1L);
+    when(issueService.listDependencies(ISSUE_ID)).thenReturn(List.of());
 
-    String args = String.format("{\"issue_id\":\"%s\"}", ISSUE_ID);
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    assertFalse(listener.outcome.result().error());
+    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
+    assertTrue(text.contains("\"submission_run\""));
+    assertTrue(text.contains("Execution completed and verified"));
+    assertTrue(text.contains("\"rejection_count\" : 1"));
+  }
+
+  @Test
+  void execute_issueRead_withPagination_passesSequencesAndLimit() {
+    // 验证 issue_read 支持分页参数 activity_after_sequence 与 activity_limit 且正向返回分页结构
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
+        .thenReturn(
+            Issue.builder()
+                .id(ISSUE_ID)
+                .projectId(PROJECT_ID)
+                .status(IssueStatus.IN_PROGRESS)
+                .build());
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+
+    IssueActivity act10 =
+        IssueActivity.builder()
+            .issueId(ISSUE_ID)
+            .sequence(11L)
+            .kind(IssueActivityKind.COMMENT)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Comment 11")
+            .build();
+    IssueActivity act11 =
+        IssueActivity.builder()
+            .issueId(ISSUE_ID)
+            .sequence(12L)
+            .kind(IssueActivityKind.COMMENT)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Comment 12")
+            .build();
+    when(issueService.listActivitiesPage(ISSUE_ID, 10L, 3))
+        .thenReturn(List.of(act10, act11)); // 请求 limit=2，pageSize+1=3
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(0L);
+    when(issueService.listDependencies(ISSUE_ID)).thenReturn(List.of());
+
+    String args = "{\"activity_after_sequence\":10,\"activity_limit\":2}";
     ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
     TestListener listener = new TestListener();
     tool.execute(request, listener);
 
-    assertNotNull(listener.outcome);
+    assertFalse(listener.outcome.result().error());
+    verify(issueService).listActivitiesPage(ISSUE_ID, 10L, 3);
+    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
+    assertTrue(text.contains("\"after_sequence\" : 10"));
+    assertTrue(text.contains("\"next_after_sequence\" : 12"));
+    assertTrue(text.contains("\"has_more\" : false"));
+  }
+
+  @Test
+  void execute_issueRequestInput_success_updatesRunToWaitingHuman() {
+    // 验证 issue_request_input 参数正确传递并将 Run 推进至 WAITING_HUMAN
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REQUEST_INPUT);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun activeRun =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(activeRun);
+
+    IssueRun waitingRun =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.WAITING_HUMAN)
+            .waitingReason("Need API key for third-party service")
+            .build();
+    when(issueRunService.requestInput(
+            RUN_ID, "Need API key for third-party service", "Running integration tests"))
+        .thenReturn(waitingRun);
+
+    String args =
+        "{\"question\":\"Need API key for third-party service\","
+            + "\"context\":\"Running integration tests\"}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    assertFalse(listener.outcome.result().error());
+    verify(issueRunService)
+        .requestInput(RUN_ID, "Need API key for third-party service", "Running integration tests");
+
+    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
+    assertTrue(text.contains("\"status\" : \"WAITING_HUMAN\""));
+    assertTrue(text.contains("Need API key for third-party service"));
+  }
+
+  @Test
+  void execute_issueReview_approve_success_bindsTerminalActionId() {
+    // 验证 issue_review APPROVE 自动绑定 tool:{invocationId}，调用 reviewByAgent 并返回 run/issue
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    IssueRun reviewerRun =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .submissionRunId(RUN_ID)
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(REVIEW_RUN_ID)).thenReturn(reviewerRun);
+
+    IssueRun completedRun =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .status(IssueRunStatus.COMPLETED)
+            .outcome(IssueRunOutcome.APPROVED)
+            .terminalActionId("tool:" + INVOCATION_ID)
+            .build();
+    when(issueRunService.reviewByAgent(
+            REVIEW_RUN_ID,
+            "reviewer-agent",
+            "tool:" + INVOCATION_ID,
+            ReviewDecision.APPROVE,
+            "Looks good and tests pass"))
+        .thenReturn(completedRun);
+
+    Issue freshIssue =
+        Issue.builder()
+            .id(ISSUE_ID)
+            .projectId(PROJECT_ID)
+            .number(1L)
+            .title("Feature")
+            .status(IssueStatus.DONE)
+            .build();
+    when(issueService.getIssue(ISSUE_ID)).thenReturn(freshIssue);
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).maxReviewRejections(3).build());
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(0L);
+
+    String args = "{\"decision\":\"APPROVE\",\"reason\":\"Looks good and tests pass\"}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    assertFalse(listener.outcome.result().error());
+    verify(issueRunService)
+        .reviewByAgent(
+            REVIEW_RUN_ID,
+            "reviewer-agent",
+            "tool:" + INVOCATION_ID,
+            ReviewDecision.APPROVE,
+            "Looks good and tests pass");
+
+    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
+    assertTrue(text.contains("\"outcome\" : \"APPROVED\""));
+    assertTrue(text.contains("\"status\" : \"DONE\""));
+  }
+
+  @Test
+  void execute_issueReview_requestChanges_success() {
+    // 验证 issue_review REQUEST_CHANGES 正向执行与参数传递
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    IssueRun reviewerRun =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .submissionRunId(RUN_ID)
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(REVIEW_RUN_ID)).thenReturn(reviewerRun);
+
+    IssueRun rejectedRun =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .status(IssueRunStatus.COMPLETED)
+            .outcome(IssueRunOutcome.CHANGES_REQUESTED)
+            .terminalActionId("tool:" + INVOCATION_ID)
+            .build();
+    when(issueRunService.reviewByAgent(
+            REVIEW_RUN_ID,
+            "reviewer-agent",
+            "tool:" + INVOCATION_ID,
+            ReviewDecision.REQUEST_CHANGES,
+            "Missing edge case tests"))
+        .thenReturn(rejectedRun);
+
+    Issue freshIssue =
+        Issue.builder()
+            .id(ISSUE_ID)
+            .projectId(PROJECT_ID)
+            .number(1L)
+            .title("Feature")
+            .status(IssueStatus.TODO)
+            .build();
+    when(issueService.getIssue(ISSUE_ID)).thenReturn(freshIssue);
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).maxReviewRejections(3).build());
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(1L);
+
+    String args = "{\"decision\":\"REQUEST_CHANGES\",\"reason\":\"Missing edge case tests\"}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    assertFalse(listener.outcome.result().error());
+    verify(issueRunService)
+        .reviewByAgent(
+            REVIEW_RUN_ID,
+            "reviewer-agent",
+            "tool:" + INVOCATION_ID,
+            ReviewDecision.REQUEST_CHANGES,
+            "Missing edge case tests");
+  }
+
+  // --- 4. 参数校验与业务规则拒绝 ---
+
+  @Test
+  void execute_issueRead_mismatchedIssueId_returnsError() {
+    // 验证 issue_read 传入与当前上下文不同的 issue_id 时被明确拒绝且不发生跨 issue 读取
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+
+    UUID mismatchedIssueId = UUID.fromString("00000000-0000-0000-0000-000000000999");
+    String args = String.format("{\"issue_id\":\"%s\"}", mismatchedIssueId);
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
     ToolResult result = listener.outcome.result();
     assertTrue(result.error());
-    String text = ((TextResultContent) result.contents().get(0)).text();
-    assertEquals("Project thread ownership is inconsistent", text);
+    assertEquals(
+        "issue_id must match the current issue context",
+        ((TextResultContent) result.contents().get(0)).text());
   }
 
   @Test
-  void execute_issueRead_crossProjectDependencyDoesNotLeakTarget() {
-    // 验证畸形跨项目 dependency snapshot 被固定一致性错误阻断，foreign title 不会泄漏
+  void execute_issueRead_negativeActivityAfterSequence_returnsError() {
+    // 验证 activity_after_sequence 为负数时被拒绝
     ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-    Issue issue =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .status(IssueStatus.TODO)
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
             .build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+
+    String args = "{\"activity_after_sequence\":-1}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "activity_after_sequence must not be negative",
+        ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_issueRead_activityLimitOutOfRange_returnsError() {
+    // 验证 activity_limit 小于 1 或大于 200 时被明确拒绝
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+
+    // limit = 0
+    TestListener listenerZero = new TestListener();
+    tool.execute(
+        createRequest(tool.descriptor(), "{\"activity_limit\":0}", executionContext), listenerZero);
+    assertTrue(listenerZero.outcome.result().error());
+    assertEquals(
+        "activity_limit must be between 1 and 200",
+        ((TextResultContent) listenerZero.outcome.result().contents().get(0)).text());
+
+    // limit = 201
+    TestListener listenerExceeded = new TestListener();
+    tool.execute(
+        createRequest(tool.descriptor(), "{\"activity_limit\":201}", executionContext),
+        listenerExceeded);
+    assertTrue(listenerExceeded.outcome.result().error());
+    assertEquals(
+        "activity_limit must be between 1 and 200",
+        ((TextResultContent) listenerExceeded.outcome.result().contents().get(0)).text());
+  }
+
+  @Test
+  void execute_issueRequestInput_blankQuestion_returnsError() {
+    // 验证 issue_request_input 提问正文为空白字符串时被拦截
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REQUEST_INPUT);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    String args = "{\"question\":\"   \"}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "question must not be blank", ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_issueReview_blankReason_returnsError() {
+    // 验证 issue_review 审查理由为空白字符串时被拦截
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    String args = "{\"decision\":\"APPROVE\",\"reason\":\"   \"}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals("reason must not be blank", ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_issueReview_invalidDecision_returnsError() {
+    // 验证非法的审查决定枚举值被拦截且错误信息明确
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    ToolCall call = mock(ToolCall.class);
+    when(call.id()).thenReturn(CALL_ID);
+    when(call.argumentsJson()).thenReturn("{\"decision\":\"INVALID\",\"reason\":\"ok\"}");
+
+    ToolExecutionRequest request = mock(ToolExecutionRequest.class);
+    when(request.context()).thenReturn(executionContext);
+    when(request.call()).thenReturn(call);
+
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "Invalid decision: only APPROVE or REQUEST_CHANGES is allowed",
+        ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_issueReview_reviewerRunMissingSubmission_returnsError() {
+    // 验证 Reviewer Run 未绑定被审查提交 Run 时拒绝执行审查动作
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
+
+    IssueRun unboundReviewerRun =
+        IssueRun.builder()
+            .id(REVIEW_RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.REVIEWER)
+            .agentName("reviewer-agent")
+            .submissionRunId(null) // 未绑定提交
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(REVIEW_RUN_ID)).thenReturn(unboundReviewerRun);
+
+    String args = "{\"decision\":\"APPROVE\",\"reason\":\"Looks good\"}";
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "issue_review requires the current REVIEWER run bound to a submission",
+        ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_malformedJsonArguments_returnsError() {
+    // 验证畸形 JSON 参数被拦截并返回 Invalid JSON arguments
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    ToolCall call = mock(ToolCall.class);
+    when(call.id()).thenReturn(CALL_ID);
+    when(call.argumentsJson()).thenReturn("{invalid-json-body");
+
+    ToolExecutionRequest request = mock(ToolExecutionRequest.class);
+    when(request.context()).thenReturn(executionContext);
+    when(request.call()).thenReturn(call);
+
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals("Invalid JSON arguments", ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_invalidUuidFormat_doesNotEchoRawValue() {
+    // 验证传入非法 UUID 格式时返回通用错误且绝不回显输入内容
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    String maliciousInput = "malicious-injection-string";
+    String args = String.format("{\"issue_id\":\"%s\"}", maliciousInput);
+    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    String errorMsg = ((TextResultContent) result.contents().get(0)).text();
+    assertEquals("Invalid issue_id format", errorMsg);
+    assertFalse(errorMsg.contains(maliciousInput));
+  }
+
+  // --- 5. 安全脱敏、一致性与异常映射测试 ---
+
+  @Test
+  void execute_aiResourceNotFoundException_sanitized() {
+    // 验证 AiResourceNotFoundException 转换为脱敏的 <resource> not found
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID)).thenThrow(new AiResourceNotFoundException("issue"));
+
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    String errorMsg = ((TextResultContent) result.contents().get(0)).text();
+    assertEquals("issue not found", errorMsg);
+    assertFalse(errorMsg.contains(ISSUE_ID.toString()));
+  }
+
+  @Test
+  void execute_aiVersionConflictException_sanitized() {
+    // 验证 AiVersionConflictException 转换为脱敏的 version conflict 消息
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
+        .thenThrow(new AiVersionConflictException("issue", "1", "2"));
+
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "issue version conflict: expected=1 actual=2",
+        ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_aiValidationException_sanitized() {
+    // 验证 AiValidationException 返回脱敏消息
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
+        .thenThrow(new AiValidationException("issue", "Validation failed for issue status"));
+
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "Validation failed for issue status",
+        ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_inconsistentOwnership_returnsInconsistentError() {
+    // 验证数据所有权不一致时返回 Project thread ownership is inconsistent
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    // Run 的 issueId 与 owner.issueId 不一致
+    UUID otherIssueId = UUID.fromString("00000000-0000-0000-0000-000000000999");
+    IssueRun mismatchedRun =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(otherIssueId)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(mismatchedRun);
+
+    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
+    TestListener listener = new TestListener();
+    tool.execute(request, listener);
+
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    assertEquals(
+        "Project thread ownership is inconsistent",
+        ((TextResultContent) result.contents().get(0)).text());
+  }
+
+  @Test
+  void execute_dependencyIssueBelongsToForeignProject_returnsInconsistentOwnershipError() {
+    // 验证畸形跨项目 dependency 关系被一致性检查阻断，目标标题绝不泄漏
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
+        .thenReturn(
+            Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).status(IssueStatus.TODO).build());
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+
     UUID foreignProject = UUID.fromString("00000000-0000-0000-0000-000000000999");
     when(issueService.getIssue(DEP_ISSUE_ID))
         .thenReturn(
@@ -570,345 +1189,66 @@ class ProjectRoleToolTest {
                     .build()));
 
     TestListener listener = new TestListener();
-    tool.execute(
-        createRequest(
-            tool.descriptor(), String.format("{\"issue_id\":\"%s\"}", ISSUE_ID), executionContext),
-        listener);
+    tool.execute(createRequest(tool.descriptor(), "{}", executionContext), listener);
 
-    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
-    assertTrue(listener.outcome.result().error());
+    ToolResult result = listener.outcome.result();
+    assertTrue(result.error());
+    String text = ((TextResultContent) result.contents().get(0)).text();
     assertEquals("Project thread ownership is inconsistent", text);
     assertFalse(text.contains("FOREIGN_SECRET_TITLE"));
   }
 
   @Test
-  void execute_issueAddAndRemoveDependency_success() {
-    // 验证 issue_add_dependency 与 issue_remove_dependency 的参数校验与执行
-    ProjectRoleTool addTool = createTool(ProjectRoleToolType.ISSUE_ADD_DEPENDENCY);
-    ProjectRoleTool removeTool = createTool(ProjectRoleToolType.ISSUE_REMOVE_DEPENDENCY);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    Issue issue = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).number(1L).build();
-    Issue dep = Issue.builder().id(DEP_ISSUE_ID).projectId(PROJECT_ID).number(2L).build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
-    when(issueService.getIssue(DEP_ISSUE_ID)).thenReturn(dep);
-
-    String args =
-        String.format(
-            "{\"issue_id\":\"%s\",\"depends_on_issue_id\":\"%s\",\"expected_version\":0}",
-            ISSUE_ID, DEP_ISSUE_ID);
-
-    ToolExecutionRequest addReq = createRequest(addTool.descriptor(), args, executionContext);
-    TestListener addListener = new TestListener();
-    addTool.execute(addReq, addListener);
-    assertFalse(addListener.outcome.result().error());
-    verify(issueService).addDependency(ISSUE_ID, DEP_ISSUE_ID, 0L);
-
-    ToolExecutionRequest removeReq = createRequest(removeTool.descriptor(), args, executionContext);
-    TestListener removeListener = new TestListener();
-    removeTool.execute(removeReq, removeListener);
-    assertFalse(removeListener.outcome.result().error());
-    verify(issueService).removeDependency(ISSUE_ID, DEP_ISSUE_ID, 0L);
-  }
-
-  @Test
-  void execute_issueSetStatusAndCancel_success() {
-    // 验证 issue_set_status 与 issue_cancel 正向执行
-    ProjectRoleTool statusTool = createTool(ProjectRoleToolType.ISSUE_SET_STATUS);
-    ProjectRoleTool cancelTool = createTool(ProjectRoleToolType.ISSUE_CANCEL);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    Issue issue = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).number(1L).build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
-    when(issueService.setStatus(ISSUE_ID, 0L, IssueStatus.TODO)).thenReturn(issue);
-    when(issueService.cancelIssue(ISSUE_ID, 0L, "Cancelled by test")).thenReturn(issue);
-
-    String statusArgs =
-        String.format("{\"issue_id\":\"%s\",\"status\":\"TODO\",\"expected_version\":0}", ISSUE_ID);
-    ToolExecutionRequest statusReq =
-        createRequest(statusTool.descriptor(), statusArgs, executionContext);
-    TestListener statusListener = new TestListener();
-    statusTool.execute(statusReq, statusListener);
-    assertFalse(statusListener.outcome.result().error());
-    verify(issueService).setStatus(ISSUE_ID, 0L, IssueStatus.TODO);
-
-    String cancelArgs =
-        String.format(
-            "{\"issue_id\":\"%s\",\"expected_version\":0,\"reason\":\"Cancelled by test\"}",
-            ISSUE_ID);
-    ToolExecutionRequest cancelReq =
-        createRequest(cancelTool.descriptor(), cancelArgs, executionContext);
-    TestListener cancelListener = new TestListener();
-    cancelTool.execute(cancelReq, cancelListener);
-    assertFalse(cancelListener.outcome.result().error());
-    verify(issueService).cancelIssue(ISSUE_ID, 0L, "Cancelled by test");
-  }
-
-  // --- 3. Executor 2 项工具正向测试与 tool:{invocationId} 绑定 ---
-
-  @Test
-  void execute_issueSubmit_generatesTerminalActionIdAndReturnsFreshIssue() {
-    // 验证 issue_submit 的 terminalActionId 由 context.invocationId 自动派生且返回 fresh issue
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_SUBMIT);
+  void execute_targetDependencyNotFound_returnsInconsistentOwnershipError() {
+    // 验证依赖目标 Issue 不存在时返回一致性错误
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
     when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
 
-    IssueRun completedRun =
+    IssueRun run =
         IssueRun.builder()
             .id(RUN_ID)
             .issueId(ISSUE_ID)
             .role(IssueRunRole.EXECUTOR)
-            .actorType(IssueRunActorType.AGENT)
             .agentName("coder-agent")
-            .status(IssueRunStatus.COMPLETED)
-            .outcome(IssueRunOutcome.SUBMITTED)
-            .observedSpecRevision(1L)
-            .observedInputSequence(2L)
-            .terminalActionId("tool:" + INVOCATION_ID)
+            .status(IssueRunStatus.RUNNING)
             .build();
-    when(issueRunService.submitRun(
-            eq(RUN_ID),
-            eq("tool:" + INVOCATION_ID),
-            eq(1L),
-            eq(2L),
-            eq("Summary"),
-            eq("Verification evidence")))
-        .thenReturn(completedRun);
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
+        .thenReturn(
+            Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).status(IssueStatus.TODO).build());
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
 
-    Issue freshIssue =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .status(IssueStatus.IN_REVIEW)
-            .version(5L)
-            .specRevision(1L)
-            .inputSequence(2L)
-            .build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(freshIssue);
-
-    String args =
-        "{\"observed_spec_revision\":1,\"observed_input_sequence\":2,\"summary\":\"Summary\",\"verification\":\"Verification evidence\"}";
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertFalse(listener.outcome.result().error());
-    verify(issueRunService)
-        .submitRun(RUN_ID, "tool:" + INVOCATION_ID, 1L, 2L, "Summary", "Verification evidence");
-
-    String text = ((TextResultContent) listener.outcome.result().contents().get(0)).text();
-    assertTrue(text.contains("\"status\" : \"IN_REVIEW\""));
-    assertFalse(text.contains("tool:" + INVOCATION_ID), "terminalActionId must be desensitized");
-  }
-
-  @Test
-  void execute_issueRequestInput_success() {
-    // 验证 issue_request_input 参数正确传递并返回 fresh issue
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REQUEST_INPUT);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
-
-    IssueRun waitingRun =
-        IssueRun.builder()
-            .id(RUN_ID)
-            .issueId(ISSUE_ID)
-            .role(IssueRunRole.EXECUTOR)
-            .actorType(IssueRunActorType.AGENT)
-            .agentName("coder-agent")
-            .status(IssueRunStatus.WAITING_HUMAN)
-            .waitingReason("Need API key")
-            .build();
-    when(issueRunService.requestInput(
-            eq(RUN_ID), eq(1L), eq(2L), eq("Need API key"), eq("Context details")))
-        .thenReturn(waitingRun);
-
-    Issue freshIssue =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .status(IssueStatus.IN_PROGRESS)
-            .build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(freshIssue);
-
-    String args =
-        "{\"observed_spec_revision\":1,\"observed_input_sequence\":2,\"question\":\"Need API key\",\"context\":\"Context details\"}";
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertFalse(listener.outcome.result().error());
-    verify(issueRunService).requestInput(RUN_ID, 1L, 2L, "Need API key", "Context details");
-  }
-
-  // --- 4. Reviewer 1 项工具正向测试 ---
-
-  @Test
-  void execute_issueReview_generatesTerminalActionIdAndDispatches() {
-    // 验证 issue_review 自动派生 reviewerAgentName 与 tool:{invocationId}，且必须返回 fresh issue
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_REVIEW);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(reviewerOwner));
-
-    IssueRun reviewedRun =
-        IssueRun.builder()
-            .id(RUN_ID)
-            .issueId(ISSUE_ID)
-            .role(IssueRunRole.REVIEWER)
-            .actorType(IssueRunActorType.AGENT)
-            .agentName("reviewer-agent")
-            .status(IssueRunStatus.COMPLETED)
-            .outcome(IssueRunOutcome.APPROVED)
-            .terminalActionId("tool:" + INVOCATION_ID)
-            .build();
-    when(issueRunService.reviewRun(
-            eq(ISSUE_ID),
-            eq(RUN_ID),
-            eq(IssueRunActorType.AGENT),
-            eq("reviewer-agent"),
-            eq("tool:" + INVOCATION_ID),
-            eq(1L),
-            eq(2L),
-            eq(ReviewDecision.APPROVE),
-            eq("Looks good"),
-            eq("Tests verified")))
-        .thenReturn(reviewedRun);
-
-    Issue freshIssue =
-        Issue.builder()
-            .id(ISSUE_ID)
-            .projectId(PROJECT_ID)
-            .number(1L)
-            .status(IssueStatus.DONE)
-            .build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(freshIssue);
-
-    String args =
-        "{\"observed_spec_revision\":1,\"observed_input_sequence\":2,\"decision\":\"APPROVE\",\"summary\":\"Looks good\",\"verification\":\"Tests verified\"}";
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    assertFalse(listener.outcome.result().error());
-    verify(issueRunService)
-        .reviewRun(
-            ISSUE_ID,
-            RUN_ID,
-            IssueRunActorType.AGENT,
-            "reviewer-agent",
-            "tool:" + INVOCATION_ID,
-            1L,
-            2L,
-            ReviewDecision.APPROVE,
-            "Looks good",
-            "Tests verified");
-  }
-
-  // --- 5. 权限、作用域隔离与安全脱敏测试 ---
-
-  @Test
-  void execute_missingInvocationContext_returnsErrorToolResult() {
-    // 验证缺失 invocation context 时返回通用错误
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.PROJECT_READ);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", null);
+    when(issueService.getIssue(DEP_ISSUE_ID)).thenReturn(null);
+    when(issueService.listDependencies(ISSUE_ID))
+        .thenReturn(
+            List.of(
+                IssueDependency.builder()
+                    .issueId(ISSUE_ID)
+                    .dependsOnIssueId(DEP_ISSUE_ID)
+                    .projectId(PROJECT_ID)
+                    .build()));
 
     TestListener listener = new TestListener();
-    tool.execute(request, listener);
+    tool.execute(createRequest(tool.descriptor(), "{}", executionContext), listener);
 
     ToolResult result = listener.outcome.result();
     assertTrue(result.error());
-    assertTrue(
-        ((TextResultContent) result.contents().get(0))
-            .text()
-            .contains("Missing invocation context"));
-  }
-
-  @Test
-  void execute_unownedThread_returnsErrorToolResult() {
-    // 验证未解析到属主的线程返回通用权限错误
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.PROJECT_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.empty());
-
-    ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    ToolResult result = listener.outcome.result();
-    assertTrue(result.error());
-    assertTrue(
-        ((TextResultContent) result.contents().get(0))
-            .text()
-            .contains("Tool not permitted for current role or unowned session"));
-  }
-
-  @Test
-  void execute_wrongRole_returnsErrorToolResult() {
-    // 验证 Coordinator 尝试调用 Executor 工具时被权限拦截
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_SUBMIT);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    String args =
-        "{\"observed_spec_revision\":0,\"observed_input_sequence\":0,\"summary\":\"done\"}";
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    ToolResult result = listener.outcome.result();
-    assertTrue(result.error());
-    assertTrue(
-        ((TextResultContent) result.contents().get(0))
-            .text()
-            .contains("Tool not permitted for current role or unowned session"));
-  }
-
-  @Test
-  void execute_crossProjectAccess_returnsGenericNotFound() {
-    // 验证跨项目访问 issue 时返回通用 Resource Not Found，坚决不泄漏跨项目信息
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    UUID otherProjectId = UUID.fromString("00000000-0000-0000-0000-000000000999");
-    Issue foreignIssue = Issue.builder().id(ISSUE_ID).projectId(otherProjectId).number(1L).build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(foreignIssue);
-
-    String args = String.format("{\"issue_id\":\"%s\"}", ISSUE_ID);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    ToolResult result = listener.outcome.result();
-    assertTrue(result.error());
-    assertEquals("issue not found", ((TextResultContent) result.contents().get(0)).text());
-  }
-
-  @Test
-  void execute_invalidUuid_doesNotEchoRawValue() {
-    // 验证传入非法 UUID 格式时，返回通用错误且绝不回显非法输入内容
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-
-    String maliciousInput = "malicious-injection-string";
-    String args = String.format("{\"issue_id\":\"%s\"}", maliciousInput);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
-
-    ToolResult result = listener.outcome.result();
-    assertTrue(result.error());
-    String errorMsg = ((TextResultContent) result.contents().get(0)).text();
-    assertEquals("Invalid issue_id format", errorMsg);
-    assertFalse(errorMsg.contains(maliciousInput));
+    assertEquals(
+        "Project thread ownership is inconsistent",
+        ((TextResultContent) result.contents().get(0)).text());
   }
 
   @Test
   void execute_unexpectedException_callsOnErrorWithoutCause() {
-    // 验证遇到意外运行时异常时，调用 listener.onError 且异常不包含原 Throwable cause
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.PROJECT_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-    when(projectService.getProject(PROJECT_ID))
+    // 验证遇到意外运行时异常时调用 listener.onError 且异常不包含原 Throwable cause
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+    when(issueRunService.getRun(RUN_ID))
         .thenThrow(new NullPointerException("Internal NPE with secrets"));
 
     ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
     TestListener listener = new TestListener();
-
     tool.execute(request, listener);
 
     assertNull(listener.outcome);
@@ -920,10 +1260,10 @@ class ProjectRoleToolTest {
 
   @Test
   void execute_internalStateError_returnsGenericMessageWithoutIdentifier() {
-    // 验证底层状态异常即使含标识也不会由工具结果回显
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.PROJECT_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-    when(projectService.getProject(PROJECT_ID))
+    // 验证底层非所有权异常即使含标识也不会由工具结果回显
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+    when(issueRunService.getRun(RUN_ID))
         .thenThrow(new IllegalStateException("Failed for " + PROJECT_ID));
 
     TestListener listener = new TestListener();
@@ -937,17 +1277,30 @@ class ProjectRoleToolTest {
 
   @Test
   void execute_listenerCallback_isStrictlyMutuallyExclusive() {
-    // 验证回调仅触发一次
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.PROJECT_READ);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
-    when(projectService.getProject(PROJECT_ID))
+    // 验证正常执行与异常执行时，回调均仅恰好触发一次
+    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_READ);
+    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(executorOwner));
+
+    IssueRun run =
+        IssueRun.builder()
+            .id(RUN_ID)
+            .issueId(ISSUE_ID)
+            .role(IssueRunRole.EXECUTOR)
+            .agentName("coder-agent")
+            .status(IssueRunStatus.RUNNING)
+            .build();
+    when(issueRunService.getRun(RUN_ID)).thenReturn(run);
+    when(issueService.getIssue(ISSUE_ID))
         .thenReturn(
-            Project.builder().id(PROJECT_ID).title("P").coordinatorAgentName("agent").build());
-    when(issueService.listIssues(PROJECT_ID, false)).thenReturn(List.of());
+            Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).status(IssueStatus.TODO).build());
+    when(projectService.getProject(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+    when(issueService.listActivitiesPage(ISSUE_ID, 0L, 51)).thenReturn(List.of());
+    when(issueService.countRejections(ISSUE_ID)).thenReturn(0L);
+    when(issueService.listDependencies(ISSUE_ID)).thenReturn(List.of());
 
     ToolExecutionRequest request = createRequest(tool.descriptor(), "{}", executionContext);
     TestListener listener = new TestListener();
-
     tool.execute(request, listener);
 
     assertEquals(1, listener.count);
@@ -955,28 +1308,44 @@ class ProjectRoleToolTest {
     assertNull(listener.error);
   }
 
+  // --- 6. 工具元数据、描述符与渲染器契约 ---
+
   @Test
-  void execute_versionConflictException_isSanitizedWithoutId() {
-    // 验证版本冲突异常返回脱敏消息，不包含实体 ID
-    ProjectRoleTool tool = createTool(ProjectRoleToolType.ISSUE_SET_STATUS);
-    when(ownerResolver.resolve(THREAD_ID)).thenReturn(Optional.of(coordinatorOwner));
+  void tool_metadata_typeDescriptorAndHistoryRenderer() {
+    // 验证 Tool.type()、descriptor() 与 historyRenderer() 完整可用
+    for (ProjectRoleToolType type : ProjectRoleToolType.values()) {
+      ProjectRoleTool tool = createTool(type);
+      assertEquals(type, tool.type());
+      assertEquals(type.descriptor(), tool.descriptor());
+      assertTrue(tool.historyRenderer().isPresent());
+    }
+  }
 
-    Issue issue = Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).number(1L).build();
-    when(issueService.getIssue(ISSUE_ID)).thenReturn(issue);
-    when(issueService.setStatus(ISSUE_ID, 0L, IssueStatus.TODO))
-        .thenThrow(new AiVersionConflictException("issue", "0", "1"));
+  @Test
+  void toolType_forRoleAndNamesForRole() {
+    // 验证 ProjectRoleToolType 辅助方法
+    assertEquals(
+        List.of(ProjectRoleToolType.ISSUE_READ, ProjectRoleToolType.ISSUE_REQUEST_INPUT),
+        ProjectRoleToolType.forRole(ProjectRole.EXECUTOR));
+    assertEquals(
+        List.of(
+            ProjectRoleToolType.ISSUE_READ,
+            ProjectRoleToolType.ISSUE_REQUEST_INPUT,
+            ProjectRoleToolType.ISSUE_REVIEW),
+        ProjectRoleToolType.forRole(ProjectRole.REVIEWER));
 
-    String args =
-        String.format("{\"issue_id\":\"%s\",\"status\":\"TODO\",\"expected_version\":0}", ISSUE_ID);
-    ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
-    TestListener listener = new TestListener();
-    tool.execute(request, listener);
+    assertEquals(
+        List.of("issue_read", "issue_request_input"),
+        ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
+    assertEquals(
+        List.of("issue_read", "issue_request_input", "issue_review"),
+        ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
 
-    ToolResult result = listener.outcome.result();
-    assertTrue(result.error());
-    String errorMsg = ((TextResultContent) result.contents().get(0)).text();
-    assertEquals("issue version conflict: expected=0 actual=1", errorMsg);
-    assertFalse(errorMsg.contains(ISSUE_ID.toString()));
+    assertEquals(
+        Optional.of(ProjectRoleToolType.ISSUE_READ),
+        ProjectRoleToolType.findByModelName("issue_read"));
+    assertEquals(Optional.empty(), ProjectRoleToolType.findByModelName(null));
+    assertEquals(Optional.empty(), ProjectRoleToolType.findByModelName("non_existent"));
   }
 
   private void assertSchemaRejected(ProjectRoleToolType type, String argumentsJson) {
@@ -992,20 +1361,9 @@ class ProjectRoleToolTest {
 
   private String minimumValidArguments(ProjectRoleToolType type) {
     return switch (type) {
-      case PROJECT_READ, ISSUE_LIST -> "{}";
-      case ISSUE_READ -> String.format("{\"issue_id\":\"%s\"}", ISSUE_ID);
-      case ISSUE_CREATE -> "{\"title\":\"title\"}";
-      case ISSUE_UPDATE -> String.format(
-          "{\"issue_id\":\"%s\",\"expected_version\":0,\"title\":\"title\"}", ISSUE_ID);
-      case ISSUE_ADD_DEPENDENCY, ISSUE_REMOVE_DEPENDENCY -> String.format(
-          "{\"issue_id\":\"%s\",\"depends_on_issue_id\":\"%s\",\"expected_version\":0}",
-          ISSUE_ID, DEP_ISSUE_ID);
-      case ISSUE_SET_STATUS -> String.format(
-          "{\"issue_id\":\"%s\",\"status\":\"TODO\",\"expected_version\":0}", ISSUE_ID);
-      case ISSUE_CANCEL -> String.format("{\"issue_id\":\"%s\",\"expected_version\":0}", ISSUE_ID);
-      case ISSUE_SUBMIT -> "{\"observed_spec_revision\":0,\"observed_input_sequence\":0,\"summary\":\"done\"}";
-      case ISSUE_REQUEST_INPUT -> "{\"observed_spec_revision\":0,\"observed_input_sequence\":0,\"question\":\"help\"}";
-      case ISSUE_REVIEW -> "{\"observed_spec_revision\":0,\"observed_input_sequence\":0,\"decision\":\"APPROVE\",\"summary\":\"ok\"}";
+      case ISSUE_READ -> "{}";
+      case ISSUE_REQUEST_INPUT -> "{\"question\":\"help\"}";
+      case ISSUE_REVIEW -> "{\"decision\":\"APPROVE\",\"reason\":\"ok\"}";
     };
   }
 }

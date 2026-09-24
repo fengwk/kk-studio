@@ -168,6 +168,13 @@
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+.badge-blocked-rejections {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  font-variant-numeric: tabular-nums;
+}
+
 .badge-waiting {
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
@@ -259,7 +266,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--border);
   min-width: 0;
 }
 
@@ -410,20 +416,6 @@
   max-height: 100%;
 }
 
-/* Coordinator Conversation Sidebar */
-.coordinator-sidebar {
-  width: 400px;
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  overflow: hidden;
-}
-
-.coordinator-sidebar .chat-pane {
-  flex: 1;
-  height: 100%;
-}
-
 /* Conflict banner */
 .cas-conflict-banner {
   background: rgba(239, 68, 68, 0.15);
@@ -493,12 +485,6 @@
     flex-direction: column;
   }
   .project-board-section {
-    border-right: none;
     border-bottom: 1px solid var(--border);
-    max-height: 60vh;
-  }
-  .coordinator-sidebar {
-    width: 100%;
-    max-height: 40vh;
   }
 }

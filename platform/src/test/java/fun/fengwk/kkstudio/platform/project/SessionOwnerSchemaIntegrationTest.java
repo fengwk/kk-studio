@@ -29,7 +29,7 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
   private UUID chatId;
   private UUID canvasId;
   private UUID projectId;
-  private UUID issueRunId;
+  private UUID issueAgentSessionId;
 
   @BeforeEach
   void setup() throws SQLException {
@@ -46,7 +46,8 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
       canvasId = UUID.randomUUID();
       projectId = UUID.randomUUID();
       UUID issueId = UUID.randomUUID();
-      issueRunId = UUID.randomUUID();
+      issueAgentSessionId = UUID.randomUUID();
+      UUID threadId = UUID.randomUUID();
 
       createHarnessSession(conn, sessionId);
       createHarnessSession(conn, secondSessionId);
@@ -56,31 +57,30 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
           chatId,
           agentName);
       execute(conn, "insert into canvas_document (id, title) values (?, 'canvas')", canvasId);
+      execute(conn, "insert into project (id, title) values (?, 'project')", projectId);
       execute(
           conn,
-          "insert into project (id, title, coordinator_agent_name) values (?, 'project', ?)",
-          projectId,
-          agentName);
-      execute(
-          conn,
-          "insert into issue (id, project_id, number, title, status)"
+          "insert into project_issue (id, project_id, number, title, status)"
               + " values (?, ?, 1, 'issue', 'TODO')",
           issueId,
           projectId);
+      createHarnessThread(conn, threadId, sessionId);
       execute(
           conn,
-          "insert into issue_run"
-              + " (id, issue_id, ordinal, role, actor_type, agent_name, status)"
-              + " values (?, ?, 1, 'EXECUTOR', 'AGENT', ?, 'RUNNING')",
-          issueRunId,
+          "insert into project_issue_agent_session"
+              + " (id, issue_id, agent_name, session_id, thread_id)"
+              + " values (?, ?, ?, ?, ?)",
+          issueAgentSessionId,
           issueId,
-          agentName);
+          agentName,
+          sessionId,
+          threadId);
     }
   }
 
   @Test
   void exactlyOneOwnerAndPerOwnerCardinalityAreRelationalConstraints() throws SQLException {
-    // 测试意图：单行恰有一个 owner；session 全局唯一；Project 至多一个长期 Session。
+    // 测试意图：单行恰有一个 owner；session 全局唯一；IssueAgentSession 至多一个长期 Session。
     try (Connection conn = newConnection()) {
       assertEquals(
           1,
@@ -111,19 +111,19 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
           1,
           execute(
               conn,
-              "insert into session_owner (session_id, project_id) values (?, ?)",
+              "insert into session_owner (session_id, issue_agent_session_id) values (?, ?)",
               sessionId,
-              projectId));
+              issueAgentSessionId));
 
       assertConstraintRejected(
           conn,
-          "uk_session_owner_project",
+          "uk_session_owner_issue_agent_session",
           () ->
               execute(
                   conn,
-                  "insert into session_owner (session_id, project_id) values (?, ?)",
+                  "insert into session_owner (session_id, issue_agent_session_id) values (?, ?)",
                   secondSessionId,
-                  projectId));
+                  issueAgentSessionId));
 
       assertConstraintRejected(
           conn,
@@ -144,11 +144,17 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
       Future<String> chat = executor.submit(() -> claim(barrier, "chat_id", chatId, "CHAT"));
-      Future<String> project =
-          executor.submit(() -> claim(barrier, "project_id", projectId, "PROJECT"));
+      Future<String> issueAgent =
+          executor.submit(
+              () ->
+                  claim(
+                      barrier,
+                      "issue_agent_session_id",
+                      issueAgentSessionId,
+                      "ISSUE_AGENT_SESSION"));
 
       Set<String> outcomes =
-          Set.of(chat.get(10, TimeUnit.SECONDS), project.get(10, TimeUnit.SECONDS));
+          Set.of(chat.get(10, TimeUnit.SECONDS), issueAgent.get(10, TimeUnit.SECONDS));
       assertEquals(Set.of("SUCCESS", "CONFLICT"), outcomes);
 
       try (Connection conn = newConnection();
@@ -197,6 +203,27 @@ class SessionOwnerSchemaIntegrationTest extends PostgresSchemaSupport {
         "insert into harness_session (id, name, created_at)"
             + " values (?, 'session', clock_timestamp())",
         id);
+  }
+
+  private static void createHarnessThread(Connection conn, UUID threadId, UUID sessionId)
+      throws SQLException {
+    UUID rootEntryId = UUID.randomUUID();
+    execute(
+        conn,
+        "insert into harness_entry (id, session_id, entry_type, payload, created_at)"
+            + " values (?, ?, 'ROOT', '{}'::jsonb, clock_timestamp())",
+        rootEntryId,
+        sessionId);
+    execute(
+        conn,
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
+            + " name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '"
+            + "0".repeat(64)
+            + "', 'test-thread', false, 1, 0, clock_timestamp(), clock_timestamp())",
+        threadId,
+        sessionId,
+        rootEntryId);
   }
 
   private static void createAgentDefinition(Connection conn, String agentName) throws SQLException {

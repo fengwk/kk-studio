@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -20,7 +21,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** 读取当前 branch 最新 Goal 快照。 */
+/** 只读当前 branch 的用户 Goal 及其 Agent 进度声明。Agent 不能通过本工具创建或改写 Goal 正文。 */
 public final class GetGoalTool implements Tool {
 
   public static final String NAME = "get_goal";
@@ -37,7 +38,7 @@ public final class GetGoalTool implements Tool {
   private static final ToolRequirements REQUIREMENTS =
       new ToolRequirements(
           EnvironmentSupport.NONE,
-          List.of(new StateDeclaration(GoalFeature.STATE_TYPE, StateMode.READ)));
+          List.of(new StateDeclaration(GoalFeature.PROGRESS_TYPE, StateMode.READ)));
 
   @Override
   public ToolDescriptor descriptor() {
@@ -69,14 +70,21 @@ public final class GetGoalTool implements Tool {
     ToolOutcome outcome;
     try {
       GoalToolSupport.arguments(request.call(), DESCRIPTOR);
-      GoalState state = GoalToolSupport.latest(request.context().branch()).orElse(null);
+      Optional<GoalSnapshot> goal = GoalToolSupport.goal(request.context().branch());
+      GoalProgress progress =
+          goal.map(value -> GoalToolSupport.progress(request.context().branch(), value.id()))
+              .orElse(Optional.empty())
+              .orElse(null);
       String prefix =
-          state == null
-              ? "There is no current branch goal."
-              : "This is the current branch goal. Use it to advance or verify the objective.";
+          goal.isEmpty()
+              ? "There is no user-set goal on this branch."
+              : "This is the current branch goal. It is owned by the user and cannot be created or"
+                  + " changed by the agent; progress entries are agent reports, not system"
+                  + " verification.";
       outcome =
           GoalToolSupport.success(
-              request.call(), prefix + "\n\n" + GoalToolSupport.envelope(state));
+              request.call(),
+              prefix + "\n\n" + GoalToolSupport.envelope(goal.orElse(null), progress));
     } catch (RuntimeException error) {
       outcome = GoalToolSupport.error(request.call(), error);
     }

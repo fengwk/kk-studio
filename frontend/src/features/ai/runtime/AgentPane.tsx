@@ -21,6 +21,7 @@ import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import { useI18n } from '@/shared/i18n'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
+import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
 
 export type { AgentPaneCapabilities, AgentPaneDefaults }
 
@@ -224,6 +225,19 @@ export function AgentPane({
     }
     if (pane.interaction === 'shortcuts') {
       return <ThreadShortcutsPanel onClose={pane.closeInteraction} />
+    }
+    if (pane.interaction === 'goal') {
+      return (
+        <BranchGoalPanel
+          goal={pane.boundGoal}
+          progress={pane.boundGoalProgress}
+          busy={pane.pending}
+          readOnly={Boolean(capabilities?.readOnly)}
+          onSubmitGoal={(goalText) => pane.submitGoal(goalText)}
+          onClearGoal={() => pane.clearGoal()}
+          onClose={pane.closeInteraction}
+        />
+      )
     }
     if (pane.interaction === 'tree') {
       return (

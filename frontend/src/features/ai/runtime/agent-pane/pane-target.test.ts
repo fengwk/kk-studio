@@ -100,6 +100,7 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
             environmentName: null,
+            goal: null,
           },
           yoloEnabled: false,
         },
@@ -128,9 +129,9 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
   })
 
-  it('supports PROJECT owner type for target storage', () => {
-    // 测试意图：验证 PROJECT owner 能够正确保存与恢复 PaneTarget
-    const owner = { type: 'PROJECT' as const, id: 'proj-1' }
+  it('supports ISSUE_AGENT_SESSION owner type for target storage', () => {
+    // 测试意图：验证 ISSUE_AGENT_SESSION owner 能够正确保存与恢复 PaneTarget
+    const owner = { type: 'ISSUE_AGENT_SESSION' as const, id: 'issue-session-1' }
     const storage = memoryStorage()
     savePaneTarget(owner, 'pane-coordinator', { kind: 'BOUND_THREAD', threadId: 'thread-p1' }, storage)
     expect(loadPaneTarget(owner, 'pane-coordinator', storage)).toEqual({
@@ -189,6 +190,7 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
             environmentName: null,
+            goal: null,
           },
           yoloEnabled: false,
         },
@@ -525,6 +527,7 @@ describe('PaneTarget durable-local FSM', () => {
             agentName: 'assistant',
             model: { providerName: 'p', modelName: 'm', variant: 'v' },
             environmentName: null,
+            goal: null,
           },
           yoloEnabled: false,
         },
@@ -574,6 +577,7 @@ describe('PaneTarget durable-local FSM', () => {
     const rootSettingsWithoutEnv = {
       agentName: baseValid.request.target.rootSettings.agentName,
       model: baseValid.request.target.rootSettings.model,
+      goal: null,
     }
     storage.setItem(key, JSON.stringify({
       ...baseValid,

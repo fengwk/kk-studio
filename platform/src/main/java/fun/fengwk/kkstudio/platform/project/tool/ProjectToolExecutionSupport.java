@@ -83,6 +83,44 @@ final class ProjectToolExecutionSupport {
     return text.trim();
   }
 
+  /** 读取可选文本字段：缺失或 null 返回 {@code null}。 */
+  static String optionalText(JsonNode node, String fieldName) {
+    if (node == null || !node.has(fieldName) || node.get(fieldName).isNull()) {
+      return null;
+    }
+    JsonNode value = node.get(fieldName);
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(fieldName + " must be a string");
+    }
+    return value.asText();
+  }
+
+  /** 读取可选 UUID 字段：缺失或 null 返回 {@code null}，格式非法明确拒绝。 */
+  static UUID optionalUuid(JsonNode node, String fieldName) {
+    String text = optionalText(node, fieldName);
+    return text == null ? null : parseUuid(text, fieldName);
+  }
+
+  /** 读取可选长整数字段：缺失或 null 返回 {@code null}，负数明确拒绝。 */
+  static Long optionalLong(JsonNode node, String fieldName) {
+    if (node == null || !node.has(fieldName) || node.get(fieldName).isNull()) {
+      return null;
+    }
+    return requireNonNegativeLong(node, fieldName);
+  }
+
+  /** 读取可选整数字段：缺失或 null 返回 {@code null}，非 int 范围明确拒绝。 */
+  static Integer optionalInt(JsonNode node, String fieldName) {
+    Long value = optionalLong(node, fieldName);
+    if (value == null) {
+      return null;
+    }
+    if (value > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException(fieldName + " exceeds the supported range");
+    }
+    return value.intValue();
+  }
+
   static String sanitizeErrorMessage(Throwable t) {
     if (t instanceof AiResourceNotFoundException nf) {
       return nf.resource() + " not found";

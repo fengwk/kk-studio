@@ -21,16 +21,16 @@ import java.util.UUID;
 public interface ProjectMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, title, description, coordinator_agent_name, next_issue_number, "
+      "id, title, description, yolo_enabled, max_review_rejections, next_issue_number, "
           + "version, archived_at, created_at, updated_at";
 
   @Insert(
       """
       insert into project (
-          id, title, description, coordinator_agent_name, next_issue_number,
+          id, title, description, yolo_enabled, max_review_rejections, next_issue_number,
           version, archived_at, created_at, updated_at
       ) values (
-          #{id}, #{title}, #{description}, #{coordinatorAgentName}, 1,
+          #{id}, #{title}, #{description}, #{yoloEnabled}, #{maxReviewRejections}, 1,
           0, null, clock_timestamp(), clock_timestamp()
       )
       """)
@@ -43,7 +43,8 @@ public interface ProjectMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
         @Result(column = "description", property = "description"),
-        @Result(column = "coordinator_agent_name", property = "coordinatorAgentName"),
+        @Result(column = "yolo_enabled", property = "yoloEnabled"),
+        @Result(column = "max_review_rejections", property = "maxReviewRejections"),
         @Result(column = "next_issue_number", property = "nextIssueNumber"),
         @Result(column = "version", property = "version"),
         @Result(column = "archived_at", property = "archivedAt"),
@@ -69,7 +70,8 @@ public interface ProjectMapper extends BaseMapper {
       update project
       set title = #{project.title},
           description = #{project.description},
-          coordinator_agent_name = #{project.coordinatorAgentName},
+          yolo_enabled = #{project.yoloEnabled},
+          max_review_rejections = #{project.maxReviewRejections},
           updated_at = clock_timestamp(),
           version = version + 1
       where id = #{project.id} and version = #{expectedVersion}
@@ -106,7 +108,7 @@ public interface ProjectMapper extends BaseMapper {
 
   @Select(
       """
-      select id, title, description, coordinator_agent_name, next_issue_number,
+      select id, title, description, yolo_enabled, max_review_rejections, next_issue_number,
              version, archived_at, created_at, updated_at
       from project
       where (archived_at is not null) = #{archived}

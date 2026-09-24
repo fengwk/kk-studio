@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -130,6 +131,19 @@ public interface HarnessStore {
      * @return 匹配的不可变 Entry 列表（保持 root-to-head 顺序）
      */
     List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId);
+
+    /**
+     * 读取指定 head Entry 所在 branch 的生效 {@link BranchSettings}：以 ROOT settings 为基础，被路径上最近的非 COMPACTION
+     * TURN_START settings 覆盖，与 {@link EntryPath#baseSettings()} 语义完全一致。
+     *
+     * <p>这是为只读 Contributor branch view 提供的窄读取：只返回 settings 快照，不物化完整 EntryPath，也不返回任何 message / tool
+     * / compaction 内容；sibling 分支的 settings 绝不可见。head 不存在或祖先链 cycle / 未到 ROOT fail closed（抛出 {@link
+     * IllegalArgumentException}）；参数为 null 拒绝。
+     *
+     * @param headEntryId 祖先链起点 head Entry ID，不能为 null
+     * @return 该 branch 的生效 settings 快照
+     */
+    BranchSettings loadBranchSettings(UUID headEntryId);
 
     /**
      * 读取指定 Session 的全部不可变 Entry，包含非当前 head 路径上的历史分支。按 {@code createdAt} 升序，相同时按 PostgreSQL 兼容的无符号

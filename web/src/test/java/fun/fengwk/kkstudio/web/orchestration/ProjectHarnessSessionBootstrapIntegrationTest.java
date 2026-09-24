@@ -14,22 +14,23 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.chat.service.ChatService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.controller.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.platform.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.platform.project.model.ClaimedControllerWork;
+import fun.fengwk.kkstudio.platform.project.model.ClaimedIssueWork;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
-import fun.fengwk.kkstudio.platform.project.session.BootstrapIssueRunSessionRequest;
-import fun.fengwk.kkstudio.platform.project.session.BootstrapProjectSessionRequest;
+import fun.fengwk.kkstudio.platform.project.session.BootstrapIssueAgentSessionRequest;
 import fun.fengwk.kkstudio.platform.project.session.ProjectHarnessSessionBootstrapService;
+import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
+import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.time.Instant;
@@ -42,10 +43,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>测试意图：
  *
  * <ul>
- *   <li>验证 PROJECT 与 ISSUE_RUN 会话在单一数据库事务内原子创建 Session、ROOT Entry、Initial Thread Command 与关系行；
+ *   <li>验证 ISSUE_AGENT_SESSION 会话在单一数据库事务内原子创建 Session、ROOT Entry、Initial Thread Command 与关系行；
  *   <li>验证幂等 exact replay 语义，不重复写入行，版本/序号不推进，且准确返回 replayed=true；
- *   <li>验证绑定冲突、无效所有者、终态运行等校验失败时的完全事务回滚（无悬挂 Harness 或关系孤儿行）；
- *   <li>验证 session_owner 主键单一所有权互斥约束，跨 OwnerType（如 PROJECT 与 ISSUE_RUN）互斥无孤儿。
+ *   <li>验证绑定冲突、无效所有者、已归档项目等校验失败时的完全事务回滚（无悬挂 Harness 或关系孤儿行）；
+ *   <li>验证 session_owner 主键单一所有权互斥约束，跨 OwnerType（如 CHAT 与 ISSUE_AGENT_SESSION）互斥无孤儿。
  * </ul>
  */
 class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSupport {
@@ -56,24 +57,29 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   @Autowired private ProjectService projectService;
   @Autowired private IssueService issueService;
   @Autowired private IssueRunService issueRunService;
-  @Autowired private IssueControllerWorkStore controllerWorkStore;
+  @Autowired private IssueWorkStore workStore;
   @Autowired private IssueReconciler issueReconciler;
+  @Autowired private ChatService chatService;
+  @Autowired private ChatSessionRepository chatSessionRepository;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @Test
-  void bootstrapProjectSession_atomicallyCreatesSessionAndHarnessRows() {
+  void bootstrapIssueAgentSession_atomicallyCreatesSessionAndHarnessRows() {
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Project Alpha", "Description", agentName);
-    UUID projectId = project.getId();
+    Project project = projectService.createProject("Project Alpha", "Description", false, 0);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Issue Alpha", "Desc", agentName, null, IssueStatus.TODO);
+    UUID issueId = issue.getId();
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     UUID idempotencyKey = UUID.randomUUID();
-    String initialMessage = "Coordinate initial project roadmap";
+    String initialMessage = "Execute initial issue task";
 
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            projectId, sessionId, threadId, idempotencyKey, initialMessage);
-    AcceptedCommands result = bootstrapService.bootstrapProjectSession(request);
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            issueId, agentName, sessionId, threadId, idempotencyKey, initialMessage);
+    AcceptedCommands result = bootstrapService.bootstrapIssueAgentSession(request);
 
     assertNotNull(result);
     assertFalse(result.replayed());
@@ -88,7 +94,13 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
         initialMessage, ((TextMessageContent) payload.message().contents().getFirst()).text());
 
     // 验证数据库内所有行的原子持久化
-    assertEquals(1, count("session_owner", "project_id", projectId));
+    UUID agentSessionId =
+        jdbcTemplate.queryForObject(
+            "select id from project_issue_agent_session where issue_id = ? and agent_name = ?",
+            UUID.class,
+            issueId,
+            agentName);
+    assertEquals(1, count("session_owner", "issue_agent_session_id", agentSessionId));
     assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
@@ -98,20 +110,23 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   }
 
   @Test
-  void bootstrapProjectSession_exactReplayIdempotencyNoVersionOrCountChange() {
+  void bootstrapIssueAgentSession_exactReplayIdempotencyNoVersionOrCountChange() {
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Replay Project", "Desc", agentName);
-    UUID projectId = project.getId();
+    Project project = projectService.createProject("Replay Project", "Desc", false, 0);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Issue Replay", "Desc", agentName, null, IssueStatus.TODO);
+    UUID issueId = issue.getId();
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     UUID idempotencyKey = UUID.randomUUID();
-    String initialMessage = "Coordinate roadmap once";
+    String initialMessage = "Execute task replay";
 
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            projectId, sessionId, threadId, idempotencyKey, initialMessage);
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            issueId, agentName, sessionId, threadId, idempotencyKey, initialMessage);
 
-    AcceptedCommands first = bootstrapService.bootstrapProjectSession(request);
+    AcceptedCommands first = bootstrapService.bootstrapIssueAgentSession(request);
     assertFalse(first.replayed());
 
     Long threadVersion1 =
@@ -122,7 +137,7 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
             "select next_command_sequence from harness_thread where id = ?", Long.class, threadId);
 
     // 第二次相同请求，触发 exact replay
-    AcceptedCommands second = bootstrapService.bootstrapProjectSession(request);
+    AcceptedCommands second = bootstrapService.bootstrapIssueAgentSession(request);
     assertTrue(second.replayed());
     assertEquals(sessionId, second.session().id());
     assertEquals(threadId, second.thread().id());
@@ -138,8 +153,13 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
     assertEquals(
         nextCmdSeq1, nextCmdSeq2, "Thread next_command_sequence must not advance on exact replay");
 
-    // 表内行数不重复膨胀
-    assertEquals(1, count("session_owner", "project_id", projectId));
+    UUID agentSessionId =
+        jdbcTemplate.queryForObject(
+            "select id from project_issue_agent_session where issue_id = ? and agent_name = ?",
+            UUID.class,
+            issueId,
+            agentName);
+    assertEquals(1, count("session_owner", "issue_agent_session_id", agentSessionId));
     assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
@@ -149,26 +169,39 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   }
 
   @Test
-  void bootstrapProjectSession_rejectsDifferentSessionWhenAlreadyBound() {
+  void bootstrapIssueAgentSession_rejectsDifferentSessionWhenAlreadyBound() {
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Bound Project", "Desc", agentName);
-    UUID projectId = project.getId();
+    Project project = projectService.createProject("Bound Project", "Desc", false, 0);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Issue Bound", "Desc", agentName, null, IssueStatus.TODO);
+    UUID issueId = issue.getId();
     UUID session1 = UUID.randomUUID();
     UUID session2 = UUID.randomUUID();
 
-    bootstrapService.bootstrapProjectSession(
-        new BootstrapProjectSessionRequest(
-            projectId, session1, UUID.randomUUID(), UUID.randomUUID(), "First session"));
+    bootstrapService.bootstrapIssueAgentSession(
+        new BootstrapIssueAgentSessionRequest(
+            issueId, agentName, session1, UUID.randomUUID(), UUID.randomUUID(), "First session"));
 
     assertThrows(
         AiValidationException.class,
         () ->
-            bootstrapService.bootstrapProjectSession(
-                new BootstrapProjectSessionRequest(
-                    projectId, session2, UUID.randomUUID(), UUID.randomUUID(), "Second session")));
+            bootstrapService.bootstrapIssueAgentSession(
+                new BootstrapIssueAgentSessionRequest(
+                    issueId,
+                    agentName,
+                    session2,
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
+                    "Second session")));
 
-    // session1 正常存在且不受影响
-    assertEquals(1, count("session_owner", "project_id", projectId));
+    UUID agentSessionId =
+        jdbcTemplate.queryForObject(
+            "select id from project_issue_agent_session where issue_id = ? and agent_name = ?",
+            UUID.class,
+            issueId,
+            agentName);
+    assertEquals(1, count("session_owner", "issue_agent_session_id", agentSessionId));
     assertEquals(1, count("session_owner", "session_id", session1));
     assertEquals(1, count("harness_session", "id", session1));
 
@@ -178,9 +211,12 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   }
 
   @Test
-  void bootstrapProjectSession_rollbackOnArchivedProjectLeavesNoDanglingRows() {
+  void bootstrapIssueAgentSession_rollbackOnArchivedProjectLeavesNoDanglingRows() {
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Archived Project", "Desc", agentName);
+    Project project = projectService.createProject("Archived Project", "Desc", false, 0);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Archived Issue", "Desc", agentName, null, IssueStatus.TODO);
     projectService.archiveProject(project.getId(), project.getVersion());
 
     UUID sessionId = UUID.randomUUID();
@@ -190,179 +226,17 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
     assertThrows(
         AiValidationException.class,
         () ->
-            bootstrapService.bootstrapProjectSession(
-                new BootstrapProjectSessionRequest(
-                    project.getId(),
+            bootstrapService.bootstrapIssueAgentSession(
+                new BootstrapIssueAgentSessionRequest(
+                    issue.getId(),
+                    agentName,
                     sessionId,
                     threadId,
                     idempotencyKey,
                     "Should fail on archived project")));
 
     // 验证事务完全回滚，无残留孤儿行
-    assertEquals(0, count("session_owner", "project_id", project.getId()));
-    assertEquals(0, count("session_owner", "session_id", sessionId));
-    assertEquals(0, count("harness_session", "id", sessionId));
-    assertEquals(0, count("harness_entry", "session_id", sessionId));
-    assertEquals(0, count("harness_thread", "id", threadId));
-    assertEquals(0, count("harness_thread_command", "thread_id", threadId));
-    assertEquals(0, count("harness_work", "target_id", threadId));
-  }
-
-  @Test
-  void bootstrapIssueRunSession_atomicallyCreatesSessionAndHarnessRows() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Issue Run Project", "Desc", agentName);
-    Issue issue =
-        issueService.createIssue(
-            project.getId(), "Issue 1", "Desc", agentName, null, IssueStatus.TODO);
-    IssueRun run =
-        issueRunService.startExecutorRun(
-            issue.getId(), agentName, Instant.now().plusSeconds(3600), 10);
-    UUID runId = run.getId();
-
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    UUID idempotencyKey = UUID.randomUUID();
-    String initialMessage = "Execute task 1";
-
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(
-            runId, sessionId, threadId, idempotencyKey, initialMessage);
-    AcceptedCommands result = bootstrapService.bootstrapIssueRunSession(request);
-
-    assertNotNull(result);
-    assertFalse(result.replayed());
-    assertEquals(sessionId, result.session().id());
-    assertEquals(threadId, result.thread().id());
-    assertEquals(1, result.acceptedCommands().size());
-
-    // 验证原子持久化
-    assertEquals(1, count("session_owner", "issue_run_id", runId));
-    assertEquals(1, count("session_owner", "session_id", sessionId));
-    assertEquals(1, count("harness_session", "id", sessionId));
-    assertEquals(1, count("harness_entry", "session_id", sessionId));
-    assertEquals(1, count("harness_thread", "id", threadId));
-    assertEquals(1, count("harness_thread_command", "thread_id", threadId));
-    assertEquals(1, count("harness_work", "target_id", threadId));
-  }
-
-  @Test
-  void bootstrapIssueRunSession_exactReplayIdempotencyNoVersionOrCountChange() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Run Replay Project", "Desc", agentName);
-    Issue issue =
-        issueService.createIssue(
-            project.getId(), "Issue Replay", "Desc", agentName, null, IssueStatus.TODO);
-    IssueRun run =
-        issueRunService.startExecutorRun(
-            issue.getId(), agentName, Instant.now().plusSeconds(3600), 10);
-    UUID runId = run.getId();
-
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    UUID idempotencyKey = UUID.randomUUID();
-    String initialMessage = "Execute task replay";
-
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(
-            runId, sessionId, threadId, idempotencyKey, initialMessage);
-
-    AcceptedCommands first = bootstrapService.bootstrapIssueRunSession(request);
-    assertFalse(first.replayed());
-
-    Long threadVersion1 =
-        jdbcTemplate.queryForObject(
-            "select version from harness_thread where id = ?", Long.class, threadId);
-    Long nextCmdSeq1 =
-        jdbcTemplate.queryForObject(
-            "select next_command_sequence from harness_thread where id = ?", Long.class, threadId);
-
-    AcceptedCommands second = bootstrapService.bootstrapIssueRunSession(request);
-    assertTrue(second.replayed());
-
-    Long threadVersion2 =
-        jdbcTemplate.queryForObject(
-            "select version from harness_thread where id = ?", Long.class, threadId);
-    Long nextCmdSeq2 =
-        jdbcTemplate.queryForObject(
-            "select next_command_sequence from harness_thread where id = ?", Long.class, threadId);
-
-    assertEquals(threadVersion1, threadVersion2, "Thread version must not advance on exact replay");
-    assertEquals(
-        nextCmdSeq1, nextCmdSeq2, "Thread next_command_sequence must not advance on exact replay");
-
-    assertEquals(1, count("session_owner", "issue_run_id", runId));
-    assertEquals(1, count("session_owner", "session_id", sessionId));
-    assertEquals(1, count("harness_session", "id", sessionId));
-    assertEquals(1, count("harness_entry", "session_id", sessionId));
-    assertEquals(1, count("harness_thread", "id", threadId));
-    assertEquals(1, count("harness_thread_command", "thread_id", threadId));
-    assertEquals(1, count("harness_work", "target_id", threadId));
-  }
-
-  @Test
-  void bootstrapIssueRunSession_rejectsDifferentSessionWhenAlreadyBound() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Run Bound Project", "Desc", agentName);
-    Issue issue =
-        issueService.createIssue(
-            project.getId(), "Issue Bound", "Desc", agentName, null, IssueStatus.TODO);
-    IssueRun run =
-        issueRunService.startExecutorRun(
-            issue.getId(), agentName, Instant.now().plusSeconds(3600), 10);
-    UUID runId = run.getId();
-
-    UUID session1 = UUID.randomUUID();
-    UUID session2 = UUID.randomUUID();
-
-    bootstrapService.bootstrapIssueRunSession(
-        new BootstrapIssueRunSessionRequest(
-            runId, session1, UUID.randomUUID(), UUID.randomUUID(), "First run session"));
-
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            bootstrapService.bootstrapIssueRunSession(
-                new BootstrapIssueRunSessionRequest(
-                    runId, session2, UUID.randomUUID(), UUID.randomUUID(), "Second run session")));
-
-    // session1 正常保留
-    assertEquals(1, count("session_owner", "issue_run_id", runId));
-    assertEquals(1, count("session_owner", "session_id", session1));
-
-    // session2 无任何数据写入
-    assertEquals(0, count("session_owner", "session_id", session2));
-    assertEquals(0, count("harness_session", "id", session2));
-  }
-
-  @Test
-  void bootstrapIssueRunSession_rollbackOnTerminalRunValidationLeavesNoDanglingRows() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Terminal Project", "Desc", agentName);
-    Issue issue =
-        issueService.createIssue(
-            project.getId(), "Terminal Issue", "Desc", agentName, null, IssueStatus.TODO);
-    IssueRun run =
-        issueRunService.startExecutorRun(
-            issue.getId(), agentName, Instant.now().plusSeconds(3600), 10);
-    UUID runId = run.getId();
-
-    // 将 Run 置为 FAILED 终态
-    issueRunService.failRun(runId, IssueRunStatus.FAILED, "Execution failed");
-
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    UUID idempotencyKey = UUID.randomUUID();
-
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            bootstrapService.bootstrapIssueRunSession(
-                new BootstrapIssueRunSessionRequest(
-                    runId, sessionId, threadId, idempotencyKey, "Should fail on terminal run")));
-
-    // 验证事务回滚，无残留 Harness 行或关系行
-    assertEquals(0, count("session_owner", "issue_run_id", runId));
+    assertEquals(0, count("project_issue_agent_session", "issue_id", issue.getId()));
     assertEquals(0, count("session_owner", "session_id", sessionId));
     assertEquals(0, count("harness_session", "id", sessionId));
     assertEquals(0, count("harness_entry", "session_id", sessionId));
@@ -374,86 +248,92 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
   @Test
   void singleOwnerEnforcementAcrossOwnerTypesLeavesNoOrphan() {
     String agentName = createTestAgent();
-    Project proj = projectService.createProject("Project Owner", "Desc", agentName);
+    Project proj = projectService.createProject("Project Owner", "Desc", false, 0);
     Issue issue =
         issueService.createIssue(
             proj.getId(), "Issue Cross Guard", "Desc", agentName, null, IssueStatus.TODO);
-    IssueRun run =
-        issueRunService.startExecutorRun(
-            issue.getId(), agentName, Instant.now().plusSeconds(3600), 10);
 
     UUID sharedSessionId = UUID.randomUUID();
 
-    // Project 先成功占用 sharedSessionId (OwnerType = PROJECT)
-    bootstrapService.bootstrapProjectSession(
-        new BootstrapProjectSessionRequest(
-            proj.getId(),
-            sharedSessionId,
-            UUID.randomUUID(),
-            UUID.randomUUID(),
-            "Project initial prompt"));
+    // 先创建 Chat 并绑定 sharedSessionId (OwnerType = CHAT)；Harness Session 行是归属边的持久前提
+    ChatCreateDTO createReq = new ChatCreateDTO();
+    createReq.setTitle("Chat Title");
+    createReq.setAgentName(agentName);
+    ChatDTO chat = chatService.createChat(createReq);
+    UUID chatId = UUID.fromString(chat.getId());
+    insertHarnessSession(sharedSessionId);
+    chatSessionRepository.insert(sharedSessionId, chatId);
 
-    assertEquals(1, count("session_owner", "project_id", proj.getId()));
+    assertEquals(1, count("session_owner", "chat_id", chatId));
     assertEquals(1, count("session_owner", "session_id", sharedSessionId));
 
-    // 跨 OwnerType: IssueRun 尝试占用同一个 sharedSessionId，被 session 主键拦截
+    // 跨 OwnerType: IssueAgentSession 尝试占用同一个 sharedSessionId，被 session 主键拦截
     assertThrows(
         Exception.class,
         () ->
-            bootstrapService.bootstrapIssueRunSession(
-                new BootstrapIssueRunSessionRequest(
-                    run.getId(),
+            bootstrapService.bootstrapIssueAgentSession(
+                new BootstrapIssueAgentSessionRequest(
+                    issue.getId(),
+                    agentName,
                     sharedSessionId,
                     UUID.randomUUID(),
                     UUID.randomUUID(),
-                    "Conflicting run prompt")));
+                    "Conflicting issue prompt")));
 
-    // 验证 IssueRun 关联行绝未创建（无孤儿关系）
-    assertEquals(0, count("session_owner", "issue_run_id", run.getId()));
+    // 验证 IssueAgentSession 关联行绝未创建（无孤儿关系）
+    assertEquals(0, count("project_issue_agent_session", "session_id", sharedSessionId));
 
-    // sharedSessionId 依然唯一且安全地归属于 Project
+    // sharedSessionId 依然唯一且安全地归属于 Chat
     assertEquals(1, count("session_owner", "session_id", sharedSessionId));
-    assertEquals(1, count("session_owner", "project_id", proj.getId()));
+    assertEquals(1, count("session_owner", "chat_id", chatId));
   }
 
   @Test
   void reconcilerAtomicallyCreatesRunAndHarnessSession() {
     // 测试意图：P2 的真实 reconcile 事务必须一起持久化 Issue 状态、Run、Session、ROOT、Thread、Command 与归属边。
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Reconcile Project", "Desc", agentName);
+    Project project = projectService.createProject("Reconcile Project", "Desc", false, 0);
     Issue issue =
         issueService.createIssue(
             project.getId(), "Reconcile Issue", "Desc", agentName, null, IssueStatus.TODO);
     Instant claimAt = Instant.now().plusSeconds(1);
-    ClaimedControllerWork claim =
-        controllerWorkStore
-            .claimNext(claimAt, "reconcile-worker", claimAt.plusSeconds(30))
-            .orElseThrow();
+    ClaimedIssueWork claim =
+        workStore.claimNext(claimAt, "reconcile-worker", claimAt.plusSeconds(30)).orElseThrow();
 
     assertEquals(IssueReconcileOutcome.EXECUTOR_STARTED, issueReconciler.reconcile(claim));
 
+    UUID issueId = issue.getId();
     UUID runId =
         jdbcTemplate.queryForObject(
-            "select id from issue_run where issue_id = ?", UUID.class, issue.getId());
+            "select id from project_issue_run where issue_id = ?", UUID.class, issueId);
+    UUID agentSessionId =
+        jdbcTemplate.queryForObject(
+            "select id from project_issue_agent_session where issue_id = ? and agent_name = ?",
+            UUID.class,
+            issueId,
+            agentName);
     UUID sessionId =
         jdbcTemplate.queryForObject(
-            "select session_id from session_owner where issue_run_id = ?", UUID.class, runId);
+            "select session_id from session_owner where issue_agent_session_id = ?",
+            UUID.class,
+            agentSessionId);
     UUID threadId =
         jdbcTemplate.queryForObject(
             "select id from harness_thread where session_id = ?", UUID.class, sessionId);
     assertEquals(
         "IN_PROGRESS",
         jdbcTemplate.queryForObject(
-            "select status from issue where id = ?", String.class, issue.getId()));
-    assertEquals(1, count("issue_run", "id", runId));
-    assertEquals(1, count("session_owner", "issue_run_id", runId));
+            "select status from project_issue where id = ?", String.class, issueId));
+    assertEquals(1, count("project_issue_run", "id", runId));
+    assertEquals(1, count("project_issue_agent_session", "id", agentSessionId));
+    assertEquals(1, count("session_owner", "issue_agent_session_id", agentSessionId));
     assertEquals(1, count("session_owner", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_entry", "session_id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
     assertEquals(1, count("harness_thread_command", "thread_id", threadId));
     assertEquals(1, count("harness_work", "target_id", threadId));
-    assertNotNull(controllerWorkStore.getWork(issue.getId()));
+    assertNotNull(workStore.getWork(issueId));
   }
 
   private int count(String table, String column, Object value) {
@@ -461,6 +341,14 @@ class ProjectHarnessSessionBootstrapIntegrationTest extends WebPostgresTestSuppo
         jdbcTemplate.queryForObject(
             "select count(*) from " + table + " where " + column + " = ?", Integer.class, value);
     return count != null ? count : 0;
+  }
+
+  /** 插入最小合法的 Harness Session 行：session_owner 归属边的持久前提。 */
+  private void insertHarnessSession(UUID sessionId) {
+    jdbcTemplate.update(
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        sessionId,
+        "session-" + sessionId);
   }
 
   private String createTestAgent() {

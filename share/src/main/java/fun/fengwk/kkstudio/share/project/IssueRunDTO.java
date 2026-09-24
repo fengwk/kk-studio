@@ -7,7 +7,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** IssueRun 完整执行事实 DTO。 */
+/**
+ * IssueRun 完整执行事实 DTO。
+ *
+ * <p>Run 状态只描述执行：RUNNING/WAITING_HUMAN/COMPLETED/FAILED/CANCELLED/UNKNOWN；{@code outcome}
+ * 才是带来源的业务结果 （SUBMITTED/APPROVED/CHANGES_REQUESTED 等）。{@code agentSessionId} 与 {@code sessionId}
+ * 是同一 {@code (issueId, agentName)} 跨多次 Run 复用的稳定归属，{@code observedActivitySequence} 是本次 Run 已消费的
+ * Activity 位置。
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -18,10 +25,15 @@ public class IssueRunDTO {
   private String issueId;
   private String ordinal;
   private String role;
-  private String actorType;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String agentName;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String agentSessionId;
+
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private String sessionId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String submissionRunId;
@@ -31,8 +43,7 @@ public class IssueRunDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String outcome;
 
-  private String observedSpecRevision;
-  private String observedInputSequence;
+  private String observedActivitySequence;
   private Integer continuationCount;
   private Integer maxContinuations;
 
@@ -54,9 +65,6 @@ public class IssueRunDTO {
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String completedAt;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String sessionId;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

@@ -72,7 +72,7 @@ class StrictJacksonConfigurationTest {
                   + "\"providerName\":\"anthropic\","
                   + "\"modelName\":\"claude-3-5-sonnet\","
                   + "\"variant\":\"default\"},"
-                  + "\"environmentName\":null}";
+                  + "\"environmentName\":null,\"goal\":null}";
           assertEquals(expectedWithNullEnvironment, mapper.writeValueAsString(settings));
 
           settings.setEnvironmentName("local");
@@ -81,7 +81,7 @@ class StrictJacksonConfigurationTest {
                   + "\"providerName\":\"anthropic\","
                   + "\"modelName\":\"claude-3-5-sonnet\","
                   + "\"variant\":\"default\"},"
-                  + "\"environmentName\":\"local\"}";
+                  + "\"environmentName\":\"local\",\"goal\":null}";
           assertEquals(expectedWithEnvironment, mapper.writeValueAsString(settings));
 
           // 往返必须保留 null 与非 null 两种形态。
@@ -134,7 +134,11 @@ class StrictJacksonConfigurationTest {
                   "{\"type\":\"SET_AGENT\",\"idempotencyKey\":\"id-1\",\"agentName\":\"a\"}",
                   HarnessCommandCreateDTO.class);
           assertFalse(absent.hasEnvironmentNameField());
-          assertEquals(cleared, mapper.writeValueAsString(dto));
+          // 序列化仍按声明顺序输出 text；SET_ENVIRONMENT 的请求形态不允许携带它，因此只断言输出形态。
+          assertEquals(
+              "{\"type\":\"SET_ENVIRONMENT\",\"idempotencyKey\":\"id-1\","
+                  + "\"environmentName\":null,\"text\":null}",
+              mapper.writeValueAsString(dto));
         });
   }
 

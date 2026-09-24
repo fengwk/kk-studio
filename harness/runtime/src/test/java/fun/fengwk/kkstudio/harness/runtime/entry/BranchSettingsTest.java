@@ -9,8 +9,9 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 
-/** Branch settings 的 immutable snapshot、canonical 名称校验与「不保存目录状态」契约。 */
+/** Branch settings 的 immutable snapshot、canonical 名称/Goal 校验与「不保存目录状态」契约。 */
 class BranchSettingsTest {
 
   private static final ModelSelection MODEL =
@@ -26,11 +27,11 @@ class BranchSettingsTest {
     assertEquals("local", new BranchSettings("coding", MODEL, "local").environmentName());
   }
 
-  /** 目录不再属于 branch 历史：record 组件固定为 agentName/model/environmentName，任何 workspace 字段都不允许回归。 */
+  /** 目录不再属于 branch 历史：record 组件固定为 agentName/model/environmentName/goal，任何 workspace 字段都不允许回归。 */
   @Test
   void exposesNoWorkspaceState() {
     assertEquals(
-        List.of("agentName", "model", "environmentName"),
+        List.of("agentName", "model", "environmentName", "goal"),
         Arrays.stream(BranchSettings.class.getRecordComponents())
             .map(RecordComponent::getName)
             .toList());
@@ -64,6 +65,38 @@ class BranchSettingsTest {
     // 其他字段不受影响。
     assertEquals("coding", base.withEnvironmentName("shared").agentName());
     assertEquals(MODEL, base.withEnvironmentName("shared").model());
+  }
+
+  /** 测试意图：Goal 是 settings 的一部分且只能整体替换——其它字段的 with 方法必须原样保留 Goal，withGoal(null) 表示用户清除。 */
+  @Test
+  void goalIsPreservedByOtherMutationsAndReplacedAtomically() {
+    GoalSetting goal = new GoalSetting(new UUID(0L, 7L), "ship it");
+    BranchSettings base = new BranchSettings("coding", MODEL, "local", goal);
+
+    assertEquals(goal, base.withAgentName("reviewer").goal());
+    assertEquals(goal, base.withModel(MODEL).goal());
+    assertEquals(goal, base.withEnvironmentName("shared").goal());
+    assertEquals(goal, base.withGoal(goal).goal());
+    assertNull(base.withGoal(null).goal());
+    assertEquals("coding", base.withGoal(null).agentName());
+    assertNull(new BranchSettings("coding", MODEL, null).goal());
+  }
+
+  /** 测试意图：目标正文必须非 blank、无首尾空白、≤2000 码点；空字符串不是清除。 */
+  @Test
+  void rejectsNonCanonicalGoalText() {
+    UUID id = new UUID(0L, 7L);
+    assertThrows(IllegalArgumentException.class, () -> new GoalSetting(id, " "));
+    assertThrows(IllegalArgumentException.class, () -> new GoalSetting(id, " text"));
+    assertThrows(IllegalArgumentException.class, () -> new GoalSetting(id, "text "));
+    assertThrows(NullPointerException.class, () -> new GoalSetting(id, null));
+    assertThrows(NullPointerException.class, () -> new GoalSetting(null, "text"));
+    assertEquals(
+        GoalSetting.MAX_TEXT_CODE_POINTS,
+        new GoalSetting(id, "x".repeat(GoalSetting.MAX_TEXT_CODE_POINTS)).text().length());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new GoalSetting(id, "x".repeat(GoalSetting.MAX_TEXT_CODE_POINTS + 1)));
   }
 
   @Test

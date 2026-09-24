@@ -41,7 +41,11 @@ function assistant(
 }
 
 function turnStart(id = 'turn-1', reason = 'USER_MESSAGE'): HarnessSessionEntryDTO {
-  return entry(id, 'TURN_START', { reason })
+  return entry(id, 'TURN_START', { reason, settings: {
+    agentName: 'coding',
+    model: { providerName: 'p', modelName: 'm', variant: 'default' },
+    environmentName: null,
+  } })
 }
 
 function turnEnd(id = 'end-1', outcome = 'COMPLETED'): HarnessSessionEntryDTO {

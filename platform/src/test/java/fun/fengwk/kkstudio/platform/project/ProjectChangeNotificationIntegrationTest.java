@@ -37,7 +37,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
       listen.execute("LISTEN " + CHANNEL);
       PGConnection notifications = listener.unwrap(PGConnection.class);
 
-      Project project = projectService.createProject("Notification project", "", agentName);
+      Project project = projectService.createProject("Notification project", "", true, 3);
       assertEquals(List.of(project.getId().toString()), awaitPayloads(notifications));
 
       issueService.createIssue(

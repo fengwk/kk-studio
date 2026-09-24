@@ -17,10 +17,13 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
+import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
@@ -44,20 +47,31 @@ import java.util.function.Supplier;
  *
  * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
  * result.status} 对齐。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->} 404、业务冲突 {@literal ->} 409、非法请求/DTO
- * {@literal ->} 400。
+ * {@literal ->} 400。属于 Issue Agent Session 的 Thread（含其分支）不接受本控制面的 YOLO 覆盖，由 Project 设置与
+ * IssueHarnessController 对齐维护（409）。
  */
 @RestController
 @RequestMapping("/api/harness/threads")
 public class StudioHarnessThreadController {
+
+  /** Issue Agent Branch 的 YOLO 由 Project 启动策略与 IssueHarnessController 对齐维护，通用 Branch API 不得覆盖。 */
+  private static final String ISSUE_AGENT_BRANCH_YOLO_OWNED_BY_PROJECT =
+      "Issue Agent Branch YOLO is owned by the project settings";
+
   private final HarnessRuntime runtime;
   private final ModelRequestDebugService modelRequestDebugService;
+  private final ProjectThreadOwnerResolver projectThreadOwnerResolver;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
-      HarnessRuntime runtime, ModelRequestDebugService modelRequestDebugService) {
+      HarnessRuntime runtime,
+      ModelRequestDebugService modelRequestDebugService,
+      ProjectThreadOwnerResolver projectThreadOwnerResolver) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.modelRequestDebugService =
         Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
+    this.projectThreadOwnerResolver =
+        Objects.requireNonNull(projectThreadOwnerResolver, "projectThreadOwnerResolver");
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
@@ -121,6 +135,11 @@ public class StudioHarnessThreadController {
   /**
    * 直接更新 Thread YOLO policy（version CAS）：相同值在任何 CAS 之前 no-op 成功，值变化时 version 精确 +1；不创建
    * Command/Entry/Work、不唤醒 processors。返回权威当前 Thread（与 stop 一致）。
+   *
+   * <p>Chat/Canvas Thread 是本控制面的归属范围；属于 Issue Agent Session 的 Thread（含其任何分支，且不要求存在活动 Run） 的 YOLO 由
+   * Project 启动策略与内部对齐维护，因此这里以 409 拒绝且绝不触达 {@link HarnessRuntime}。请求形状仍先经 {@link
+   * HarnessRuntimeRequestMapper} 严格校验（非 canonical UUID -&gt; 400）。缺失 Thread 的 resolver 判定为 false，
+   * 保持 {@link HarnessRuntime} 的 404 翻译。
    */
   @PutMapping("/{threadId}/yolo")
   public Result<HarnessThreadDTO> updateYolo(
@@ -128,9 +147,13 @@ public class StudioHarnessThreadController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              ThreadState updated =
-                  runtime.setThreadYolo(
-                      HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId, request));
+              SetThreadYoloCommand command =
+                  HarnessRuntimeRequestMapper.toSetThreadYoloCommand(threadId, request);
+              if (projectThreadOwnerResolver.isIssueAgentBranch(command.threadId())) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, ISSUE_AGENT_BRANCH_YOLO_OWNED_BY_PROJECT);
+              }
+              ThreadState updated = runtime.setThreadYolo(command);
               return HarnessRuntimeResponseMapper.toThreadDto(
                   runtime.getThreadSnapshot(updated.id()));
             }));
@@ -143,8 +166,12 @@ public class StudioHarnessThreadController {
     return Results.ok(
         withRuntimeTranslation(
             () -> {
-              StopResult result =
-                  runtime.stop(HarnessRuntimeRequestMapper.toStopCommand(threadId, request));
+              StopCommand command = HarnessRuntimeRequestMapper.toStopCommand(threadId, request);
+              if (projectThreadOwnerResolver.isIssueAgentBranch(command.threadId())) {
+                throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "Issue Agent Branch stop is owned by the Issue workflow");
+              }
+              StopResult result = runtime.stop(command);
               return HarnessRuntimeResponseMapper.toStopResultDto(
                   result, runtime.getThreadSnapshot(result.thread().id()));
             }));

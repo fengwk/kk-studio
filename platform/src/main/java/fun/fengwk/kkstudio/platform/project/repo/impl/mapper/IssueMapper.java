@@ -21,24 +21,24 @@ public interface IssueMapper extends BaseMapper {
 
   String COLUMNS =
       "id, project_id, number, title, description, status, "
-          + "assignee_agent_name, reviewer_agent_name, version, spec_revision, "
-          + "input_sequence, archived_at, created_at, updated_at";
+          + "assignee_agent_name, reviewer_agent_name, version, "
+          + "archived_at, created_at, updated_at";
 
   @Insert(
       """
-      insert into issue (
+      insert into project_issue (
           id, project_id, number, title, description, status,
-          assignee_agent_name, reviewer_agent_name, version, spec_revision,
-          input_sequence, archived_at, created_at, updated_at
+          assignee_agent_name, reviewer_agent_name, version,
+          archived_at, created_at, updated_at
       ) values (
           #{id}, #{projectId}, #{number}, #{title}, #{description}, #{status},
-          #{assigneeAgentName}, #{reviewerAgentName}, 0, #{specRevision},
-          0, null, clock_timestamp(), clock_timestamp()
+          #{assigneeAgentName}, #{reviewerAgentName}, 0,
+          null, clock_timestamp(), clock_timestamp()
       )
       """)
   int insert(IssueDO issue);
 
-  @Select("select " + COLUMNS + " from issue where id = #{id}")
+  @Select("select " + COLUMNS + " from project_issue where id = #{id}")
   @Results(
       id = "issueResultMap",
       value = {
@@ -51,33 +51,36 @@ public interface IssueMapper extends BaseMapper {
         @Result(column = "assignee_agent_name", property = "assigneeAgentName"),
         @Result(column = "reviewer_agent_name", property = "reviewerAgentName"),
         @Result(column = "version", property = "version"),
-        @Result(column = "spec_revision", property = "specRevision"),
-        @Result(column = "input_sequence", property = "inputSequence"),
         @Result(column = "archived_at", property = "archivedAt"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "updated_at", property = "updatedAt")
       })
   IssueDO getById(@Param("id") UUID id);
 
-  @Select("select " + COLUMNS + " from issue where id = #{id} for update")
+  @Select("select " + COLUMNS + " from project_issue where id = #{id} for update")
   @ResultMap("issueResultMap")
   IssueDO lockById(@Param("id") UUID id);
 
   @Select(
-      "select " + COLUMNS + " from issue where project_id = #{projectId} and number = #{number}")
+      "select "
+          + COLUMNS
+          + " from project_issue where project_id = #{projectId} and number = #{number}")
   @ResultMap("issueResultMap")
   IssueDO getByProjectAndNumber(@Param("projectId") UUID projectId, @Param("number") long number);
 
-  @Select("select " + COLUMNS + " from issue where project_id = #{projectId} order by number asc")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue where project_id = #{projectId} order by number asc")
   @ResultMap("issueResultMap")
   List<IssueDO> listByProjectId(@Param("projectId") UUID projectId);
 
   @Select(
       """
       select id, project_id, number, title, description, status,
-             assignee_agent_name, reviewer_agent_name, version, spec_revision,
-             input_sequence, archived_at, created_at, updated_at
-      from issue
+             assignee_agent_name, reviewer_agent_name, version,
+             archived_at, created_at, updated_at
+      from project_issue
       where project_id = #{projectId}
         and (archived_at is not null) = #{archived}
       order by number asc
@@ -88,14 +91,12 @@ public interface IssueMapper extends BaseMapper {
 
   @Update(
       """
-      update issue
+      update project_issue
       set title = #{issue.title},
           description = #{issue.description},
           status = #{issue.status},
           assignee_agent_name = #{issue.assigneeAgentName},
           reviewer_agent_name = #{issue.reviewerAgentName},
-          spec_revision = #{issue.specRevision},
-          input_sequence = #{issue.inputSequence},
           archived_at = #{issue.archivedAt},
           updated_at = clock_timestamp(),
           version = version + 1
@@ -103,17 +104,6 @@ public interface IssueMapper extends BaseMapper {
       """)
   int updateById(@Param("issue") IssueDO issue, @Param("expectedVersion") long expectedVersion);
 
-  @Select(
-      """
-      update issue
-      set input_sequence = input_sequence + 1,
-          updated_at = clock_timestamp(),
-          version = version + 1
-      where id = #{id}
-      returning input_sequence
-      """)
-  Long incrementInputSequence(@Param("id") UUID id);
-
-  @Delete("delete from issue where id = #{id} and version = #{expectedVersion}")
+  @Delete("delete from project_issue where id = #{id} and version = #{expectedVersion}")
   int deleteById(@Param("id") UUID id, @Param("expectedVersion") long expectedVersion);
 }

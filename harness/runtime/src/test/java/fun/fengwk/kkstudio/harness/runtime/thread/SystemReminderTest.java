@@ -7,26 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestResult;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 
 import java.util.List;
 
-/**
- * 运行时上下文切换提醒契约：systemInstruction 是唯一的系统指令，因此 SET_* 变更与内部 steering 统一以 durable USER CUSTOM_MESSAGE +
- * 精确 {@code <system-reminder>} 定界符进入历史，且只描述生效后的当前事实。
- */
+/** 内部 steering 使用精确 {@code <system-reminder>} 定界符进入历史。 */
 class SystemReminderTest {
-
-  private static final BranchSettings BASE =
-      new BranchSettings(
-          "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
 
   /** 定界符必须精确包裹正文：open tag + 换行 + 正文 + 换行 + close tag。 */
   @Test
@@ -74,74 +62,5 @@ class SystemReminderTest {
     assertTrue(SystemReminder.isReminderText("<system-reminder>\nbody"));
     assertFalse(SystemReminder.isReminderText("<system-reminder>inline"));
     assertFalse(SystemReminder.isReminderText(null));
-  }
-
-  /** SET_AGENT 提醒只描述生效后的 agent 事实。 */
-  @Test
-  void setAgentReminderDescribesTheEffectiveAgent() {
-    AgentMessage message =
-        SettingsReminder.message(
-            new CommandHarvestResult.SettingsChange(
-                ThreadCommandType.SET_AGENT, BASE.withAgentName("reviewer")));
-
-    assertEquals(
-        SystemReminder.wrap("The agent for this branch is now `reviewer`."), textOf(message));
-    assertTrue(SystemReminder.isReminder(message));
-  }
-
-  /** SET_MODEL 提醒携带完整的生效 provider/model/variant 选择，而不是增量。 */
-  @Test
-  void setModelReminderDescribesTheEffectiveSelection() {
-    AgentMessage message =
-        SettingsReminder.message(
-            new CommandHarvestResult.SettingsChange(
-                ThreadCommandType.SET_MODEL,
-                BASE.withModel(new ModelSelection("openai", "gpt-5", "thinking"))));
-
-    assertEquals(
-        SystemReminder.wrap(
-            "The model for this branch is now `openai/gpt-5` (variant `thinking`)."),
-        textOf(message));
-  }
-
-  /** SET_ENVIRONMENT 的 attach 与 detach 两种事实各自有明确的提醒文本。 */
-  @Test
-  void setEnvironmentReminderCoversAttachAndDetach() {
-    AgentMessage attached =
-        SettingsReminder.message(
-            new CommandHarvestResult.SettingsChange(
-                ThreadCommandType.SET_ENVIRONMENT, BASE.withEnvironmentName("local")));
-    assertEquals(
-        SystemReminder.wrap("This branch is now attached to environment `local`."),
-        textOf(attached));
-
-    AgentMessage detached =
-        SettingsReminder.message(
-            new CommandHarvestResult.SettingsChange(
-                ThreadCommandType.SET_ENVIRONMENT, BASE.withEnvironmentName(null)));
-    assertEquals(
-        SystemReminder.wrap("This branch is now detached from any environment."), textOf(detached));
-  }
-
-  /** 非 SET_* 命令类型不得渲染提醒（提醒只由真实 setting 变更产生）。 */
-  @Test
-  void nonSettingChangeTypesAreRejected() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            SettingsReminder.message(
-                new CommandHarvestResult.SettingsChange(ThreadCommandType.USER_MESSAGE, BASE)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            SettingsReminder.message(
-                new CommandHarvestResult.SettingsChange(ThreadCommandType.CUSTOM_MESSAGE, BASE)));
-    assertThrows(NullPointerException.class, () -> SettingsReminder.message(null));
-  }
-
-  private static String textOf(AgentMessage message) {
-    List<AgentMessageContent> contents = message.contents();
-    assertEquals(1, contents.size());
-    return ((TextMessageContent) contents.get(0)).text();
   }
 }

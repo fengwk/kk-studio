@@ -12,13 +12,11 @@ public class IssueRunDO {
   private UUID issueId;
   private Long ordinal;
   private String role;
-  private String actorType;
   private String agentName;
   private UUID submissionRunId;
   private String status;
   private String outcome;
-  private Long observedSpecRevision;
-  private Long observedInputSequence;
+  private Long observedActivitySequence;
   private Integer continuationCount;
   private Integer maxContinuations;
   private Instant deadline;

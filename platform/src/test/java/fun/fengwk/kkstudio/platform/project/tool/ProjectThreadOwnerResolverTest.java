@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.project.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -16,17 +15,16 @@ import org.junit.jupiter.api.function.Executable;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
+import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
+import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -39,13 +37,14 @@ import java.util.function.Function;
  * <p>测试意图：
  *
  * <ul>
- *   <li>验证 Coordinator、Executor、Reviewer 三种角色的 Harness Thread 属主解析链路；
- *   <li>验证缺失 Thread 或未绑定任何 Project/Run 的 Session 返回 Optional.empty()；
- *   <li>验证 ProjectSession 与 IssueRunSession 双重认领的歧义场景被坚决拒绝；
- *   <li>验证关联实体缺失、外键/Session 映射不一致等场景抛出脱敏异常；
- *   <li>验证 HUMAN 类型的 Run 以及 null 角色被严格拦截拒绝；
+ *   <li>验证 Executor、Reviewer 两种角色的 Harness Thread 属主解析链路（直接通过 IssueAgentSession.threadId 或通过
+ *       HarnessStore.findThread -&gt; sessionId 回查）；
+ *   <li>验证缺失 Thread 或未绑定 IssueAgentSession 的 Session 返回 Optional.empty()；
+ *   <li>验证无活动 Run、活动 Run 已终结或活动 Run 的 agentName 不匹配时返回 Optional.empty()；
+ *   <li>验证关联实体缺失（Issue 或 Project 不存在）、ID 映射不一致等场景抛出通用脱敏异常；
  *   <li>验证所有异常信息均为通用描述且绝不回显任何 UUID；
- *   <li>验证 ProjectThreadOwnerContext 的不可变属性与结构约束。
+ *   <li>验证 withStoreSupplier 工厂方法与 Supplier 返回 null 时的 fail-closed 语义；
+ *   <li>验证防空校验与 ProjectThreadOwnerContext 的不可变属性与结构约束。
  * </ul>
  */
 class ProjectThreadOwnerResolverTest {
@@ -60,8 +59,7 @@ class ProjectThreadOwnerResolverTest {
 
   private HarnessStore harnessStore;
   private HarnessStore.Transaction transaction;
-  private ProjectSessionRepository projectSessionRepository;
-  private IssueRunSessionRepository issueRunSessionRepository;
+  private IssueAgentSessionRepository issueAgentSessionRepository;
   private ProjectRepository projectRepository;
   private IssueRepository issueRepository;
   private IssueRunRepository issueRunRepository;
@@ -72,8 +70,7 @@ class ProjectThreadOwnerResolverTest {
   void setUp() {
     harnessStore = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
-    projectSessionRepository = mock(ProjectSessionRepository.class);
-    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
+    issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
     projectRepository = mock(ProjectRepository.class);
     issueRepository = mock(IssueRepository.class);
     issueRunRepository = mock(IssueRunRepository.class);
@@ -88,52 +85,42 @@ class ProjectThreadOwnerResolverTest {
     resolver =
         new ProjectThreadOwnerResolver(
             harnessStore,
-            projectSessionRepository,
-            issueRunSessionRepository,
+            issueAgentSessionRepository,
             projectRepository,
             issueRepository,
             issueRunRepository);
   }
 
   @Test
-  void resolve_coordinator_success() {
-    // 验证 Coordinator 关联的 Session 正确反查出 ProjectRole.COORDINATOR 角色上下文。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new ProjectSession(PROJECT_ID, SESSION_ID, NOW));
-    when(projectRepository.getById(PROJECT_ID))
+  void resolve_byThreadId_executor_success() {
+    // 验证通过 threadId 直接命中 IssueAgentSession 并反查出 EXECUTOR 上下文
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(10))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
         .thenReturn(
-            Project.builder().id(PROJECT_ID).coordinatorAgentName("coordinator-agent").build());
-
-    Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
-
-    assertTrue(context.isPresent());
-    assertEquals(ProjectRole.COORDINATOR, context.get().role());
-    assertEquals(PROJECT_ID, context.get().projectId());
-    assertNull(context.get().issueId());
-    assertNull(context.get().runId());
-    assertEquals("coordinator-agent", context.get().agentName());
-  }
-
-  @Test
-  void resolve_executor_success() {
-    // 验证 Executor 关联的 Session 正确反查出 ProjectRole.EXECUTOR 角色上下文。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
+            Issue.builder()
+                .id(ISSUE_ID)
+                .projectId(PROJECT_ID)
+                .status(IssueStatus.IN_PROGRESS)
+                .build());
+    when(projectRepository.getById(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).title("Test Project").build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID))
         .thenReturn(
             IssueRun.builder()
                 .id(RUN_ID)
                 .issueId(ISSUE_ID)
                 .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
                 .agentName("coder-agent")
+                .status(IssueRunStatus.RUNNING)
                 .build());
-    when(issueRepository.getById(ISSUE_ID))
-        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
-    when(projectRepository.getById(PROJECT_ID))
-        .thenReturn(Project.builder().id(PROJECT_ID).build());
 
     Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
 
@@ -146,24 +133,35 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_reviewer_success() {
-    // 验证 Reviewer 关联的 Session 正确反查出 ProjectRole.REVIEWER 角色上下文。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
+  void resolve_byThreadId_reviewer_success() {
+    // 验证通过 threadId 直接命中 IssueAgentSession 并反查出 REVIEWER 上下文
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(11))
+            .issueId(ISSUE_ID)
+            .agentName("reviewer-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
+        .thenReturn(
+            Issue.builder()
+                .id(ISSUE_ID)
+                .projectId(PROJECT_ID)
+                .status(IssueStatus.IN_REVIEW)
+                .build());
+    when(projectRepository.getById(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).title("Test Project").build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID))
         .thenReturn(
             IssueRun.builder()
                 .id(RUN_ID)
                 .issueId(ISSUE_ID)
                 .role(IssueRunRole.REVIEWER)
-                .actorType(IssueRunActorType.AGENT)
                 .agentName("reviewer-agent")
+                .status(IssueRunStatus.RUNNING)
                 .build());
-    when(issueRepository.getById(ISSUE_ID))
-        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
-    when(projectRepository.getById(PROJECT_ID))
-        .thenReturn(Project.builder().id(PROJECT_ID).build());
 
     Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
 
@@ -176,8 +174,52 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_missingThread_returnsEmpty() {
-    // 验证底层 Harness 存储中不存在 Thread 时返回 Optional.empty()。
+  void resolve_fallbackToHarnessStore_sessionId_success() {
+    // 验证 findByThreadId 为空时回退到 HarnessStore 查 sessionId 再命中 IssueAgentSession
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(null);
+    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(12))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findBySessionId(SESSION_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
+        .thenReturn(
+            Issue.builder()
+                .id(ISSUE_ID)
+                .projectId(PROJECT_ID)
+                .status(IssueStatus.IN_PROGRESS)
+                .build());
+    when(projectRepository.getById(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).title("Test Project").build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID))
+        .thenReturn(
+            IssueRun.builder()
+                .id(RUN_ID)
+                .issueId(ISSUE_ID)
+                .role(IssueRunRole.EXECUTOR)
+                .agentName("coder-agent")
+                .status(IssueRunStatus.WAITING_HUMAN)
+                .build());
+
+    Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
+
+    assertTrue(context.isPresent());
+    assertEquals(ProjectRole.EXECUTOR, context.get().role());
+    assertEquals(PROJECT_ID, context.get().projectId());
+    assertEquals(ISSUE_ID, context.get().issueId());
+    assertEquals(RUN_ID, context.get().runId());
+    assertEquals("coder-agent", context.get().agentName());
+  }
+
+  @Test
+  void resolve_missingThreadAndSession_returnsEmpty() {
+    // 验证 threadId 未直接绑定且 HarnessStore 中不存在该 Thread 时返回 Optional.empty()
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(null);
     when(transaction.findThread(THREAD_ID)).thenReturn(Optional.empty());
 
     Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
@@ -186,11 +228,11 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_unownedSession_returnsEmpty() {
-    // 验证 Session 未被 ProjectSession 或 IssueRunSession 认领时返回 Optional.empty()。
+  void resolve_storeThreadFoundButSessionUnbound_returnsEmpty() {
+    // 验证 HarnessStore 中有 Thread 但 sessionId 未被 IssueAgentSession 认领时返回 Optional.empty()
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(null);
     when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID)).thenReturn(null);
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID)).thenReturn(null);
+    when(issueAgentSessionRepository.findBySessionId(SESSION_ID)).thenReturn(null);
 
     Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
 
@@ -198,152 +240,161 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_ambiguousProjectAndRunRelation_throwsInconsistent() {
-    // 验证当 Session 同时匹配到 ProjectSession 和 IssueRunSession 时判定为数据不一致并绝不泄露 UUID。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new ProjectSession(PROJECT_ID, SESSION_ID, NOW));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
+  void resolve_withStoreSupplier_nullStore_fallsClosedToEmpty() {
+    // 验证 StoreSupplier 返回 null 时 fail-closed 返回 Optional.empty()
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(null);
+    ProjectThreadOwnerResolver supplierResolver =
+        ProjectThreadOwnerResolver.withStoreSupplier(
+            () -> null,
+            issueAgentSessionRepository,
+            projectRepository,
+            issueRepository,
+            issueRunRepository);
 
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
+    Optional<ProjectThreadOwnerContext> context = supplierResolver.resolve(THREAD_ID);
+
+    assertTrue(context.isEmpty());
   }
 
   @Test
-  void resolve_coordinatorSessionIdMismatch_throwsInconsistent() {
-    // 验证 ProjectSession 的 sessionId 与 Thread 的 sessionId 不一致时抛出异常。
+  void resolve_withStoreSupplier_activeStore_resolvesSuccessfully() {
+    // 验证 withStoreSupplier 在提供可用 Store 时能够正确解析
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(null);
     when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new ProjectSession(PROJECT_ID, OTHER_ID, NOW));
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_coordinatorProjectNotFound_throwsInconsistent() {
-    // 验证 ProjectSession 关联的 Project 不存在时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new ProjectSession(PROJECT_ID, SESSION_ID, NOW));
-    when(projectRepository.getById(PROJECT_ID)).thenReturn(null);
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_coordinatorProjectIdMismatch_throwsInconsistent() {
-    // 验证 Project 的 ID 与 ProjectSession 的 projectId 不一致时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new ProjectSession(PROJECT_ID, SESSION_ID, NOW));
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(13))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findBySessionId(SESSION_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
+        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
     when(projectRepository.getById(PROJECT_ID))
-        .thenReturn(
-            Project.builder().id(OTHER_ID).coordinatorAgentName("coordinator-agent").build());
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_coordinatorAgentNameNullOrBlank_throwsInconsistent() {
-    // 验证 Project 的 coordinatorAgentName 为 null 或全空白时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(projectSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new ProjectSession(PROJECT_ID, SESSION_ID, NOW));
-
-    when(projectRepository.getById(PROJECT_ID))
-        .thenReturn(Project.builder().id(PROJECT_ID).coordinatorAgentName(null).build());
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-
-    when(projectRepository.getById(PROJECT_ID))
-        .thenReturn(Project.builder().id(PROJECT_ID).coordinatorAgentName("   ").build());
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_issueRunSessionIdMismatch_throwsInconsistent() {
-    // 验证 IssueRunSession 的 sessionId 与 Thread 的 sessionId 不一致时抛出异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, OTHER_ID, NOW));
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_issueRunNotFound_throwsInconsistent() {
-    // 验证 IssueRunSession 关联的 IssueRun 不存在时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(null);
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_issueRunIdMismatch_throwsInconsistent() {
-    // 验证 IssueRun 的 ID 与 IssueRunSession 的 runId 不一致时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID))
         .thenReturn(
             IssueRun.builder()
-                .id(OTHER_ID)
+                .id(RUN_ID)
                 .issueId(ISSUE_ID)
                 .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
                 .agentName("coder-agent")
+                .status(IssueRunStatus.RUNNING)
                 .build());
 
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
+    ProjectThreadOwnerResolver supplierResolver =
+        ProjectThreadOwnerResolver.withStoreSupplier(
+            () -> harnessStore,
+            issueAgentSessionRepository,
+            projectRepository,
+            issueRepository,
+            issueRunRepository);
+
+    Optional<ProjectThreadOwnerContext> context = supplierResolver.resolve(THREAD_ID);
+
+    assertTrue(context.isPresent());
+    assertEquals(ProjectRole.EXECUTOR, context.get().role());
   }
 
   @Test
-  void resolve_issueRunAgentNameNullOrBlank_throwsInconsistent() {
-    // 验证 IssueRun 的 agentName 为 null 或全空白时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
+  void resolve_noActiveRun_returnsEmpty() {
+    // 验证没有活动 IssueRun 时返回 Optional.empty()
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(14))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
+        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
+    when(projectRepository.getById(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID)).thenReturn(null);
 
-    when(issueRunRepository.getById(RUN_ID))
+    Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
+
+    assertTrue(context.isEmpty());
+  }
+
+  @Test
+  void resolve_inactiveRun_returnsEmpty() {
+    // 验证找到的 Run 处于已完成/非活跃状态时返回 Optional.empty()
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(15))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
+        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
+    when(projectRepository.getById(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID))
         .thenReturn(
             IssueRun.builder()
                 .id(RUN_ID)
                 .issueId(ISSUE_ID)
                 .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName(null)
+                .agentName("coder-agent")
+                .status(IssueRunStatus.COMPLETED)
                 .build());
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
 
-    when(issueRunRepository.getById(RUN_ID))
+    Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
+
+    assertTrue(context.isEmpty());
+  }
+
+  @Test
+  void resolve_runAgentNameMismatch_returnsEmpty() {
+    // 验证活动 Run 的 agentName 与 IssueAgentSession 不匹配时返回 Optional.empty()
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(16))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
+    when(issueRepository.getById(ISSUE_ID))
+        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
+    when(projectRepository.getById(PROJECT_ID))
+        .thenReturn(Project.builder().id(PROJECT_ID).build());
+    when(issueRunRepository.findActiveByIssueId(ISSUE_ID))
         .thenReturn(
             IssueRun.builder()
                 .id(RUN_ID)
                 .issueId(ISSUE_ID)
                 .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName("   ")
+                .agentName("other-agent")
+                .status(IssueRunStatus.RUNNING)
                 .build());
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
+
+    Optional<ProjectThreadOwnerContext> context = resolver.resolve(THREAD_ID);
+
+    assertTrue(context.isEmpty());
   }
 
   @Test
   void resolve_issueNotFound_throwsInconsistent() {
-    // 验证 IssueRun 关联的 Issue 不存在时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
-        .thenReturn(
-            IssueRun.builder()
-                .id(RUN_ID)
-                .issueId(ISSUE_ID)
-                .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName("coder-agent")
-                .build());
+    // 验证 IssueAgentSession 关联的 Issue 不存在时抛出一致性异常
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(17))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(null);
 
     assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
@@ -351,19 +402,16 @@ class ProjectThreadOwnerResolverTest {
 
   @Test
   void resolve_issueIdMismatch_throwsInconsistent() {
-    // 验证 Issue 的 ID 与 IssueRun 的 issueId 不一致时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
-        .thenReturn(
-            IssueRun.builder()
-                .id(RUN_ID)
-                .issueId(ISSUE_ID)
-                .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName("coder-agent")
-                .build());
+    // 验证 Issue 仓库返回的 ID 与 agentSession.issueId 不匹配时抛出一致性异常
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(18))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
     when(issueRepository.getById(ISSUE_ID))
         .thenReturn(Issue.builder().id(OTHER_ID).projectId(PROJECT_ID).build());
 
@@ -371,20 +419,17 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_issueRunProjectNotFound_throwsInconsistent() {
-    // 验证 Issue 关联的 Project 不存在时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
-        .thenReturn(
-            IssueRun.builder()
-                .id(RUN_ID)
-                .issueId(ISSUE_ID)
-                .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName("coder-agent")
-                .build());
+  void resolve_projectNotFound_throwsInconsistent() {
+    // 验证 Issue 关联的 Project 不存在时抛出一致性异常
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(19))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
     when(issueRepository.getById(ISSUE_ID))
         .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
     when(projectRepository.getById(PROJECT_ID)).thenReturn(null);
@@ -393,20 +438,17 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_issueRunProjectIdMismatch_throwsInconsistent() {
-    // 验证 Project 的 ID 与 Issue 的 projectId 不一致时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
-        .thenReturn(
-            IssueRun.builder()
-                .id(RUN_ID)
-                .issueId(ISSUE_ID)
-                .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName("coder-agent")
-                .build());
+  void resolve_projectIdMismatch_throwsInconsistent() {
+    // 验证 Project 仓库返回的 ID 与 issue.projectId 不匹配时抛出一致性异常
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(id(20))
+            .issueId(ISSUE_ID)
+            .agentName("coder-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByThreadId(THREAD_ID)).thenReturn(agentSession);
     when(issueRepository.getById(ISSUE_ID))
         .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
     when(projectRepository.getById(PROJECT_ID)).thenReturn(Project.builder().id(OTHER_ID).build());
@@ -415,63 +457,22 @@ class ProjectThreadOwnerResolverTest {
   }
 
   @Test
-  void resolve_humanRunRejection_throwsInconsistent() {
-    // 验证 HUMAN 类型的 IssueRun 被严格拒绝作为 Agent 工具所有权来源。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
-        .thenReturn(
-            IssueRun.builder()
-                .id(RUN_ID)
-                .issueId(ISSUE_ID)
-                .role(IssueRunRole.EXECUTOR)
-                .actorType(IssueRunActorType.HUMAN)
-                .agentName("human-operator")
-                .build());
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
-  void resolve_nullRunRole_throwsInconsistent() {
-    // 验证 IssueRun 的 role 为 null 时抛出一致性异常。
-    when(transaction.findThread(THREAD_ID)).thenReturn(Optional.of(thread(THREAD_ID, SESSION_ID)));
-    when(issueRunSessionRepository.findBySessionId(SESSION_ID))
-        .thenReturn(new IssueRunSession(RUN_ID, SESSION_ID, NOW));
-    when(issueRunRepository.getById(RUN_ID))
-        .thenReturn(
-            IssueRun.builder()
-                .id(RUN_ID)
-                .issueId(ISSUE_ID)
-                .role(null)
-                .actorType(IssueRunActorType.AGENT)
-                .agentName("coder-agent")
-                .build());
-    when(issueRepository.getById(ISSUE_ID))
-        .thenReturn(Issue.builder().id(ISSUE_ID).projectId(PROJECT_ID).build());
-    when(projectRepository.getById(PROJECT_ID))
-        .thenReturn(Project.builder().id(PROJECT_ID).build());
-
-    assertInconsistentOwnership(() -> resolver.resolve(THREAD_ID));
-  }
-
-  @Test
   void resolve_nullThreadId_throwsNpe() {
-    // 验证 threadId 传 null 时防御性抛出 NullPointerException。
-    assertThrows(NullPointerException.class, () -> resolver.resolve(null));
+    // 验证 threadId 传 null 时防御性抛出 NullPointerException
+    NullPointerException ex =
+        assertThrows(NullPointerException.class, () -> resolver.resolve(null));
+    assertTrue(ex.getMessage().contains("threadId"));
   }
 
   @Test
   void constructor_nullChecks() {
-    // 验证构造函数各个关键依赖不可为 null。
+    // 验证构造函数各个关键依赖不可为 null
     assertThrows(
         NullPointerException.class,
         () ->
             new ProjectThreadOwnerResolver(
                 null,
-                projectSessionRepository,
-                issueRunSessionRepository,
+                issueAgentSessionRepository,
                 projectRepository,
                 issueRepository,
                 issueRunRepository));
@@ -479,29 +480,13 @@ class ProjectThreadOwnerResolverTest {
         NullPointerException.class,
         () ->
             new ProjectThreadOwnerResolver(
-                harnessStore,
-                null,
-                issueRunSessionRepository,
-                projectRepository,
-                issueRepository,
-                issueRunRepository));
+                harnessStore, null, projectRepository, issueRepository, issueRunRepository));
     assertThrows(
         NullPointerException.class,
         () ->
             new ProjectThreadOwnerResolver(
                 harnessStore,
-                projectSessionRepository,
-                null,
-                projectRepository,
-                issueRepository,
-                issueRunRepository));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ProjectThreadOwnerResolver(
-                harnessStore,
-                projectSessionRepository,
-                issueRunSessionRepository,
+                issueAgentSessionRepository,
                 null,
                 issueRepository,
                 issueRunRepository));
@@ -510,8 +495,7 @@ class ProjectThreadOwnerResolverTest {
         () ->
             new ProjectThreadOwnerResolver(
                 harnessStore,
-                projectSessionRepository,
-                issueRunSessionRepository,
+                issueAgentSessionRepository,
                 projectRepository,
                 null,
                 issueRunRepository));
@@ -520,8 +504,53 @@ class ProjectThreadOwnerResolverTest {
         () ->
             new ProjectThreadOwnerResolver(
                 harnessStore,
-                projectSessionRepository,
-                issueRunSessionRepository,
+                issueAgentSessionRepository,
+                projectRepository,
+                issueRepository,
+                null));
+  }
+
+  @Test
+  void withStoreSupplier_nullChecks() {
+    // 验证 withStoreSupplier 工厂方法各个关键依赖不可为 null
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            ProjectThreadOwnerResolver.withStoreSupplier(
+                null,
+                issueAgentSessionRepository,
+                projectRepository,
+                issueRepository,
+                issueRunRepository));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            ProjectThreadOwnerResolver.withStoreSupplier(
+                () -> harnessStore, null, projectRepository, issueRepository, issueRunRepository));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            ProjectThreadOwnerResolver.withStoreSupplier(
+                () -> harnessStore,
+                issueAgentSessionRepository,
+                null,
+                issueRepository,
+                issueRunRepository));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            ProjectThreadOwnerResolver.withStoreSupplier(
+                () -> harnessStore,
+                issueAgentSessionRepository,
+                projectRepository,
+                null,
+                issueRunRepository));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            ProjectThreadOwnerResolver.withStoreSupplier(
+                () -> harnessStore,
+                issueAgentSessionRepository,
                 projectRepository,
                 issueRepository,
                 null));
@@ -529,51 +558,47 @@ class ProjectThreadOwnerResolverTest {
 
   @Test
   void projectThreadOwnerContext_validation() {
-    // 验证 ProjectThreadOwnerContext 的参数校验与不变量约束。
+    // 验证 ProjectThreadOwnerContext 的参数校验与不变量约束
     assertThrows(
         NullPointerException.class,
-        () -> new ProjectThreadOwnerContext(null, PROJECT_ID, null, null, "agent"));
+        () -> new ProjectThreadOwnerContext(null, PROJECT_ID, ISSUE_ID, RUN_ID, "agent"));
     assertThrows(
         NullPointerException.class,
-        () -> new ProjectThreadOwnerContext(ProjectRole.COORDINATOR, null, null, null, "agent"));
+        () -> new ProjectThreadOwnerContext(ProjectRole.EXECUTOR, null, ISSUE_ID, RUN_ID, "agent"));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProjectThreadOwnerContext(ProjectRole.COORDINATOR, PROJECT_ID, null, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProjectThreadOwnerContext(ProjectRole.COORDINATOR, PROJECT_ID, null, null, "  "));
-
-    // Coordinator 不得携带 issueId 或 runId
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ProjectThreadOwnerContext(
-                ProjectRole.COORDINATOR, PROJECT_ID, ISSUE_ID, null, "agent"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ProjectThreadOwnerContext(
-                ProjectRole.COORDINATOR, PROJECT_ID, null, RUN_ID, "agent"));
-
-    // Executor / Reviewer 必须同时携带 issueId 与 runId
-    assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ProjectThreadOwnerContext(ProjectRole.EXECUTOR, PROJECT_ID, null, RUN_ID, "agent"));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ProjectThreadOwnerContext(
                 ProjectRole.EXECUTOR, PROJECT_ID, ISSUE_ID, null, "agent"));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ProjectThreadOwnerContext(ProjectRole.REVIEWER, PROJECT_ID, null, RUN_ID, "agent"));
-    assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ProjectThreadOwnerContext(
-                ProjectRole.REVIEWER, PROJECT_ID, ISSUE_ID, null, "agent"));
+                ProjectRole.EXECUTOR, PROJECT_ID, ISSUE_ID, RUN_ID, null));
+  }
+
+  @Test
+  void projectThreadOwnerContext_recordInvariants() {
+    // 验证 ProjectThreadOwnerContext 的访问器与不可变 record 契约
+    ProjectThreadOwnerContext context =
+        new ProjectThreadOwnerContext(
+            ProjectRole.EXECUTOR, PROJECT_ID, ISSUE_ID, RUN_ID, "coder-agent");
+    assertEquals(ProjectRole.EXECUTOR, context.role());
+    assertEquals(PROJECT_ID, context.projectId());
+    assertEquals(ISSUE_ID, context.issueId());
+    assertEquals(RUN_ID, context.runId());
+    assertEquals("coder-agent", context.agentName());
+
+    ProjectThreadOwnerContext same =
+        new ProjectThreadOwnerContext(
+            ProjectRole.EXECUTOR, PROJECT_ID, ISSUE_ID, RUN_ID, "coder-agent");
+    assertEquals(context, same);
+    assertEquals(context.hashCode(), same.hashCode());
+    assertTrue(context.toString().contains("coder-agent"));
   }
 
   private void assertInconsistentOwnership(Executable executable) {

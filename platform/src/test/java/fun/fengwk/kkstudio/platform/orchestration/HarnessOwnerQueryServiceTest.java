@@ -33,22 +33,15 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SettingsReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestResult;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
@@ -74,10 +67,8 @@ class HarnessOwnerQueryServiceTest {
   private ChatSessionRepository chatSessionRepository;
   private CanvasStore canvasStore;
   private CanvasSessionRepository canvasSessionRepository;
-  private ProjectRepository projectRepository;
-  private ProjectSessionRepository projectSessionRepository;
-  private IssueRunRepository issueRunRepository;
-  private IssueRunSessionRepository issueRunSessionRepository;
+  private IssueAgentSessionRepository issueAgentSessionRepository;
+  private IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private HarnessOwnerQueryService service;
@@ -89,10 +80,8 @@ class HarnessOwnerQueryServiceTest {
     chatSessionRepository = mock(ChatSessionRepository.class);
     canvasStore = mock(CanvasStore.class);
     canvasSessionRepository = mock(CanvasSessionRepository.class);
-    projectRepository = mock(ProjectRepository.class);
-    projectSessionRepository = mock(ProjectSessionRepository.class);
-    issueRunRepository = mock(IssueRunRepository.class);
-    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
+    issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
+    issueAgentSessionOwnershipRepository = mock(IssueAgentSessionOwnershipRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
@@ -102,10 +91,8 @@ class HarnessOwnerQueryServiceTest {
             chatSessionRepository,
             canvasStore,
             canvasSessionRepository,
-            projectRepository,
-            projectSessionRepository,
-            issueRunRepository,
-            issueRunSessionRepository,
+            issueAgentSessionRepository,
+            issueAgentSessionOwnershipRepository,
             runtimes);
   }
 
@@ -114,63 +101,71 @@ class HarnessOwnerQueryServiceTest {
     // Owner 不存在时不能枚举或读取任何 Session/Harness 事实。
     UUID chatId = id(1);
     UUID canvasId = id(2);
-    UUID projectId = id(3);
-    UUID runId = id(4);
+    UUID issueAgentSessionId = id(3);
 
     assertThrows(AiResourceNotFoundException.class, () -> service.listChatSessions(chatId));
     assertThrows(AiResourceNotFoundException.class, () -> service.listCanvasSessions(canvasId));
-    assertThrows(AiResourceNotFoundException.class, () -> service.listProjectSessions(projectId));
-    assertThrows(AiResourceNotFoundException.class, () -> service.listIssueRunSessions(runId));
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.listIssueAgentSessions(issueAgentSessionId));
 
     verifyNoInteractions(
         chatSessionRepository,
         canvasSessionRepository,
-        projectSessionRepository,
-        issueRunSessionRepository,
+        issueAgentSessionOwnershipRepository,
         runtime);
   }
 
   @Test
-  void projectAndIssueRunSessionsQueryAndUnifiedOwnerQuery() {
-    UUID projectId = id(20);
-    UUID runId = id(21);
-    UUID projectSessionId = id(22);
-    UUID runSessionId = id(23);
+  void issueAgentSessionsQueryAndUnifiedOwnerQuery() {
+    UUID issueAgentSessionId = id(20);
+    UUID sessionId = id(22);
 
-    when(projectRepository.getById(projectId)).thenReturn(mock(Project.class));
-    when(projectSessionRepository.findByProjectId(projectId))
-        .thenReturn(
-            ProjectSession.builder().projectId(projectId).sessionId(projectSessionId).build());
-    when(runtime.getSession(projectSessionId))
-        .thenReturn(new Session(projectSessionId, "project session", T0));
-    when(runtime.getSessionEntries(projectSessionId)).thenReturn(List.of());
-    when(runtime.listThreadsBySession(projectSessionId)).thenReturn(List.of());
+    IssueAgentSession binding =
+        IssueAgentSession.builder()
+            .id(issueAgentSessionId)
+            .issueId(id(30))
+            .agentName("executor")
+            .sessionId(sessionId)
+            .threadId(id(40))
+            .createdAt(T0)
+            .updatedAt(T0)
+            .build();
+    when(issueAgentSessionRepository.getById(issueAgentSessionId)).thenReturn(binding);
+    when(issueAgentSessionOwnershipRepository.listSessionIds(issueAgentSessionId))
+        .thenReturn(List.of(sessionId));
+    when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "agent session", T0));
+    when(runtime.getSessionEntries(sessionId)).thenReturn(List.of());
+    when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of());
 
-    when(issueRunRepository.getById(runId)).thenReturn(mock(IssueRun.class));
-    when(issueRunSessionRepository.findByRunId(runId))
-        .thenReturn(IssueRunSession.builder().runId(runId).sessionId(runSessionId).build());
-    when(runtime.getSession(runSessionId)).thenReturn(new Session(runSessionId, "run session", T1));
-    when(runtime.getSessionEntries(runSessionId)).thenReturn(List.of());
-    when(runtime.listThreadsBySession(runSessionId)).thenReturn(List.of());
+    List<HarnessSessionSummaryDTO> summaries = service.listIssueAgentSessions(issueAgentSessionId);
+    assertEquals(1, summaries.size());
+    assertEquals(sessionId.toString(), summaries.getFirst().getSessionId());
 
-    List<HarnessSessionSummaryDTO> projectSummaries = service.listProjectSessions(projectId);
-    assertEquals(1, projectSummaries.size());
-    assertEquals(projectSessionId.toString(), projectSummaries.get(0).getSessionId());
+    // 统一查询 OwnerRef
+    List<HarnessSessionSummaryDTO> byOwner =
+        service.listSessionsByOwner(
+            new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, issueAgentSessionId));
+    assertEquals(1, byOwner.size());
+    assertEquals(sessionId.toString(), byOwner.getFirst().getSessionId());
 
-    List<HarnessSessionSummaryDTO> runSummaries = service.listIssueRunSessions(runId);
-    assertEquals(1, runSummaries.size());
-    assertEquals(runSessionId.toString(), runSummaries.get(0).getSessionId());
+    // CHAT 统一查询
+    UUID chatId = id(50);
+    when(chatRepository.getById(chatId)).thenReturn(mock(Chat.class));
+    when(chatSessionRepository.listSessionIds(chatId)).thenReturn(List.of(sessionId));
+    List<HarnessSessionSummaryDTO> byChatOwner =
+        service.listSessionsByOwner(new OwnerRef(OwnerType.CHAT, chatId));
+    assertEquals(1, byChatOwner.size());
+    assertEquals(sessionId.toString(), byChatOwner.getFirst().getSessionId());
 
-    // 统一查询
-    List<HarnessSessionSummaryDTO> byOwnerProject =
-        service.listSessionsByOwner(new OwnerRef(OwnerType.PROJECT, projectId));
-    assertEquals(1, byOwnerProject.size());
-    assertEquals(projectSessionId.toString(), byOwnerProject.get(0).getSessionId());
-
-    List<HarnessSessionSummaryDTO> byOwnerRun =
-        service.listSessionsByOwner(new OwnerRef(OwnerType.ISSUE_RUN, runId));
-    assertEquals(1, byOwnerRun.size());
-    assertEquals(runSessionId.toString(), byOwnerRun.get(0).getSessionId());
+    // CANVAS 统一查询
+    UUID canvasId = id(60);
+    when(canvasStore.findDocument(canvasId)).thenReturn(Optional.of(mock(CanvasDocument.class)));
+    when(canvasSessionRepository.listSessionIds(canvasId)).thenReturn(List.of(sessionId));
+    List<HarnessSessionSummaryDTO> byCanvasOwner =
+        service.listSessionsByOwner(new OwnerRef(OwnerType.CANVAS, canvasId));
+    assertEquals(1, byCanvasOwner.size());
+    assertEquals(sessionId.toString(), byCanvasOwner.getFirst().getSessionId());
   }
 
   @Test
@@ -282,13 +277,7 @@ class HarnessOwnerQueryServiceTest {
             sessionId,
             user.id(),
             new CustomMessagePayload(
-                "core",
-                "message",
-                "message",
-                settingsReminder(
-                    new BranchSettings(
-                        "assistant", new ModelSelection("provider", "turn-model", "fast"), null)),
-                "{}"),
+                "core", "message", "message", SystemReminder.message("Runtime context."), "{}"),
             T3);
     Entry afterReminder = userText(sessionId, id(505), reminder.id(), T4, "after reminder");
     ThreadState thread = thread(threadId, sessionId, afterReminder.id(), T0, T5);
@@ -398,12 +387,6 @@ class HarnessOwnerQueryServiceTest {
         0L,
         createdAt,
         updatedAt);
-  }
-
-  /** 用生产 {@link SettingsReminder} 构造一条 SET_MODEL 生效提醒，测试因此跟随真实提醒正文格式，而非自造字符串。 */
-  private static AgentMessage settingsReminder(BranchSettings settings) {
-    return SettingsReminder.message(
-        new CommandHarvestResult.SettingsChange(ThreadCommandType.SET_MODEL, settings));
   }
 
   private static UUID id(long value) {
