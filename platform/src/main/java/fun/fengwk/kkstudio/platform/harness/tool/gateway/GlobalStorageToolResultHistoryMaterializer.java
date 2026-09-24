@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
@@ -147,6 +148,13 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
           resource.textMetadata().totalLines(),
           resource.preview());
     }
-    return ResourceMessageContent.media(ready.blobId(), filename, resource.preview());
+    // 工具结果图片没有用户选择：冻结平台默认档位（720P）；非图片媒体不带档位。
+    return ResourceMessageContent.media(
+        ready.blobId(), filename, resource.preview(), defaultImageTier(blob.getMediaType()));
+  }
+
+  /** 图片工具结果的默认输入档位；非 image/* 媒体不携带档位。 */
+  private static ImageInputTier defaultImageTier(String mediaType) {
+    return mediaType != null && mediaType.startsWith("image/") ? ImageInputTier.P720 : null;
   }
 }

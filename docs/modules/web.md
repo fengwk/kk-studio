@@ -151,7 +151,10 @@ no-op），不产生 Command、Entry 或 Work。
   `CUSTOM_MESSAGE` 不开放
   到 product HTTP surface；`SET_ENVIRONMENT` 必须显式携带可空 `environmentName`（null 表示清除），
   其余命令禁止携带该字段；user content 只允许 `TEXT`、`ATTACHMENT`、`RESOURCE`，
-  Attachment 由 Platform acceptance transaction 转成 durable Resource。
+  Attachment 由 Platform acceptance transaction 转成 durable Resource。`ATTACHMENT` 与
+  `RESOURCE` 可携带 `imageTier`（`720P` / `1080P` / `ORIGINAL`，缺省即平台默认 `720P`，
+  `TEXT` 禁止携带），该值随命令冻结并进入 durable 历史；非图片媒体在消费 upload / 复用
+  resource 时按权威 MIME 收敛为无档位。
 - [HarnessRuntimeResponseMapper](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeResponseMapper.java)
   把 Runtime snapshot 投影为严格 DTO，Entry/Command/AgentMessage/Model result/Model
   error/Tool approval/Tool result 各经对应 JSON codec 编码，Thread status 由

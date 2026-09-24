@@ -35,7 +35,7 @@ registerCase({
   level: 'L1',
   requires: ['canvas-storage'],
   title: 'USER_MESSAGE ATTACHMENT 消费与幂等 replay 契约',
-  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；durable payload 为 resource(blobId,name,preview)；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
+  docs: '需 backend 启用 S3：reserve -> presigned PUT -> complete -> ATTACHMENT(uploadId) 作为 NEW_SESSION 首条消息原子物化；durable payload 为 resource(blobId,name,preview,imageTier) 且不含 Base64，非图片媒体不携带档位；同批精确重放 replayed=true 不二次消费；同 Session RESOURCE 可重提且跨/新 Session 拒绝；已消费/未 READY upload 与 IMAGE/AUDIO/VIDEO 内容类型确定性 400',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -122,6 +122,9 @@ registerCase({
     assert(payload.message.contents[0].type === 'resource', JSON.stringify(payload))
     assert(String(payload.message.contents[0].blobId) === blobId, JSON.stringify(payload))
     assert(payload.message.contents[0].name === 'e2e-attachment.txt', JSON.stringify(payload))
+    // durable 只保存 blob 引用：文本附件不携带图片输入档位，payload 里也不出现任何内联内容。
+    assert(payload.message.contents[0].imageTier === null, JSON.stringify(payload))
+    assert(!String(command.payloadJson).includes('base64'), String(command.payloadJson))
 
     // 5. 整批精确重放：replayed=true，返回既有命令（payloadJson 一致），不二次消费。
     const replayed = await createNewSession(ctx, {
@@ -427,6 +430,12 @@ registerCase({
         secondAccepted.acceptedCommands.length === 1,
         JSON.stringify(secondAccepted.acceptedCommands),
       )
+      // 图片附件未显式选择档位：durable 历史必须冻结平台默认 720P，且不保存任何内联内容。
+      const secondPayloadJson = String(secondAccepted.acceptedCommands[0].payloadJson)
+      const secondPayload = JSON.parse(secondPayloadJson)
+      const durableImage = secondPayload.message.contents.find((content) => content.type === 'resource')
+      assert(durableImage?.imageTier === '720P', secondPayloadJson)
+      assert(!secondPayloadJson.includes('base64'), secondPayloadJson)
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 45_000, intervalMs: 100 })
 
       const finalSnapshot = await getThreadSnapshot(ctx, threadId)

@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
@@ -55,7 +57,7 @@ public final class AgentMessageJsonCodec {
       orderedSet(
           "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_FIELDS =
-      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview");
+      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview", "imageTier");
 
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -85,7 +87,7 @@ public final class AgentMessageJsonCodec {
   /**
    * 把 {@link AgentMessage} 编码为 client command 请求的 canonical {@link ObjectNode}：与 {@link
    * #encodeNode} 相同，但允许瞬时 {@link AttachmentMessageContent}（编码为 {@code
-   * {"type":"attachment","uploadId":...}}）。 请求 hash 只基于该形态计算，绝不进入 durable payload。
+   * {"type":"attachment","uploadId":...,"imageTier":...}}）。 请求 hash 只基于该形态计算，绝不进入 durable payload。
    */
   public ObjectNode encodeRequestNode(AgentMessage message) {
     Objects.requireNonNull(message, "message");
@@ -97,6 +99,7 @@ public final class AgentMessageJsonCodec {
         ObjectNode item = contents.addObject();
         item.put("type", "attachment");
         item.put("uploadId", attachment.uploadId().toString());
+        putNullableText(item, "imageTier", wireName(attachment.imageTier()));
         continue;
       }
       contents.add(encodeContent(content));
@@ -193,6 +196,7 @@ public final class AgentMessageJsonCodec {
         putNullableLong(node, "totalBytes", value.totalBytes());
         putNullableLong(node, "totalLines", value.totalLines());
         putNullableText(node, "preview", value.preview());
+        putNullableText(node, "imageTier", wireName(value.imageTier()));
       }
       case AttachmentMessageContent value -> throw new IllegalArgumentException(
           "attachment content is transient and must never be persisted");
@@ -260,7 +264,8 @@ public final class AgentMessageJsonCodec {
             nullableText(node, "name", "content"),
             nullableLong(node, "totalBytes", "content"),
             nullableLong(node, "totalLines", "content"),
-            nullableText(node, "preview", "content"));
+            nullableText(node, "preview", "content"),
+            nullableImageTier(node, "imageTier", "content"));
       }
       default -> throw new IllegalArgumentException(
           "unknown agent message content type: "
@@ -429,6 +434,23 @@ public final class AgentMessageJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be integer or null");
     }
     return value.longValue();
+  }
+
+  /** 可空图片输入档位字段：JSON null 或档位 wire 名称；未知名称显式失败。 */
+  private static ImageInputTier nullableImageTier(ObjectNode node, String field, String context) {
+    String wireName = nullableText(node, field, context);
+    if (wireName == null) {
+      return null;
+    }
+    try {
+      return ImageInputTier.fromWireName(wireName);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + " " + error.getMessage(), error);
+    }
+  }
+
+  private static String wireName(ImageInputTier tier) {
+    return tier == null ? null : tier.wireName();
   }
 
   private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {

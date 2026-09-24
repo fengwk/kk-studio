@@ -1,9 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 
 import java.util.List;
 import java.util.UUID;
@@ -12,6 +17,8 @@ import java.util.UUID;
 class AgentMessageJsonCodecTest {
 
   private final AgentMessageJsonCodec codec = new AgentMessageJsonCodec();
+
+  private static final UUID TIER_BLOB_ID = UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01");
 
   @Test
   void roundTripsAllContentTypes() {
@@ -92,11 +99,12 @@ class AgentMessageJsonCodecTest {
                         List.of(new TextMessageContent("ok")),
                         false,
                         "{}")))));
-    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 totals/preview 字段显式写出为 JSON null。
+    // resource 是扁平精确字段：blobId/name 必须显式写出，可空 totals/preview/imageTier 字段显式写出为 JSON null。
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
             + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
-            + "\"name\":\"a.txt\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}",
+            + "\"name\":\"a.txt\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null,"
+            + "\"imageTier\":null}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
@@ -154,6 +162,99 @@ class AgentMessageJsonCodecTest {
 
     assertEquals(resource, codec.decode(codec.encode(resource)));
     assertEquals(emptyText, codec.decode(codec.encode(emptyText)));
+  }
+
+  /** 意图：档位是 durable 事实，必须用 wire 名称无损往返；未知名称、枚举名与缺失字段都显式拒绝（绝不静默套用默认档位）。 */
+  @Test
+  void roundTripsDurableImageInputTiers() {
+    for (ImageInputTier tier : ImageInputTier.values()) {
+      AgentMessage message =
+          new AgentMessage(
+              AgentMessageRole.ASSISTANT,
+              List.of(ResourceMessageContent.media(TIER_BLOB_ID, "photo.png", "preview", tier)));
+
+      String json = codec.encode(message);
+
+      assertTrue(
+          json.contains("\"imageTier\":\"" + tier.wireName() + "\""),
+          "durable JSON 必须写出档位 wire 名称：" + json);
+      assertEquals(message, codec.decode(json));
+      assertEquals(message, codec.decodeNode(codec.encodeNode(message)));
+    }
+
+    // 枚举名、未知名称与非文本取值都不是合法 durable 事实。
+    for (String wireName : List.of("P720", "720p", "4K", "")) {
+      assertThrows(
+          IllegalArgumentException.class, () -> decodeResourceWithTier(wireName), wireName);
+    }
+    assertThrows(IllegalArgumentException.class, () -> decodeResourceWithTier("720"));
+    // 缺失字段 fail closed：历史 payload 不会被静默解释成某个档位。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
+                    + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+                    + "\"name\":\"photo.png\",\"totalBytes\":null,\"totalLines\":null,"
+                    + "\"preview\":null}]}"));
+  }
+
+  /** 意图：durable payload 只保存 blob 引用与档位，绝不携带内联媒体（无 Base64、无 data URI、无 URL）。 */
+  @Test
+  void durableEncodingCarriesNoInlineMedia() {
+    String json =
+        codec.encode(
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(
+                    ResourceMessageContent.media(
+                        TIER_BLOB_ID, "photo.png", "preview", ImageInputTier.P1080),
+                    ResourceMessageContent.media(
+                        TIER_BLOB_ID, "original.png", null, ImageInputTier.ORIGINAL))));
+
+    assertFalse(json.contains("base64"), json);
+    assertFalse(json.contains("data:"), json);
+    assertFalse(json.contains("http"), json);
+  }
+
+  /** 意图：请求形态（幂等哈希输入）携带客户端冻结的档位；不同档位是不同请求，且 ATTACHMENT 永不进入 durable payload。 */
+  @Test
+  void requestFormCarriesFrozenAttachmentTierAndStaysTransient() {
+    UUID uploadId = UUID.fromString("1a4e2f0c-1f2b-4e6d-9c3a-77f0a1b2c3d4");
+    String p720 =
+        codec.encodeRequestNode(attachmentMessage(uploadId, ImageInputTier.P720)).toString();
+    String p1080 =
+        codec.encodeRequestNode(attachmentMessage(uploadId, ImageInputTier.P1080)).toString();
+
+    assertTrue(p720.contains("\"imageTier\":\"720P\""), p720);
+    assertNotEquals(p720, p1080, "同一 upload 的不同档位必须产生不同请求形态");
+    // 未选择档位：请求形态显式为 null，默认档位由命令接受边界决定。
+    assertTrue(
+        codec
+            .encodeRequestNode(attachmentMessage(uploadId, null))
+            .toString()
+            .contains("\"imageTier\":null"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.encode(attachmentMessage(uploadId, ImageInputTier.P720)));
+    assertThrows(
+        IllegalArgumentException.class, () -> codec.encodeNode(attachmentMessage(uploadId, null)));
+  }
+
+  private static AgentMessage attachmentMessage(UUID uploadId, ImageInputTier tier) {
+    return new AgentMessage(
+        AgentMessageRole.USER, List.of(new AttachmentMessageContent(uploadId, tier)));
+  }
+
+  private AgentMessage decodeResourceWithTier(String imageTierJsonValue) {
+    return codec.decode(
+        "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
+            + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
+            + "\"name\":\"photo.png\",\"totalBytes\":null,\"totalLines\":null,"
+            + "\"preview\":null,\"imageTier\":"
+            + imageTierJsonValue
+            + "}]}");
   }
 
   @Test

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -423,6 +424,51 @@ class ProviderRequestJsonCodecTest {
           () -> codec.decode(mediaJson.toString()),
           media.getClass().getSimpleName());
     }
+  }
+
+  /** 意图：Provider 请求内的 durable resource 块必须无损携带图片输入档位；未知/枚举名/缺失字段一律显式拒绝。 */
+  @Test
+  void roundTripsProviderResourceBlockImageTier() {
+    for (ImageInputTier tier : ImageInputTier.values()) {
+      ProviderRequest request =
+          requestWithResourceBlock(
+              ProviderResourceBlock.media(
+                  UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"),
+                  "photo.png",
+                  "preview",
+                  tier));
+
+      String encoded = codec.encode(request);
+
+      assertTrue(
+          encoded.contains("\"imageTier\":\"" + tier.wireName() + "\""),
+          "provider request 必须写出档位 wire 名称：" + encoded);
+      assertEquals(request, codec.decode(encoded));
+    }
+
+    ProviderRequest withoutTier =
+        requestWithResourceBlock(
+            ProviderResourceBlock.media(
+                UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01"), "photo.png", "preview"));
+    assertTrue(codec.encode(withoutTier).contains("\"imageTier\":null"));
+
+    // canonical fixture 的 message 0 的第二个块就是 resource：篡改档位字段必须被拒绝。
+    assertRejected(root -> content(root, 0, 1).put("imageTier", "4K"));
+    assertRejected(root -> content(root, 0, 1).put("imageTier", "P720"));
+    assertRejected(root -> content(root, 0, 1).put("imageTier", 720));
+    assertRejected(root -> content(root, 0, 1).remove("imageTier"));
+  }
+
+  private static ProviderRequest requestWithResourceBlock(ProviderResourceBlock resource) {
+    ProviderRequest base = canonicalRequest();
+    return new ProviderRequest(
+        base.model(),
+        base.variant(),
+        base.outputTokens(),
+        base.systemInstruction(),
+        List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(resource))),
+        base.tools(),
+        base.cacheControl());
   }
 
   private static ObjectNode mediaBlockNode(ProviderContentBlock media) {

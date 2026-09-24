@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -389,6 +390,7 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(dto.hasBlobIdField(), context + ".blobId", "content type " + type);
         requireForbidden(dto.hasNameField(), context + ".name", "content type " + type);
         requireForbidden(dto.hasPreviewField(), context + ".preview", "content type " + type);
+        requireForbidden(dto.hasImageTierField(), context + ".imageTier", "content type " + type);
         yield new TextMessageContent(requireText(dto.getText(), context + ".text"));
       }
       case "ATTACHMENT" -> {
@@ -396,7 +398,8 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(dto.hasBlobIdField(), context + ".blobId", "content type " + type);
         requireForbidden(dto.hasNameField(), context + ".name", "content type " + type);
         requireForbidden(dto.hasPreviewField(), context + ".preview", "content type " + type);
-        yield new AttachmentMessageContent(parseUuid(dto.getUploadId(), context + ".uploadId"));
+        yield new AttachmentMessageContent(
+            parseUuid(dto.getUploadId(), context + ".uploadId"), toImageTier(dto, context));
       }
       case "RESOURCE" -> {
         requireForbidden(dto.hasTextField(), context + ".text", "content type " + type);
@@ -404,11 +407,29 @@ public final class HarnessRuntimeRequestMapper {
         yield ResourceMessageContent.media(
             parseUuid(dto.getBlobId(), context + ".blobId"),
             requireText(dto.getName(), context + ".name"),
-            dto.getPreview());
+            dto.getPreview(),
+            toImageTier(dto, context));
       }
       default -> throw new IllegalArgumentException(
           context + ".type must be one of TEXT, ATTACHMENT, RESOURCE: " + type);
     };
+  }
+
+  /**
+   * 解析 ATTACHMENT / RESOURCE 的图片输入档位：字段缺省时使用平台默认 720P，显式提供时必须是受支持的档位名（非图片媒体由 Platform 在权威 MIME 上收敛为
+   * null）。
+   */
+  private static ImageInputTier toImageTier(HarnessUserMessageContentDTO dto, String context) {
+    if (!dto.hasImageTierField()) {
+      return ImageInputTier.P720;
+    }
+    String value = requireText(dto.getImageTier(), context + ".imageTier");
+    try {
+      return ImageInputTier.fromWireName(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + ".imageTier must be one of 720P, 1080P, ORIGINAL: " + value, error);
+    }
   }
 
   private static void requireForbidden(boolean present, String field, String context) {

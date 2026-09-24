@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
@@ -930,7 +931,9 @@ class DatabaseProviderResolutionServiceTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
-                    List.of(new ProviderResourceBlock(blobId, "scan.png", "tiny")))),
+                    List.of(
+                        ProviderResourceBlock.media(
+                            blobId, "scan.png", "tiny", ImageInputTier.ORIGINAL)))),
             List.of(),
             Set.of(ModelInputModality.IMAGE));
 
@@ -944,9 +947,9 @@ class DatabaseProviderResolutionServiceTest {
     assertEquals("data:image/png;base64,AAEC", image.source());
   }
 
-  /** 意图：adapter 未声明能力时 Resource 必须是确定性文本回退，且不读取任何存储内容。 */
+  /** 意图：adapter 未声明能力时图片不得被降级成文本描述，必须在读取任何存储内容之前显式失败。 */
   @Test
-  void resolveFallsBackToTextWhenAdapterDeclaresNoMediaCapability() {
+  void resolveFailsExplicitlyWhenAdapterDeclaresNoMediaCapabilityForImage() {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
@@ -973,18 +976,18 @@ class DatabaseProviderResolutionServiceTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
-                    List.of(new ProviderResourceBlock(blobId, "scan.png", "tiny")))),
+                    List.of(
+                        ProviderResourceBlock.media(
+                            blobId, "scan.png", "tiny", ImageInputTier.ORIGINAL)))),
             List.of(),
             Set.of(ModelInputModality.IMAGE));
 
-    ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted));
 
-    ProviderTextBlock fallback =
-        assertInstanceOf(
-            ProviderTextBlock.class,
-            resolved.effectiveRequest().messages().get(0).contents().get(0));
-    assertTrue(fallback.text().contains("blobId: " + blobId), fallback.text());
+    assertTrue(error.getMessage().contains("cannot be sent"), error.getMessage());
     verify(contentService, never()).readBlobContent(any(), anyLong());
     verify(blobManager, never()).presignOriginalUrl(any());
   }
