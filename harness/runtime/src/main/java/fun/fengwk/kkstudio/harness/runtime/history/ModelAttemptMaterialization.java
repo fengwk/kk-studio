@@ -103,7 +103,15 @@ public final class ModelAttemptMaterialization {
    */
   private static void requireTerminalResult(ModelInvocation invocation, EntryPath resultPath) {
     if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
-      requireSuccessfulResult(invocation, resultPath);
+      TurnStartPayload start = requiredTurnStart(invocation, resultPath);
+      // 普通 Assistant 结果转移 replay state；压缩结果只保留摘要，丢弃 provider 原生状态。
+      if (start.compaction() == null
+          && !Objects.equals(
+              invocation.providerReplayState(), resultPath.head().providerReplayState())) {
+        throw new IllegalArgumentException(
+            "materialized assistant entry must match the invocation provider replay state");
+      }
+      requireSuccessfulResult(invocation, resultPath, start);
       return;
     }
     if (resultPath.head().providerReplayState() != null) {
@@ -150,15 +158,11 @@ public final class ModelAttemptMaterialization {
    * 结果后的前缀，保证 TURN_PREFIX / HISTORY 组装上下文与 apply 时一致）。任何字段漂移（text / thinking / tool call renderer /
    * metadata / summary text）都必须被拒。
    */
-  private static void requireSuccessfulResult(ModelInvocation invocation, EntryPath resultPath) {
+  private static void requireSuccessfulResult(
+      ModelInvocation invocation, EntryPath resultPath, TurnStartPayload start) {
     Entry resultEntry = resultPath.head();
     EntryPayload resultPayload = resultEntry.payload();
-    TurnStartPayload start = requiredTurnStart(invocation, resultPath);
     if (start.compaction() != null) {
-      if (resultEntry.providerReplayState() != null) {
-        throw new IllegalArgumentException(
-            "compaction result entry must not carry provider replay state");
-      }
       EntryPayload expected =
           CompactionResultEvaluator.evaluate(
               preResultPath(resultPath), start.compaction(), invocation.result());
@@ -167,10 +171,6 @@ public final class ModelAttemptMaterialization {
             "model result must materialize the exact compaction payload");
       }
       return;
-    }
-    if (!Objects.equals(invocation.providerReplayState(), resultEntry.providerReplayState())) {
-      throw new IllegalArgumentException(
-          "materialized assistant entry must match the invocation provider replay state");
     }
     MessagePayload expected =
         new HistoryPayloadMapper()
@@ -336,6 +336,6 @@ public final class ModelAttemptMaterialization {
       throw new IllegalArgumentException(
           "an attached tool-phase model result head must be an ASSISTANT message entry");
     }
-    requireSuccessfulResult(attached, resultPath);
+    requireSuccessfulResult(attached, resultPath, requiredTurnStart(attached, resultPath));
   }
 }
