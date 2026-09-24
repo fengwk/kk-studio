@@ -38,7 +38,9 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -61,6 +63,17 @@ final class GeminiRequestEncoder {
   // data:[<mediatype>][;base64],<data>
   private static final Pattern DATA_URI_PATTERN =
       Pattern.compile("^data:([^;,]+)(?:;base64)?,(.*)$", Pattern.CASE_INSENSITIVE);
+
+  // data:<mediatype>;base64,<data>：工具结果只接受内联 Base64 媒体
+  private static final Pattern BASE64_DATA_URI_PATTERN =
+      Pattern.compile("^data:([^;,]+);base64,(.*)$", Pattern.CASE_INSENSITIVE);
+
+  /** 工具结果可内联的图片 MIME：只保留官方明确列举的保守集合，不扩大到全部 image/*。 */
+  private static final Set<String> TOOL_RESULT_IMAGE_TYPES =
+      Set.of("image/jpeg", "image/png", "image/webp");
+
+  /** 工具结果唯一可内联的文档 MIME。 */
+  private static final String TOOL_RESULT_DOCUMENT_TYPE = "application/pdf";
 
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
@@ -297,6 +310,19 @@ final class GeminiRequestEncoder {
     }
   }
 
+  /**
+   * 工具结果编码：文本/JSON 结果进入 {@code functionResponse.response}，媒体必须内联在 {@code
+   * functionResponse.parts[].inlineData} 内。
+   *
+   * <p>media 绝不能作为外层 {@code Content.parts} 的同级 part：那样媒体会变成该 role 的独立输入，而不是这次函数调用的返回值 （见
+   * https://ai.google.dev/api/generate-content#v1beta.FunctionResponse 与
+   * https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/function-calling#mm-fr）。
+   *
+   * <p>Gemini Developer API（generativelanguage v1beta）的 {@code FunctionResponseBlob} 只声明 {@code
+   * mimeType} 与 {@code data}，没有 {@code displayName}，因此 {@code response} 内 {@code {"$ref":
+   * "<displayName>"}} 的引用机制在 本协议下不可用：编码器只把媒体挂到 {@code functionResponse.parts} 上，绝不伪造 {@code
+   * displayName} 或 {@code $ref}。
+   */
   private static void encodeToolResultBlock(ArrayNode parts, ProviderToolResultBlock resultBlock) {
     List<ProviderContentBlock> textAndJsonBlocks = new ArrayList<>();
     List<ProviderContentBlock> mediaBlocks = new ArrayList<>();
@@ -308,6 +334,7 @@ final class GeminiRequestEncoder {
           || block instanceof ProviderAudioBlock
           || block instanceof ProviderVideoBlock
           || block instanceof ProviderDocumentBlock) {
+        // 媒体统一走保守白名单校验：音频/视频与非法来源在 encodeToolResultMediaPart 中明确拒绝
         mediaBlocks.add(block);
       } else {
         throw new ProviderException(
@@ -320,14 +347,69 @@ final class GeminiRequestEncoder {
     ObjectNode part = parts.addObject();
     ObjectNode functionResponse = part.putObject("functionResponse");
     functionResponse.put("name", resultBlock.toolName());
-    if (resultBlock.toolCallId() != null && !resultBlock.toolCallId().isBlank()) {
-      functionResponse.put("id", resultBlock.toolCallId());
-    }
+    functionResponse.put("id", resultBlock.toolCallId());
     functionResponse.set("response", responseObj);
 
-    for (ProviderContentBlock mediaBlock : mediaBlocks) {
-      encodeUserBlock(parts, mediaBlock);
+    if (!mediaBlocks.isEmpty()) {
+      ArrayNode responseParts = functionResponse.putArray("parts");
+      for (ProviderContentBlock mediaBlock : mediaBlocks) {
+        responseParts.add(encodeToolResultMediaPart(mediaBlock));
+      }
     }
+  }
+
+  /**
+   * 工具结果媒体按保守白名单内联为 {@code FunctionResponsePart.inlineData}：只接受 image/jpeg、image/png、image/webp 与
+   * application/pdf 的 Base64 data URI。
+   *
+   * <p>音频、视频、其他 MIME 与非 data URI 来源（含 http(s)/gs URL：v1beta 的 {@code FunctionResponsePart} 只有
+   * {@code inlineData}）都明确以 {@code INVALID_REQUEST} 失败，绝不降级为看似成功却丢弃媒体的请求。
+   */
+  private static ObjectNode encodeToolResultMediaPart(ProviderContentBlock block) {
+    String declaredMediaType;
+    String source;
+    if (block instanceof ProviderImageBlock imageBlock) {
+      declaredMediaType = imageBlock.mediaType();
+      source = imageBlock.source();
+    } else if (block instanceof ProviderDocumentBlock documentBlock) {
+      declaredMediaType = documentBlock.mediaType();
+      source = documentBlock.source();
+    } else {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini tool result only supports IMAGE and DOCUMENT media blocks");
+    }
+
+    String mediaType = declaredMediaType == null ? "" : declaredMediaType.toLowerCase(Locale.ROOT);
+    if (!TOOL_RESULT_IMAGE_TYPES.contains(mediaType)
+        && !TOOL_RESULT_DOCUMENT_TYPE.equals(mediaType)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "unsupported tool result media type: " + mediaType);
+    }
+
+    ObjectNode part = NODES.objectNode();
+    ObjectNode inlineData = part.putObject("inlineData");
+    inlineData.put("mimeType", mediaType);
+    inlineData.put("data", extractToolResultBase64(source, mediaType));
+    return part;
+  }
+
+  /** 工具结果媒体来源必须是 MIME 与声明一致的 Base64 data URI；任何其他形态都 fail closed。 */
+  private static String extractToolResultBase64(String source, String mediaType) {
+    Matcher matcher = source == null ? null : BASE64_DATA_URI_PATTERN.matcher(source);
+    if (matcher != null && matcher.matches()) {
+      String dataUriMediaType = matcher.group(1);
+      String base64Data = matcher.group(2);
+      if (dataUriMediaType != null
+          && dataUriMediaType.equalsIgnoreCase(mediaType)
+          && base64Data != null
+          && !base64Data.isEmpty()) {
+        return base64Data;
+      }
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST,
+        "tool result media source must be a base64 data URI matching mediaType");
   }
 
   private static JsonNode encodeToolResultResponse(

@@ -16,7 +16,14 @@ import java.util.Set;
 /** Google AI Gemini GenerateContent 流式协议适配器。 */
 public final class GeminiProviderAdapter implements ProviderAdapter {
 
-  /** 当前编码器的内联媒体能力：用户消息与工具结果均支持 IMAGE/AUDIO/VIDEO/DOCUMENT。这是本编码器实际可编码的 schema， 不构成厂商能力承诺。 */
+  /**
+   * 当前编码器的内联媒体能力：用户消息支持 IMAGE/AUDIO/VIDEO/DOCUMENT（{@code Part.inlineData} 或 {@code
+   * Part.fileData}），工具结果只支持 IMAGE/DOCUMENT。
+   *
+   * <p>工具结果媒体只能内联在 {@code FunctionResponse.parts[].inlineData}（v1beta 的 {@code
+   * FunctionResponsePart} 只有 {@code inlineData}），因此音频、视频与任意其他 MIME 都不声明，并由编码器以 {@code
+   * INVALID_REQUEST} 明确拒绝。这是本编码器 实际可编码的 schema，不构成厂商能力承诺。
+   */
   private static final ProviderMediaCapabilities MEDIA_CAPABILITIES =
       new ProviderMediaCapabilities(
           Set.of(
@@ -24,11 +31,7 @@ public final class GeminiProviderAdapter implements ProviderAdapter {
               ModelInputModality.AUDIO,
               ModelInputModality.VIDEO,
               ModelInputModality.DOCUMENT),
-          Set.of(
-              ModelInputModality.IMAGE,
-              ModelInputModality.AUDIO,
-              ModelInputModality.VIDEO,
-              ModelInputModality.DOCUMENT));
+          Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT));
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;

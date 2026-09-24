@@ -66,11 +66,16 @@ OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoni
 | 协议 | 用户内容 | 工具结果 | Base64 wire 形态 |
 | --- | --- | --- | --- |
 | OpenAI Chat | 由 `openAiChatMediaTypes` 派生，缺省为空；IMAGE / AUDIO / PDF 分别映射 IMAGE / AUDIO / DOCUMENT | 无媒体 | 图片 `image_url.url`；音频 `input_audio.data/format`；PDF `file.file_data` |
-| OpenAI Responses | 图片、PDF | 图片 | `input_image.image_url`、`input_file.file_data` |
-| Anthropic | 图片、PDF | 图片、PDF | `source.type=base64` 与 `source.media_type/data` |
-| Gemini | 图片、音频、视频、PDF | 图片、音频、视频、PDF | `inlineData.mimeType/data`（或 `fileData`） |
+| OpenAI Responses | 图片、PDF | 图片、PDF | 用户内容 `input_image.image_url`、`input_file.file_data`/`file_url`；工具结果 `function_call_output.output` 数组的 `input_text` / `input_image` / `input_file` 项 |
+| Anthropic | 图片、PDF | 图片、PDF | `source.type=base64` 与 `source.media_type/data`（图片也接受 http(s) `url`；文档只接受 base64） |
+| Gemini | 图片、音频、视频、PDF | 图片、PDF | 用户内容 `inlineData.mimeType/data`（或 `fileData`）；工具结果只允许内联在 `functionResponse.parts[].inlineData` |
 
-能力声明只描述本编码器能表达的 schema，不承诺具体上游模型支持该模态，也不替代编码器自己的 MIME / 格式校验。Chat 侧单个纯文本块保持字符串，多块或含媒体时使用数组。
+工具结果媒体有两个容易写反的位置约束：
+
+- **Gemini**：媒体必须内联在 `functionResponse.parts[].inlineData`，绝不能作为外层 `Content.parts` 的同级 part——同级 part 会被解析为该 role 的独立输入，而不是这次函数调用的返回值。Gemini Developer API 的 v1beta schema 里 `FunctionResponseBlob` 只有 `mimeType` 与 `data`，没有 `displayName`，官方文档描述的 `response` 内 `{"$ref": "<displayName>"}` 引用形态只成立于 Vertex AI 的 `FunctionResponseBlob` / `FunctionResponseFileData`；本编码器因此只把媒体挂到 `parts` 上，不伪造 `displayName` 或 `$ref`。工具结果只接受保守白名单 `image/jpeg`、`image/png`、`image/webp` 与 `application/pdf` 的 Base64 data URI，音频、视频、其他 MIME 与 http(s)/`gs` URL 来源一律以 `INVALID_REQUEST` 失败。
+- **OpenAI Chat**：tool message 的 `content` 只能是字符串，任何媒体块都以 `INVALID_REQUEST` 失败。
+
+能力声明只描述本编码器能表达的 schema，不承诺具体上游模型支持该模态，也不替代编码器自己的 MIME / 格式校验。Chat 侧单个纯文本块保持字符串，多块或含媒体时使用数组；Responses 工具结果同理：单个文本或 JSON 保持字符串，含媒体时使用 `output` 数组。
 
 请求体的最终 UTF-8 字节上限在序列化完成后统一收口：[`RequestBodySizeGuard`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/RequestBodySizeGuard.java) 的 `MAX_REQUEST_BODY_BYTES` 是 **192 MiB**，Chat、Responses 与 Gemini 都走它；Anthropic 保留更严格的 **32 MiB** 协议级上限。超限一律以 `INVALID_REQUEST` 明确失败，不静默截断、不降级、不改写请求；厂商仍可能有自己的更严格限制。
 
@@ -115,6 +120,7 @@ OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoni
 
 - 传输与字节级解析：[`transport` 测试目录](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/)；[`IncrementalSseParserTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/IncrementalSseParserTest.java) 锁定换行/BOM/上限规则，[`JdkHttpSseTransportTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/JdkHttpSseTransportTest.java) 锁定启动门、Watchdog 与取消仲裁，[`HeaderSanitizerTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/HeaderSanitizerTest.java) 锁定标头脱敏。
 - 上游错误透传：根包 [`ProviderErrorHelperTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderErrorHelperTest.java) 与各协议目录下同名的 `*ErrorMapper` 测试锁定原始正文透传、`[TRUNCATED]` 标记与分类。
+- 工具结果媒体矩阵契约：根包 [`ProviderAdapterMediaCapabilitiesTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderAdapterMediaCapabilitiesTest.java) 锁定四个协议的用户/工具结果声明矩阵，同包 [`ProviderToolResultMediaMatrixWireTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderToolResultMediaMatrixWireTest.java) 用本地离线 `HttpServer` 逐格验证「声明 ↔ 真实 HTTP 请求体 ↔ 不支持模态以 `INVALID_REQUEST` 失败且不发起请求」；各协议目录内的参数化用例锁定各自的 wire 形态与拒绝理由，全部离线，不访问真实 Provider。
 - 协议回归：四个协议各自的测试目录（[`anthropic`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/)、[`gemini`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/gemini/)、[`openai.chat`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/chat/)、[`openai.responses`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/responses/)）按 wire 形状、推理编码、流式聚合、终态证据与桥接取消分文件组织；改动某个协议时从对应目录进入，先跑该目录再跑全模块。Responses 的原生回放回归单独由 [`OpenAiResponsesDurableReplayTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesDurableReplayTest.java) 与 [`OpenAiResponsesEmptyReasoningReplayRepairTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesEmptyReasoningReplayRepairTest.java) 守住加密内容合并与空占位符回退。
 - 上游对齐清单：每个协议目录下的 `UpstreamTestManifestTest` 校验同目录的 `upstream-test-manifest.json`（如 [`transport` 清单](../../harness/provider/src/test/resources/fun/fengwk/kkstudio/harness/provider/transport/upstream-test-manifest.json)）。清单拒绝虚构对等：`PORTED` 项必须经反射验证目标测试真实存在且带 `@Test` / `@ParameterizedTest`，`OUT_OF_SCOPE` 项必须逐条说明架构不匹配原因，需要真实凭据的项独立标记为未执行；新增或迁移上游对等测试时同步更新对应清单。
 

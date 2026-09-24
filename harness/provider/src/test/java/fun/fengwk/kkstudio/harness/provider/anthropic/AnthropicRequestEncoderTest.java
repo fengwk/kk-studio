@@ -13,6 +13,9 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -27,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
@@ -49,6 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderToolCallDiagnosticJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -61,6 +66,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** AnthropicRequestEncoder 的纯单元与 Golden 测试。 */
 class AnthropicRequestEncoderTest {
@@ -911,6 +917,84 @@ class AnthropicRequestEncoderTest {
     assertEquals("base64", nested.get(2).path("source").path("type").asText());
     assertEquals("application/pdf", nested.get(2).path("source").path("media_type").asText());
     assertEquals("JVBERi0xLjUK", nested.get(2).path("source").path("data").asText());
+  }
+
+  /**
+   * Anthropic 工具结果媒体矩阵用例：{@code tool_result.content} 支持嵌套的 text/image/document（base64），
+   * 音频、视频与其他块类型必须明确拒绝，声明与编码器保持一致。
+   */
+  @ParameterizedTest(name = "anthropic tool result media: {0}")
+  @MethodSource("toolResultMediaCases")
+  void encodesToolResultMediaModalityMatrix(
+      String label, ProviderContentBlock block, String expectedType) throws IOException {
+    ProviderRequest req =
+        request(
+            defaultVariant(),
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "call_1", "name", List.of(block), false, "{}")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    if (expectedType == null) {
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> encoder.encode(req, descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+      assertNotNull(ex.getMessage());
+      return;
+    }
+
+    AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
+    JsonNode toolResult =
+        MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
+    assertEquals("tool_result", toolResult.path("type").asText());
+    assertEquals("call_1", toolResult.path("tool_use_id").asText());
+    JsonNode nested = toolResult.path("content");
+    assertEquals(1, nested.size());
+    assertEquals(expectedType, nested.get(0).path("type").asText());
+    assertEquals("base64", nested.get(0).path("source").path("type").asText());
+  }
+
+  /** 工具结果媒体用例：仅 base64 图片与 PDF 可嵌套；音频/视频/思考块与非法来源一律 fail closed。 */
+  private static Stream<Arguments> toolResultMediaCases() {
+    return Stream.of(
+        Arguments.of(
+            "png",
+            new ProviderImageBlock("image/png", "data:image/png;base64,iVBORw0KGgo="),
+            "image"),
+        Arguments.of(
+            "jpeg",
+            new ProviderImageBlock("image/jpeg", "data:image/jpeg;base64,/9j/4AAQ"),
+            "image"),
+        Arguments.of(
+            "pdf",
+            new ProviderDocumentBlock(
+                "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK"),
+            "document"),
+        Arguments.of(
+            "audio", new ProviderAudioBlock("audio/wav", "data:audio/wav;base64,UklGRg=="), null),
+        Arguments.of(
+            "video",
+            new ProviderVideoBlock("video/mp4", "data:video/mp4;base64,AAAAIGZ0eXA="),
+            null),
+        Arguments.of("thinking", new ProviderThinkingBlock("internal"), null),
+        // 文档只接受 base64：URL 来源在工具结果内同样拒绝
+        Arguments.of(
+            "pdf-url-rejected",
+            new ProviderDocumentBlock("application/pdf", "https://example.com/spec.pdf"),
+            null),
+        // 不支持的图片 MIME 与非法 scheme 同样拒绝
+        Arguments.of(
+            "tiff-rejected",
+            new ProviderImageBlock("image/tiff", "data:image/tiff;base64,SUkqAA=="),
+            null),
+        Arguments.of(
+            "ftp-image-rejected",
+            new ProviderImageBlock("image/png", "ftp://example.com/i.png"),
+            null));
   }
 
   @Test

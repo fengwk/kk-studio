@@ -13,6 +13,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.cache.PromptCacheRequestFinalizer;
@@ -27,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -53,6 +57,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** 验证 OpenAI Responses 请求编码、参数映射、媒体支持、回放与缓存控制规则。 */
 class OpenAiResponsesRequestEncoderTest {
@@ -1248,9 +1253,9 @@ class OpenAiResponsesRequestEncoderTest {
   }
 
   /**
-   * 测试意图：验证 ProviderToolResultBlock.contents 对 ProviderJsonBlock 的支持； JSON 与 text/image
-   * 按原顺序确定性编码；单文本保持简洁 string 兼容，JSON-only 编码为原始 JSON 文本； 多块走 output content array；单块或多块中出现任何不支持
-   * block（thinking/document/audio）均明确抛出 INVALID_REQUEST。
+   * 测试意图：验证 ProviderToolResultBlock.contents 对 ProviderJsonBlock/媒体块的支持； JSON 与 text/image/PDF
+   * 按原顺序确定性编码；单文本保持简洁 string 兼容，JSON-only 编码为原始 JSON 文本； 多块或含媒体走 output content array（数组元素与用户
+   * content 共用同一 wire 形态）；单块或多块中出现任何不支持 block（thinking/audio/video）均明确抛出 INVALID_REQUEST。
    */
   @Test
   void test_toolResult_jsonBlockAndMultiBlockSupport() throws Exception {
@@ -1322,6 +1327,31 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("data:image/png;base64,iVBORw0KGgo=", output3.get(0).path("image_url").asText());
     assertEquals("auto", output3.get(0).path("detail").asText());
 
+    // 3.5 单 ProviderDocumentBlock（PDF）：工具结果 PDF 与用户 PDF 同形，走 input_file + file_data/filename
+    ProviderRequest reqPdf =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "call_pdf",
+                            "docs",
+                            List.of(
+                                new ProviderDocumentBlock(
+                                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK")),
+                            false,
+                            null)))));
+    OpenAiResponsesEncodedRequest encPdf =
+        encoder.encode(reqPdf, desc, OpenAiResponsesConfig.defaultConfig());
+    JsonNode outputPdf = MAPPER.readTree(encPdf.bodyUtf8Bytes()).get("input").get(0).path("output");
+    assertTrue(outputPdf.isArray());
+    assertEquals(1, outputPdf.size());
+    assertEquals("input_file", outputPdf.get(0).path("type").asText());
+    assertEquals(
+        "data:application/pdf;base64,JVBERi0xLjQK", outputPdf.get(0).path("file_data").asText());
+    assertEquals("document.pdf", outputPdf.get(0).path("filename").asText());
+
     // 4. 多块混合（Text + Json + Image）：按原顺序确定性编码进 output content array
     ProviderRequest req4 =
         request(
@@ -1352,7 +1382,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("input_image", output4.get(2).path("type").asText());
     assertEquals("https://api.openai.com/image.jpg", output4.get(2).path("image_url").asText());
 
-    // 5. 不支持的 block（ThinkingBlock、DocumentBlock、AudioBlock）：单块与多块均抛出 INVALID_REQUEST
+    // 5. 不支持的 block（ThinkingBlock、AudioBlock、VideoBlock）：单块与多块均抛出 INVALID_REQUEST
     ProviderRequest reqBadThinking =
         request(
             List.of(
@@ -1370,26 +1400,6 @@ class OpenAiResponsesRequestEncoderTest {
             ProviderException.class,
             () -> encoder.encode(reqBadThinking, desc, OpenAiResponsesConfig.defaultConfig()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exTh.kind());
-
-    ProviderRequest reqBadDoc =
-        request(
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.TOOL,
-                    List.of(
-                        new ProviderToolResultBlock(
-                            "call_bad_doc",
-                            "tool",
-                            List.of(
-                                new ProviderDocumentBlock(
-                                    "application/pdf", "https://example.com/doc.pdf")),
-                            false,
-                            null)))));
-    ProviderException exDoc =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadDoc, desc, OpenAiResponsesConfig.defaultConfig()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exDoc.kind());
 
     ProviderRequest reqBadAudio =
         request(
@@ -1411,7 +1421,27 @@ class OpenAiResponsesRequestEncoderTest {
             () -> encoder.encode(reqBadAudio, desc, OpenAiResponsesConfig.defaultConfig()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exAudio.kind());
 
-    // 6. 多块中混入不支持 block（例如 Text + ThinkingBlock 或 Text + DocumentBlock）
+    ProviderRequest reqBadVideo =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "call_bad_video",
+                            "tool",
+                            List.of(
+                                new ProviderVideoBlock(
+                                    "video/mp4", "https://example.com/video.mp4")),
+                            false,
+                            null)))));
+    ProviderException exVideo =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(reqBadVideo, desc, OpenAiResponsesConfig.defaultConfig()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exVideo.kind());
+
+    // 6. 多块中混入不支持 block（例如 Text + ThinkingBlock 或 Text + AudioBlock）
     ProviderRequest reqBadMulti1 =
         request(
             List.of(
@@ -1430,26 +1460,199 @@ class OpenAiResponsesRequestEncoderTest {
             () -> encoder.encode(reqBadMulti1, desc, OpenAiResponsesConfig.defaultConfig()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exM1.kind());
 
-    ProviderRequest reqBadMulti2 =
+    // 7. 多块混合（Json + PDF）：媒体与文本按原顺序进入同一个 output content array
+    ProviderRequest reqMultiMedia =
         request(
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.TOOL,
                     List.of(
                         new ProviderToolResultBlock(
-                            "call_bad_m2",
-                            "tool",
+                            "call_multi_media",
+                            "docs",
                             List.of(
-                                new ProviderJsonBlock("{}"),
+                                new ProviderJsonBlock("{\"pages\":2}"),
                                 new ProviderDocumentBlock(
-                                    "application/pdf", "https://example.com/doc.pdf")),
+                                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK"),
+                                new ProviderImageBlock(
+                                    "image/png", "data:image/png;base64,iVBORw0KGgo=")),
                             false,
                             null)))));
-    ProviderException exM2 =
-        assertThrows(
-            ProviderException.class,
-            () -> encoder.encode(reqBadMulti2, desc, OpenAiResponsesConfig.defaultConfig()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exM2.kind());
+    JsonNode outputMultiMedia =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(reqMultiMedia, desc, OpenAiResponsesConfig.defaultConfig())
+                    .bodyUtf8Bytes())
+            .get("input")
+            .get(0)
+            .path("output");
+    assertEquals(3, outputMultiMedia.size());
+    assertEquals("input_text", outputMultiMedia.get(0).path("type").asText());
+    assertEquals("{\"pages\":2}", outputMultiMedia.get(0).path("text").asText());
+    assertEquals("input_file", outputMultiMedia.get(1).path("type").asText());
+    assertEquals("input_image", outputMultiMedia.get(2).path("type").asText());
+  }
+
+  /** 验证同名工具的多次调用按 call_id 分别绑定：两个 function_call_output 各自携带自己的媒体，不会互相覆盖。 */
+  @Test
+  void test_duplicateToolNamesBindByCallId() throws Exception {
+    ProviderDescriptor desc = createDescriptor();
+    ProviderRequest req =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "call_1",
+                            "get_media",
+                            List.of(
+                                new ProviderTextBlock("first"),
+                                new ProviderImageBlock(
+                                    "image/png", "data:image/png;base64,iVBORw0KGgo=")),
+                            false,
+                            null))),
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "call_2",
+                            "get_media",
+                            List.of(
+                                new ProviderTextBlock("second"),
+                                new ProviderDocumentBlock(
+                                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK")),
+                            false,
+                            null)))));
+
+    JsonNode input =
+        MAPPER
+            .readTree(
+                encoder.encode(req, desc, OpenAiResponsesConfig.defaultConfig()).bodyUtf8Bytes())
+            .get("input");
+    assertEquals(2, input.size());
+    assertEquals("call_1", input.get(0).path("call_id").asText());
+    assertEquals("call_2", input.get(1).path("call_id").asText());
+    assertEquals("first", input.get(0).path("output").get(0).path("text").asText());
+    assertEquals("second", input.get(1).path("output").get(0).path("text").asText());
+    assertEquals("input_image", input.get(0).path("output").get(1).path("type").asText());
+    assertEquals("input_file", input.get(1).path("output").get(1).path("type").asText());
+  }
+
+  /**
+   * 工具结果媒体矩阵用例：OpenAI Responses 的 {@code function_call_output.output} 数组只接受 {@code
+   * input_text}、{@code input_image} 与 {@code input_file}；其余模态、非法 MIME 与非法 URI 一律 fail closed。
+   */
+  private record ToolResultItemCase(
+      String label, ProviderContentBlock block, String expectedWireType, String expectedSource) {}
+
+  private static Stream<Arguments> toolResultItemCases() {
+    return Stream.of(
+        Arguments.of(
+            new ToolResultItemCase(
+                "text-keeps-string-output", new ProviderTextBlock("plain"), "string", null)),
+        Arguments.of(
+            new ToolResultItemCase(
+                "json-keeps-string-output",
+                new ProviderJsonBlock("{\"pages\":2}"),
+                "string",
+                null)),
+        Arguments.of(
+            new ToolResultItemCase(
+                "png-data-uri",
+                new ProviderImageBlock("image/png", "data:image/png;base64,iVBORw0KGgo="),
+                "input_image",
+                "data:image/png;base64,iVBORw0KGgo=")),
+        Arguments.of(
+            new ToolResultItemCase(
+                "jpeg-https-url",
+                new ProviderImageBlock("image/jpeg", "https://example.com/chart.jpg"),
+                "input_image",
+                "https://example.com/chart.jpg")),
+        Arguments.of(
+            new ToolResultItemCase(
+                "pdf-data-uri",
+                new ProviderDocumentBlock(
+                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK"),
+                "input_file",
+                "data:application/pdf;base64,JVBERi0xLjQK")),
+        Arguments.of(
+            new ToolResultItemCase(
+                "pdf-https-url",
+                new ProviderDocumentBlock("application/pdf", "https://example.com/spec.pdf"),
+                "input_file",
+                "https://example.com/spec.pdf")),
+        Arguments.of(
+            new ToolResultItemCase(
+                "audio-rejected",
+                new ProviderAudioBlock("audio/wav", "data:audio/wav;base64,UklGRg=="),
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultItemCase(
+                "video-rejected",
+                new ProviderVideoBlock("video/mp4", "data:video/mp4;base64,AAAAIGZ0eXA="),
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultItemCase(
+                "thinking-rejected", new ProviderThinkingBlock("internal"), null, null)),
+        Arguments.of(
+            new ToolResultItemCase(
+                "unsupported-image-mime-rejected",
+                new ProviderImageBlock("image/tiff", "https://example.com/scan.tiff"),
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultItemCase(
+                "non-http-uri-rejected",
+                new ProviderImageBlock("image/png", "ftp://example.com/i.png"),
+                null,
+                null)));
+  }
+
+  /** 验证工具结果每个块类型的 wire 结果或明确失败：媒体确实被编码，绝不被静默丢弃。 */
+  @ParameterizedTest(name = "tool result item: {0}")
+  @MethodSource("toolResultItemCases")
+  void test_toolResultItemModalityMatrix(ToolResultItemCase itemCase) throws Exception {
+    ProviderRequest req =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "call_1", "tool", List.of(itemCase.block()), false, null)))));
+
+    if (itemCase.expectedWireType() == null) {
+      ProviderException ex =
+          assertThrows(
+              ProviderException.class,
+              () -> encoder.encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+      assertNotNull(ex.getMessage());
+      return;
+    }
+
+    JsonNode output =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(req, createDescriptor(), OpenAiResponsesConfig.defaultConfig())
+                    .bodyUtf8Bytes())
+            .get("input")
+            .get(0)
+            .path("output");
+    if ("string".equals(itemCase.expectedWireType())) {
+      assertTrue(output.isTextual());
+      return;
+    }
+    assertTrue(output.isArray());
+    assertEquals(1, output.size());
+    assertEquals(itemCase.expectedWireType(), output.get(0).path("type").asText());
+    // 媒体内容确实进入 wire，而不是被替换为占位文本
+    assertTrue(output.get(0).toString().contains(itemCase.expectedSource()));
   }
 
   /** 测试意图：全面验证回放校验子结构边界条件（非 Object 项、未知项类型、畸形字段、 id 回退、文本与工具调用失配、不支持的 durable 块）与媒体 URI 校验防御。 */
