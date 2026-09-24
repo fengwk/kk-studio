@@ -88,10 +88,18 @@ class IssueHarnessController {
   }
 
   void bootstrap(Project project, Issue issue, IssueRun run) {
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
     String action = run.getRole() == IssueRunRole.EXECUTOR ? "Execute" : "Review";
     String initialMessage = action + " issue #" + issue.getNumber() + ": " + issue.getTitle();
+    IssueAgentSession existing =
+        issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName());
+    if (existing != null) {
+      // (Issue, Agent) 的归属随 Issue 稳定：后续 Run 复用自己的 Session 与工作 Branch，绝不重建归属，
+      // 只把本次 Run 的初始消息作为 Run 级幂等命令投递到既有 Thread。
+      deliverRunInitialMessage(run, existing, initialMessage);
+      return;
+    }
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
     try {
       bootstrapService.bootstrapIssueAgentSession(
           new BootstrapIssueAgentSessionRequest(
@@ -101,6 +109,31 @@ class IssueHarnessController {
               threadId,
               initialCommandKey(run.getId()),
               initialMessage));
+    } catch (RuntimeException e) {
+      throw sanitizedFailure("Harness session bootstrap failed", e);
+    }
+  }
+
+  /**
+   * 把 Run 的初始消息投递到既有工作 Branch。
+   *
+   * <p>命令与 reconcile 处于同一物理事务：Thread 游标由本次 Run 起始时的快照冻结，若期间 Harness 已完成新的 command 推进，接受会以 {@code
+   * STALE_COMMAND_CURSOR} 失败并让整个 reconcile 回滚重试，绝不写入陈旧游标。
+   */
+  private void deliverRunInitialMessage(
+      IssueRun run, IssueAgentSession agentSession, String initialMessage) {
+    try {
+      ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(agentSession.getThreadId());
+      if (snapshot == null) {
+        throw new HarnessRuntimeNotFoundException("Thread snapshot is missing");
+      }
+      NewThreadCommand command =
+          new NewThreadCommand(
+              new UserMessageCommandPayload(
+                  new AgentMessage(
+                      AgentMessageRole.USER, List.of(new TextMessageContent(initialMessage)))),
+              initialCommandKey(run.getId()));
+      acceptRunCommand(agentSession.getId(), snapshot, command);
     } catch (RuntimeException e) {
       throw sanitizedFailure("Harness session bootstrap failed", e);
     }
