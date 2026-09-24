@@ -6,15 +6,26 @@ import {
   Archive,
   Ban,
   Clock,
+  Download,
   Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
   ShieldAlert,
   Trash2,
+  Upload,
   X,
 } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
+import {
+  storageService as defaultStorageService,
+  type StorageService,
+} from '@/shared/api/storage-service'
+import {
+  createWorkerHasher,
+  validateUploadFile,
+  type HashFile,
+} from '@/features/ai/composer'
 import { presentConflict } from '@/shared/conflict/conflict-presenter'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
@@ -24,6 +35,7 @@ import { projectsApi } from '../projects-api'
 import type {
   IssueActivityDTO,
   IssueDetailDTO,
+  IssueEvidenceDTO,
   IssueRunRole,
   IssueStatus,
   ProjectIssueSnapshotDTO,
@@ -38,9 +50,33 @@ export interface IssueDetailModalProps {
   onClose: () => void
   onUpdated: () => void
   api?: ProjectsApi
+  storageService?: StorageService
+  hashFile?: HashFile
 }
 
-type TabKey = 'spec' | 'deps' | 'activities' | 'runs'
+type TabKey = 'spec' | 'deps' | 'activities' | 'runs' | 'evidence'
+
+async function calculateFileSha256(file: File, customHasher?: HashFile): Promise<string> {
+  if (customHasher) {
+    return customHasher(file)
+  }
+  if (typeof Worker !== 'undefined') {
+    try {
+      const workerHasher = createWorkerHasher()
+      return await workerHasher(file)
+    } catch {
+      // fallback
+    }
+  }
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const buf = await file.arrayBuffer()
+    const digest = await crypto.subtle.digest('SHA-256', buf)
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+  return '0'.repeat(64)
+}
 
 export function IssueDetailModal({
   isOpen,
@@ -50,6 +86,8 @@ export function IssueDetailModal({
   onClose,
   onUpdated,
   api = projectsApi,
+  storageService = defaultStorageService,
+  hashFile,
 }: IssueDetailModalProps) {
   const queryClient = useQueryClient()
   const issueQueryKey = queryKeys.projects.issue(projectId, issueId ?? '')
@@ -129,6 +167,19 @@ export function IssueDetailModal({
   // Retry state
   const [isRetrying, setIsRetrying] = useState(false)
 
+  // Evidence state
+  const currentIssueIdRef = useRef(issueId)
+  useEffect(() => {
+    currentIssueIdRef.current = issueId
+  }, [issueId])
+
+  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false)
+  const [evidenceActionError, setEvidenceActionError] = useState<string | null>(null)
+  const evidenceFileInputRef = useRef<HTMLInputElement>(null)
+
+  const [downloadingBlobId, setDownloadingBlobId] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState<{ blobId: string; message: string } | null>(null)
+
   // Sync activities from detail query
   useEffect(() => {
     if (detail) {
@@ -153,6 +204,10 @@ export function IssueDetailModal({
       setActivityTargetRole('')
       setActiveTab('spec')
       setActionError(null)
+      setIsUploadingEvidence(false)
+      setEvidenceActionError(null)
+      setDownloadingBlobId(null)
+      setDownloadError(null)
     }
   }, [isOpen, issueId])
 
@@ -518,6 +573,120 @@ export function IssueDetailModal({
     }
   }
 
+  // 12. Evidence Upload & Download
+  const handleEvidenceUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file || !issue) {
+      return
+    }
+    event.target.value = ''
+    const targetIssueId = issue.id
+
+    const sizeError = validateUploadFile(file)
+    if (sizeError) {
+      setEvidenceActionError(sizeError)
+      return
+    }
+
+    setIsUploadingEvidence(true)
+    setEvidenceActionError(null)
+    let reservationId: string | null = null
+
+    try {
+      const sha256 = await calculateFileSha256(file, hashFile)
+      if (currentIssueIdRef.current !== targetIssueId) {
+        return
+      }
+
+      const reservation = await storageService.reserveUpload({
+        filename: file.name,
+        mediaType: file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+        sha256,
+      })
+      reservationId = reservation.id
+      if (currentIssueIdRef.current !== targetIssueId) {
+        void storageService.deleteUpload(reservation.id).catch(() => undefined)
+        return
+      }
+
+      if (reservation.state === 'PENDING') {
+        await storageService.uploadFile(reservation.presignedPut, file)
+        if (currentIssueIdRef.current !== targetIssueId) {
+          void storageService.deleteUpload(reservation.id).catch(() => undefined)
+          return
+        }
+      }
+
+      const completed = await storageService.completeUpload(reservation.id)
+      if (currentIssueIdRef.current !== targetIssueId) {
+        void storageService.deleteUpload(completed.id).catch(() => undefined)
+        return
+      }
+
+      await api.addIssueEvidence(targetIssueId, { uploadId: completed.id })
+      if (currentIssueIdRef.current !== targetIssueId) {
+        return
+      }
+
+      await refetch()
+      onUpdated()
+    } catch (err) {
+      if (currentIssueIdRef.current !== targetIssueId) {
+        return
+      }
+      if (reservationId) {
+        void storageService.deleteUpload(reservationId).catch(() => undefined)
+      }
+      setEvidenceActionError(err instanceof Error ? err.message : '上传证据失败')
+    } finally {
+      if (currentIssueIdRef.current === targetIssueId) {
+        setIsUploadingEvidence(false)
+      }
+    }
+  }
+
+  const handleDownloadEvidence = async (ev: IssueEvidenceDTO) => {
+    if (!issue || !ev.blobId || downloadingBlobId === ev.blobId) {
+      return
+    }
+    const targetIssueId = issue.id
+    setDownloadingBlobId(ev.blobId)
+    setDownloadError(null)
+    try {
+      const result = await storageService.getBlobDownloadUrl(ev.blobId)
+      if (currentIssueIdRef.current !== targetIssueId) {
+        return
+      }
+      if (result?.url) {
+        const a = document.createElement('a')
+        a.href = result.url
+        a.target = '_blank'
+        a.rel = 'noreferrer noopener'
+        if (ev.name) {
+          a.download = ev.name
+        }
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+      } else {
+        throw new Error('未获取到有效的下载地址')
+      }
+    } catch (err) {
+      if (currentIssueIdRef.current !== targetIssueId) {
+        return
+      }
+      setDownloadError({
+        blobId: ev.blobId,
+        message: err instanceof Error ? err.message : '获取下载链接失败',
+      })
+    } finally {
+      if (currentIssueIdRef.current === targetIssueId) {
+        setDownloadingBlobId(null)
+      }
+    }
+  }
+
   const isBlocked = Boolean(detail?.blocked) || issue?.status === 'BLOCKED'
   const isTerminal = issue?.status === 'DONE' || issue?.status === 'CANCELED'
   const canHumanReview =
@@ -614,6 +783,13 @@ export function IssueDetailModal({
             onClick={() => setActiveTab('runs')}
           >
             执行与审核 ({detail?.runs.length ?? 0})
+          </button>
+          <button
+            type="button"
+            className={`modal-tab-button ${activeTab === 'evidence' ? 'is-active' : ''}`}
+            onClick={() => setActiveTab('evidence')}
+          >
+            已发布证据 ({detail?.evidence?.length ?? 0})
           </button>
         </nav>
 
@@ -1550,6 +1726,230 @@ export function IssueDetailModal({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {detail && activeTab === 'evidence' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                }}
+              >
+                <div>
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: '0.875rem' }}>
+                    已发布证据 (Published Evidence)
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg-muted)' }}>
+                    由 Issue 自主持有的已发布产物与人工证明材料；仅在点击时换取下载原件地址。
+                  </p>
+                </div>
+                <div>
+                  <input
+                    type="file"
+                    ref={evidenceFileInputRef}
+                    style={{ display: 'none' }}
+                    onChange={handleEvidenceUpload}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={isUploadingEvidence || isLoading}
+                    onClick={() => evidenceFileInputRef.current?.click()}
+                    style={{ fontSize: '0.8125rem', padding: '6px 12px' }}
+                  >
+                    <Upload size={14} aria-hidden="true" style={{ marginRight: '6px' }} />
+                    {isUploadingEvidence ? '正在上传证据...' : '上传证据'}
+                  </button>
+                </div>
+              </div>
+
+              {evidenceActionError && (
+                <div
+                  className="form-error-banner"
+                  role="alert"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertTriangle size={14} aria-hidden="true" />
+                    <span>{evidenceActionError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => setEvidenceActionError(null)}
+                    aria-label="关闭上传错误提示"
+                    style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                  >
+                    关闭
+                  </button>
+                </div>
+              )}
+
+              {isUploadingEvidence && (
+                <div
+                  style={{
+                    padding: '12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+                    fontSize: '0.8125rem',
+                    color: 'var(--fg-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <RefreshCw size={14} className="spin" aria-hidden="true" />
+                  <span>正在上传并发布证据材料，请稍候...</span>
+                </div>
+              )}
+
+              {(() => {
+                const scopedEvidence = (detail.evidence ?? []).filter((e) => e.issueId === issueId)
+                if (scopedEvidence.length === 0) {
+                  return (
+                    <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: '16px 0' }}>
+                      暂无已发布证据。执行者完成交付或人工上传后，将在此公开展示。
+                    </p>
+                  )
+                }
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {scopedEvidence.map((ev) => {
+                      const isDownloading = downloadingBlobId === ev.blobId
+                      const currentError = downloadError?.blobId === ev.blobId ? downloadError.message : null
+                      const displayName = ev.name || ev.uri
+                      const originLabel =
+                        ev.origin === 'HUMAN'
+                          ? '人工上传'
+                          : ev.origin === 'EXECUTOR'
+                            ? '执行者交付'
+                            : ev.origin
+
+                      return (
+                        <div
+                          key={`${ev.issueId}-${ev.blobId}`}
+                          className="evidence-card"
+                          data-blob-id={ev.blobId}
+                          data-origin={ev.origin}
+                          style={{
+                            background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '12px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '8px',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                              <span
+                                className={`badge ${ev.origin === 'HUMAN' ? 'badge-waiting' : 'badge-run'}`}
+                                style={{ fontSize: '0.7rem', flexShrink: 0 }}
+                              >
+                                {originLabel}
+                              </span>
+                              <strong
+                                style={{
+                                  fontSize: '0.875rem',
+                                  color: 'var(--fg)',
+                                  wordBreak: 'break-all',
+                                }}
+                                title={displayName}
+                              >
+                                {displayName}
+                              </strong>
+                            </div>
+                            <button
+                              type="button"
+                              className="quick-action-btn"
+                              disabled={isDownloading}
+                              onClick={() => handleDownloadEvidence(ev)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+                              aria-label={`下载 ${displayName}`}
+                            >
+                              <Download size={13} aria-hidden="true" />
+                              <span>{isDownloading ? '获取链接中...' : '下载原件'}</span>
+                            </button>
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '12px',
+                              flexWrap: 'wrap',
+                              fontSize: '0.75rem',
+                              color: 'var(--fg-muted)',
+                            }}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <span>URI:</span>
+                              <code
+                                style={{
+                                  fontFamily: 'var(--mono)',
+                                  fontSize: '0.75rem',
+                                  color: 'var(--fg-dim)',
+                                  background: 'rgba(0, 0, 0, 0.2)',
+                                  padding: '1px 5px',
+                                  borderRadius: '3px',
+                                }}
+                              >
+                                {ev.uri}
+                              </code>
+                            </span>
+                            {ev.runId && <span>关联 Run: #{ev.runId.slice(0, 8)}</span>}
+                            <span>发布于: {ev.publishedAt}</span>
+                          </div>
+
+                          {currentError && (
+                            <div
+                              className="form-error-banner"
+                              role="alert"
+                              style={{
+                                marginTop: '4px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <AlertTriangle size={13} aria-hidden="true" />
+                                <span>{currentError}</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="ghost-btn"
+                                onClick={() => setDownloadError(null)}
+                                aria-label="关闭下载错误提示"
+                                style={{ padding: '1px 6px', fontSize: '0.75rem' }}
+                              >
+                                关闭
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
             </div>
           )}
         </div>

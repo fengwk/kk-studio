@@ -7,6 +7,8 @@ import type {
   IssueDTO,
   IssueDependencyDTO,
   IssueDetailDTO,
+  IssueEvidenceDTO,
+  IssueEvidenceOrigin,
   IssueRunDTO,
   IssueRunOutcome,
   IssueRunRole,
@@ -44,6 +46,7 @@ const ISSUE_ACTIVITY_ACTOR_TYPES: readonly IssueActivityActorType[] = [
   'AGENT',
   'SYSTEM',
 ]
+const ISSUE_EVIDENCE_ORIGINS: readonly IssueEvidenceOrigin[] = ['EXECUTOR', 'HUMAN']
 const ISSUE_RUN_ROLES: readonly IssueRunRole[] = ['EXECUTOR', 'REVIEWER']
 const ISSUE_RUN_STATUSES: readonly IssueRunStatus[] = [
   'RUNNING',
@@ -115,6 +118,24 @@ function requireNullableUuid(value: unknown, path: string): string | null {
     throw invalidPayload(`${path} must not be undefined`)
   }
   if (value === null) {
+    return null
+  }
+  return requireUuid(value, path)
+}
+
+function optionalNullableString(value: unknown, path: string): string | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+  if (typeof value !== 'string') {
+    throw invalidPayload(`${path} must be a string or null`)
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function optionalNullableUuid(value: unknown, path: string): string | null {
+  if (value === undefined || value === null) {
     return null
   }
   return requireUuid(value, path)
@@ -286,6 +307,26 @@ export function decodeIssueActivityList(
   return requireArray(raw, path, decodeIssueActivity)
 }
 
+export function decodeIssueEvidence(raw: unknown, path = 'evidence'): IssueEvidenceDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    issueId: requireUuid(obj.issueId, `${path}.issueId`),
+    blobId: requireString(obj.blobId, `${path}.blobId`),
+    uri: requireString(obj.uri, `${path}.uri`),
+    origin: requireEnumValue(obj.origin, `${path}.origin`, ISSUE_EVIDENCE_ORIGINS),
+    name: optionalNullableString(obj.name, `${path}.name`),
+    runId: optionalNullableUuid(obj.runId, `${path}.runId`),
+    publishedAt: requireString(obj.publishedAt, `${path}.publishedAt`),
+  }
+}
+
+export function decodeIssueEvidenceList(
+  raw: unknown,
+  path = 'evidence',
+): IssueEvidenceDTO[] {
+  return requireArray(raw, path, decodeIssueEvidence)
+}
+
 export function decodeIssueRunSummary(raw: unknown, path = 'runSummary'): IssueRunSummaryDTO {
   const obj = requireRecord(raw, path)
   return {
@@ -383,6 +424,7 @@ export function decodeIssueDetail(raw: unknown, path = 'issueDetail'): IssueDeta
     dependencies: decodeIssueDependencyList(obj.dependencies, `${path}.dependencies`),
     sessions: requireArray(obj.sessions ?? [], `${path}.sessions`, decodeIssueAgentSession),
     activities: requireArray(obj.activities ?? [], `${path}.activities`, decodeIssueActivity),
+    evidence: requireArray(obj.evidence ?? [], `${path}.evidence`, decodeIssueEvidence),
     nextActivityCursor: requireNullableString(
       obj.nextActivityCursor,
       `${path}.nextActivityCursor`,

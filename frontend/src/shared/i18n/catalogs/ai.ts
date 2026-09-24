@@ -1081,6 +1081,14 @@ export const aiCatalog = {
     'en-US': 'Remove attachment {{name}}',
     'zh-CN': '移除附件 {{name}}',
   },
+  'ai.runtime.composer.imageTier': {
+    'en-US': 'Image resolution for {{name}}',
+    'zh-CN': '{{name}} 图片清晰度',
+  },
+  'ai.runtime.composer.tierOriginal': {
+    'en-US': 'Original',
+    'zh-CN': '原图',
+  },
   'ai.runtime.composer.fileTooLarge': {
     'en-US': '{{name}} exceeds the {{limit}} upload limit',
     'zh-CN': '{{name}} 超过 {{limit}} 上传限制',

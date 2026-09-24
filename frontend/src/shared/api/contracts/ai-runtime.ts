@@ -168,15 +168,18 @@ export interface HarnessThreadCommandDTO {
  * 任何文本 shorthand。持久 Entry/投影仍可包含 CUSTOM_MESSAGE，但它不是创建命令。
  * idempotencyKey 是稳定的幂等键。
  */
+/** 图片输入档位；Wire 与 durable 均采用 720P / 1080P / ORIGINAL。 */
+export type ImageInputTier = '720P' | '1080P' | 'ORIGINAL'
+
 export type HarnessUserMessageContentDTO =
   | { type: 'TEXT'; text: string }
   /**
    * 共享存储 READY 上传的引用。uploadId 是完成后的持久句柄；后端在入队事务内
    * 将其原子物化为 durable RESOURCE。
    */
-  | { type: 'ATTACHMENT'; uploadId: string }
+  | { type: 'ATTACHMENT'; uploadId: string; imageTier?: ImageInputTier }
   /** 当前 Session 已拥有的 durable blob ref；用于 Stop 后 Resource pill 重提。 */
-  | { type: 'RESOURCE'; blobId: string; name: string; preview?: string | null }
+  | { type: 'RESOURCE'; blobId: string; name: string; preview?: string | null; imageTier?: ImageInputTier }
 
 type HarnessUserMessageCommandDTO = {
   type: 'USER_MESSAGE'

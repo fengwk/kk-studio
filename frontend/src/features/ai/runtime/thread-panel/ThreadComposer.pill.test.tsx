@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import {
   createAttachmentPart,
+  partsToMessageContents,
   type ComposerPart,
   type HashFile,
   type StorageService,
@@ -822,5 +823,87 @@ describe('ThreadComposer attachment pills', () => {
     // 恢复的是本地 id 草稿（不是服务端句柄）。
     expect(partsSnapshot()[1]?.uploadId).toBe(localUploadId)
     expect(document.querySelector('.composer-pill')?.getAttribute('data-upload-id')).toBe(localUploadId)
+  })
+
+  it('manages imageTier selection (default 720P, options 1080P/ORIGINAL) and submits it in payload/draft', async () => {
+    // 测试意图：验证图片附件默认赋予 720P 档位，用户可修改为 1080P 或 ORIGINAL，修改后同步 DOM pill 与 parts，
+    // 提交时 payload 与 localDraft 均保留该档位，且非图片媒体不暴露档位选择并在内容载荷中省略 imageTier。
+    const user = userEvent.setup()
+    const { service } = fakeStorage()
+    let submittedPayload: ComposerPart[] = []
+    let submittedDraft: ComposerPart[] = []
+
+    function Controlled() {
+      const [parts, setParts] = useState<ComposerPart[]>([])
+      return (
+        <div>
+          <ThreadComposer
+            parts={parts}
+            pending={false}
+            disabled={false}
+            onPartsChange={setParts}
+            onSubmit={(payload, localDraft) => {
+              submittedPayload = payload
+              submittedDraft = localDraft
+            }}
+            onCommand={vi.fn()}
+            storageService={service}
+            hashFile={hashFile}
+          />
+          <pre data-testid="parts">{JSON.stringify(parts)}</pre>
+        </div>
+      )
+    }
+
+    render(<Controlled />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await typeInEditor(editor, 'check images')
+    await pasteFiles(editor, fileOf('shot.png', 'image/png'), fileOf('doc.pdf', 'application/pdf'))
+    await waitForIdleUploads()
+
+    const selectElements = screen.getAllByRole('combobox')
+    // 只有图片有档位选择下拉框（doc.pdf 没有）
+    expect(selectElements).toHaveLength(1)
+    const tierSelect = selectElements[0] as HTMLSelectElement
+    expect(tierSelect.value).toBe('720P')
+
+    // 默认 pill 与 parts 均为 720P
+    const imgPill = document.querySelector('.composer-pill[data-filename="shot.png"]')
+    expect(imgPill?.getAttribute('data-image-tier')).toBe('720P')
+
+    // 用户切换档位至 1080P
+    await user.selectOptions(tierSelect, '1080P')
+    expect(tierSelect.value).toBe('1080P')
+    expect(imgPill?.getAttribute('data-image-tier')).toBe('1080P')
+
+    // 提交消息（聚焦 editor 并按回车）
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    expect(submittedPayload).toHaveLength(3) // text + 2 attachments
+    expect(submittedPayload[1]).toMatchObject({
+      type: 'attachment',
+      filename: 'shot.png',
+      imageTier: '1080P',
+    })
+    expect(submittedDraft[1]).toMatchObject({
+      type: 'attachment',
+      filename: 'shot.png',
+      imageTier: '1080P',
+    })
+
+    // 非图片附件 doc.pdf 不携带 imageTier
+    expect(submittedPayload[2]).toMatchObject({
+      type: 'attachment',
+      filename: 'doc.pdf',
+    })
+    expect((submittedPayload[2] as { imageTier?: unknown }).imageTier).toBeUndefined()
+    expect((submittedDraft[2] as { imageTier?: unknown }).imageTier).toBeUndefined()
+
+    // 验证序列化为 wire contents
+    const contents = partsToMessageContents(submittedPayload)
+    expect(contents).toEqual([
+      { type: 'TEXT', text: 'check images' },
+      { type: 'ATTACHMENT', uploadId: expect.any(String), imageTier: '1080P' },
+      { type: 'ATTACHMENT', uploadId: expect.any(String) },
+    ])
   })
 })

@@ -44,6 +44,7 @@ export function storeComposerDraft(
             blobId: part.blobId,
             name: part.name,
             ...(part.preview !== undefined ? { preview: part.preview } : {}),
+            ...(part.imageTier ? { imageTier: part.imageTier } : {}),
           }
         }),
       }),
@@ -131,16 +132,20 @@ function parseStoredDraft(raw: string): ComposerPart[] {
     }
     if (part.type === 'resource') {
       if (
-        !hasOnlyKeys(part, ['type', 'blobId', 'name', 'preview'])
+        !hasOnlyKeys(part, ['type', 'blobId', 'name', 'preview', 'imageTier'])
         || typeof part.blobId !== 'string'
         || !part.blobId.trim()
         || typeof part.name !== 'string'
         || !part.name.trim()
         || (part.preview !== undefined && typeof part.preview !== 'string')
+        || (part.imageTier !== undefined
+          && part.imageTier !== '720P'
+          && part.imageTier !== '1080P'
+          && part.imageTier !== 'ORIGINAL')
       ) {
         throw new Error('invalid resource draft part')
       }
-      return createResourcePart(part.blobId, part.name, part.preview)
+      return createResourcePart(part.blobId, part.name, part.preview, part.imageTier)
     }
     throw new Error('unknown composer draft part')
   })

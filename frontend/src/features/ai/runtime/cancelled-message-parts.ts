@@ -61,12 +61,17 @@ function contentToParts(content: unknown): ComposerPart[] {
     && typeof content.name === 'string'
     && content.name.trim()
     && (content.preview == null || typeof content.preview === 'string')
+    && (content.imageTier == null
+      || content.imageTier === '720P'
+      || content.imageTier === '1080P'
+      || content.imageTier === 'ORIGINAL')
   ) {
     return [
       createResourcePart(
         content.blobId,
         content.name,
         typeof content.preview === 'string' ? content.preview : undefined,
+        typeof content.imageTier === 'string' ? content.imageTier : undefined,
       ),
     ]
   }

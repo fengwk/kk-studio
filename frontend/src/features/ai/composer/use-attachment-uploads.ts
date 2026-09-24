@@ -4,6 +4,7 @@ import {
   createPartId,
   removePartsByUpload,
   type ComposerPart,
+  type ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
 import type { StorageMediaKind } from '@/shared/api/contracts/storage'
@@ -32,6 +33,8 @@ export interface AttachmentUpload {
   previewUrl: string | null
   /** 提交后等待发送结果期间隐藏（发送失败恢复时重新挂载）。 */
   detached: boolean
+  /** 图片输入档位（仅图片有效；默认 720P，可选 1080P/ORIGINAL；其它媒体为 undefined）。 */
+  imageTier?: ImageInputTier
 }
 
 export interface UploadLimits {
@@ -289,6 +292,8 @@ export function useAttachmentUploads(options?: {
         if (previewUrl) {
           previewUrlsRef.current.set(localId, previewUrl)
         }
+        const isImage = mediaKindOf(file.type) === 'image'
+        const imageTier: ImageInputTier | undefined = isImage ? '720P' : undefined
         const record: AttachmentUpload = {
           localId,
           uploadId: null,
@@ -300,6 +305,7 @@ export function useAttachmentUploads(options?: {
           progress: 0,
           previewUrl,
           detached: false,
+          ...(imageTier ? { imageTier } : {}),
         }
         created.push(record)
         fresh.push(record)
@@ -333,11 +339,20 @@ export function useAttachmentUploads(options?: {
     [updateUploads],
   )
 
+  /** 更新指定条目的图片输入档位。 */
+  const updateImageTier = useCallback(
+    (localId: string, imageTier: ImageInputTier) => {
+      patchUpload(localId, { imageTier })
+    },
+    [patchUpload],
+  )
+
   return {
     uploads,
     addFiles,
     releaseUpload,
     markDetached,
+    updateImageTier,
   }
 }
 
@@ -386,7 +401,7 @@ export function uploadOccurrence(upload: AttachmentUpload, parts: ComposerPart[]
 
 /** 创建引用该上传的 attachment part（上传完成前以 localId 占位）。 */
 export function partForUpload(upload: AttachmentUpload): ComposerPart {
-  return createAttachmentPart(upload.localId, upload.filename)
+  return createAttachmentPart(upload.localId, upload.filename, upload.imageTier)
 }
 
 /** 移除引用指定上传的全部 attachment parts（上传注册表 X）。 */

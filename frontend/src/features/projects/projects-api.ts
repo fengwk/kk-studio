@@ -5,12 +5,14 @@ import {
   decodeIssueActivityList,
   decodeIssueDependency,
   decodeIssueDetail,
+  decodeIssueEvidence,
   decodeProject,
   decodeProjectList,
   decodeProjectSnapshot,
 } from './codecs'
 import type {
   AddIssueDependencyRequest,
+  AddIssueEvidenceRequest,
   AppendIssueActivityRequest,
   ArchiveIssueRequest,
   BlockIssueRequest,
@@ -22,6 +24,7 @@ import type {
   IssueDTO,
   IssueDependencyDTO,
   IssueDetailDTO,
+  IssueEvidenceDTO,
   ProjectArchiveRequest,
   ProjectDTO,
   ProjectSnapshotDTO,
@@ -248,6 +251,17 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
         request,
       )
       return decodeIssue(raw)
+    },
+
+    addIssueEvidence: async (
+      issueId: string,
+      request: AddIssueEvidenceRequest,
+    ): Promise<IssueEvidenceDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/evidence`,
+        request,
+      )
+      return decodeIssueEvidence(raw)
     },
   }
 }
