@@ -284,6 +284,29 @@ class IssueReconcilerTest {
   }
 
   @Test
+  void reconcilePropagatesYoloAlignmentFailureForRetry() {
+    // 测试意图：对齐失败必须显式抛出并让整个 reconcile 回滚重试，绝不静默吞掉后继续按旧策略推进。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    fixture.project().setYoloEnabled(true);
+    ThreadSnapshot snapshot = mockThreadSnapshot(false);
+    Inspection inspection =
+        new Inspection(InspectionStatus.QUIESCENT, mockAgentSession(fixture), snapshot);
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun())).thenReturn(inspection);
+    UUID threadId = snapshot.thread().id();
+    long threadVersion = snapshot.thread().version();
+    doThrow(new IllegalStateException(IssueHarnessController.YOLO_ALIGNMENT_FAILED))
+        .when(harnessController)
+        .alignThreadYolo(threadId, threadVersion, true);
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> reconciler.reconcile(fixture.claim()));
+
+    assertEquals(IssueHarnessController.YOLO_ALIGNMENT_FAILED, failure.getMessage());
+    verify(harnessController, never()).deliverActivity(any(), any(), any(), any(), any());
+    verify(harnessController, never()).sendSystemContinuation(any(), any(), any(), any());
+  }
+
+  @Test
   void reconcileActiveExecutorSubmitsOnQualifiedTurn() {
     // 测试意图：验证在静止且无待投递 activity 时，合规的 final turn 会触发 completeExecutorRun。
     Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);

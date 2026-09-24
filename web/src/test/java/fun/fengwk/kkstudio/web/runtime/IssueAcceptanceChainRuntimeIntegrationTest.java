@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.reset;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,9 +26,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
@@ -130,6 +137,9 @@ class IssueAcceptanceChainRuntimeIntegrationTest {
   @Autowired private IssueRunService issueRunService;
   @Autowired private ScriptedModelGateway scriptedModelGateway;
   @Autowired private JdbcTemplate jdbc;
+
+  /** 真实 HarnessRuntime 的 Mockito spy：仅用于确定性注入 YOLO CAS 冲突（对齐失败路径），其余调用全部透传到真实运行时。 */
+  @MockitoSpyBean private HarnessRuntime harnessRuntime;
 
   @BeforeEach
   void resetScriptedModel() {
@@ -344,6 +354,171 @@ class IssueAcceptanceChainRuntimeIntegrationTest {
     assertEquals(1, sessionThreadCount(executorSession.getSessionId()));
     assertEquals(4, runCount(issue.getId(), IssueRunRole.EXECUTOR));
     assertEquals(0, runCount(issue.getId(), IssueRunRole.REVIEWER));
+  }
+
+  /**
+   * 复用工作 Branch 的 YOLO 双向对齐：Project 关闭/打开 YOLO 后，下一次 Run 必须在投递输入前把既有 Branch 对齐到新策略。
+   *
+   * <p>断言的是 durable 事实：Thread 的 {@code yolo_enabled} 跟随 Project 设置变化，且始终只有一条归属与一条工作 Branch；
+   * 顺序（先对齐再投递）由 {@code IssueHarnessControllerTest} 的 InOrder 断言精确覆盖。阈值取 3，避免两轮打回提前阻塞。
+   */
+  @Test
+  void reusedBranchAlignsProjectYoloBothWaysBetweenRuns() {
+    String executorAgent = createAgent();
+    Project project = projectService.createProject("YOLO reuse chain", "复用 Branch 的策略对齐", false, 3);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(),
+            "YOLO reuse chain",
+            "Deliver the change; the project policy changes between runs.",
+            executorAgent,
+            null,
+            IssueStatus.TODO);
+
+    // 阶段 1：新建 Branch 按 Project 设置初始化（Project YOLO=false）。
+    awaitIssueStatus(issue.getId(), IssueStatus.IN_REVIEW, "first submission");
+    IssueAgentSession executorSession = requireAgentSession(issue.getId(), executorAgent);
+    assertEquals(
+        false,
+        threadYolo(executorSession.getThreadId()),
+        "new branch must start from the project policy");
+
+    // 阶段 2：false -> true：无活动 Run 时改 Project，下一次复用 Branch 的 Run 前必须已对齐。
+    flipProjectYolo(project.getId(), true);
+    issueRunService.reviewByHuman(
+        issue.getId(), ReviewDecision.REQUEST_CHANGES, "Rejected once", "yolo-decision-1");
+    awaitExecutorSubmissions(issue.getId(), 2);
+    assertReusedExecutorBranch(issue.getId(), executorAgent, executorSession, 2);
+    assertEquals(
+        true,
+        threadYolo(executorSession.getThreadId()),
+        "reused branch must be aligned before the next run");
+
+    // 阶段 3：true -> false：策略反向变化同样在下一 Run 前生效。
+    awaitIssueStatus(issue.getId(), IssueStatus.IN_REVIEW, "second submission");
+    flipProjectYolo(project.getId(), false);
+    issueRunService.reviewByHuman(
+        issue.getId(), ReviewDecision.REQUEST_CHANGES, "Rejected twice", "yolo-decision-2");
+    awaitExecutorSubmissions(issue.getId(), 3);
+    assertReusedExecutorBranch(issue.getId(), executorAgent, executorSession, 3);
+    assertEquals(
+        false,
+        threadYolo(executorSession.getThreadId()),
+        "reused branch must follow the project policy again");
+  }
+
+  /**
+   * YOLO 对齐失败的启动语义：既不能投递 Run 输入，也不能留下 Run，只能整体回滚并按可重试失败收敛。
+   *
+   * <p>用真实 Runtime 的 spy 注入确定性 CAS 冲突（真实并发下由 version CAS 冲突触发同一路径），然后观察有界窗口内的 durable 事实：Issue 停在
+   * TODO、没有第二条执行 Run、没有新的模型请求、Branch YOLO 未被写成与 Project 策略不符的值。
+   */
+  @Test
+  void yoloAlignmentFailureRollsBackRunAndDeliversNoInput() {
+    String executorAgent = createAgent();
+    Project project =
+        projectService.createProject(
+            "YOLO rollback chain", "对齐失败必须回滚", true, HUMAN_REJECTION_THRESHOLD);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(),
+            "YOLO rollback chain",
+            "Deliver the change; the alignment must fail.",
+            executorAgent,
+            null,
+            IssueStatus.TODO);
+
+    awaitIssueStatus(issue.getId(), IssueStatus.IN_REVIEW, "first submission");
+    IssueAgentSession executorSession = requireAgentSession(issue.getId(), executorAgent);
+    assertEquals(true, threadYolo(executorSession.getThreadId()));
+
+    // Project 关闭 YOLO（Branch 仍是 true），并让复用路径的版本 CAS 永远冲突。
+    flipProjectYolo(project.getId(), false);
+    doThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.STALE_VERSION, "private-value"))
+        .when(harnessRuntime)
+        .setThreadYolo(any(SetThreadYoloCommand.class));
+    int modelRequestsBefore = scriptedModelGateway.requestCount();
+    issueRunService.reviewByHuman(
+        issue.getId(), ReviewDecision.REQUEST_CHANGES, "Rejected once", "yolo-decision-1");
+    assertEquals(IssueStatus.TODO, issueService.getIssue(issue.getId()).getStatus());
+
+    // 有界窗口：调度会反复重试，但绝不新建 Run、绝不投递输入、绝不留下与策略不符的 YOLO。
+    long runOfRetries = workDueAtMillis(issue.getId());
+    long deadline = System.nanoTime() + QUIET_WINDOW.toNanos();
+    while (System.nanoTime() < deadline) {
+      assertEquals(IssueStatus.TODO, issueService.getIssue(issue.getId()).getStatus());
+      assertNull(
+          issueRunService.getActiveRun(issue.getId()),
+          "failed bootstrap must not own an active run");
+      assertEquals(
+          1,
+          runCount(issue.getId(), IssueRunRole.EXECUTOR),
+          "failed bootstrap must not leave a run");
+      assertEquals(
+          modelRequestsBefore,
+          scriptedModelGateway.requestCount(),
+          "failed alignment must not deliver run input to the branch");
+      assertEquals(true, threadYolo(executorSession.getThreadId()));
+      sleep(POLL_INTERVAL);
+    }
+    assertTrue(
+        workDueAtMillis(issue.getId()) > runOfRetries,
+        "failed reconcile must be rescheduled for retry instead of stalling");
+
+    // 收尾：解除冲突并把 Project 策略恢复成与 Branch 一致，让被回滚的调度正常收敛，不把重试循环留给后续测试。
+    reset(harnessRuntime);
+    flipProjectYolo(project.getId(), true);
+    awaitExecutorSubmissions(issue.getId(), 2);
+    assertReusedExecutorBranch(issue.getId(), executorAgent, executorSession, 2);
+  }
+
+  /** 无活动 Run 时按真实业务 API 修改 Project 的 YOLO，并核对确实生效。 */
+  private void flipProjectYolo(UUID projectId, boolean yoloEnabled) {
+    Project current = projectService.getProject(projectId);
+    Project updated =
+        projectService.updateProject(
+            projectId, current.getVersion(), null, null, yoloEnabled, null);
+    assertEquals(yoloEnabled, updated.isYoloEnabled());
+  }
+
+  /** Branch 的 YOLO 是实际工具授权快照，必须从 durable Thread 行读取而不是从内存状态推断。 */
+  private boolean threadYolo(UUID threadId) {
+    Boolean value =
+        jdbc.queryForObject(
+            "select yolo_enabled from harness_thread where id = ?", Boolean.class, threadId);
+    assertNotNull(value, "thread must exist for threadId=" + threadId);
+    return value;
+  }
+
+  private long workDueAtMillis(UUID issueId) {
+    Long millis =
+        jdbc.queryForObject(
+            "select floor(extract(epoch from due_at) * 1000)::bigint from project_issue_work"
+                + " where issue_id = ?",
+            Long.class,
+            issueId);
+    assertNotNull(millis, "issue work must stay scheduled for retry");
+    return millis;
+  }
+
+  private void awaitExecutorSubmissions(UUID issueId, int expected) {
+    awaitTrue(
+        () -> submittedExecutorRuns(issueId).size() >= expected,
+        CHAIN_TIMEOUT,
+        () -> diagnose("executor submissions >= " + expected, issueId));
+  }
+
+  private void assertReusedExecutorBranch(
+      UUID issueId, String agentName, IssueAgentSession original, int expectedExecutorRuns) {
+    IssueAgentSession current = requireAgentSession(issueId, agentName);
+    assertEquals(original.getSessionId(), current.getSessionId());
+    assertEquals(original.getThreadId(), current.getThreadId());
+    assertEquals(1, agentSessionCount(issueId), "reuse must not create another ownership row");
+    assertEquals(
+        1, sessionThreadCount(original.getSessionId()), "reuse must not create another branch");
+    assertEquals(expectedExecutorRuns, runCount(issueId, IssueRunRole.EXECUTOR));
   }
 
   private void assertExecutorSubmitted(IssueRun run, String expectedSummary) {
