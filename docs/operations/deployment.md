@@ -93,6 +93,27 @@ curl -fsS http://127.0.0.1:8080/actuator/health
   没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与全部
   `KK_STUDIO_STORAGE_S3_*` 同样必须显式提供。
 
+### 已执行旧 V1 的数据库
+
+本次 Project/Issue、Harness Goal 和证据重构直接重写了 Flyway V1；**旧库不能直接运行新镜像**。
+Flyway 校验失败不是可跳过的升级步骤：不得修改 `flyway_schema_history`、使用 `repair` 伪造
+checksum，或直接在有数据的旧库上重放 V1。源码合入 `dev` 也不等于批准生产数据库重建。
+
+上线前由数据所有者批准维护窗口和数据范围，然后按
+[共享数据库重建](development-and-testing.md#共享数据库重建)执行：先停止所有旧 App/Worker 和
+Daemon，等待在途调用收敛；从**与新部署相同的提交**对旧库只读执行 Catalog 导出 `--dry-run`
+和正式导出（仅当三张表列结构仍符合检查器契约时），再对旧库执行 `reset-database.sh --dry-run`。
+确认离线备份的存放位置、恢复权限和数据范围后，才在维护窗口执行 reset：脚本会生成完整备份、
+冻结原库并创建同名空库；由唯一 Flyway owner 在空库执行新 V1，再回灌三张 Catalog 表，重建
+Environment/Daemon 注册，并用新镜像及独立 S3 bucket 验证健康与关键业务操作。旧 Project、
+Issue、Chat、Harness、Blob 引用与历史设置**只保存在冻结快照/完整备份，不导入新库**；
+存储对象本身不由数据库 reset 删除，不得在确认快照保留策略前清理旧 bucket。
+
+如导出预检不接受旧 Catalog 结构、生产依赖保留旧会话历史、备份不可验证或缺少可恢复的停机窗口，
+则**停止部署**，保持旧镜像/旧库运行；不可用不受支持的兼容别名或静默丢弃数据绕过预检。
+回退时停止新 App，使用已验证的冻结快照和旧镜像恢复旧入口；新库中写入的事实不会自动合并回
+旧库。真正执行重建、清理快照或切换生产服务均需另行明确授权。
+
 ## 生产部署与反向代理
 
 Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须在外部入口配置 TLS 和访问控制；
