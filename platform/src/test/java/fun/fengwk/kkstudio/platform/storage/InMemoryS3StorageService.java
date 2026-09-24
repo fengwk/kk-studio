@@ -141,6 +141,12 @@ public class InMemoryS3StorageService implements S3StorageService {
   }
 
   @Override
+  public S3ObjectStream readObject(String key, ReadDeadline deadline) {
+    // 内存实现没有 S3 网络握手，直接复用无截止读取；响应体消费的绝对截止由读取边界看门狗负责。
+    return readObject(key);
+  }
+
+  @Override
   public void deleteObject(String key) {
     record("deleteObject", key);
     RuntimeException failure = deleteFailures.remove(key);

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.storage.service;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
 import java.io.InputStream;
@@ -28,6 +29,13 @@ public interface StorageBlobContentService {
    */
   StorageBlobContent readBlobContent(UUID blobId, long maxSizeBytes);
 
-  /** 在短事务 retain/release 之间提供原始对象流；consumer 在事务外执行，流不能逃逸回调。 */
-  <T> T withBlobStream(UUID blobId, Function<InputStream, T> consumer);
+  /**
+   * 在短事务 retain/release 之间提供原始对象流；consumer 在事务外执行，流不能逃逸回调。
+   *
+   * <p>{@code deadline} 由调用方在读取请求入口冻结，覆盖 S3 握手与响应体消费的总预算；到点或读取线程被中断时中止连接并抛出可区分的失败，不排空剩余响应体。
+   *
+   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException 读取超过截止时间
+   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException 读取被取消
+   */
+  <T> T withBlobStream(UUID blobId, ReadDeadline deadline, Function<InputStream, T> consumer);
 }

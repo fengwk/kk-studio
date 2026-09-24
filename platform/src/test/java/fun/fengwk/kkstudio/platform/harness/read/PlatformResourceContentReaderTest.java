@@ -13,6 +13,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -20,6 +23,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -98,7 +102,7 @@ class PlatformResourceContentReaderTest {
     UUID threadId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     authorize(threadId, UUID.randomUUID(), blobId, true);
-    when(blobs.withBlobStream(eq(blobId), any()))
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new StorageResourceNotFoundException("blob", blobId.toString()));
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
@@ -117,17 +121,17 @@ class PlatformResourceContentReaderTest {
             .getMessage()
             .contains("content is unavailable"));
 
-    when(blobs.withBlobStream(eq(blobId), any()))
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenThrow(new IllegalStateException("storage unavailable"));
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
             .getMessage()
             .contains("failed to read resource"));
 
-    when(blobs.withBlobStream(eq(blobId), any()))
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenAnswer(
             invocation -> {
-              Function<InputStream, String> callback = invocation.getArgument(1);
+              Function<InputStream, String> callback = invocation.getArgument(2);
               return callback.apply(new ByteArrayInputStream(new byte[] {0}));
             });
     assertTrue(
@@ -142,14 +146,62 @@ class PlatformResourceContentReaderTest {
     UUID threadId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     authorize(threadId, UUID.randomUUID(), blobId, true);
-    when(blobs.withBlobStream(eq(blobId), any()))
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
         .thenAnswer(
             invocation -> {
-              Function<InputStream, String> callback = invocation.getArgument(1);
+              Function<InputStream, String> callback = invocation.getArgument(2);
               return callback.apply(
                   new ByteArrayInputStream("blob-content".getBytes(StandardCharsets.UTF_8)));
             });
     assertTrue(read(threadId, blobId).contains("1|blob-content"));
+  }
+
+  /** 测试意图：读取预算在请求入口冻结，后续会话鉴权耗时也占用同一预算（不是拿到流之后才起算）。 */
+  @Test
+  void freezesReadDeadlineAtEntry() {
+    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    authorize(threadId, sessionId, blobId, true);
+    // 会话引用校验耗时也必须计入同一读取预算。
+    when(refs.contains(sessionId, blobId))
+        .thenAnswer(
+            invocation -> {
+              sleepQuietly(300L);
+              return true;
+            });
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              ReadDeadline deadline = invocation.getArgument(1);
+              assertTrue(
+                  deadline.remaining().compareTo(Duration.ofMillis(29_900L)) <= 0,
+                  "截止时间必须在会话查询之前冻结，实际剩余 " + deadline.remaining());
+              return "1|blob-content";
+            });
+
+    assertTrue(read(threadId, blobId).contains("1|blob-content"));
+  }
+
+  /** 测试意图：超时与取消以可区分消息对外表达，不能退化成通用读取失败。 */
+  @Test
+  void mapsTimeoutAndInterruptFailures() {
+    UUID threadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    authorize(threadId, UUID.randomUUID(), blobId, true);
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenThrow(new StorageReadTimeoutException("blob read timed out: " + blobId));
+    assertTrue(
+        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+            .getMessage()
+            .contains("resource read timed out"));
+
+    when(blobs.withBlobStream(eq(blobId), any(), any()))
+        .thenThrow(new StorageReadInterruptedException("blob read interrupted: " + blobId));
+    assertTrue(
+        assertThrows(PlatformReadException.class, () -> read(threadId, blobId))
+            .getMessage()
+            .contains("resource read interrupted"));
   }
 
   private void authorize(UUID threadId, UUID sessionId, UUID blobId, boolean allowed) {
@@ -157,6 +209,15 @@ class PlatformResourceContentReaderTest {
     when(thread.sessionId()).thenReturn(sessionId);
     when(transaction.findThread(threadId)).thenReturn(Optional.of(thread));
     when(refs.contains(sessionId, blobId)).thenReturn(allowed);
+  }
+
+  private static void sleepQuietly(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 
   private String read(UUID threadId, UUID blobId) {

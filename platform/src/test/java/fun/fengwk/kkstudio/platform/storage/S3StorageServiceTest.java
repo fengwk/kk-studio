@@ -4,17 +4,20 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.CopyObjectResponse;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
@@ -23,11 +26,13 @@ import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -338,6 +343,94 @@ public class S3StorageServiceTest {
     return newTestContext(methodName -> null);
   }
 
+  /** 测试意图：带截止的读取把剩余预算写成请求级 apiCallTimeout（同步 getObject 只能约束响应头握手）。 */
+  @Test
+  public void testReadObjectAppliesRemainingBudgetAsApiCallTimeout() throws IOException {
+    AtomicReference<GetObjectRequest> captured = new AtomicReference<>();
+    S3StorageServiceImpl storageService =
+        newObservingStorageService(
+            (proxy, method, args) -> {
+              if (args != null && args.length > 0 && args[0] instanceof GetObjectRequest request) {
+                captured.set(request);
+              }
+            });
+
+    try (S3ObjectStream object =
+        storageService.readObject("dir/demo.txt", ReadDeadline.after(Duration.ofSeconds(30L)))) {
+      assertEquals(3L, object.metadata().contentLength());
+    }
+
+    assertNotNull(captured.get(), "必须发出 getObject 请求");
+    Duration apiCallTimeout =
+        captured.get().overrideConfiguration().orElseThrow().apiCallTimeout().orElseThrow();
+    assertTrue(apiCallTimeout.compareTo(Duration.ofSeconds(30L)) <= 0);
+    assertTrue(apiCallTimeout.compareTo(Duration.ofSeconds(29L)) > 0);
+  }
+
+  /** 测试意图：截止已过时不得发起 getObject，直接以读取超时失败。 */
+  @Test
+  public void testReadObjectRejectsExpiredDeadlineWithoutRequest() {
+    AtomicBoolean getObjectCalled = new AtomicBoolean();
+    S3StorageServiceImpl storageService =
+        newObservingStorageService(
+            (proxy, method, args) -> {
+              if ("getObject".equals(method.getName())) {
+                getObjectCalled.set(true);
+              }
+            });
+    ReadDeadline expiredDeadline = ReadDeadline.after(Duration.ofMillis(1L));
+    sleepQuietly(20L);
+
+    assertThrows(
+        StorageReadTimeoutException.class,
+        () -> storageService.readObject("dir/demo.txt", expiredDeadline));
+    assertFalse(getObjectCalled.get(), "截止已过时不能发起 S3 请求");
+  }
+
+  /** 测试意图：SDK 握手超时按 SDK 异常原样抛出，由读取边界翻译为受管资源读取超时。 */
+  @Test
+  public void testReadObjectPropagatesSdkHandshakeTimeout() {
+    S3StorageServiceImpl storageService =
+        new S3StorageServiceImpl(
+            newS3Properties(),
+            newNoopS3Client(
+                methodName -> {
+                  if ("getObject".equals(methodName)) {
+                    throw ApiCallTimeoutException.create(10L);
+                  }
+                  return null;
+                }));
+
+    assertThrows(
+        ApiCallTimeoutException.class,
+        () ->
+            storageService.readObject("dir/demo.txt", ReadDeadline.after(Duration.ofSeconds(1L))));
+  }
+
+  /** 测试意图：GET 响应缺少非负 contentLength 时必须中止响应流并以非法响应失败，而不是返回未知长度的对象。 */
+  @Test
+  public void testReadObjectRejectsMissingContentLength() {
+    S3StorageServiceImpl storageService =
+        new S3StorageServiceImpl(
+            newS3Properties(),
+            newNoopS3Client(
+                methodName -> {
+                  if ("getObject".equals(methodName)) {
+                    return new ResponseInputStream<>(
+                        GetObjectResponse.builder().build(),
+                        AbortableInputStream.create(new ByteArrayInputStream(new byte[0])));
+                  }
+                  return null;
+                }));
+
+    assertThrows(IllegalArgumentException.class, () -> storageService.readObject("dir/demo.txt"));
+  }
+
+  private S3StorageServiceImpl newObservingStorageService(RequestObserver observer) {
+    return new S3StorageServiceImpl(
+        newS3Properties(), newNoopS3Client(methodName -> null, observer));
+  }
+
   private TestContext newTestContext(Function<String, Object> override) {
     return new TestContext(new S3StorageServiceImpl(newS3Properties(), newNoopS3Client(override)));
   }
@@ -372,6 +465,15 @@ public class S3StorageServiceTest {
                 default -> throw new UnsupportedOperationException(method.getName());
               };
             });
+  }
+
+  private static void sleepQuietly(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 
   @FunctionalInterface

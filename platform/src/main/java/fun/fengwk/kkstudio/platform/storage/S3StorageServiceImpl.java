@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.storage;
 
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -18,11 +19,13 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.Objects;
 
 /**
@@ -118,16 +121,37 @@ public class S3StorageServiceImpl implements S3StorageService {
   @Override
   public S3ObjectStream readObject(String key) {
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
-    ResponseInputStream<GetObjectResponse> response =
-        s3Client.getObject(
-            GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+    return readObject(
+        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build(),
+        normalizedKey);
+  }
+
+  @Override
+  public S3ObjectStream readObject(String key, ReadDeadline deadline) {
+    Objects.requireNonNull(deadline, "deadline must not be null");
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    Duration remaining = deadline.remaining();
+    if (remaining.isZero()) {
+      throw new StorageReadTimeoutException(
+          "S3 GET deadline exceeded before request for key: " + normalizedKey);
+    }
+    // 同步 getObject 的 apiCallTimeout 只覆盖到响应头返回，因此这里只用于约束握手；
+    // 响应体的绝对截止由读取边界的看门狗在到点时 abort 响应流。
+    GetObjectRequest request =
+        GetObjectRequest.builder()
+            .bucket(properties.getBucket())
+            .key(normalizedKey)
+            .overrideConfiguration(
+                AwsRequestOverrideConfiguration.builder().apiCallTimeout(remaining).build())
+            .build();
+    return readObject(request, normalizedKey);
+  }
+
+  private S3ObjectStream readObject(GetObjectRequest request, String normalizedKey) {
+    ResponseInputStream<GetObjectResponse> response = s3Client.getObject(request);
     Long contentLength = response.response().contentLength();
     if (contentLength == null || contentLength < 0L) {
-      try {
-        response.close();
-      } catch (IOException closeError) {
-        throw new UncheckedIOException(closeError);
-      }
+      response.abort();
       throw new IllegalArgumentException(
           "S3 GET response must report a non-negative content length for key: " + normalizedKey);
     }

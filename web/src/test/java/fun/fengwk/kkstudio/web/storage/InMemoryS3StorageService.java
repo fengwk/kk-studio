@@ -6,6 +6,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
@@ -107,6 +108,12 @@ public class InMemoryS3StorageService implements S3StorageService {
         new ResponseInputStream<>(
             response, AbortableInputStream.create(new ByteArrayInputStream(bytes.clone()))),
         metadata(key, false));
+  }
+
+  @Override
+  public S3ObjectStream readObject(String key, ReadDeadline deadline) {
+    // 内存实现没有 S3 网络握手，直接复用无截止读取；响应体消费的绝对截止由读取边界看门狗负责。
+    return readObject(key);
   }
 
   @Override
