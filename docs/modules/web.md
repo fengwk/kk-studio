@@ -120,7 +120,7 @@ result status 对齐。
 | Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
 | Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、YOLO 启动策略与打回阈值配置、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
-| Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities|status|block|recover|dependencies|evidence|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、七态迁移（含人工阻塞与恢复）、Activity 事实流与分页、依赖、人工上传转为公开证据、Run 人工动作与归档 |
+| Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities|status|block|recover|dependencies|evidence|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、七态迁移（含人工阻塞与恢复）、Activity 事实流与分页、依赖、人工上传转为公开证据、Run 人工动作与归档；`retry` 对 `UNKNOWN` 的最新 Run 要求 `verification` 人工核对说明 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
 | Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |

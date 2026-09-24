@@ -166,6 +166,10 @@ export function IssueDetailModal({
 
   // Retry state
   const [isRetrying, setIsRetrying] = useState(false)
+  const [retryVerification, setRetryVerification] = useState('')
+  // UNKNOWN 的最新 Run 无法判定外部副作用是否已发生，后端要求人工核对说明；前端按同一判定启用输入。
+  const retryNeedsVerification =
+    detail?.latestRun?.status === 'UNKNOWN' || detail?.currentRun?.status === 'UNKNOWN'
 
   // Evidence state
   const currentIssueIdRef = useRef(issueId)
@@ -202,6 +206,7 @@ export function IssueDetailModal({
       setRecoverComment('')
       setActivityBody('')
       setActivityTargetRole('')
+      setRetryVerification('')
       setActiveTab('spec')
       setActionError(null)
       setIsUploadingEvidence(false)
@@ -558,12 +563,19 @@ export function IssueDetailModal({
     if (!issue) {
       return
     }
+    const verification = retryVerification.trim()
+    if (retryNeedsVerification && !verification) {
+      setActionError('重试 UNKNOWN Run 前必须填写人工核对说明')
+      return
+    }
     setIsRetrying(true)
     setActionError(null)
     try {
       await api.retryIssue(issue.id, {
         idempotencyKey: createUuid(),
+        verification: verification || null,
       })
+      setRetryVerification('')
       await refetch()
       onUpdated()
     } catch (err) {
@@ -1630,20 +1642,51 @@ export function IssueDetailModal({
                     borderRadius: 'var(--radius-sm)',
                     padding: '12px 14px',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                    flexWrap: 'wrap',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    gap: '10px',
                   }}
                 >
                   <div style={{ color: '#f87171', fontSize: '0.875rem' }}>
-                    Run 执行失败或处于未知状态，可执行显式重试。
+                    {retryNeedsVerification
+                      ? 'Run 处于 UNKNOWN 状态：外部副作用是否已发生不可判定。请先核对残留的模型/工具调用，填写核对说明后再重试。'
+                      : 'Run 执行失败或处于未知状态，可执行显式重试。'}
                   </div>
+                  {retryNeedsVerification && (
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label htmlFor="retry-verification">
+                        人工核对说明 <span style={{ color: 'var(--danger)' }}>*</span>
+                      </label>
+                      <textarea
+                        id="retry-verification"
+                        placeholder="说明已核对的残留模型/工具调用及其结果与外部副作用..."
+                        value={retryVerification}
+                        onChange={(e) => setRetryVerification(e.target.value)}
+                        rows={3}
+                        required
+                      />
+                      {!retryVerification.trim() && (
+                        <div
+                          role="alert"
+                          style={{
+                            color: 'var(--danger)',
+                            fontSize: '0.75rem',
+                            marginTop: '6px',
+                          }}
+                        >
+                          必须填写人工核对说明才能重试 UNKNOWN Run
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button
                     type="button"
                     className="btn-primary"
                     onClick={handleRetryRun}
-                    disabled={isRetrying}
+                    disabled={
+                      isRetrying || (retryNeedsVerification && !retryVerification.trim())
+                    }
+                    style={{ alignSelf: 'flex-start' }}
                   >
                     <RefreshCw size={14} className={isRetrying ? 'animate-spin' : ''} aria-hidden="true" />
                     <span>{isRetrying ? '重试中...' : '重试 Run'}</span>

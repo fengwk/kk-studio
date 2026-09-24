@@ -346,12 +346,14 @@ public class StudioIssueController {
     return Results.ok(mapper.toDto(cancelled));
   }
 
+  /** 重试最新终态 Run；最新 Run 为 UNKNOWN 时请求必须携带人工核对说明 {@code verification}。 */
   @PostMapping("/api/issues/{issueId}/retry")
   public ResponseEntity<Result<IssueActivityDTO>> retry(
       @PathVariable("issueId") String issueIdStr, @RequestBody RetryIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    IssueActivity activity = issueRunService.retryRun(issueId, request.getIdempotencyKey());
+    IssueActivity activity =
+        issueRunService.retryRun(issueId, request.getIdempotencyKey(), request.getVerification());
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(activity)));
   }
 

@@ -330,9 +330,13 @@ describe('projectsApi', () => {
       createdAt: '2026-09-14T00:02:00Z',
     }
     vi.mocked(mockClient.post).mockResolvedValueOnce(retryActivityMock)
-    const res = await api.retryIssue(mockIssue.id, { idempotencyKey: retryActivityMock.idempotencyKey })
+    const res = await api.retryIssue(mockIssue.id, {
+      idempotencyKey: retryActivityMock.idempotencyKey,
+      verification: '已核对残留调用',
+    })
     expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/retry`, {
       idempotencyKey: retryActivityMock.idempotencyKey,
+      verification: '已核对残留调用',
     })
     expect(res.kind).toBe('RETRY')
   })

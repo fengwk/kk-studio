@@ -318,14 +318,75 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
     assertEquals("Budget exhausted", failed.getWaitingReason());
     assertEquals(IssueStatus.IN_PROGRESS, issueService.getIssue(issueId).getStatus());
 
-    // 明确 retry 追加 RETRY Activity，不复活旧 Run
-    IssueActivity retryActivity = issueRunService.retryRun(issueId, "retry-key-1");
+    // 明确 retry 追加 RETRY Activity，不复活旧 Run；FAILED 不需要人工核对说明
+    IssueActivity retryActivity = issueRunService.retryRun(issueId, "retry-key-1", null);
     assertEquals(IssueActivityKind.RETRY, retryActivity.getKind());
     assertEquals("retry-key-1", retryActivity.getIdempotencyKey());
+    assertEquals("Retry requested for run " + runId, retryActivity.getBody());
 
     // 幂等重放返回同一 Activity
-    IssueActivity retryReplay = issueRunService.retryRun(issueId, "retry-key-1");
+    IssueActivity retryReplay = issueRunService.retryRun(issueId, "retry-key-1", null);
     assertEquals(retryActivity.getSequence(), retryReplay.getSequence());
+  }
+
+  @Test
+  void testUnknownRetryRequiresHumanVerificationAndRejectsKeyReuse() {
+    // 测试意图：UNKNOWN 表示外部副作用不可判定，重试必须提交人工核对说明并写入 RETRY 正文；同一
+    // idempotencyKey 只允许重放完全相同的请求，说明被改写后复用该键必须拒绝且不留下新事实。
+    String agent = createTestAgent();
+    Project project = projectService.createProject("Unknown Retry Proj", "Desc", true, 3);
+    Issue issue =
+        issueService.createIssue(
+            project.getId(), "Unknown Task", "Desc", agent, null, IssueStatus.TODO);
+    UUID issueId = issue.getId();
+
+    IssueRun run =
+        issueRunService.startExecutorRun(issueId, agent, Instant.now().plusSeconds(3600), 10);
+    issueRunService.failRun(run.getId(), IssueRunStatus.UNKNOWN, "connection lost");
+
+    // 缺失、空白、超长（码点与 UTF-8 字节双上限）说明都被拒绝，且不追加任何 RETRY 事实
+    assertThrows(
+        AiValidationException.class, () -> issueRunService.retryRun(issueId, "k-missing", null));
+    assertThrows(
+        AiValidationException.class, () -> issueRunService.retryRun(issueId, "k-blank", "   "));
+    assertThrows(
+        AiValidationException.class,
+        () -> issueRunService.retryRun(issueId, "k-too-long", "x".repeat(65537)));
+    assertThrows(
+        AiValidationException.class,
+        () -> issueRunService.retryRun(issueId, "k-too-many-bytes", "核".repeat(30000)));
+    assertEquals(
+        0,
+        issueActivityRepository.listByIssueId(issueId).stream()
+            .filter(activity -> activity.getKind() == IssueActivityKind.RETRY)
+            .count());
+
+    String verification = "已核对残留调用：未观察到外部副作用，可安全重试";
+    IssueActivity first =
+        issueRunService.retryRun(issueId, "k-unknown", "  " + verification + "  ");
+    // 说明按 trim 后的纯文本写入正文，保证相同请求得到确定性正文
+    assertEquals(
+        "Retry requested for run " + run.getId() + "\nHuman verification: " + verification,
+        first.getBody());
+    assertEquals(IssueActivityActorType.HUMAN, first.getActorType());
+
+    // 完全相同请求的重放返回同一条 RETRY 事实
+    IssueActivity replay = issueRunService.retryRun(issueId, "k-unknown", verification);
+    assertEquals(first.getSequence(), replay.getSequence());
+
+    // 同一 key 携带改写后的说明必须整体拒绝，且不覆盖已有事实
+    AiValidationException reused =
+        assertThrows(
+            AiValidationException.class,
+            () -> issueRunService.retryRun(issueId, "k-unknown", verification + "（补充）"));
+    assertEquals(
+        "idempotencyKey was already used for a different retry request", reused.getMessage());
+    List<IssueActivity> activities = issueActivityRepository.listByIssueId(issueId);
+    assertEquals(
+        1, activities.stream().filter(a -> a.getKind() == IssueActivityKind.RETRY).count());
+    assertEquals(
+        first.getSequence(),
+        issueActivityRepository.findByIssueIdAndIdempotencyKey(issueId, "k-unknown").getSequence());
   }
 
   @Test
@@ -429,8 +490,8 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
 
     // retryRun idempotency replay
     issueRunService.failRun(run.getId(), IssueRunStatus.FAILED, "reason");
-    IssueActivity retry1 = issueRunService.retryRun(issueId, "k-replay");
-    IssueActivity retry2 = issueRunService.retryRun(issueId, "k-replay");
+    IssueActivity retry1 = issueRunService.retryRun(issueId, "k-replay", null);
+    IssueActivity retry2 = issueRunService.retryRun(issueId, "k-replay", null);
     assertEquals(retry1.getSequence(), retry2.getSequence());
   }
 
@@ -487,16 +548,18 @@ class IssueRunServiceIntegrationTest extends ProjectTestSupport {
 
     // retryRun not found
     assertThrows(
-        AiResourceNotFoundException.class, () -> issueRunService.retryRun(UUID.randomUUID(), "k"));
+        AiResourceNotFoundException.class,
+        () -> issueRunService.retryRun(UUID.randomUUID(), "k", null));
 
-    // UNKNOWN 运行支持 retryRun
+    // UNKNOWN 运行允许 retryRun，但必须提交人工核对说明
     Issue issue =
         issueService.createIssue(projId, "Unknown Task", "Desc", execAgent, null, IssueStatus.TODO);
     IssueRun execRun =
         issueRunService.startExecutorRun(
             issue.getId(), execAgent, Instant.now().plusSeconds(3600), 10);
     issueRunService.failRun(execRun.getId(), IssueRunStatus.UNKNOWN, "lost connection");
-    IssueActivity unknownRetry = issueRunService.retryRun(issue.getId(), "k-unknown");
+    IssueActivity unknownRetry =
+        issueRunService.retryRun(issue.getId(), "k-unknown", "已核对：残留调用未产生外部副作用");
     assertEquals(IssueActivityKind.RETRY, unknownRetry.getKind());
   }
 

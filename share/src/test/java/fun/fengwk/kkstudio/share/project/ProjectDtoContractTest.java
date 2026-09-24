@@ -186,7 +186,9 @@ class ProjectDtoContractTest {
         getInstanceFieldNames(ReviewIssueRequestDTO.class));
     assertEquals(
         Set.of("expectedVersion", "reason"), getInstanceFieldNames(CancelIssueRequestDTO.class));
-    assertEquals(Set.of("idempotencyKey"), getInstanceFieldNames(RetryIssueRequestDTO.class));
+    assertEquals(
+        Set.of("idempotencyKey", "verification"),
+        getInstanceFieldNames(RetryIssueRequestDTO.class));
     assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ArchiveIssueRequestDTO.class));
     assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(UnarchiveIssueRequestDTO.class));
 

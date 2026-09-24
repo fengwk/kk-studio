@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueHarnessInvocationRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
@@ -41,6 +42,7 @@ class ProjectServiceDefensiveUnitTest {
       IssueDependencyRepository issueDependencyRepository,
       IssueActivityRepository issueActivityRepository,
       IssueRunRepository issueRunRepository,
+      IssueHarnessInvocationRepository issueHarnessInvocationRepository,
       IssueAgentSessionRepository issueAgentSessionRepository,
       IssueWorkRepository issueWorkRepository,
       SessionDeletionOrchestrator sessionDeletionOrchestrator,
@@ -51,6 +53,7 @@ class ProjectServiceDefensiveUnitTest {
         issueDependencyRepository,
         issueActivityRepository,
         issueRunRepository,
+        issueHarnessInvocationRepository,
         issueAgentSessionRepository,
         issueWorkRepository,
         sessionDeletionOrchestrator,
@@ -64,6 +67,7 @@ class ProjectServiceDefensiveUnitTest {
         mock(IssueDependencyRepository.class),
         mock(IssueActivityRepository.class),
         mock(IssueRunRepository.class),
+        mock(IssueHarnessInvocationRepository.class),
         mock(IssueAgentSessionRepository.class),
         mock(IssueWorkRepository.class),
         mock(SessionDeletionOrchestrator.class),
@@ -129,6 +133,8 @@ class ProjectServiceDefensiveUnitTest {
     IssueDependencyRepository issueDependencyRepository = mock(IssueDependencyRepository.class);
     IssueActivityRepository issueActivityRepository = mock(IssueActivityRepository.class);
     IssueRunRepository issueRunRepository = mock(IssueRunRepository.class);
+    IssueHarnessInvocationRepository issueHarnessInvocationRepository =
+        mock(IssueHarnessInvocationRepository.class);
     IssueAgentSessionRepository issueAgentSessionRepository =
         mock(IssueAgentSessionRepository.class);
     IssueWorkRepository issueWorkRepository = mock(IssueWorkRepository.class);
@@ -142,6 +148,7 @@ class ProjectServiceDefensiveUnitTest {
             issueDependencyRepository,
             issueActivityRepository,
             issueRunRepository,
+            issueHarnessInvocationRepository,
             issueAgentSessionRepository,
             issueWorkRepository,
             sessionDeletionOrchestrator,

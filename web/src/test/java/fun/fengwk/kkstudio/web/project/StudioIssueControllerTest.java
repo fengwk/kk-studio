@@ -697,7 +697,7 @@ class StudioIssueControllerTest {
             .body("retry")
             .createdAt(now)
             .build();
-    when(issueRunService.retryRun(eq(issueId), any())).thenReturn(retriedActivity);
+    when(issueRunService.retryRun(eq(issueId), any(), any())).thenReturn(retriedActivity);
 
     // Cancel
     mockMvc
@@ -712,16 +712,20 @@ class StudioIssueControllerTest {
                             .build())))
         .andExpect(status().isOk());
 
-    // Retry
+    // Retry：UNKNOWN 的人工核对说明必须透传到服务层
     mockMvc
         .perform(
             post("/api/issues/" + issueId + "/retry")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     objectMapper.writeValueAsString(
-                        RetryIssueRequestDTO.builder().idempotencyKey("k").build())))
+                        RetryIssueRequestDTO.builder()
+                            .idempotencyKey("k")
+                            .verification("已核对残留调用")
+                            .build())))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.sequence").value("3"));
+    verify(issueRunService).retryRun(issueId, "k", "已核对残留调用");
 
     // Archive
     mockMvc
