@@ -55,6 +55,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -148,6 +149,73 @@ class IssueHarnessControllerTest {
     assertEquals("Harness session bootstrap failed", failure.getMessage());
     assertNull(failure.getCause());
     assertFalse(failure.toString().contains("private-value"));
+  }
+
+  @Test
+  void bootstrapReusesExistingAgentSessionAndDeliversRunInitialMessageOnBoundThread() {
+    // 测试意图：验证 (Issue, Agent) 归属跨 Run 稳定——既有 Agent Session 时不再创建新 Session/Thread，
+    // 而是把本次 Run 的初始消息作为 Run 级幂等命令投递到既有工作 Branch。
+    Project project = project();
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.EXECUTOR);
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(run.getAgentName())
+            .sessionId(sessionId)
+            .threadId(threadId)
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName()))
+        .thenReturn(agentSession);
+    ThreadState thread = thread(sessionId, NOW);
+    ThreadSnapshot snapshot = baseSnapshot(thread);
+    when(harnessRuntime.getThreadSnapshot(threadId)).thenReturn(snapshot);
+
+    controller.bootstrap(project, issue, run);
+
+    verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
+    ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
+    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(acceptanceOrchestrator).accept(ownerCaptor.capture(), commandCaptor.capture());
+    assertEquals(
+        new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, agentSession.getId()), ownerCaptor.getValue());
+    AcceptCommandsCommand batch = commandCaptor.getValue();
+    assertThreadCursor(batch, thread);
+    NewThreadCommand command = batch.commands().getFirst();
+    assertEquals(IssueHarnessController.initialCommandKey(run.getId()), command.idempotencyKey());
+    UserMessageCommandPayload payload = (UserMessageCommandPayload) command.payload();
+    assertEquals(
+        "Execute issue #7: Title",
+        ((TextMessageContent) payload.message().contents().getFirst()).text());
+  }
+
+  @Test
+  void bootstrapSanitizesMissingBoundThreadFailure() {
+    // 测试意图：既有归属但 Harness Thread 缺失时按脱敏失败上报，绝不静默创建第二条归属。
+    Project project = project();
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.REVIEWER);
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(run.getAgentName())
+            .sessionId(UUID.randomUUID())
+            .threadId(UUID.randomUUID())
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName()))
+        .thenReturn(agentSession);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId())).thenReturn(null);
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> controller.bootstrap(project, issue, run));
+    assertEquals("Harness session bootstrap failed", failure.getMessage());
+    assertNull(failure.getCause());
+    verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
   }
 
   @Test

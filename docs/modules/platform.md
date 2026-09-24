@@ -529,7 +529,8 @@ Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。
 统一按 `Project(FOR UPDATE) -> Issue(FOR UPDATE) -> active Run -> work lease` 锁序与 fencing
 每次推进一个有界动作，处理依赖阻塞、Agent executor/reviewer Run、Harness bootstrap/inspection、
 输入 continuation、人工等待、deadline、continuation budget、retry/cancel 与人工阻塞/恢复；复用工作
-Branch 前先把 Harness Thread 的 YOLO 状态对齐到 Project 的 `yoloEnabled`。通知与 poll 都只是唤醒，
+Branch 前先把 Harness Thread 的 YOLO 状态对齐到 Project 的 `yoloEnabled`；`(Issue, Agent)` 归属已
+存在时绝不重建 Session，只把本次 Run 的初始消息作为 Run 级幂等命令投递到既有 Thread。通知与 poll 都只是唤醒，
 数据库 work 行才是可恢复事实；claim/reconcile 由 lease token 与 claimed wake version 双重围栏，
 worker 拒绝、处理失败、节点退出或通知丢失都由归还、延迟重试、lease 过期和 periodic
 poll 收敛。
