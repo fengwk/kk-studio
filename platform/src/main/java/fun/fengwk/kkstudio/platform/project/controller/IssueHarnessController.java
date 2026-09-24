@@ -69,6 +69,15 @@ class IssueHarnessController {
 
   private static final ThreadContextClassifier CONTEXT_CLASSIFIER = new ThreadContextClassifier();
 
+  /** 引导/投递失败对外的稳定脱敏消息：reconcile 会整体回滚并按该失败重试。 */
+  static final String HARNESS_BOOTSTRAP_FAILED = "Harness session bootstrap failed";
+
+  /** Project 策略尚未在 Thread 上生效：不得继续按旧 YOLO 启动 Run。 */
+  static final String YOLO_ALIGNMENT_FAILED = "Harness YOLO alignment failed";
+
+  /** 复用工作 Branch 前仍有未收尾模型/工具调用或未消费命令。 */
+  static final String HARNESS_BRANCH_UNSETTLED = "Harness branch is not quiescent";
+
   private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final ProjectHarnessSessionBootstrapService bootstrapService;
   private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
@@ -93,9 +102,8 @@ class IssueHarnessController {
     IssueAgentSession existing =
         issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName());
     if (existing != null) {
-      // (Issue, Agent) 的归属随 Issue 稳定：后续 Run 复用自己的 Session 与工作 Branch，绝不重建归属，
-      // 只把本次 Run 的初始消息作为 Run 级幂等命令投递到既有 Thread。
-      deliverRunInitialMessage(run, existing, initialMessage);
+      // (Issue, Agent) 的归属随 Issue 稳定：后续 Run 复用自己的 Session 与工作 Branch，绝不重建归属。
+      deliverRunInitialMessage(project, existing, run, initialMessage);
       return;
     }
     UUID sessionId = UUID.randomUUID();
@@ -110,33 +118,76 @@ class IssueHarnessController {
               initialCommandKey(run.getId()),
               initialMessage));
     } catch (RuntimeException e) {
-      throw sanitizedFailure("Harness session bootstrap failed", e);
+      throw sanitizedFailure(HARNESS_BOOTSTRAP_FAILED, e);
     }
   }
 
   /**
-   * 把 Run 的初始消息投递到既有工作 Branch。
+   * 复用工作 Branch 启动新 Run：先确认 Branch 已收尾，再按 Project 策略对齐 Thread YOLO 并确认生效，最后才投递 Run 输入。
    *
-   * <p>命令与 reconcile 处于同一物理事务：Thread 游标由本次 Run 起始时的快照冻结，若期间 Harness 已完成新的 command 推进，接受会以 {@code
+   * <p>该顺序本身是安全属性：Harness Thread 的 {@code yoloEnabled} 是实际工具授权快照，Run 输入一旦入队就可能立刻产生模型与
+   * 工具调用，因此先投递再对齐等于让本次 Run 按旧策略执行。命令与 reconcile 处于同一物理事务：游标由对齐后的快照冻结，若期间 Harness 已推进游标，接受会以 {@code
    * STALE_COMMAND_CURSOR} 失败并让整个 reconcile 回滚重试，绝不写入陈旧游标。
    */
   private void deliverRunInitialMessage(
-      IssueRun run, IssueAgentSession agentSession, String initialMessage) {
-    try {
-      ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(agentSession.getThreadId());
-      if (snapshot == null) {
-        throw new HarnessRuntimeNotFoundException("Thread snapshot is missing");
-      }
-      NewThreadCommand command =
-          new NewThreadCommand(
-              new UserMessageCommandPayload(
-                  new AgentMessage(
-                      AgentMessageRole.USER, List.of(new TextMessageContent(initialMessage)))),
-              initialCommandKey(run.getId()));
-      acceptRunCommand(agentSession.getId(), snapshot, command);
-    } catch (RuntimeException e) {
-      throw sanitizedFailure("Harness session bootstrap failed", e);
+      Project project, IssueAgentSession agentSession, IssueRun run, String initialMessage) {
+    ThreadSnapshot snapshot = alignedQuiescentSnapshot(project, agentSession.getThreadId());
+    NewThreadCommand command =
+        new NewThreadCommand(
+            new UserMessageCommandPayload(
+                new AgentMessage(
+                    AgentMessageRole.USER, List.of(new TextMessageContent(initialMessage)))),
+            initialCommandKey(run.getId()));
+    acceptRunCommand(agentSession.getId(), snapshot, command);
+  }
+
+  /**
+   * 取回可用于启动 Run 的静止快照：Thread 必须已收尾旧模型/工具调用且没有未消费命令；YOLO 与 Project 策略不一致时先以版本 CAS
+   * 对齐，再重新读取快照，用对齐后的游标启动本次 Run。
+   *
+   * <p>任一环不满足都抛脱敏失败让 reconcile 整体回滚重试：绝不把 Run 输入排到未收尾的 Branch 上，也绝不按与项目策略不符的 YOLO 启动 Run。
+   */
+  private ThreadSnapshot alignedQuiescentSnapshot(Project project, UUID threadId) {
+    ThreadSnapshot snapshot = quiescentSnapshot(threadId);
+    if (snapshot.thread().yoloEnabled() == project.isYoloEnabled()) {
+      return snapshot;
     }
+    ThreadState aligned;
+    try {
+      aligned =
+          requireRuntime()
+              .setThreadYolo(
+                  new SetThreadYoloCommand(
+                      threadId, snapshot.thread().version(), project.isYoloEnabled()));
+    } catch (RuntimeException e) {
+      throw sanitizedFailure(YOLO_ALIGNMENT_FAILED, e);
+    }
+    if (aligned == null || aligned.yoloEnabled() != project.isYoloEnabled()) {
+      throw sanitizedFailure(
+          YOLO_ALIGNMENT_FAILED, new IllegalStateException("Thread YOLO did not take effect"));
+    }
+    return quiescentSnapshot(threadId);
+  }
+
+  /** 读取静止快照：Thread 存在、没有未收尾调用且没有未消费命令，否则按脱敏失败上报交由 reconcile 回滚重试。 */
+  private ThreadSnapshot quiescentSnapshot(UUID threadId) {
+    ThreadSnapshot snapshot;
+    try {
+      snapshot = requireRuntime().getThreadSnapshot(threadId);
+    } catch (RuntimeException e) {
+      throw sanitizedFailure(HARNESS_BOOTSTRAP_FAILED, e);
+    }
+    if (snapshot == null) {
+      throw sanitizedFailure(
+          HARNESS_BOOTSTRAP_FAILED,
+          new HarnessRuntimeNotFoundException("Thread snapshot is missing"));
+    }
+    if (isProcessing(snapshot)) {
+      throw sanitizedFailure(
+          HARNESS_BRANCH_UNSETTLED,
+          new IllegalStateException("Thread has unsettled invocations or unconsumed commands"));
+    }
+    return snapshot;
   }
 
   void bootstrapIfAvailable(Project project, Issue issue, IssueRun run) {
@@ -176,17 +227,17 @@ class IssueHarnessController {
     return new Inspection(InspectionStatus.QUIESCENT, relation, snapshot);
   }
 
-  boolean alignThreadYolo(UUID threadId, long expectedVersion, boolean yoloEnabled) {
+  /**
+   * 以版本 CAS 对齐 Thread YOLO；失败抛脱敏失败让调用方整体回滚重试，绝不静默吞掉后继续推进。
+   *
+   * <p>静默吞掉会让 Run 在 Project 策略尚未生效时继续（或让 reconcile 以“已对齐”的假象反复空转），因此对齐失败必须是一个 可重试的明确失败，而不是被忽略的返回值。
+   */
+  void alignThreadYolo(UUID threadId, long expectedVersion, boolean yoloEnabled) {
     try {
       requireRuntime()
           .setThreadYolo(new SetThreadYoloCommand(threadId, expectedVersion, yoloEnabled));
-      return true;
     } catch (RuntimeException e) {
-      log.warn(
-          "Failed to align thread YOLO for threadId={}; failure={}",
-          threadId,
-          e.getClass().getName());
-      return false;
+      throw sanitizedFailure(YOLO_ALIGNMENT_FAILED, e);
     }
   }
 

@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
@@ -20,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -27,6 +28,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -153,30 +155,20 @@ class IssueHarnessControllerTest {
 
   @Test
   void bootstrapReusesExistingAgentSessionAndDeliversRunInitialMessageOnBoundThread() {
-    // 测试意图：验证 (Issue, Agent) 归属跨 Run 稳定——既有 Agent Session 时不再创建新 Session/Thread，
-    // 而是把本次 Run 的初始消息作为 Run 级幂等命令投递到既有工作 Branch。
+    // 测试意图：验证 (Issue, Agent) 归属跨 Run 稳定——既有 Agent Session 且 Thread 已与 Project 策略一致时不再创建新
+    // Session/Thread，直接把本次 Run 的初始消息作为 Run 级幂等命令投递到既有工作 Branch。
     Project project = project();
     Issue issue = issue();
     IssueRun run = run(IssueRunRole.EXECUTOR);
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    IssueAgentSession agentSession =
-        IssueAgentSession.builder()
-            .id(UUID.randomUUID())
-            .issueId(issue.getId())
-            .agentName(run.getAgentName())
-            .sessionId(sessionId)
-            .threadId(threadId)
-            .build();
-    when(issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName()))
-        .thenReturn(agentSession);
-    ThreadState thread = thread(sessionId, NOW);
+    IssueAgentSession agentSession = boundSession(issue, run);
+    ThreadState thread = thread(agentSession.getThreadId(), agentSession.getSessionId(), true, NOW);
     ThreadSnapshot snapshot = baseSnapshot(thread);
-    when(harnessRuntime.getThreadSnapshot(threadId)).thenReturn(snapshot);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId())).thenReturn(snapshot);
 
     controller.bootstrap(project, issue, run);
 
     verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
+    verify(harnessRuntime, never()).setThreadYolo(any());
     ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
@@ -191,6 +183,123 @@ class IssueHarnessControllerTest {
     assertEquals(
         "Execute issue #7: Title",
         ((TextMessageContent) payload.message().contents().getFirst()).text());
+  }
+
+  @Test
+  void bootstrapAlignsThreadYoloBeforeDeliveringRunInitialMessageOnReusedBranch() {
+    // 测试意图：Project 策略与既有 Branch 不一致时，必须先按快照版本 CAS 对齐 Thread YOLO 并确认生效，之后才投递本次 Run
+    // 输入，且投递使用对齐后的最新游标；先投递再对齐会让 Run 按旧策略执行。
+    Project project = project(true);
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.EXECUTOR);
+    IssueAgentSession agentSession = boundSession(issue, run);
+    ThreadState stale =
+        thread(agentSession.getThreadId(), agentSession.getSessionId(), false, 4L, 2L, NOW);
+    ThreadState aligned =
+        thread(
+            agentSession.getThreadId(),
+            agentSession.getSessionId(),
+            true,
+            5L,
+            3L,
+            NOW.plusSeconds(1));
+    ThreadSnapshot staleSnapshot = baseSnapshot(stale);
+    ThreadSnapshot alignedSnapshot = baseSnapshot(aligned);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId()))
+        .thenReturn(staleSnapshot, alignedSnapshot);
+    when(harnessRuntime.setThreadYolo(
+            new SetThreadYoloCommand(agentSession.getThreadId(), 2L, true)))
+        .thenReturn(aligned);
+
+    controller.bootstrap(project, issue, run);
+
+    InOrder order = inOrder(harnessRuntime, acceptanceOrchestrator);
+    order
+        .verify(harnessRuntime)
+        .setThreadYolo(new SetThreadYoloCommand(agentSession.getThreadId(), 2L, true));
+    order.verify(acceptanceOrchestrator).accept(any(), any());
+
+    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(acceptanceOrchestrator).accept(any(), commandCaptor.capture());
+    assertThreadCursor(commandCaptor.getValue(), aligned);
+    assertEquals(
+        IssueHarnessController.initialCommandKey(run.getId()),
+        commandCaptor.getValue().commands().getFirst().idempotencyKey());
+  }
+
+  @Test
+  void bootstrapAlignsThreadYoloBackWhenProjectPolicyTurnsOff() {
+    // 测试意图：策略可双向变化；Project 关闭 YOLO 时复用 Branch 的 Run 也必须在投递前把 Thread 对齐回 false。
+    Project project = project(false);
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.REVIEWER);
+    run.setAgentName("reviewer-agent");
+    IssueAgentSession agentSession = boundSession(issue, run);
+    ThreadState stale = thread(agentSession.getThreadId(), agentSession.getSessionId(), true, NOW);
+    ThreadState aligned =
+        thread(agentSession.getThreadId(), agentSession.getSessionId(), false, NOW.plusSeconds(1));
+    ThreadSnapshot staleSnapshot = baseSnapshot(stale);
+    ThreadSnapshot alignedSnapshot = baseSnapshot(aligned);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId()))
+        .thenReturn(staleSnapshot, alignedSnapshot);
+    when(harnessRuntime.setThreadYolo(
+            new SetThreadYoloCommand(agentSession.getThreadId(), 2L, false)))
+        .thenReturn(aligned);
+
+    controller.bootstrap(project, issue, run);
+
+    InOrder order = inOrder(harnessRuntime, acceptanceOrchestrator);
+    order
+        .verify(harnessRuntime)
+        .setThreadYolo(new SetThreadYoloCommand(agentSession.getThreadId(), 2L, false));
+    order.verify(acceptanceOrchestrator).accept(any(), any());
+    verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
+  }
+
+  @Test
+  void bootstrapRefusesRunDeliveryWhenYoloAlignmentConflicts() {
+    // 测试意图：CAS 冲突时不得投递 Run 输入（调用方整体回滚并重试），只能给出脱敏失败。
+    Project project = project(true);
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.EXECUTOR);
+    IssueAgentSession agentSession = boundSession(issue, run);
+    ThreadState stale = thread(agentSession.getThreadId(), agentSession.getSessionId(), false, NOW);
+    ThreadSnapshot staleSnapshot = baseSnapshot(stale);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId())).thenReturn(staleSnapshot);
+    when(harnessRuntime.setThreadYolo(
+            new SetThreadYoloCommand(agentSession.getThreadId(), 2L, true)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.STALE_VERSION, "private-value"));
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> controller.bootstrap(project, issue, run));
+
+    assertEquals(IssueHarnessController.YOLO_ALIGNMENT_FAILED, failure.getMessage());
+    assertNull(failure.getCause());
+    verify(acceptanceOrchestrator, never()).accept(any(), any());
+    verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
+  }
+
+  @Test
+  void bootstrapRefusesRunDeliveryOnUnsettledBranch() {
+    // 测试意图：复用 Branch 前必须已收尾——存在未消费命令或未收尾模型调用时拒绝启动 Run，绝不把输入排到未收尾的 Branch 上。
+    Project project = project();
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.EXECUTOR);
+    IssueAgentSession agentSession = boundSession(issue, run);
+    ThreadState thread = thread(agentSession.getThreadId(), agentSession.getSessionId(), true, NOW);
+
+    ThreadSnapshot queued = baseSnapshot(thread);
+    when(queued.queuedCommands()).thenReturn(List.of(mock(ThreadCommand.class)));
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId())).thenReturn(queued);
+    assertUnsettledBootstrapRejected(project, issue, run);
+
+    ThreadSnapshot modelRunning = baseSnapshot(thread);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId())).thenReturn(modelRunning);
+    stubLiveModelInvocation(modelRunning, thread);
+    assertUnsettledBootstrapRejected(project, issue, run);
   }
 
   @Test
@@ -213,9 +322,29 @@ class IssueHarnessControllerTest {
 
     IllegalStateException failure =
         assertThrows(IllegalStateException.class, () -> controller.bootstrap(project, issue, run));
-    assertEquals("Harness session bootstrap failed", failure.getMessage());
+    assertEquals(IssueHarnessController.HARNESS_BOOTSTRAP_FAILED, failure.getMessage());
     assertNull(failure.getCause());
     verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
+  }
+
+  @Test
+  void alignThreadYoloThrowsSanitizedFailureForRetry() {
+    // 测试意图：对齐是启动 Run 的前置条件；CAS 失败必须抛可重试的脱敏失败，绝不静默吞掉后继续推进。
+    UUID threadId = UUID.randomUUID();
+    when(harnessRuntime.setThreadYolo(new SetThreadYoloCommand(threadId, 2L, true)))
+        .thenReturn(mock(ThreadState.class));
+    controller.alignThreadYolo(threadId, 2L, true);
+
+    doThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.STALE_VERSION, "private-value"))
+        .when(harnessRuntime)
+        .setThreadYolo(new SetThreadYoloCommand(threadId, 2L, false));
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class, () -> controller.alignThreadYolo(threadId, 2L, false));
+    assertEquals(IssueHarnessController.YOLO_ALIGNMENT_FAILED, failure.getMessage());
+    assertNull(failure.getCause());
   }
 
   @Test
@@ -292,20 +421,6 @@ class IssueHarnessControllerTest {
     Inspection inspection = controller.inspect(issue, run);
     assertEquals(InspectionStatus.QUIESCENT, inspection.status());
     assertEquals(snapshot, inspection.requireQuiescentSnapshot());
-  }
-
-  @Test
-  void alignThreadYoloDelegatesToRuntime() {
-    // 测试意图：验证 YOLO 对齐命令正确传递 threadId、版本号与目标开关。
-    UUID threadId = UUID.randomUUID();
-    when(harnessRuntime.setThreadYolo(new SetThreadYoloCommand(threadId, 2L, true)))
-        .thenReturn(mock(ThreadState.class));
-    assertTrue(controller.alignThreadYolo(threadId, 2L, true));
-
-    doThrow(new IllegalStateException("conflict"))
-        .when(harnessRuntime)
-        .setThreadYolo(new SetThreadYoloCommand(threadId, 2L, false));
-    assertFalse(controller.alignThreadYolo(threadId, 2L, false));
   }
 
   @Test
@@ -502,6 +617,62 @@ class IssueHarnessControllerTest {
     return snapshot;
   }
 
+  /** 既有归属（Issue, Agent）：复用路径要求归属先存在，Repository 才能解析到稳定的 Session 与工作 Branch。 */
+  private IssueAgentSession boundSession(Issue issue, IssueRun run) {
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(run.getAgentName())
+            .sessionId(UUID.randomUUID())
+            .threadId(UUID.randomUUID())
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName()))
+        .thenReturn(agentSession);
+    return agentSession;
+  }
+
+  /** 未收尾模型调用：open Turn 的 Model 仍非 terminal，ThreadRuntimeStatus 因此不是 IDLE。 */
+  private void stubLiveModelInvocation(ThreadSnapshot snapshot, ThreadState thread) {
+    UUID turnStartEntryId = UUID.randomUUID();
+    UUID headEntryId = UUID.randomUUID();
+    Entry turnStartEntry = mock(Entry.class);
+    when(turnStartEntry.id()).thenReturn(turnStartEntryId);
+    when(turnStartEntry.payload())
+        .thenReturn(
+            new TurnStartPayload(
+                TurnStartReason.INPUT,
+                new BranchSettings(
+                    "executor", new ModelSelection("provider", "model", "default"), null),
+                thread.id()));
+    Entry headEntry = mock(Entry.class);
+    when(headEntry.id()).thenReturn(headEntryId);
+    EntryPath path = mock(EntryPath.class);
+    when(path.openTurnStart()).thenReturn(Optional.of(turnStartEntry));
+    when(path.head()).thenReturn(headEntry);
+    when(path.entries()).thenReturn(List.of(turnStartEntry, headEntry));
+    when(snapshot.entryPath()).thenReturn(path);
+
+    ModelInvocation model = mock(ModelInvocation.class);
+    when(model.id()).thenReturn(UUID.randomUUID());
+    when(model.threadId()).thenReturn(thread.id());
+    when(model.turnStartEntryId()).thenReturn(turnStartEntryId);
+    when(model.requestHeadEntryId()).thenReturn(headEntryId);
+    when(model.status()).thenReturn(ModelInvocationStatus.RUNNING);
+    when(model.resultEntryId()).thenReturn(null);
+    when(snapshot.model()).thenReturn(model);
+  }
+
+  private void assertUnsettledBootstrapRejected(Project project, Issue issue, IssueRun run) {
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> controller.bootstrap(project, issue, run));
+    assertEquals(IssueHarnessController.HARNESS_BRANCH_UNSETTLED, failure.getMessage());
+    assertNull(failure.getCause());
+    verify(acceptanceOrchestrator, never()).accept(any(), any());
+    verify(harnessRuntime, never()).setThreadYolo(any());
+    verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
+  }
+
   private void stubSnapshot(ThreadSnapshot snapshot, ThreadState thread) {
     EntryPath path = mock(EntryPath.class);
     Entry head = mock(Entry.class);
@@ -522,10 +693,14 @@ class IssueHarnessControllerTest {
   }
 
   private Project project() {
+    return project(true);
+  }
+
+  private Project project(boolean yoloEnabled) {
     return Project.builder()
         .id(UUID.randomUUID())
         .title("Project")
-        .yoloEnabled(true)
+        .yoloEnabled(yoloEnabled)
         .maxReviewRejections(3)
         .version(0L)
         .build();
@@ -559,15 +734,31 @@ class IssueHarnessControllerTest {
   }
 
   private ThreadState thread(UUID sessionId, Instant createdAt) {
+    return thread(UUID.randomUUID(), sessionId, false, 4L, 2L, createdAt);
+  }
+
+  /** 指定 YOLO 与游标的 Thread：nextCommandSequence 与 version 可独立变化，用于断言投递使用了对齐后的快照。 */
+  private ThreadState thread(
+      UUID threadId, UUID sessionId, boolean yoloEnabled, Instant createdAt) {
+    return thread(threadId, sessionId, yoloEnabled, 4L, 2L, createdAt);
+  }
+
+  private static ThreadState thread(
+      UUID threadId,
+      UUID sessionId,
+      boolean yoloEnabled,
+      long nextCommandSequence,
+      long version,
+      Instant createdAt) {
     return new ThreadState(
-        UUID.randomUUID(),
+        threadId,
         sessionId,
         UUID.randomUUID(),
         "a".repeat(64),
         "main",
-        false,
-        4L,
-        2L,
+        yoloEnabled,
+        nextCommandSequence,
+        version,
         createdAt,
         createdAt);
   }
