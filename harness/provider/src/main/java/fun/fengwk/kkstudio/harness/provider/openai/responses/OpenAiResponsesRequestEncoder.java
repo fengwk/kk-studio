@@ -353,6 +353,13 @@ final class OpenAiResponsesRequestEncoder {
     }
   }
 
+  /**
+   * 工具结果编码：单文本/JSON 保持简洁的 string 形态，含媒体时使用 {@code output} 数组。
+   *
+   * <p>数组元素只允许 {@code input_text}、{@code input_image} 与 {@code input_file}（PDF）：OpenAI Responses 的
+   * {@code function_call_output.output} 明确支持这三种输入项。音频、视频与任何其他块类型都以 {@code INVALID_REQUEST} 明确失败，
+   * 绝不静默丢弃媒体。
+   */
   private static void encodeToolResultContent(
       ProviderToolResultBlock resultBlock, ObjectNode toolOutput) {
     List<ProviderContentBlock> contents = resultBlock.contents();
@@ -370,36 +377,35 @@ final class OpenAiResponsesRequestEncoder {
         toolOutput.put("output", jsonBlock.json());
         return;
       }
-      if (!(single instanceof ProviderImageBlock)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "Unsupported content block type in tool result: " + single.getClass().getSimpleName());
-      }
     }
 
     ArrayNode array = toolOutput.putArray("output");
     for (ProviderContentBlock block : contents) {
-      if (block instanceof ProviderTextBlock textBlock) {
-        ObjectNode item = array.addObject();
-        item.put("type", "input_text");
-        item.put("text", textBlock.text());
-      } else if (block instanceof ProviderJsonBlock jsonBlock) {
-        ObjectNode item = array.addObject();
-        item.put("type", "input_text");
-        item.put("text", jsonBlock.json());
-      } else if (block instanceof ProviderImageBlock imgBlock) {
-        validateImageType(imgBlock.mediaType());
-        validateUri(imgBlock.source());
-        ObjectNode item = array.addObject();
-        item.put("type", "input_image");
-        item.put("image_url", imgBlock.source());
-        item.put("detail", "auto");
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "Unsupported content block type in tool result: " + block.getClass().getSimpleName());
-      }
+      array.add(encodeToolResultItem(block));
     }
+  }
+
+  /** 工具结果的文本与 JSON 统一编码为 {@code input_text}，媒体与用户内容共用同一规则，保证同模态两处 wire 形态一致。 */
+  private static ObjectNode encodeToolResultItem(ProviderContentBlock block) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      ObjectNode item = NODES.objectNode();
+      item.put("type", "input_text");
+      item.put("text", textBlock.text());
+      return item;
+    }
+    if (block instanceof ProviderJsonBlock jsonBlock) {
+      ObjectNode item = NODES.objectNode();
+      item.put("type", "input_text");
+      item.put("text", jsonBlock.json());
+      return item;
+    }
+    if (block instanceof ProviderImageBlock || block instanceof ProviderDocumentBlock) {
+      return encodeUserContentBlock(block);
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST,
+        "OpenAI Responses does not support tool result content block type: "
+            + block.getClass().getSimpleName());
   }
 
   private static boolean canReplay(

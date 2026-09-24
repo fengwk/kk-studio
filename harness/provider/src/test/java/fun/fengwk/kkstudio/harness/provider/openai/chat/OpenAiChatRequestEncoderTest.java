@@ -14,6 +14,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -26,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -54,6 +58,7 @@ import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /** 测试意图：全面验证 OpenAI Chat 请求编码器（Golden 结构、输出预算、推理、Tools、Messages、Replay、媒体、三种缓存模式）。 */
 class OpenAiChatRequestEncoderTest {
@@ -1412,6 +1417,73 @@ class OpenAiChatRequestEncoderTest {
             ProviderException.class,
             () -> encoder.encode(reqBadTool, descriptor, OpenAiChatConfiguration.defaults()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+  }
+
+  /**
+   * 测试意图：Chat Completions 的 tool message 只承载文本/JSON，任何媒体块（图片、PDF、音频、视频）与其他块类型都必须以 INVALID_REQUEST
+   * 明确失败；该参数化用例把每个块类型映射到预期 wire 文本或预期失败，锁定能力声明与实际编码一致。
+   */
+  @ParameterizedTest(name = "chat tool result block: {0}")
+  @MethodSource("toolResultBlockCases")
+  void testToolResultBlockModalityMatrix(
+      String label, ProviderContentBlock block, String expectedContent) throws Exception {
+    ProviderMessage toolMsg =
+        new ProviderMessage(
+            ProviderMessageRole.TOOL,
+            List.of(new ProviderToolResultBlock("call_1", "tool", List.of(block), false, "{}")));
+    ProviderRequest request =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(toolMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    if (expectedContent == null) {
+      ProviderException ex =
+          assertThrows(
+              ProviderException.class,
+              () -> encoder.encode(request, descriptor, OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+      assertNotNull(ex.getMessage());
+      return;
+    }
+
+    JsonNode root =
+        MAPPER.readTree(
+            encoder
+                .encode(request, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    JsonNode wire = root.path("messages").get(1);
+    assertEquals("tool", wire.path("role").asText());
+    assertEquals("call_1", wire.path("tool_call_id").asText());
+    assertEquals(expectedContent, wire.path("content").asText());
+  }
+
+  private static Stream<Arguments> toolResultBlockCases() {
+    return Stream.of(
+        Arguments.of("text", new ProviderTextBlock("Result text"), "Result text"),
+        Arguments.of("json", new ProviderJsonBlock("{\"ans\":1}"), "{\"ans\":1}"),
+        Arguments.of(
+            "image-rejected",
+            new ProviderImageBlock("image/png", "data:image/png;base64,iVBORw0KGgo="),
+            null),
+        Arguments.of(
+            "pdf-rejected",
+            new ProviderDocumentBlock(
+                "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK"),
+            null),
+        Arguments.of(
+            "audio-rejected",
+            new ProviderAudioBlock("audio/wav", "data:audio/wav;base64,UklGRg=="),
+            null),
+        Arguments.of(
+            "video-rejected",
+            new ProviderVideoBlock("video/mp4", "data:video/mp4;base64,AAAAIGZ0eXA="),
+            null),
+        Arguments.of("thinking-rejected", new ProviderThinkingBlock("internal"), null));
   }
 
   @Test

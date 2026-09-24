@@ -12,6 +12,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -50,6 +53,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** Gemini 请求体序列化与请求映射规则测试。 */
 class GeminiRequestEncoderTest {
@@ -1080,66 +1084,179 @@ class GeminiRequestEncoderTest {
     assertEquals(404, innerResult.get("code").asInt());
   }
 
-  /** 验证 Gemini 可原生承载的 image/document 工具结果紧随 functionResponse 在同一 user content 中编码。 */
-  @Test
-  void encodesToolResultBlocks_nativeMediaResults_encodedAsConsecutiveMediaPartsInSameUserContent()
-      throws Exception {
-    ProviderRequest request =
-        new ProviderRequest(
-            model(false),
-            DEFAULT_VARIANT,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(
-                        new ProviderToolCallBlock(new ProviderToolCall("c1", "chart_tool", "{}")))),
-                new ProviderMessage(
-                    ProviderMessageRole.TOOL,
-                    List.of(
-                        new ProviderToolResultBlock(
-                            "c1",
-                            "chart_tool",
-                            List.of(
-                                new ProviderTextBlock("Here is the chart:"),
-                                new ProviderImageBlock(
-                                    "image/png",
-                                    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="),
-                                new ProviderDocumentBlock(
-                                    "application/pdf", "https://example.com/spec.pdf")),
-                            false,
-                            "{}")))),
-            List.of(),
-            ProviderCacheControl.none());
+  /**
+   * 工具结果媒体矩阵用例：Gemini 只把保守白名单（image/jpeg、image/png、image/webp、application/pdf）的 Base64 data URI 内联到
+   * {@code functionResponse.parts[].inlineData}，其余模态与来源形态一律 fail closed。
+   */
+  private record ToolResultMediaCase(
+      String label,
+      ProviderContentBlock block,
+      boolean supported,
+      String expectedMimeType,
+      String expectedBase64) {}
 
-    GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
-    JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    ArrayNode parts = (ArrayNode) json.get("contents").get(2).get("parts");
-
-    assertEquals(3, parts.size());
-    // part 0: functionResponse
-    assertTrue(parts.get(0).has("functionResponse"));
-    assertEquals(
-        "Here is the chart:",
-        parts.get(0).get("functionResponse").get("response").get("result").asText());
-    // part 1: inlineData —— 工具结果的 base64 载荷必须逐字节保留
-    assertTrue(parts.get(1).has("inlineData"));
-    assertEquals("image/png", parts.get(1).get("inlineData").get("mimeType").asText());
-    assertEquals(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-        parts.get(1).get("inlineData").get("data").asText());
-    // part 2: fileData
-    assertTrue(parts.get(2).has("fileData"));
-    assertEquals(
-        "https://example.com/spec.pdf", parts.get(2).get("fileData").get("fileUri").asText());
+  private static Stream<Arguments> toolResultMediaCases() {
+    return Stream.of(
+        Arguments.of(
+            new ToolResultMediaCase(
+                "jpeg-inline",
+                new ProviderImageBlock("image/jpeg", "data:image/jpeg;base64,/9j/4AAQ"),
+                true,
+                "image/jpeg",
+                "/9j/4AAQ")),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "png-inline",
+                new ProviderImageBlock("image/png", "data:image/png;base64,iVBORw0KGgo="),
+                true,
+                "image/png",
+                "iVBORw0KGgo=")),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "webp-inline-uppercase-declared-mime",
+                new ProviderImageBlock("IMAGE/WEBP", "data:image/webp;base64,UklGRg=="),
+                true,
+                "image/webp",
+                "UklGRg==")),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "pdf-inline",
+                new ProviderDocumentBlock(
+                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK"),
+                true,
+                "application/pdf",
+                "JVBERi0xLjQK")),
+        // 未在白名单内的图片 MIME：保守拒绝，不扩大到全部 image/*
+        Arguments.of(
+            new ToolResultMediaCase(
+                "gif-inline-not-in-conservative-allowlist",
+                new ProviderImageBlock("image/gif", "data:image/gif;base64,R0lGODlh"),
+                false,
+                null,
+                null)),
+        // 音频与视频：Gemini Developer API 的工具结果不承载这两种模态
+        Arguments.of(
+            new ToolResultMediaCase(
+                "audio-inline-rejected",
+                new ProviderAudioBlock("audio/wav", "data:audio/wav;base64,UklGRg=="),
+                false,
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "video-inline-rejected",
+                new ProviderVideoBlock("video/mp4", "data:video/mp4;base64,AAAAIGZ0eXA="),
+                false,
+                null,
+                null)),
+        // 非 data URI 来源：v1beta FunctionResponsePart 只有 inlineData，没有 fileData
+        Arguments.of(
+            new ToolResultMediaCase(
+                "image-https-url-rejected",
+                new ProviderImageBlock("image/png", "https://example.com/chart.png"),
+                false,
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "pdf-gs-url-rejected",
+                new ProviderDocumentBlock("application/pdf", "gs://bucket/spec.pdf"),
+                false,
+                null,
+                null)),
+        // data URI 形态非法：MIME 与声明不一致、缺 base64 标记、空载荷
+        Arguments.of(
+            new ToolResultMediaCase(
+                "data-uri-mime-mismatch-rejected",
+                new ProviderImageBlock("image/png", "data:image/jpeg;base64,/9j/4AAQ"),
+                false,
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "data-uri-without-base64-marker-rejected",
+                new ProviderImageBlock("image/png", "data:image/png,abc"),
+                false,
+                null,
+                null)),
+        Arguments.of(
+            new ToolResultMediaCase(
+                "data-uri-empty-payload-rejected",
+                new ProviderImageBlock("image/png", "data:image/png;base64,"),
+                false,
+                null,
+                null)));
   }
 
-  /** 验证 Gemini 工具结果中的音频/视频/文档 base64 媒体验证与其 inlineData 载荷逐字节保留。 */
+  /** 验证工具结果媒体只以内联 part 挂在 functionResponse 内，绝不作为外层 Content.parts 的同级 part。 */
+  @ParameterizedTest(name = "tool result media: {0}")
+  @MethodSource("toolResultMediaCases")
+  void encodesToolResultBlocks_mediaModalityMatrix(ToolResultMediaCase mediaCase) throws Exception {
+    ProviderRequest request =
+        toolResultRequest(
+            List.of(new ProviderTextBlock("Here is the result:"), mediaCase.block()),
+            "c1",
+            "get_media");
+
+    if (!mediaCase.supported()) {
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+      assertNotNull(ex.getMessage());
+      return;
+    }
+
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    ArrayNode parts = (ArrayNode) json.path("contents").get(2).path("parts");
+
+    // 媒体不是同级 part：该 user content 只有 functionResponse 一个 part
+    assertEquals(1, parts.size());
+    JsonNode functionResponse = parts.get(0).path("functionResponse");
+    assertEquals("get_media", functionResponse.path("name").asText());
+    assertEquals("c1", functionResponse.path("id").asText());
+    assertEquals("Here is the result:", functionResponse.path("response").path("result").asText());
+
+    JsonNode nested = functionResponse.path("parts");
+    assertEquals(1, nested.size());
+    assertEquals(
+        mediaCase.expectedMimeType(), nested.get(0).path("inlineData").path("mimeType").asText());
+    // 载荷逐字节保留，且不引入官方 v1beta schema 之外的命名字段
+    assertEquals(
+        mediaCase.expectedBase64(), nested.get(0).path("inlineData").path("data").asText());
+    assertFalse(nested.get(0).path("inlineData").has("displayName"));
+  }
+
+  /** 验证同一 functionResponse 内 text 与多个媒体保持顺序，且 tool 结果的媒体载荷互不串位。 */
   @Test
-  void encodesToolResultBlocks_base64MediaForAllModalitiesPreservedVerbatim() throws Exception {
+  void encodesToolResultBlocks_textAndMultipleMediaStayOrderedInsideFunctionResponse()
+      throws Exception {
+    ProviderRequest request =
+        toolResultRequest(
+            List.of(
+                new ProviderTextBlock("chart and spec:"),
+                new ProviderImageBlock("image/png", "data:image/png;base64,iVBORw0KGgo="),
+                new ProviderDocumentBlock(
+                    "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK")),
+            "c1",
+            "get_files");
+
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    ArrayNode parts = (ArrayNode) json.path("contents").get(2).path("parts");
+
+    assertEquals(1, parts.size());
+    JsonNode functionResponse = parts.get(0).path("functionResponse");
+    assertEquals("chart and spec:", functionResponse.path("response").path("result").asText());
+    JsonNode nested = functionResponse.path("parts");
+    assertEquals(2, nested.size());
+    assertEquals("image/png", nested.get(0).path("inlineData").path("mimeType").asText());
+    assertEquals("iVBORw0KGgo=", nested.get(0).path("inlineData").path("data").asText());
+    assertEquals("application/pdf", nested.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals("JVBERi0xLjQK", nested.get(1).path("inlineData").path("data").asText());
+  }
+
+  /** 验证同名工具的多次调用各自按 id 绑定，媒体只挂在对应的 functionResponse 内且不写 $ref 引用。 */
+  @Test
+  void encodesToolResultBlocks_duplicateToolNamesBindByIdWithoutRefFabrication() throws Exception {
     ProviderRequest request =
         new ProviderRequest(
             model(false),
@@ -1148,22 +1265,32 @@ class GeminiRequestEncoderTest {
             "Test system instruction.",
             List.of(
                 new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("call twice"))),
                 new ProviderMessage(
                     ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "probe", "{}")))),
+                    List.of(
+                        new ProviderToolCallBlock(new ProviderToolCall("c1", "get_media", "{}")),
+                        new ProviderToolCallBlock(new ProviderToolCall("c2", "get_media", "{}")))),
                 new ProviderMessage(
                     ProviderMessageRole.TOOL,
                     List.of(
                         new ProviderToolResultBlock(
                             "c1",
-                            "probe",
+                            "get_media",
                             List.of(
-                                new ProviderTextBlock("media:"),
-                                new ProviderAudioBlock(
-                                    "audio/wav", "data:audio/wav;base64,UklGRg=="),
-                                new ProviderVideoBlock(
-                                    "video/mp4", "data:video/mp4;base64,AAAAIGZ0eXA="),
+                                new ProviderTextBlock("first"),
+                                new ProviderImageBlock(
+                                    "image/png", "data:image/png;base64,iVBORw0KGgo=")),
+                            false,
+                            "{}"))),
+                new ProviderMessage(
+                    ProviderMessageRole.TOOL,
+                    List.of(
+                        new ProviderToolResultBlock(
+                            "c2",
+                            "get_media",
+                            List.of(
+                                new ProviderTextBlock("second"),
                                 new ProviderDocumentBlock(
                                     "application/pdf", "data:application/pdf;base64,JVBERi0xLjQK")),
                             false,
@@ -1172,16 +1299,46 @@ class GeminiRequestEncoderTest {
             ProviderCacheControl.none());
 
     JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    // 两个 TOOL 消息与后续无 USER 消息，wire 中仍是同一个 user content
     ArrayNode parts = (ArrayNode) json.path("contents").get(2).path("parts");
+    assertEquals(2, parts.size());
 
-    // functionResponse + 3 个媒体 part
-    assertEquals(4, parts.size());
-    assertEquals("UklGRg==", parts.get(1).path("inlineData").path("data").asText());
-    assertEquals("audio/wav", parts.get(1).path("inlineData").path("mimeType").asText());
-    assertEquals("AAAAIGZ0eXA=", parts.get(2).path("inlineData").path("data").asText());
-    assertEquals("video/mp4", parts.get(2).path("inlineData").path("mimeType").asText());
-    assertEquals("JVBERi0xLjQK", parts.get(3).path("inlineData").path("data").asText());
-    assertEquals("application/pdf", parts.get(3).path("inlineData").path("mimeType").asText());
+    JsonNode first = parts.get(0).path("functionResponse");
+    JsonNode second = parts.get(1).path("functionResponse");
+    assertEquals("c1", first.path("id").asText());
+    assertEquals("c2", second.path("id").asText());
+    assertEquals("first", first.path("response").path("result").asText());
+    assertEquals("second", second.path("response").path("result").asText());
+    assertEquals(
+        "iVBORw0KGgo=", first.path("parts").get(0).path("inlineData").path("data").asText());
+    assertEquals(
+        "JVBERi0xLjQK", second.path("parts").get(0).path("inlineData").path("data").asText());
+    // v1beta 的 FunctionResponseBlob 没有 displayName，因此绝不伪造 $ref 引用
+    assertFalse(first.path("response").has("$ref"));
+    assertFalse(first.path("parts").get(0).path("inlineData").has("displayName"));
+  }
+
+  /** 构造携带单个 TOOL 结果的 Gemini 请求：USER → ASSISTANT tool call → TOOL result。 */
+  private static ProviderRequest toolResultRequest(
+      List<ProviderContentBlock> resultContents, String toolCallId, String toolName) {
+    return new ProviderRequest(
+        model(false),
+        DEFAULT_VARIANT,
+        1024,
+        "Test system instruction.",
+        List.of(
+            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("call"))),
+            new ProviderMessage(
+                ProviderMessageRole.ASSISTANT,
+                List.of(
+                    new ProviderToolCallBlock(new ProviderToolCall(toolCallId, toolName, "{}")))),
+            new ProviderMessage(
+                ProviderMessageRole.TOOL,
+                List.of(
+                    new ProviderToolResultBlock(
+                        toolCallId, toolName, resultContents, false, "{}")))),
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   /** 验证工具结果中出现不受支持的块类型（如嵌套的 tool call）时抛出脱敏的 INVALID_REQUEST。 */

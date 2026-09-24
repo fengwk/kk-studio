@@ -16,11 +16,16 @@ import java.util.Set;
 /** OpenAI Responses 流式协议适配器。 */
 public final class OpenAiResponsesProviderAdapter implements ProviderAdapter {
 
-  /** 当前编码器的内联媒体能力：用户消息支持 IMAGE 与 DOCUMENT，工具结果只支持 IMAGE。这是本编码器实际可编码的 schema，不构成厂商能力承诺。 */
+  /**
+   * 当前编码器的内联媒体能力：用户消息与工具结果都支持 IMAGE 与 DOCUMENT（{@code input_image.image_url}、{@code
+   * input_file.file_data/file_url}）。工具结果的 {@code function_call_output.output} 数组明确支持 {@code
+   * input_image} 与 {@code input_file}；音频、视频与任意其他模态都不声明，并由编码器以 {@code INVALID_REQUEST}
+   * 拒绝。这是本编码器实际可编码的 schema，不构成厂商能力承诺。
+   */
   private static final ProviderMediaCapabilities MEDIA_CAPABILITIES =
       new ProviderMediaCapabilities(
           Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
-          Set.of(ModelInputModality.IMAGE));
+          Set.of(ModelInputModality.IMAGE, ModelInputModality.DOCUMENT));
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;
