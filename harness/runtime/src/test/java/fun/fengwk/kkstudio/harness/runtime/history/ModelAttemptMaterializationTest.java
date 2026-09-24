@@ -351,6 +351,8 @@ class ModelAttemptMaterializationTest {
     EntryPath path = attachedToolPath(assistant);
 
     assertDoesNotThrow(() -> ModelAttemptMaterialization.validate(stored, attached, path));
+    // 测试意图：attach 已把 replay state 转移到不可变 Entry，Tool batch 的二次校验不能把清空后的 Invocation 与 Entry 比较。
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validateAttached(attached, path));
   }
 
   @Test
