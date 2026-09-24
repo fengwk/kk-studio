@@ -3,6 +3,11 @@ import type {
   PaneTargetKind,
 } from '@/features/ai/runtime/agent-pane/pane-target'
 
+export interface ThreadCommandOwner {
+  type: string
+  id: string
+}
+
 interface ManualCompactionAvailability {
   available: boolean
   disabledReason: string | null
@@ -22,6 +27,7 @@ export type ThreadCommandId =
   | 'compact'
   | 'rename-session'
   | 'rename-thread'
+  | 'goal'
 
 export interface ThreadCommand {
   id: ThreadCommandId
@@ -53,6 +59,7 @@ export const THREAD_COMMANDS: ThreadCommand[] = [
   command('compact', ['context', 'tokens', 'summary', 'reduce']),
   command('rename-session', ['session', 'name']),
   command('rename-thread', ['thread', 'name']),
+  command('goal', ['objective', 'target', 'task', 'goal']),
 ]
 
 function command(id: ThreadCommandId, keywords: string[]): ThreadCommand {
@@ -78,6 +85,7 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
     'upload',
     'shortcuts',
     'rename-session',
+    'goal',
   ],
   BOUND_THREAD: THREAD_COMMANDS.map((item) => item.id),
 }
@@ -89,13 +97,14 @@ export interface ThreadCommandOptions {
   allowNewSession?: boolean
   readOnly?: boolean
   canBranchFromRoot?: boolean
+  owner?: ThreadCommandOwner
 }
 
 function isThreadCommandOptions(value: unknown): value is ThreadCommandOptions {
   return (
     value != null
     && typeof value === 'object'
-    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value)
+    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value || 'owner' in value)
   )
 }
 
@@ -109,7 +118,14 @@ export function threadCommandsForTarget(
   const manualCompaction = options.manualCompaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
 
-  return THREAD_COMMANDS.map((item) => {
+  // Ordinary Chat/Canvas only: hide Goal for any non-Chat, non-Canvas owner.
+  // Default fail-closed: if owner is absent or unknown, goal command is not exposed.
+  const isGoalAllowed = options.owner != null && (options.owner.type === 'CHAT' || options.owner.type === 'CANVAS')
+  const commandList = isGoalAllowed
+    ? THREAD_COMMANDS
+    : THREAD_COMMANDS.filter((item) => item.id !== 'goal')
+
+  return commandList.map((item) => {
     const targetEnabled = enabled.has(item.id)
     const compactDisabled =
       item.id === 'compact'

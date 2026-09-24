@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /** {@link BranchView} 纯接口契约与自定义状态快照、追加意图、上下文投影等值对象测试。 */
 class BranchViewTest {
@@ -43,12 +44,19 @@ class BranchViewTest {
             }
             return Optional.empty();
           }
+
+          @Override
+          public Optional<GoalSnapshot> goal() {
+            return Optional.of(new GoalSnapshot(new UUID(0L, 9L), "ship it"));
+          }
         };
 
     assertEquals(List.of(snapshot1, snapshot2), view.customEntries("my-state"));
     assertEquals(Optional.of(snapshot2), view.latestCustomEntry("my-state"));
     assertTrue(view.customEntries("other").isEmpty());
     assertTrue(view.latestCustomEntry("other").isEmpty());
+    // 用户 Goal 是独立于 contributor custom state 的只读投影。
+    assertEquals(Optional.of(new GoalSnapshot(new UUID(0L, 9L), "ship it")), view.goal());
   }
 
   /** 验证 CustomStateSnapshot 字段非空与版本号正数约束。 */
@@ -130,6 +138,11 @@ class BranchViewTest {
           @Override
           public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
             return Optional.of(new CustomStateSnapshot(1, "state-data"));
+          }
+
+          @Override
+          public Optional<GoalSnapshot> goal() {
+            return Optional.empty();
           }
         };
 

@@ -248,7 +248,7 @@ class ThreadCommandPayloadJsonCodecTest {
           () -> codec.decode(type, "{\"workspacePath\":null}"),
           "workspacePath 形状必须对 " + type + " 保持拒绝");
     }
-    assertEquals(5, ThreadCommandType.values().length);
+    assertEquals(6, ThreadCommandType.values().length);
   }
 
   private static AgentMessage user(String text) {

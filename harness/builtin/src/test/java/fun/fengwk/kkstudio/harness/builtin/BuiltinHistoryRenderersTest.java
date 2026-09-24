@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.builtin.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
@@ -28,10 +27,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * {@link BuiltinHistoryRenderers} 及其在 6 个内建工具中绑定的历史动作渲染器单元测试。
+ * {@link BuiltinHistoryRenderers} 及其在 5 个内建工具中绑定的历史动作渲染器单元测试。
  *
- * <p>验证 task、create_goal、get_goal、update_goal 的最小语义动作提取、省略执行控制参数、 缺失核心字段与畸形输入的确定性安全回退，以及 6
- * 个内建工具均暴露渲染器且为确定性纯函数。
+ * <p>验证 task、get_goal、update_goal 的最小语义动作提取、省略执行控制参数、 缺失核心字段与畸形输入的确定性安全回退，以及 5
+ * 个内建工具均暴露渲染器且为确定性纯函数。Goal 正文由用户维护，因此没有 create_goal 渲染器。
  */
 class BuiltinHistoryRenderersTest {
 
@@ -76,37 +75,6 @@ class BuiltinHistoryRenderersTest {
     // 畸形 JSON 与非对象
     assertEquals(Optional.empty(), renderer.render(malformedRequest("task", "{bad json")));
     assertEquals(Optional.empty(), renderer.render(malformedRequest("task", "\"just-string\"")));
-  }
-
-  /**
-   * 验证 createGoal 历史动作渲染器提取 objective 渲染为 "set goal: " + objective， 省略 tokenBudget 等执行预算，且在
-   * objective 缺失、空白、非文本或 JSON 畸形时安全返回 Optional.empty()。
-   */
-  @Test
-  void createGoalRendersObjectiveAndOmitsBudget() {
-    ToolHistoryRenderer renderer = BuiltinHistoryRenderers.createGoal();
-
-    // 正常渲染
-    assertEquals(
-        Optional.of("set goal: Finish all tests"),
-        renderer.render(request("create_goal", "{\"objective\":\"Finish all tests\"}")));
-
-    // 省略 tokenBudget 执行预算
-    assertEquals(
-        Optional.of("set goal: Finish all tests"),
-        renderer.render(
-            request("create_goal", "{\"objective\":\"Finish all tests\",\"tokenBudget\":50000}")));
-
-    // objective 缺失、空白、非文本
-    assertEquals(Optional.empty(), renderer.render(request("create_goal", "{}")));
-    assertEquals(
-        Optional.empty(), renderer.render(request("create_goal", "{\"objective\":\"  \"}")));
-    assertEquals(Optional.empty(), renderer.render(request("create_goal", "{\"objective\":99}")));
-
-    // 畸形 JSON 与非对象
-    assertEquals(
-        Optional.empty(), renderer.render(malformedRequest("create_goal", "{broken json")));
-    assertEquals(Optional.empty(), renderer.render(malformedRequest("create_goal", "[]")));
   }
 
   /**
@@ -184,9 +152,8 @@ class BuiltinHistoryRenderersTest {
   }
 
   /**
-   * 验证全部 6
-   * 个内建工具（EnvironmentCapabilityTool、ReadTool、CreateGoalTool、GetGoalTool、UpdateGoalTool、TaskTool）
-   * 均通过 historyRenderer() 暴露渲染器，且该渲染器为确定性纯函数：同一合法输入连续两次调用返回相同非空结果，同一非法输入连续两次调用返回相同 empty。
+   * 验证全部 5 个内建工具（EnvironmentCapabilityTool、ReadTool、GetGoalTool、UpdateGoalTool、TaskTool） 均通过
+   * historyRenderer() 暴露渲染器，且该渲染器为确定性纯函数：同一合法输入连续两次调用返回相同非空结果，同一非法输入连续两次调用返回相同 empty。
    */
   @Test
   void allBuiltinToolsExposeHistoryRendererAsDeterministicPureFunction() {
@@ -206,22 +173,18 @@ class BuiltinHistoryRenderersTest {
     // 构造 2: ReadTool
     Tool readTool = new ReadTool((request, listener) -> null);
 
-    // 构造 3: CreateGoalTool
-    Tool createGoalTool = new CreateGoalTool();
-
-    // 构造 4: GetGoalTool
+    // 构造 3: GetGoalTool
     Tool getGoalTool = new GetGoalTool();
 
-    // 构造 5: UpdateGoalTool
+    // 构造 4: UpdateGoalTool
     Tool updateGoalTool = new UpdateGoalTool();
 
-    // 构造 6: TaskTool（依赖轻量接口，使用 mock 构造）
+    // 构造 5: TaskTool（依赖轻量接口，使用 mock 构造）
     Tool taskTool = new TaskTool(mock(SubagentRunner.class));
 
-    List<Tool> tools =
-        List.of(envTool, readTool, createGoalTool, getGoalTool, updateGoalTool, taskTool);
+    List<Tool> tools = List.of(envTool, readTool, getGoalTool, updateGoalTool, taskTool);
 
-    // 断言所有 6 个工具均暴露 historyRenderer
+    // 断言所有 5 个工具均暴露 historyRenderer
     for (Tool tool : tools) {
       assertTrue(
           tool.historyRenderer().isPresent(),
@@ -235,13 +198,6 @@ class BuiltinHistoryRenderersTest {
     Optional<String> envSecond = envRenderer.render(envReq);
     assertEquals(Optional.of("read src/Test.java"), envFirst);
     assertEquals(envFirst, envSecond);
-
-    ToolHistoryRenderer createGoalRenderer = createGoalTool.historyRenderer().orElseThrow();
-    ToolHistoryRenderRequest createGoalReq = request("create_goal", "{\"objective\":\"task A\"}");
-    Optional<String> cgFirst = createGoalRenderer.render(createGoalReq);
-    Optional<String> cgSecond = createGoalRenderer.render(createGoalReq);
-    assertEquals(Optional.of("set goal: task A"), cgFirst);
-    assertEquals(cgFirst, cgSecond);
 
     ToolHistoryRenderer getGoalRenderer = getGoalTool.historyRenderer().orElseThrow();
     ToolHistoryRenderRequest getGoalReq = request("get_goal", "{}");
@@ -275,7 +231,7 @@ class BuiltinHistoryRenderersTest {
     // 验证安全回退的确定性：对非 get_goal 工具连续调用无效请求两次，均稳定返回 Optional.empty()
     ToolHistoryRenderRequest emptyReq = request("dummy", "{}");
     List<ToolHistoryRenderer> fallibleRenderers =
-        List.of(envRenderer, readRenderer, createGoalRenderer, updateGoalRenderer, taskRenderer);
+        List.of(envRenderer, readRenderer, updateGoalRenderer, taskRenderer);
     for (ToolHistoryRenderer renderer : fallibleRenderers) {
       Optional<String> f1 = renderer.render(emptyReq);
       Optional<String> f2 = renderer.render(emptyReq);

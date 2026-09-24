@@ -17,8 +17,6 @@ public class IssueDO {
   private String assigneeAgentName;
   private String reviewerAgentName;
   private Long version;
-  private Long specRevision;
-  private Long inputSequence;
   private Instant archivedAt;
   private Instant createdAt;
   private Instant updatedAt;

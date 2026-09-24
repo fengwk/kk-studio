@@ -1,4 +1,4 @@
-import { assert, cid, envelopeData, pageResults, sleep } from '../lib/http.mjs'
+import { assert, cid, envelopeData, sleep } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -54,10 +54,6 @@ registerCase({
     socket.addEventListener('message', collect)
     try {
       await waitForSocketOpen(socket, 5_000)
-      const agents = pageResults(
-        (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=1')).json,
-      )
-      assert(agents.length > 0 && typeof agents[0].name === 'string', 'Agent seed required')
 
       socket.send(
         JSON.stringify({ version: 1, type: 'subscribe', resource: { kind: 'projects' } }),
@@ -74,7 +70,6 @@ registerCase({
           await ctx.call('POST', '/api/projects', {
             title: `Event Project ${cid().slice(0, 8)}`,
             description: 'Database notification E2E',
-            coordinatorAgentName: agents[0].name,
           })
         ).json,
       )

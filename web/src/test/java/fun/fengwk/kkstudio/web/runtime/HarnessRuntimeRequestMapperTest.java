@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -94,11 +95,11 @@ class HarnessRuntimeRequestMapperTest {
     assertEquals(OwnerType.CANVAS, mappedOwner.type());
     assertEquals(id(10), mappedOwner.id());
 
-    owner.setType("PROJECT");
+    owner.setType("ISSUE_AGENT_SESSION");
     owner.setId(idText(11));
-    OwnerRef projectOwner = HarnessRuntimeRequestMapper.toOwner(owner);
-    assertEquals(OwnerType.PROJECT, projectOwner.type());
-    assertEquals(id(11), projectOwner.id());
+    OwnerRef issueAgentSessionOwner = HarnessRuntimeRequestMapper.toOwner(owner);
+    assertEquals(OwnerType.ISSUE_AGENT_SESSION, issueAgentSessionOwner.type());
+    assertEquals(id(11), issueAgentSessionOwner.id());
 
     AcceptCommandsCommand newSession =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
@@ -571,6 +572,68 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(IllegalArgumentException.class, () -> HarnessRuntimeRequestMapper.toOwner(null));
   }
 
+  /**
+   * 测试意图：typed GOAL 必须显式携带 nullable text——显式 null 表示清除，canonical 文本表示设置；字段缺失、空白文本、与 USER_MESSAGE
+   * 共存或非末位都必须 fail closed。
+   */
+  @Test
+  void goalCommandRequiresExplicitNullableTextAndRejectsInvalidBatchShapes() {
+    HarnessCommandCreateDTO set = command("GOAL", "goal-set");
+    set.setText("ship the release");
+    AcceptCommandsCommand mapped =
+        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), set));
+    assertEquals(ThreadCommandType.GOAL, mapped.commands().getFirst().payload().type());
+    assertEquals(
+        new GoalCommandPayload("ship the release"), mapped.commands().getFirst().payload());
+    assertEquals(
+        ThreadCommandPayloadJsonCodec.requestHash(mapped.commands().getFirst().payload()),
+        mapped.commands().getFirst().requestHash());
+
+    HarnessCommandCreateDTO cleared = command("GOAL", "goal-clear");
+    cleared.setText(null);
+    assertEquals(
+        new GoalCommandPayload(null),
+        HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), cleared))
+            .commands()
+            .getFirst()
+            .payload());
+
+    // 字段缺失必须拒绝：无法区分「清除」与「请求未携带」。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(threadTarget(), command("GOAL", "goal-missing"))));
+
+    // 空白文本不是清除，必须由 Core canonical 规则拒绝。
+    HarnessCommandCreateDTO blank = command("GOAL", "goal-blank");
+    blank.setText("   ");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), blank)));
+
+    // GOAL 与 USER_MESSAGE 都是 user-like 终止输入：恰有一条且必须是最后一条。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(threadTarget(), set, userCommand("tail"))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
+                request(threadTarget(), userCommand("head"), set)));
+
+    // 跨命令字段：GOAL 不携带 contents，其他命令不携带 text。
+    HarnessCommandCreateDTO goalWithContents = command("GOAL", "goal-contents");
+    goalWithContents.setText("ship");
+    goalWithContents.setContents(List.of(userContent()));
+    assertCommandRejected(goalWithContents);
+    HarnessCommandCreateDTO userWithText = userCommand("user-text");
+    userWithText.setText("ship");
+    assertCommandRejected(userWithText);
+  }
+
   private static void assertCommandRejected(HarnessCommandCreateDTO command) {
     assertThrows(
         IllegalArgumentException.class,
@@ -607,12 +670,16 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   private static HarnessCommandCreateDTO userCommand(String suffix) {
+    HarnessCommandCreateDTO command = command("USER_MESSAGE", suffix);
+    command.setContents(List.of(userContent()));
+    return command;
+  }
+
+  private static HarnessUserMessageContentDTO userContent() {
     HarnessUserMessageContentDTO content = new HarnessUserMessageContentDTO();
     content.setType("TEXT");
     content.setText("hello");
-    HarnessCommandCreateDTO command = command("USER_MESSAGE", suffix);
-    command.setContents(List.of(content));
-    return command;
+    return content;
   }
 
   private static HarnessCommandTargetDTO newSessionTarget() {

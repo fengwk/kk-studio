@@ -6,13 +6,17 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -227,6 +231,34 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
          or entry_type = 'ROOT'
          or is_cycle
          or (entry_type = 'CUSTOM' and payload ->> 'contributorId' = ?)
+      order by depth desc
+      """;
+
+  /**
+   * 窄查询递归 CTE：仅提取路径上的 ROOT、head、环路哨兵及非 COMPACTION 的 TURN_START Entry。
+   *
+   * <p>用于解析 branch 生效 settings（等价于 {@link EntryPath#baseSettings()}）：递归仍遍历祖先链，但只返回决定 settings
+   * 的必要节点， 减少结果传输与 Java 侧完整 EntryPath 物化，其结果绝不回填完整路径缓存。COMPACTION turn 的 settings 只描述压缩执行模型，因此在 SQL
+   * 侧就被排除，绝不参与 branch settings 解析。
+   */
+  private static final String LOAD_BRANCH_SETTINGS =
+      """
+      with recursive branch_settings_path as (
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 0 as depth
+          from harness_entry
+          where id = ?
+          union all
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state, bsp.depth + 1
+          from harness_entry e
+          join branch_settings_path bsp on e.id = bsp.parent_entry_id
+          where bsp.parent_entry_id is not null
+      ) cycle id set is_cycle using path
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, depth, is_cycle
+      from branch_settings_path
+      where depth = 0
+         or entry_type = 'ROOT'
+         or is_cycle
+         or (entry_type = 'TURN_START' and payload ->> 'reason' <> 'COMPACTION')
       order by depth desc
       """;
 
@@ -540,6 +572,56 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 entry.payload() instanceof CustomEntryPayload custom
                     && contributorId.equals(custom.contributorId()))
         .toList();
+  }
+
+  /**
+   * 读取指定 head 所在 branch 的生效 settings（等价于 {@link EntryPath#baseSettings()}）。
+   *
+   * <p>若完整路径在 {@link #entryPathCache} 中已命中，直接在内存中派生；cold cache 则执行窄查询 CTE（{@link
+   * #LOAD_BRANCH_SETTINGS}），只返回 ROOT 与非 COMPACTION TURN_START 节点，绝不物化完整 EntryPath、也绝不把部分投影写入完整路径缓存。
+   */
+  @Override
+  public BranchSettings loadBranchSettings(UUID headEntryId) {
+    checkOpen();
+    Objects.requireNonNull(headEntryId, "headEntryId");
+    EntryPath cached = entryPathCache.get(headEntryId);
+    if (cached != null) {
+      return cached.baseSettings();
+    }
+    List<PathEntryRow> rows = queryList(LOAD_BRANCH_SETTINGS, PATH_ENTRY_ROW, headEntryId);
+    if (rows.isEmpty()) {
+      throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
+    }
+    for (PathEntryRow row : rows) {
+      if (row.isCycle()) {
+        throw new IllegalArgumentException("entry parent cycle detected at " + row.entry().id());
+      }
+    }
+    if (!rows.get(0).entry().payload().type().isRoot()) {
+      throw new IllegalArgumentException("entry path for " + headEntryId + " does not reach root");
+    }
+    PathEntryRow headRow = rows.get(rows.size() - 1);
+    if (headRow.depth() != 0 || !headRow.entry().id().equals(headEntryId)) {
+      throw new IllegalArgumentException("entry path does not end with head " + headEntryId);
+    }
+    UUID sessionId = rows.get(0).entry().sessionId();
+    for (PathEntryRow row : rows) {
+      if (!row.entry().sessionId().equals(sessionId)) {
+        throw new IllegalArgumentException("entry path crosses sessions: " + row.entry().id());
+      }
+    }
+    // 深度升序即 head-to-root：首个 settings 载体就是离 head 最近的生效快照。
+    for (int i = rows.size() - 1; i >= 0; i--) {
+      EntryPayload payload = rows.get(i).entry().payload();
+      if (payload instanceof TurnStartPayload start) {
+        if (start.reason() != TurnStartReason.COMPACTION) {
+          return start.settings();
+        }
+      } else if (payload instanceof RootPayload root) {
+        return root.settings();
+      }
+    }
+    throw new IllegalArgumentException("entry path for " + headEntryId + " carries no settings");
   }
 
   @Override

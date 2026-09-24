@@ -1217,6 +1217,90 @@ export const aiCatalog = {
     'en-US': 'rename-thread',
     'zh-CN': 'rename-thread',
   },
+  'ai.runtime.command.goal': {
+    'en-US': 'View, edit, or clear branch goal',
+    'zh-CN': '查看、编辑或清除分支目标',
+  },
+  'ai.runtime.command.goalLabel': {
+    'en-US': 'goal',
+    'zh-CN': 'goal',
+  },
+  'ai.runtime.goal.title': {
+    'en-US': 'Branch Goal',
+    'zh-CN': '分支目标',
+  },
+  'ai.runtime.goal.currentGoal': {
+    'en-US': 'Current Goal',
+    'zh-CN': '当前目标',
+  },
+  'ai.runtime.goal.emptyGoal': {
+    'en-US': 'No goal set for this branch',
+    'zh-CN': '当前分支暂无设定目标',
+  },
+  'ai.runtime.goal.agentReportTitle': {
+    'en-US': 'Agent Progress Report',
+    'zh-CN': 'Agent 进展报告',
+  },
+  'ai.runtime.goal.agentReportDisclaimer': {
+    'en-US': 'Reported by Agent (not system acceptance)',
+    'zh-CN': '由 Agent 报告，非系统验收',
+  },
+  'ai.runtime.goal.statusCompleteReported': {
+    'en-US': 'Completed (Agent Report)',
+    'zh-CN': '已完成（Agent 报告）',
+  },
+  'ai.runtime.goal.statusBlockedReported': {
+    'en-US': 'Blocked (Agent Report)',
+    'zh-CN': '阻塞（Agent 报告）',
+  },
+  'ai.runtime.goal.staleReportNotice': {
+    'en-US': 'Previous goal progress report is stale',
+    'zh-CN': '历史目标的 Agent 报告已失效',
+  },
+  'ai.runtime.goal.setGoalLabel': {
+    'en-US': 'Set New Goal',
+    'zh-CN': '设置新目标',
+  },
+  'ai.runtime.goal.updateGoalLabel': {
+    'en-US': 'Update Goal',
+    'zh-CN': '更新目标',
+  },
+  'ai.runtime.goal.inputPlaceholder': {
+    'en-US': 'Enter branch goal (max 2,000 characters)...',
+    'zh-CN': '输入分支目标（最多 2000 字符）...',
+  },
+  'ai.runtime.goal.setGoalBtn': {
+    'en-US': 'Set Goal',
+    'zh-CN': '设置目标',
+  },
+  'ai.runtime.goal.clearGoalBtn': {
+    'en-US': 'Clear Goal',
+    'zh-CN': '清除目标',
+  },
+  'ai.runtime.goal.busy': {
+    'en-US': 'Applying...',
+    'zh-CN': '正在提交...',
+  },
+  'ai.runtime.goal.readOnlyNotice': {
+    'en-US': 'Read-only mode; cannot modify goal.',
+    'zh-CN': '只读模式，不可修改目标。',
+  },
+  'ai.runtime.goal.notAllowed': {
+    'en-US': 'Goal is not supported on this branch',
+    'zh-CN': '当前分支不支持设置目标',
+  },
+  'ai.runtime.goal.errorEmpty': {
+    'en-US': 'Goal text cannot be empty',
+    'zh-CN': '目标正文不能为空',
+  },
+  'ai.runtime.goal.errorTooLong': {
+    'en-US': 'Goal text must be 2,000 characters or fewer',
+    'zh-CN': '目标正文不能超过 2000 个字符',
+  },
+  'ai.runtime.goal.submitFailed': {
+    'en-US': 'Failed to update goal',
+    'zh-CN': '更新目标失败',
+  },
   'ai.runtime.rename.sessionTitle': {
     'en-US': 'Rename Session',
     'zh-CN': '重命名 Session',
@@ -1552,6 +1636,34 @@ export const aiCatalog = {
   'ai.runtime.entry.rootText': {
     'en-US': 'The conversation tree root was created.',
     'zh-CN': '已创建会话树根节点。',
+  },
+  'ai.runtime.entry.rootSettings': {
+    'en-US': 'Conversation started · Agent: {{agent}} · Model: {{model}} · Environment: {{environment}}',
+    'zh-CN': '会话开始 · Agent: {{agent}} · 模型: {{model}} · 环境: {{environment}}',
+  },
+  'ai.runtime.entry.noEnvironment': {
+    'en-US': 'none',
+    'zh-CN': '无',
+  },
+  'ai.runtime.entry.invalidSettings': {
+    'en-US': 'Settings snapshot could not be read',
+    'zh-CN': '配置快照不可解析',
+  },
+  'ai.runtime.entry.agentChanged': {
+    'en-US': 'Agent changed to {{agent}}',
+    'zh-CN': 'Agent 改为 {{agent}}',
+  },
+  'ai.runtime.entry.modelChanged': {
+    'en-US': 'Model changed to {{model}}',
+    'zh-CN': '模型改为 {{model}}',
+  },
+  'ai.runtime.entry.environmentChanged': {
+    'en-US': 'Environment changed to {{environment}}',
+    'zh-CN': '环境改为 {{environment}}',
+  },
+  'ai.runtime.entry.environmentDetached': {
+    'en-US': 'Environment detached',
+    'zh-CN': '环境已解除',
   },
   'ai.runtime.entry.unknownType': {
     'en-US': 'unknown type',

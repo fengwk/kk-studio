@@ -25,12 +25,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
@@ -58,10 +55,8 @@ public class HarnessOwnerQueryService {
   private final ChatSessionRepository chatSessionRepository;
   private final CanvasStore canvasStore;
   private final CanvasSessionRepository canvasSessionRepository;
-  private final ProjectRepository projectRepository;
-  private final ProjectSessionRepository projectSessionRepository;
-  private final IssueRunRepository issueRunRepository;
-  private final IssueRunSessionRepository issueRunSessionRepository;
+  private final IssueAgentSessionRepository issueAgentSessionRepository;
+  private final IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private final ObjectProvider<HarnessRuntime> runtimes;
 
   public HarnessOwnerQueryService(
@@ -69,10 +64,8 @@ public class HarnessOwnerQueryService {
       ChatSessionRepository chatSessionRepository,
       CanvasStore canvasStore,
       CanvasSessionRepository canvasSessionRepository,
-      ProjectRepository projectRepository,
-      ProjectSessionRepository projectSessionRepository,
-      IssueRunRepository issueRunRepository,
-      IssueRunSessionRepository issueRunSessionRepository,
+      IssueAgentSessionRepository issueAgentSessionRepository,
+      IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.chatSessionRepository =
@@ -80,12 +73,11 @@ public class HarnessOwnerQueryService {
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.canvasSessionRepository =
         Objects.requireNonNull(canvasSessionRepository, "canvasSessionRepository");
-    this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
-    this.projectSessionRepository =
-        Objects.requireNonNull(projectSessionRepository, "projectSessionRepository");
-    this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
-    this.issueRunSessionRepository =
-        Objects.requireNonNull(issueRunSessionRepository, "issueRunSessionRepository");
+    this.issueAgentSessionRepository =
+        Objects.requireNonNull(issueAgentSessionRepository, "issueAgentSessionRepository");
+    this.issueAgentSessionOwnershipRepository =
+        Objects.requireNonNull(
+            issueAgentSessionOwnershipRepository, "issueAgentSessionOwnershipRepository");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
   }
 
@@ -107,24 +99,15 @@ public class HarnessOwnerQueryService {
     return listSessionSummaries(canvasSessionRepository.listSessionIds(canvasId));
   }
 
-  /** 返回 Project owner 的 Session 摘要。 */
-  public List<HarnessSessionSummaryDTO> listProjectSessions(UUID projectId) {
-    Objects.requireNonNull(projectId, "projectId");
-    if (projectRepository.getById(projectId) == null) {
-      throw new AiResourceNotFoundException("project");
+  /** 返回某个 Issue+Agent 稳定归属持有的 Session 摘要。 */
+  public List<HarnessSessionSummaryDTO> listIssueAgentSessions(UUID issueAgentSessionId) {
+    Objects.requireNonNull(issueAgentSessionId, "issueAgentSessionId");
+    IssueAgentSession binding = issueAgentSessionRepository.getById(issueAgentSessionId);
+    if (binding == null) {
+      throw new AiResourceNotFoundException("issue_agent_session");
     }
-    ProjectSession session = projectSessionRepository.findByProjectId(projectId);
-    return session != null ? listSessionSummaries(List.of(session.getSessionId())) : List.of();
-  }
-
-  /** 返回 IssueRun owner 的 Session 摘要。 */
-  public List<HarnessSessionSummaryDTO> listIssueRunSessions(UUID runId) {
-    Objects.requireNonNull(runId, "runId");
-    if (issueRunRepository.getById(runId) == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    IssueRunSession session = issueRunSessionRepository.findByRunId(runId);
-    return session != null ? listSessionSummaries(List.of(session.getSessionId())) : List.of();
+    return listSessionSummaries(
+        issueAgentSessionOwnershipRepository.listSessionIds(issueAgentSessionId));
   }
 
   /** 统一按 owner 查询 Session 摘要。 */
@@ -133,8 +116,7 @@ public class HarnessOwnerQueryService {
     return switch (owner.type()) {
       case CHAT -> listChatSessions(owner.id());
       case CANVAS -> listCanvasSessions(owner.id());
-      case PROJECT -> listProjectSessions(owner.id());
-      case ISSUE_RUN -> listIssueRunSessions(owner.id());
+      case ISSUE_AGENT_SESSION -> listIssueAgentSessions(owner.id());
     };
   }
 

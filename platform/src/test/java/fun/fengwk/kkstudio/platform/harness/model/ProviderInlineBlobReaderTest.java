@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.BiFunction;
 
 /**
  * {@link ProviderInlineBlobReader} 契约：有界读取、权威事实校验、并发闸门与缓存语义。
@@ -141,12 +142,13 @@ class ProviderInlineBlobReaderTest {
     CountDownLatch releaseLoader = new CountDownLatch(1);
     AtomicInteger reads = new AtomicInteger();
     StorageBlobContentService coalescingService =
-        (blobId, maxSizeBytes) -> {
-          reads.incrementAndGet();
-          loaderStarted.countDown();
-          awaitQuietly(releaseLoader);
-          return new StorageBlobContent(blobId, BYTES, MEDIA_TYPE, BYTES.length);
-        };
+        service(
+            (blobId, maxSizeBytes) -> {
+              reads.incrementAndGet();
+              loaderStarted.countDown();
+              awaitQuietly(releaseLoader);
+              return new StorageBlobContent(blobId, BYTES, MEDIA_TYPE, BYTES.length);
+            });
     ProviderInlineBlobReader reader =
         new ProviderInlineBlobReader(coalescingService, testLimits(), Ticker.systemTicker());
 
@@ -194,16 +196,17 @@ class ProviderInlineBlobReaderTest {
     AtomicInteger peak = new AtomicInteger();
     ProviderInlineBlobReader reader =
         new ProviderInlineBlobReader(
-            (id, maximum) -> {
-              int current = active.incrementAndGet();
-              peak.accumulateAndGet(current, Math::max);
-              try {
-                awaitQuietly(release);
-                return new StorageBlobContent(id, BYTES, MEDIA_TYPE, BYTES.length);
-              } finally {
-                active.decrementAndGet();
-              }
-            },
+            service(
+                (id, maximum) -> {
+                  int current = active.incrementAndGet();
+                  peak.accumulateAndGet(current, Math::max);
+                  try {
+                    awaitQuietly(release);
+                    return new StorageBlobContent(id, BYTES, MEDIA_TYPE, BYTES.length);
+                  } finally {
+                    active.decrementAndGet();
+                  }
+                }),
             limits(builder().maxCacheEntryWeightBytes(1).maxConcurrentDownloads(2)),
             Ticker.systemTicker());
     List<Thread> workers = new ArrayList<>();
@@ -251,11 +254,12 @@ class ProviderInlineBlobReaderTest {
     CountDownLatch permitTaken = new CountDownLatch(1);
     CountDownLatch releaseHolder = new CountDownLatch(1);
     StorageBlobContentService blockingService =
-        (blobId, maxSizeBytes) -> {
-          permitTaken.countDown();
-          awaitQuietly(releaseHolder);
-          return new StorageBlobContent(blobId, BYTES, MEDIA_TYPE, BYTES.length);
-        };
+        service(
+            (blobId, maxSizeBytes) -> {
+              permitTaken.countDown();
+              awaitQuietly(releaseHolder);
+              return new StorageBlobContent(blobId, BYTES, MEDIA_TYPE, BYTES.length);
+            });
     ProviderInlineBlobReader reader =
         new ProviderInlineBlobReader(
             blockingService, limits(builder().maxConcurrentDownloads(1)), Ticker.systemTicker());
@@ -475,6 +479,15 @@ class ProviderInlineBlobReaderTest {
 
   private static ProviderInlineBlobReader.Limits limits(LimitsBuilder builder) {
     return builder.build();
+  }
+
+  private static StorageBlobContentService service(
+      BiFunction<UUID, Long, StorageBlobContent> loader) {
+    StorageBlobContentService result = mock(StorageBlobContentService.class);
+    when(result.readBlobContent(any(), anyLong()))
+        .thenAnswer(
+            invocation -> loader.apply(invocation.getArgument(0), invocation.getArgument(1)));
+    return result;
   }
 
   /** 测试用可注入上限：默认值远小于生产默认值，避免测试分配大对象。 */

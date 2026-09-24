@@ -7,7 +7,8 @@ describe('projectsApi', () => {
     id: 'a0000000-0000-0000-0000-000000000001',
     title: 'P1',
     description: '',
-    coordinatorAgentName: 'coordinator-agent',
+    yoloEnabled: true,
+    maxReviewRejections: '3',
     nextIssueNumber: '1',
     version: '0',
     archivedAt: null,
@@ -21,12 +22,10 @@ describe('projectsApi', () => {
     number: '1',
     title: 'I1',
     description: '',
-    status: 'TODO',
+    status: 'TODO' as const,
     assigneeAgentName: null,
     reviewerAgentName: null,
     version: '0',
-    specRevision: '0',
-    inputSequence: '0',
     archivedAt: null,
     createdAt: '2026-09-14T00:00:00Z',
     updatedAt: '2026-09-14T00:00:00Z',
@@ -53,13 +52,15 @@ describe('projectsApi', () => {
     expect(res[0].id).toBe(mockProject.id)
   })
 
-  it('createProject should post to /projects', async () => {
-    // 测试意图：验证 createProject 发送 POST /projects 并携带创建请求负载
+  it('createProject should post to /projects with yoloEnabled and maxReviewRejections', async () => {
+    // 测试意图：验证 createProject 发送 POST /projects 并携带包含 yoloEnabled 与 maxReviewRejections 的请求
     vi.mocked(mockClient.post).mockResolvedValueOnce(mockProject)
-    const req = { title: 'P1', description: 'desc', coordinatorAgentName: 'coord' }
+    const req = { title: 'P1', description: 'desc', yoloEnabled: true, maxReviewRejections: 3 }
     const res = await api.createProject(req)
     expect(mockClient.post).toHaveBeenCalledWith('/projects', req)
     expect(res.title).toBe('P1')
+    expect(res.yoloEnabled).toBe(true)
+    expect(res.maxReviewRejections).toBe('3')
   })
 
   it('getProject should query /projects/:id', async () => {
@@ -71,9 +72,9 @@ describe('projectsApi', () => {
   })
 
   it('updateProject should put to /projects/:id with expectedVersion', async () => {
-    // 测试意图：验证 updateProject 执行 PUT 并传递 expectedVersion
-    vi.mocked(mockClient.put).mockResolvedValueOnce({ ...mockProject, version: '1' })
-    const req = { expectedVersion: '0', title: 'New Title' }
+    // 测试意图：验证 updateProject 执行 PUT 并传递 expectedVersion 及新配置项
+    vi.mocked(mockClient.put).mockResolvedValueOnce({ ...mockProject, version: '1', maxReviewRejections: '5' })
+    const req = { expectedVersion: '0', title: 'New Title', maxReviewRejections: 5 }
     const res = await api.updateProject(mockProject.id, req)
     expect(mockClient.put).toHaveBeenCalledWith(`/projects/${mockProject.id}`, req)
     expect(res.version).toBe('1')
@@ -107,20 +108,26 @@ describe('projectsApi', () => {
   })
 
   it('getProjectSnapshot should query /projects/:id/snapshot and decode', async () => {
-    // 测试意图：验证读取权威 Snapshot 面
+    // 测试意图：验证读取权威 Snapshot 面，正确解码包含 reviewRejectionCount 的 Issue 快照
     const snapshotRaw = {
       project: mockProject,
-      issues: [],
+      issues: [
+        {
+          issue: mockIssue,
+          blocked: true,
+          reviewRejectionCount: '3',
+          currentOrLatestRun: null,
+        },
+      ],
       dependencies: [],
-      coordinatorSessionId: null,
-      coordinatorSession: null,
-      coordinatorThread: null,
     }
     vi.mocked(mockClient.get).mockResolvedValueOnce(snapshotRaw)
     const res = await api.getProjectSnapshot(mockProject.id)
     expect(mockClient.get).toHaveBeenCalledWith(`/projects/${mockProject.id}/snapshot`)
     expect(res.project.id).toBe(mockProject.id)
-    expect(res.issues).toHaveLength(0)
+    expect(res.issues).toHaveLength(1)
+    expect(res.issues[0].blocked).toBe(true)
+    expect(res.issues[0].reviewRejectionCount).toBe('3')
   })
 
   it('createIssue should post to /projects/:id/issues', async () => {
@@ -132,21 +139,50 @@ describe('projectsApi', () => {
     expect(res.id).toBe(mockIssue.id)
   })
 
-  it('getIssue should query /issues/:id', async () => {
-    // 测试意图：验证获取单个 Issue 详情
+  it('getIssue should query /issues/:id with paging params', async () => {
+    // 测试意图：验证获取单个 Issue 详情包含 sessions 与 activities 并传递 afterSequence
     const issueDetailRaw = {
       issue: mockIssue,
       blocked: false,
       dependencies: [],
-      inputs: [],
+      sessions: [],
+      activities: [],
+      nextActivityCursor: null,
       runs: [],
       currentRun: null,
       latestRun: null,
     }
     vi.mocked(mockClient.get).mockResolvedValueOnce(issueDetailRaw)
-    const res = await api.getIssue(mockIssue.id)
-    expect(mockClient.get).toHaveBeenCalledWith(`/issues/${mockIssue.id}`)
+    const res = await api.getIssue(mockIssue.id, '10', 20)
+    expect(mockClient.get).toHaveBeenCalledWith(`/issues/${mockIssue.id}`, {
+      params: { afterSequence: '10', limit: 20 },
+    })
     expect(res.issue.id).toBe(mockIssue.id)
+  })
+
+  it('listActivities should query /issues/:id/activities', async () => {
+    // 测试意图：验证分页查询 Issue 活动流
+    const activityRaw = {
+      issueId: mockIssue.id,
+      sequence: '1',
+      kind: 'INSTRUCTION',
+      actorType: 'HUMAN',
+      actorAgentName: null,
+      targetRole: 'EXECUTOR',
+      runId: null,
+      submissionRunId: null,
+      decision: null,
+      body: 'Do X',
+      idempotencyKey: null,
+      createdAt: '2026-09-14T00:00:00Z',
+    }
+    vi.mocked(mockClient.get).mockResolvedValueOnce([activityRaw])
+    const res = await api.listActivities(mockIssue.id, '0', 50)
+    expect(mockClient.get).toHaveBeenCalledWith(`/issues/${mockIssue.id}/activities`, {
+      params: { afterSequence: '0', limit: 50 },
+    })
+    expect(res).toHaveLength(1)
+    expect(res[0].body).toBe('Do X')
   })
 
   it('updateIssue should put to /issues/:id', async () => {
@@ -177,6 +213,36 @@ describe('projectsApi', () => {
     expect(res.status).toBe('BACKLOG')
   })
 
+  it('blockIssue should post to /issues/:id/block with reason', async () => {
+    // 测试意图：验证人工阻塞 Issue 并发送必填 reason
+    vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, status: 'BLOCKED' })
+    const res = await api.blockIssue(mockIssue.id, {
+      expectedVersion: '1',
+      reason: 'Wait for customer clarification',
+    })
+    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/block`, {
+      expectedVersion: '1',
+      reason: 'Wait for customer clarification',
+    })
+    expect(res.status).toBe('BLOCKED')
+  })
+
+  it('recoverIssue should post to /issues/:id/recover with toBacklog option', async () => {
+    // 测试意图：验证人工恢复 Issue，可指定恢复到 TODO (toBacklog: false) 或 BACKLOG (toBacklog: true)
+    vi.mocked(mockClient.post).mockResolvedValueOnce({ ...mockIssue, status: 'TODO' })
+    const res = await api.recoverIssue(mockIssue.id, {
+      expectedVersion: '2',
+      toBacklog: false,
+      comment: 'Resume working',
+    })
+    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/recover`, {
+      expectedVersion: '2',
+      toBacklog: false,
+      comment: 'Resume working',
+    })
+    expect(res.status).toBe('TODO')
+  })
+
   it('addIssueDependency and removeIssueDependency should construct correct requests', async () => {
     // 测试意图：验证依赖增删操作与 expectedVersion 传递
     const depMock = {
@@ -203,45 +269,41 @@ describe('projectsApi', () => {
     )
   })
 
-  it('appendIssueInput should post to /issues/:id/inputs', async () => {
-    // 测试意图：验证人类向 Issue 追加输入
-    const inputMock = {
+  it('appendIssueActivity should post to /issues/:id/activities with targetRole', async () => {
+    // 测试意图：验证追加 Issue Activity（带 targetRole）
+    const activityMock = {
       issueId: mockIssue.id,
       sequence: '1',
-      kind: 'HUMAN',
-      body: 'Answer',
+      kind: 'INSTRUCTION',
+      actorType: 'HUMAN',
+      actorAgentName: null,
+      targetRole: 'EXECUTOR',
+      runId: null,
+      submissionRunId: null,
+      decision: null,
+      body: 'Focus on performance',
       idempotencyKey: null,
       createdAt: '2026-09-14T00:00:00Z',
     }
-    vi.mocked(mockClient.post).mockResolvedValueOnce(inputMock)
-    const res = await api.appendIssueInput(mockIssue.id, { body: 'Answer' })
-    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/inputs`, {
-      body: 'Answer',
+    vi.mocked(mockClient.post).mockResolvedValueOnce(activityMock)
+    const res = await api.appendIssueActivity(mockIssue.id, {
+      body: 'Focus on performance',
+      targetRole: 'EXECUTOR',
     })
-    expect(res.body).toBe('Answer')
+    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/activities`, {
+      body: 'Focus on performance',
+      targetRole: 'EXECUTOR',
+    })
+    expect(res.body).toBe('Focus on performance')
+    expect(res.targetRole).toBe('EXECUTOR')
   })
 
   it('reviewIssue should post review decision', async () => {
-    // 测试意图：验证人工 Review 接口调用与返回值解析
-    const runSummaryMock = {
-      id: 'd0000000-0000-0000-0000-000000000001',
-      issueId: mockIssue.id,
-      ordinal: '2',
-      role: 'REVIEWER',
-      actorType: 'HUMAN',
-      agentName: null,
-      submissionRunId: null,
-      status: 'COMPLETED',
-      outcome: 'APPROVED',
-      waitingReason: null,
-      createdAt: '2026-09-14T00:00:00Z',
-      completedAt: '2026-09-14T00:01:00Z',
-    }
-    vi.mocked(mockClient.post).mockResolvedValueOnce(runSummaryMock)
-    const reviewReq = { decision: 'APPROVE' as const, summary: 'LGTM' }
-    const res = await api.reviewIssue(mockIssue.id, reviewReq)
+    // 测试意图：验证人工 Review 接口调用（返回 void）
+    vi.mocked(mockClient.post).mockResolvedValueOnce(undefined)
+    const reviewReq = { decision: 'APPROVE' as const, reason: 'LGTM' }
+    await api.reviewIssue(mockIssue.id, reviewReq)
     expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/review`, reviewReq)
-    expect(res.outcome).toBe('APPROVED')
   })
 
   it('cancelIssue and retryIssue should call appropriate endpoints', async () => {
@@ -253,19 +315,26 @@ describe('projectsApi', () => {
       reason: 'No longer needed',
     })
 
-    const retryInputMock = {
+    const retryActivityMock = {
       issueId: mockIssue.id,
       sequence: '2',
-      kind: 'SYSTEM',
+      kind: 'RETRY',
+      actorType: 'HUMAN',
+      actorAgentName: null,
+      targetRole: null,
+      runId: null,
+      submissionRunId: null,
+      decision: null,
       body: 'RETRY',
       idempotencyKey: 'c0000000-0000-0000-0000-000000000002',
       createdAt: '2026-09-14T00:02:00Z',
     }
-    vi.mocked(mockClient.post).mockResolvedValueOnce(retryInputMock)
-    await api.retryIssue(mockIssue.id, { idempotencyKey: retryInputMock.idempotencyKey })
+    vi.mocked(mockClient.post).mockResolvedValueOnce(retryActivityMock)
+    const res = await api.retryIssue(mockIssue.id, { idempotencyKey: retryActivityMock.idempotencyKey })
     expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/retry`, {
-      idempotencyKey: retryInputMock.idempotencyKey,
+      idempotencyKey: retryActivityMock.idempotencyKey,
     })
+    expect(res.kind).toBe('RETRY')
   })
 
   it('archiveIssue and unarchiveIssue should call appropriate endpoints', async () => {

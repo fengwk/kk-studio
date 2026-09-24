@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -50,15 +51,12 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -81,12 +79,13 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final UUID UPLOAD_ID = id(6);
   private static final UUID BLOB_ID = id(7);
   private static final UUID PROJECT_ID = id(8);
-  private static final UUID RUN_ID = id(9);
+  private static final UUID ISSUE_AGENT_SESSION_ID = id(9);
   private static final UUID ISSUE_ID = id(10);
+  private static final String AGENT_NAME = "executor";
   private static final OwnerRef CHAT_OWNER = new OwnerRef(OwnerType.CHAT, CHAT_ID);
   private static final OwnerRef CANVAS_OWNER = new OwnerRef(OwnerType.CANVAS, CANVAS_ID);
-  private static final OwnerRef PROJECT_OWNER = new OwnerRef(OwnerType.PROJECT, PROJECT_ID);
-  private static final OwnerRef ISSUE_RUN_OWNER = new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID);
+  private static final OwnerRef ISSUE_AGENT_SESSION_OWNER =
+      new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, ISSUE_AGENT_SESSION_ID);
   private static final BranchSettings SETTINGS =
       new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
 
@@ -95,10 +94,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private ChatRepository chatRepository;
   private CanvasStore canvasStore;
   private ProjectRepository projectRepository;
-  private ProjectSessionRepository projectSessionRepository;
   private IssueRepository issueRepository;
-  private IssueRunRepository issueRunRepository;
-  private IssueRunSessionRepository issueRunSessionRepository;
+  private IssueAgentSessionRepository issueAgentSessionRepository;
+  private IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessStore store;
@@ -107,6 +105,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private StorageUploadService uploadService;
   private SessionBlobRefManager refManager;
   private AcceptedCommands accepted;
+  private IssueAgentSession agentSessionBinding;
+  private Project project;
+  private Issue issue;
   private HarnessCommandAcceptanceOrchestrator service;
 
   @BeforeEach
@@ -117,10 +118,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
     chatRepository = mock(ChatRepository.class);
     canvasStore = mock(CanvasStore.class);
     projectRepository = mock(ProjectRepository.class);
-    projectSessionRepository = mock(ProjectSessionRepository.class);
     issueRepository = mock(IssueRepository.class);
-    issueRunRepository = mock(IssueRunRepository.class);
-    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
+    issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
+    issueAgentSessionOwnershipRepository = mock(IssueAgentSessionOwnershipRepository.class);
     stores = mock(ObjectProvider.class);
     runtimes = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
@@ -142,18 +142,34 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(mock(Chat.class));
     when(canvasStore.lockDocumentForKeyShare(CANVAS_ID))
         .thenReturn(Optional.of(mock(CanvasDocument.class)));
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(mock(Project.class));
 
-    IssueRun run = mock(IssueRun.class);
-    when(run.getIssueId()).thenReturn(ISSUE_ID);
-    when(run.getActorType()).thenReturn(IssueRunActorType.AGENT);
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
-    Issue issue = mock(Issue.class);
+    agentSessionBinding =
+        IssueAgentSession.builder()
+            .id(ISSUE_AGENT_SESSION_ID)
+            .issueId(ISSUE_ID)
+            .agentName(AGENT_NAME)
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .createdAt(NOW)
+            .updatedAt(NOW)
+            .build();
+    project = mock(Project.class);
+    when(project.getId()).thenReturn(PROJECT_ID);
+    when(project.isArchived()).thenReturn(false);
+    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
+
+    issue = mock(Issue.class);
     when(issue.getId()).thenReturn(ISSUE_ID);
     when(issue.getProjectId()).thenReturn(PROJECT_ID);
+    when(issue.isArchived()).thenReturn(false);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
-    when(issueRunRepository.lockById(RUN_ID)).thenReturn(run);
+    when(issueAgentSessionRepository.getById(ISSUE_AGENT_SESSION_ID))
+        .thenReturn(agentSessionBinding);
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
+        .thenReturn(agentSessionBinding);
+    when(issueAgentSessionOwnershipRepository.findAgentSessionIdBySessionId(SESSION_ID))
+        .thenReturn(ISSUE_AGENT_SESSION_ID);
 
     when(runtime.acceptCommands(any(), any())).thenReturn(accepted);
 
@@ -164,10 +180,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
             chatRepository,
             canvasStore,
             projectRepository,
-            projectSessionRepository,
             issueRepository,
-            issueRunRepository,
-            issueRunSessionRepository,
+            issueAgentSessionRepository,
+            issueAgentSessionOwnershipRepository,
             stores,
             runtimes,
             uploadService,
@@ -175,7 +190,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void createsChatAndCanvasOwnershipAndPreservesNonUserCommands() {
+  void createsChatCanvasAndIssueAgentSessionOwnershipAndPreservesNonUserCommands() {
     // NEW_SESSION preflight 只创建对应 owner relation；SET_* 保持同一命令实例，USER 文本保持幂等键。
     NewThreadCommand setAgent =
         new NewThreadCommand(new SetAgentCommandPayload("assistant"), id(20));
@@ -198,11 +213,22 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     AcceptCommandsCommand canvasCommand = newSession(user(new TextMessageContent("canvas")));
     when(canvasSessionRepository.insert(SESSION_ID, CANVAS_ID)).thenReturn(true);
+
     AcceptancePreflight canvasPreflight = acceptAndCapturePreflight(CANVAS_OWNER, canvasCommand);
     canvasPreflight.prepare(
         transaction, new Session(SESSION_ID, "session", NOW), canvasCommand.commands());
-
     verify(canvasSessionRepository).insert(SESSION_ID, CANVAS_ID);
+
+    AcceptCommandsCommand agentSessionCommand =
+        newSession(user(new TextMessageContent("agent session")));
+    when(issueAgentSessionOwnershipRepository.insert(SESSION_ID, ISSUE_AGENT_SESSION_ID))
+        .thenReturn(true);
+
+    AcceptancePreflight agentSessionPreflight =
+        acceptAndCapturePreflight(ISSUE_AGENT_SESSION_OWNER, agentSessionCommand);
+    agentSessionPreflight.prepare(
+        transaction, new Session(SESSION_ID, "agent session", NOW), agentSessionCommand.commands());
+    verify(issueAgentSessionOwnershipRepository).insert(SESSION_ID, ISSUE_AGENT_SESSION_ID);
   }
 
   @Test
@@ -232,10 +258,29 @@ class HarnessCommandAcceptanceOrchestratorTest {
             List.of(user(new TextMessageContent("thread"))));
     assertSame(accepted, service.accept(CANVAS_OWNER, threadCommand));
 
+    AcceptCommandsCommand agentSessionThreadCommand =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(THREAD_ID, ENTRY_ID, 1),
+            List.of(user(new TextMessageContent("agent thread"))));
+    assertSame(accepted, service.accept(ISSUE_AGENT_SESSION_OWNER, agentSessionThreadCommand));
+
     verify(chatRepository, times(2)).lockForKeyShare(CHAT_ID);
     verify(canvasStore).lockDocumentForKeyShare(CANVAS_ID);
     verify(chatSessionRepository, times(2)).findBySessionId(SESSION_ID);
     verify(canvasSessionRepository).findBySessionId(SESSION_ID);
+    verify(issueAgentSessionOwnershipRepository).findAgentSessionIdBySessionId(SESSION_ID);
+  }
+
+  @Test
+  void authorizesIssueAgentSessionWithCorrectLockOrder() {
+    // 验证 ISSUE_AGENT_SESSION 严格按 Project -> Issue -> IssueAgentSession 加锁与校验
+    AcceptCommandsCommand command = newSession(user(new TextMessageContent("work")));
+    service.accept(ISSUE_AGENT_SESSION_OWNER, command);
+
+    InOrder lockOrder = inOrder(projectRepository, issueRepository, issueAgentSessionRepository);
+    lockOrder.verify(projectRepository).lockForKeyShare(PROJECT_ID);
+    lockOrder.verify(issueRepository).lockById(ISSUE_ID);
+    lockOrder.verify(issueAgentSessionRepository).findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME);
   }
 
   @Test
@@ -253,7 +298,93 @@ class HarnessCommandAcceptanceOrchestratorTest {
             service.accept(
                 CANVAS_OWNER, newSession(user(new TextMessageContent("missing canvas")))));
 
+    when(issueAgentSessionRepository.getById(ISSUE_AGENT_SESSION_ID)).thenReturn(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.accept(
+                ISSUE_AGENT_SESSION_OWNER,
+                newSession(user(new TextMessageContent("missing binding")))));
+
     verify(runtime, never()).acceptCommands(any(), any());
+  }
+
+  @Test
+  void rejectsAcceptanceWhenProjectOrIssueIsArchived() {
+    // 归档的 Project 或 Issue 禁止接受任何命令，统一 backend 防线拦截。
+    when(project.isArchived()).thenReturn(true);
+    AcceptCommandsCommand cmd1 = newSession(user(new TextMessageContent("archived project")));
+    IllegalArgumentException ex1 =
+        assertThrows(
+            IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_SESSION_OWNER, cmd1));
+    assertTrue(ex1.getMessage().contains("archived project"));
+
+    when(project.isArchived()).thenReturn(false);
+    when(issue.isArchived()).thenReturn(true);
+    AcceptCommandsCommand cmd2 = newSession(user(new TextMessageContent("archived issue")));
+    IllegalArgumentException ex2 =
+        assertThrows(
+            IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_SESSION_OWNER, cmd2));
+    assertTrue(ex2.getMessage().contains("archived issue"));
+  }
+
+  @Test
+  void rejectsInconsistentHierarchyOrOwnershipForIssueAgentSession() {
+    // Issue 归属的项目 ID 不匹配
+    Issue inconsistentIssue = mock(Issue.class);
+    when(inconsistentIssue.getId()).thenReturn(ISSUE_ID);
+    when(inconsistentIssue.getProjectId()).thenReturn(id(999));
+    when(inconsistentIssue.isArchived()).thenReturn(false);
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(inconsistentIssue);
+
+    AcceptCommandsCommand cmd1 = newSession(user(new TextMessageContent("bad hierarchy")));
+    IllegalArgumentException ex1 =
+        assertThrows(
+            IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_SESSION_OWNER, cmd1));
+    assertTrue(ex1.getMessage().contains("Issue owner hierarchy is inconsistent"));
+
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
+
+    // 锁定的 binding 与原 binding session 不一致
+    IssueAgentSession inconsistentBinding =
+        IssueAgentSession.builder()
+            .id(ISSUE_AGENT_SESSION_ID)
+            .issueId(ISSUE_ID)
+            .agentName(AGENT_NAME)
+            .sessionId(id(999))
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
+        .thenReturn(inconsistentBinding);
+    AcceptCommandsCommand cmd2 = newSession(user(new TextMessageContent("bad binding")));
+    IllegalArgumentException ex2 =
+        assertThrows(
+            IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_SESSION_OWNER, cmd2));
+    assertTrue(ex2.getMessage().contains("Issue agent session ownership is inconsistent"));
+  }
+
+  @Test
+  void rejectsNewSessionWhenIssueAgentSessionBoundToDifferentSessionOrBranch() {
+    // IssueAgentSession 仅允许绑定与其一致的 sessionId 和 threadId，尝试指定不同 ID 将被确定性拒绝
+    AcceptCommandsCommand diffSessionCmd =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewSession(id(999), THREAD_ID, SETTINGS, null, false),
+            List.of(user(new TextMessageContent("diff session"))));
+    IllegalArgumentException ex1 =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.accept(ISSUE_AGENT_SESSION_OWNER, diffSessionCmd));
+    assertTrue(ex1.getMessage().contains("bound to a different session or branch"));
+
+    AcceptCommandsCommand diffThreadCmd =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewSession(SESSION_ID, id(999), SETTINGS, null, false),
+            List.of(user(new TextMessageContent("diff thread"))));
+    IllegalArgumentException ex2 =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.accept(ISSUE_AGENT_SESSION_OWNER, diffThreadCmd));
+    assertTrue(ex2.getMessage().contains("bound to a different session or branch"));
   }
 
   @Test
@@ -278,6 +409,16 @@ class HarnessCommandAcceptanceOrchestratorTest {
         .thenReturn(new CanvasSession(SESSION_ID, id(98)));
     assertThrows(IllegalArgumentException.class, () -> service.accept(CANVAS_OWNER, canvasEntry));
 
+    AcceptCommandsCommand agentEntry =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, THREAD_ID, false),
+            List.of(user(new TextMessageContent("agent entry"))));
+    when(issueAgentSessionOwnershipRepository.findAgentSessionIdBySessionId(SESSION_ID))
+        .thenReturn(id(97));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.accept(ISSUE_AGENT_SESSION_OWNER, agentEntry));
+
     AcceptCommandsCommand threadCommand =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(THREAD_ID, ENTRY_ID, 1),
@@ -296,9 +437,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void rejectsOwnershipInsertConflicts() {
+  void rejectsOwnershipInsertConflictsForChat() {
     // Relation 未插入或数据库报告 owner 主键冲突时都回滚 acceptance。
-    AcceptCommandsCommand command = newSession(user(new TextMessageContent("ownership")));
+    AcceptCommandsCommand command = newSession(user(new TextMessageContent("chat ownership")));
     AcceptancePreflight preflight = acceptAndCapturePreflight(CHAT_OWNER, command);
     when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(false);
 
@@ -314,6 +455,29 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalStateException.class,
         () ->
             preflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
+  }
+
+  @Test
+  void rejectsOwnershipInsertConflictsForIssueAgentSession() {
+    AcceptCommandsCommand command = newSession(user(new TextMessageContent("agent ownership")));
+    AcceptancePreflight agentPreflight =
+        acceptAndCapturePreflight(ISSUE_AGENT_SESSION_OWNER, command);
+    when(issueAgentSessionOwnershipRepository.insert(SESSION_ID, ISSUE_AGENT_SESSION_ID))
+        .thenReturn(false);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            agentPreflight.prepare(
+                transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
+
+    doThrow(new DataIntegrityViolationException("duplicate binding"))
+        .when(issueAgentSessionOwnershipRepository)
+        .insert(SESSION_ID, ISSUE_AGENT_SESSION_ID);
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            agentPreflight.prepare(
                 transaction, new Session(SESSION_ID, "session", NOW), command.commands()));
   }
 
@@ -345,8 +509,24 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void rejectsNullStorageDependenciesInConstructor() {
-    // 强依赖验证：Upload service 与 Session ref manager 必须非空注入。
+  void rejectsNullDependenciesInConstructor() {
+    // 强依赖验证：各 Repository、Store、Runtime、Upload service 与 Session ref manager 必须非空注入。
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new HarnessCommandAcceptanceOrchestrator(
+                null,
+                canvasSessionRepository,
+                chatRepository,
+                canvasStore,
+                projectRepository,
+                issueRepository,
+                issueAgentSessionRepository,
+                issueAgentSessionOwnershipRepository,
+                stores,
+                runtimes,
+                uploadService,
+                refManager));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -356,10 +536,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 chatRepository,
                 canvasStore,
                 projectRepository,
-                projectSessionRepository,
                 issueRepository,
-                issueRunRepository,
-                issueRunSessionRepository,
+                issueAgentSessionRepository,
+                issueAgentSessionOwnershipRepository,
                 stores,
                 runtimes,
                 null,
@@ -373,10 +552,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 chatRepository,
                 canvasStore,
                 projectRepository,
-                projectSessionRepository,
                 issueRepository,
-                issueRunRepository,
-                issueRunSessionRepository,
+                issueAgentSessionRepository,
+                issueAgentSessionOwnershipRepository,
                 stores,
                 runtimes,
                 uploadService,
@@ -437,86 +615,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
   }
 
   @Test
-  void createsProjectAndIssueRunOwnershipSuccessfully() {
-    AcceptCommandsCommand projectCmd = newSession(user(new TextMessageContent("project")));
-    when(projectSessionRepository.bindSession(PROJECT_ID, SESSION_ID)).thenReturn(true);
-    AcceptancePreflight projectPreflight = acceptAndCapturePreflight(PROJECT_OWNER, projectCmd);
-    projectPreflight.prepare(
-        transaction, new Session(SESSION_ID, "proj", NOW), projectCmd.commands());
-    verify(projectSessionRepository).bindSession(PROJECT_ID, SESSION_ID);
-
-    AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
-    when(issueRunSessionRepository.bindSession(RUN_ID, SESSION_ID)).thenReturn(true);
-    AcceptancePreflight runPreflight = acceptAndCapturePreflight(ISSUE_RUN_OWNER, runCmd);
-    runPreflight.prepare(transaction, new Session(SESSION_ID, "run", NOW), runCmd.commands());
-    verify(issueRunSessionRepository).bindSession(RUN_ID, SESSION_ID);
-  }
-
-  @Test
-  void authorizesProjectAndIssueRunWithCorrectLockOrder() {
-    // 验证 ISSUE_RUN 严格按 Project -> Issue -> IssueRun 加锁并校验
-    AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
-    service.accept(ISSUE_RUN_OWNER, runCmd);
-
-    InOrder lockOrder = inOrder(projectRepository, issueRepository, issueRunRepository);
-    lockOrder.verify(projectRepository).lockForKeyShare(PROJECT_ID);
-    lockOrder.verify(issueRepository).lockById(ISSUE_ID);
-    lockOrder.verify(issueRunRepository).lockById(RUN_ID);
-  }
-
-  @Test
-  void rejectsHumanIssueRunForSessionAcceptance() {
-    IssueRun humanRun = mock(IssueRun.class);
-    when(humanRun.getIssueId()).thenReturn(ISSUE_ID);
-    when(humanRun.getActorType()).thenReturn(IssueRunActorType.HUMAN);
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(humanRun);
-    when(issueRunRepository.lockById(RUN_ID)).thenReturn(humanRun);
-
-    AcceptCommandsCommand runCmd = newSession(user(new TextMessageContent("run")));
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_RUN_OWNER, runCmd));
-  }
-
-  @Test
-  void rejectsProjectAcceptanceWhenProjectIsArchived() {
-    // 测试意图：归档的项目禁止接受任何命令，统一 backend 防线拦截
-    Project archivedProject = mock(Project.class);
-    when(archivedProject.isArchived()).thenReturn(true);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(archivedProject);
-
-    AcceptCommandsCommand cmd = newSession(user(new TextMessageContent("hello")));
-    IllegalArgumentException ex =
-        assertThrows(IllegalArgumentException.class, () -> service.accept(PROJECT_OWNER, cmd));
-    assertTrue(ex.getMessage().contains("archived"));
-  }
-
-  @Test
-  void rejectsNewSessionWhenProjectAlreadyBoundToDifferentSession() {
-    // 测试意图：Project 仅允许绑定一个 Session，尝试发第二个不同 SessionId 的 NEW_SESSION 将被确定性拒绝
-    UUID existingSessionId = UUID.randomUUID();
-    when(projectSessionRepository.findByProjectId(PROJECT_ID))
-        .thenReturn(
-            ProjectSession.builder().projectId(PROJECT_ID).sessionId(existingSessionId).build());
-
-    AcceptCommandsCommand cmd = newSession(user(new TextMessageContent("another session")));
-    IllegalArgumentException ex =
-        assertThrows(IllegalArgumentException.class, () -> service.accept(PROJECT_OWNER, cmd));
-    assertTrue(ex.getMessage().contains("already bound to a different session"));
-  }
-
-  @Test
-  void wrapsDataIntegrityViolationInCreateOwnership() {
-    AcceptCommandsCommand projectCmd = newSession(user(new TextMessageContent("project")));
-    when(projectSessionRepository.bindSession(PROJECT_ID, SESSION_ID))
-        .thenThrow(new DataIntegrityViolationException("duplicate"));
-    AcceptancePreflight projectPreflight = acceptAndCapturePreflight(PROJECT_OWNER, projectCmd);
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            projectPreflight.prepare(
-                transaction, new Session(SESSION_ID, "proj", NOW), projectCmd.commands()));
-  }
-
-  @Test
   void requiresRuntimeAndStoreBeforeAcceptance() {
     // 缺 Runtime 或 Store 时部署必须 fail closed，不能返回伪成功。
     when(runtimes.getIfAvailable()).thenReturn(null);
@@ -530,6 +628,56 @@ class HarnessCommandAcceptanceOrchestratorTest {
         IllegalStateException.class,
         () -> service.accept(CHAT_OWNER, newSession(user(new TextMessageContent("store")))));
     verify(runtime, never()).acceptCommands(any(), any());
+  }
+
+  /**
+   * 测试意图：Issue Agent Branch 不得经产品入口设置或清除 Branch Goal——GOAL 命令必须对 {@code ISSUE_AGENT_SESSION} 的三个
+   * target（NEW_SESSION / NEW_THREAD / THREAD）全部确定性拒绝，且在任何锁与 Runtime 调用之前失败；Chat/Canvas 的普通 Branch
+   * Goal 不受影响。
+   */
+  @Test
+  void rejectsGoalCommandsForIssueAgentSessionBeforeAnyLockOrRuntimeCall() {
+    NewThreadCommand goal =
+        new NewThreadCommand(new GoalCommandPayload("ship the release"), id(21));
+    NewThreadCommand clearGoal = new NewThreadCommand(new GoalCommandPayload(null), id(22));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> service.accept(ISSUE_AGENT_SESSION_OWNER, newSession(goal)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.accept(
+                ISSUE_AGENT_SESSION_OWNER,
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewThread(SESSION_ID, ENTRY_ID, THREAD_ID, false),
+                    List.of(clearGoal))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.accept(
+                ISSUE_AGENT_SESSION_OWNER,
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.Thread(THREAD_ID, ENTRY_ID, 1), List.of(goal))));
+
+    // 拒绝必须在 owner 锁与 Runtime 之前发生：不读取归属、不物化附件、不入队命令。
+    verify(runtime, never()).acceptCommands(any(), any());
+    verify(issueAgentSessionRepository, never()).getById(any());
+    verify(projectRepository, never()).lockForKeyShare(any());
+    verify(issueAgentSessionOwnershipRepository, never()).findAgentSessionIdBySessionId(any());
+  }
+
+  @Test
+  void acceptsGoalCommandsForOrdinaryChatBranches() {
+    // Chat 普通 Branch 的 Goal 是产品能力：同一 GOAL 命令在 CHAT owner 下必须继续被接受。
+    NewThreadCommand goal =
+        new NewThreadCommand(new GoalCommandPayload("ship the release"), id(23));
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
+
+    assertSame(
+        accepted, service.accept(CHAT_OWNER, newSession(goal, user(new TextMessageContent("go")))));
+
+    verify(runtime).acceptCommands(any(), any());
   }
 
   private AcceptancePreflight acceptAndCapturePreflight(

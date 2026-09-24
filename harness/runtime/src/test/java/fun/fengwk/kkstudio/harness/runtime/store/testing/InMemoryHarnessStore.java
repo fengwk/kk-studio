@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -527,6 +528,14 @@ public final class InMemoryHarnessStore implements HarnessStore {
                   entry.payload() instanceof CustomEntryPayload custom
                       && contributorId.equals(custom.contributorId()))
           .toList();
+    }
+
+    @Override
+    public BranchSettings loadBranchSettings(UUID headEntryId) {
+      checkOpen();
+      Objects.requireNonNull(headEntryId, "headEntryId");
+      // 参考实现直接复用完整路径语义：与 PostgreSQL 窄查询保持同一 settings 结果。
+      return loadEntryPath(headEntryId).baseSettings();
     }
 
     @Override

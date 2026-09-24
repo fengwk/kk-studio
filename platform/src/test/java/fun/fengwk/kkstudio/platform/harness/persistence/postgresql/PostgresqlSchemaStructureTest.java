@@ -65,11 +65,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work",
           "project",
-          "issue",
-          "issue_dependency",
-          "issue_input",
-          "issue_run",
-          "issue_controller_work",
+          "project_issue",
+          "project_issue_dependency",
+          "project_issue_agent_session",
+          "project_issue_run",
+          "project_issue_activity",
+          "project_issue_work",
           "session_owner",
           "session_blob_ref",
           "storage_blob",
@@ -250,8 +251,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "session_id",
         "chat_id",
         "canvas_id",
-        "project_id",
-        "issue_run_id",
+        "issue_agent_session_id",
         "created_at");
     assertColumns(
         "storage_blob",
@@ -298,14 +298,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "id",
         "title",
         "description",
-        "coordinator_agent_name",
+        "yolo_enabled",
+        "max_review_rejections",
         "next_issue_number",
         "version",
         "archived_at",
         "created_at",
         "updated_at");
     assertColumns(
-        "issue",
+        "project_issue",
         "id",
         "project_id",
         "number",
@@ -315,28 +316,31 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "assignee_agent_name",
         "reviewer_agent_name",
         "version",
-        "spec_revision",
-        "input_sequence",
         "archived_at",
         "created_at",
         "updated_at");
     assertColumns(
-        "issue_dependency", "issue_id", "depends_on_issue_id", "project_id", "created_at");
+        "project_issue_dependency", "issue_id", "depends_on_issue_id", "project_id", "created_at");
     assertColumns(
-        "issue_input", "issue_id", "sequence", "kind", "body", "idempotency_key", "created_at");
+        "project_issue_agent_session",
+        "id",
+        "issue_id",
+        "agent_name",
+        "session_id",
+        "thread_id",
+        "created_at",
+        "updated_at");
     assertColumns(
-        "issue_run",
+        "project_issue_run",
         "id",
         "issue_id",
         "ordinal",
         "role",
-        "actor_type",
         "agent_name",
         "submission_run_id",
         "status",
         "outcome",
-        "observed_spec_revision",
-        "observed_input_sequence",
+        "observed_activity_sequence",
         "continuation_count",
         "max_continuations",
         "deadline",
@@ -348,7 +352,21 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "completed_at");
     assertColumns(
-        "issue_controller_work",
+        "project_issue_activity",
+        "issue_id",
+        "sequence",
+        "kind",
+        "actor_type",
+        "actor_agent_name",
+        "target_role",
+        "run_id",
+        "submission_run_id",
+        "decision",
+        "body",
+        "idempotency_key",
+        "created_at");
+    assertColumns(
+        "project_issue_work",
         "issue_id",
         "wake_version",
         "due_at",
@@ -451,7 +469,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("jsonb", "canvas_node", "function_config_json");
     assertColumnType("jsonb", "canvas_function_run", "state_json");
     assertColumnType("jsonb", "environment_connection", "runtime_info");
-    assertColumnType("jsonb", "issue_run", "result");
+    assertColumnType("jsonb", "project_issue_run", "result");
     // description 是自由文本字段，不受列宽限制：Catalog 与 ComfyUI 的四个资源都使用 text。
     assertColumnType("text", "agent_provider", "description");
     assertColumnType("text", "agent_model", "description");
@@ -524,6 +542,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   void usesNativeBooleanForFlags() throws SQLException {
     assertColumnType("boolean", "harness_thread", "yolo_enabled");
     assertColumnType("boolean", "chat", "yolo_enabled");
+    assertColumnType("boolean", "project", "yolo_enabled");
   }
 
   @Test
@@ -879,10 +898,11 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "trg_project_issue_changed_session_owner",
             "trg_project_issue_changed_issue",
             "trg_project_issue_changed_dependency",
-            "trg_project_issue_changed_input",
+            "trg_project_issue_changed_activity",
             "trg_project_issue_changed_run",
+            "trg_project_issue_changed_agent_session",
             "trg_project_issue_changed_thread",
-            "trg_issue_controller_work_due"),
+            "trg_project_issue_work_due"),
         triggers,
         "public triggers must equal the exact set of user triggers");
 
@@ -1019,7 +1039,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "canvas_document_version_notify",
             "canvas_function_work_notify",
             "project_issue_changed_notify",
-            "notify_issue_controller_work_due",
+            "notify_project_issue_work_due",
             "skill_package_changed_notify"),
         functions,
         "only declared notification helpers may exist");
@@ -1113,8 +1133,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumnType("uuid", "session_owner", "session_id");
     assertColumnType("uuid", "session_owner", "chat_id");
     assertColumnType("uuid", "session_owner", "canvas_id");
-    assertColumnType("uuid", "session_owner", "project_id");
-    assertColumnType("uuid", "session_owner", "issue_run_id");
+    assertColumnType("uuid", "session_owner", "issue_agent_session_id");
   }
 
   @Test
@@ -1238,10 +1257,12 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         deferred.add(rs.getString(1));
       }
     }
+    // 唯一允许的延迟外键白名单：IssueAgentSession 归属行先于 Harness Session/Thread 建立（owner 授权要求归属先存在），
+    // 三者在同一次接受、同一物理事务内提交，形成循环依赖；其余外键必须立即校验，版本与 head 绑定均为 runtime-owned。
     assertEquals(
-        Set.of(),
+        Set.of("fk_project_issue_agent_session_session", "fk_project_issue_agent_session_thread"),
         deferred,
-        "version and head binding are runtime-owned: no FK needs deferral in the new protocol");
+        "only the IssueAgentSession ownership bootstrap cycle may defer its foreign keys");
   }
 
   @Test
@@ -1316,15 +1337,18 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_storage_blob_active_hash",
             "uk_storage_upload_candidate",
             "uk_mcp_tool_server_source_name",
-            "uk_session_owner_project",
-            "uk_issue_project_number",
-            "uk_issue_id_project",
-            "uk_issue_input_idempotency",
-            "uk_issue_run_issue_ordinal",
-            "uk_issue_run_id_issue",
-            "uk_issue_run_terminal_action",
-            "uk_issue_run_single_active",
-            "uk_session_owner_issue_run"),
+            "uk_project_issue_project_number",
+            "uk_project_issue_id_project",
+            "uk_project_issue_agent_session_issue_agent",
+            "uk_project_issue_agent_session_id_issue",
+            "uk_project_issue_agent_session_session",
+            "uk_project_issue_agent_session_thread",
+            "uk_project_issue_activity_idempotency",
+            "uk_project_issue_run_issue_ordinal",
+            "uk_project_issue_run_id_issue",
+            "uk_project_issue_run_terminal_action",
+            "uk_project_issue_run_single_active",
+            "uk_session_owner_issue_agent_session"),
         indexes,
         "the final schema must expose only its declared domain unique keys");
 
@@ -1347,13 +1371,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
                     + " 'fk_canvas_function_run_node',"
                     + " 'fk_canvas_function_resource_pin_node',"
                     + " 'fk_session_owner_chat', 'fk_session_owner_canvas',"
-                    + " 'fk_session_owner_project', 'fk_session_owner_issue_run',"
+                    + " 'fk_session_owner_issue_agent_session',"
                     + " 'fk_session_owner_session', 'fk_mcp_tool_server',"
-                    + " 'fk_project_coordinator', 'fk_issue_project',"
-                    + " 'fk_issue_assignee', 'fk_issue_reviewer',"
-                    + " 'fk_issue_dependency_issue', 'fk_issue_dependency_depends_on',"
-                    + " 'fk_issue_input_issue', 'fk_issue_run_issue', 'fk_issue_run_agent',"
-                    + " 'fk_issue_run_submission', 'fk_issue_controller_work_issue')")) {
+                    + " 'fk_project_issue_project',"
+                    + " 'fk_project_issue_assignee', 'fk_project_issue_reviewer',"
+                    + " 'fk_project_issue_dependency_issue', 'fk_project_issue_dependency_depends_on',"
+                    + " 'fk_project_issue_agent_session_issue', 'fk_project_issue_agent_session_agent',"
+                    + " 'fk_project_issue_agent_session_session', 'fk_project_issue_agent_session_thread',"
+                    + " 'fk_project_issue_activity_issue', 'fk_project_issue_activity_agent',"
+                    + " 'fk_project_issue_activity_run', 'fk_project_issue_activity_submission',"
+                    + " 'fk_project_issue_run_issue', 'fk_project_issue_run_agent',"
+                    + " 'fk_project_issue_run_submission', 'fk_project_issue_work_issue')")) {
       while (rs.next()) {
         foreignKeys.add(rs.getString(1));
       }
@@ -1377,21 +1405,26 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_canvas_function_resource_pin_node",
             "fk_session_owner_chat",
             "fk_session_owner_canvas",
-            "fk_session_owner_project",
-            "fk_session_owner_issue_run",
+            "fk_session_owner_issue_agent_session",
             "fk_session_owner_session",
             "fk_mcp_tool_server",
-            "fk_project_coordinator",
-            "fk_issue_project",
-            "fk_issue_assignee",
-            "fk_issue_reviewer",
-            "fk_issue_dependency_issue",
-            "fk_issue_dependency_depends_on",
-            "fk_issue_input_issue",
-            "fk_issue_run_issue",
-            "fk_issue_run_agent",
-            "fk_issue_run_submission",
-            "fk_issue_controller_work_issue"),
+            "fk_project_issue_project",
+            "fk_project_issue_assignee",
+            "fk_project_issue_reviewer",
+            "fk_project_issue_dependency_issue",
+            "fk_project_issue_dependency_depends_on",
+            "fk_project_issue_agent_session_issue",
+            "fk_project_issue_agent_session_agent",
+            "fk_project_issue_agent_session_session",
+            "fk_project_issue_agent_session_thread",
+            "fk_project_issue_activity_issue",
+            "fk_project_issue_activity_agent",
+            "fk_project_issue_activity_run",
+            "fk_project_issue_activity_submission",
+            "fk_project_issue_run_issue",
+            "fk_project_issue_run_agent",
+            "fk_project_issue_run_submission",
+            "fk_project_issue_work_issue"),
         foreignKeys,
         "all declared ownership relations must be enforced by PostgreSQL");
   }

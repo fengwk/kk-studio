@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
@@ -97,7 +98,7 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  /** 映射 owner，并只允许产品公开的 CHAT/CANVAS/PROJECT discriminator。 */
+  /** 映射 owner，并只允许产品公开的 CHAT/CANVAS/ISSUE_AGENT_SESSION discriminator。 */
   public static OwnerRef toOwner(HarnessCommandOwnerDTO dto) {
     requireNonNull(dto, "owner");
     String type = requireText(dto.getType(), "owner.type");
@@ -106,12 +107,13 @@ public final class HarnessRuntimeRequestMapper {
       ownerType = OwnerType.valueOf(type);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
-          "owner.type must be CHAT, CANVAS, or PROJECT: " + type, error);
+          "owner.type must be CHAT, CANVAS, or ISSUE_AGENT_SESSION: " + type, error);
     }
     if (ownerType != OwnerType.CHAT
         && ownerType != OwnerType.CANVAS
-        && ownerType != OwnerType.PROJECT) {
-      throw new IllegalArgumentException("owner.type must be CHAT, CANVAS, or PROJECT: " + type);
+        && ownerType != OwnerType.ISSUE_AGENT_SESSION) {
+      throw new IllegalArgumentException(
+          "owner.type must be CHAT, CANVAS, or ISSUE_AGENT_SESSION: " + type);
     }
     return new OwnerRef(ownerType, parseUuid(dto.getId(), "owner.id"));
   }
@@ -240,11 +242,16 @@ public final class HarnessRuntimeRequestMapper {
     };
   }
 
+  /** rootSettings 是新建 branch 的初始快照：Goal 只由 typed GOAL 用户命令设置，因此这里必须为空。 */
   private static BranchSettings toBranchSettings(HarnessBranchSettingsDTO dto) {
     requireNonNull(dto, "branchSettings");
     if (!dto.hasEnvironmentNameField()) {
       throw new IllegalArgumentException(
           "branchSettings requires an explicit nullable environmentName field");
+    }
+    if (dto.getGoal() != null) {
+      throw new IllegalArgumentException(
+          "branchSettings must not carry a goal; goals are set through a GOAL command");
     }
     return new BranchSettings(
         requireText(dto.getAgentName(), "branchSettings.agentName"),
@@ -276,23 +283,38 @@ public final class HarnessRuntimeRequestMapper {
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
+        requireForbidden(dto.hasTextField(), "text", "command type " + type);
         yield new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, toUserMessageContents(dto)));
       }
+      case "GOAL" -> {
+        requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
+        requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
+        requireForbidden(dto.hasModelField(), "model", "command type " + type);
+        requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
+        // GOAL 必须显式携带 text（显式 null 表示清除），与「字段缺失」严格区分。
+        if (!dto.hasTextField()) {
+          throw new IllegalArgumentException("GOAL requires an explicit nullable text field");
+        }
+        yield new GoalCommandPayload(dto.getText());
+      }
       case "SET_AGENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
+        requireForbidden(dto.hasTextField(), "text", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         yield new SetAgentCommandPayload(requireText(dto.getAgentName(), "agentName"));
       }
       case "SET_MODEL" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
+        requireForbidden(dto.hasTextField(), "text", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasEnvironmentNameField(), "environmentName", "command type " + type);
         yield new SetModelCommandPayload(toModelSelection(requireNonNull(dto.getModel(), "model")));
       }
       case "SET_ENVIRONMENT" -> {
         requireForbidden(dto.hasContentsField(), "contents", "command type " + type);
+        requireForbidden(dto.hasTextField(), "text", "command type " + type);
         requireForbidden(dto.hasAgentNameField(), "agentName", "command type " + type);
         requireForbidden(dto.hasModelField(), "model", "command type " + type);
         // SET_ENVIRONMENT 必须显式携带 environmentName（显式 null 表示解除选择），与「字段缺失」严格区分。
@@ -315,13 +337,15 @@ public final class HarnessRuntimeRequestMapper {
             ThreadCommandType.SET_MODEL,
             ThreadCommandType.SET_ENVIRONMENT);
     int lastSetOrder = -1;
-    int userMessageCount = 0;
+    int userLikeCount = 0;
     for (int i = 0; i < commands.size(); i++) {
       ThreadCommandType type = commands.get(i).payload().type();
-      if (type == ThreadCommandType.USER_MESSAGE) {
-        userMessageCount++;
+      if (type == ThreadCommandType.USER_MESSAGE || type == ThreadCommandType.GOAL) {
+        // typed GOAL 与 USER_MESSAGE 都是 user-like 终止输入：恰有一条且必须在最后。
+        userLikeCount++;
         if (i != commands.size() - 1) {
-          throw new IllegalArgumentException("USER_MESSAGE must be the final HTTP command");
+          throw new IllegalArgumentException(
+              "the terminal user-like command must be the final HTTP command");
         }
         continue;
       }
@@ -332,9 +356,9 @@ public final class HarnessRuntimeRequestMapper {
       }
       lastSetOrder = order;
     }
-    if (userMessageCount != 1) {
+    if (userLikeCount != 1) {
       throw new IllegalArgumentException(
-          "HTTP command batch must contain exactly one USER_MESSAGE");
+          "HTTP command batch must contain exactly one USER_MESSAGE or GOAL command");
     }
   }
 

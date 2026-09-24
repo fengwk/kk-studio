@@ -21,10 +21,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectArchiveRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
@@ -35,11 +33,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 验证 StudioProjectController 的全部 REST 接口端点、Session 查询以及 CAS 409 / 404 错误处理。 */
+/** 验证 StudioProjectController 的全部 REST 接口端点、配置透传以及 CAS 409 / 404 错误处理。 */
 class StudioProjectControllerTest {
 
   private ProjectService projectService;
-  private HarnessOwnerQueryService queryService;
   private ProjectSnapshotAssembler snapshotAssembler;
 
   private MockMvc mockMvc;
@@ -50,12 +47,10 @@ class StudioProjectControllerTest {
   @BeforeEach
   void setUp() {
     projectService = mock(ProjectService.class);
-    queryService = mock(HarnessOwnerQueryService.class);
     snapshotAssembler = mock(ProjectSnapshotAssembler.class);
 
     StudioProjectController controller =
-        new StudioProjectController(
-            projectService, queryService, snapshotAssembler, new ProjectDtoMapper());
+        new StudioProjectController(projectService, snapshotAssembler, new ProjectDtoMapper());
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -76,22 +71,19 @@ class StudioProjectControllerTest {
   }
 
   @Test
-  void testCreateProject() throws Exception {
+  void testCreateProjectDefaultSettings() throws Exception {
     CreateProjectRequestDTO req =
-        CreateProjectRequestDTO.builder()
-            .title("New Project")
-            .description("Desc")
-            .coordinatorAgentName("coord")
-            .build();
+        CreateProjectRequestDTO.builder().title("New Project").description("Desc").build();
     Project created =
         Project.builder()
             .id(projectId)
             .title("New Project")
             .description("Desc")
-            .coordinatorAgentName("coord")
+            .yoloEnabled(true)
+            .maxReviewRejections(3)
             .version(0L)
             .build();
-    when(projectService.createProject("New Project", "Desc", "coord")).thenReturn(created);
+    when(projectService.createProject("New Project", "Desc", true, 3)).thenReturn(created);
 
     mockMvc
         .perform(
@@ -100,7 +92,45 @@ class StudioProjectControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.id").value(projectId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.title").value("New Project"));
+        .andExpect(jsonPath("$.data.title").value("New Project"))
+        .andExpect(jsonPath("$.data.yoloEnabled").value(true))
+        .andExpect(jsonPath("$.data.maxReviewRejections").value("3"));
+
+    verify(projectService).createProject("New Project", "Desc", true, 3);
+  }
+
+  @Test
+  void testCreateProjectExplicitSettings() throws Exception {
+    CreateProjectRequestDTO req =
+        CreateProjectRequestDTO.builder()
+            .title("Custom Project")
+            .description("Desc")
+            .yoloEnabled(false)
+            .maxReviewRejections(5)
+            .build();
+    Project created =
+        Project.builder()
+            .id(projectId)
+            .title("Custom Project")
+            .description("Desc")
+            .yoloEnabled(false)
+            .maxReviewRejections(5)
+            .version(0L)
+            .build();
+    when(projectService.createProject("Custom Project", "Desc", false, 5)).thenReturn(created);
+
+    mockMvc
+        .perform(
+            post("/api/projects")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.id").value(projectId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.data.title").value("Custom Project"))
+        .andExpect(jsonPath("$.data.yoloEnabled").value(false))
+        .andExpect(jsonPath("$.data.maxReviewRejections").value("5"));
+
+    verify(projectService).createProject("Custom Project", "Desc", false, 5);
   }
 
   @Test
@@ -123,17 +153,15 @@ class StudioProjectControllerTest {
             .expectedVersion("1")
             .title("Updated Title")
             .description("Updated Desc")
-            .coordinatorAgentName("new-coord")
             .build();
     Project updated =
         Project.builder()
             .id(projectId)
             .title("Updated Title")
             .description("Updated Desc")
-            .coordinatorAgentName("new-coord")
             .version(2L)
             .build();
-    when(projectService.updateProject(projectId, 1L, "Updated Title", "Updated Desc", "new-coord"))
+    when(projectService.updateProject(projectId, 1L, "Updated Title", "Updated Desc", null, null))
         .thenReturn(updated);
 
     mockMvc
@@ -143,6 +171,44 @@ class StudioProjectControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("2"));
+
+    verify(projectService)
+        .updateProject(projectId, 1L, "Updated Title", "Updated Desc", null, null);
+  }
+
+  @Test
+  void testUpdateProjectWithExplicitSettings() throws Exception {
+    UpdateProjectRequestDTO req =
+        UpdateProjectRequestDTO.builder()
+            .expectedVersion("1")
+            .title("Updated Title")
+            .description("Updated Desc")
+            .yoloEnabled(false)
+            .maxReviewRejections(4)
+            .build();
+    Project updated =
+        Project.builder()
+            .id(projectId)
+            .title("Updated Title")
+            .description("Updated Desc")
+            .yoloEnabled(false)
+            .maxReviewRejections(4)
+            .version(2L)
+            .build();
+    when(projectService.updateProject(projectId, 1L, "Updated Title", "Updated Desc", false, 4))
+        .thenReturn(updated);
+
+    mockMvc
+        .perform(
+            put("/api/projects/" + projectId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("2"))
+        .andExpect(jsonPath("$.data.yoloEnabled").value(false))
+        .andExpect(jsonPath("$.data.maxReviewRejections").value("4"));
+
+    verify(projectService).updateProject(projectId, 1L, "Updated Title", "Updated Desc", false, 4);
   }
 
   @Test
@@ -152,9 +218,8 @@ class StudioProjectControllerTest {
             .expectedVersion("1")
             .title("Updated Title")
             .description("Updated Desc")
-            .coordinatorAgentName("new-coord")
             .build();
-    when(projectService.updateProject(projectId, 1L, "Updated Title", "Updated Desc", "new-coord"))
+    when(projectService.updateProject(projectId, 1L, "Updated Title", "Updated Desc", null, null))
         .thenThrow(new AiVersionConflictException("project", "1", "2"));
 
     mockMvc
@@ -204,23 +269,6 @@ class StudioProjectControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.archivedAt").isEmpty());
-  }
-
-  @Test
-  void testListSessions() throws Exception {
-    // 测试意图：验证 GET /api/projects/{projectId}/sessions 返回对应 Project 的 Session 摘要
-    HarnessSessionSummaryDTO sessionSummary = new HarnessSessionSummaryDTO();
-    UUID sessionId = UUID.randomUUID();
-    sessionSummary.setSessionId(sessionId.toString().toLowerCase());
-    sessionSummary.setName("Coordinator Session");
-    sessionSummary.setThreadCount(1);
-    when(queryService.listProjectSessions(projectId)).thenReturn(List.of(sessionSummary));
-
-    mockMvc
-        .perform(get("/api/projects/" + projectId + "/sessions"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].sessionId").value(sessionId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data[0].name").value("Coordinator Session"));
   }
 
   @Test

@@ -80,8 +80,8 @@ describe('ThreadTranscript', () => {
           {
             id: 'root',
             role: 'entry',
-            kind: 'root',
-            title: '会话开始',
+            kind: 'unknown_entry',
+            title: '未知 Entry',
             text: '已创建会话树根节点。',
             rawPayloadJson: '{}',
             subjectEntryId: 'root',
@@ -95,7 +95,7 @@ describe('ThreadTranscript', () => {
       />,
     )
 
-    expect(screen.getByText('会话开始')).toBeInTheDocument()
+    expect(screen.getByText('未知 Entry')).toBeInTheDocument()
     expect(screen.getByText('已创建会话树根节点。')).toBeInTheDocument()
     expect(screen.getByText('查看原始 Entry')).toBeInTheDocument()
   })

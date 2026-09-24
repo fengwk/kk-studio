@@ -359,13 +359,15 @@ MiniMax Mavis 卡片的 Connect 流程是：
 ### Projects
 
 [ProjectsPage](../../frontend/src/features/projects/ProjectsPage.tsx) 承载 Project 列表
-与 create/edit/archive/delete；[ProjectDetailPage](../../frontend/src/features/projects/ProjectDetailPage.tsx)
-只消费一个 `ProjectSnapshotDTO`（Project、未归档 Issues、依赖、blocked、当前/最近 Run、
-Coordinator Session/Thread）。[IssueBoard](../../frontend/src/features/projects/components/IssueBoard.tsx)
-固定六列 backlog、待办、执行中、等待人类、审核、完成，已取消的 Issue 单独成道；
-IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot。
-[CoordinatorConversation](../../frontend/src/features/projects/components/CoordinatorConversation.tsx)
-接入并托管底座 `AgentPane`（配置单 Session 与归档只读能力约束），首条 command 可在尚无 Session/Thread 时作为草稿发送，会话历史与运行时交互完全复用 AI 运行时底座，Project feature 不维护重复状态机。
+与 create/edit/archive/delete，表单可设 `yoloEnabled` 与审查打回阈值；[ProjectDetailPage](../../frontend/src/features/projects/ProjectDetailPage.tsx)
+只消费一个 `ProjectSnapshotDTO`（Project、未归档 Issues、依赖、blocked、当前审查窗口打回次数、当前/最近 Run）。
+[IssueBoard](../../frontend/src/features/projects/components/IssueBoard.tsx)
+固定七列需求池、待办、执行中、等待人类、审核中、已阻塞、已完成，已取消的 Issue 单独成道；
+BLOCKED 卡片用 Snapshot 中服务端计数与 Project 当前阈值显示「本轮打回次数 / 上限」，不从分页 Activity 推导。
+Issue 创建与规格编辑的执行者、审查者从分页 Agent Catalog 完整枚举后受控选择；下线的历史分配名称在编辑时保留为选项，不静默清空。
+IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot，
+并在 BLOCKED 上提供人工恢复与解除阻塞的理由输入。Issue Agent 的会话与工作 Branch 由 Issue 归属驱动，不在
+Project 页另建会话入口，Project feature 不维护自己的运行时状态机。
 
 [ProjectsInvalidationBridge](../../frontend/src/features/projects/extensions/projects-extension.tsx)
 作为 ExtensionHost overlay 订阅 `{kind: "projects"}`，并通过
@@ -439,7 +441,7 @@ shared UI 传入数据与 callback；[shared/ui/console](../../frontend/src/shar
 | --- | --- |
 | [Bootstrap](../../frontend/src/app/)、[platform](../../frontend/src/platform/) | App redirect、AppShell immersive route 与 Escape、ExtensionHost registry、Workbench slot |
 | [AI](../../frontend/src/features/ai/) | catalog form/normalizer、Pane target/layout、Composer 与附件上传、command batch、Thread timeline、snapshot/realtime、stop/approval/task |
-| [Projects](../../frontend/src/features/projects/) | list/detail、CAS、Issue Board/actions、Coordinator conversation、全局 invalidation |
+| [Projects](../../frontend/src/features/projects/) | list/detail、CAS、Issue Board/actions、BLOCKED 栏、全局 invalidation |
 | [Canvas](../../frontend/src/features/canvas/__tests__/) | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run |
 | [ComfyUI](../../frontend/src/features/comfyui/) | workflow 校验、page/card/panel/editor、run lifecycle、modal |
 | [Settings](../../frontend/src/features/settings/) | schema renderer/validation、draft、permission、browser preference、server CAS |

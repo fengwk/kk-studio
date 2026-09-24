@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.project.controller;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -14,35 +14,42 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.Inspection;
 import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.InspectionStatus;
-import fun.fengwk.kkstudio.platform.project.model.ClaimedControllerWork;
+import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.QualifiedSubmission;
+import fun.fengwk.kkstudio.platform.project.model.ClaimedIssueWork;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
-import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
+import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 class IssueReconcilerTest {
@@ -53,9 +60,12 @@ class IssueReconcilerTest {
   private ProjectRepository projectRepository;
   private IssueRepository issueRepository;
   private IssueRunRepository issueRunRepository;
-  private IssueInputRepository issueInputRepository;
+  private IssueActivityRepository issueActivityRepository;
+  private IssueAgentSessionRepository issueAgentSessionRepository;
+  private IssueDependencyRepository issueDependencyRepository;
   private IssueService issueService;
-  private IssueControllerWorkStore workStore;
+  private IssueRunService issueRunService;
+  private IssueWorkStore workStore;
   private IssueHarnessController harnessController;
   private IssueControllerProperties properties;
   private IssueReconciler reconciler;
@@ -65,9 +75,12 @@ class IssueReconcilerTest {
     projectRepository = mock(ProjectRepository.class);
     issueRepository = mock(IssueRepository.class);
     issueRunRepository = mock(IssueRunRepository.class);
-    issueInputRepository = mock(IssueInputRepository.class);
+    issueActivityRepository = mock(IssueActivityRepository.class);
+    issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
+    issueDependencyRepository = mock(IssueDependencyRepository.class);
     issueService = mock(IssueService.class);
-    workStore = mock(IssueControllerWorkStore.class);
+    issueRunService = mock(IssueRunService.class);
+    workStore = mock(IssueWorkStore.class);
     harnessController = mock(IssueHarnessController.class);
     properties = new IssueControllerProperties();
     properties.setActiveDelay(Duration.ofSeconds(2));
@@ -77,8 +90,11 @@ class IssueReconcilerTest {
             projectRepository,
             issueRepository,
             issueRunRepository,
-            issueInputRepository,
+            issueActivityRepository,
+            issueAgentSessionRepository,
+            issueDependencyRepository,
             issueService,
+            issueRunService,
             workStore,
             harnessController,
             properties,
@@ -87,28 +103,30 @@ class IssueReconcilerTest {
 
   @Test
   void reconcileLocksInCanonicalOrderAndRejectsStaleLeaseWithoutSideEffects() {
-    // 测试意图：验证锁序固定，且 fencing 异常传播以触发事务回滚。
+    // 测试意图：验证锁序固定（project FOR UPDATE -> issue FOR UPDATE -> active run -> work），
+    // 且 fencing 异常传播以触发事务回滚；锁模式必须与业务层一致，否则会退化出锁升级死锁。
     Fixture fixture = fixture(IssueStatus.TODO, null);
-    doThrow(new AiValidationException("controller_work", "Lease expired"))
+    doThrow(new AiValidationException("work", "Lease expired"))
         .when(workStore)
         .renewLease(any(), any(), any(), any());
 
     assertThrows(AiValidationException.class, () -> reconciler.reconcile(fixture.claim()));
 
     InOrder order = inOrder(projectRepository, issueRepository, issueRunRepository, workStore);
-    order.verify(projectRepository).lockForShare(fixture.project().getId());
+    order.verify(projectRepository).lockById(fixture.project().getId());
     order.verify(issueRepository).lockById(fixture.issue().getId());
     order.verify(issueRunRepository).lockActiveByIssueId(fixture.issue().getId());
     order.verify(workStore).renewLease(any(), any(), any(), any());
-    verify(issueRunRepository, never()).create(any());
-    verify(harnessController, never()).bootstrapIfAvailable(any(), any());
+    verify(projectRepository, never()).lockForShare(any());
+    verify(issueRunService, never()).startExecutorRun(any(), any(), any(), anyInt());
+    verify(harnessController, never()).bootstrapIfAvailable(any(), any(), any());
   }
 
   @Test
   void reconcileMissingHierarchySkipsWithoutClaimMutation() {
     // 测试意图：Issue/Project 在 claim 后已删除或层级重校验失败时，不接触已不再可安全归属的 work。
-    ClaimedControllerWork missingClaim =
-        ClaimedControllerWork.builder()
+    ClaimedIssueWork missingClaim =
+        ClaimedIssueWork.builder()
             .issueId(UUID.randomUUID())
             .claimedWakeVersion(1L)
             .leaseToken("lease")
@@ -117,7 +135,7 @@ class IssueReconcilerTest {
     assertEquals(IssueReconcileOutcome.SKIPPED_CONVERGED, reconciler.reconcile(missingClaim));
 
     Fixture missingProject = fixture(IssueStatus.TODO, null);
-    when(projectRepository.lockForShare(missingProject.project().getId())).thenReturn(null);
+    when(projectRepository.lockById(missingProject.project().getId())).thenReturn(null);
     assertEquals(
         IssueReconcileOutcome.SKIPPED_CONVERGED, reconciler.reconcile(missingProject.claim()));
 
@@ -142,32 +160,26 @@ class IssueReconcilerTest {
   }
 
   @Test
-  void reconcileCanceledRunTransitionsAndStopsAfterCommit() {
-    // 测试意图：验证取消 Issue 对活跃 run 做 CAS 终结并登记 Harness stop。
-    Fixture fixture = fixture(IssueStatus.CANCELED, null);
-    IssueRun run = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.RUNNING);
-    when(issueRunRepository.lockActiveByIssueId(fixture.issue().getId())).thenReturn(run);
-    when(issueRunRepository.updateById(run, 0L)).thenReturn(true);
-
-    assertEquals(IssueReconcileOutcome.SKIPPED_CONVERGED, reconciler.reconcile(fixture.claim()));
-
-    assertEquals(IssueRunStatus.CANCELLED, run.getStatus());
-    assertEquals(NOW, run.getCompletedAt());
-    verify(harnessController).stopAfterCommit(run);
+  void reconcileBlockedIssueCompletesWorkWaitingHumanRecovery() {
+    // 测试意图：验证 BLOCKED 状态直接完成 work 且不设置自唤醒调度。
+    Fixture blocked = fixture(IssueStatus.BLOCKED, null);
+    assertEquals(
+        IssueReconcileOutcome.WAITING_HUMAN_RECOVERY, reconciler.reconcile(blocked.claim()));
+    verify(workStore).completeWork(blocked.issue().getId(), "lease", 7L, NOW);
   }
 
   @Test
-  void reconcileCanceledRunIsIdempotentForLatestCancelledRun() {
-    // 测试意图：崩溃恢复后，已转为 CANCELLED 的最新 Run 仍会 best-effort stop，但不重复 CAS。
+  void reconcileCanceledRunTransitionsAndStopsAfterCommit() {
+    // 测试意图：验证取消 Issue 对活跃 run 终结并登记 Harness stop。
     Fixture fixture = fixture(IssueStatus.CANCELED, null);
-    IssueRun cancelled = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.CANCELLED);
-    when(issueRunRepository.findLatestByIssueId(fixture.issue().getId())).thenReturn(cancelled);
-    when(issueRunRepository.lockById(cancelled.getId())).thenReturn(cancelled);
+    IssueRun run = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.RUNNING);
+    when(issueRunRepository.lockActiveByIssueId(fixture.issue().getId())).thenReturn(run);
 
     assertEquals(IssueReconcileOutcome.SKIPPED_CONVERGED, reconciler.reconcile(fixture.claim()));
 
-    verify(issueRunRepository, never()).updateById(any(), anyLong());
-    verify(harnessController).stopAfterCommit(cancelled);
+    verify(issueRunService).failRun(run.getId(), IssueRunStatus.CANCELLED, "Issue was canceled");
+    verify(harnessController).stopAfterCommit(fixture.issue().getId(), run.getAgentName());
+    verify(workStore).completeWork(fixture.issue().getId(), "lease", 7L, NOW);
   }
 
   @Test
@@ -181,7 +193,7 @@ class IssueReconcilerTest {
     when(issueService.isBlocked(blocked.issue().getId())).thenReturn(true);
     assertEquals(IssueReconcileOutcome.DEFERRED_BLOCKED, reconciler.reconcile(blocked.claim()));
 
-    verify(issueRunRepository, never()).create(any());
+    verify(issueRunService, never()).startExecutorRun(any(), any(), any(), anyInt());
   }
 
   @Test
@@ -192,155 +204,187 @@ class IssueReconcilerTest {
 
     assertEquals(IssueReconcileOutcome.NO_ASSIGNEE, reconciler.reconcile(fixture.claim()));
 
-    verify(issueRunRepository, never()).create(any());
+    verify(issueRunService, never()).startExecutorRun(any(), any(), any(), anyInt());
   }
 
   @Test
   void reconcileTodoAtomicallyStartsExecutor() {
-    // 测试意图：验证 executor、Issue 状态、Session 和后续 work 在同一动作中创建。
+    // 测试意图：验证 executor 启动委托给 IssueRunService。
     Fixture fixture = fixture(IssueStatus.TODO, null);
-    when(issueRunRepository.allocateNextOrdinal(fixture.issue().getId())).thenReturn(3L);
-    when(issueRunRepository.create(any())).thenReturn(true);
-    when(issueRepository.updateById(fixture.issue(), 0L)).thenReturn(true);
+    IssueRun run = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.RUNNING);
+    when(issueRunService.startExecutorRun(
+            eq(fixture.issue().getId()),
+            eq(fixture.issue().getAssigneeAgentName()),
+            any(),
+            eq(properties.getMaxContinuations())))
+        .thenReturn(run);
 
     assertEquals(IssueReconcileOutcome.EXECUTOR_STARTED, reconciler.reconcile(fixture.claim()));
 
-    ArgumentCaptor<IssueRun> runCaptor = ArgumentCaptor.forClass(IssueRun.class);
-    verify(issueRunRepository).create(runCaptor.capture());
-    IssueRun run = runCaptor.getValue();
-    assertEquals(IssueRunRole.EXECUTOR, run.getRole());
-    assertEquals(IssueRunStatus.RUNNING, run.getStatus());
-    assertEquals(3L, run.getOrdinal());
-    assertEquals(IssueStatus.IN_PROGRESS, fixture.issue().getStatus());
-    verify(harnessController).bootstrapIfAvailable(fixture.issue(), run);
+    verify(harnessController).bootstrapIfAvailable(fixture.project(), fixture.issue(), run);
   }
 
   @Test
   void reconcileActiveBootstrapsMissingSession() {
     // 测试意图：验证已存在 active run 缺 Session 时仅补建 Session。
     Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    when(harnessController.inspect(fixture.activeRun()))
-        .thenReturn(new Inspection(InspectionStatus.MISSING_SESSION, null));
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun()))
+        .thenReturn(new Inspection(InspectionStatus.MISSING_SESSION, null, null));
 
     assertEquals(IssueReconcileOutcome.SESSION_BOOTSTRAPPED, reconciler.reconcile(fixture.claim()));
 
-    verify(harnessController).bootstrap(fixture.issue(), fixture.activeRun());
+    verify(harnessController).bootstrap(fixture.project(), fixture.issue(), fixture.activeRun());
   }
 
   @Test
   void reconcileActiveMapsDeadlineAndHarnessUnknownThenImmediatelyRequeues() {
-    // 测试意图：验证不可恢复终止原因映射和“迁移后下一 claim attention”单动作边界。
+    // 测试意图：验证不可恢复终止原因映射并立即重新排队。
     Fixture deadline = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
     deadline.activeRun().setDeadline(NOW);
-    when(issueRunRepository.updateById(deadline.activeRun(), 0L)).thenReturn(true);
     assertEquals(
         IssueReconcileOutcome.RUN_DEADLINE_EXCEEDED, reconciler.reconcile(deadline.claim()));
+    verify(issueRunService)
+        .failRun(deadline.activeRun().getId(), IssueRunStatus.FAILED, "Run deadline exceeded");
     verify(workStore).rescheduleWork(deadline.issue().getId(), "lease", 7L, NOW, NOW);
 
     Fixture unknown = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    when(harnessController.inspect(unknown.activeRun()))
-        .thenReturn(new Inspection(InspectionStatus.UNKNOWN, null));
-    when(issueRunRepository.updateById(unknown.activeRun(), 0L)).thenReturn(true);
+    when(harnessController.inspect(unknown.issue(), unknown.activeRun()))
+        .thenReturn(new Inspection(InspectionStatus.UNKNOWN, null, null));
     assertEquals(IssueReconcileOutcome.RUN_UNKNOWN_HARNESS, reconciler.reconcile(unknown.claim()));
-    verify(harnessController).stopAfterCommit(unknown.activeRun());
+    verify(issueRunService)
+        .failRun(unknown.activeRun().getId(), IssueRunStatus.UNKNOWN, "Harness state is unknown");
   }
 
   @Test
   void reconcileActiveProcessingDefers() {
     // 测试意图：验证 Harness 正在处理时不发送 continuation。
     Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    when(harnessController.inspect(fixture.activeRun()))
-        .thenReturn(new Inspection(InspectionStatus.PROCESSING, mockThreadSnapshot()));
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun()))
+        .thenReturn(new Inspection(InspectionStatus.PROCESSING, null, snapshot));
 
     assertEquals(IssueReconcileOutcome.RUN_PROCESSING, reconciler.reconcile(fixture.claim()));
 
-    verify(harnessController, never()).sendSystemContinuation(any(), any(), any());
+    verify(harnessController, never()).sendSystemContinuation(any(), any(), any(), any());
   }
 
   @Test
-  void reconcileConsumesExactlyOneInputAndResumesWaitingHuman() {
-    // 测试意图：验证每次只消费首个未观察输入，并以该 sequence 推进游标。
+  void reconcileActiveAlignsYoloWhenThreadPolicyDiffers() {
+    // 测试意图：验证在投递前对齐 Thread YOLO 设置以匹配 Project。
     Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    fixture.issue().setInputSequence(9L);
+    fixture.project().setYoloEnabled(true);
+    ThreadSnapshot snapshot = mockThreadSnapshot(false);
+    Inspection inspection =
+        new Inspection(InspectionStatus.QUIESCENT, mockAgentSession(fixture), snapshot);
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun())).thenReturn(inspection);
+
+    assertEquals(IssueReconcileOutcome.YOLO_ALIGNED, reconciler.reconcile(fixture.claim()));
+    verify(harnessController)
+        .alignThreadYolo(snapshot.thread().id(), snapshot.thread().version(), true);
+  }
+
+  @Test
+  void reconcileActiveExecutorSubmitsOnQualifiedTurn() {
+    // 测试意图：验证在静止且无待投递 activity 时，合规的 final turn 会触发 completeExecutorRun。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    fixture.project().setYoloEnabled(true);
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    Inspection inspection =
+        new Inspection(InspectionStatus.QUIESCENT, mockAgentSession(fixture), snapshot);
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun())).thenReturn(inspection);
+    when(issueActivityRepository.listPage(fixture.issue().getId(), 0L, 200)).thenReturn(List.of());
+
+    UUID turnEndId = UUID.randomUUID();
+    when(harnessController.findQualifiedSubmission(fixture.activeRun(), snapshot, false))
+        .thenReturn(new QualifiedSubmission(turnEndId, "Done text"));
+
+    assertEquals(IssueReconcileOutcome.EXECUTOR_SUBMITTED, reconciler.reconcile(fixture.claim()));
+    verify(issueRunService)
+        .completeExecutorRun(
+            fixture.activeRun().getId(),
+            "submit:" + fixture.activeRun().getId() + ":" + turnEndId,
+            "Done text",
+            null);
+  }
+
+  @Test
+  void reconcileConsumesActivityAndResumesWaitingHuman() {
+    // 测试意图：验证消费未观察的 activity，推进游标，并恢复 WAITING_HUMAN 状态。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    fixture.project().setYoloEnabled(true);
     fixture.activeRun().setStatus(IssueRunStatus.WAITING_HUMAN);
-    fixture.activeRun().setObservedInputSequence(3L);
-    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, mockThreadSnapshot());
-    IssueInput input = input(fixture.issue(), 4L, IssueInputKind.HUMAN);
-    when(harnessController.inspect(fixture.activeRun())).thenReturn(inspection);
-    when(issueInputRepository.findFirstAfterSequence(fixture.issue().getId(), 3L))
-        .thenReturn(input);
+    fixture.activeRun().setObservedActivitySequence(3L);
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    IssueAgentSession session = mockAgentSession(fixture);
+    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, session, snapshot);
+    IssueActivity activity =
+        IssueActivity.builder()
+            .issueId(fixture.issue().getId())
+            .sequence(4L)
+            .kind(IssueActivityKind.HUMAN_INPUT)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Input body")
+            .build();
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun())).thenReturn(inspection);
+    when(issueActivityRepository.listPage(fixture.issue().getId(), 3L, 200))
+        .thenReturn(List.of(activity));
     when(issueRunRepository.updateById(fixture.activeRun(), 0L)).thenReturn(true);
 
-    assertEquals(
-        IssueReconcileOutcome.USER_CONTINUATION_SENT, reconciler.reconcile(fixture.claim()));
+    assertEquals(IssueReconcileOutcome.ACTIVITY_DELIVERED, reconciler.reconcile(fixture.claim()));
 
     verify(harnessController)
-        .sendUserContinuation(fixture.issue(), fixture.activeRun(), input, inspection);
-    assertEquals(4L, fixture.activeRun().getObservedInputSequence());
+        .deliverActivity(fixture.issue(), fixture.activeRun(), activity, session, snapshot);
+    assertEquals(4L, fixture.activeRun().getObservedActivitySequence());
     assertEquals(IssueRunStatus.RUNNING, fixture.activeRun().getStatus());
-    verify(workStore).rescheduleWork(fixture.issue().getId(), "lease", 7L, NOW, NOW);
   }
 
   @Test
-  void reconcileFinalInputDefersAndWaitingWithoutDeadlineConverges() {
-    // 测试意图：消费最后一个 input 后走 active delay；兼容无 deadline 的 WAITING_HUMAN Run 并完成 work。
-    Fixture finalInput = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    finalInput.issue().setInputSequence(1L);
-    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, mockThreadSnapshot());
-    when(harnessController.inspect(finalInput.activeRun())).thenReturn(inspection);
-    when(issueInputRepository.findFirstAfterSequence(finalInput.issue().getId(), 0L))
-        .thenReturn(input(finalInput.issue(), 1L, IssueInputKind.HUMAN));
-    when(issueRunRepository.updateById(finalInput.activeRun(), 0L)).thenReturn(true);
-
-    assertEquals(
-        IssueReconcileOutcome.USER_CONTINUATION_SENT, reconciler.reconcile(finalInput.claim()));
-    verify(workStore)
-        .rescheduleWork(
-            finalInput.issue().getId(), "lease", 7L, NOW, NOW.plus(properties.getActiveDelay()));
-
+  void reconcileWaitingHumanWithoutDeadlineConverges() {
+    // 测试意图：无 deadline 的 WAITING_HUMAN 完成 work。
     Fixture waiting = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    waiting.project().setYoloEnabled(true);
     waiting.activeRun().setStatus(IssueRunStatus.WAITING_HUMAN);
     waiting.activeRun().setDeadline(null);
-    when(harnessController.inspect(waiting.activeRun())).thenReturn(inspection);
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    Inspection inspection =
+        new Inspection(InspectionStatus.QUIESCENT, mockAgentSession(waiting), snapshot);
+    when(harnessController.inspect(waiting.issue(), waiting.activeRun())).thenReturn(inspection);
+    when(issueActivityRepository.listPage(waiting.issue().getId(), 0L, 200)).thenReturn(List.of());
+
     assertEquals(IssueReconcileOutcome.WAITING_FOR_HUMAN, reconciler.reconcile(waiting.claim()));
     verify(workStore).completeWork(waiting.issue().getId(), "lease", 7L, NOW);
-  }
-
-  @Test
-  void reconcileWaitingHumanDeliversAttentionAndConverges() {
-    // 测试意图：验证静止 WAITING_HUMAN 不被自动 steering，并通知已有 Coordinator。
-    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    fixture.activeRun().setStatus(IssueRunStatus.WAITING_HUMAN);
-    when(harnessController.inspect(fixture.activeRun()))
-        .thenReturn(new Inspection(InspectionStatus.QUIESCENT, mockThreadSnapshot()));
-
-    assertEquals(IssueReconcileOutcome.WAITING_FOR_HUMAN, reconciler.reconcile(fixture.claim()));
-
-    verify(harnessController)
-        .deliverAttention(fixture.project(), fixture.issue(), fixture.activeRun());
-    verify(harnessController, never()).sendSystemContinuation(any(), any(), any());
-    verify(workStore)
-        .rescheduleWork(
-            fixture.issue().getId(), "lease", 7L, NOW, fixture.activeRun().getDeadline());
   }
 
   @Test
   void reconcileQuiescentSendsSteeringOrFailsAtBudget() {
     // 测试意图：验证 continuation 预算的两个边界分支。
     Fixture available = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, mockThreadSnapshot());
-    when(harnessController.inspect(available.activeRun())).thenReturn(inspection);
+    available.project().setYoloEnabled(true);
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    IssueAgentSession session = mockAgentSession(available);
+    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, session, snapshot);
+    when(harnessController.inspect(available.issue(), available.activeRun()))
+        .thenReturn(inspection);
+    when(issueActivityRepository.listPage(available.issue().getId(), 0L, 200))
+        .thenReturn(List.of());
     when(issueRunRepository.updateById(available.activeRun(), 0L)).thenReturn(true);
+
     assertEquals(
         IssueReconcileOutcome.SYSTEM_CONTINUATION_SENT, reconciler.reconcile(available.claim()));
     assertEquals(1, available.activeRun().getContinuationCount());
 
     Fixture exhausted = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    exhausted.project().setYoloEnabled(true);
     exhausted.activeRun().setContinuationCount(exhausted.activeRun().getMaxContinuations());
-    when(harnessController.inspect(exhausted.activeRun())).thenReturn(inspection);
-    when(issueRunRepository.updateById(exhausted.activeRun(), 0L)).thenReturn(true);
+    when(harnessController.inspect(exhausted.issue(), exhausted.activeRun()))
+        .thenReturn(new Inspection(InspectionStatus.QUIESCENT, session, snapshot));
+    when(issueActivityRepository.listPage(exhausted.issue().getId(), 0L, 200))
+        .thenReturn(List.of());
+
     assertEquals(IssueReconcileOutcome.BUDGET_EXHAUSTED, reconciler.reconcile(exhausted.claim()));
-    assertEquals(IssueRunStatus.FAILED, exhausted.activeRun().getStatus());
+    verify(issueRunService)
+        .failRun(
+            exhausted.activeRun().getId(), IssueRunStatus.FAILED, "Continuation budget exhausted");
   }
 
   @Test
@@ -351,171 +395,196 @@ class IssueReconcilerTest {
     submitted.setOutcome(IssueRunOutcome.SUBMITTED);
     when(issueRunRepository.findLatestByIssueId(start.issue().getId())).thenReturn(submitted);
     when(issueRunRepository.lockById(submitted.getId())).thenReturn(submitted);
-    when(issueRunRepository.allocateNextOrdinal(start.issue().getId())).thenReturn(2L);
-    when(issueRunRepository.create(any())).thenReturn(true);
+    when(issueRunService.startReviewerRun(any(), any(), any(), anyInt()))
+        .thenReturn(run(start.issue(), IssueRunRole.REVIEWER, IssueRunStatus.RUNNING));
+
     assertEquals(IssueReconcileOutcome.REVIEWER_STARTED, reconciler.reconcile(start.claim()));
 
     Fixture retry = fixture(IssueStatus.IN_REVIEW, null);
     IssueRun failed = run(retry.issue(), IssueRunRole.REVIEWER, IssueRunStatus.FAILED);
     when(issueRunRepository.findLatestByIssueId(retry.issue().getId())).thenReturn(failed);
     when(issueRunRepository.lockById(failed.getId())).thenReturn(failed);
-    when(issueInputRepository.findFirstByKindAfterSequence(
-            retry.issue().getId(), IssueInputKind.RETRY, 0L))
-        .thenReturn(input(retry.issue(), 1L, IssueInputKind.RETRY));
-    when(issueRunRepository.allocateNextOrdinal(retry.issue().getId())).thenReturn(2L);
-    when(issueRunRepository.create(any())).thenReturn(true);
+    when(issueActivityRepository.existsAfterSequenceAndKind(
+            retry.issue().getId(), 0L, IssueActivityKind.RETRY))
+        .thenReturn(true);
+    when(issueRunService.startReviewerRun(any(), any(), any(), anyInt()))
+        .thenReturn(run(retry.issue(), IssueRunRole.REVIEWER, IssueRunStatus.RUNNING));
+
     assertEquals(IssueReconcileOutcome.REVIEWER_RETRY_STARTED, reconciler.reconcile(retry.claim()));
   }
 
   @Test
-  void reconcileReviewCoversHumanArchivedAndNonSubmittedConvergence() {
-    // 测试意图：覆盖人工 Review、失败无 retry、归档重试、归档新 Review 与非 SUBMITTED 历史的确定性收敛。
+  void reconcileReviewCoversHumanAndRefusesSameAssigneeReviewer() {
+    // 测试意图：验证人工 Review 与 Assignee==Reviewer 时的自动审查拒绝。
     Fixture human = fixture(IssueStatus.IN_REVIEW, null);
     human.issue().setReviewerAgentName(null);
     assertEquals(IssueReconcileOutcome.WAITING_HUMAN_REVIEW, reconciler.reconcile(human.claim()));
 
-    Fixture failed = fixture(IssueStatus.IN_REVIEW, null);
-    IssueRun failedReviewer = run(failed.issue(), IssueRunRole.REVIEWER, IssueRunStatus.FAILED);
-    when(issueRunRepository.findLatestByIssueId(failed.issue().getId())).thenReturn(failedReviewer);
-    when(issueRunRepository.lockById(failedReviewer.getId())).thenReturn(failedReviewer);
-    assertEquals(IssueReconcileOutcome.CONVERGED_FAILED, reconciler.reconcile(failed.claim()));
-
-    Fixture archivedRetry = fixture(IssueStatus.IN_REVIEW, null);
-    archivedRetry.project().setArchivedAt(NOW);
-    IssueRun retryReviewer =
-        run(archivedRetry.issue(), IssueRunRole.REVIEWER, IssueRunStatus.UNKNOWN);
-    when(issueRunRepository.findLatestByIssueId(archivedRetry.issue().getId()))
-        .thenReturn(retryReviewer);
-    when(issueRunRepository.lockById(retryReviewer.getId())).thenReturn(retryReviewer);
-    when(issueInputRepository.findFirstByKindAfterSequence(
-            archivedRetry.issue().getId(), IssueInputKind.RETRY, 0L))
-        .thenReturn(input(archivedRetry.issue(), 1L, IssueInputKind.RETRY));
+    Fixture sameAgent = fixture(IssueStatus.IN_REVIEW, null);
+    sameAgent.issue().setReviewerAgentName("executor-agent");
+    sameAgent.issue().setAssigneeAgentName("executor-agent");
     assertEquals(
-        IssueReconcileOutcome.DEFERRED_ARCHIVED, reconciler.reconcile(archivedRetry.claim()));
-
-    Fixture archivedReview = fixture(IssueStatus.IN_REVIEW, null);
-    archivedReview.project().setArchivedAt(NOW);
-    IssueRun submission =
-        run(archivedReview.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.COMPLETED);
-    submission.setOutcome(IssueRunOutcome.SUBMITTED);
-    when(issueRunRepository.findLatestByIssueId(archivedReview.issue().getId()))
-        .thenReturn(submission);
-    when(issueRunRepository.lockById(submission.getId())).thenReturn(submission);
-    assertEquals(
-        IssueReconcileOutcome.DEFERRED_ARCHIVED, reconciler.reconcile(archivedReview.claim()));
-
-    Fixture nonSubmitted = fixture(IssueStatus.IN_REVIEW, null);
-    IssueRun irrelevant =
-        run(nonSubmitted.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.COMPLETED);
-    when(issueRunRepository.findLatestByIssueId(nonSubmitted.issue().getId()))
-        .thenReturn(irrelevant);
-    when(issueRunRepository.lockById(irrelevant.getId())).thenReturn(irrelevant);
-    assertEquals(
-        IssueReconcileOutcome.SKIPPED_CONVERGED, reconciler.reconcile(nonSubmitted.claim()));
-  }
-
-  @Test
-  void reconcileFailedRunWithoutRetryDeliversAttentionWithoutCreatingSession() {
-    // 测试意图：验证失败收敛只走既有 Coordinator 边界，不创建 Project Session。
-    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, null);
-    IssueRun failed = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.FAILED);
-    when(issueRunRepository.findLatestByIssueId(fixture.issue().getId())).thenReturn(failed);
-    when(issueRunRepository.lockById(failed.getId())).thenReturn(failed);
-
-    assertEquals(IssueReconcileOutcome.CONVERGED_FAILED, reconciler.reconcile(fixture.claim()));
-
-    verify(harnessController).deliverAttention(fixture.project(), fixture.issue(), failed);
-    verify(harnessController, never()).bootstrapIfAvailable(any(), any());
+        IssueReconcileOutcome.WAITING_HUMAN_REVIEW, reconciler.reconcile(sameAgent.claim()));
   }
 
   @Test
   void reconcileFailedExecutorRequiresRetryAndUnblockedProject() {
-    // 测试意图：验证 executor retry 仍遵守依赖与归档门禁。
+    // 测试意图：验证 executor retry 遵守依赖门禁。
     Fixture fixture = fixture(IssueStatus.IN_PROGRESS, null);
-    IssueRun failed = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.UNKNOWN);
+    IssueRun failed = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.FAILED);
     when(issueRunRepository.findLatestByIssueId(fixture.issue().getId())).thenReturn(failed);
     when(issueRunRepository.lockById(failed.getId())).thenReturn(failed);
-    when(issueInputRepository.findFirstByKindAfterSequence(
-            fixture.issue().getId(), IssueInputKind.RETRY, 0L))
-        .thenReturn(input(fixture.issue(), 1L, IssueInputKind.RETRY));
+    when(issueActivityRepository.existsAfterSequenceAndKind(
+            fixture.issue().getId(), 0L, IssueActivityKind.RETRY))
+        .thenReturn(true);
     when(issueService.isBlocked(fixture.issue().getId())).thenReturn(true);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_BLOCKED, reconciler.reconcile(fixture.claim()));
-
-    verify(issueRunRepository, never()).create(any());
+    verify(issueRunService, never()).startExecutorRun(any(), any(), any(), anyInt());
   }
 
   @Test
-  void reconcileFailedExecutorCoversArchivedMissingAssigneeAndRetryStart() {
-    // 测试意图：显式 RETRY 仍受归档/assignee 门禁，门禁通过后创建同角色新 ordinal。
-    Fixture archived = failedExecutorWithRetry();
-    archived.project().setArchivedAt(NOW);
-    assertEquals(IssueReconcileOutcome.DEFERRED_ARCHIVED, reconciler.reconcile(archived.claim()));
+  void reconcileFailedExecutorCoversRetryStart() {
+    // 测试意图：验证失败 executor 在新 RETRY activity 驱动下重新启动 run。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, null);
+    IssueRun failed = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.FAILED);
+    when(issueRunRepository.findLatestByIssueId(fixture.issue().getId())).thenReturn(failed);
+    when(issueRunRepository.lockById(failed.getId())).thenReturn(failed);
+    when(issueActivityRepository.existsAfterSequenceAndKind(
+            fixture.issue().getId(), 0L, IssueActivityKind.RETRY))
+        .thenReturn(true);
+    when(issueRunService.startExecutorRun(any(), any(), any(), anyInt()))
+        .thenReturn(run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.RUNNING));
 
-    Fixture missingAssignee = failedExecutorWithRetry();
-    missingAssignee.issue().setAssigneeAgentName(null);
-    assertEquals(IssueReconcileOutcome.NO_ASSIGNEE, reconciler.reconcile(missingAssignee.claim()));
-
-    Fixture retry = failedExecutorWithRetry();
-    when(issueRunRepository.allocateNextOrdinal(retry.issue().getId())).thenReturn(2L);
-    when(issueRunRepository.create(any())).thenReturn(true);
-    assertEquals(IssueReconcileOutcome.RETRY_RUN_STARTED, reconciler.reconcile(retry.claim()));
-    verify(harnessController).bootstrapIfAvailable(eq(retry.issue()), any());
+    assertEquals(IssueReconcileOutcome.RETRY_RUN_STARTED, reconciler.reconcile(fixture.claim()));
   }
 
   @Test
-  void reconcileRejectsCorruptRunShapesAndMutationFailures() {
-    // 测试意图：损坏 actor/role 与所有关键 CAS 失败都必须立即抛出，禁止继续 bootstrap 或完成 work。
-    Fixture humanActor = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    humanActor.activeRun().setActorType(IssueRunActorType.HUMAN);
-    assertThrows(IllegalStateException.class, () -> reconciler.reconcile(humanActor.claim()));
-
+  void reconcileRejectsCorruptRunShapes() {
+    // 测试意图：损坏 actor/role 与所有关键 CAS 失败都必须立即抛出。
     Fixture wrongActiveRole = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.REVIEWER);
     assertThrows(IllegalStateException.class, () -> reconciler.reconcile(wrongActiveRole.claim()));
 
-    Fixture wrongLatestRole = failedExecutorWithRetry();
+    Fixture wrongLatestRole = fixture(IssueStatus.IN_PROGRESS, null);
     IssueRun reviewer = run(wrongLatestRole.issue(), IssueRunRole.REVIEWER, IssueRunStatus.FAILED);
     when(issueRunRepository.findLatestByIssueId(wrongLatestRole.issue().getId()))
         .thenReturn(reviewer);
     when(issueRunRepository.lockById(reviewer.getId())).thenReturn(reviewer);
     assertThrows(IllegalStateException.class, () -> reconciler.reconcile(wrongLatestRole.claim()));
+  }
 
-    Fixture createFailure = fixture(IssueStatus.TODO, null);
-    when(issueRunRepository.allocateNextOrdinal(createFailure.issue().getId())).thenReturn(1L);
-    assertThrows(IllegalStateException.class, () -> reconciler.reconcile(createFailure.claim()));
+  @Test
+  void reconcileActiveFullWindowAdvancesCursorAndReschedulesImmediately() {
+    // 测试意图：有界扫描窗口读满（200条非定向活动）时，推进已检视游标并立即重新排队，绝不发送 continuation。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    fixture.project().setYoloEnabled(true);
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    IssueAgentSession session = mockAgentSession(fixture);
+    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, session, snapshot);
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun())).thenReturn(inspection);
 
-    Fixture issueCasFailure = fixture(IssueStatus.TODO, null);
-    when(issueRunRepository.allocateNextOrdinal(issueCasFailure.issue().getId())).thenReturn(1L);
-    when(issueRunRepository.create(any())).thenReturn(true);
-    assertThrows(IllegalStateException.class, () -> reconciler.reconcile(issueCasFailure.claim()));
+    List<IssueActivity> fullWindow = new ArrayList<>(200);
+    for (long i = 1; i <= 200; i++) {
+      fullWindow.add(
+          IssueActivity.builder()
+              .issueId(fixture.issue().getId())
+              .sequence(i)
+              .kind(IssueActivityKind.COMMENT)
+              .actorType(IssueActivityActorType.HUMAN)
+              .body("Comment " + i)
+              .build());
+    }
+    when(issueActivityRepository.listPage(fixture.issue().getId(), 0L, 200)).thenReturn(fullWindow);
+    when(issueRunRepository.updateById(fixture.activeRun(), 0L)).thenReturn(true);
 
-    Fixture runCasFailure = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
-    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, mockThreadSnapshot());
-    when(harnessController.inspect(runCasFailure.activeRun())).thenReturn(inspection);
-    assertThrows(IllegalStateException.class, () -> reconciler.reconcile(runCasFailure.claim()));
+    assertEquals(
+        IssueReconcileOutcome.ACTIVITY_SCAN_RESCHEDULED, reconciler.reconcile(fixture.claim()));
+
+    assertEquals(200L, fixture.activeRun().getObservedActivitySequence());
+    verify(issueRunRepository).updateById(fixture.activeRun(), 0L);
+    verify(workStore).rescheduleWork(fixture.issue().getId(), "lease", 7L, NOW, NOW);
+    verify(harnessController, never()).sendSystemContinuation(any(), any(), any(), any());
+    verify(issueRunService, never()).completeExecutorRun(any(), any(), any(), any());
+  }
+
+  @Test
+  void reconcileActivePartialWindowAdvancesCursorAndPreservesQuiescentBehaviour() {
+    // 测试意图：有界扫描窗口未读满（部分非定向活动）时，推进游标并保持原有的 continuation 派发行为。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, IssueRunRole.EXECUTOR);
+    fixture.project().setYoloEnabled(true);
+    ThreadSnapshot snapshot = mockThreadSnapshot(true);
+    IssueAgentSession session = mockAgentSession(fixture);
+    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, session, snapshot);
+    when(harnessController.inspect(fixture.issue(), fixture.activeRun())).thenReturn(inspection);
+
+    List<IssueActivity> partialWindow =
+        List.of(
+            IssueActivity.builder()
+                .issueId(fixture.issue().getId())
+                .sequence(1L)
+                .kind(IssueActivityKind.COMMENT)
+                .actorType(IssueActivityActorType.HUMAN)
+                .body("Comment 1")
+                .build(),
+            IssueActivity.builder()
+                .issueId(fixture.issue().getId())
+                .sequence(2L)
+                .kind(IssueActivityKind.COMMENT)
+                .actorType(IssueActivityActorType.HUMAN)
+                .body("Comment 2")
+                .build());
+    when(issueActivityRepository.listPage(fixture.issue().getId(), 0L, 200))
+        .thenReturn(partialWindow);
+    when(issueRunRepository.updateById(fixture.activeRun(), 0L)).thenReturn(true);
+
+    assertEquals(
+        IssueReconcileOutcome.SYSTEM_CONTINUATION_SENT, reconciler.reconcile(fixture.claim()));
+
+    assertEquals(2L, fixture.activeRun().getObservedActivitySequence());
+    assertEquals(1, fixture.activeRun().getContinuationCount());
+    verify(harnessController)
+        .sendSystemContinuation(fixture.issue(), fixture.activeRun(), session, snapshot);
+    verify(workStore)
+        .rescheduleWork(
+            fixture.issue().getId(), "lease", 7L, NOW, NOW.plus(properties.getActiveDelay()));
+  }
+
+  @Test
+  void reconcileFailedRunWithoutRetryActivityConverges() {
+    // 测试意图：终态 FAILED run 无新 RETRY activity 时完成 work，不重新调度。
+    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, null);
+    IssueRun failed = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.FAILED);
+    when(issueRunRepository.findLatestByIssueId(fixture.issue().getId())).thenReturn(failed);
+    when(issueRunRepository.lockById(failed.getId())).thenReturn(failed);
+    when(issueActivityRepository.existsAfterSequenceAndKind(
+            fixture.issue().getId(), 0L, IssueActivityKind.RETRY))
+        .thenReturn(false);
+
+    assertEquals(IssueReconcileOutcome.CONVERGED_FAILED, reconciler.reconcile(fixture.claim()));
+    verify(workStore).completeWork(fixture.issue().getId(), "lease", 7L, NOW);
   }
 
   @Test
   void reconcileValidatesClaimShape() {
     // 测试意图：controller 的公开事务边界拒绝 null、空 token、非正 wake 和缺失 lease。
     assertThrows(NullPointerException.class, () -> reconciler.reconcile(null));
-    ClaimedControllerWork missingLease =
-        ClaimedControllerWork.builder()
+    ClaimedIssueWork missingLease =
+        ClaimedIssueWork.builder()
             .issueId(UUID.randomUUID())
             .claimedWakeVersion(1L)
             .leaseToken(" ")
             .build();
     assertThrows(NullPointerException.class, () -> reconciler.reconcile(missingLease));
-    ClaimedControllerWork blankToken =
-        ClaimedControllerWork.builder()
+    ClaimedIssueWork blankToken =
+        ClaimedIssueWork.builder()
             .issueId(UUID.randomUUID())
             .claimedWakeVersion(1L)
             .leaseToken(" ")
             .leaseUntil(NOW.plusSeconds(30))
             .build();
     assertThrows(IllegalArgumentException.class, () -> reconciler.reconcile(blankToken));
-    ClaimedControllerWork invalidWake =
-        ClaimedControllerWork.builder()
+    ClaimedIssueWork invalidWake =
+        ClaimedIssueWork.builder()
             .issueId(UUID.randomUUID())
             .claimedWakeVersion(0L)
             .leaseToken("lease")
@@ -529,7 +598,8 @@ class IssueReconcilerTest {
         Project.builder()
             .id(UUID.randomUUID())
             .title("Project")
-            .coordinatorAgentName("coordinator")
+            .yoloEnabled(true)
+            .maxReviewRejections(3)
             .version(0L)
             .build();
     Issue issue =
@@ -539,14 +609,12 @@ class IssueReconcilerTest {
             .number(1L)
             .title("Issue")
             .status(status)
-            .assigneeAgentName("executor")
-            .reviewerAgentName("reviewer")
+            .assigneeAgentName("executor-agent")
+            .reviewerAgentName("reviewer-agent")
             .version(0L)
-            .specRevision(2L)
-            .inputSequence(0L)
             .build();
-    ClaimedControllerWork claim =
-        ClaimedControllerWork.builder()
+    ClaimedIssueWork claim =
+        ClaimedIssueWork.builder()
             .issueId(issue.getId())
             .claimedWakeVersion(7L)
             .leaseToken("lease")
@@ -554,21 +622,10 @@ class IssueReconcilerTest {
             .build();
     IssueRun activeRun = activeRole == null ? null : run(issue, activeRole, IssueRunStatus.RUNNING);
     when(issueRepository.getById(issue.getId())).thenReturn(issue);
-    when(projectRepository.lockForShare(project.getId())).thenReturn(project);
+    when(projectRepository.lockById(project.getId())).thenReturn(project);
     when(issueRepository.lockById(issue.getId())).thenReturn(issue);
     when(issueRunRepository.lockActiveByIssueId(issue.getId())).thenReturn(activeRun);
     return new Fixture(project, issue, activeRun, claim);
-  }
-
-  private Fixture failedExecutorWithRetry() {
-    Fixture fixture = fixture(IssueStatus.IN_PROGRESS, null);
-    IssueRun failed = run(fixture.issue(), IssueRunRole.EXECUTOR, IssueRunStatus.FAILED);
-    when(issueRunRepository.findLatestByIssueId(fixture.issue().getId())).thenReturn(failed);
-    when(issueRunRepository.lockById(failed.getId())).thenReturn(failed);
-    when(issueInputRepository.findFirstByKindAfterSequence(
-            fixture.issue().getId(), IssueInputKind.RETRY, 0L))
-        .thenReturn(input(fixture.issue(), 1L, IssueInputKind.RETRY));
-    return fixture;
   }
 
   private IssueRun run(Issue issue, IssueRunRole role, IssueRunStatus status) {
@@ -577,11 +634,9 @@ class IssueReconcilerTest {
         .issueId(issue.getId())
         .ordinal(1L)
         .role(role)
-        .actorType(IssueRunActorType.AGENT)
-        .agentName("agent")
+        .agentName(role == IssueRunRole.EXECUTOR ? "executor-agent" : "reviewer-agent")
         .status(status)
-        .observedSpecRevision(0L)
-        .observedInputSequence(0L)
+        .observedActivitySequence(0L)
         .continuationCount(0)
         .maxContinuations(3)
         .deadline(NOW.plusSeconds(600))
@@ -589,19 +644,34 @@ class IssueReconcilerTest {
         .build();
   }
 
-  private IssueInput input(Issue issue, long sequence, IssueInputKind kind) {
-    return IssueInput.builder()
-        .issueId(issue.getId())
-        .sequence(sequence)
-        .kind(kind)
-        .body("input")
+  private ThreadSnapshot mockThreadSnapshot(boolean yoloEnabled) {
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    ThreadState thread =
+        new ThreadState(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            "0".repeat(64),
+            "main",
+            yoloEnabled,
+            1L,
+            0L,
+            NOW,
+            NOW);
+    when(snapshot.thread()).thenReturn(thread);
+    return snapshot;
+  }
+
+  private IssueAgentSession mockAgentSession(Fixture fixture) {
+    return IssueAgentSession.builder()
+        .id(UUID.randomUUID())
+        .issueId(fixture.issue().getId())
+        .agentName(fixture.activeRun().getAgentName())
+        .sessionId(UUID.randomUUID())
+        .threadId(UUID.randomUUID())
         .build();
   }
 
-  private ThreadSnapshot mockThreadSnapshot() {
-    return mock(ThreadSnapshot.class);
-  }
-
   private record Fixture(
-      Project project, Issue issue, IssueRun activeRun, ClaimedControllerWork claim) {}
+      Project project, Issue issue, IssueRun activeRun, ClaimedIssueWork claim) {}
 }

@@ -3,13 +3,15 @@ package fun.fengwk.kkstudio.web.project;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
+import fun.fengwk.kkstudio.share.project.IssueAgentSessionDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
 import fun.fengwk.kkstudio.share.project.IssueDependencyDTO;
-import fun.fengwk.kkstudio.share.project.IssueInputDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunSummaryDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
@@ -74,7 +76,8 @@ public class ProjectDtoMapper {
         .id(formatUuid(project.getId()))
         .title(project.getTitle())
         .description(project.getDescription())
-        .coordinatorAgentName(project.getCoordinatorAgentName())
+        .yoloEnabled(project.isYoloEnabled())
+        .maxReviewRejections(formatLong((long) project.getMaxReviewRejections()))
         .nextIssueNumber(formatLong(project.getNextIssueNumber()))
         .version(formatLong(project.getVersion()))
         .archivedAt(formatInstant(project.getArchivedAt()))
@@ -95,8 +98,6 @@ public class ProjectDtoMapper {
         .assigneeAgentName(issue.getAssigneeAgentName())
         .reviewerAgentName(issue.getReviewerAgentName())
         .version(formatLong(issue.getVersion()))
-        .specRevision(formatLong(issue.getSpecRevision()))
-        .inputSequence(formatLong(issue.getInputSequence()))
         .archivedAt(formatInstant(issue.getArchivedAt()))
         .createdAt(formatInstant(issue.getCreatedAt()))
         .updatedAt(formatInstant(issue.getUpdatedAt()))
@@ -113,15 +114,37 @@ public class ProjectDtoMapper {
         .build();
   }
 
-  public IssueInputDTO toDto(IssueInput input) {
-    Objects.requireNonNull(input, "input");
-    return IssueInputDTO.builder()
-        .issueId(formatUuid(input.getIssueId()))
-        .sequence(formatLong(input.getSequence()))
-        .kind(input.getKind() != null ? input.getKind().name() : null)
-        .body(input.getBody())
-        .idempotencyKey(input.getIdempotencyKey())
-        .createdAt(formatInstant(input.getCreatedAt()))
+  public IssueActivityDTO toDto(IssueActivity activity) {
+    Objects.requireNonNull(activity, "activity");
+    return IssueActivityDTO.builder()
+        .issueId(formatUuid(activity.getIssueId()))
+        .sequence(formatLong(activity.getSequence()))
+        .kind(activity.getKind() != null ? activity.getKind().name() : null)
+        .actorType(activity.getActorType() != null ? activity.getActorType().name() : null)
+        .actorAgentName(activity.getActorAgentName())
+        .targetRole(activity.getTargetRole() != null ? activity.getTargetRole().name() : null)
+        .runId(formatUuid(activity.getRunId()))
+        .submissionRunId(formatUuid(activity.getSubmissionRunId()))
+        .decision(activity.getDecision() != null ? activity.getDecision().name() : null)
+        .body(activity.getBody())
+        .idempotencyKey(activity.getIdempotencyKey())
+        .createdAt(formatInstant(activity.getCreatedAt()))
+        .build();
+  }
+
+  /** 投影 Issue + Agent 的稳定归属；{@code role} 由 Issue 当前职责配置推导。 */
+  public IssueAgentSessionDTO toDto(IssueAgentSession agentSession, String role) {
+    if (agentSession == null) {
+      return null;
+    }
+    return IssueAgentSessionDTO.builder()
+        .id(formatUuid(agentSession.getId()))
+        .issueId(formatUuid(agentSession.getIssueId()))
+        .agentName(agentSession.getAgentName())
+        .role(role)
+        .sessionId(formatUuid(agentSession.getSessionId()))
+        .branchId(formatUuid(agentSession.getThreadId()))
+        .createdAt(formatInstant(agentSession.getCreatedAt()))
         .build();
   }
 
@@ -134,7 +157,6 @@ public class ProjectDtoMapper {
         .issueId(formatUuid(run.getIssueId()))
         .ordinal(formatLong(run.getOrdinal()))
         .role(run.getRole() != null ? run.getRole().name() : null)
-        .actorType(run.getActorType() != null ? run.getActorType().name() : null)
         .agentName(run.getAgentName())
         .submissionRunId(formatUuid(run.getSubmissionRunId()))
         .status(run.getStatus() != null ? run.getStatus().name() : null)
@@ -145,7 +167,11 @@ public class ProjectDtoMapper {
         .build();
   }
 
-  public IssueRunDTO toDetailDto(IssueRun run, UUID sessionId) {
+  /**
+   * 完整 Run 投影：Session 与归属取自同一 {@code (issueId, agentName)} 的稳定 {@link IssueAgentSession}， 因此同一
+   * Agent 的多次 Run 共享 sessionId，权限则随当前 Run 变化。
+   */
+  public IssueRunDTO toDetailDto(IssueRun run, IssueAgentSession agentSession) {
     if (run == null) {
       return null;
     }
@@ -154,13 +180,13 @@ public class ProjectDtoMapper {
         .issueId(formatUuid(run.getIssueId()))
         .ordinal(formatLong(run.getOrdinal()))
         .role(run.getRole() != null ? run.getRole().name() : null)
-        .actorType(run.getActorType() != null ? run.getActorType().name() : null)
         .agentName(run.getAgentName())
+        .agentSessionId(agentSession != null ? formatUuid(agentSession.getId()) : null)
+        .sessionId(agentSession != null ? formatUuid(agentSession.getSessionId()) : null)
         .submissionRunId(formatUuid(run.getSubmissionRunId()))
         .status(run.getStatus() != null ? run.getStatus().name() : null)
         .outcome(run.getOutcome() != null ? run.getOutcome().name() : null)
-        .observedSpecRevision(formatLong(run.getObservedSpecRevision()))
-        .observedInputSequence(formatLong(run.getObservedInputSequence()))
+        .observedActivitySequence(formatLong(run.getObservedActivitySequence()))
         .continuationCount(run.getContinuationCount())
         .maxContinuations(run.getMaxContinuations())
         .deadline(formatInstant(run.getDeadline()))
@@ -171,7 +197,6 @@ public class ProjectDtoMapper {
         .createdAt(formatInstant(run.getCreatedAt()))
         .updatedAt(formatInstant(run.getUpdatedAt()))
         .completedAt(formatInstant(run.getCompletedAt()))
-        .sessionId(formatUuid(sessionId))
         .build();
   }
 }

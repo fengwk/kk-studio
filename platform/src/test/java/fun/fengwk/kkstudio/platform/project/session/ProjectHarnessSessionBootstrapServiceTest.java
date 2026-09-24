@@ -34,21 +34,13 @@ import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrches
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -59,7 +51,7 @@ import java.util.UUID;
  * <ul>
  *   <li>验证权威 Agent 与 BranchSettings 的正确物化与选择；
  *   <li>验证 target 与 command 的结构、UUID 幂等键与 canonical requestHash 计算；
- *   <li>验证已归档项目、HUMAN 运行、终态/非活跃运行、缺失 Agent、所有权层级不一致等严格前置拒绝；
+ *   <li>验证已归档项目/Issue、未指派 Agent、绑定不同 Session、所有权层级不一致等严格前置拒绝；
  *   <li>验证同 Owner 精确重放的正确委托行为；
  *   <li>验证异常消息脱敏，绝不回显初始用户消息正文或 action/idempotency UUID。
  * </ul>
@@ -68,17 +60,15 @@ class ProjectHarnessSessionBootstrapServiceTest {
 
   private static final UUID PROJECT_ID = id(1);
   private static final UUID ISSUE_ID = id(2);
-  private static final UUID RUN_ID = id(3);
+  private static final UUID AGENT_SESSION_ID = id(3);
   private static final UUID SESSION_ID = id(4);
   private static final UUID THREAD_ID = id(5);
   private static final UUID IDEMPOTENCY_KEY = id(6);
   private static final Instant NOW = Instant.parse("2026-09-13T10:00:00Z");
 
   private ProjectRepository projectRepository;
-  private ProjectSessionRepository projectSessionRepository;
   private IssueRepository issueRepository;
-  private IssueRunRepository issueRunRepository;
-  private IssueRunSessionRepository issueRunSessionRepository;
+  private IssueAgentSessionRepository issueAgentSessionRepository;
   private AgentBranchSettingsMaterializer settingsMaterializer;
   private HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private ProjectHarnessSessionBootstrapService service;
@@ -86,43 +76,54 @@ class ProjectHarnessSessionBootstrapServiceTest {
   @BeforeEach
   void setUp() {
     projectRepository = mock(ProjectRepository.class);
-    projectSessionRepository = mock(ProjectSessionRepository.class);
     issueRepository = mock(IssueRepository.class);
-    issueRunRepository = mock(IssueRunRepository.class);
-    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
+    issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
     settingsMaterializer = mock(AgentBranchSettingsMaterializer.class);
     acceptanceOrchestrator = mock(HarnessCommandAcceptanceOrchestrator.class);
 
     service =
         new ProjectHarnessSessionBootstrapService(
             projectRepository,
-            projectSessionRepository,
             issueRepository,
-            issueRunRepository,
-            issueRunSessionRepository,
+            issueAgentSessionRepository,
             settingsMaterializer,
             acceptanceOrchestrator);
   }
 
   @Test
-  void bootstrapProjectSession_success_selectsAuthoritativeAgentAndMaterializesSettings() {
-    Project project = testProject("coordinator-agent", null);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
-    when(projectSessionRepository.findByProjectId(PROJECT_ID)).thenReturn(null);
+  void bootstrapIssueAgentSession_success_selectsAuthoritativeAgentAndMaterializesSettings() {
+    stubValidIssueHierarchy("executor-agent", "reviewer-agent");
 
-    BranchSettings settings = branchSettings("coordinator-agent");
-    when(settingsMaterializer.materialize("coordinator-agent")).thenReturn(settings);
+    BranchSettings settings = branchSettings("executor-agent");
+    when(settingsMaterializer.materialize("executor-agent")).thenReturn(settings);
+
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(ISSUE_ID, "executor-agent"))
+        .thenReturn(null);
+    when(issueAgentSessionRepository.bindOrGet(any(IssueAgentSession.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
 
     AcceptedCommands accepted = stubAcceptedCommands(SESSION_ID, THREAD_ID, false);
-    when(acceptanceOrchestrator.accept(eq(new OwnerRef(OwnerType.PROJECT, PROJECT_ID)), any()))
+    when(acceptanceOrchestrator.accept(
+            eq(new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, AGENT_SESSION_ID)), any()))
         .thenReturn(accepted);
 
-    // 初始命令是用户正文事实，校验不得裁剪有意义的首尾空白或换行。
-    String initialMessage = "  Start coordinator\n";
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, initialMessage);
-    AcceptedCommands result = service.bootstrapProjectSession(request);
+    String initialMessage = "  Execute issue task\n";
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "executor-agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, initialMessage);
+
+    // Mock bindOrGet to return agentSession with AGENT_SESSION_ID
+    when(issueAgentSessionRepository.bindOrGet(any(IssueAgentSession.class)))
+        .thenReturn(
+            IssueAgentSession.builder()
+                .id(AGENT_SESSION_ID)
+                .issueId(ISSUE_ID)
+                .agentName("executor-agent")
+                .sessionId(SESSION_ID)
+                .threadId(THREAD_ID)
+                .build());
+
+    AcceptedCommands result = service.bootstrapIssueAgentSession(request);
 
     assertEquals(accepted, result);
     assertFalse(result.replayed());
@@ -130,14 +131,16 @@ class ProjectHarnessSessionBootstrapServiceTest {
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     verify(acceptanceOrchestrator)
-        .accept(eq(new OwnerRef(OwnerType.PROJECT, PROJECT_ID)), commandCaptor.capture());
+        .accept(
+            eq(new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, AGENT_SESSION_ID)),
+            commandCaptor.capture());
 
     AcceptCommandsCommand captured = commandCaptor.getValue();
     AcceptCommandsTarget.NewSession target = (AcceptCommandsTarget.NewSession) captured.target();
     assertEquals(SESSION_ID, target.sessionId());
     assertEquals(THREAD_ID, target.threadId());
     assertEquals(settings, target.rootSettings());
-    assertFalse(target.yoloEnabled());
+    assertTrue(target.yoloEnabled());
 
     assertEquals(1, captured.commands().size());
     NewThreadCommand initialCommand = captured.commands().getFirst();
@@ -152,305 +155,196 @@ class ProjectHarnessSessionBootstrapServiceTest {
   }
 
   @Test
-  void bootstrapProjectSession_convenienceOverloadDelegatesToRecord() {
-    Project project = testProject("coord-agent", null);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
-    when(settingsMaterializer.materialize("coord-agent")).thenReturn(branchSettings("coord-agent"));
-    AcceptedCommands accepted = stubAcceptedCommands(SESSION_ID, THREAD_ID, false);
-    when(acceptanceOrchestrator.accept(any(), any())).thenReturn(accepted);
+  void bootstrapIssueAgentSession_reviewerAgent_success() {
+    stubValidIssueHierarchy("executor-agent", "reviewer-agent");
 
-    AcceptedCommands result =
-        service.bootstrapProjectSession(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Overload text");
-    assertEquals(accepted, result);
-  }
+    BranchSettings settings = branchSettings("reviewer-agent");
+    when(settingsMaterializer.materialize("reviewer-agent")).thenReturn(settings);
 
-  @Test
-  void bootstrapProjectSession_rejectsNonExistentProject() {
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(null);
-
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-    assertThrows(AiResourceNotFoundException.class, () -> service.bootstrapProjectSession(request));
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-  }
-
-  @Test
-  void bootstrapProjectSession_rejectsArchivedProject() {
-    Project archivedProject = testProject("coordinator-agent", NOW);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(archivedProject);
-
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-    AiValidationException ex =
-        assertThrows(AiValidationException.class, () -> service.bootstrapProjectSession(request));
-    assertTrue(ex.getMessage().contains("Cannot bootstrap session for archived project"));
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-  }
-
-  @Test
-  void bootstrapProjectSession_rejectsMissingCoordinatorAgent() {
-    Project missingAgentProject = testProject("   ", null);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(missingAgentProject);
-
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-    assertThrows(AiValidationException.class, () -> service.bootstrapProjectSession(request));
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-  }
-
-  @Test
-  void bootstrapProjectSession_rejectsExistingBoundDifferentSession() {
-    Project project = testProject("coordinator-agent", null);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
-    UUID otherSessionId = id(99);
-    when(projectSessionRepository.findByProjectId(PROJECT_ID))
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(ISSUE_ID, "reviewer-agent"))
+        .thenReturn(null);
+    when(issueAgentSessionRepository.bindOrGet(any(IssueAgentSession.class)))
         .thenReturn(
-            ProjectSession.builder().projectId(PROJECT_ID).sessionId(otherSessionId).build());
-
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-    AiValidationException ex =
-        assertThrows(AiValidationException.class, () -> service.bootstrapProjectSession(request));
-    assertTrue(ex.getMessage().contains("already bound to a different session"));
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-  }
-
-  @Test
-  void bootstrapProjectSession_exactReplayDelegation() {
-    Project project = testProject("coordinator-agent", null);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
-    when(projectSessionRepository.findByProjectId(PROJECT_ID))
-        .thenReturn(ProjectSession.builder().projectId(PROJECT_ID).sessionId(SESSION_ID).build());
-    when(settingsMaterializer.materialize("coordinator-agent"))
-        .thenReturn(branchSettings("coordinator-agent"));
-
-    AcceptedCommands replayed = stubAcceptedCommands(SESSION_ID, THREAD_ID, true);
-    when(acceptanceOrchestrator.accept(eq(new OwnerRef(OwnerType.PROJECT, PROJECT_ID)), any()))
-        .thenReturn(replayed);
-
-    BootstrapProjectSessionRequest request =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Exact replay prompt");
-    AcceptedCommands result = service.bootstrapProjectSession(request);
-
-    assertTrue(result.replayed());
-    verify(acceptanceOrchestrator).accept(any(), any());
-  }
-
-  @Test
-  void bootstrapIssueRunSession_success_selectsAuthoritativeAgentAndMaterializesSettings() {
-    stubValidIssueRunHierarchy("executor-agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-
-    BranchSettings settings = branchSettings("executor-agent");
-    when(settingsMaterializer.materialize("executor-agent")).thenReturn(settings);
+            IssueAgentSession.builder()
+                .id(AGENT_SESSION_ID)
+                .issueId(ISSUE_ID)
+                .agentName("reviewer-agent")
+                .sessionId(SESSION_ID)
+                .threadId(THREAD_ID)
+                .build());
 
     AcceptedCommands accepted = stubAcceptedCommands(SESSION_ID, THREAD_ID, false);
-    when(acceptanceOrchestrator.accept(eq(new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID)), any()))
+    when(acceptanceOrchestrator.accept(
+            eq(new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, AGENT_SESSION_ID)), any()))
         .thenReturn(accepted);
 
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(
-            RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Execute issue run");
-    AcceptedCommands result = service.bootstrapIssueRunSession(request);
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "reviewer-agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Review task");
 
+    AcceptedCommands result = service.bootstrapIssueAgentSession(request);
     assertEquals(accepted, result);
-    assertFalse(result.replayed());
-
-    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     verify(acceptanceOrchestrator)
-        .accept(eq(new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID)), commandCaptor.capture());
-
-    AcceptCommandsCommand captured = commandCaptor.getValue();
-    AcceptCommandsTarget.NewSession target = (AcceptCommandsTarget.NewSession) captured.target();
-    assertEquals(SESSION_ID, target.sessionId());
-    assertEquals(THREAD_ID, target.threadId());
-    assertEquals(settings, target.rootSettings());
-
-    assertEquals(1, captured.commands().size());
-    NewThreadCommand cmd = captured.commands().getFirst();
-    assertEquals(IDEMPOTENCY_KEY, cmd.idempotencyKey());
-    assertTrue(cmd.payload() instanceof UserMessageCommandPayload);
+        .accept(eq(new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, AGENT_SESSION_ID)), any());
   }
 
   @Test
-  void bootstrapIssueRunSession_convenienceOverloadDelegatesToRecord() {
-    stubValidIssueRunHierarchy("exec-agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
+  void bootstrapIssueAgentSession_convenienceOverloadDelegatesToRecord() {
+    stubValidIssueHierarchy("exec-agent", "rev-agent");
     when(settingsMaterializer.materialize("exec-agent")).thenReturn(branchSettings("exec-agent"));
+    when(issueAgentSessionRepository.bindOrGet(any(IssueAgentSession.class)))
+        .thenReturn(
+            IssueAgentSession.builder()
+                .id(AGENT_SESSION_ID)
+                .issueId(ISSUE_ID)
+                .agentName("exec-agent")
+                .sessionId(SESSION_ID)
+                .threadId(THREAD_ID)
+                .build());
     AcceptedCommands accepted = stubAcceptedCommands(SESSION_ID, THREAD_ID, false);
     when(acceptanceOrchestrator.accept(any(), any())).thenReturn(accepted);
 
     AcceptedCommands result =
-        service.bootstrapIssueRunSession(
-            RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Overload run text");
+        service.bootstrapIssueAgentSession(
+            ISSUE_ID, "exec-agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Overload text");
     assertEquals(accepted, result);
   }
 
   @Test
-  void bootstrapIssueRunSession_rejectsNonExistentRunOrIssue() {
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(null);
-
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.bootstrapIssueRunSession(request));
-
-    IssueRun run = testIssueRun(ISSUE_ID, "agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
+  void bootstrapIssueAgentSession_rejectsNonExistentIssue() {
     when(issueRepository.getById(ISSUE_ID)).thenReturn(null);
 
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
+
     assertThrows(
-        AiResourceNotFoundException.class, () -> service.bootstrapIssueRunSession(request));
+        AiResourceNotFoundException.class, () -> service.bootstrapIssueAgentSession(request));
     verify(acceptanceOrchestrator, never()).accept(any(), any());
   }
 
   @Test
-  void bootstrapIssueRunSession_rejectsLockedEntitiesNotFound() {
-    IssueRun run = testIssueRun(ISSUE_ID, "agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-    Issue issue = testIssue(PROJECT_ID, null);
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
+  void bootstrapIssueAgentSession_rejectsLockedEntitiesNotFound() {
+    Issue issue = testIssue(PROJECT_ID, null, "agent", null);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
 
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
 
     // Project lock missing
     when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(null);
     assertThrows(
-        AiResourceNotFoundException.class, () -> service.bootstrapIssueRunSession(request));
+        AiResourceNotFoundException.class, () -> service.bootstrapIssueAgentSession(request));
 
     // Issue lock missing
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject("coord", null));
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject(null));
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(null);
     assertThrows(
-        AiResourceNotFoundException.class, () -> service.bootstrapIssueRunSession(request));
-
-    // Run lock missing
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
-    when(issueRunRepository.lockById(RUN_ID)).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.bootstrapIssueRunSession(request));
+        AiResourceNotFoundException.class, () -> service.bootstrapIssueAgentSession(request));
   }
 
   @Test
-  void bootstrapIssueRunSession_rejectsInconsistentHierarchyState() {
-    IssueRun run = testIssueRun(ISSUE_ID, "agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-    Issue issue = testIssue(PROJECT_ID, null);
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
+  void bootstrapIssueAgentSession_rejectsInconsistentHierarchyState() {
+    Issue issue = testIssue(PROJECT_ID, null, "agent", null);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject("coord", null));
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject(null));
 
     UUID differentProjectId = id(77);
-    Issue mismatchedIssue = testIssue(differentProjectId, null);
+    Issue mismatchedIssue = testIssue(differentProjectId, null, "agent", null);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(mismatchedIssue);
-    when(issueRunRepository.lockById(RUN_ID)).thenReturn(run);
 
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
 
     AiValidationException ex =
-        assertThrows(AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
+        assertThrows(
+            AiValidationException.class, () -> service.bootstrapIssueAgentSession(request));
     assertTrue(ex.getMessage().contains("Inconsistent owner hierarchy state"));
   }
 
   @Test
-  void bootstrapIssueRunSession_rejectsArchivedProjectOrArchivedIssue() {
-    stubValidIssueRunHierarchy("agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
+  void bootstrapIssueAgentSession_rejectsArchivedProjectOrArchivedIssue() {
+    stubValidIssueHierarchy("agent", null);
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
 
     // Archived project
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject("coord", NOW));
-    assertThrows(AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject(NOW));
+    assertThrows(AiValidationException.class, () -> service.bootstrapIssueAgentSession(request));
 
     // Archived issue
-    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject("coord", null));
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(testIssue(PROJECT_ID, NOW));
-    assertThrows(AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject(null));
+    when(issueRepository.lockById(ISSUE_ID)).thenReturn(testIssue(PROJECT_ID, NOW, "agent", null));
+    assertThrows(AiValidationException.class, () -> service.bootstrapIssueAgentSession(request));
   }
 
   @Test
-  void bootstrapIssueRunSession_rejectsHumanActor() {
-    stubValidIssueRunHierarchy(null, IssueRunActorType.HUMAN, IssueRunStatus.RUNNING);
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
+  void bootstrapIssueAgentSession_rejectsUnassignedAgent() {
+    stubValidIssueHierarchy("assignee-agent", "reviewer-agent");
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "unassigned-agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
 
     AiValidationException ex =
-        assertThrows(AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
-    assertTrue(ex.getMessage().contains("Cannot bootstrap session for non-agent run"));
+        assertThrows(
+            AiValidationException.class, () -> service.bootstrapIssueAgentSession(request));
+    assertTrue(ex.getMessage().contains("is not assigned to issue"));
+    verify(acceptanceOrchestrator, never()).accept(any(), any());
   }
 
   @Test
-  void bootstrapIssueRunSession_rejectsMissingAgent() {
-    stubValidIssueRunHierarchy("   ", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-    AiValidationException ex =
-        assertThrows(AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
-    assertTrue(ex.getMessage().contains("Issue run agent is missing"));
-  }
-
-  @Test
-  void bootstrapIssueRunSession_rejectsNonActiveStatus() {
-    for (IssueRunStatus status :
-        List.of(
-            IssueRunStatus.COMPLETED,
-            IssueRunStatus.FAILED,
-            IssueRunStatus.CANCELLED,
-            IssueRunStatus.UNKNOWN)) {
-      stubValidIssueRunHierarchy("agent", IssueRunActorType.AGENT, status);
-      BootstrapIssueRunSessionRequest request =
-          new BootstrapIssueRunSessionRequest(
-              RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
-
-      AiValidationException ex =
-          assertThrows(
-              AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
-      assertTrue(ex.getMessage().contains("Cannot bootstrap session for non-active run"));
-    }
-  }
-
-  @Test
-  void bootstrapIssueRunSession_rejectsExistingBoundDifferentSession() {
-    stubValidIssueRunHierarchy("agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
+  void bootstrapIssueAgentSession_rejectsExistingBoundDifferentSession() {
+    stubValidIssueHierarchy("agent", null);
     UUID otherSessionId = id(88);
-    when(issueRunSessionRepository.findByRunId(RUN_ID))
-        .thenReturn(IssueRunSession.builder().runId(RUN_ID).sessionId(otherSessionId).build());
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(ISSUE_ID, "agent"))
+        .thenReturn(
+            IssueAgentSession.builder()
+                .id(AGENT_SESSION_ID)
+                .issueId(ISSUE_ID)
+                .agentName("agent")
+                .sessionId(otherSessionId)
+                .threadId(THREAD_ID)
+                .build());
 
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Text");
 
     AiValidationException ex =
-        assertThrows(AiValidationException.class, () -> service.bootstrapIssueRunSession(request));
+        assertThrows(
+            AiValidationException.class, () -> service.bootstrapIssueAgentSession(request));
     assertTrue(ex.getMessage().contains("already bound to a different session"));
+    verify(acceptanceOrchestrator, never()).accept(any(), any());
   }
 
   @Test
-  void bootstrapIssueRunSession_exactReplayDelegation() {
-    stubValidIssueRunHierarchy("exec-agent", IssueRunActorType.AGENT, IssueRunStatus.RUNNING);
-    when(issueRunSessionRepository.findByRunId(RUN_ID))
-        .thenReturn(IssueRunSession.builder().runId(RUN_ID).sessionId(SESSION_ID).build());
+  void bootstrapIssueAgentSession_exactReplayDelegation() {
+    stubValidIssueHierarchy("exec-agent", null);
+    IssueAgentSession existing =
+        IssueAgentSession.builder()
+            .id(AGENT_SESSION_ID)
+            .issueId(ISSUE_ID)
+            .agentName("exec-agent")
+            .sessionId(SESSION_ID)
+            .threadId(THREAD_ID)
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(ISSUE_ID, "exec-agent"))
+        .thenReturn(existing);
+    when(issueAgentSessionRepository.bindOrGet(any(IssueAgentSession.class))).thenReturn(existing);
     when(settingsMaterializer.materialize("exec-agent")).thenReturn(branchSettings("exec-agent"));
 
     AcceptedCommands replayed = stubAcceptedCommands(SESSION_ID, THREAD_ID, true);
-    when(acceptanceOrchestrator.accept(eq(new OwnerRef(OwnerType.ISSUE_RUN, RUN_ID)), any()))
+    when(acceptanceOrchestrator.accept(
+            eq(new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, AGENT_SESSION_ID)), any()))
         .thenReturn(replayed);
 
-    BootstrapIssueRunSessionRequest request =
-        new BootstrapIssueRunSessionRequest(
-            RUN_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Exact replay run");
-    AcceptedCommands result = service.bootstrapIssueRunSession(request);
+    BootstrapIssueAgentSessionRequest request =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "exec-agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "Exact replay run");
+    AcceptedCommands result = service.bootstrapIssueAgentSession(request);
 
     assertTrue(result.replayed());
     verify(acceptanceOrchestrator).accept(any(), any());
@@ -461,13 +355,21 @@ class ProjectHarnessSessionBootstrapServiceTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new BootstrapProjectSessionRequest(
-                PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, null));
+            new BootstrapIssueAgentSessionRequest(
+                ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, null));
 
-    BootstrapProjectSessionRequest blankReq =
-        new BootstrapProjectSessionRequest(
-            PROJECT_ID, SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "   ");
-    assertThrows(AiValidationException.class, () -> service.bootstrapProjectSession(blankReq));
+    stubValidIssueHierarchy("agent", null);
+    BootstrapIssueAgentSessionRequest blankReq =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, "   ");
+    assertThrows(AiValidationException.class, () -> service.bootstrapIssueAgentSession(blankReq));
+
+    String oversizedMessage = "m".repeat(1048577);
+    BootstrapIssueAgentSessionRequest oversizedReq =
+        new BootstrapIssueAgentSessionRequest(
+            ISSUE_ID, "agent", SESSION_ID, THREAD_ID, IDEMPOTENCY_KEY, oversizedMessage);
+    assertThrows(
+        AiValidationException.class, () -> service.bootstrapIssueAgentSession(oversizedReq));
   }
 
   @Test
@@ -475,39 +377,38 @@ class ProjectHarnessSessionBootstrapServiceTest {
     String sensitiveBody = "SUPER_SECRET_PAYLOAD_CONTENT_98765";
     UUID sensitiveActionKey = UUID.randomUUID();
 
-    // 1. Blank body validation
+    // 1. Project archived
+    stubValidIssueHierarchy("agent", null);
+    when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(testProject(NOW));
     assertDoesNotContainSensitive(
         assertThrows(
             AiValidationException.class,
             () ->
-                service.bootstrapProjectSession(
-                    new BootstrapProjectSessionRequest(
-                        PROJECT_ID, SESSION_ID, THREAD_ID, sensitiveActionKey, "   "))),
+                service.bootstrapIssueAgentSession(
+                    new BootstrapIssueAgentSessionRequest(
+                        ISSUE_ID,
+                        "agent",
+                        SESSION_ID,
+                        THREAD_ID,
+                        sensitiveActionKey,
+                        sensitiveBody))),
         sensitiveBody,
         sensitiveActionKey);
 
-    // 2. Project archived
-    when(projectRepository.lockForShare(PROJECT_ID))
-        .thenReturn(testProject("coordinator-agent", NOW));
+    // 2. Unassigned agent
+    stubValidIssueHierarchy("assignee", "reviewer");
     assertDoesNotContainSensitive(
         assertThrows(
             AiValidationException.class,
             () ->
-                service.bootstrapProjectSession(
-                    new BootstrapProjectSessionRequest(
-                        PROJECT_ID, SESSION_ID, THREAD_ID, sensitiveActionKey, sensitiveBody))),
-        sensitiveBody,
-        sensitiveActionKey);
-
-    // 3. IssueRun non-active
-    stubValidIssueRunHierarchy("agent", IssueRunActorType.AGENT, IssueRunStatus.COMPLETED);
-    assertDoesNotContainSensitive(
-        assertThrows(
-            AiValidationException.class,
-            () ->
-                service.bootstrapIssueRunSession(
-                    new BootstrapIssueRunSessionRequest(
-                        RUN_ID, SESSION_ID, THREAD_ID, sensitiveActionKey, sensitiveBody))),
+                service.bootstrapIssueAgentSession(
+                    new BootstrapIssueAgentSessionRequest(
+                        ISSUE_ID,
+                        "other-agent",
+                        SESSION_ID,
+                        THREAD_ID,
+                        sensitiveActionKey,
+                        sensitiveBody))),
         sensitiveBody,
         sensitiveActionKey);
   }
@@ -523,53 +424,38 @@ class ProjectHarnessSessionBootstrapServiceTest {
     }
   }
 
-  private void stubValidIssueRunHierarchy(
-      String agentName, IssueRunActorType actorType, IssueRunStatus status) {
-    Project project = testProject("coordinator-agent", null);
-    Issue issue = testIssue(PROJECT_ID, null);
-    IssueRun run = testIssueRun(ISSUE_ID, agentName, actorType, status);
+  private void stubValidIssueHierarchy(String assigneeAgent, String reviewerAgent) {
+    Project project = testProject(null);
+    Issue issue = testIssue(PROJECT_ID, null, assigneeAgent, reviewerAgent);
 
-    when(issueRunRepository.getById(RUN_ID)).thenReturn(run);
     when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
     when(projectRepository.lockForShare(PROJECT_ID)).thenReturn(project);
     when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
-    when(issueRunRepository.lockById(RUN_ID)).thenReturn(run);
-    when(issueRunSessionRepository.findByRunId(RUN_ID)).thenReturn(null);
   }
 
-  private static Project testProject(String coordinatorAgent, Instant archivedAt) {
+  private static Project testProject(Instant archivedAt) {
     return Project.builder()
         .id(PROJECT_ID)
         .title("Test Project")
         .description("Description")
-        .coordinatorAgentName(coordinatorAgent)
+        .yoloEnabled(true)
+        .maxReviewRejections(3)
         .archivedAt(archivedAt)
         .version(1L)
         .build();
   }
 
-  private static Issue testIssue(UUID projectId, Instant archivedAt) {
+  private static Issue testIssue(
+      UUID projectId, Instant archivedAt, String assigneeAgent, String reviewerAgent) {
     return Issue.builder()
         .id(ISSUE_ID)
         .projectId(projectId)
         .number(1L)
         .title("Test Issue")
         .description("Issue Desc")
+        .assigneeAgentName(assigneeAgent)
+        .reviewerAgentName(reviewerAgent)
         .archivedAt(archivedAt)
-        .version(1L)
-        .build();
-  }
-
-  private static IssueRun testIssueRun(
-      UUID issueId, String agentName, IssueRunActorType actorType, IssueRunStatus status) {
-    return IssueRun.builder()
-        .id(RUN_ID)
-        .issueId(issueId)
-        .ordinal(1L)
-        .role(IssueRunRole.EXECUTOR)
-        .actorType(actorType)
-        .agentName(agentName)
-        .status(status)
         .version(1L)
         .build();
   }

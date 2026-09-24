@@ -8,9 +8,12 @@ import { useI18n } from '@/shared/i18n'
  */
 export function EntryMessageBlock({ message }: { message: EntryEventDialogueMessage }) {
   const { t } = useI18n()
+  const singleLine = message.kind === 'root'
+    || message.kind === 'settings_change'
+    || message.kind === 'invalid_settings'
   return (
     <section
-      className={`thread-block thread-block-entry kind-${message.kind}`}
+      className={`thread-block thread-block-entry kind-${message.kind}${singleLine ? ' is-inline' : ''}`}
       data-entry-kind={message.kind}
     >
       <div className="thread-entry-row">
@@ -18,12 +21,16 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
           <EntryIcon kind={message.kind} />
         </span>
         <div className="thread-entry-content">
-          <div className="thread-entry-title">{message.title}</div>
-          <div className="thread-block-body thread-entry-text">{message.text}</div>
-          <details className="thread-entry-payload">
-            <summary>{t('ai.runtime.message.rawEntry')}</summary>
-            <pre>{message.rawPayloadJson}</pre>
-          </details>
+          <div className="thread-entry-title" title={singleLine ? message.title : undefined}>{message.title}</div>
+          {!singleLine && (
+            <>
+              <div className="thread-block-body thread-entry-text">{message.text}</div>
+              <details className="thread-entry-payload">
+                <summary>{t('ai.runtime.message.rawEntry')}</summary>
+                <pre>{message.rawPayloadJson}</pre>
+              </details>
+            </>
+          )}
         </div>
       </div>
     </section>

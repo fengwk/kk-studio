@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
@@ -45,6 +44,11 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
   @Override
   public IssueRun lockActiveByIssueId(UUID issueId) {
     return toModel(issueRunMapper.lockActiveByIssueId(issueId));
+  }
+
+  @Override
+  public boolean hasActiveByProjectId(UUID projectId) {
+    return issueRunMapper.hasActiveByProjectId(projectId);
   }
 
   @Override
@@ -92,13 +96,11 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
     target.setIssueId(run.getIssueId());
     target.setOrdinal(run.getOrdinal());
     target.setRole(run.getRole() != null ? run.getRole().name() : null);
-    target.setActorType(run.getActorType() != null ? run.getActorType().name() : null);
     target.setAgentName(run.getAgentName());
     target.setSubmissionRunId(run.getSubmissionRunId());
     target.setStatus(run.getStatus() != null ? run.getStatus().name() : null);
     target.setOutcome(run.getOutcome() != null ? run.getOutcome().name() : null);
-    target.setObservedSpecRevision(run.getObservedSpecRevision());
-    target.setObservedInputSequence(run.getObservedInputSequence());
+    target.setObservedActivitySequence(run.getObservedActivitySequence());
     target.setContinuationCount(run.getContinuationCount());
     target.setMaxContinuations(run.getMaxContinuations());
     target.setDeadline(run.getDeadline());
@@ -121,16 +123,12 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
         .issueId(row.getIssueId())
         .ordinal(row.getOrdinal() != null ? row.getOrdinal() : 0L)
         .role(row.getRole() != null ? IssueRunRole.valueOf(row.getRole()) : null)
-        .actorType(
-            row.getActorType() != null ? IssueRunActorType.valueOf(row.getActorType()) : null)
         .agentName(row.getAgentName())
         .submissionRunId(row.getSubmissionRunId())
         .status(row.getStatus() != null ? IssueRunStatus.valueOf(row.getStatus()) : null)
         .outcome(row.getOutcome() != null ? IssueRunOutcome.valueOf(row.getOutcome()) : null)
-        .observedSpecRevision(
-            row.getObservedSpecRevision() != null ? row.getObservedSpecRevision() : 0L)
-        .observedInputSequence(
-            row.getObservedInputSequence() != null ? row.getObservedInputSequence() : 0L)
+        .observedActivitySequence(
+            row.getObservedActivitySequence() != null ? row.getObservedActivitySequence() : 0L)
         .continuationCount(row.getContinuationCount() != null ? row.getContinuationCount() : 0)
         .maxContinuations(row.getMaxContinuations() != null ? row.getMaxContinuations() : 10)
         .deadline(row.getDeadline())

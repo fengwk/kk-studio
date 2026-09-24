@@ -113,14 +113,14 @@ result status 对齐。
 | Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
-| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、命名、运行控制与人工审批 |
+| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、命名、运行控制与人工审批；Issue Agent Branch 的公开 YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
 | Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
-| Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|sessions|snapshot` | Project CRUD/CAS、归档、权威聚合 Snapshot 与 owner Sessions 查询（Coordinator Harness command 统一走 `/api/harness/command-batches`） |
-| Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/status|dependencies|inputs|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、六态迁移、依赖、追加输入、Run 人工动作与归档 |
+| Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、YOLO 启动策略与打回阈值配置、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
+| Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities|status|block|recover|dependencies|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、七态迁移（含人工阻塞与恢复）、Activity 事实流与分页、依赖、Run 人工动作与归档 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
 | Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |
 | ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
@@ -130,6 +130,7 @@ result status 对齐。
 返回 `202 Accepted` 只表示 durable acceptance 已提交；Provider/Tool 执行和 Thread
 progression 由 Work dispatcher 异步完成。Canvas
 command 返回带 `baseVersion/version` 的 Patch，实时收敛另走 `/api/events/v1`。
+公开 `command-batches` 仅接纳 Chat/Canvas owner；Issue Agent Session 的用户输入、分叉和停止不能绕过 Issue Activity 与 Run 权限校验。
 Session/Thread `name` 是独立控制面：`PUT .../name` 只更新命名元数据（可含规范化同名
 no-op），不产生 Command、Entry 或 Work。
 
@@ -157,7 +158,7 @@ no-op），不产生 Command、Entry 或 Work。
   width、height、duration 来自 `StorageBlob` 权威行，TEXT Resource 没有 Blob，
   bucket/object key 不进入 DTO。
 - [ProjectSnapshotAssembler](../../web/src/main/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssembler.java)
-  聚合未归档 Issues、依赖、blocked 状态、当前/最近 Run 与 Coordinator Session/Thread，
+  聚合未归档 Issues、依赖、blocked 状态与当前/最近 Run，
   并对每条跨表归属 fail closed。
 - [StrictJacksonConfiguration](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
   全局启用 `STRICT_DUPLICATE_DETECTION`、省略 null 并保持 DTO 声明顺序，同时把 `Long`
@@ -172,7 +173,7 @@ error envelope：
 | [StudioResponseStatusErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioResponseStatusErrorAdvice.java) | Canvas、Chat、ComfyUI、Harness | `ResponseStatusException` 按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
 | [StudioStorageErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioStorageErrorAdvice.java) | Storage | validation 400、not found 404、verification/conflict 409 |
 | [StudioSystemSettingsErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioSystemSettingsErrorAdvice.java) | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
-| [StudioProjectErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdvice.java) | Project、Issue | validation 400、not found 404、version/runtime conflict 409、`IllegalStateException` 500；不回显 Issue input、幂等键或认证数据 |
+| [StudioProjectErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdvice.java) | Project、Issue | validation 400、not found 404、version/runtime conflict 409、`IllegalStateException` 500；不回显 Issue Activity 正文、幂等键或认证数据 |
 
 用户可见 message 由 [StudioMessageService](../../web/src/main/java/fun/fengwk/kkstudio/web/i18n/StudioMessageService.java)
 按请求 locale 解析，支持 `en-US`、`zh-CN`，其它 locale fallback 到英文；Platform
@@ -230,7 +231,7 @@ profile locations：
 
 ```text
 harness_runtime_work
-issue_controller_work_due
+project_issue_work_due
 canvas_function_work
 harness_thread_version
 canvas_version

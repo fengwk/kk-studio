@@ -35,7 +35,7 @@ dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行�
 | [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | `PlatformReadToolExecutor`、`PlatformSkillContentReader`、`PlatformResourceContentReader`、`ReadTextWindow` | 统一 `read` 的 path 路由：Skill Git cache 与 Session 授权的 Blob 文本读取，本地路径委托 `BoundEnvironment` |
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`SessionDeletionOrchestrator`、`PlatformCanvasCommandService`、`OwnerType` | 跨 owner 的 Harness 命令接受、深删除与 Canvas command |
 | [chat](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat) | `ChatServiceImpl` | Chat CRUD 与深删除 |
-| [project](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project) | `ProjectServiceImpl`、`IssueServiceImpl`、`IssueRunServiceImpl`、`IssueControllerDispatcher`、`IssueReconciler`、`ProjectHarnessContributor` | Project/Issue 生命周期与确定性 Coordinator |
+| [project](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project) | `ProjectServiceImpl`、`IssueServiceImpl`、`IssueRunServiceImpl`、`IssueControllerDispatcher`、`IssueReconciler`、`ProjectHarnessContributor` | Project/Issue 生命周期与确定性 Reconciler |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
 | plugin | `StudioPluginRegistry`、`PluginCredentialStore`、`PluginResourceGateway` | 构建期 Plugin 发现、安全管理面、加密凭据与 Session Resource 桥接 |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
@@ -487,48 +487,63 @@ Chat 本身不持有 Environment；具体 branch 的环境身份由该 branch �
 
 [ProjectServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/ProjectServiceImpl.java)
 与 [IssueServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/IssueServiceImpl.java)
-提供 Project/Issue 的事务边界。Project 持有必填 Coordinator Agent、项目内单调 Issue
-编号、CAS `version` 与归档状态；Issue 持有六态生命周期、可空 assignee/reviewer
-Agent、`specRevision`、`inputSequence` 与归档状态。状态迁移白名单由
+提供 Project/Issue 的事务边界。Project 持有 `yoloEnabled`、`maxReviewRejections`、项目内单调 Issue
+编号、CAS `version` 与归档状态，没有 Coordinator Agent；Issue 持有七态生命周期、可空
+assignee/reviewer Agent、`version` 与归档状态。状态迁移白名单由
 [IssueStatusTransition](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueStatusTransition.java)
 单点维护，action 与状态的对应关系以该类为准：
 
 ```text
 需求池 --READY--> 待处理 --START_EXECUTION--> 执行中 --SUBMIT--> 评审中 --APPROVE--> 完成
-待处理 <--DEFER-- 需求池         评审中 --REQUEST_CHANGES--> 待处理
+待处理 <--DEFER-- 需求池         评审中 --REQUEST_CHANGES--> 待处理 / 阻塞
+阻塞 --RECOVER--> 待处理         阻塞 --RECOVER_TO_BACKLOG--> 需求池
 非终态 --CANCEL--> 已取消         完成/已取消 --REOPEN--> 待处理
 ```
 
-依赖边只能连接同一 Project 的未归档 Issue，添加时在 Project 图锁下按 UUID 顺序锁两端
-并通过递归 CTE 拒绝环；增删依赖推进目标 Issue 的 `specRevision/version`。
-`issue_input` 是每 Issue 单调追加流，可用 `idempotencyKey` 精确重放，追加输入推进
-`inputSequence/version` 并唤醒 Controller。
+`BLOCKED`（阻塞）是七态里的独立状态：自动推进已停止、等待人处理，既不参与自动派发，也不等于「待处理
+但依赖未满足」。正式打回 `REQUEST_CHANGES` 始终是同一个业务动作，项目阈值只决定它的目标是
+待处理还是阻塞；已阻塞的 Issue 不能被自动流程重新唤醒，只能由人恢复或取消。
 
-Project Coordinator 和每个 Agent IssueRun 分别以 `OwnerType.PROJECT` 与
-`OwnerType.ISSUE_RUN` 拥有 Harness Session。
+依赖边只能连接同一 Project 的未归档 Issue，添加时在 Project 图锁下按 UUID 顺序锁两端
+并通过递归 CTE 拒绝环；增删依赖推进目标 Issue 的 `version`。
+`project_issue_activity` 是每 Issue 单调追加的唯一有序事实流（建单/改要求、定向指示、评论、人工
+输入、审查决定、恢复、重试与系统指令），可用 `idempotencyKey` 精确重放，并作为 Agent 的投递游标；
+正文约束 `body = btrim(body)`，只对非 `SPEC_CHANGE`/`REVIEW_DECISION` 要求非空。打回次数不落库，
+按「最近一次 `RECOVERY`/`SPEC_CHANGE` 之后、`REVIEW_DECISION` 且 `REQUEST_CHANGES` 的不同提交 Run」
+实时推导。
+
+每个 `(Issue, Agent)` 由
+[IssueAgentSession](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueAgentSession.java)
+绑定唯一 Session 与工作 Branch，并以 `OwnerType.ISSUE_AGENT_SESSION` 拥有 Harness Session：
+归属随 Issue 稳定并跨多次 Run 复用，权限始终随当前 Run 变化。
 [ProjectHarnessSessionBootstrapService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/session/ProjectHarnessSessionBootstrapService.java)
-按 `Project -> Issue -> IssueRun` 锁序，在同一物理事务内原子创建 Session、ROOT、
-Thread、首条 Command、Work 与 owner relation；数据库 `session_owner.session_id`
-主键与排他弧 check 保证 Chat、Canvas、Project、IssueRun 四类 owner 全局互斥。
+按 `Project -> Issue -> IssueAgentSession` 锁序，在同一物理事务内原子创建 Session、ROOT、
+Thread、首条 Command、Work 与 owner relation；`project_issue_agent_session` 的 Session/Thread
+外键是 `DEFERRABLE INITIALLY DEFERRED`，让「先登记归属再接受命令」的引导期自引用在同一事务内闭合，
+而 `ON DELETE RESTRICT` 仍立即生效。数据库 `session_owner.session_id` 主键与排他弧 check 保证
+Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。
 
 [IssueControllerDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueControllerDispatcher.java)
-只负责 `issue_controller_work` 的短事务 claim、bounded handoff、合并 wake 与 poll；
+只负责 `project_issue_work` 的短事务 claim、bounded handoff、合并 wake 与 poll；
 [IssueReconciler](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconciler.java)
-在 `Project(FOR SHARE) -> Issue(FOR UPDATE) -> IssueRun(FOR UPDATE) -> work lease`
-锁序与 fencing 下每次推进一个有界动作，处理依赖阻塞、Agent executor/reviewer Run、
-Harness bootstrap/inspection、输入 continuation、人工等待、deadline、continuation
-budget、retry/cancel 和 Coordinator attention。通知与 poll 都只是唤醒，数据库 work
-行才是可恢复事实；claim/reconcile 由 lease token 与 claimed wake version 双重围栏，
+统一按 `Project(FOR UPDATE) -> Issue(FOR UPDATE) -> active Run -> work lease` 锁序与 fencing
+每次推进一个有界动作，处理依赖阻塞、Agent executor/reviewer Run、Harness bootstrap/inspection、
+输入 continuation、人工等待、deadline、continuation budget、retry/cancel 与人工阻塞/恢复；复用工作
+Branch 前先把 Harness Thread 的 YOLO 状态对齐到 Project 的 `yoloEnabled`。通知与 poll 都只是唤醒，
+数据库 work 行才是可恢复事实；claim/reconcile 由 lease token 与 claimed wake version 双重围栏，
 worker 拒绝、处理失败、节点退出或通知丢失都由归还、延迟重试、lease 过期和 periodic
 poll 收敛。
 
 [ProjectHarnessContributor](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHarnessContributor.java)
-注册 12 个 INTERNAL 角色工具，按 `ProjectRoleToolType` 划分归属：Coordinator 获得
-Project/Issue 查询与编排工具，Executor 只获得 submit/request-input，Reviewer 只获得
-review；`ProjectThreadOwnerResolver` 从 Thread 的唯一 owner relation 解析角色，不依赖
-模型自报。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或 UNKNOWN Run，再按
-controller work -> Run Sessions -> reviewer/executor Runs -> inputs/dependencies/
-Issues -> Coordinator Session -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
+注册 3 个 INTERNAL 角色工具，按 [ProjectRoleToolType](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectRoleToolType.java)
+划分归属：Executor 与 Reviewer 都获得 `issue_read`、`issue_request_input`，只有 Reviewer
+获得 `issue_review`；[ProjectThreadOwnerResolver](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectThreadOwnerResolver.java)
+从 Thread 的唯一 owner relation 解析角色与 Issue，不依赖模型自报；
+[ProjectRoleContextProjector](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectRoleContextProjector.java)
+只把可信 Run 元数据（issue/run/role/agent）注入系统指令，Issue 正文与 Activity 一律作为数据读取，
+绝不提升为指令。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或 UNKNOWN Run，再按
+work -> Agent Session（`deleteSessionsByOwner`）-> Runs（先 reviewer 后 executor）->
+Activities/Dependencies/Issues -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
 这些工具通过
 [ProjectHistoryRenderers](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHistoryRenderers.java)
 提供历史语义动作：只保留动作与相关 issue/status/dependency 身份，省略
@@ -742,7 +757,7 @@ requirements 相等；贡献缺失或 definition/requirements 漂移直接生成
 正常路径按模型可见 tool name、arguments 与单次调用的 `arguments.workdir` 生成 `ALLOW`、
 `ASK` 或 `DENY`，不改写 binding/arguments，也不感知 YOLO。`start` 先获取 tool
 admission（默认 `kk-studio.harness.execution-admission.tool=64`），再经单一执行路径
-校验冻结定义与 requirements、构建隔离所属 Contributor 的只读 `BranchView` 与可选
+校验冻结定义与 requirements、构建隔离所属 Contributor 的只读 `BranchView`（含该 branch 的用户 Goal）与可选
 `BoundEnvironment`、提交异步执行并返回两阶段门控 Handle，最后在门控桥校验 effects
 归属与声明、完成 managed Resource 外部化并一次性投递。
 
@@ -791,7 +806,7 @@ Skill binding。
 
 统一 `read` 根据 `path` 路由：`kkstudio:/skills/<package>/<skill>/...` 从 Platform
 bare Git cache 的 Package 当前 commit 读取，`kkstudio:/resources/<blobId>` 在校验当前
-Session 引用后读取 Blob 文本，本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
+Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（无 8 MiB 源文件上限，单次输出最多 48 KiB；扫描不能在 30 秒内完成时明确失败），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
 路径要求显式 `workdir`；`workdir` 只参与同一地址空间内的相对解析，不提供隐藏默认值。
 Platform URI 不接受任意 HTTP(S) 透传。
 
@@ -925,7 +940,7 @@ owner 排他锁，深删除统一按 `Owner -> Session -> Thread` 锁序并对�
 
 ```text
 Project/Issue mutation or controller poll
-  -> issue_controller_work request / PostgreSQL wake hint
+  -> project_issue_work request / PostgreSQL wake hint
   -> IssueControllerDispatcher claim (short transaction)
   -> bounded worker handoff
   -> IssueReconciler

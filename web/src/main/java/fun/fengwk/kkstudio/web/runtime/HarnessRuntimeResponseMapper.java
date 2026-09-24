@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledUserMessageDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionDTO;
@@ -102,6 +104,18 @@ public final class HarnessRuntimeResponseMapper {
     dto.setModel(toModelSelectionDto(settings.model()));
     // Environment 引用平铺为 nullable canonical name；null 显式保留（@JsonInclude(ALWAYS)）。
     dto.setEnvironmentName(settings.environmentName());
+    // 用户 Goal 同样显式输出：null 表示当前没有用户设定 Goal。
+    dto.setGoal(toGoalSettingDto(settings.goal()));
+    return dto;
+  }
+
+  private static HarnessGoalSettingDTO toGoalSettingDto(GoalSetting goal) {
+    if (goal == null) {
+      return null;
+    }
+    HarnessGoalSettingDTO dto = new HarnessGoalSettingDTO();
+    dto.setId(goal.id().toString());
+    dto.setText(goal.text());
     return dto;
   }
 

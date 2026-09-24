@@ -1,5 +1,3 @@
 # issue_review
 
-Submit a review decision for the current reviewer run.
-
-Decision must be APPROVE or REQUEST_CHANGES. Requires observed spec revision and input sequence cursors.
+Submit a formal review decision (APPROVE or REQUEST_CHANGES) for the current reviewer run, bound to the submission being reviewed.

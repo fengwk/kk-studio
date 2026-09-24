@@ -33,7 +33,9 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
 
     assertTrue(harnessCatalog.findTool(ReadTool.NAME).isPresent());
     assertTrue(harnessCatalog.findTool(TaskTool.NAME).isPresent());
-    assertTrue(harnessCatalog.findTool("create_goal").isPresent());
+    assertTrue(harnessCatalog.findTool("update_goal").isPresent());
+    // Goal 正文由用户维护：内建 catalog 不再暴露任何 Goal 创建工具。
+    assertTrue(harnessCatalog.findTool("create_goal").isEmpty());
 
     assertEquals(
         ReadTool.NAME,

@@ -62,7 +62,7 @@ yoloEnabled / nextCommandSequence / version / createdAt / updatedAt
 - `NEW_THREAD`：`KEY SHARE` 锁既有 Session（不串行化同 Session 的兄弟创建），校验 `startEntryId` 属于该 Session，插入 Thread + Commands + Work；不复制任何 Entry，新 Thread 的 head 直接指向该 Entry。
 - `THREAD`：先按 immutable `sessionId` 做 `KEY SHARE`，再 `FOR UPDATE` 锁 Thread；exact ordered replay 必须**先于**任何 cursor / preflight 准入，全新批次要求 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 精确匹配（否则 `STALE_COMMAND_CURSOR`），随后调用 preflight、预留连续 sequence、请求 THREAD Work。
 
-命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；所有 target 的命令批次都要求**恰有一条末尾 USER 消息**（`USER_MESSAGE` 或 `CUSTOM_MESSAGE`，`CUSTOM_MESSAGE` 角色限定为 `USER`）；非法批次是请求校验错误（`IllegalArgumentException`）。当配置命令产生实际变更时，`TurnPlanBuilder` 在紧邻本 turn 的用户消息前注入包装在 `<system-reminder>` 定界符中的 durable USER `CUSTOM_MESSAGE`（`SettingsReminder`），模型与前端均感知其为注入的上下文提醒而非用户发言。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
+命令类型只有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择）；所有 target 的命令批次都要求**恰有一条末尾 USER 消息**（`USER_MESSAGE` 或 `CUSTOM_MESSAGE`，`CUSTOM_MESSAGE` 角色限定为 `USER`）；非法批次是请求校验错误（`IllegalArgumentException`）。`TurnPlanBuilder` 只在 `TURN_START.settings` 冻结已生效的配置，不向模型注入配置提醒；UI 对比 ROOT 与非压缩 TURN_START 的完整设置快照投影配置变化。需要模型执行的独立提醒仍可作为显式 `CUSTOM_MESSAGE` 输入。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
 
 状态由标记字段派生：无标记即 `QUEUED`；有 `appliedTurnStartEntryId` 即 `APPLIED`；`stopRequestId` 与 `cancelledAt` 成对存在且无 `appliedTurnStartEntryId` 即 `CANCELLED`。
 

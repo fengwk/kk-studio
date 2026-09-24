@@ -187,8 +187,9 @@ class PlatformReadToolExecutorTest {
     ToolExecutionContext context = mock(ToolExecutionContext.class);
     when(context.threadId()).thenReturn(threadId);
 
-    byte[] bytes = "blob-data\n".getBytes(StandardCharsets.UTF_8);
-    when(resourceReader.readResource(threadId, blobId)).thenReturn(bytes);
+    when(resourceReader.readResourceText(
+            threadId, blobId, null, null, null, "kkstudio:/resources/" + blobId))
+        .thenReturn("path: kkstudio:/resources/" + blobId + "\n\n1|blob-data");
 
     ToolExecutionRequest request =
         mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context);

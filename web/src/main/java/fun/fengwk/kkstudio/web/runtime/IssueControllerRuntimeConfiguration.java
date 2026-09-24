@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperti
 import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.platform.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.platform.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 
 import java.time.Clock;
 import java.util.concurrent.Executor;
@@ -65,7 +65,7 @@ public class IssueControllerRuntimeConfiguration {
 
   @Bean
   public IssueControllerDispatcher issueControllerDispatcher(
-      IssueControllerWorkStore workStore,
+      IssueWorkStore workStore,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
       Clock clock,

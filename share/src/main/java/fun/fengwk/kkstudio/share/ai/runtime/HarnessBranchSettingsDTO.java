@@ -3,14 +3,21 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 单个 Entry branch 的设置快照。 */
+/**
+ * 单个 Entry branch 的设置快照。
+ *
+ * <p>wire 顺序显式冻结为声明顺序：{@code environmentName} 与 {@code goal} 都由显式 {@code @JsonSetter} 方法解析，若不做显式排序，
+ * Jackson 的方法遍次会把它们排到隐式字段之后，破坏既有字段位置。
+ */
 @Data
+@JsonPropertyOrder({"agentName", "model", "environmentName", "goal"})
 public class HarnessBranchSettingsDTO {
 
   /** 必填 Agent definition 名（canonical text，≤128 字符）。 */
@@ -27,6 +34,14 @@ public class HarnessBranchSettingsDTO {
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String environmentName;
+
+  /**
+   * 用户维护的 Goal 快照；null 表示该 branch 当前没有用户设定 Goal。
+   *
+   * <p>Goal 正文只由 typed GOAL 用户命令设置，因此新建 branch 的 ROOT settings 与请求方向永不携带它；该字段用于向客户端投影当前值。
+   */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private HarnessGoalSettingDTO goal;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)

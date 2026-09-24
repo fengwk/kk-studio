@@ -108,9 +108,9 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and constraint_type = 'FOREIGN KEY'")) {
         assertTrue(ownerSessionForeignKeys.next());
         assertEquals(
-            5L,
+            4L,
             ownerSessionForeignKeys.getLong(1),
-            "the owner arc must retain four owner FKs and the Harness Session FK");
+            "the owner arc keeps the Harness Session FK and exactly three owner FKs");
       }
     }
   }

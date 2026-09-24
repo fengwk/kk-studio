@@ -65,7 +65,7 @@ registerCase({
   id: 'crud.model.invalid_update_config',
   level: 'L1',
   title: 'Model 非法更新不破坏原配置',
-  docs: 'name identity 通过 path 指定；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
+  docs: 'path 定位既有复合 identity（providerName/modelName）；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名）；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
@@ -89,6 +89,7 @@ registerCase({
           'PUT',
           modelPath(provider.name, modelName),
           {
+            name: modelName,
             modelId: model.modelId,
             description: 'bad',
             config: baseModelConfig({ defaultVariant: 'nope' }),
@@ -99,6 +100,11 @@ registerCase({
     )
     const still = await findModel(ctx, provider.name, modelName)
     assert(still?.config?.defaultVariant === 'default', JSON.stringify(still))
+    // 失败的 PUT 不得改动 identity/version：name 与 version 与创建时完全一致。
+    assert(
+      still?.name === modelName && String(still?.version) === String(model.version),
+      JSON.stringify(still),
+    )
     await deleteModel(ctx, still)
     await deleteProvider(ctx, provider)
   },
@@ -227,7 +233,7 @@ registerCase({
   id: 'crud.model.lifecycle',
   level: 'L1',
   title: 'Model 复合 name identity 创建/更新/硬删除/同名重建',
-  docs: '记录存续期间 providerName/name 不可修改；PUT 不修改 identity；modelName 可包含 /；DELETE 硬删除后同名可重建，version 从 0 重新开始；Provider 保持到最后再删',
+  docs: 'path 定位既有复合 identity（providerName/modelName）；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名），PUT 不改 providerName；modelName 可包含 /；DELETE 硬删除后同名可重建，version 从 0 重新开始；Provider 保持到最后再删',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
@@ -261,6 +267,7 @@ registerCase({
     const updated = envelopeData(
       (
         await ctx.call('PUT', modelPath(provider.name, name), {
+          name,
           modelId: model.modelId,
           description: 'updated',
           config: updatedConfig,
@@ -502,7 +509,7 @@ registerCase({
   id: 'crud.chat.thread_branch_settings_independent',
   level: 'L1',
   title: 'Chat 默认值与 Thread branchSettings 相互独立',
-  docs: 'Chat 仅保存 agentName/yoloEnabled；NEW_SESSION rootSettings 携带 agentName/model/environmentName branch draft；更新 Chat 默认值不改变既有 Thread',
+  docs: 'Chat 仅保存 agentName/yoloEnabled；NEW_SESSION rootSettings 携带 agentName/model/environmentName branch draft，Thread 快照额外显式投影 goal；更新 Chat 默认值不改变既有 Thread',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -528,6 +535,13 @@ registerCase({
         model: modelSelectionFor(agent),
         environmentName: null,
       }
+      // 请求方向不携带 goal；Thread 完整快照总是显式投影 goal（未设置时为 null）。
+      const expectedSettings = {
+        agentName: requested.agentName,
+        model: requested.model,
+        environmentName: requested.environmentName,
+        goal: null,
+      }
       const threadId = cid()
       const accepted = await createNewSession(ctx, {
         owner: chatOwner(chat.id),
@@ -540,8 +554,8 @@ registerCase({
       const thread = accepted.thread
       assert(thread.yoloEnabled === false, JSON.stringify(thread))
       assert(
-        JSON.stringify(thread.branchSettings) === JSON.stringify(requested),
-        JSON.stringify({ expected: requested, actual: thread.branchSettings }),
+        JSON.stringify(thread.branchSettings) === JSON.stringify(expectedSettings),
+        JSON.stringify({ expected: expectedSettings, actual: thread.branchSettings }),
       )
       const updated = envelopeData(
         (
@@ -563,8 +577,8 @@ registerCase({
       // 同一 Thread reread：branchSettings 逐字段不变。
       const reread = await getThreadSnapshot(ctx, threadId)
       assert(
-        JSON.stringify(reread.thread.branchSettings) === JSON.stringify(requested),
-        JSON.stringify({ expected: requested, actual: reread.thread.branchSettings }),
+        JSON.stringify(reread.thread.branchSettings) === JSON.stringify(expectedSettings),
+        JSON.stringify({ expected: expectedSettings, actual: reread.thread.branchSettings }),
       )
       assert(reread.thread.yoloEnabled === false, JSON.stringify(reread.thread))
       // 缺 rootSettings 的 NEW_SESSION => 400（mapper requireNonNull）。

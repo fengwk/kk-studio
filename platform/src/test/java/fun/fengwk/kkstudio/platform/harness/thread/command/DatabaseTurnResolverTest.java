@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -51,7 +52,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -687,9 +687,9 @@ class DatabaseTurnResolverTest {
   void bindsToolsInExactLatestAgentOrder() {
     Fixture fixture =
         new Fixture(
-            List.of("bash", "create_goal", "read"),
+            List.of("bash", "update_goal", "read"),
             List.of(),
-            List.of(hostDescriptor("create_goal")));
+            List.of(hostDescriptor("update_goal")));
     fixture.readyEnvironment(ENV_A);
     BranchSettings settings = settings("default");
 
@@ -697,12 +697,12 @@ class DatabaseTurnResolverTest {
 
     List<String> boundNames =
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
-    assertEquals(List.of("bash", "create_goal", "read"), boundNames);
+    assertEquals(List.of("bash", "update_goal", "read"), boundNames);
     assertEquals(
         List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.OPTIONAL),
         requestSpec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
     // Provider tools 与 bindings 一一对应且顺序一致。
-    assertEquals(List.of("bash", "create_goal", "read"), boundNames);
+    assertEquals(List.of("bash", "update_goal", "read"), boundNames);
 
     Fixture missingFixture =
         new Fixture(List.of("missing"), List.of(), List.of(), HarnessCatalog.from(List.of()));
@@ -711,44 +711,34 @@ class DatabaseTurnResolverTest {
         missingFixture.rejected(missingFixture.path(settings("default"))).error().message());
   }
 
+  /**
+   * 验证 Goal Tool 的 contributor provenance 冻结，以及用户 Goal 绝不进入 systemInstruction。
+   *
+   * <p>Goal 正文由 branch settings 拥有，不再有任何 context projector：即使设置了 Goal，模型请求的 systemInstruction
+   * 也不会出现其正文。
+   */
   @Test
-  void freezesContributorProvenanceAndProjectsBranchScopedGoalContext() {
+  void freezesGoalToolProvenanceWithoutProjectingUserGoalIntoSystemInstruction() {
     ReadTool readTool = new ReadTool(mock(ReadToolExecutor.class));
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
     BuiltinHarnessContributor builtin = new BuiltinHarnessContributor(readTool, dummyTask);
     HarnessCatalog catalog = HarnessCatalog.from(List.of(builtin));
-    Fixture fixture = new Fixture(List.of("create_goal"), List.of(), List.of(), catalog);
-    BranchSettings settings = settings("default");
+    Fixture fixture = new Fixture(List.of("update_goal"), List.of(), List.of(), catalog);
+    BranchSettings settings =
+        settings("default").withGoal(new GoalSetting(new UUID(0L, 42L), "ship the release"));
     EntryPath path =
-        new EntryPath(
-            List.of(
-                new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
-                new Entry(
-                    id(2),
-                    SESSION_ID,
-                    id(1),
-                    new CustomEntryPayload(
-                        "builtin",
-                        "goal.state",
-                        1,
-                        "{\"objective\":\"ship\",\"tokenBudget\":null,\"status\":\"active\","
-                            + "\"reason\":null,\"createdAt\":\""
-                            + NOW
-                            + "\",\"updatedAt\":\""
-                            + NOW
-                            + "\"}"),
-                    NOW)));
+        new EntryPath(List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
 
     ModelRequestSpec requestSpec = fixture.resolved(path);
 
     ToolBinding binding = requestSpec.toolBindings().getFirst();
     assertEquals("builtin", binding.contributor().contributorId());
-    assertEquals("goal.create", binding.contributor().localName());
-    assertEquals("goal.state", binding.contributor().stateAccesses().getFirst().customType());
-    assertTrue(
-        requestSpec.systemInstruction().contains("\"objective\":\"ship\""),
+    assertEquals("goal.update", binding.contributor().localName());
+    assertEquals("goal.progress", binding.contributor().stateAccesses().getFirst().customType());
+    assertFalse(
+        requestSpec.systemInstruction().contains("ship the release"),
         requestSpec.systemInstruction());
   }
 
@@ -1314,7 +1304,7 @@ class DatabaseTurnResolverTest {
     HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool", ENV_B);
     Fixture fixture =
         new Fixture(
-            List.of("bash", "fixed_tool", "create_goal", "read"),
+            List.of("bash", "fixed_tool", "update_goal", "read"),
             List.of(),
             List.of(),
             fixedCatalog);
@@ -1323,7 +1313,7 @@ class DatabaseTurnResolverTest {
 
     List<LiveTurnPlan.CandidateTool> candidates = planned.candidateTools();
     assertEquals(
-        List.of("create_goal", "read", "bash", "fixed_tool"),
+        List.of("update_goal", "read", "bash", "fixed_tool"),
         candidates.stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertEquals(
         List.of(
@@ -1334,7 +1324,7 @@ class DatabaseTurnResolverTest {
         candidates.stream().map(LiveTurnPlan.CandidateTool::state).toList());
     // 最终模型工具面只含 SENT 候选，顺序与候选投影中的 SENT 段一致。
     assertEquals(
-        List.of("create_goal", "read"),
+        List.of("update_goal", "read"),
         planned.spec().toolBindings().stream()
             .map(binding -> binding.descriptor().name())
             .toList());
@@ -1494,9 +1484,9 @@ class DatabaseTurnResolverTest {
 
     fixture =
         new Fixture(
-            List.of("create_goal"),
+            List.of("update_goal"),
             List.of(),
-            List.of(hostDescriptor("create_goal")),
+            List.of(hostDescriptor("update_goal")),
             Set.of(),
             ProviderType.OPENAI,
             ProviderType.OPENAI,
@@ -1669,7 +1659,7 @@ class DatabaseTurnResolverTest {
   @Test
   void resolvedSpecStaysFrozenAfterCatalogAndConfigChange() {
     Fixture fixture =
-        new Fixture(List.of("create_goal"), List.of(), List.of(hostDescriptor("create_goal")));
+        new Fixture(List.of("update_goal"), List.of(), List.of(hostDescriptor("update_goal")));
     EntryPath path = fixture.path(settings("custom"));
     ModelRequestSpec frozen = fixture.resolved(path);
     String preamble = instructionText(frozen);
@@ -1696,14 +1686,14 @@ class DatabaseTurnResolverTest {
     assertEquals(tools, frozen.toolBindings());
     assertEquals("custom", frozen.variant().id());
     assertEquals(
-        List.of("create_goal"),
+        List.of("update_goal"),
         tools.stream().map(binding -> binding.descriptor().name()).toList());
     ProviderRequest after = new ModelRequestMaterializer().materialize(path, frozen);
     assertEquals(before, after);
     // 物化边界把冻结的 instruction 原样带到 Provider 请求，不再合成 SYSTEM 消息。
     assertEquals(preamble, after.systemInstruction());
     assertTrue(after.messages().stream().noneMatch(m -> textOf(m).equals(preamble)));
-    assertEquals(List.of("create_goal"), after.tools().stream().map(tool -> tool.name()).toList());
+    assertEquals(List.of("update_goal"), after.tools().stream().map(tool -> tool.name()).toList());
   }
 
   private static String textOf(ProviderMessage message) {
@@ -2249,15 +2239,15 @@ class DatabaseTurnResolverTest {
   void selectableToolsPreserveOrderAndBindings() {
     Fixture fixture =
         new Fixture(
-            List.of("bash", "create_goal", "read"),
+            List.of("bash", "update_goal", "read"),
             List.of(),
-            List.of(hostDescriptor("create_goal")));
+            List.of(hostDescriptor("update_goal")));
     fixture.readyEnvironment(ENV_A);
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
     List<String> names = spec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    assertEquals(List.of("bash", "create_goal", "read"), names);
+    assertEquals(List.of("bash", "update_goal", "read"), names);
     assertEquals(
         List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.OPTIONAL),
         spec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
@@ -2271,9 +2261,9 @@ class DatabaseTurnResolverTest {
     // 1. branch 选择了环境：REQUIRED 工具冻结环境名，OPTIONAL 工具冻结环境名，NONE 工具冻结 null
     Fixture fixture =
         new Fixture(
-            List.of("bash", "create_goal", "read"),
+            List.of("bash", "update_goal", "read"),
             List.of(),
-            List.of(hostDescriptor("create_goal")));
+            List.of(hostDescriptor("update_goal")));
     fixture.readyEnvironment(ENV_A);
 
     ModelRequestSpec boundSpec = fixture.resolved(fixture.path(settings("default")));
@@ -2283,7 +2273,7 @@ class DatabaseTurnResolverTest {
     assertEquals(EnvironmentSupport.REQUIRED, boundTools.get(0).environmentSupport());
     assertEquals(ENV_A_NAME, boundTools.get(0).environmentName());
     assertEquals(ENV_A, boundTools.get(0).environmentId());
-    // create_goal (NONE) -> null
+    // update_goal (NONE) -> null
     assertEquals(EnvironmentSupport.NONE, boundTools.get(1).environmentSupport());
     assertNull(boundTools.get(1).environmentName());
     assertNull(boundTools.get(1).environmentId());
@@ -2296,7 +2286,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec unboundSpec = fixture.resolved(fixture.path(unboundSettings("default")));
     List<ToolBinding> unboundTools = unboundSpec.toolBindings();
     assertEquals(2, unboundTools.size());
-    assertEquals("create_goal", unboundTools.get(0).descriptor().name());
+    assertEquals("update_goal", unboundTools.get(0).descriptor().name());
     assertEquals(EnvironmentSupport.NONE, unboundTools.get(0).environmentSupport());
     assertNull(unboundTools.get(0).environmentName());
     assertNull(unboundTools.get(0).environmentId());
@@ -2310,7 +2300,7 @@ class DatabaseTurnResolverTest {
         fixture.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
     List<ToolBinding> clearedTools = clearedSpec.toolBindings();
     assertEquals(2, clearedTools.size());
-    assertEquals("create_goal", clearedTools.get(0).descriptor().name());
+    assertEquals("update_goal", clearedTools.get(0).descriptor().name());
     assertEquals(EnvironmentSupport.NONE, clearedTools.get(0).environmentSupport());
     assertEquals("read", clearedTools.get(1).descriptor().name());
     assertEquals(EnvironmentSupport.OPTIONAL, clearedTools.get(1).environmentSupport());
@@ -2320,40 +2310,23 @@ class DatabaseTurnResolverTest {
 
   @Test
   void projectRoleThreadsInjectExactRoleTools() {
-    // 1. Coordinator: 包含所有 Coordinator 工具
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR));
 
-    ModelRequestSpec coordinatorSpec = fixture.resolved(fixture.path(settings("default")));
-    List<String> coordinatorTools =
-        coordinatorSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    List<String> expectedCoordinatorTools =
-        List.of(
-            "project_read",
-            "issue_read",
-            "issue_list",
-            "issue_create",
-            "issue_update",
-            "issue_add_dependency",
-            "issue_remove_dependency",
-            "issue_set_status",
-            "issue_cancel");
-    assertEquals(expectedCoordinatorTools, coordinatorTools);
-
-    // 2. Executor: 仅 issue_submit 与 issue_request_input
+    // 1. Executor: 仅 issue_read 与 issue_request_input
     fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
     ModelRequestSpec executorSpec = fixture.resolved(fixture.path(settings("default")));
     List<String> executorTools =
         executorSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    List<String> expectedExecutorTools = List.of("issue_submit", "issue_request_input");
+    List<String> expectedExecutorTools = List.of("issue_read", "issue_request_input");
     assertEquals(expectedExecutorTools, executorTools);
 
-    // 3. Reviewer: 仅 issue_review
+    // 2. Reviewer: 包含 issue_read、issue_request_input 与 issue_review
     fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
     ModelRequestSpec reviewerSpec = fixture.resolved(fixture.path(settings("default")));
     List<String> reviewerTools =
         reviewerSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    List<String> expectedReviewerTools = List.of("issue_review");
+    List<String> expectedReviewerTools =
+        List.of("issue_read", "issue_request_input", "issue_review");
     assertEquals(expectedReviewerTools, reviewerTools);
   }
 
@@ -2364,6 +2337,38 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
     assertEquals(List.of(), spec.toolBindings());
+  }
+
+  /**
+   * 测试意图：Issue Agent Branch 永不提供 Goal 工具——即使 Agent 配置显式声明 get_goal/update_goal，两者也必须从冻结
+   * toolBindings 中消失（未绑定的 tool call 在 ModelResponsePlanner 中判为 UNKNOWN_TOOL，绝不会执行）。隐藏只由稳定归属决定： 没有活动
+   * Run 时同样成立；同一配置在普通 Branch 上仍完整保留 Goal 工具。
+   */
+  @Test
+  void issueAgentBranchHidesConfiguredGoalToolsWhileOrdinaryBranchKeepsThem() {
+    Fixture fixture = new Fixture(List.of("get_goal", "update_goal", "read"), List.of(), List.of());
+    fixture.issueAgentBranch(THREAD_ID, true);
+
+    // 1. 有活动 Run（注入角色工具）：Goal 工具仍然不可绑定。
+    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
+    ModelRequestSpec issueSpec = fixture.resolved(fixture.path(settings("default")));
+    List<String> issueTools =
+        issueSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
+    assertEquals(List.of("read", "issue_read", "issue_request_input"), issueTools);
+
+    // 2. 没有活动 Run（无角色工具）：归属不变，Goal 工具依旧隐藏，不能靠「Run 未开始」绕过。
+    fixture.roleTools(THREAD_ID, List.of());
+    ModelRequestSpec idleSpec = fixture.resolved(fixture.path(settings("default")));
+    assertEquals(
+        List.of("read"),
+        idleSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+
+    // 3. 普通 Branch（非 Issue 归属）：同一配置的 Goal 工具完整保留。
+    fixture.issueAgentBranch(THREAD_ID, false);
+    ModelRequestSpec ordinarySpec = fixture.resolved(fixture.path(settings("default")));
+    assertEquals(
+        List.of("get_goal", "update_goal", "read"),
+        ordinarySpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
   }
 
   @Test
@@ -2439,21 +2444,21 @@ class DatabaseTurnResolverTest {
         HarnessCatalog.from(List.of(defaultBuiltinContributor()));
     Fixture fixtureWithoutRoleTools =
         new Fixture(List.of(), List.of(), List.of(), catalogWithoutRoleTools);
-    fixtureWithoutRoleTools.roleTools(THREAD_ID, List.of("project_read"));
+    fixtureWithoutRoleTools.roleTools(THREAD_ID, List.of("issue_read"));
     TurnResolver.Rejected rejectedRole =
         fixtureWithoutRoleTools.rejected(fixtureWithoutRoleTools.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedRole.error().code());
-    assertEquals("tool not found: project_read", rejectedRole.error().message());
+    assertEquals("tool not found: issue_read", rejectedRole.error().message());
   }
 
   @Test
   void rejectsWhenAgentConfiguresInternalProjectTool() {
-    Fixture projectToolInConfig = new Fixture(List.of("project_read"), List.of(), List.of());
+    Fixture projectToolInConfig = new Fixture(List.of("issue_read"), List.of(), List.of());
     TurnResolver.Rejected rejectedProject =
         projectToolInConfig.rejected(projectToolInConfig.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedProject.error().code());
     assertEquals(
-        "internal tool cannot be selected by an Agent: project_read",
+        "internal tool cannot be selected by an Agent: issue_read",
         rejectedProject.error().message());
   }
 
@@ -2494,7 +2499,7 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionDoesNotInvokeSelectorOrProjectorAndHasZeroTools() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.COORDINATOR));
+    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
     fixture.roleContext(THREAD_ID, "role context");
 
     List<AgentMessage> messages =
@@ -2940,7 +2945,6 @@ class DatabaseTurnResolverTest {
                   registrar -> {
                     for (ToolDescriptor descriptor : hostDescriptors) {
                       if (descriptor.name().equals("task")
-                          || descriptor.name().equals("create_goal")
                           || descriptor.name().equals("get_goal")
                           || descriptor.name().equals("update_goal")
                           || descriptor.name().equals("bash")
@@ -3005,6 +3009,11 @@ class DatabaseTurnResolverTest {
 
     private void roleTools(UUID threadId, List<String> tools) {
       when(roleToolSelector.select(threadId)).thenReturn(tools);
+    }
+
+    /** 声明该 thread 的稳定归属：true 表示属于某个 Issue+Agent 归属（与是否有活动 Run 无关）。 */
+    private void issueAgentBranch(UUID threadId, boolean value) {
+      when(roleToolSelector.isIssueAgentBranch(threadId)).thenReturn(value);
     }
 
     private void roleContext(UUID threadId, String context) {

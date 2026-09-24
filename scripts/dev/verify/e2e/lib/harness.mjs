@@ -13,7 +13,6 @@ import {
  * - POST /api/harness/command-batches          唯一产品用户命令写入口（202 accepted）
  * - GET  /api/ai/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
  * - GET  /api/canvases/{canvasId}/sessions     Canvas owner 的 Session 摘要（新到旧）
- * - GET  /api/projects/{projectId}/sessions    Project owner 的 Session 摘要（新到旧）
  * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
  * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
  * - GET  /api/harness/threads/{id}             一致快照（单事务）
@@ -203,8 +202,8 @@ function assertAcceptedCommands(accepted) {
 export async function acceptCommandBatch(ctx, { owner, target, commands }) {
   assert(owner?.type && owner?.id, `owner required: ${JSON.stringify(owner)}`)
   assert(
-    owner.type === 'CHAT' || owner.type === 'CANVAS' || owner.type === 'PROJECT',
-    `owner.type must be CHAT|CANVAS|PROJECT: ${JSON.stringify(owner)}`,
+    owner.type === 'CHAT' || owner.type === 'CANVAS',
+    `owner.type must be CHAT|CANVAS: ${JSON.stringify(owner)}`,
   )
   canonicalUuid(owner.id, 'owner.id')
   assert(target?.type, `target required: ${JSON.stringify(target)}`)
@@ -343,16 +342,6 @@ export async function listChatSessions(ctx, chatId) {
 /** Canvas owner 的 Session 摘要数组（归属时间新到旧）。 */
 export async function listCanvasSessions(ctx, canvasId) {
   const { json } = await ctx.call('GET', `/api/canvases/${encodeURIComponent(canvasId)}/sessions`)
-  const sessions = envelopeData(json)
-  assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
-  for (const item of sessions) assertSessionSummary(item)
-  return sessions
-}
-
-/** Project owner 的 Session 摘要数组（归属时间新到旧）。 */
-export async function listProjectSessions(ctx, projectId) {
-  canonicalUuid(projectId, 'projectId')
-  const { json } = await ctx.call('GET', `/api/projects/${encodeURIComponent(projectId)}/sessions`)
   const sessions = envelopeData(json)
   assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
   for (const item of sessions) assertSessionSummary(item)

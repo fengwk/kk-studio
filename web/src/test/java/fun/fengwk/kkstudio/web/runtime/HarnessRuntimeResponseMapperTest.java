@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -457,6 +458,23 @@ class HarnessRuntimeResponseMapperTest {
         () ->
             HarnessRuntimeResponseMapper.toStopResultDto(
                 result, withVersion(HarnessRuntimeTestFixtures.idleSnapshot(), 4)));
+  }
+
+  /** 测试意图：branch settings 的 goal 投影必须显式 nullable：已设置时输出 {id,text}，未设置或已清除时输出 null。 */
+  @Test
+  void projectsNullableUserGoalSnapshot() {
+    UUID goalId = id(42);
+    HarnessThreadDTO withGoal =
+        HarnessRuntimeResponseMapper.toThreadDto(
+            idleSnapshot(
+                HarnessRuntimeTestFixtures.settings()
+                    .withGoal(new GoalSetting(goalId, "ship the release"))));
+    assertEquals(idText(42), withGoal.getBranchSettings().getGoal().getId());
+    assertEquals("ship the release", withGoal.getBranchSettings().getGoal().getText());
+
+    HarnessThreadDTO cleared =
+        HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot());
+    assertNull(cleared.getBranchSettings().getGoal());
   }
 
   private static ThreadSnapshot idleSnapshot(BranchSettings settings) {

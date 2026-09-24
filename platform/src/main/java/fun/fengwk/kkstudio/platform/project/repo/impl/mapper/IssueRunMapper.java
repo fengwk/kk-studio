@@ -21,21 +21,21 @@ import java.util.UUID;
 public interface IssueRunMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, issue_id, ordinal, role, actor_type, agent_name, submission_run_id, "
-          + "status, outcome, observed_spec_revision, observed_input_sequence, "
+      "id, issue_id, ordinal, role, agent_name, submission_run_id, "
+          + "status, outcome, observed_activity_sequence, "
           + "continuation_count, max_continuations, deadline, waiting_reason, "
           + "result::text as result, terminal_action_id, version, created_at, updated_at, completed_at";
 
   @Insert(
       """
-      insert into issue_run (
-          id, issue_id, ordinal, role, actor_type, agent_name, submission_run_id,
-          status, outcome, observed_spec_revision, observed_input_sequence,
+      insert into project_issue_run (
+          id, issue_id, ordinal, role, agent_name, submission_run_id,
+          status, outcome, observed_activity_sequence,
           continuation_count, max_continuations, deadline, waiting_reason,
           result, terminal_action_id, version, created_at, updated_at, completed_at
       ) values (
-          #{id}, #{issueId}, #{ordinal}, #{role}, #{actorType}, #{agentName}, #{submissionRunId},
-          #{status}, #{outcome}, #{observedSpecRevision}, #{observedInputSequence},
+          #{id}, #{issueId}, #{ordinal}, #{role}, #{agentName}, #{submissionRunId},
+          #{status}, #{outcome}, #{observedActivitySequence},
           #{continuationCount}, #{maxContinuations}, #{deadline}, #{waitingReason},
           cast(#{result, jdbcType=VARCHAR} as jsonb),
           #{terminalActionId}, 0, clock_timestamp(), clock_timestamp(), #{completedAt}
@@ -43,7 +43,7 @@ public interface IssueRunMapper extends BaseMapper {
       """)
   int insert(IssueRunDO run);
 
-  @Select("select " + COLUMNS + " from issue_run where id = #{id}")
+  @Select("select " + COLUMNS + " from project_issue_run where id = #{id}")
   @Results(
       id = "issueRunResultMap",
       value = {
@@ -51,13 +51,11 @@ public interface IssueRunMapper extends BaseMapper {
         @Result(column = "issue_id", property = "issueId"),
         @Result(column = "ordinal", property = "ordinal"),
         @Result(column = "role", property = "role"),
-        @Result(column = "actor_type", property = "actorType"),
         @Result(column = "agent_name", property = "agentName"),
         @Result(column = "submission_run_id", property = "submissionRunId"),
         @Result(column = "status", property = "status"),
         @Result(column = "outcome", property = "outcome"),
-        @Result(column = "observed_spec_revision", property = "observedSpecRevision"),
-        @Result(column = "observed_input_sequence", property = "observedInputSequence"),
+        @Result(column = "observed_activity_sequence", property = "observedActivitySequence"),
         @Result(column = "continuation_count", property = "continuationCount"),
         @Result(column = "max_continuations", property = "maxContinuations"),
         @Result(column = "deadline", property = "deadline"),
@@ -71,25 +69,39 @@ public interface IssueRunMapper extends BaseMapper {
       })
   IssueRunDO getById(@Param("id") UUID id);
 
-  @Select("select " + COLUMNS + " from issue_run where id = #{id} for update")
+  @Select("select " + COLUMNS + " from project_issue_run where id = #{id} for update")
   @ResultMap("issueRunResultMap")
   IssueRunDO lockById(@Param("id") UUID id);
 
   @Select(
       "select "
           + COLUMNS
-          + " from issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN')")
+          + " from project_issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN')")
   @ResultMap("issueRunResultMap")
   IssueRunDO findActiveByIssueId(@Param("issueId") UUID issueId);
 
   @Select(
       "select "
           + COLUMNS
-          + " from issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN') for update")
+          + " from project_issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN') for update")
   @ResultMap("issueRunResultMap")
   IssueRunDO lockActiveByIssueId(@Param("issueId") UUID issueId);
 
-  @Select("select " + COLUMNS + " from issue_run where terminal_action_id = #{terminalActionId}")
+  @Select(
+      """
+      select exists(
+          select 1
+          from project_issue_run r
+          join project_issue i on i.id = r.issue_id
+          where i.project_id = #{projectId}
+            and r.status in ('RUNNING', 'WAITING_HUMAN'))
+      """)
+  boolean hasActiveByProjectId(@Param("projectId") UUID projectId);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue_run where terminal_action_id = #{terminalActionId}")
   @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
   @ResultMap("issueRunResultMap")
   IssueRunDO findByTerminalActionId(@Param("terminalActionId") String terminalActionId);
@@ -97,24 +109,26 @@ public interface IssueRunMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from issue_run where issue_id = #{issueId} order by ordinal desc limit 1")
+          + " from project_issue_run where issue_id = #{issueId} order by ordinal desc limit 1")
   @ResultMap("issueRunResultMap")
   IssueRunDO findLatestByIssueId(@Param("issueId") UUID issueId);
 
-  @Select("select " + COLUMNS + " from issue_run where issue_id = #{issueId} order by ordinal asc")
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue_run where issue_id = #{issueId} order by ordinal asc")
   @ResultMap("issueRunResultMap")
   List<IssueRunDO> listByIssueId(@Param("issueId") UUID issueId);
 
-  @Select("select coalesce(max(ordinal), 0) + 1 from issue_run where issue_id = #{issueId}")
+  @Select("select coalesce(max(ordinal), 0) + 1 from project_issue_run where issue_id = #{issueId}")
   Long allocateNextOrdinal(@Param("issueId") UUID issueId);
 
   @Update(
       """
-      update issue_run
+      update project_issue_run
       set status = #{run.status},
           outcome = #{run.outcome},
-          observed_spec_revision = #{run.observedSpecRevision},
-          observed_input_sequence = #{run.observedInputSequence},
+          observed_activity_sequence = #{run.observedActivitySequence},
           continuation_count = #{run.continuationCount},
           waiting_reason = #{run.waitingReason},
           result = cast(#{run.result, jdbcType=VARCHAR} as jsonb),
@@ -126,6 +140,6 @@ public interface IssueRunMapper extends BaseMapper {
       """)
   int updateById(@Param("run") IssueRunDO run, @Param("expectedVersion") long expectedVersion);
 
-  @Delete("delete from issue_run where id = #{id} and version = #{expectedVersion}")
+  @Delete("delete from project_issue_run where id = #{id} and version = #{expectedVersion}")
   int deleteById(@Param("id") UUID id, @Param("expectedVersion") long expectedVersion);
 }

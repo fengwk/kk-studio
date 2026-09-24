@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.CustomStateSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -110,6 +111,11 @@ final class ToolGatewayTestSupport {
 
         @Override
         public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+          return Optional.empty();
+        }
+
+        @Override
+        public Optional<GoalSnapshot> goal() {
           return Optional.empty();
         }
       };

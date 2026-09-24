@@ -22,17 +22,19 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
-import fun.fengwk.kkstudio.platform.project.repo.IssueControllerWorkRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
 import java.time.Instant;
@@ -51,16 +53,16 @@ import java.util.stream.Collectors;
 
 /**
  * 验证 ProjectService 及底层 PostgreSQL ProjectRepository 的核心业务行为： 包含项目创建、CAS 乐观锁更新、归档/解归档、并发单调 Issue
- * 编号分配及 Coordinator Session 绑定。
+ * 编号分配及深删除孤儿清理。
  */
 class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Autowired private ProjectService projectService;
   @Autowired private ProjectRepository projectRepository;
-  @Autowired private ProjectSessionRepository projectSessionRepository;
   @Autowired private IssueService issueService;
   @Autowired private IssueRunService issueRunService;
-  @Autowired private IssueControllerWorkRepository issueControllerWorkRepository;
+  @Autowired private IssueWorkStore issueWorkStore;
+  @Autowired private IssueAgentSessionRepository issueAgentSessionRepository;
   @MockitoBean private HarnessStore harnessStore;
 
   @BeforeEach
@@ -92,6 +94,8 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
       doAnswer(
               inv -> {
                 UUID sessionId = inv.getArgument(0);
+                jdbcTemplate.update("delete from harness_thread where session_id = ?", sessionId);
+                jdbcTemplate.update("delete from harness_entry where session_id = ?", sessionId);
                 jdbcTemplate.update("delete from harness_session where id = ?", sessionId);
                 return null;
               })
@@ -102,21 +106,17 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testCreateProjectSuccessAndValidation() {
-    String agentName = createTestAgent();
-
-    // 标题空白或 Coordinator 为空时应抛出校验异常
+    // 测试意图：验证创建项目时的字段校验边界、默认值分配以及成功落库后的完整字段一致性。
     assertThrows(
-        AiValidationException.class, () -> projectService.createProject("  ", "desc", agentName));
-    assertThrows(
-        AiValidationException.class, () -> projectService.createProject("title", "desc", "  "));
+        AiValidationException.class, () -> projectService.createProject("  ", "desc", true, 3));
 
-    // 成功创建项目
-    Project project =
-        projectService.createProject("Project Alpha", "Initial description", agentName);
+    // 默认 maxReviewRejections 传入非正数时自动回退为默认值 3
+    Project project = projectService.createProject("Project Alpha", "Initial description", true, 0);
     assertNotNull(project.getId());
     assertEquals("Project Alpha", project.getTitle());
     assertEquals("Initial description", project.getDescription());
-    assertEquals(agentName, project.getCoordinatorAgentName());
+    assertTrue(project.isYoloEnabled());
+    assertEquals(3, project.getMaxReviewRejections());
     assertEquals(1L, project.getNextIssueNumber());
     assertEquals(0L, project.getVersion());
     assertNull(project.getArchivedAt());
@@ -127,34 +127,108 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testUpdateProjectCasAndArchiveCheck() {
-    String agentName1 = createTestAgent();
-    String agentName2 = createTestAgent();
-    Project project = projectService.createProject("Project Beta", "Desc", agentName1);
+    // 测试意图：验证 CAS 乐观锁版本检查、字段更新（包含 YOLO 和阈值）、正整数约束及归档后禁止修改。
+    Project project = projectService.createProject("Project Beta", "Desc", true, 3);
     UUID id = project.getId();
 
     // 期望版本不匹配时抛出版本冲突异常
     assertThrows(
         AiVersionConflictException.class,
-        () -> projectService.updateProject(id, 999L, "New Title", "New Desc", agentName2));
+        () -> projectService.updateProject(id, 999L, "New Title", "New Desc", false, 5));
+
+    // maxReviewRejections 必须为正整数
+    assertThrows(
+        AiValidationException.class,
+        () -> projectService.updateProject(id, 0L, "New Title", "New Desc", false, 0));
 
     // 正常 CAS 更新
-    Project updated = projectService.updateProject(id, 0L, "New Title", "New Desc", agentName2);
+    Project updated = projectService.updateProject(id, 0L, "New Title", "New Desc", false, 5);
     assertEquals("New Title", updated.getTitle());
     assertEquals("New Desc", updated.getDescription());
-    assertEquals(agentName2, updated.getCoordinatorAgentName());
+    assertFalse(updated.isYoloEnabled());
+    assertEquals(5, updated.getMaxReviewRejections());
     assertEquals(1L, updated.getVersion());
 
     // 归档后禁止修改
     projectService.archiveProject(id, 1L);
     assertThrows(
         AiValidationException.class,
-        () -> projectService.updateProject(id, 2L, "Should Fail", "Desc", agentName2));
+        () -> projectService.updateProject(id, 2L, "Should Fail", "Desc", true, 3));
+  }
+
+  @Test
+  void testUpdateProjectYoloRejectedWhileProjectHasActiveRun() {
+    // 测试意图：YOLO 是 Run 启动策略，工作 Branch 的实际授权是启动时的快照。只要同一 Project 下任一
+    // Issue 仍有活动 Run（RUNNING / WAITING_HUMAN），修改 YOLO 必须整体拒绝且不留下任何已改字段，
+    // 否则会出现“界面已关闭、工具仍按旧快照免审批”的假安全信号；同值 YOLO、其它字段与阈值更新不受
+    // 约束，Run 进入终态后放行，其它 Project 的活动 Run 不影响本 Project。
+    String agentName = createTestAgent();
+    Project project = projectService.createProject("Yolo Guard", "Desc", true, 3);
+    UUID projectId = project.getId();
+
+    Issue issueWithRun =
+        issueService.createIssue(projectId, "Issue A", "Desc", agentName, null, IssueStatus.TODO);
+    Issue issueWithoutRun =
+        issueService.createIssue(projectId, "Issue B", "Desc", agentName, null, IssueStatus.TODO);
+
+    IssueRun run =
+        issueRunService.startExecutorRun(
+            issueWithRun.getId(), agentName, Instant.now().plusSeconds(60), 5);
+    assertEquals(IssueRunStatus.RUNNING, run.getStatus());
+
+    // RUNNING 时拒绝修改 YOLO，同一请求中的其它字段一并拒绝：版本与全部字段保持原样
+    AiValidationException runningRejected =
+        assertThrows(
+            AiValidationException.class,
+            () -> projectService.updateProject(projectId, 0L, "Renamed", "New Desc", false, 5));
+    assertTrue(runningRejected.getMessage().contains("yoloEnabled"));
+    Project afterRunningReject = projectService.getProject(projectId);
+    assertTrue(afterRunningReject.isYoloEnabled());
+    assertEquals("Yolo Guard", afterRunningReject.getTitle());
+    assertEquals("Desc", afterRunningReject.getDescription());
+    assertEquals(3, afterRunningReject.getMaxReviewRejections());
+    assertEquals(0L, afterRunningReject.getVersion());
+
+    // 同值 YOLO 与其它字段更新正常生效；活动 Run 按 Project 判定，与它在哪个 Issue 上无关
+    Project sameValueUpdate =
+        projectService.updateProject(projectId, 0L, "Yolo Guard Renamed", "New Desc", true, 5);
+    assertTrue(sameValueUpdate.isYoloEnabled());
+    assertEquals("Yolo Guard Renamed", sameValueUpdate.getTitle());
+    assertEquals("New Desc", sameValueUpdate.getDescription());
+    assertEquals(5, sameValueUpdate.getMaxReviewRejections());
+    assertEquals(1L, sameValueUpdate.getVersion());
+    assertNotNull(issueService.getIssue(issueWithoutRun.getId()));
+
+    // WAITING_HUMAN 的运行同样算活动 Run：等待人工回答期间不能先关掉 YOLO
+    IssueRun waiting = issueRunService.requestInput(run.getId(), "Need clarification", null);
+    assertEquals(IssueRunStatus.WAITING_HUMAN, waiting.getStatus());
+    assertThrows(
+        AiValidationException.class,
+        () -> projectService.updateProject(projectId, 1L, null, null, false, null));
+
+    // Run 进入终态后放行
+    issueRunService.failRun(run.getId(), IssueRunStatus.FAILED, "stopped by human");
+    Project toggled = projectService.updateProject(projectId, 1L, null, null, false, null);
+    assertFalse(toggled.isYoloEnabled());
+    assertEquals(2L, toggled.getVersion());
+
+    // 其它 Project 的活动 Run 不阻塞本 Project 的 YOLO 修改
+    String otherAgentName = createTestAgent();
+    Project otherProject = projectService.createProject("Other Project", "Desc", true, 3);
+    Issue otherIssue =
+        issueService.createIssue(
+            otherProject.getId(), "Other Issue", "Desc", otherAgentName, null, IssueStatus.TODO);
+    issueRunService.startExecutorRun(
+        otherIssue.getId(), otherAgentName, Instant.now().plusSeconds(60), 5);
+    Project toggledAgain = projectService.updateProject(projectId, 2L, null, null, true, null);
+    assertTrue(toggledAgain.isYoloEnabled());
+    assertTrue(projectService.getProject(otherProject.getId()).isYoloEnabled());
   }
 
   @Test
   void testArchiveAndUnarchiveProject() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Project Gamma", "Desc", agentName);
+    // 测试意图：验证项目的归档（标记 archivedAt 并递增版本）、幂等重复归档/解归档及 CAS 版本防并发。
+    Project project = projectService.createProject("Project Gamma", "Desc", true, 3);
     UUID id = project.getId();
 
     // 首次归档设置 archivedAt 并递增版本
@@ -185,10 +259,10 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testGetAndListProjects() {
-    String agentName = createTestAgent();
-    Project p1 = projectService.createProject("Active 1", "D1", agentName);
-    Project p2 = projectService.createProject("Active 2", "D2", agentName);
-    Project p3 = projectService.createProject("Archived 1", "D3", agentName);
+    // 测试意图：验证根据 ID 查询项目、按归档状态过滤列表及不存在 ID 返回 404 错误。
+    Project p1 = projectService.createProject("Active 1", "D1", true, 3);
+    Project p2 = projectService.createProject("Active 2", "D2", false, 3);
+    Project p3 = projectService.createProject("Archived 1", "D3", true, 3);
     projectService.archiveProject(p3.getId(), 0L);
 
     // 不包含已归档
@@ -212,8 +286,8 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testConcurrentAllocateNextIssueNumber() throws InterruptedException {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Project Number Allocator", "Desc", agentName);
+    // 测试意图：验证高并发下 allocateNextIssueNumber 能严格单调、唯一地分配 Issue 编号，绝不出现重号。
+    Project project = projectService.createProject("Project Number Allocator", "Desc", true, 3);
     UUID projectId = project.getId();
 
     int threadCount = 10;
@@ -230,8 +304,7 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
                 startGate.await();
                 long num = projectRepository.allocateNextIssueNumber(projectId);
                 allocatedNumbers.add(num);
-              } catch (Exception e) {
-                // 记录异常
+              } catch (Exception ignored) {
               } finally {
                 doneGate.countDown();
               }
@@ -256,56 +329,31 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
   }
 
   @Test
-  void testCoordinatorSessionBindingAndLookup() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Project Session Test", "Desc", agentName);
-    UUID projectId = project.getId();
-    UUID sessionId = createHarnessSession();
-
-    // 绑定 Coordinator Session（通过 repository 直接建立关系以测试服务查询）
-    assertTrue(projectSessionRepository.bindSession(projectId, sessionId));
-
-    // 双向查找
-    ProjectSession byProj = projectService.getCoordinatorSession(projectId);
-    assertNotNull(byProj);
-    assertEquals(projectId, byProj.getProjectId());
-    assertEquals(sessionId, byProj.getSessionId());
-
-    ProjectSession bySession = projectService.findProjectSession(sessionId);
-    assertNotNull(bySession);
-    assertEquals(projectId, bySession.getProjectId());
-
-    // 删除关联边
-    assertTrue(projectSessionRepository.deleteByProjectId(projectId));
-    assertNull(projectService.getCoordinatorSession(projectId));
-  }
-
-  @Test
   void testProjectValidationBoundariesAndErrors() {
-    String agentName = createTestAgent();
+    // 测试意图：验证超长描述、超长标题、超长空白内容以及不存在实体的防御性拒绝。
     // Description > 65536 bytes
     String oversizedDesc = "d".repeat(65537);
     assertThrows(
         AiValidationException.class,
-        () -> projectService.createProject("Title", oversizedDesc, agentName));
+        () -> projectService.createProject("Title", oversizedDesc, true, 3));
 
     // Title > 255 chars
     String oversizedTitle = "t".repeat(256);
     assertThrows(
         AiValidationException.class,
-        () -> projectService.createProject(oversizedTitle, "desc", agentName));
+        () -> projectService.createProject(oversizedTitle, "desc", true, 3));
 
     // Optional oversized blank description (e.g. 70000 spaces) 前置拒绝且不落库
     String oversizedBlankDesc = " ".repeat(70000);
     assertThrows(
         AiValidationException.class,
-        () -> projectService.createProject("Valid Title", oversizedBlankDesc, agentName));
+        () -> projectService.createProject("Valid Title", oversizedBlankDesc, true, 3));
 
     // Not found errors
     UUID nonExistent = UUID.randomUUID();
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> projectService.updateProject(nonExistent, 0L, "T", "D", agentName));
+        () -> projectService.updateProject(nonExistent, 0L, "T", "D", true, 3));
     assertThrows(
         AiResourceNotFoundException.class, () -> projectService.archiveProject(nonExistent, 0L));
     assertThrows(
@@ -314,8 +362,8 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testRepositoryDirectOperations() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Repo Test", "Desc", agentName);
+    // 测试意图：验证底层仓储行级锁 lockById 与基于版本号的物理 deleteById 行为。
+    Project project = projectService.createProject("Repo Test", "Desc", true, 3);
     UUID id = project.getId();
 
     Project locked = projectRepository.lockById(id);
@@ -329,19 +377,16 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testDeleteProjectCasAndNotFound() {
-    String agentName = createTestAgent();
-    Project project = projectService.createProject("Delete CAS Test", "Desc", agentName);
+    // 测试意图：验证删除不存在的项目抛 404、负数版本拒绝、CAS 冲突拒绝且保证数据完整性。
+    Project project = projectService.createProject("Delete CAS Test", "Desc", true, 3);
     UUID projectId = project.getId();
 
-    // 测试意图：验证删除不存在的 Project 抛出 AiResourceNotFoundException
     UUID notFoundId = UUID.randomUUID();
     assertThrows(
         AiResourceNotFoundException.class, () -> projectService.deleteProject(notFoundId, 0L));
 
-    // 测试意图：验证 expectedVersion 负数抛出校验异常
     assertThrows(AiValidationException.class, () -> projectService.deleteProject(projectId, -1L));
 
-    // 测试意图：验证 expectedVersion CAS 冲突拒绝删除，且项目未被删除
     assertThrows(
         AiVersionConflictException.class, () -> projectService.deleteProject(projectId, 100L));
     assertNotNull(projectService.getProject(projectId));
@@ -349,8 +394,9 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testDeleteProjectRefusesActiveOrUnknownRuns() {
+    // 测试意图：存在活动中（RUNNING）或状态不确定的（UNKNOWN）Issue Run 时明确拒绝删除 Project。
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Active Run Delete Guard", "Desc", agentName);
+    Project project = projectService.createProject("Active Run Delete Guard", "Desc", true, 3);
     UUID projectId = project.getId();
 
     Issue issue =
@@ -363,7 +409,6 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
             issue.getId(), agentName, Instant.now().plusSeconds(60), 5);
     assertEquals(IssueRunStatus.RUNNING, activeRun.getStatus());
 
-    // 测试意图：存在 RUNNING 状态的 run 时，必须明确拒绝删除，且无数据被孤立清理
     AiValidationException ex =
         assertThrows(
             AiValidationException.class, () -> projectService.deleteProject(projectId, 0L));
@@ -373,7 +418,6 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
     // 将 run 设为 UNKNOWN
     issueRunService.failRun(activeRun.getId(), IssueRunStatus.UNKNOWN, "uncertain network failure");
 
-    // 测试意图：存在 UNKNOWN 状态的 run 时，必须明确拒绝删除
     AiValidationException exUnknown =
         assertThrows(
             AiValidationException.class, () -> projectService.deleteProject(projectId, 0L));
@@ -384,13 +428,10 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
 
   @Test
   void testDeleteProjectFullSuccessCleansAllOrphans() {
+    // 测试意图：验证深删除完整成功，按设计顺序删除各表记录并清理关联 Session，不留任何孤儿数据。
     String agentName = createTestAgent();
-    Project project = projectService.createProject("Full Deep Delete Proj", "Desc", agentName);
+    Project project = projectService.createProject("Full Deep Delete Proj", "Desc", true, 3);
     UUID projectId = project.getId();
-
-    // 绑定 Coordinator session
-    UUID coordSessionId = createHarnessSession();
-    projectSessionRepository.bindSession(projectId, coordSessionId);
 
     // 创建两个 Issue 并建立依赖关系
     Issue issue1 =
@@ -399,11 +440,32 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
         issueService.createIssue(projectId, "Issue 2", "Desc", agentName, null, IssueStatus.TODO);
     issueService.addDependency(issue2.getId(), issue1.getId(), issue2.getVersion());
 
-    // 追加 issue input
-    issueService.appendInput(issue1.getId(), IssueInputKind.HUMAN, "test input", "key-1");
+    // 建立 IssueAgentSession 并绑定 session_owner
+    UUID sessionId = createHarnessSession();
+    UUID threadId = createHarnessThread(sessionId);
+    IssueAgentSession agentSession =
+        issueAgentSessionRepository.bindOrGet(
+            IssueAgentSession.builder()
+                .id(UUID.randomUUID())
+                .issueId(issue1.getId())
+                .agentName(agentName)
+                .sessionId(sessionId)
+                .threadId(threadId)
+                .build());
+    createSessionOwnerForIssueAgentSession(sessionId, agentSession.getId());
 
-    // 创建 controller work
-    issueControllerWorkRepository.requestWork(issue1.getId(), Instant.now());
+    // 追加 issue activity
+    issueService.appendActivity(
+        IssueActivity.builder()
+            .issueId(issue1.getId())
+            .kind(IssueActivityKind.HUMAN_INPUT)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("test input")
+            .idempotencyKey("key-1")
+            .build());
+
+    // 请求 issue work
+    issueWorkStore.requestWork(issue1.getId(), Instant.now());
 
     // 启动 run 并将其终态置为 FAILED
     IssueRun run =
@@ -411,7 +473,7 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
             issue1.getId(), agentName, Instant.now().plusSeconds(60), 5);
     issueRunService.failRun(run.getId(), IssueRunStatus.FAILED, "intentional failure");
 
-    // 测试意图：验证深删除完整成功，按设计顺序删除各表记录并清理 Harness Session，不留任何孤儿数据
+    // 执行深删除
     projectService.deleteProject(projectId, 0L);
 
     // 验证 Project 事实被删除
@@ -423,34 +485,46 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         0,
         jdbcTemplate.queryForObject(
-            "select count(*) from session_owner where project_id = ?", Integer.class, projectId));
+            "select count(*) from project_issue where project_id = ?", Integer.class, projectId));
     assertEquals(
         0,
         jdbcTemplate.queryForObject(
-            "select count(*) from issue where project_id = ?", Integer.class, projectId));
-    assertEquals(
-        0,
-        jdbcTemplate.queryForObject(
-            "select count(*) from issue_dependency where project_id = ?",
+            "select count(*) from project_issue_dependency where project_id = ?",
             Integer.class,
             projectId));
     assertEquals(
         0,
         jdbcTemplate.queryForObject(
-            "select count(*) from issue_input where issue_id = ?", Integer.class, issue1.getId()));
-    assertEquals(
-        0,
-        jdbcTemplate.queryForObject(
-            "select count(*) from issue_run where issue_id = ?", Integer.class, issue1.getId()));
-    assertEquals(
-        0,
-        jdbcTemplate.queryForObject(
-            "select count(*) from issue_controller_work where issue_id = ?",
+            "select count(*) from project_issue_activity where issue_id = ?",
             Integer.class,
             issue1.getId()));
     assertEquals(
         0,
         jdbcTemplate.queryForObject(
-            "select count(*) from harness_session where id = ?", Integer.class, coordSessionId));
+            "select count(*) from project_issue_run where issue_id = ?",
+            Integer.class,
+            issue1.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from project_issue_agent_session where issue_id = ?",
+            Integer.class,
+            issue1.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from project_issue_work where issue_id = ?",
+            Integer.class,
+            issue1.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from session_owner where issue_agent_session_id = ?",
+            Integer.class,
+            agentSession.getId()));
+    assertEquals(
+        0,
+        jdbcTemplate.queryForObject(
+            "select count(*) from harness_session where id = ?", Integer.class, sessionId));
   }
 }

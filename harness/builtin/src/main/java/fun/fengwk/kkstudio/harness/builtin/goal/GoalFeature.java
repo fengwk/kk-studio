@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 final class GoalFeature {
 
   static final ContributorId CONTRIBUTOR_ID = BuiltinHarnessContributor.ID;
-  static final String STATE_TYPE = BuiltinHarnessContributor.GOAL_STATE_TYPE;
+  static final String PROGRESS_TYPE = BuiltinHarnessContributor.GOAL_PROGRESS_TYPE;
 
   private GoalFeature() {}
 }

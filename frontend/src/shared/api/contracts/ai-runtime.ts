@@ -14,12 +14,21 @@ export interface HarnessModelSelectionDTO {
 }
 
 /**
+ * 用户维护的 branch Goal 快照：不可变 id 与用户原文。
+ */
+export interface HarnessGoalSettingDTO {
+  id: string
+  text: string
+}
+
+/**
  * 单个 Entry branch 的完整 branch settings 快照。
  */
 export interface HarnessBranchSettingsDTO {
   agentName: string
   model: HarnessModelSelectionDTO
   environmentName: string | null
+  goal: HarnessGoalSettingDTO | null
 }
 
 export type EntryType =
@@ -177,6 +186,7 @@ type HarnessUserMessageCommandDTO = {
 
 export type HarnessCommandCreateDTO =
   | HarnessUserMessageCommandDTO
+  | { type: 'GOAL'; idempotencyKey: string; text: string | null }
   | { type: 'SET_AGENT'; idempotencyKey: string; agentName: string }
   | { type: 'SET_MODEL'; idempotencyKey: string; model: HarnessModelSelectionDTO }
   | { type: 'SET_ENVIRONMENT'; idempotencyKey: string; environmentName: string | null }
@@ -311,7 +321,7 @@ export interface ManualCompactionDTO {
 }
 
 export interface AgentRuntimeOwnerDTO {
-  type: 'CHAT' | 'CANVAS' | 'PROJECT'
+  type: 'CHAT' | 'CANVAS' | 'ISSUE_AGENT_SESSION'
   id: string
 }
 

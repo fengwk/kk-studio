@@ -3,9 +3,7 @@ package fun.fengwk.kkstudio.harness.builtin;
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentPrompts;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.builtin.goal.CreateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
-import fun.fengwk.kkstudio.harness.builtin.goal.GoalContextProjector;
 import fun.fengwk.kkstudio.harness.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -27,17 +25,18 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>集中注册 13 个内置工具（统一 {@code read}、8 个宿主 Environment capability 工具、{@code task} internal 工具、 3 个
- * Goal 工具）、{@code goal.state} 自定义 Entry 类型与上下文投影器。 其中 {@code read} 声明 {@link
+ * <p>集中注册 12 个内置工具（统一 {@code read}、8 个宿主 Environment capability 工具、{@code task} internal 工具、 2 个
+ * Goal 工具）与 {@code goal.progress} 自定义 Entry 类型。其中 {@code read} 声明 {@link
  * EnvironmentSupport#OPTIONAL}，其余 8 个宿主工具声明 {@link EnvironmentSupport#REQUIRED}， {@code task} 与
- * Goal 工具声明 {@link EnvironmentSupport#NONE}。
+ * Goal 工具声明 {@link EnvironmentSupport#NONE}。目标正文只由用户在 branch settings 中维护，因此没有创建工具、也没有把 Goal 提升为
+ * systemInstruction 的 context projector。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
   public static final ContributorId ID = new ContributorId("builtin");
   public static final String NAME = "Built-in";
   public static final String VERSION = "1";
-  public static final String GOAL_STATE_TYPE = "goal.state";
+  public static final String GOAL_PROGRESS_TYPE = "goal.progress";
 
   private static final ContributorDescriptor DESCRIPTOR =
       new ContributorDescriptor(ID, NAME, VERSION, Set.of());
@@ -127,12 +126,10 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
     // Internal server-side tool
     registrar.registerTool("runtime.task", taskTool, ToolVisibility.INTERNAL, 0);
 
-    // Goal tools & custom entry
-    registrar.registerCustomEntryType("goal.state-type", GOAL_STATE_TYPE, 0);
-    registrar.registerTool("goal.create", new CreateGoalTool(), ToolVisibility.SELECTABLE, 0);
+    // Goal tools & custom entry: 目标正文由用户维护，Agent 只能读取并报告进度。
+    registrar.registerCustomEntryType("goal.progress-type", GOAL_PROGRESS_TYPE, 0);
     registrar.registerTool("goal.get", new GetGoalTool(), ToolVisibility.SELECTABLE, 0);
     registrar.registerTool("goal.update", new UpdateGoalTool(), ToolVisibility.SELECTABLE, 0);
-    registrar.registerContextProjector("goal.context", new GoalContextProjector(), 0);
   }
 
   private static void registerEnvironment(

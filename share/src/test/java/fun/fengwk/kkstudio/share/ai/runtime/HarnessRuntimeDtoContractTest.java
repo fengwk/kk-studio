@@ -216,6 +216,82 @@ class HarnessRuntimeDtoContractTest {
         NoSuchFieldException.class, () -> ToolInvocationDTO.class.getDeclaredField("environment"));
   }
 
+  /**
+   * 测试意图：GOAL 命令的 text 是 required-nullable 字段——显式 null（清除）与 canonical 文本都必须精确保留，字段缺失可被精确判定， 非字符串
+   * text 必须拒绝。
+   */
+  @Test
+  void commandDtoTracksRequiredNullableGoalTextPresence() throws Exception {
+    HarnessCommandCreateDTO cleared =
+        MAPPER.readValue(
+            """
+            {"type":"GOAL","idempotencyKey":"00000000-0000-0000-0000-000000000001","text":null}
+            """,
+            HarnessCommandCreateDTO.class);
+    HarnessCommandCreateDTO set =
+        MAPPER.readValue(
+            """
+            {"type":"GOAL","idempotencyKey":"00000000-0000-0000-0000-000000000002",
+             "text":"ship the release"}
+            """,
+            HarnessCommandCreateDTO.class);
+    HarnessCommandCreateDTO missing =
+        MAPPER.readValue(
+            """
+            {"type":"GOAL","idempotencyKey":"00000000-0000-0000-0000-000000000003"}
+            """,
+            HarnessCommandCreateDTO.class);
+
+    assertTrue(cleared.hasTextField());
+    assertNull(cleared.getText());
+    assertTrue(set.hasTextField());
+    assertEquals("ship the release", set.getText());
+    assertFalse(missing.hasTextField());
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"type":"GOAL","idempotencyKey":"00000000-0000-0000-0000-000000000004","text":7}
+                """,
+                HarnessCommandCreateDTO.class));
+  }
+
+  /** 测试意图：branch settings 的 goal 是显式 nullable 投影——null（未设置或已清除）与 {id,text} 快照都必须精确往返，未知子字段必须拒绝。 */
+  @Test
+  void branchSettingsDtoExposesNullableGoalSnapshot() throws Exception {
+    HarnessBranchSettingsDTO cleared =
+        MAPPER.readValue(
+            """
+            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+             "environmentName":null,"goal":null}
+            """,
+            HarnessBranchSettingsDTO.class);
+    HarnessBranchSettingsDTO set =
+        MAPPER.readValue(
+            """
+            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+             "environmentName":null,
+             "goal":{"id":"00000000-0000-0000-0000-00000000002a","text":"ship it"}}
+            """,
+            HarnessBranchSettingsDTO.class);
+
+    assertNull(cleared.getGoal());
+    assertNotNull(set.getGoal());
+    assertEquals("00000000-0000-0000-0000-00000000002a", set.getGoal().getId());
+    assertEquals("ship it", set.getGoal().getText());
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+                 "environmentName":null,
+                 "goal":{"id":"00000000-0000-0000-0000-00000000002a","text":"ship it","extra":1}}
+                """,
+                HarnessBranchSettingsDTO.class));
+  }
+
   @Test
   void branchSettingsDtoExposesNullableEnvironmentName() throws Exception {
     // 三字段完整快照：environmentName 必须是显式 nullable String 字段，且旧 workspacePath 不得回归。

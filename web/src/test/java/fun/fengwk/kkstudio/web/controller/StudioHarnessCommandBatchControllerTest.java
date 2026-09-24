@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -25,6 +26,9 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -215,6 +219,120 @@ class StudioHarnessCommandBatchControllerTest {
         .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
   }
 
+  /**
+   * 测试意图：typed GOAL 是合法的终止 user-like 命令——显式 null 表示清除、文本表示设置；缺 text、与 USER_MESSAGE 共存或非末位都返回 400
+   * 且不调用 acceptance service。
+   */
+  @Test
+  void acceptsTypedGoalAsTerminalUserLikeCommandAndRejectsMalformedShapes() throws Exception {
+    String withGoal =
+        batchWithCommands(
+            threadTarget(),
+            """
+            [{
+              "type":"SET_AGENT",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000031",
+              "agentName":"default-assistant"
+            },
+            {
+              "type":"GOAL",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000032",
+              "text":"ship the release"
+            }]
+            """);
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(withGoal))
+        .andExpect(status().isAccepted());
+
+    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(acceptanceService).accept(any(OwnerRef.class), commandCaptor.capture());
+    List<ThreadCommandPayload> payloads =
+        commandCaptor.getValue().commands().stream().map(command -> command.payload()).toList();
+    assertEquals(
+        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.GOAL),
+        payloads.stream().map(ThreadCommandPayload::type).toList());
+    assertEquals(new GoalCommandPayload("ship the release"), payloads.get(1));
+
+    // 显式 null 是「清除 Goal」，同样合法。
+    String cleared =
+        batchWithCommands(
+            threadTarget(),
+            """
+            [{
+              "type":"GOAL",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000033",
+              "text":null
+            }]
+            """);
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(cleared))
+        .andExpect(status().isAccepted());
+
+    // 缺 text 的 GOAL 与「携带 text 的 USER_MESSAGE」都必须 400。
+    String missingText =
+        batchWithCommands(
+            threadTarget(),
+            """
+            [{
+              "type":"GOAL",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000034"
+            }]
+            """);
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(missingText))
+        .andExpect(status().isBadRequest());
+    String userWithText =
+        batchWithCommands(
+            threadTarget(),
+            """
+            [{
+              "type":"USER_MESSAGE",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000035",
+              "text":"ship",
+              "contents":[{"type":"TEXT","text":"hello"}]
+            }]
+            """);
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(userWithText))
+        .andExpect(status().isBadRequest());
+
+    // GOAL 与 USER_MESSAGE 不能共存：恰有一条 user-like 终止命令。
+    String bothUserLike =
+        batchWithCommands(
+            threadTarget(),
+            """
+            [{
+              "type":"GOAL",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000036",
+              "text":"ship"
+            },
+            {
+              "type":"USER_MESSAGE",
+              "idempotencyKey":"00000000-0000-0000-0000-000000000037",
+              "contents":[{"type":"TEXT","text":"hello"}]
+            }]
+            """);
+    mockMvc
+        .perform(
+            post("/api/harness/command-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(bothUserLike))
+        .andExpect(status().isBadRequest());
+  }
+
   @Test
   void enforcesFixedSetPrefixAndTrailingUserMessage() throws Exception {
     String wrongOrder =
@@ -312,6 +430,22 @@ class StudioHarnessCommandBatchControllerTest {
 
     verify(acceptanceService, never())
         .accept(any(OwnerRef.class), any(AcceptCommandsCommand.class));
+  }
+
+  @Test
+  void rejectsIssueAgentSessionCommandsAtPublicHttpBoundary() throws Exception {
+    // 测试意图：Issue Agent 的用户输入和分叉必须经 Issue 业务工作流，不能直接以 ownerId 伪造公共命令批。
+    for (String target : List.of(newSessionTarget(), newThreadTarget(), threadTarget())) {
+      String request =
+          batch(target).replace("\"type\":\"CHAT\"", "\"type\":\"ISSUE_AGENT_SESSION\"");
+      mockMvc
+          .perform(
+              post("/api/harness/command-batches")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(request))
+          .andExpect(status().isBadRequest());
+    }
+    verifyNoInteractions(acceptanceService, runtime);
   }
 
   private static String batch(String target) {

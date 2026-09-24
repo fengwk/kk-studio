@@ -14,7 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** 注册 12 个 Project/Issue 角色 INTERNAL 工具的 Harness Contributor。 */
+/** 注册 3 个 Project/Issue 角色 INTERNAL 工具的 Harness Contributor。 */
 public final class ProjectHarnessContributor implements HarnessContributor {
 
   public static final ContributorId ID = new ContributorId("project");

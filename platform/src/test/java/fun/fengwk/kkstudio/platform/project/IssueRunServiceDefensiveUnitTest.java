@@ -21,23 +21,20 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.impl.IssueRunServiceImpl;
 
 import java.time.Instant;
@@ -119,7 +116,7 @@ class IssueRunServiceDefensiveUnitTest {
   }
 
   @Test
-  void testSubmitRunStateAndAffectedRowFences() {
+  void testCompleteExecutorRunStateAndAffectedRowFences() {
     UUID issueId = UUID.randomUUID();
     UUID runId = UUID.randomUUID();
 
@@ -130,15 +127,15 @@ class IssueRunServiceDefensiveUnitTest {
     terminal.stubLockChain(terminalIssue, terminalRun);
     assertValidation(
         "Run is already terminal and cannot be submitted",
-        () -> terminal.service.submitRun(runId, "action", 1L, 0L, "summary", "verification"));
+        () -> terminal.service.completeExecutorRun(runId, "action", "summary", "verification"));
 
     Fixture wrongRole = new Fixture();
     Issue wrongRoleIssue = issue(issueId, IssueStatus.IN_PROGRESS);
     IssueRun reviewerRun = run(runId, issueId, IssueRunRole.REVIEWER);
     wrongRole.stubLockChain(wrongRoleIssue, reviewerRun);
     assertValidation(
-        "Only RUNNING EXECUTOR run can be submitted, current role=REVIEWER, status=RUNNING",
-        () -> wrongRole.service.submitRun(runId, "action", 1L, 0L, "summary", "verification"));
+        "Only RUNNING EXECUTOR run can be completed, current role=REVIEWER, status=RUNNING",
+        () -> wrongRole.service.completeExecutorRun(runId, "action", "summary", "verification"));
 
     Fixture wrongIssueStatus = new Fixture();
     Issue todoIssue = issue(issueId, IssueStatus.TODO);
@@ -146,26 +143,8 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Issue must be in IN_PROGRESS for submit, current status=TODO",
         () ->
-            wrongIssueStatus.service.submitRun(runId, "action", 1L, 0L, "summary", "verification"));
-
-    Fixture missingDependency = new Fixture();
-    Issue blockedIssue = issue(issueId, IssueStatus.IN_PROGRESS);
-    missingDependency.stubLockChain(blockedIssue, run(runId, issueId, IssueRunRole.EXECUTOR));
-    UUID dependencyId = UUID.randomUUID();
-    when(missingDependency.dependencies.listByIssueId(issueId))
-        .thenReturn(
-            List.of(
-                IssueDependency.builder()
-                    .issueId(issueId)
-                    .dependsOnIssueId(dependencyId)
-                    .projectId(PROJECT_ID)
-                    .build()));
-    when(missingDependency.issues.lockById(dependencyId)).thenReturn(null);
-    assertValidation(
-        "Cannot submit: dependency is not DONE",
-        () ->
-            missingDependency.service.submitRun(
-                runId, "action", 1L, 0L, "summary", "verification"));
+            wrongIssueStatus.service.completeExecutorRun(
+                runId, "action", "summary", "verification"));
 
     Fixture runUpdateFailure = new Fixture();
     Issue updateIssue = issue(issueId, IssueStatus.IN_PROGRESS);
@@ -174,7 +153,8 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Failed to update run to COMPLETED",
         () ->
-            runUpdateFailure.service.submitRun(runId, "action", 1L, 0L, "summary", "verification"));
+            runUpdateFailure.service.completeExecutorRun(
+                runId, "action", "summary", "verification"));
     verify(runUpdateFailure.issues, never()).updateById(any(Issue.class), anyLong());
 
     Fixture issueUpdateFailure = new Fixture();
@@ -185,8 +165,8 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Failed to update issue status to IN_REVIEW",
         () ->
-            issueUpdateFailure.service.submitRun(
-                runId, "action", 1L, 0L, "summary", "verification"));
+            issueUpdateFailure.service.completeExecutorRun(
+                runId, "action", "summary", "verification"));
     verify(issueUpdateFailure.workStore, never()).requestWork(eq(issueId), any(Instant.class));
   }
 
@@ -203,7 +183,7 @@ class IssueRunServiceDefensiveUnitTest {
     AiValidationException translated =
         assertThrows(
             AiValidationException.class,
-            () -> known.service.submitRun(runId, "action", 1L, 0L, "summary", "verification"));
+            () -> known.service.completeExecutorRun(runId, "action", "summary", "verification"));
     assertEquals("Terminal action ID conflict", translated.getMessage());
     assertNull(translated.getCause());
 
@@ -217,7 +197,7 @@ class IssueRunServiceDefensiveUnitTest {
         original,
         assertThrows(
             DataIntegrityViolationException.class,
-            () -> unknown.service.submitRun(runId, "action", 1L, 0L, "summary", "verification")));
+            () -> unknown.service.completeExecutorRun(runId, "action", "summary", "verification")));
   }
 
   @Test
@@ -225,19 +205,14 @@ class IssueRunServiceDefensiveUnitTest {
     UUID issueId = UUID.randomUUID();
     UUID runId = UUID.randomUUID();
 
-    Fixture wrongRole = new Fixture();
+    Fixture notRunning = new Fixture();
     Issue inProgress = issue(issueId, IssueStatus.IN_PROGRESS);
-    wrongRole.stubLockChain(inProgress, run(runId, issueId, IssueRunRole.REVIEWER));
+    IssueRun waitingRun = run(runId, issueId, IssueRunRole.EXECUTOR);
+    waitingRun.setStatus(IssueRunStatus.WAITING_HUMAN);
+    notRunning.stubLockChain(inProgress, waitingRun);
     assertValidation(
-        "Only RUNNING EXECUTOR run can request input, current role=REVIEWER, status=RUNNING",
-        () -> wrongRole.service.requestInput(runId, 1L, 0L, "question", null));
-
-    Fixture wrongStatus = new Fixture();
-    wrongStatus.stubLockChain(
-        issue(issueId, IssueStatus.TODO), run(runId, issueId, IssueRunRole.EXECUTOR));
-    assertValidation(
-        "Issue must be in IN_PROGRESS to request input, current is TODO",
-        () -> wrongStatus.service.requestInput(runId, 1L, 0L, "question", " "));
+        "Only RUNNING run can request input, current status=WAITING_HUMAN",
+        () -> notRunning.service.requestInput(runId, "question", null));
 
     Fixture updateFailure = new Fixture();
     updateFailure.stubLockChain(
@@ -245,57 +220,37 @@ class IssueRunServiceDefensiveUnitTest {
     when(updateFailure.runs.updateById(any(IssueRun.class), eq(0L))).thenReturn(false);
     assertValidation(
         "Failed to update run to WAITING_HUMAN",
-        () -> updateFailure.service.requestInput(runId, 1L, 0L, "question", null));
+        () -> updateFailure.service.requestInput(runId, "question", null));
     verify(updateFailure.workStore, never()).requestWork(eq(issueId), any(Instant.class));
   }
 
   @Test
-  void testReviewArgumentAndAgentRunFences() {
-    Fixture arguments = new Fixture();
+  void testReviewByAgentFences() {
     UUID issueId = UUID.randomUUID();
     UUID runId = UUID.randomUUID();
+
+    Fixture blankAgent = new Fixture();
     assertValidation(
-        "runId is required for AGENT review",
+        "reviewerAgentName must not be blank",
         () ->
-            arguments.service.reviewRun(
-                issueId,
-                null,
-                IssueRunActorType.AGENT,
-                REVIEWER,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
+            blankAgent.service.reviewByAgent(
+                runId, "  ", "action", ReviewDecision.APPROVE, "reason"));
+
+    Fixture blankAction = new Fixture();
     assertValidation(
-        "runId must not be provided for human review",
+        "terminalActionId must not be blank",
         () ->
-            arguments.service.reviewRun(
-                issueId,
-                runId,
-                IssueRunActorType.HUMAN,
-                null,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
+            blankAction.service.reviewByAgent(
+                runId, REVIEWER, "  ", ReviewDecision.APPROVE, "reason"));
+
+    Fixture wrongStatus = new Fixture();
+    Issue todoIssue = issue(issueId, IssueStatus.TODO);
+    wrongStatus.stubLockChain(todoIssue, run(runId, issueId, IssueRunRole.REVIEWER));
     assertValidation(
-        "reviewerAgentName must not be provided for human review",
+        "Issue must be in IN_REVIEW to be reviewed, current is TODO",
         () ->
-            arguments.service.reviewRun(
-                issueId,
-                null,
-                IssueRunActorType.HUMAN,
-                REVIEWER,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
+            wrongStatus.service.reviewByAgent(
+                runId, REVIEWER, "action", ReviewDecision.APPROVE, "reason"));
 
     Fixture wrongRole = new Fixture();
     Issue reviewIssue = issue(issueId, IssueStatus.IN_REVIEW);
@@ -303,17 +258,8 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Agent review requires a RUNNING REVIEWER run, found role=EXECUTOR, status=RUNNING",
         () ->
-            wrongRole.service.reviewRun(
-                issueId,
-                runId,
-                IssueRunActorType.AGENT,
-                REVIEWER,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
+            wrongRole.service.reviewByAgent(
+                runId, REVIEWER, "action", ReviewDecision.APPROVE, "reason"));
 
     Fixture identity = new Fixture();
     Issue identityIssue = issue(issueId, IssueStatus.IN_REVIEW);
@@ -323,17 +269,8 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Reviewer agent identity mismatch",
         () ->
-            identity.service.reviewRun(
-                issueId,
-                runId,
-                IssueRunActorType.AGENT,
-                REVIEWER,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
+            identity.service.reviewByAgent(
+                runId, REVIEWER, "action", ReviewDecision.APPROVE, "reason"));
 
     Fixture updateFailure = new Fixture();
     Issue updateIssue = issue(issueId, IssueStatus.IN_REVIEW);
@@ -342,22 +279,27 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Failed to update reviewer run",
         () ->
-            updateFailure.service.reviewRun(
-                issueId,
-                runId,
-                IssueRunActorType.AGENT,
-                REVIEWER,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
+            updateFailure.service.reviewByAgent(
+                runId, REVIEWER, "action", ReviewDecision.APPROVE, "reason"));
   }
 
   @Test
-  void testHumanReviewChecksEveryMutation() {
+  void testReviewByHumanFences() {
     UUID issueId = UUID.randomUUID();
+
+    Fixture oversizedKey = new Fixture();
+    assertValidation(
+        "idempotencyKey exceeds maximum allowed length of 128 characters",
+        () ->
+            oversizedKey.service.reviewByHuman(
+                issueId, ReviewDecision.APPROVE, "reason", "k".repeat(129)));
+
+    Fixture notInReview = new Fixture();
+    Issue todoIssue = issue(issueId, IssueStatus.TODO);
+    notInReview.stubIssue(todoIssue);
+    assertValidation(
+        "Issue must be in IN_REVIEW to be reviewed, current is TODO",
+        () -> notInReview.service.reviewByHuman(issueId, ReviewDecision.APPROVE, "reason", "key"));
 
     Fixture noSubmission = new Fixture();
     Issue reviewIssue = issue(issueId, IssueStatus.IN_REVIEW);
@@ -366,63 +308,15 @@ class IssueRunServiceDefensiveUnitTest {
     when(noSubmission.runs.listByIssueId(issueId)).thenReturn(List.of());
     assertValidation(
         "No submitted executor run found to review",
-        () ->
-            noSubmission.service.reviewRun(
-                issueId,
-                null,
-                IssueRunActorType.HUMAN,
-                null,
-                "action",
-                1L,
-                0L,
-                ReviewDecision.APPROVE,
-                "summary",
-                "verification"));
-
-    Fixture createFailure = humanReviewFixture(issueId);
-    when(createFailure.runs.create(any(IssueRun.class))).thenReturn(false);
-    assertValidation(
-        "Failed to create human reviewer run",
-        () -> reviewAsHuman(createFailure, issueId, ReviewDecision.APPROVE, "summary"));
-
-    Fixture uniqueConflict = humanReviewFixture(issueId);
-    when(uniqueConflict.runs.create(any(IssueRun.class)))
-        .thenThrow(constraintViolation("uk_issue_run_terminal_action"));
-    assertValidation(
-        "Terminal action ID conflict",
-        () -> reviewAsHuman(uniqueConflict, issueId, ReviewDecision.APPROVE, "summary"));
-
-    Fixture approveFailure = humanReviewFixture(issueId);
-    when(approveFailure.runs.create(any(IssueRun.class))).thenReturn(true);
-    when(approveFailure.issues.updateById(any(Issue.class), eq(0L))).thenReturn(false);
-    assertValidation(
-        "Failed to update issue status to DONE",
-        () -> reviewAsHuman(approveFailure, issueId, ReviewDecision.APPROVE, "summary"));
-
-    Fixture sequenceFailure = humanReviewFixture(issueId);
-    when(sequenceFailure.runs.create(any(IssueRun.class))).thenReturn(true);
-    when(sequenceFailure.issues.incrementInputSequence(issueId)).thenReturn(0L);
-    assertValidation(
-        "Failed to increment input sequence",
-        () -> reviewAsHuman(sequenceFailure, issueId, ReviewDecision.REQUEST_CHANGES, null));
-
-    Fixture appendFailure = humanReviewFixture(issueId);
-    when(appendFailure.runs.create(any(IssueRun.class))).thenReturn(true);
-    when(appendFailure.issues.incrementInputSequence(issueId)).thenReturn(1L);
-    when(appendFailure.inputs.append(any(IssueInput.class))).thenReturn(false);
-    assertValidation(
-        "Failed to append review feedback input",
-        () -> reviewAsHuman(appendFailure, issueId, ReviewDecision.REQUEST_CHANGES, " "));
+        () -> noSubmission.service.reviewByHuman(issueId, ReviewDecision.APPROVE, "reason", "key"));
 
     Fixture issueUpdateFailure = humanReviewFixture(issueId);
-    when(issueUpdateFailure.runs.create(any(IssueRun.class))).thenReturn(true);
-    when(issueUpdateFailure.issues.incrementInputSequence(issueId)).thenReturn(1L);
-    when(issueUpdateFailure.inputs.append(any(IssueInput.class))).thenReturn(true);
     when(issueUpdateFailure.issues.updateById(any(Issue.class), eq(0L))).thenReturn(false);
     assertValidation(
-        "Failed to update issue status to TODO",
+        "Failed to update issue status",
         () ->
-            reviewAsHuman(issueUpdateFailure, issueId, ReviewDecision.REQUEST_CHANGES, "summary"));
+            issueUpdateFailure.service.reviewByHuman(
+                issueId, ReviewDecision.REQUEST_CHANGES, "summary", "key"));
     verify(issueUpdateFailure.workStore, never()).requestWork(eq(issueId), any(Instant.class));
   }
 
@@ -439,6 +333,13 @@ class IssueRunServiceDefensiveUnitTest {
         "Run is already terminal and cannot be failed",
         () -> terminal.service.failRun(runId, IssueRunStatus.FAILED, "reason"));
 
+    Fixture invalidTerminalStatus = new Fixture();
+    invalidTerminalStatus.stubLockChain(
+        issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
+    assertValidation(
+        "Terminal status must be FAILED or UNKNOWN, but was RUNNING",
+        () -> invalidTerminalStatus.service.failRun(runId, IssueRunStatus.RUNNING, "reason"));
+
     Fixture failUpdate = new Fixture();
     failUpdate.stubLockChain(
         issue(issueId, IssueStatus.IN_PROGRESS), run(runId, issueId, IssueRunRole.EXECUTOR));
@@ -450,8 +351,7 @@ class IssueRunServiceDefensiveUnitTest {
 
     Fixture blankKey = new Fixture();
     assertValidation(
-        "idempotencyKey must not be blank for retry",
-        () -> blankKey.service.retryRun(issueId, null));
+        "idempotencyKey must not be blank", () -> blankKey.service.retryRun(issueId, "  "));
 
     Fixture noLatestRun = new Fixture();
     noLatestRun.stubIssue(issue(issueId, IssueStatus.IN_PROGRESS));
@@ -466,18 +366,6 @@ class IssueRunServiceDefensiveUnitTest {
     assertValidation(
         "Cannot retry while an active run exists",
         () -> activeRun.service.retryRun(issueId, "retry"));
-
-    Fixture sequenceFailure = retryFixture(issueId);
-    when(sequenceFailure.issues.incrementInputSequence(issueId)).thenReturn(0L);
-    assertValidation(
-        "Failed to increment input sequence",
-        () -> sequenceFailure.service.retryRun(issueId, "retry"));
-
-    Fixture appendFailure = retryFixture(issueId);
-    when(appendFailure.issues.incrementInputSequence(issueId)).thenReturn(1L);
-    when(appendFailure.inputs.append(any(IssueInput.class))).thenReturn(false);
-    assertValidation(
-        "Failed to append retry input", () -> appendFailure.service.retryRun(issueId, "retry"));
   }
 
   private static Fixture humanReviewFixture(UUID issueId) {
@@ -488,22 +376,9 @@ class IssueRunServiceDefensiveUnitTest {
     when(fixture.runs.listByIssueId(issueId))
         .thenReturn(List.of(submittedRun(UUID.randomUUID(), issueId)));
     when(fixture.runs.allocateNextOrdinal(issueId)).thenReturn(2L);
+    when(fixture.activities.findReviewWindowStartSequence(issueId)).thenReturn(0L);
+    when(fixture.activities.countRejectionsSince(eq(issueId), anyLong())).thenReturn(0L);
     return fixture;
-  }
-
-  private static IssueRun reviewAsHuman(
-      Fixture fixture, UUID issueId, ReviewDecision decision, String summary) {
-    return fixture.service.reviewRun(
-        issueId,
-        null,
-        IssueRunActorType.HUMAN,
-        null,
-        "action",
-        1L,
-        0L,
-        decision,
-        summary,
-        "verification");
   }
 
   private static Fixture retryFixture(UUID issueId) {
@@ -526,8 +401,6 @@ class IssueRunServiceDefensiveUnitTest {
         .assigneeAgentName(EXECUTOR)
         .reviewerAgentName(REVIEWER)
         .version(0L)
-        .specRevision(1L)
-        .inputSequence(0L)
         .build();
   }
 
@@ -536,7 +409,8 @@ class IssueRunServiceDefensiveUnitTest {
         .id(PROJECT_ID)
         .title("Project")
         .description("")
-        .coordinatorAgentName("coordinator")
+        .yoloEnabled(true)
+        .maxReviewRejections(3)
         .version(0L)
         .archivedAt(archived ? Instant.now() : null)
         .build();
@@ -548,11 +422,9 @@ class IssueRunServiceDefensiveUnitTest {
         .issueId(issueId)
         .ordinal(1L)
         .role(role)
-        .actorType(IssueRunActorType.AGENT)
         .agentName(role == IssueRunRole.REVIEWER ? REVIEWER : EXECUTOR)
         .status(IssueRunStatus.RUNNING)
-        .observedSpecRevision(1L)
-        .observedInputSequence(0L)
+        .observedActivitySequence(0L)
         .continuationCount(0)
         .maxContinuations(1)
         .version(0L)
@@ -582,18 +454,19 @@ class IssueRunServiceDefensiveUnitTest {
     private final ProjectRepository projects = mock(ProjectRepository.class);
     private final IssueRepository issues = mock(IssueRepository.class);
     private final IssueDependencyRepository dependencies = mock(IssueDependencyRepository.class);
-    private final IssueInputRepository inputs = mock(IssueInputRepository.class);
+    private final IssueActivityRepository activities = mock(IssueActivityRepository.class);
     private final IssueRunRepository runs = mock(IssueRunRepository.class);
-    private final IssueRunSessionRepository runSessions = mock(IssueRunSessionRepository.class);
-    private final IssueControllerWorkStore workStore = mock(IssueControllerWorkStore.class);
+    private final IssueAgentSessionRepository agentSessions =
+        mock(IssueAgentSessionRepository.class);
+    private final IssueWorkStore workStore = mock(IssueWorkStore.class);
     private final IssueRunServiceImpl service =
         new IssueRunServiceImpl(
             projects,
             issues,
             dependencies,
-            inputs,
+            activities,
             runs,
-            runSessions,
+            agentSessions,
             workStore,
             new ObjectMapper());
 

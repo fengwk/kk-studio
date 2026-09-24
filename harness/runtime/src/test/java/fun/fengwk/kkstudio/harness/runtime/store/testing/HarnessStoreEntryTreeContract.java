@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
@@ -19,11 +20,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
@@ -34,7 +42,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** Session / Entry tree / Thread schema 约束，以及 root-to-head path 的加载。 */
+/** Session / Entry tree / Thread schema 约束，root-to-head path 与 branch settings 的窄读取。 */
 public abstract class HarnessStoreEntryTreeContract {
 
   private HarnessStore store;
@@ -883,5 +891,176 @@ public abstract class HarnessStoreEntryTreeContract {
           assertEquals(List.of(otherHeadCustom), otherEntries.stream().map(Entry::id).toList());
           return null;
         });
+  }
+
+  /**
+   * 测试意图：loadBranchSettings 以 ROOT settings 为基础，被路径上最近的非 COMPACTION TURN_START settings 覆盖，并与
+   * EntryPath.baseSettings() 完全一致。
+   */
+  @Test
+  void loadBranchSettingsFollowsRootAndLatestTurnStartOnPath() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID firstGoal = TestIds.id(41L);
+    UUID secondGoal = TestIds.id(42L);
+    BranchSettings root = store.transaction(tx -> tx.loadBranchSettings(baseline.rootEntryId()));
+    assertEquals(branchSettings(), root);
+
+    UUID firstTurnEnd =
+        insertClosedInputTurn(
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            T1,
+            goalSettings(firstGoal, "first goal"));
+    UUID secondTurnEnd =
+        insertClosedInputTurn(
+            baseline.sessionId(), firstTurnEnd, T2, goalSettings(secondGoal, "second goal"));
+
+    store.transaction(
+        tx -> {
+          // 中间节点也命中最近的 TURN_START settings。
+          assertEquals(goalSettings(firstGoal, "first goal"), tx.loadBranchSettings(firstTurnEnd));
+          assertEquals(
+              goalSettings(secondGoal, "second goal"), tx.loadBranchSettings(secondTurnEnd));
+          return null;
+        });
+  }
+
+  /** 测试意图：COMPACTION turn 的 settings 只描述压缩执行模型，绝不参与 branch settings 解析。 */
+  @Test
+  void loadBranchSettingsSkipsCompactionTurnStart() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID goal = TestIds.id(43L);
+    UUID inputTurnEnd =
+        insertClosedInputTurn(
+            baseline.sessionId(), baseline.rootEntryId(), T1, goalSettings(goal, "user goal"));
+
+    UUID compactionTurnStart =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              BranchSettings compactionSettings = goalSettings(TestIds.id(44L), "compaction goal");
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      inputTurnEnd,
+                      new TurnStartPayload(
+                          TurnStartReason.COMPACTION,
+                          compactionSettings,
+                          StoreTestSupport.OWNER_THREAD_ID,
+                          StoreTestSupport.CONTEXT_WINDOW,
+                          StoreTestSupport.MAX_OUTPUT_TOKENS,
+                          new CompactionStart(
+                              CompactionPhase.FULL,
+                              CompactionTrigger.MANUAL,
+                              compactionSettings.model(),
+                              inputTurnEnd,
+                              null,
+                              null)),
+                      T2));
+              return id;
+            });
+
+    store.transaction(
+        tx -> {
+          assertEquals(goalSettings(goal, "user goal"), tx.loadBranchSettings(compactionTurnStart));
+          return null;
+        });
+  }
+
+  /** 测试意图：sibling fork 的 TURN_START settings 互不可见，各自只解析自己 head 路径上的最近快照。 */
+  @Test
+  void loadBranchSettingsIsScopedToTheHeadBranch() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID goalA = TestIds.id(45L);
+    UUID goalB = TestIds.id(46L);
+    UUID branchAEnd =
+        insertClosedInputTurn(
+            baseline.sessionId(), baseline.rootEntryId(), T1, goalSettings(goalA, "branch A goal"));
+    UUID branchBEnd =
+        insertClosedInputTurn(
+            baseline.sessionId(), baseline.rootEntryId(), T2, goalSettings(goalB, "branch B goal"));
+
+    store.transaction(
+        tx -> {
+          assertEquals(goalSettings(goalA, "branch A goal"), tx.loadBranchSettings(branchAEnd));
+          assertEquals(goalSettings(goalB, "branch B goal"), tx.loadBranchSettings(branchBEnd));
+          return null;
+        });
+  }
+
+  /** 测试意图：尚未关闭（open / queued）turn 的 settings 在 TURN_START 落库后立即生效。 */
+  @Test
+  void loadBranchSettingsAppliesOpenTurnStartImmediately() {
+    Baseline baseline = seedThreadBaseline(store);
+    UUID goal = TestIds.id(47L);
+    UUID openTurnStart =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          goalSettings(goal, "open turn goal"),
+                          StoreTestSupport.OWNER_THREAD_ID),
+                      T1));
+              return id;
+            });
+
+    store.transaction(
+        tx -> {
+          assertEquals(goalSettings(goal, "open turn goal"), tx.loadBranchSettings(openTurnStart));
+          return null;
+        });
+  }
+
+  /** 测试意图：unknown head 与 null 参数必须 fail closed。 */
+  @Test
+  void loadBranchSettingsRejectsUnknownHeadAndNullArguments() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> store.transaction(tx -> tx.loadBranchSettings(TestIds.id(99999))));
+    assertThrows(
+        NullPointerException.class, () -> store.transaction(tx -> tx.loadBranchSettings(null)));
+  }
+
+  /** 插入一个已关闭的 INPUT turn（TURN_START -> USER -> ASSISTANT -> TURN_END），返回其 TURN_END Entry id。 */
+  private UUID insertClosedInputTurn(
+      UUID sessionId, UUID parentId, Instant createdAt, BranchSettings settings) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          UUID userId = tx.nextId();
+          UUID assistantId = tx.nextId();
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  sessionId,
+                  parentId,
+                  new TurnStartPayload(
+                      TurnStartReason.INPUT, settings, StoreTestSupport.OWNER_THREAD_ID),
+                  createdAt));
+          tx.insertEntry(
+              new Entry(userId, sessionId, turnStartId, userMessagePayload(), createdAt));
+          tx.insertEntry(new Entry(assistantId, sessionId, userId, assistantPayload(), createdAt));
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  sessionId,
+                  assistantId,
+                  new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                  createdAt));
+          return turnEndId;
+        });
+  }
+
+  /** 带用户 Goal 的 branch settings 快照。 */
+  private static BranchSettings goalSettings(UUID goalId, String text) {
+    return branchSettings().withGoal(new GoalSetting(goalId, text));
   }
 }

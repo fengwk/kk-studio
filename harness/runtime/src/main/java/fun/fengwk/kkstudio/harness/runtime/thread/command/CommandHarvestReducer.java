@@ -1,27 +1,34 @@
 package fun.fengwk.kkstudio.harness.runtime.thread.command;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * queued Thread command harvest 的纯 reducer。
  *
  * <p>本 reducer 仅应用 typed 字段变更。Environment quiescence 以及所有 persistence/CAS 决策都不在本类内。
+ *
+ * <p>typed GOAL 命令同时写入 settings 快照（由 {@code goalIdAllocator} 在 speculative planning 时分配新 id）与同 turn
+ * 的冻结 USER 消息；SET_* 只改变快照，不产生提醒。CONTINUATION 只消费 SET_*，不提前消费 Goal。
  */
 public final class CommandHarvestReducer {
 
-  public CommandHarvestResult reduce(
-      UUID threadId, BranchSettings baseSettings, List<ThreadCommand> eligibleCommands) {
+  public BranchSettings reduce(
+      UUID threadId,
+      BranchSettings baseSettings,
+      List<ThreadCommand> eligibleCommands,
+      Supplier<UUID> goalIdAllocator) {
     Objects.requireNonNull(threadId, "threadId");
     BranchSettings settings = Objects.requireNonNull(baseSettings, "baseSettings");
     Objects.requireNonNull(eligibleCommands, "eligibleCommands");
+    Objects.requireNonNull(goalIdAllocator, "goalIdAllocator");
 
     long previousSequence = 0L;
-    List<CommandHarvestResult.SettingsChange> changes = new ArrayList<>();
     for (ThreadCommand command : eligibleCommands) {
       Objects.requireNonNull(command, "eligibleCommands[]");
       if (!command.threadId().equals(threadId)) {
@@ -48,33 +55,18 @@ public final class CommandHarvestReducer {
       switch (payload) {
         case UserMessageCommandPayload ignored -> {}
         case CustomMessageCommandPayload ignored -> {}
-        case SetAgentCommandPayload value -> {
-          BranchSettings updated = settings.withAgentName(value.agentName());
-          if (!updated.equals(settings)) {
-            settings = updated;
-            changes.add(
-                new CommandHarvestResult.SettingsChange(ThreadCommandType.SET_AGENT, settings));
-          }
+        case GoalCommandPayload value -> {
+          // 每次设置都是新目标（即使文本相同），清除则回到无 Goal。
+          GoalSetting goal =
+              value.text() == null ? null : new GoalSetting(goalIdAllocator.get(), value.text());
+          settings = settings.withGoal(goal);
         }
-        case SetModelCommandPayload value -> {
-          BranchSettings updated = settings.withModel(value.model());
-          if (!updated.equals(settings)) {
-            settings = updated;
-            changes.add(
-                new CommandHarvestResult.SettingsChange(ThreadCommandType.SET_MODEL, settings));
-          }
-        }
-        case SetEnvironmentCommandPayload value -> {
-          BranchSettings updated = settings.withEnvironmentName(value.environmentName());
-          if (!updated.equals(settings)) {
-            settings = updated;
-            changes.add(
-                new CommandHarvestResult.SettingsChange(
-                    ThreadCommandType.SET_ENVIRONMENT, settings));
-          }
-        }
+        case SetAgentCommandPayload value -> settings = settings.withAgentName(value.agentName());
+        case SetModelCommandPayload value -> settings = settings.withModel(value.model());
+        case SetEnvironmentCommandPayload value -> settings =
+            settings.withEnvironmentName(value.environmentName());
       }
     }
-    return new CommandHarvestResult(settings, changes);
+    return settings;
   }
 }

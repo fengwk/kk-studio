@@ -16,14 +16,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 参数化 Project/Issue 角色工具统一实现。 */
@@ -71,7 +69,7 @@ public final class ProjectRoleTool implements Tool {
       }
 
       Optional<ProjectThreadOwnerContext> ownerOpt = ownerResolver.resolve(context.threadId());
-      if (ownerOpt.isEmpty() || ownerOpt.get().role() != type.requiredRole()) {
+      if (ownerOpt.isEmpty() || !type.isAllowedFor(ownerOpt.get().role())) {
         handleError(
             request.call().id(),
             "Tool not permitted for current role or unowned session",
@@ -111,187 +109,28 @@ public final class ProjectRoleTool implements Tool {
   private Map<String, Object> dispatch(
       ProjectThreadOwnerContext owner, ToolExecutionContext context, JsonNode args) {
     return switch (type) {
-      case PROJECT_READ -> toolService.projectRead(owner);
-      case ISSUE_READ -> {
-        UUID issueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "issue_id"), "issue_id");
-        yield toolService.issueRead(owner, issueId);
-      }
-      case ISSUE_LIST -> {
-        boolean includeArchived =
-            args.has("include_archived") && args.get("include_archived").asBoolean();
-        IssueStatus status = null;
-        if (args.has("status") && !args.get("status").isNull()) {
-          String statusStr = args.get("status").asText();
-          try {
-            status = IssueStatus.valueOf(statusStr);
-          } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid status");
-          }
-        }
-        yield toolService.issueList(owner, status, includeArchived);
-      }
-      case ISSUE_CREATE -> {
-        String title = ProjectToolExecutionSupport.requireNonBlankString(args, "title");
-        String description =
-            args.has("description") && !args.get("description").isNull()
-                ? args.get("description").asText()
-                : "";
-        String assignee =
-            args.has("assignee_agent_name") && !args.get("assignee_agent_name").isNull()
-                ? args.get("assignee_agent_name").asText()
-                : null;
-        String reviewer =
-            args.has("reviewer_agent_name") && !args.get("reviewer_agent_name").isNull()
-                ? args.get("reviewer_agent_name").asText()
-                : null;
-        IssueStatus initialStatus = null;
-        if (args.has("initial_status") && !args.get("initial_status").isNull()) {
-          String statusStr = args.get("initial_status").asText();
-          try {
-            initialStatus = IssueStatus.valueOf(statusStr);
-          } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException(
-                "Invalid initial_status: only BACKLOG or TODO is allowed");
-          }
-        }
-        yield toolService.issueCreate(owner, title, description, assignee, reviewer, initialStatus);
-      }
-      case ISSUE_UPDATE -> {
-        UUID issueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "issue_id"), "issue_id");
-        long expectedVersion =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "expected_version");
-        boolean hasTitle = args.has("title");
-        String title = hasTitle ? args.get("title").asText() : null;
-        boolean hasDescription = args.has("description");
-        String description = hasDescription ? args.get("description").asText() : null;
-        boolean hasAssignee = args.has("assignee_agent_name");
-        String assignee = hasAssignee ? args.get("assignee_agent_name").asText() : null;
-        boolean hasReviewer = args.has("reviewer_agent_name");
-        String reviewer = hasReviewer ? args.get("reviewer_agent_name").asText() : null;
-        ProjectRoleToolService.UpdateIssueCommand cmd =
-            new ProjectRoleToolService.UpdateIssueCommand(
-                hasTitle,
-                title,
-                hasDescription,
-                description,
-                hasAssignee,
-                assignee,
-                hasReviewer,
-                reviewer);
-        yield toolService.issueUpdate(owner, issueId, expectedVersion, cmd);
-      }
-      case ISSUE_ADD_DEPENDENCY -> {
-        UUID issueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "issue_id"), "issue_id");
-        UUID dependsOnIssueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "depends_on_issue_id"),
-                "depends_on_issue_id");
-        long expectedVersion =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "expected_version");
-        yield toolService.issueAddDependency(owner, issueId, dependsOnIssueId, expectedVersion);
-      }
-      case ISSUE_REMOVE_DEPENDENCY -> {
-        UUID issueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "issue_id"), "issue_id");
-        UUID dependsOnIssueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "depends_on_issue_id"),
-                "depends_on_issue_id");
-        long expectedVersion =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "expected_version");
-        yield toolService.issueRemoveDependency(owner, issueId, dependsOnIssueId, expectedVersion);
-      }
-      case ISSUE_SET_STATUS -> {
-        UUID issueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "issue_id"), "issue_id");
-        String statusStr = ProjectToolExecutionSupport.requireNonBlankString(args, "status");
-        IssueStatus status;
-        try {
-          status = IssueStatus.valueOf(statusStr);
-        } catch (IllegalArgumentException e) {
-          throw new IllegalArgumentException("Invalid status: only BACKLOG or TODO is allowed");
-        }
-        long expectedVersion =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "expected_version");
-        yield toolService.issueSetStatus(owner, issueId, status, expectedVersion);
-      }
-      case ISSUE_CANCEL -> {
-        UUID issueId =
-            ProjectToolExecutionSupport.parseUuid(
-                ProjectToolExecutionSupport.requireNonBlankString(args, "issue_id"), "issue_id");
-        long expectedVersion =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "expected_version");
-        String reason =
-            args.has("reason") && !args.get("reason").isNull() ? args.get("reason").asText() : null;
-        yield toolService.issueCancel(owner, issueId, expectedVersion, reason);
-      }
-      case ISSUE_SUBMIT -> {
-        long observedSpecRevision =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "observed_spec_revision");
-        long observedInputSequence =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "observed_input_sequence");
-        String summary = ProjectToolExecutionSupport.requireNonBlankString(args, "summary");
-        String verification =
-            args.has("verification") && !args.get("verification").isNull()
-                ? args.get("verification").asText()
-                : null;
-        String terminalActionId = "tool:" + context.invocationId().toString();
-        yield toolService.issueSubmit(
-            owner,
-            terminalActionId,
-            observedSpecRevision,
-            observedInputSequence,
-            summary,
-            verification);
-      }
+      case ISSUE_READ -> toolService.issueRead(
+          owner,
+          ProjectToolExecutionSupport.optionalUuid(args, "issue_id"),
+          ProjectToolExecutionSupport.optionalLong(args, "activity_after_sequence"),
+          ProjectToolExecutionSupport.optionalInt(args, "activity_limit"));
       case ISSUE_REQUEST_INPUT -> {
-        long observedSpecRevision =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "observed_spec_revision");
-        long observedInputSequence =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "observed_input_sequence");
         String question = ProjectToolExecutionSupport.requireNonBlankString(args, "question");
-        String ctx =
-            args.has("context") && !args.get("context").isNull()
-                ? args.get("context").asText()
-                : null;
-        yield toolService.issueRequestInput(
-            owner, observedSpecRevision, observedInputSequence, question, ctx);
+        String requestContext = ProjectToolExecutionSupport.optionalText(args, "context");
+        yield toolService.issueRequestInput(owner, question, requestContext);
       }
       case ISSUE_REVIEW -> {
-        long observedSpecRevision =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "observed_spec_revision");
-        long observedInputSequence =
-            ProjectToolExecutionSupport.requireNonNegativeLong(args, "observed_input_sequence");
-        String decisionStr = ProjectToolExecutionSupport.requireNonBlankString(args, "decision");
+        String decisionText = ProjectToolExecutionSupport.requireNonBlankString(args, "decision");
         ReviewDecision decision;
         try {
-          decision = ReviewDecision.valueOf(decisionStr);
+          decision = ReviewDecision.valueOf(decisionText);
         } catch (IllegalArgumentException e) {
           throw new IllegalArgumentException(
               "Invalid decision: only APPROVE or REQUEST_CHANGES is allowed");
         }
-        String summary = ProjectToolExecutionSupport.requireNonBlankString(args, "summary");
-        String verification =
-            args.has("verification") && !args.get("verification").isNull()
-                ? args.get("verification").asText()
-                : null;
-        String terminalActionId = "tool:" + context.invocationId().toString();
-        yield toolService.issueReview(
-            owner,
-            terminalActionId,
-            observedSpecRevision,
-            observedInputSequence,
-            decision,
-            summary,
-            verification);
+        String reason = ProjectToolExecutionSupport.requireNonBlankString(args, "reason");
+        // 决定幂等键绑定本次工具调用，业务效果先落地；ToolResult 失败也不重复决定。
+        yield toolService.issueReview(owner, "tool:" + context.invocationId(), decision, reason);
       }
     };
   }

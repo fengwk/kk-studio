@@ -463,6 +463,11 @@ class HarnessContractTest {
     public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
       return Optional.empty();
     }
+
+    @Override
+    public Optional<GoalSnapshot> goal() {
+      return Optional.empty();
+    }
   }
 
   private static final class DummyBoundEnvironment implements BoundEnvironment {

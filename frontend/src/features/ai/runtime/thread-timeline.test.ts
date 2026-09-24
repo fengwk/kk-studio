@@ -14,7 +14,10 @@ describe('thread timeline', () => {
   it('projects durable entries as the transcript baseline', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('1', 'ROOT', {}),
+        entry('1', 'ROOT', { settings: {
+          agentName: 'JIJI', model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+          environmentName: null,
+        } }),
         entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '检查大纲' }])),
         entry('3', 'MESSAGE', messagePayload('ASSISTANT', [
           { type: 'thinking', text: '先梳理结构。' },
@@ -26,12 +29,61 @@ describe('thread timeline', () => {
     )
 
     expect(timeline.messages).toMatchObject([
-      { role: 'entry', kind: 'root', title: '会话开始', status: 'done' },
+      { role: 'entry', kind: 'root', title: '会话开始 · Agent: JIJI · 模型: provider/model (default) · 环境: 无', status: 'done' },
       { role: 'user', text: '检查大纲', status: 'done' },
       { role: 'assistant', text: '结构完整。', thinking: '先梳理结构。', status: 'done' },
     ])
     expect(timeline.queuedMessages).toEqual([])
     expect(timeline.hasPendingInputs).toBe(false)
+  })
+
+  it('projects committed settings snapshots before messages, never compaction settings', () => {
+    // 测试意图：配置事件来自持久快照，固定字段顺序且有稳定的复合 ID。
+    const initial = {
+      agentName: 'coding', model: { providerName: 'p', modelName: 'm1', variant: 'default' },
+      environmentName: null,
+    }
+    const changed = {
+      agentName: 'reviewer', model: { providerName: 'p', modelName: 'm2', variant: 'high' },
+      environmentName: 'local',
+    }
+    const entries = [
+      entry('root', 'ROOT', { settings: initial }),
+      entry('compact', 'TURN_START', { reason: 'COMPACTION', settings: changed }),
+      entry('compact-end', 'TURN_END', {}),
+      entry('turn', 'TURN_START', { reason: 'CONTINUATION', settings: changed }),
+      entry('failed', 'ASSISTANT_ERROR', { error: { message: 'failed' } }),
+      entry('same', 'TURN_START', { reason: 'INPUT', settings: changed }),
+      entry('user', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'next input' }])),
+    ]
+    const projected = buildThreadTimeline(entries, [], []).messages
+    expect(projected.map(({ id }) => id)).toEqual([
+      'entry:root', 'entry:turn:agent', 'entry:turn:model', 'entry:turn:environment',
+      'failed', 'user',
+    ])
+    expect(projected.slice(1, 4).map((message) => message.role === 'entry' ? message.title : '')).toEqual([
+      'Agent 改为 reviewer', '模型改为 p/m2 (high)', '环境改为 local',
+    ])
+    expect(buildThreadTimeline(entries, [], []).messages).toEqual(projected)
+  })
+
+  it('clears the diff baseline on malformed snapshots and recovers without invented changes', () => {
+    // 测试意图：损坏快照中断差值链；下一完整快照只重建基准，不虚构变更。
+    const settings = {
+      agentName: 'coding', model: { providerName: 'p', modelName: 'm', variant: 'default' },
+      environmentName: 'local',
+    }
+    const projected = buildThreadTimeline([
+      entry('root', 'ROOT', { settings }),
+      entry('broken', 'TURN_START', { reason: 'INPUT', settings: { agentName: 'reviewer' } }),
+      entry('recovered', 'TURN_START', { reason: 'CONTINUATION', settings }),
+      entry('detached', 'TURN_START', { reason: 'INPUT', settings: { ...settings, environmentName: null } }),
+    ], [], []).messages
+    expect(projected.map(({ id }) => id)).toEqual([
+      'entry:root', 'entry:broken', 'entry:detached:environment',
+    ])
+    expect(projected[1]).toMatchObject({ kind: 'invalid_settings', title: '配置快照不可解析' })
+    expect(projected[2]).toMatchObject({ title: '环境已解除' })
   })
 
   it('appends a transient assistant modelStream overlay after durable entries', () => {
@@ -412,7 +464,7 @@ describe('thread timeline', () => {
     const timeline = buildThreadTimeline([root], [], [])
 
     expect(timeline.messages).toMatchObject([
-      { role: 'entry', kind: 'root', rawPayloadJson: '{}', subjectEntryId: 'root' },
+      { role: 'entry', kind: 'invalid_settings', rawPayloadJson: '{}', subjectEntryId: 'root' },
     ])
   })
 
@@ -499,11 +551,15 @@ describe('thread timeline', () => {
     ])
   })
 
-  it('produces no messages for TURN_START and TURN_END control boundaries', () => {
+  it('produces no messages for unchanged TURN_START and TURN_END control boundaries', () => {
+    const settings = {
+      agentName: 'JIJI', model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+      environmentName: null,
+    }
     const timeline = buildThreadTimeline(
       [
-        entry('0', 'ROOT', {}),
-        entry('1', 'TURN_START', { reason: 'USER_MESSAGE', settings: {} }),
+        entry('0', 'ROOT', { settings }),
+        entry('1', 'TURN_START', { reason: 'INPUT', settings }),
         entry('2', 'TURN_END', {
           turnStartEntryId: '1',
           outcome: 'COMPLETED',

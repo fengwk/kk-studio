@@ -50,14 +50,14 @@ class StudioProjectErrorAdviceTest {
   void handlesHarnessConflict() {
     HarnessRuntimeConflictException ex =
         new HarnessRuntimeConflictException(
-            HarnessRuntimeConflictException.Reason.STALE_VERSION, "coordinator busy");
+            HarnessRuntimeConflictException.Reason.STALE_VERSION, "issue runtime busy");
     ResponseEntity<Result<Void>> response = advice.handleHarnessConflict(ex);
 
     assertEquals(409, response.getStatusCode().value());
     Result<Void> body = response.getBody();
     assertNotNull(body);
     assertEquals("PROJECT_RUNTIME_CONFLICT", body.getCode());
-    assertEquals(Map.of("detail", "Coordinator runtime conflict occurred"), body.getErrors());
+    assertEquals(Map.of("detail", "Issue runtime conflict occurred"), body.getErrors());
   }
 
   @Test
@@ -81,7 +81,7 @@ class StudioProjectErrorAdviceTest {
     Result<Void> body = response.getBody();
     assertNotNull(body);
     assertEquals("PROJECT_RUNTIME_NOT_FOUND", body.getCode());
-    assertEquals(Map.of("detail", "Coordinator runtime resource not found"), body.getErrors());
+    assertEquals(Map.of("detail", "Issue runtime resource not found"), body.getErrors());
   }
 
   @Test

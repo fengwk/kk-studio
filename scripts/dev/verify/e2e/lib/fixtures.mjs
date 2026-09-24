@@ -252,8 +252,9 @@ export function agentConfigMatrix() {
       id: 'valid.goal_contributor_tools',
       ok: true,
       title: 'Goal contributor 工具已进入可选 ToolCatalog',
+      // Goal 正文只由用户经 typed GOAL 命令维护：Goal contributor 只贡献 get_goal/update_goal，没有创建工具。
       build: () => ({
-        tools: ['create_goal', 'get_goal', 'update_goal'],
+        tools: ['get_goal', 'update_goal'],
         skills: [],
         subagents: [],
         inheritParentEnvironment: true,
@@ -340,9 +341,13 @@ export function agentConfigMatrix() {
       expectStatus: 400,
       messageIncludes: /duplicate|skill/i,
       title: '全局 Skill 名称重复',
+      // skills 的 wire shape 是 (packageName, name) 引用列表；两个相同引用必须命中 duplicate 校验。
       build: () => ({
         tools: [],
-        skills: ['a', 'a'],
+        skills: [
+          { packageName: 'tools', name: 'dev' },
+          { packageName: 'tools', name: 'dev' },
+        ],
         subagents: [],
         inheritParentEnvironment: true,
       }),

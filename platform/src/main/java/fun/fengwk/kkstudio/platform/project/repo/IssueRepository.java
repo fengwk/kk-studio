@@ -21,7 +21,5 @@ public interface IssueRepository {
 
   boolean updateById(Issue issue, long expectedVersion);
 
-  long incrementInputSequence(UUID id);
-
   boolean deleteById(UUID id, long expectedVersion);
 }

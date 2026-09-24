@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import {
   decodeIssue,
+  decodeIssueActivity,
+  decodeIssueActivityList,
+  decodeIssueAgentSession,
   decodeIssueDependency,
   decodeIssueDependencyList,
   decodeIssueDetail,
-  decodeIssueInput,
   decodeIssueRun,
   decodeIssueRunSummary,
   decodeProject,
@@ -40,14 +42,16 @@ describe('projects codecs', () => {
       expect(isDecimalLong(0)).toBe(false)
     })
 
-    it('isIssueStatus should validate defined issue statuses', () => {
-      // 测试意图：验证 IssueStatus 严格限定为 BACKLOG/TODO/IN_PROGRESS/IN_REVIEW/DONE/CANCELED
+    it('isIssueStatus should validate defined issue statuses including BLOCKED and CANCELED', () => {
+      // 测试意图：验证 IssueStatus 严格限定为 BACKLOG/TODO/IN_PROGRESS/IN_REVIEW/BLOCKED/DONE/CANCELED
       expect(isIssueStatus('BACKLOG')).toBe(true)
       expect(isIssueStatus('TODO')).toBe(true)
       expect(isIssueStatus('IN_PROGRESS')).toBe(true)
       expect(isIssueStatus('IN_REVIEW')).toBe(true)
+      expect(isIssueStatus('BLOCKED')).toBe(true)
       expect(isIssueStatus('DONE')).toBe(true)
       expect(isIssueStatus('CANCELED')).toBe(true)
+      expect(isIssueStatus('CANCELLED')).toBe(false)
       expect(isIssueStatus('INVALID')).toBe(false)
       expect(isIssueStatus('')).toBe(false)
       expect(isIssueStatus(null)).toBe(false)
@@ -59,7 +63,8 @@ describe('projects codecs', () => {
       id: 'a0000000-0000-0000-0000-000000000001',
       title: 'Test Project',
       description: 'Project description',
-      coordinatorAgentName: 'coordinator-agent',
+      yoloEnabled: true,
+      maxReviewRejections: '3',
       nextIssueNumber: '1',
       version: '0',
       archivedAt: null,
@@ -68,19 +73,20 @@ describe('projects codecs', () => {
     }
 
     it('decodeProject should decode valid project payload', () => {
-      // 测试意图：验证合法 Project JSON 负载能够被严格解码为 ProjectDTO
+      // 测试意图：验证合法 Project JSON 负载能够被严格解码为 ProjectDTO（包含 yoloEnabled 与 maxReviewRejections）
       const decoded = decodeProject(validProject)
       expect(decoded.id).toBe('a0000000-0000-0000-0000-000000000001')
       expect(decoded.title).toBe('Test Project')
       expect(decoded.description).toBe('Project description')
-      expect(decoded.coordinatorAgentName).toBe('coordinator-agent')
+      expect(decoded.yoloEnabled).toBe(true)
+      expect(decoded.maxReviewRejections).toBe('3')
       expect(decoded.nextIssueNumber).toBe('1')
       expect(decoded.version).toBe('0')
       expect(decoded.archivedAt).toBeNull()
     })
 
     it('decodeProject should reject a null description', () => {
-      // 测试意图：响应 description 是必需字符串；拒绝旧式空值而不是静默改写事实。
+      // 测试意图：响应 description 是必需字符串；拒绝旧式空值而不是静默改写事实
       expect(() => decodeProject({ ...validProject, description: null })).toThrow(ApiError)
     })
 
@@ -89,7 +95,7 @@ describe('projects codecs', () => {
       expect(() => decodeProject({ ...validProject, id: 'bad-id' })).toThrow(ApiError)
       expect(() => decodeProject({ ...validProject, title: 123 })).toThrow(ApiError)
       expect(() => decodeProject({ ...validProject, version: '-5' })).toThrow(ApiError)
-      expect(() => decodeProject({ ...validProject, coordinatorAgentName: null })).toThrow(ApiError)
+      expect(() => decodeProject({ ...validProject, yoloEnabled: 'true' })).toThrow(ApiError)
       expect(() => decodeProject('not-an-object')).toThrow(ApiError)
     })
 
@@ -117,8 +123,6 @@ describe('projects codecs', () => {
       assigneeAgentName: 'dev-agent',
       reviewerAgentName: null,
       version: '1',
-      specRevision: '2',
-      inputSequence: '0',
       archivedAt: null,
       createdAt: '2026-09-14T00:00:00Z',
       updatedAt: '2026-09-14T01:00:00Z',
@@ -157,21 +161,50 @@ describe('projects codecs', () => {
       expect(list).toHaveLength(1)
     })
 
-    it('decodeIssueInput should decode input entries', () => {
-      // 测试意图：验证 IssueInput 结构解码与 nullable idempotencyKey
-      const input = {
+    it('decodeIssueAgentSession should decode session structure', () => {
+      // 测试意图：验证 IssueAgentSession 稳定归属解码（role, sessionId, branchId）
+      const session = {
+        id: 'c0000000-0000-0000-0000-000000000001',
         issueId: 'b0000000-0000-0000-0000-000000000001',
-        sequence: '1',
-        kind: 'HUMAN',
-        body: 'Please proceed with approach A',
-        idempotencyKey: 'input-key-1',
+        agentName: 'dev-agent',
+        role: 'EXECUTOR',
+        sessionId: 'f0000000-0000-0000-0000-000000000001',
+        branchId: 'f0000000-0000-0000-0000-000000000002',
         createdAt: '2026-09-14T00:00:00Z',
       }
-      const decoded = decodeIssueInput(input)
+      const decoded = decodeIssueAgentSession(session)
+      expect(decoded.agentName).toBe('dev-agent')
+      expect(decoded.role).toBe('EXECUTOR')
+      expect(decoded.sessionId).toBe('f0000000-0000-0000-0000-000000000001')
+      expect(decoded.branchId).toBe('f0000000-0000-0000-0000-000000000002')
+    })
+
+    it('decodeIssueActivity and decodeIssueActivityList should decode activity entries', () => {
+      // 测试意图：验证 IssueActivity 事实流条目解码（包含 targetRole 与 actorType）
+      const activity = {
+        issueId: 'b0000000-0000-0000-0000-000000000001',
+        sequence: '1',
+        kind: 'INSTRUCTION',
+        actorType: 'HUMAN',
+        actorAgentName: null,
+        targetRole: 'EXECUTOR',
+        runId: null,
+        submissionRunId: null,
+        decision: null,
+        body: 'Please proceed with approach A',
+        idempotencyKey: 'act-key-1',
+        createdAt: '2026-09-14T00:00:00Z',
+      }
+      const decoded = decodeIssueActivity(activity)
       expect(decoded.sequence).toBe('1')
-      expect(decoded.kind).toBe('HUMAN')
+      expect(decoded.kind).toBe('INSTRUCTION')
+      expect(decoded.actorType).toBe('HUMAN')
+      expect(decoded.targetRole).toBe('EXECUTOR')
       expect(decoded.body).toBe('Please proceed with approach A')
-      expect(decoded.idempotencyKey).toBe('input-key-1')
+      expect(decoded.idempotencyKey).toBe('act-key-1')
+
+      const list = decodeIssueActivityList([activity])
+      expect(list).toHaveLength(1)
     })
 
     it('decodeIssueRunSummary should decode summary with nullable timestamps and outcomes', () => {
@@ -181,7 +214,6 @@ describe('projects codecs', () => {
         issueId: 'b0000000-0000-0000-0000-000000000001',
         ordinal: '1',
         role: 'EXECUTOR',
-        actorType: 'AGENT',
         agentName: 'dev-agent',
         submissionRunId: null,
         status: 'RUNNING',
@@ -203,13 +235,13 @@ describe('projects codecs', () => {
         issueId: 'b0000000-0000-0000-0000-000000000001',
         ordinal: '1',
         role: 'EXECUTOR',
-        actorType: 'AGENT',
         agentName: 'dev-agent',
+        agentSessionId: 'c0000000-0000-0000-0000-000000000001',
+        sessionId: 'f0000000-0000-0000-0000-000000000001',
         submissionRunId: null,
         status: 'COMPLETED',
         outcome: 'SUBMITTED',
-        observedSpecRevision: '1',
-        observedInputSequence: '0',
+        observedActivitySequence: '2',
         continuationCount: 2,
         maxContinuations: 10,
         deadline: null,
@@ -220,24 +252,26 @@ describe('projects codecs', () => {
         createdAt: '2026-09-14T00:00:00Z',
         updatedAt: '2026-09-14T00:05:00Z',
         completedAt: '2026-09-14T00:05:00Z',
-        sessionId: 'f0000000-0000-0000-0000-000000000001',
       }
       const decoded = decodeIssueRun(run)
       expect(decoded.outcome).toBe('SUBMITTED')
       expect(decoded.continuationCount).toBe(2)
+      expect(decoded.observedActivitySequence).toBe('2')
+      expect(decoded.agentSessionId).toBe('c0000000-0000-0000-0000-000000000001')
       expect(decoded.sessionId).toBe('f0000000-0000-0000-0000-000000000001')
     })
   })
 
   describe('decodeProjectSnapshot and decodeIssueDetail', () => {
-    it('decodeProjectSnapshot should decode complete snapshot with issues and session summaries', () => {
-      // 测试意图：验证权威 ProjectSnapshot 聚合对象解码，包含 Project、Issue 投影条目与 Coordinator Session
+    it('decodeProjectSnapshot should decode complete snapshot with issues and dependencies', () => {
+      // 测试意图：验证权威 ProjectSnapshot 聚合对象解码，包含 Project、Issue 投影条目与依赖边（无 Coordinator 会话）
       const snapshot = {
         project: {
           id: 'a0000000-0000-0000-0000-000000000001',
           title: 'Snapshot Test',
           description: '',
-          coordinatorAgentName: 'coord',
+          yoloEnabled: true,
+          maxReviewRejections: '3',
           nextIssueNumber: '2',
           version: '1',
           archivedAt: null,
@@ -256,52 +290,29 @@ describe('projects codecs', () => {
               assigneeAgentName: null,
               reviewerAgentName: null,
               version: '0',
-              specRevision: '0',
-              inputSequence: '0',
               archivedAt: null,
               createdAt: '2026-09-14T00:00:00Z',
               updatedAt: '2026-09-14T00:00:00Z',
             },
             blocked: false,
+            reviewRejectionCount: '0',
             currentOrLatestRun: null,
           },
         ],
         dependencies: [],
-        coordinatorSessionId: 'f0000000-0000-0000-0000-000000000001',
-        coordinatorSession: {
-          sessionId: 'f0000000-0000-0000-0000-000000000001',
-          name: 'Coordinator Session',
-          createdAt: '2026-09-14T00:00:00Z',
-          lastActivityAt: '2026-09-14T00:00:00Z',
-          firstMessagePreview: 'Hello project',
-          threadCount: 1,
-        },
-        coordinatorThread: {
-          threadId: 'f0000000-0000-0000-0000-000000000002',
-          name: 'main',
-          createdAt: '2026-09-14T00:00:00Z',
-          updatedAt: '2026-09-14T00:00:00Z',
-          status: 'IDLE',
-          model: {
-            providerName: 'openai',
-            modelName: 'gpt-4o',
-            variant: 'default',
-          },
-          headMessagePreview: 'Hello project',
-        },
       }
 
       const decoded = decodeProjectSnapshot(snapshot)
       expect(decoded.project.title).toBe('Snapshot Test')
+      expect(decoded.project.yoloEnabled).toBe(true)
+      expect(decoded.project.maxReviewRejections).toBe('3')
       expect(decoded.issues).toHaveLength(1)
       expect(decoded.issues[0].blocked).toBe(false)
-      expect(decoded.coordinatorSessionId).toBe('f0000000-0000-0000-0000-000000000001')
-      expect(decoded.coordinatorSession?.name).toBe('Coordinator Session')
-      expect(decoded.coordinatorThread?.status).toBe('IDLE')
+      expect(decoded.issues[0].reviewRejectionCount).toBe('0')
     })
 
     it('decodeProjectIssueSnapshot should decode item with run', () => {
-      // 测试意图：验证 issue snapshot 带有 active/latest run 时的正确解码
+      // 测试意图：验证 issue snapshot 带有 active/latest run 及 reviewRejectionCount 时的正确解码
       const item = {
         issue: {
           id: 'b0000000-0000-0000-0000-000000000001',
@@ -313,19 +324,17 @@ describe('projects codecs', () => {
           assigneeAgentName: 'dev-agent',
           reviewerAgentName: null,
           version: '1',
-          specRevision: '1',
-          inputSequence: '0',
           archivedAt: null,
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T00:00:00Z',
         },
         blocked: true,
+        reviewRejectionCount: '2',
         currentOrLatestRun: {
           id: 'd0000000-0000-0000-0000-000000000001',
           issueId: 'b0000000-0000-0000-0000-000000000001',
           ordinal: '1',
           role: 'EXECUTOR',
-          actorType: 'AGENT',
           agentName: 'dev-agent',
           submissionRunId: null,
           status: 'WAITING_HUMAN',
@@ -338,12 +347,65 @@ describe('projects codecs', () => {
 
       const decoded = decodeProjectIssueSnapshot(item)
       expect(decoded.blocked).toBe(true)
+      expect(decoded.reviewRejectionCount).toBe('2')
       expect(decoded.currentOrLatestRun?.status).toBe('WAITING_HUMAN')
       expect(decoded.currentOrLatestRun?.waitingReason).toBe('Awaiting human choice')
     })
 
-    it('decodeIssueDetail should decode full issue detail DTO', () => {
-      // 测试意图：验证 Issue 详情页聚合 DTO 包含 runs、dependencies、inputs
+    it('decodeProjectIssueSnapshot strictly fails if reviewRejectionCount is missing or invalid decimal long', () => {
+      // 测试意图：验证严格 codec 契约，当 reviewRejectionCount 缺失、非数字字符串或负数时立即抛出 ApiError
+      const baseItem = {
+        issue: {
+          id: 'b0000000-0000-0000-0000-000000000001',
+          projectId: 'a0000000-0000-0000-0000-000000000001',
+          number: '1',
+          title: 'Issue',
+          description: '',
+          status: 'BLOCKED',
+          assigneeAgentName: null,
+          reviewerAgentName: null,
+          version: '1',
+          archivedAt: null,
+          createdAt: '2026-09-14T00:00:00Z',
+          updatedAt: '2026-09-14T00:00:00Z',
+        },
+        blocked: true,
+        currentOrLatestRun: null,
+      }
+
+      // 缺失字段
+      expect(() => decodeProjectIssueSnapshot(baseItem)).toThrow(
+        /issueSnapshot\.reviewRejectionCount must be a string/,
+      )
+
+      // null
+      expect(() =>
+        decodeProjectIssueSnapshot({ ...baseItem, reviewRejectionCount: null }),
+      ).toThrow(/issueSnapshot\.reviewRejectionCount must be a string/)
+
+      // 非数字字符串
+      expect(() =>
+        decodeProjectIssueSnapshot({ ...baseItem, reviewRejectionCount: 'invalid' }),
+      ).toThrow(/issueSnapshot\.reviewRejectionCount must be a canonical non-negative decimal string/)
+
+      // 负数
+      expect(() =>
+        decodeProjectIssueSnapshot({ ...baseItem, reviewRejectionCount: '-1' }),
+      ).toThrow(/issueSnapshot\.reviewRejectionCount must be a canonical non-negative decimal string/)
+
+      // 前导零无效 (如 01)
+      expect(() =>
+        decodeProjectIssueSnapshot({ ...baseItem, reviewRejectionCount: '01' }),
+      ).toThrow(/issueSnapshot\.reviewRejectionCount must be a canonical non-negative decimal string/)
+
+      // 合法 0
+      expect(
+        decodeProjectIssueSnapshot({ ...baseItem, reviewRejectionCount: '0' }).reviewRejectionCount,
+      ).toBe('0')
+    })
+
+    it('decodeIssueDetail should decode full issue detail DTO with sessions and activities', () => {
+      // 测试意图：验证 Issue 详情页聚合 DTO 包含 runs、dependencies、sessions、activities
       const detail = {
         issue: {
           id: 'b0000000-0000-0000-0000-000000000001',
@@ -352,27 +414,43 @@ describe('projects codecs', () => {
           title: 'Detail test',
           description: 'Spec',
           status: 'IN_PROGRESS',
-          assigneeAgentName: null,
+          assigneeAgentName: 'dev-agent',
           reviewerAgentName: null,
           version: '1',
-          specRevision: '1',
-          inputSequence: '1',
           archivedAt: null,
           createdAt: '2026-09-14T00:00:00Z',
           updatedAt: '2026-09-14T00:00:00Z',
         },
         blocked: false,
         dependencies: [],
-        inputs: [
+        sessions: [
+          {
+            id: 'c0000000-0000-0000-0000-000000000001',
+            issueId: 'b0000000-0000-0000-0000-000000000001',
+            agentName: 'dev-agent',
+            role: 'EXECUTOR',
+            sessionId: 'f0000000-0000-0000-0000-000000000001',
+            branchId: 'f0000000-0000-0000-0000-000000000002',
+            createdAt: '2026-09-14T00:00:00Z',
+          },
+        ],
+        activities: [
           {
             issueId: 'b0000000-0000-0000-0000-000000000001',
             sequence: '1',
-            kind: 'HUMAN',
+            kind: 'INSTRUCTION',
+            actorType: 'HUMAN',
+            actorAgentName: null,
+            targetRole: 'EXECUTOR',
+            runId: null,
+            submissionRunId: null,
+            decision: null,
             body: 'Input #1',
             idempotencyKey: null,
             createdAt: '2026-09-14T00:01:00Z',
           },
         ],
+        nextActivityCursor: null,
         runs: [],
         currentRun: null,
         latestRun: null,
@@ -380,8 +458,12 @@ describe('projects codecs', () => {
 
       const decoded = decodeIssueDetail(detail)
       expect(decoded.issue.title).toBe('Detail test')
-      expect(decoded.inputs).toHaveLength(1)
-      expect(decoded.inputs[0].body).toBe('Input #1')
+      expect(decoded.sessions).toHaveLength(1)
+      expect(decoded.sessions[0].role).toBe('EXECUTOR')
+      expect(decoded.activities).toHaveLength(1)
+      expect(decoded.activities[0].body).toBe('Input #1')
+      expect(decoded.activities[0].targetRole).toBe('EXECUTOR')
+      expect(decoded.nextActivityCursor).toBeNull()
       expect(decoded.currentRun).toBeNull()
     })
   })

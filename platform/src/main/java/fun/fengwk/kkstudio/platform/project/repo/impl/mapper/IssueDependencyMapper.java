@@ -21,7 +21,7 @@ public interface IssueDependencyMapper extends BaseMapper {
 
   @Select(
       """
-      insert into issue_dependency (issue_id, depends_on_issue_id, project_id, created_at)
+      insert into project_issue_dependency (issue_id, depends_on_issue_id, project_id, created_at)
       values (#{issueId}, #{dependsOnIssueId}, #{projectId}, clock_timestamp())
       returning created_at
       """)
@@ -30,7 +30,7 @@ public interface IssueDependencyMapper extends BaseMapper {
 
   @Delete(
       """
-      delete from issue_dependency
+      delete from project_issue_dependency
       where issue_id = #{issueId} and depends_on_issue_id = #{dependsOnIssueId}
       """)
   int delete(@Param("issueId") UUID issueId, @Param("dependsOnIssueId") UUID dependsOnIssueId);
@@ -38,7 +38,7 @@ public interface IssueDependencyMapper extends BaseMapper {
   @Select(
       """
       select issue_id, depends_on_issue_id, project_id, created_at
-      from issue_dependency
+      from project_issue_dependency
       where issue_id = #{issueId}
       order by created_at asc
       """)
@@ -55,7 +55,7 @@ public interface IssueDependencyMapper extends BaseMapper {
   @Select(
       """
       select issue_id, depends_on_issue_id, project_id, created_at
-      from issue_dependency
+      from project_issue_dependency
       where depends_on_issue_id = #{dependsOnIssueId}
       order by created_at asc
       """)
@@ -65,7 +65,7 @@ public interface IssueDependencyMapper extends BaseMapper {
   @Select(
       """
       select issue_id, depends_on_issue_id, project_id, created_at
-      from issue_dependency
+      from project_issue_dependency
       where project_id = #{projectId}
       order by created_at asc
       """)
@@ -79,11 +79,11 @@ public interface IssueDependencyMapper extends BaseMapper {
       """
       with recursive reach as (
           select depends_on_issue_id as target_id
-          from issue_dependency
+          from project_issue_dependency
           where issue_id = #{fromIssueId}
           union
           select d.depends_on_issue_id
-          from issue_dependency d
+          from project_issue_dependency d
           inner join reach r on d.issue_id = r.target_id
       )
       select exists (
@@ -92,6 +92,6 @@ public interface IssueDependencyMapper extends BaseMapper {
       """)
   boolean checkHasPath(@Param("fromIssueId") UUID fromIssueId, @Param("toIssueId") UUID toIssueId);
 
-  @Delete("delete from issue_dependency where project_id = #{projectId}")
+  @Delete("delete from project_issue_dependency where project_id = #{projectId}")
   int deleteByProjectId(@Param("projectId") UUID projectId);
 }

@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,9 +22,8 @@ import java.util.UUID;
  * <p>校验 open Turn 内的 entry 顺序与 TURN_END outcome 前置条件：ROOT 后所有非 ROOT entry 必须在 open TURN_START
  * 内（CUSTOM 透明除外，见 {@link #visit}）；input 阶段只允许 USER/CUSTOM MESSAGE；MODEL_ATTEMPT_FAILURE 只能位于 open
  * 非压缩 Turn 的 Assistant 结果之前，attempt 从 1 连续递增；INPUT turn 在 Assistant 结果前必须已有至少一条
- * USER/CUSTOM；CONTINUATION turn 偿还上一 TURN_END 的 continueModel obligation，不消费普通 USER/CUSTOM（配置
- * Commands 只体现在 TURN_START.settings），只额外允许运行时注入的 core {@code <system-reminder>} 设置变更提醒（普通
- * contributor CUSTOM_MESSAGE 仍然拒绝），可零 input 直接产生 Assistant 结果；COMPACTION turn 消费零 Command、绝不出现
+ * USER/CUSTOM；CONTINUATION turn 偿还上一 TURN_END 的 continueModel obligation，不消费 USER/CUSTOM（配置
+ * Commands 只体现在 TURN_START.settings），可零 input 直接产生 Assistant 结果；COMPACTION turn 消费零 Command、绝不出现
  * USER/CUSTOM MESSAGE，成功结果只能是 COMPACTION payload （普通 turn 绝不包含它），失败/停止可复用 ASSISTANT_ERROR /
  * ASSISTANT_ABORTED barrier 且无需 USER input； Assistant 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR /
  * ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带
@@ -225,7 +223,7 @@ final class TurnPathValidator {
       if (assistantSeen) {
         throw new IllegalArgumentException("custom messages must not follow an assistant result");
       }
-      if (openReason == TurnStartReason.CONTINUATION && !isCoreRuntimeReminder(custom)) {
+      if (openReason == TurnStartReason.CONTINUATION) {
         throw new IllegalArgumentException("continuation turns must not consume custom messages");
       }
       if (openReason == TurnStartReason.COMPACTION) {
@@ -261,17 +259,6 @@ final class TurnPathValidator {
       throw new IllegalArgumentException(
           "INPUT turns require a USER or CUSTOM message before " + context);
     }
-  }
-
-  /**
-   * 只有运行时自身注入的设置变更提醒可以在 CONTINUATION turn 内出现：它必须使用稳定的 core 元数据，并且消息是精确包裹在 {@code
-   * <system-reminder>} 定界符中的 USER 文本。contributor 的普通 CUSTOM_MESSAGE 不满足该形状。
-   */
-  private static boolean isCoreRuntimeReminder(CustomMessagePayload payload) {
-    return CustomMessagePayload.CORE_CONTRIBUTOR_ID.equals(payload.contributorId())
-        && CustomMessagePayload.CORE_CUSTOM_TYPE.equals(payload.customType())
-        && CustomMessagePayload.CORE_RENDERER_KEY.equals(payload.rendererKey())
-        && SystemReminder.isReminder(payload.message());
   }
 
   private void requireAssistantMessage(String context) {

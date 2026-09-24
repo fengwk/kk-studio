@@ -3,11 +3,17 @@
   "properties": {
     "issue_id": {
       "type": "string",
-      "description": "ID of the issue to read."
+      "description": "Optional issue ID. When provided it must be the issue bound to the current run; cross-issue reads are rejected."
+    },
+    "activity_after_sequence": {
+      "type": "integer",
+      "description": "Return activities with a sequence greater than this cursor. Defaults to 0; use next_after_sequence from the previous page."
+    },
+    "activity_limit": {
+      "type": "integer",
+      "description": "Maximum number of activities to return. Defaults to 50; must be between 1 and 200."
     }
   },
-  "required": [
-    "issue_id"
-  ],
+  "required": [],
   "additionalProperties": false
 }

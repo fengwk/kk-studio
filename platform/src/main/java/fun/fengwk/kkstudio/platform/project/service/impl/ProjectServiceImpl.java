@@ -12,19 +12,18 @@ import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
-import fun.fengwk.kkstudio.platform.project.repo.IssueControllerWorkRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
 import java.time.Instant;
@@ -38,30 +37,32 @@ import java.util.UUID;
 @Service
 public class ProjectServiceImpl implements ProjectService {
 
+  private static final int DEFAULT_MAX_REVIEW_REJECTIONS = 3;
+
   private final ProjectRepository projectRepository;
-  private final ProjectSessionRepository projectSessionRepository;
   private final IssueRepository issueRepository;
   private final IssueDependencyRepository issueDependencyRepository;
-  private final IssueInputRepository issueInputRepository;
+  private final IssueActivityRepository issueActivityRepository;
   private final IssueRunRepository issueRunRepository;
-  private final IssueControllerWorkRepository issueControllerWorkRepository;
+  private final IssueAgentSessionRepository issueAgentSessionRepository;
+  private final IssueWorkRepository issueWorkRepository;
   private final SessionDeletionOrchestrator sessionDeletionOrchestrator;
 
   @Transactional
   @Override
-  public Project createProject(String title, String description, String coordinatorAgentName) {
+  public Project createProject(
+      String title, String description, boolean yoloEnabled, int maxReviewRejections) {
     String trimmedTitle = ProjectValidationUtils.trimAndValidate(title, "title", 255, true);
-    String trimmedCoordinator =
-        ProjectValidationUtils.trimAndValidate(
-            coordinatorAgentName, "coordinatorAgentName", 128, true);
     ProjectValidationUtils.validateUtf8Bytes(description, "description", 65536, false);
+    int rejections = maxReviewRejections > 0 ? maxReviewRejections : DEFAULT_MAX_REVIEW_REJECTIONS;
 
     Project project =
         Project.builder()
             .id(UUID.randomUUID())
             .title(trimmedTitle)
             .description(description != null ? description : "")
-            .coordinatorAgentName(trimmedCoordinator)
+            .yoloEnabled(yoloEnabled)
+            .maxReviewRejections(rejections)
             .nextIssueNumber(1L)
             .version(0L)
             .archivedAt(null)
@@ -80,14 +81,9 @@ public class ProjectServiceImpl implements ProjectService {
       long expectedVersion,
       String title,
       String description,
-      String coordinatorAgentName) {
+      Boolean yoloEnabled,
+      Integer maxReviewRejections) {
     Objects.requireNonNull(id, "id");
-    String trimmedTitle = ProjectValidationUtils.trimAndValidate(title, "title", 255, true);
-    String trimmedCoordinator =
-        ProjectValidationUtils.trimAndValidate(
-            coordinatorAgentName, "coordinatorAgentName", 128, true);
-    ProjectValidationUtils.validateUtf8Bytes(description, "description", 65536, false);
-
     Project current = projectRepository.lockById(id);
     if (current == null) {
       throw new AiResourceNotFoundException("project");
@@ -99,9 +95,31 @@ public class ProjectServiceImpl implements ProjectService {
     if (current.isArchived()) {
       throw new AiValidationException("project", "Archived project cannot be modified");
     }
-    current.setTitle(trimmedTitle);
-    current.setDescription(description != null ? description : "");
-    current.setCoordinatorAgentName(trimmedCoordinator);
+    // Run 使用启动时的 YOLO 快照；持有 Project 锁时禁止在活动 Run 期间切换该策略。
+    if (yoloEnabled != null && yoloEnabled != current.isYoloEnabled()) {
+      if (issueRunRepository.hasActiveByProjectId(id)) {
+        throw new AiValidationException(
+            "project", "Cannot change yoloEnabled while the project has active issue runs");
+      }
+    }
+    if (title != null) {
+      String trimmedTitle = ProjectValidationUtils.trimAndValidate(title, "title", 255, true);
+      current.setTitle(trimmedTitle);
+    }
+    if (description != null) {
+      ProjectValidationUtils.validateUtf8Bytes(description, "description", 65536, false);
+      current.setDescription(description);
+    }
+    if (yoloEnabled != null) {
+      current.setYoloEnabled(yoloEnabled);
+    }
+    if (maxReviewRejections != null) {
+      if (maxReviewRejections <= 0) {
+        throw new AiValidationException(
+            "project", "maxReviewRejections must be a positive integer");
+      }
+      current.setMaxReviewRejections(maxReviewRejections);
+    }
     boolean updated = projectRepository.updateById(current, expectedVersion);
     if (!updated) {
       Project latest = projectRepository.getById(id);
@@ -225,15 +243,32 @@ public class ProjectServiceImpl implements ProjectService {
     }
 
     // 5. 编排删除：
-    // (a) controller work
+    // (a) issue work
     for (Issue issue : sortedIssues) {
-      issueControllerWorkRepository.deleteByIssueId(issue.getId());
+      issueWorkRepository.deleteByIssueId(issue.getId());
     }
 
-    // (b) 对每个 run 调 SessionDeletionOrchestrator.deleteSessionsByOwner(ISSUE_RUN)
-    for (IssueRun run : sortedRuns) {
-      sessionDeletionOrchestrator.deleteSessionsByOwner(
-          new OwnerRef(OwnerType.ISSUE_RUN, run.getId()));
+    // (b) issue agent sessions & deleteSessionsByOwner
+    for (Issue issue : sortedIssues) {
+      if (issue.getAssigneeAgentName() != null) {
+        IssueAgentSession s =
+            issueAgentSessionRepository.findByIssueIdAndAgentName(
+                issue.getId(), issue.getAssigneeAgentName());
+        if (s != null) {
+          sessionDeletionOrchestrator.deleteSessionsByOwner(
+              new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, s.getId()));
+        }
+      }
+      if (issue.getReviewerAgentName() != null) {
+        IssueAgentSession s =
+            issueAgentSessionRepository.findByIssueIdAndAgentName(
+                issue.getId(), issue.getReviewerAgentName());
+        if (s != null) {
+          sessionDeletionOrchestrator.deleteSessionsByOwner(
+              new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, s.getId()));
+        }
+      }
+      issueAgentSessionRepository.deleteByIssueId(issue.getId());
     }
 
     // (c) run rows：先删 reviewer (有 submission_run_id)，再删 executor
@@ -257,20 +292,9 @@ public class ProjectServiceImpl implements ProjectService {
       }
     }
 
-    // (d) inputs
+    // (d) activities
     for (Issue issue : sortedIssues) {
-      List<IssueInput> inputs = issueInputRepository.listByIssueId(issue.getId());
-      if (!inputs.isEmpty()) {
-        int deleted = issueInputRepository.deleteByIssueId(issue.getId());
-        if (deleted != inputs.size()) {
-          throw new AiValidationException(
-              "issue_input",
-              "Deleted issue inputs count mismatch: expected "
-                  + inputs.size()
-                  + ", actual "
-                  + deleted);
-        }
-      }
+      issueActivityRepository.deleteByIssueId(issue.getId());
     }
 
     // (e) dependency edges
@@ -293,10 +317,7 @@ public class ProjectServiceImpl implements ProjectService {
       }
     }
 
-    // (g) deleteSessionsByOwner(PROJECT)
-    sessionDeletionOrchestrator.deleteSessionsByOwner(new OwnerRef(OwnerType.PROJECT, id));
-
-    // (h) project CAS 删除
+    // (g) project CAS 删除
     boolean projectDeleted = projectRepository.deleteById(id, expectedVersion);
     if (!projectDeleted) {
       throw new AiVersionConflictException("project", String.valueOf(expectedVersion), "unknown");
@@ -319,17 +340,5 @@ public class ProjectServiceImpl implements ProjectService {
       return projectRepository.listAll();
     }
     return projectRepository.listByArchived(false);
-  }
-
-  @Override
-  public ProjectSession getCoordinatorSession(UUID projectId) {
-    Objects.requireNonNull(projectId, "projectId");
-    return projectSessionRepository.findByProjectId(projectId);
-  }
-
-  @Override
-  public ProjectSession findProjectSession(UUID sessionId) {
-    Objects.requireNonNull(sessionId, "sessionId");
-    return projectSessionRepository.findBySessionId(sessionId);
   }
 }

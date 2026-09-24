@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  acceptCommandBatch,
   canonicalUuid,
   chatOwner,
   newSessionTarget,
   newThreadTarget,
   threadTarget,
+  userMessageCommand,
 } from '../lib/harness.mjs'
 import { cid } from '../lib/http.mjs'
 
@@ -84,4 +86,34 @@ test('chatOwner/canonicalUuid keep canonical UUID owner identity', () => {
   assert.deepEqual(chatOwner(id), { type: 'CHAT', id })
   assert.equal(canonicalUuid(id, 'id'), id)
   assert.throws(() => chatOwner('bad'), /canonical UUID/)
+})
+
+test('acceptCommandBatch rejects the removed PROJECT owner before any HTTP call', async () => {
+  // Test intent: Project 不再有 Coordinator Session/命令入口，helper 必须在本地就拒绝 PROJECT owner，
+  // 不能把已删除的 owner 判别式重新放行给后端。
+  const calls = []
+  const ctx = {
+    call: async (...args) => {
+      calls.push(args)
+      throw new Error('unexpected HTTP call')
+    },
+  }
+  await assert.rejects(
+    () =>
+      acceptCommandBatch(ctx, {
+        owner: { type: 'PROJECT', id: sampleId() },
+        target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
+        commands: [userMessageCommand('plan', sampleId())],
+      }),
+    /owner\.type must be CHAT\|CANVAS/,
+  )
+  assert.equal(calls.length, 0, 'invalid owner must not reach the HTTP client')
+})
+
+test('the Project session route and its helper are gone from the lib surface', async () => {
+  // Test intent: 项目级 Session 路由已随 Coordinator 移除，lib 不得保留过期 helper 或端点文档。
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../lib/harness.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /listProjectSessions/)
+  assert.doesNotMatch(source, /projects\/\$\{[^}]*\}\/sessions/)
 })

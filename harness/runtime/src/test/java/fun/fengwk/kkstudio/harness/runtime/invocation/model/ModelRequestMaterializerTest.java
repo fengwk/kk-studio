@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryInput;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -60,6 +61,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -179,6 +181,38 @@ class ModelRequestMaterializerTest {
     assertEquals("old-reply", textOf(request.messages().get(1)));
     assertEquals("kept-user", textOf(request.messages().get(2)));
     assertEquals("latest-user", textOf(request.messages().get(3)));
+  }
+
+  /** 测试意图：压缩把原始 Goal 输入消息切掉后，当前 Goal 原文作为有界 USER 级背景紧邻摘要插入，且不进入 systemInstruction。 */
+  @Test
+  void compactionInjectsGoalBackgroundWhenGoalInputWasCut() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(goalHistoryPath(true), liveSpec(bashBinding()));
+
+    assertEquals("Test system instruction.", request.systemInstruction());
+    assertEquals(
+        CompactionPrompts.compactedContext("kept summary"), textOf(request.messages().get(0)));
+    assertEquals(
+        agentText(GoalMessages.backgroundSet("ship it")), textOf(request.messages().get(1)));
+    assertTrue(textOf(request.messages().get(1)).contains("ship it"));
+  }
+
+  /** 测试意图：Goal 输入消息仍在真实近期消息中时不重复插入背景；清除后的输入消息被切掉时背景说明当前无用户设定 Goal。 */
+  @Test
+  void compactionBackgroundNeverDuplicatesRetainedGoalInputAndStatesClearedGoal() {
+    ProviderRequest retained =
+        MATERIALIZER.materialize(goalHistoryPath(false), liveSpec(bashBinding()));
+    assertEquals(agentText(GoalMessages.inputSet("ship it")), textOf(retained.messages().get(1)));
+    assertTrue(
+        retained.messages().stream()
+            .noneMatch(
+                message -> textOf(message).contains("Background for the compacted history")));
+
+    ProviderRequest cleared =
+        MATERIALIZER.materialize(goalHistoryPath(true, true), liveSpec(bashBinding()));
+    assertEquals(agentText(GoalMessages.backgroundCleared()), textOf(cleared.messages().get(1)));
+    assertTrue(
+        cleared.messages().stream().noneMatch(message -> textOf(message).contains("ship it")));
   }
 
   @Test
@@ -458,6 +492,89 @@ class ModelRequestMaterializerTest {
         List.of(),
         List.of(),
         ProviderCacheControl.none());
+  }
+
+  /**
+   * Goal 路径：ROOT(无 Goal) -> INPUT(设置 Goal) + 冻结 Goal USER 消息 -> assistant -> TURN_END -> [可选清除
+   * turn] -> COMPACTION。{@code cutGoalInput} 为 true 时保留区间从 Goal 输入消息之后开始（消息被切掉）。
+   */
+  private static EntryPath goalHistoryPath(boolean cutGoalInput) {
+    return goalHistoryPath(cutGoalInput, false);
+  }
+
+  private static EntryPath goalHistoryPath(boolean cutGoalInput, boolean cleared) {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(
+        entry(
+            2,
+            1,
+            new TurnStartPayload(
+                TurnStartReason.INPUT, goalSettings("ship it"), OWNER, 4096, 1024, null)));
+    entries.add(entry(3, 2, new MessagePayload(GoalMessages.inputSet("ship it"), null, null)));
+    entries.add(entry(4, 3, assistant("first reply")));
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+    long cutId = cutGoalInput ? 4L : 3L;
+    long compactionTurnStart = 6L;
+    UUID parent = id(5L);
+    if (cleared) {
+      entries.add(
+          entry(
+              6,
+              5,
+              new TurnStartPayload(
+                  TurnStartReason.INPUT, SETTINGS.withGoal(null), OWNER, 4096, 1024, null)));
+      entries.add(entry(7, 6, new MessagePayload(GoalMessages.inputCleared(), null, null)));
+      entries.add(entry(8, 7, assistant("cleared reply")));
+      entries.add(
+          entry(9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+      // 清除后的输入消息同样必须已被切掉，背景才会说明当前无 Goal。
+      cutId = 8L;
+      parent = id(9L);
+      compactionTurnStart = 10L;
+    }
+    CompactionStart compaction =
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            SETTINGS.model(),
+            id(cutId),
+            null,
+            null);
+    entries.add(
+        entry(
+            id(compactionTurnStart),
+            parent,
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION, SETTINGS, OWNER, 4096, 1024, compaction)));
+    entries.add(
+        entry(
+            id(compactionTurnStart + 1),
+            id(compactionTurnStart),
+            new CompactionPayload("kept summary")));
+    entries.add(
+        entry(
+            id(compactionTurnStart + 2),
+            id(compactionTurnStart + 1),
+            new TurnEndPayload(
+                id(compactionTurnStart), TurnEndOutcome.COMPLETED, false, null, null)));
+    return new EntryPath(entries);
+  }
+
+  /** AgentMessage 的纯文本拼接，用于与投影后的 ProviderMessage 文本比较。 */
+  private static String agentText(AgentMessage message) {
+    StringBuilder text = new StringBuilder();
+    for (var content : message.contents()) {
+      if (content instanceof TextMessageContent value) {
+        text.append(value.text());
+      }
+    }
+    return text.toString();
+  }
+
+  private static BranchSettings goalSettings(String text) {
+    return SETTINGS.withGoal(new GoalSetting(id(700L), text));
   }
 
   private static TurnStartPayload resolvedStart(

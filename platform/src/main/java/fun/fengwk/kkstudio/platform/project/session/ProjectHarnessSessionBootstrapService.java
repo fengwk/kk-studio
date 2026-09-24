@@ -20,52 +20,37 @@ import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrches
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.impl.ProjectValidationUtils;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * 为 Project Coordinator 与 IssueRun 原子引导创建 Harness Session、ROOT Entry、初始 Thread 与 Command，
- * 并在同一物理事务内建立归属关系边。
- */
+/** 为 IssueAgentSession 原子引导创建 Harness Session、ROOT Entry、初始 Thread 与 Command， 并在同一物理事务内建立归属关系。 */
 @Service
 public class ProjectHarnessSessionBootstrapService {
 
   private final ProjectRepository projectRepository;
-  private final ProjectSessionRepository projectSessionRepository;
   private final IssueRepository issueRepository;
-  private final IssueRunRepository issueRunRepository;
-  private final IssueRunSessionRepository issueRunSessionRepository;
+  private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
 
   public ProjectHarnessSessionBootstrapService(
       ProjectRepository projectRepository,
-      ProjectSessionRepository projectSessionRepository,
       IssueRepository issueRepository,
-      IssueRunRepository issueRunRepository,
-      IssueRunSessionRepository issueRunSessionRepository,
+      IssueAgentSessionRepository issueAgentSessionRepository,
       AgentBranchSettingsMaterializer settingsMaterializer,
       HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator) {
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
-    this.projectSessionRepository =
-        Objects.requireNonNull(projectSessionRepository, "projectSessionRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
-    this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
-    this.issueRunSessionRepository =
-        Objects.requireNonNull(issueRunSessionRepository, "issueRunSessionRepository");
+    this.issueAgentSessionRepository =
+        Objects.requireNonNull(issueAgentSessionRepository, "issueAgentSessionRepository");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
     this.acceptanceOrchestrator =
@@ -73,82 +58,26 @@ public class ProjectHarnessSessionBootstrapService {
   }
 
   @Transactional
-  public AcceptedCommands bootstrapProjectSession(BootstrapProjectSessionRequest request) {
+  public AcceptedCommands bootstrapIssueAgentSession(BootstrapIssueAgentSessionRequest request) {
     Objects.requireNonNull(request, "request");
     String message = validateMessage(request.initialMessage());
 
-    Project project = projectRepository.lockForShare(request.projectId());
-    if (project == null) {
-      throw new AiResourceNotFoundException("project");
-    }
-    if (project.isArchived()) {
-      throw new AiValidationException("project", "Cannot bootstrap session for archived project");
-    }
-    if (project.getCoordinatorAgentName() == null || project.getCoordinatorAgentName().isBlank()) {
-      throw new AiValidationException("project", "Project coordinator agent is missing");
-    }
-
-    ProjectSession existing = projectSessionRepository.findByProjectId(request.projectId());
-    if (existing != null && !existing.getSessionId().equals(request.sessionId())) {
-      throw new AiValidationException(
-          "session_owner", "Project is already bound to a different session");
-    }
-
-    BranchSettings settings = settingsMaterializer.materialize(project.getCoordinatorAgentName());
-    NewThreadCommand command = buildInitialCommand(message, request.initialCommandIdempotencyKey());
-    AcceptCommandsTarget.NewSession target =
-        new AcceptCommandsTarget.NewSession(
-            request.sessionId(), request.threadId(), settings, null, false);
-    return acceptanceOrchestrator.accept(
-        new OwnerRef(OwnerType.PROJECT, request.projectId()),
-        new AcceptCommandsCommand(target, List.of(command)));
-  }
-
-  @Transactional
-  public AcceptedCommands bootstrapProjectSession(
-      UUID projectId,
-      UUID sessionId,
-      UUID threadId,
-      UUID initialCommandIdempotencyKey,
-      String initialMessage) {
-    return bootstrapProjectSession(
-        new BootstrapProjectSessionRequest(
-            projectId, sessionId, threadId, initialCommandIdempotencyKey, initialMessage));
-  }
-
-  @Transactional
-  public AcceptedCommands bootstrapIssueRunSession(BootstrapIssueRunSessionRequest request) {
-    Objects.requireNonNull(request, "request");
-    String message = validateMessage(request.initialMessage());
-
-    // 锁序必须严格保持 Project -> Issue -> IssueRun
-    IssueRun runRef = issueRunRepository.getById(request.runId());
-    if (runRef == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    Issue issueRef = issueRepository.getById(runRef.getIssueId());
+    Issue issueRef = issueRepository.getById(request.issueId());
     if (issueRef == null) {
       throw new AiResourceNotFoundException("issue");
     }
 
     UUID projectId = issueRef.getProjectId();
-    UUID issueId = issueRef.getId();
-
     Project project = projectRepository.lockForShare(projectId);
     if (project == null) {
       throw new AiResourceNotFoundException("project");
     }
-    Issue issue = issueRepository.lockById(issueId);
+    Issue issue = issueRepository.lockById(request.issueId());
     if (issue == null) {
       throw new AiResourceNotFoundException("issue");
     }
-    IssueRun run = issueRunRepository.lockById(request.runId());
-    if (run == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
 
-    // 锁下验证层级一致性（避免在加锁前被重定向或读锁竞态）
-    if (!issue.getProjectId().equals(project.getId()) || !run.getIssueId().equals(issue.getId())) {
+    if (!issue.getProjectId().equals(project.getId())) {
       throw new AiValidationException("owner_state", "Inconsistent owner hierarchy state");
     }
 
@@ -158,42 +87,54 @@ public class ProjectHarnessSessionBootstrapService {
     if (issue.isArchived()) {
       throw new AiValidationException("issue", "Cannot bootstrap session for archived issue");
     }
-    if (run.getActorType() != IssueRunActorType.AGENT) {
-      throw new AiValidationException("issue_run", "Cannot bootstrap session for non-agent run");
-    }
-    if (run.getAgentName() == null || run.getAgentName().isBlank()) {
-      throw new AiValidationException("issue_run", "Issue run agent is missing");
-    }
-    if (run.getStatus() == null || !run.getStatus().isActive()) {
-      throw new AiValidationException("issue_run", "Cannot bootstrap session for non-active run");
+
+    String agentName = request.agentName().trim();
+    boolean matchesAssignee = agentName.equals(issue.getAssigneeAgentName());
+    boolean matchesReviewer = agentName.equals(issue.getReviewerAgentName());
+    if (!matchesAssignee && !matchesReviewer) {
+      throw new AiValidationException(
+          "issue_agent_session",
+          "Agent " + agentName + " is not assigned to issue " + issue.getId());
     }
 
-    IssueRunSession existing = issueRunSessionRepository.findByRunId(request.runId());
+    IssueAgentSession existing =
+        issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), agentName);
     if (existing != null && !existing.getSessionId().equals(request.sessionId())) {
       throw new AiValidationException(
-          "session_owner", "Issue run is already bound to a different session");
+          "session_owner", "Issue agent is already bound to a different session");
     }
 
-    BranchSettings settings = settingsMaterializer.materialize(run.getAgentName());
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(existing != null ? existing.getId() : UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(agentName)
+            .sessionId(request.sessionId())
+            .threadId(request.threadId())
+            .build();
+    agentSession = issueAgentSessionRepository.bindOrGet(agentSession);
+
+    BranchSettings settings = settingsMaterializer.materialize(agentName);
     NewThreadCommand command = buildInitialCommand(message, request.initialCommandIdempotencyKey());
     AcceptCommandsTarget.NewSession target =
         new AcceptCommandsTarget.NewSession(
-            request.sessionId(), request.threadId(), settings, null, false);
+            request.sessionId(), request.threadId(), settings, null, project.isYoloEnabled());
     return acceptanceOrchestrator.accept(
-        new OwnerRef(OwnerType.ISSUE_RUN, request.runId()),
+        new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, agentSession.getId()),
         new AcceptCommandsCommand(target, List.of(command)));
   }
 
   @Transactional
-  public AcceptedCommands bootstrapIssueRunSession(
-      UUID runId,
+  public AcceptedCommands bootstrapIssueAgentSession(
+      UUID issueId,
+      String agentName,
       UUID sessionId,
       UUID threadId,
       UUID initialCommandIdempotencyKey,
       String initialMessage) {
-    return bootstrapIssueRunSession(
-        new BootstrapIssueRunSessionRequest(
-            runId, sessionId, threadId, initialCommandIdempotencyKey, initialMessage));
+    return bootstrapIssueAgentSession(
+        new BootstrapIssueAgentSessionRequest(
+            issueId, agentName, sessionId, threadId, initialCommandIdempotencyKey, initialMessage));
   }
 
   private String validateMessage(String initialMessage) {

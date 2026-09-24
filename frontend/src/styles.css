@@ -2259,6 +2259,19 @@ div.is-error {
   background: var(--scrim);
 }
 
+.thread-block-entry.is-inline {
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+}
+
+.thread-block-entry.is-inline .thread-entry-title {
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .thread-entry-row {
   display: flex;
   align-items: flex-start;
@@ -6315,6 +6328,282 @@ select.settings-input option {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+/* Branch Goal 面板 */
+.branch-goal-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface-elevated, var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  max-width: 600px;
+  width: 100%;
+  margin: 8px auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.branch-goal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.branch-goal-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.branch-goal-header-title h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.branch-goal-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--primary);
+}
+
+.branch-goal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.branch-goal-close-btn:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.branch-goal-close-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.branch-goal-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.branch-goal-current-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-tertiary, var(--surface));
+  border: 1px solid var(--border);
+}
+
+.branch-goal-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.branch-goal-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  letter-spacing: 0.05em;
+}
+
+.branch-goal-id-badge {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--fg-muted);
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.branch-goal-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.branch-goal-empty-text {
+  font-size: 13px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.branch-goal-report-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-tertiary, var(--surface));
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.branch-goal-report-card.complete {
+  border-left: 3px solid var(--success, #22c55e);
+}
+
+.branch-goal-report-card.blocked {
+  border-left: 3px solid var(--warning, #eab308);
+}
+
+.branch-goal-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.branch-goal-report-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.branch-goal-report-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.branch-goal-report-icon.success {
+  color: var(--success, #22c55e);
+}
+
+.branch-goal-report-icon.warning {
+  color: var(--warning, #eab308);
+}
+
+.branch-goal-report-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.branch-goal-disclaimer {
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.branch-goal-report-reason {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--fg);
+}
+
+.branch-goal-report-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.branch-goal-time-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.branch-goal-stale-card {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+}
+
+.branch-goal-stale-notice {
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.branch-goal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.branch-goal-input-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.branch-goal-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.branch-goal-textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.branch-goal-form-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+.branch-goal-counter.overflow {
+  color: var(--danger, #ef4444);
+  font-weight: 600;
+}
+
+.branch-goal-error-inline {
+  color: var(--danger, #ef4444);
+}
+
+.branch-goal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.branch-goal-submit-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.branch-goal-clear-btn {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.branch-goal-readonly-notice {
+  font-size: 12px;
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: 6px 0;
 }
 
 /* Session/Thread 选择行：选中按钮与行内重命名铅笔并排。 */

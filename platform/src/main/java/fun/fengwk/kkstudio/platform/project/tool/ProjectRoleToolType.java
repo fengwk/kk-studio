@@ -8,32 +8,26 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
-/** 12 个 Project/Issue 角色工具的类型定义与描述符。 */
+/** Issue 角色工具的类型定义与描述符（3 个内部 Agent 工具）。 */
 public enum ProjectRoleToolType {
-  PROJECT_READ("project_read", ProjectRole.COORDINATOR, ToolSideEffect.READ_ONLY),
-  ISSUE_READ("issue_read", ProjectRole.COORDINATOR, ToolSideEffect.READ_ONLY),
-  ISSUE_LIST("issue_list", ProjectRole.COORDINATOR, ToolSideEffect.READ_ONLY),
-  ISSUE_CREATE("issue_create", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_UPDATE("issue_update", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_ADD_DEPENDENCY(
-      "issue_add_dependency", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_REMOVE_DEPENDENCY(
-      "issue_remove_dependency", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_SET_STATUS("issue_set_status", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_CANCEL("issue_cancel", ProjectRole.COORDINATOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_SUBMIT("issue_submit", ProjectRole.EXECUTOR, ToolSideEffect.IDEMPOTENT),
-  ISSUE_REQUEST_INPUT("issue_request_input", ProjectRole.EXECUTOR, ToolSideEffect.NON_IDEMPOTENT),
-  ISSUE_REVIEW("issue_review", ProjectRole.REVIEWER, ToolSideEffect.IDEMPOTENT);
+  ISSUE_READ(
+      "issue_read", Set.of(ProjectRole.EXECUTOR, ProjectRole.REVIEWER), ToolSideEffect.READ_ONLY),
+  ISSUE_REQUEST_INPUT(
+      "issue_request_input",
+      Set.of(ProjectRole.EXECUTOR, ProjectRole.REVIEWER),
+      ToolSideEffect.NON_IDEMPOTENT),
+  ISSUE_REVIEW("issue_review", Set.of(ProjectRole.REVIEWER), ToolSideEffect.IDEMPOTENT);
 
   private final String modelName;
-  private final ProjectRole requiredRole;
+  private final Set<ProjectRole> allowedRoles;
   private final ToolSideEffect sideEffect;
   private final ToolDescriptor descriptor;
 
-  ProjectRoleToolType(String modelName, ProjectRole requiredRole, ToolSideEffect sideEffect) {
+  ProjectRoleToolType(String modelName, Set<ProjectRole> allowedRoles, ToolSideEffect sideEffect) {
     this.modelName = Objects.requireNonNull(modelName, "modelName");
-    this.requiredRole = Objects.requireNonNull(requiredRole, "requiredRole");
+    this.allowedRoles = Objects.requireNonNull(allowedRoles, "allowedRoles");
     this.sideEffect = Objects.requireNonNull(sideEffect, "sideEffect");
     this.descriptor =
         new ToolDescriptor(
@@ -53,8 +47,12 @@ public enum ProjectRoleToolType {
     return modelName.replace('_', '.');
   }
 
-  public ProjectRole requiredRole() {
-    return requiredRole;
+  public Set<ProjectRole> allowedRoles() {
+    return allowedRoles;
+  }
+
+  public boolean isAllowedFor(ProjectRole role) {
+    return role != null && allowedRoles.contains(role);
   }
 
   public ToolSideEffect sideEffect() {
@@ -74,7 +72,7 @@ public enum ProjectRoleToolType {
 
   public static List<ProjectRoleToolType> forRole(ProjectRole role) {
     Objects.requireNonNull(role, "role");
-    return Arrays.stream(values()).filter(t -> t.requiredRole == role).toList();
+    return Arrays.stream(values()).filter(t -> t.isAllowedFor(role)).toList();
   }
 
   /** 返回该角色可用的模型可见工具名列表（声明顺序）。 */

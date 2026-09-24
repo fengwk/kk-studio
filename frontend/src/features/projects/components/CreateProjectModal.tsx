@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react'
 import { X, FolderPlus } from 'lucide-react'
-import { Select } from '@/shared/ui/console/Select'
-import { useCoordinatorAgents } from '../useCoordinatorAgents'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -21,23 +19,17 @@ export function CreateProjectModal({
 }: CreateProjectModalProps) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [coordinatorAgentName, setCoordinatorAgentName] = useState('')
+  const [yoloEnabled, setYoloEnabled] = useState(true)
+  const [maxReviewRejections, setMaxReviewRejections] = useState<number | ''>(3)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-
-  const {
-    agents,
-    options: agentOptions,
-    isLoading: isAgentsLoading,
-    isError: isAgentsError,
-    isCoordinatorValid,
-  } = useCoordinatorAgents(undefined, isOpen)
 
   useEffect(() => {
     if (isOpen) {
       setTitle('')
       setDescription('')
-      setCoordinatorAgentName('')
+      setYoloEnabled(true)
+      setMaxReviewRejections(3)
       setErrorMessage(null)
     }
   }, [isOpen])
@@ -67,9 +59,9 @@ export function CreateProjectModal({
       setErrorMessage('项目名称不能为空')
       return
     }
-    const trimmedCoordinatorAgentName = coordinatorAgentName.trim()
-    if (!trimmedCoordinatorAgentName || !isCoordinatorValid(trimmedCoordinatorAgentName)) {
-      setErrorMessage('请选择有效的 Coordinator Agent')
+    const rejections = typeof maxReviewRejections === 'number' ? maxReviewRejections : 3
+    if (rejections <= 0) {
+      setErrorMessage('最大打回次数必须为正整数')
       return
     }
 
@@ -79,7 +71,8 @@ export function CreateProjectModal({
       const created = await api.createProject({
         title: trimmedTitle,
         description: description.trim() || null,
-        coordinatorAgentName: trimmedCoordinatorAgentName,
+        yoloEnabled,
+        maxReviewRejections: rejections,
       })
       onSuccess(created)
       onClose()
@@ -156,37 +149,43 @@ export function CreateProjectModal({
             </div>
 
             <div className="form-group">
-              <label id="create-project-coordinator-label" htmlFor="create-project-coordinator">
-                Coordinator Agent 名称 <span style={{ color: 'var(--danger)' }}>*</span>
+              <label htmlFor="create-project-max-rejections">
+                最大审查打回次数 <span style={{ color: 'var(--danger)' }}>*</span>
               </label>
-              <Select
-                id="create-project-coordinator"
-                value={coordinatorAgentName}
-                options={agentOptions}
-                onChange={setCoordinatorAgentName}
-                disabled={isSubmitting || isAgentsLoading || isAgentsError || agents.length === 0}
-                placeholder={
-                  isAgentsLoading
-                    ? '正在加载 Agent 列表...'
-                    : isAgentsError
-                      ? '加载 Agent 列表失败'
-                      : agents.length === 0
-                        ? '暂无可用 Agent'
-                        : '请选择 Coordinator Agent'
-                }
-                aria-label="Coordinator Agent 名称"
+              <input
+                id="create-project-max-rejections"
+                type="number"
+                min={1}
+                value={maxReviewRejections}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setMaxReviewRejections(val === '' ? '' : parseInt(val, 10))
+                }}
                 required
+                aria-label="最大审查打回次数"
               />
-              {isAgentsError ? (
-                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
-                  加载 Agent 列表失败，请稍后重试
-                </p>
-              ) : null}
-              {!isAgentsLoading && !isAgentsError && agents.length === 0 ? (
-                <p className="field-error" role="alert" style={{ marginTop: '4px' }}>
-                  当前无可用 Agent，请先在 Agent 控制台创建
-                </p>
-              ) : null}
+              <span className="field-hint" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
+                连续打回达到该次数后单据转入 BLOCKED 状态，默认 3 次
+              </span>
+            </div>
+
+            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+              <input
+                id="create-project-yolo"
+                type="checkbox"
+                checked={yoloEnabled}
+                onChange={(e) => setYoloEnabled(e.target.checked)}
+                style={{ marginTop: '3px' }}
+                aria-label="YOLO 模式"
+              />
+              <div>
+                <label htmlFor="create-project-yolo" style={{ cursor: 'pointer', fontWeight: 500 }}>
+                  YOLO 模式 (自动执行)
+                </label>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block' }}>
+                  新建 Issue 时自动启动 Agent Run 分支，无需手动触发，默认开启
+                </span>
+              </div>
             </div>
           </div>
 
@@ -202,7 +201,11 @@ export function CreateProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim() || !isCoordinatorValid(coordinatorAgentName)}
+              disabled={
+                isSubmitting ||
+                !title.trim() ||
+                (typeof maxReviewRejections === 'number' && maxReviewRejections <= 0)
+              }
             >
               {isSubmitting ? '创建中...' : '创建项目'}
             </button>

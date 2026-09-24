@@ -21,6 +21,14 @@ function event(
 }
 
 describe('EntryMessageBlock', () => {
+  it('shows setting events as a single accessible line without a raw payload card', () => {
+    // 测试意图：配置变更只占一行，完整值保留在 title 属性以便悬停查看。
+    const { container } = render(<EntryMessageBlock message={event('settings_change', '模型改为 p/m (high)')} />)
+    expect(screen.getByText('模型改为 p/m (high)')).toHaveAttribute('title', '模型改为 p/m (high)')
+    expect(container.querySelector('.thread-entry-text')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-entry-payload')).not.toBeInTheDocument()
+  })
+
   it('renders semantic Entry variants through the portable timeline contract', () => {
     const { container } = render(
       <>
@@ -33,7 +41,7 @@ describe('EntryMessageBlock', () => {
     expect(screen.getByText('会话开始')).toBeInTheDocument()
     expect(screen.getByText('无法识别消息 Entry')).toBeInTheDocument()
     expect(screen.getByText('未识别 Entry')).toBeInTheDocument()
-    expect(screen.getAllByText('查看原始 Entry')).toHaveLength(3)
+    expect(screen.getAllByText('查看原始 Entry')).toHaveLength(2)
     expect(container.querySelector('[data-entry-kind="root"] svg')).toBeInTheDocument()
     expect(container.querySelector('[data-entry-kind="unsupported_message"] svg')).toBeInTheDocument()
     expect(container.querySelector('[data-entry-kind="unknown_entry"] svg')).toBeInTheDocument()

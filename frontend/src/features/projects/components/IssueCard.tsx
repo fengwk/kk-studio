@@ -3,6 +3,7 @@ import type { IssueStatus, ProjectIssueSnapshotDTO } from '../types'
 
 export interface IssueCardProps {
   item: ProjectIssueSnapshotDTO
+  maxReviewRejections: string
   onClick: () => void
   onChangeStatus?: (targetStatus: IssueStatus) => void
   onCancel?: () => void
@@ -12,6 +13,7 @@ export interface IssueCardProps {
 
 export function IssueCard({
   item,
+  maxReviewRejections,
   onClick,
   onChangeStatus,
   onCancel,
@@ -19,6 +21,7 @@ export function IssueCard({
   onUnarchive,
 }: IssueCardProps) {
   const { issue, blocked, currentOrLatestRun } = item
+  const isBlocked = blocked || issue.status === 'BLOCKED'
   const isWaitingHuman = currentOrLatestRun?.status === 'WAITING_HUMAN'
   const isFailed = currentOrLatestRun?.status === 'FAILED'
   const isUnknown = currentOrLatestRun?.status === 'UNKNOWN'
@@ -26,7 +29,7 @@ export function IssueCard({
 
   return (
     <div
-      className={`issue-card ${blocked ? 'is-blocked' : ''} ${isWaitingHuman ? 'is-waiting' : ''}`}
+      className={`issue-card ${isBlocked ? 'is-blocked' : ''} ${isWaitingHuman ? 'is-waiting' : ''}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -41,10 +44,18 @@ export function IssueCard({
       <div className="issue-card-header">
         <span className="issue-number">#{issue.number}</span>
         <div className="issue-badges-row">
-          {blocked && (
-            <span className="badge badge-blocked" title="依赖尚未满足">
+          {isBlocked && (
+            <span className="badge badge-blocked" title="Issue 处于阻塞状态">
               <AlertCircle size={12} aria-hidden="true" />
               BLOCKED
+            </span>
+          )}
+          {isBlocked && (
+            <span
+              className="badge badge-blocked-rejections"
+              title={`打回次数: ${item.reviewRejectionCount} / ${maxReviewRejections}`}
+            >
+              {item.reviewRejectionCount} / {maxReviewRejections}
             </span>
           )}
           {isWaitingHuman && (

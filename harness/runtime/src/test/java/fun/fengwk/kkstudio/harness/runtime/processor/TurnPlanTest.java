@@ -105,8 +105,8 @@ class TurnPlanTest {
   }
 
   /**
-   * CONTINUATION 只消费 SET_* 配置命令：所有 queued USER/CUSTOM message command（含运行时 reminder command）都保留给后续
-   * INPUT 由 planner 物化；planner 自己注入的设置提醒不是 queued command。
+   * CONTINUATION 只消费 SET_* 配置命令：所有 queued USER/CUSTOM message command 都保留给后续 INPUT 由 planner
+   * 物化；配置只写入 TURN_START.settings。
    */
   @Test
   void continuationConsumesOnlySettingCommands() {

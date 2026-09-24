@@ -10,7 +10,9 @@ import lombok.NoArgsConstructor;
 /**
  * Issue 公开传输对象。
  *
- * <p>UUID 以 canonical lowercase string 传输，编号与游标以 canonical non-negative decimal string 传输。
+ * <p>UUID 以 canonical lowercase string 传输，编号与版本以 canonical non-negative decimal string 传输。 Issue 只有
+ * EXECUTOR（{@code assigneeAgentName}）与 REVIEWER（{@code reviewerAgentName}）两种 Agent 职责：当前要求就是本对象
+ * 正文，打回次数由 Activity 事实流推导。
  */
 @Data
 @Builder
@@ -32,8 +34,6 @@ public class IssueDTO {
   private String reviewerAgentName;
 
   private String version;
-  private String specRevision;
-  private String inputSequence;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String archivedAt;

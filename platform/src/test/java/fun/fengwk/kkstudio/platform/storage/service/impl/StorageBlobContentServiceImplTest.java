@@ -28,6 +28,8 @@ import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
+import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
+import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
@@ -36,6 +38,8 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -98,6 +102,126 @@ class StorageBlobContentServiceImplTest {
     inOrder.verify(blobManager).retain(blobId);
     inOrder.verify(s3StorageService).download(StorageObjectKeys.blobOriginal(blobId), 1024L);
     inOrder.verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：流的获取、消费与关闭均在事务外；关闭后才 release，不缓存整对象。 */
+  @Test
+  void streamsBlobOutsideTransactionAndReleasesAfterClose() throws IOException {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    AtomicBoolean closed = new AtomicBoolean();
+    ByteArrayInputStream stream =
+        new ByteArrayInputStream(new byte[] {1, 2, 3}) {
+          @Override
+          public void close() throws IOException {
+            closed.set(true);
+            super.close();
+          }
+        };
+    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+        .thenReturn(new S3ObjectStream(stream, new S3ObjectMetadata(3, "text/plain", null)));
+    when(blobManager.release(blobId))
+        .thenAnswer(
+            invocation -> {
+              assertTrue(closed.get());
+              return true;
+            });
+    int first =
+        contentService.withBlobStream(
+            blobId,
+            input -> {
+              assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+              try {
+                return input.read();
+              } catch (IOException e) {
+                throw new IllegalStateException(e);
+              }
+            });
+    assertEquals(1, first);
+    verify(s3StorageService).readObject(StorageObjectKeys.blobOriginal(blobId));
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：窗口解析异常不能泄漏 S3 连接或 ACTIVE blob 的引用。 */
+  @Test
+  void streamingFailureClosesObjectAndReleasesBlob() throws IOException {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    AtomicBoolean closed = new AtomicBoolean();
+    ByteArrayInputStream stream =
+        new ByteArrayInputStream(new byte[] {1}) {
+          @Override
+          public void close() throws IOException {
+            closed.set(true);
+            super.close();
+          }
+        };
+    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+        .thenReturn(new S3ObjectStream(stream, new S3ObjectMetadata(1, "text/plain", null)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            contentService.withBlobStream(
+                blobId,
+                input -> {
+                  throw new IllegalArgumentException("invalid text");
+                }));
+    assertTrue(closed.get());
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：retain 返回 null 时没有引用可释放；S3 不得被访问。 */
+  @Test
+  void streamRejectsNullRetain() {
+    UUID blobId = UUID.randomUUID();
+    assertThrows(
+        IllegalStateException.class,
+        () -> contentService.withBlobStream(blobId, input -> "unreachable"));
+    verify(s3StorageService, never()).readObject(any());
+    verify(blobManager, never()).release(any());
+  }
+
+  /** 测试意图：S3 读取失败和 release 失败同时发生时不能丢失原始错误。 */
+  @Test
+  void streamPreservesReadErrorAndSuppressedReleaseError() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+        .thenThrow(new IllegalStateException("S3 unavailable"));
+    doThrow(new IllegalStateException("release failed")).when(blobManager).release(blobId);
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> contentService.withBlobStream(blobId, input -> "unreachable"));
+    assertEquals("S3 unavailable", error.getMessage());
+    assertEquals("release failed", error.getSuppressed()[0].getMessage());
+  }
+
+  /** 测试意图：成功读取后 release 异常仍需显式失败，防止引用泄漏被忽略。 */
+  @Test
+  void streamReportsReleaseErrorAfterSuccess() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+        .thenReturn(
+            new S3ObjectStream(
+                new ByteArrayInputStream(new byte[] {1}),
+                new S3ObjectMetadata(1, "text/plain", null)));
+    when(blobManager.release(blobId)).thenReturn(false);
+    assertTrue(
+        assertThrows(
+                IllegalStateException.class,
+                () -> contentService.withBlobStream(blobId, input -> "ok"))
+            .getMessage()
+            .contains("release returned false"));
   }
 
   /** 测试意图：验证任何 S3 下载 IO 发生时，当前线程绝不处于 DB 事务中（保证短事务边界）。 */

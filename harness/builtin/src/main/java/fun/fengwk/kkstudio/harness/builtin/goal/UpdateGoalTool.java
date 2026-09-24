@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
@@ -23,7 +24,11 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
-/** 把当前 branch Goal 更新为 complete 或 blocked 全量快照。 */
+/**
+ * 把当前用户 Goal 的 Agent 声明（complete | blocked + reason）记成 goal-id-bound 的 {@code goal.progress}。
+ *
+ * <p>不复制或改写目标正文，不删除 Goal，也不推进任何业务状态；没有用户 Goal 或当前 Goal 已有终态声明时拒绝，避免迟到/重复的 陈旧报告被当成当前目标的进度。
+ */
 public final class UpdateGoalTool implements Tool {
 
   public static final String NAME = "update_goal";
@@ -40,7 +45,7 @@ public final class UpdateGoalTool implements Tool {
   private static final ToolRequirements REQUIREMENTS =
       new ToolRequirements(
           EnvironmentSupport.NONE,
-          List.of(new StateDeclaration(GoalFeature.STATE_TYPE, StateMode.WRITE)));
+          List.of(new StateDeclaration(GoalFeature.PROGRESS_TYPE, StateMode.WRITE)));
 
   @Override
   public ToolDescriptor descriptor() {
@@ -75,20 +80,21 @@ public final class UpdateGoalTool implements Tool {
       GoalStatus status =
           GoalStatus.parseTerminal(GoalToolSupport.requiredNonBlankText(arguments, "status"));
       String reason = GoalToolSupport.requiredNonBlankText(arguments, "reason");
-      GoalState current =
-          GoalToolSupport.latest(request.context().branch())
+      GoalSnapshot goal =
+          GoalToolSupport.goal(request.context().branch())
               .orElseThrow(() -> new IllegalStateException("No goal is set on this branch."));
-      if (current.status() != GoalStatus.ACTIVE) {
+      GoalProgress reported =
+          GoalToolSupport.progress(request.context().branch(), goal.id()).orElse(null);
+      if (reported != null) {
         throw new IllegalStateException(
-            "Goal status is "
-                + current.status().wireValue()
-                + "; it cannot be updated by the model.");
+            "The current goal is already reported "
+                + reported.status().wireValue()
+                + "; wait for the user to change or clear the goal.");
       }
       Instant now = GoalToolSupport.timestamp(request.context().executedAt());
-      GoalState state =
-          new GoalState(
-              current.objective(), current.tokenBudget(), status, reason, current.createdAt(), now);
-      outcome = GoalToolSupport.stateChange(request.call(), state);
+      outcome =
+          GoalToolSupport.progressChange(
+              request.call(), new GoalProgress(goal.id(), status, reason, now));
     } catch (RuntimeException error) {
       outcome = GoalToolSupport.error(request.call(), error);
     }

@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetEnvironmentCommandPayload;
@@ -307,6 +308,52 @@ class HarnessRuntimeAcceptInitialTest {
                     List.of(
                         systemReminderCommand(TestIds.id(7), "steer"),
                         userMessageCommand(TestIds.id(8), "hello"))),
+                AcceptancePreflight.IDENTITY));
+  }
+
+  /** 测试意图：typed GOAL 是 user-like 终止输入——可作为唯一末尾命令（可跟在 SET_* 前缀之后）；与 USER_MESSAGE 同批或不在末尾都被拒。 */
+  @Test
+  void goalBatchShapeAllowsOnlySoleTerminalGoalCommand() {
+    AcceptedCommands result =
+        runtime.acceptCommands(
+            newSession(
+                TestIds.id(130),
+                TestIds.id(131),
+                List.of(new NewThreadCommand(new GoalCommandPayload("finish"), TestIds.id(2)))),
+            AcceptancePreflight.IDENTITY);
+    assertFalse(result.replayed());
+    // 合法：SET_* 前缀 + 末尾 GOAL（显式 null 表示清除）。
+    runtime.acceptCommands(
+        newSession(
+            TestIds.id(132),
+            TestIds.id(133),
+            List.of(
+                setAgent(TestIds.id(3)),
+                new NewThreadCommand(new GoalCommandPayload(null), TestIds.id(4)))),
+        AcceptancePreflight.IDENTITY);
+    // 非法：GOAL 与 USER_MESSAGE 同批是两条 user-like。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(134),
+                    TestIds.id(135),
+                    List.of(
+                        new NewThreadCommand(new GoalCommandPayload("finish"), TestIds.id(5)),
+                        userMessageCommand(TestIds.id(6), "hi"))),
+                AcceptancePreflight.IDENTITY));
+    // 非法：GOAL 之后还有命令。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                newSession(
+                    TestIds.id(136),
+                    TestIds.id(137),
+                    List.of(
+                        new NewThreadCommand(new GoalCommandPayload("finish"), TestIds.id(7)),
+                        setAgent(TestIds.id(8)))),
                 AcceptancePreflight.IDENTITY));
   }
 

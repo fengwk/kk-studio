@@ -373,7 +373,7 @@ registerCase({
       assert(mock.requests.length === 1, JSON.stringify(mock.requests))
       const firstToolNames = collectToolNames(mock.requests[0].body)
       assert(
-        firstToolNames.includes('get_goal') && !firstToolNames.includes('create_goal'),
+        firstToolNames.includes('get_goal') && !firstToolNames.includes('update_goal'),
         JSON.stringify({ firstToolNames, tools: mock.requests[0].body.tools }),
       )
       assert(
@@ -391,7 +391,7 @@ registerCase({
             model: agent.model,
             variant: 'default',
             config: {
-              tools: ['get_goal', 'create_goal'],
+              tools: ['get_goal', 'update_goal'],
               skills: [],
               subagents: [],
               inheritParentEnvironment: true,
@@ -451,7 +451,7 @@ registerCase({
       const toolNames = collectToolNames(request.body)
       assert(toolNames.includes('get_goal'), JSON.stringify({ toolNames, tools: request.body.tools }))
       assert(
-        toolNames.includes('create_goal'),
+        toolNames.includes('update_goal'),
         `latest Agent tool missing from existing Thread request: ${JSON.stringify({
           toolNames,
           tools: request.body.tools,

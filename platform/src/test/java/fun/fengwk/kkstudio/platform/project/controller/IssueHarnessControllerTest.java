@@ -3,8 +3,10 @@ package fun.fengwk.kkstudio.platform.project.controller;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -25,45 +27,54 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.Inspection;
 import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.InspectionStatus;
+import fun.fengwk.kkstudio.platform.project.controller.IssueHarnessController.QualifiedSubmission;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
-import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
-import fun.fengwk.kkstudio.platform.project.session.BootstrapIssueRunSessionRequest;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
+import fun.fengwk.kkstudio.platform.project.session.BootstrapIssueAgentSessionRequest;
 import fun.fengwk.kkstudio.platform.project.session.ProjectHarnessSessionBootstrapService;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -74,8 +85,7 @@ class IssueHarnessControllerTest {
 
   private static final Instant NOW = Instant.parse("2026-09-13T10:00:00Z");
 
-  private ProjectSessionRepository projectSessionRepository;
-  private IssueRunSessionRepository issueRunSessionRepository;
+  private IssueAgentSessionRepository issueAgentSessionRepository;
   private ProjectHarnessSessionBootstrapService bootstrapService;
   private HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private HarnessRuntime harnessRuntime;
@@ -84,8 +94,7 @@ class IssueHarnessControllerTest {
 
   @BeforeEach
   void setUp() {
-    projectSessionRepository = mock(ProjectSessionRepository.class);
-    issueRunSessionRepository = mock(IssueRunSessionRepository.class);
+    issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
     bootstrapService = mock(ProjectHarnessSessionBootstrapService.class);
     acceptanceOrchestrator = mock(HarnessCommandAcceptanceOrchestrator.class);
     harnessRuntime = mock(HarnessRuntime.class);
@@ -93,11 +102,7 @@ class IssueHarnessControllerTest {
     when(harnessRuntimes.getIfAvailable()).thenReturn(harnessRuntime);
     controller =
         new IssueHarnessController(
-            projectSessionRepository,
-            issueRunSessionRepository,
-            bootstrapService,
-            acceptanceOrchestrator,
-            harnessRuntimes);
+            issueAgentSessionRepository, bootstrapService, acceptanceOrchestrator, harnessRuntimes);
   }
 
   @AfterEach
@@ -110,15 +115,17 @@ class IssueHarnessControllerTest {
   @Test
   void bootstrapBuildsRoleSpecificReplaySafeRequestAndSanitizesFailure() {
     // 测试意图：验证随机 Session 身份、稳定初始 command key、角色消息与异常脱敏。
+    Project project = project();
     Issue issue = issue();
     IssueRun executor = run(IssueRunRole.EXECUTOR);
-    controller.bootstrap(issue, executor);
+    controller.bootstrap(project, issue, executor);
 
-    ArgumentCaptor<BootstrapIssueRunSessionRequest> requestCaptor =
-        ArgumentCaptor.forClass(BootstrapIssueRunSessionRequest.class);
-    verify(bootstrapService).bootstrapIssueRunSession(requestCaptor.capture());
-    BootstrapIssueRunSessionRequest request = requestCaptor.getValue();
-    assertEquals(executor.getId(), request.runId());
+    ArgumentCaptor<BootstrapIssueAgentSessionRequest> requestCaptor =
+        ArgumentCaptor.forClass(BootstrapIssueAgentSessionRequest.class);
+    verify(bootstrapService).bootstrapIssueAgentSession(requestCaptor.capture());
+    BootstrapIssueAgentSessionRequest request = requestCaptor.getValue();
+    assertEquals(issue.getId(), request.issueId());
+    assertEquals(executor.getAgentName(), request.agentName());
     assertEquals(
         IssueHarnessController.initialCommandKey(executor.getId()),
         request.initialCommandIdempotencyKey());
@@ -127,15 +134,17 @@ class IssueHarnessControllerTest {
 
     reset(bootstrapService);
     IssueRun reviewer = run(IssueRunRole.REVIEWER);
-    controller.bootstrap(issue, reviewer);
-    verify(bootstrapService).bootstrapIssueRunSession(requestCaptor.capture());
+    reviewer.setAgentName("reviewer-agent");
+    controller.bootstrap(project, issue, reviewer);
+    verify(bootstrapService).bootstrapIssueAgentSession(requestCaptor.capture());
     assertEquals("Review issue #7: Title", requestCaptor.getValue().initialMessage());
 
     doThrow(new IllegalArgumentException("private-value"))
         .when(bootstrapService)
-        .bootstrapIssueRunSession(any());
+        .bootstrapIssueAgentSession(any());
     IllegalStateException failure =
-        assertThrows(IllegalStateException.class, () -> controller.bootstrap(issue, reviewer));
+        assertThrows(
+            IllegalStateException.class, () -> controller.bootstrap(project, issue, reviewer));
     assertEquals("Harness session bootstrap failed", failure.getMessage());
     assertNull(failure.getCause());
     assertFalse(failure.toString().contains("private-value"));
@@ -144,46 +153,55 @@ class IssueHarnessControllerTest {
   @Test
   void optionalBootstrapOnlyRunsInHarnessCapableDeployment() {
     // 测试意图：platform-only 组合根可推进 durable Run；web 组合根存在 Runtime 时才原子引导 Session。
+    Project project = project();
     Issue issue = issue();
     IssueRun run = run(IssueRunRole.EXECUTOR);
     when(harnessRuntimes.getIfAvailable()).thenReturn(null);
-    controller.bootstrapIfAvailable(issue, run);
-    verify(bootstrapService, never()).bootstrapIssueRunSession(any());
+    controller.bootstrapIfAvailable(project, issue, run);
+    verify(bootstrapService, never()).bootstrapIssueAgentSession(any());
 
     when(harnessRuntimes.getIfAvailable()).thenReturn(harnessRuntime);
-    controller.bootstrapIfAvailable(issue, run);
-    verify(bootstrapService).bootstrapIssueRunSession(any());
+    controller.bootstrapIfAvailable(project, issue, run);
+    verify(bootstrapService).bootstrapIssueAgentSession(any());
   }
 
   @Test
   void inspectClassifiesMissingUnknownProcessingAndQuiescentStates() {
-    // 测试意图：验证 bridge 只按最早 Thread 的权威 snapshot 分类，并识别三类 UNKNOWN 来源。
+    // 测试意图：验证 bridge 只按权威 snapshot 分类，并识别三类 UNKNOWN 来源。
+    Issue issue = issue();
     IssueRun run = run(IssueRunRole.EXECUTOR);
-    assertEquals(InspectionStatus.MISSING_SESSION, controller.inspect(run).status());
+    assertEquals(InspectionStatus.MISSING_SESSION, controller.inspect(issue, run).status());
 
     UUID sessionId = UUID.randomUUID();
-    when(issueRunSessionRepository.findByRunId(run.getId()))
-        .thenReturn(IssueRunSession.builder().runId(run.getId()).sessionId(sessionId).build());
-    when(harnessRuntime.listThreadsBySession(sessionId)).thenReturn(List.of());
-    assertEquals(InspectionStatus.MISSING_THREAD, controller.inspect(run).status());
+    UUID threadId = UUID.randomUUID();
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(run.getAgentName())
+            .sessionId(sessionId)
+            .threadId(threadId)
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName()))
+        .thenReturn(agentSession);
 
-    ThreadState later = thread(sessionId, NOW.plusSeconds(1));
-    ThreadState earliest = thread(sessionId, NOW);
-    when(harnessRuntime.listThreadsBySession(sessionId)).thenReturn(List.of(later, earliest));
+    when(harnessRuntime.getThreadSnapshot(threadId)).thenReturn(null);
+    assertEquals(InspectionStatus.MISSING_THREAD, controller.inspect(issue, run).status());
 
-    ThreadSnapshot snapshot = baseSnapshot(earliest);
+    ThreadState threadState = thread(sessionId, NOW);
+    ThreadSnapshot snapshot = baseSnapshot(threadState);
     ModelInvocation unknownModel = mock(ModelInvocation.class);
     when(unknownModel.status()).thenReturn(ModelInvocationStatus.UNKNOWN);
     when(snapshot.model()).thenReturn(unknownModel);
-    when(harnessRuntime.getThreadSnapshot(earliest.id())).thenReturn(snapshot);
-    assertEquals(InspectionStatus.UNKNOWN, controller.inspect(run).status());
+    when(harnessRuntime.getThreadSnapshot(threadId)).thenReturn(snapshot);
+    assertEquals(InspectionStatus.UNKNOWN, controller.inspect(issue, run).status());
 
     reset(snapshot);
     ToolInvocation unknownTool = mock(ToolInvocation.class);
     when(unknownTool.status()).thenReturn(ToolInvocationStatus.UNKNOWN);
-    stubSnapshot(snapshot, earliest);
+    stubSnapshot(snapshot, threadState);
     when(snapshot.toolSiblings()).thenReturn(List.of(unknownTool));
-    assertEquals(InspectionStatus.UNKNOWN, controller.inspect(run).status());
+    assertEquals(InspectionStatus.UNKNOWN, controller.inspect(issue, run).status());
 
     reset(snapshot);
     MessagePayload message = mock(MessagePayload.class);
@@ -192,183 +210,175 @@ class IssueHarnessControllerTest {
     when(metadata.status()).thenReturn(ToolResultStatus.UNKNOWN);
     when(message.toolResultMetadata()).thenReturn(metadata);
     when(messageEntry.payload()).thenReturn(message);
-    stubSnapshot(snapshot, earliest);
+    stubSnapshot(snapshot, threadState);
     when(snapshot.entryPath().entries()).thenReturn(List.of(messageEntry));
-    assertEquals(InspectionStatus.UNKNOWN, controller.inspect(run).status());
+    assertEquals(InspectionStatus.UNKNOWN, controller.inspect(issue, run).status());
 
     reset(snapshot);
-    stubSnapshot(snapshot, earliest);
+    stubSnapshot(snapshot, threadState);
     when(snapshot.queuedCommands()).thenReturn(List.of(mock(ThreadCommand.class)));
-    assertEquals(InspectionStatus.PROCESSING, controller.inspect(run).status());
+    assertEquals(InspectionStatus.PROCESSING, controller.inspect(issue, run).status());
 
     reset(snapshot);
-    stubSnapshot(snapshot, earliest);
-    Inspection inspection = controller.inspect(run);
+    stubSnapshot(snapshot, threadState);
+    Inspection inspection = controller.inspect(issue, run);
     assertEquals(InspectionStatus.QUIESCENT, inspection.status());
     assertEquals(snapshot, inspection.requireQuiescentSnapshot());
-    verify(harnessRuntime, times(5)).getThreadSnapshot(earliest.id());
-    verify(harnessRuntime, never()).getThreadSnapshot(later.id());
   }
 
   @Test
-  void continuationsUseExactOwnerCursorPayloadAndDeterministicKeys() {
-    // 测试意图：验证 user/system continuation 的 owner、cursor、正文和幂等键完整绑定。
+  void alignThreadYoloDelegatesToRuntime() {
+    // 测试意图：验证 YOLO 对齐命令正确传递 threadId、版本号与目标开关。
+    UUID threadId = UUID.randomUUID();
+    when(harnessRuntime.setThreadYolo(new SetThreadYoloCommand(threadId, 2L, true)))
+        .thenReturn(mock(ThreadState.class));
+    assertTrue(controller.alignThreadYolo(threadId, 2L, true));
+
+    doThrow(new IllegalStateException("conflict"))
+        .when(harnessRuntime)
+        .setThreadYolo(new SetThreadYoloCommand(threadId, 2L, false));
+    assertFalse(controller.alignThreadYolo(threadId, 2L, false));
+  }
+
+  @Test
+  void findQualifiedSubmissionValidatesStrictContract() {
+    // 测试意图：验证只有完全符合 qualified turn 条件的输出才会被识别为 submission。
+    IssueRun run = run(IssueRunRole.EXECUTOR);
+    run.setCreatedAt(NOW);
+    UUID threadId = UUID.randomUUID();
+    ThreadState threadState = thread(UUID.randomUUID(), NOW);
+    ThreadSnapshot snapshot = baseSnapshot(threadState);
+
+    // 1. 无 TurnEnd -> null
+    assertNull(controller.findQualifiedSubmission(run, snapshot, false));
+
+    // 2. 有合规的 TurnEnd 与 Assistant 消息 -> 返回 QualifiedSubmission
+    UUID turnStartId = UUID.randomUUID();
+    UUID turnEndId = UUID.randomUUID();
+    TurnStartPayload turnStartPayload =
+        new TurnStartPayload(
+            TurnStartReason.INPUT,
+            new BranchSettings(
+                "executor", new ModelSelection("provider", "model", "default"), null),
+            threadState.id());
+    Entry turnStartEntry = mock(Entry.class);
+    when(turnStartEntry.id()).thenReturn(turnStartId);
+    when(turnStartEntry.payload()).thenReturn(turnStartPayload);
+    when(turnStartEntry.createdAt()).thenReturn(NOW.plusSeconds(1));
+
+    TextMessageContent textContent = new TextMessageContent("Work completed successfully.");
+    AgentMessage assistantMsg = new AgentMessage(AgentMessageRole.ASSISTANT, List.of(textContent));
+    AssistantMessageMetadata metadata =
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(10L, 20L, 0L, 0L, 0L, 0L, 30L),
+            new ModelCost(
+                "USD",
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO,
+                BigDecimal.ZERO));
+    MessagePayload messagePayload = new MessagePayload(assistantMsg, metadata, null);
+    Entry assistantEntry = mock(Entry.class);
+    when(assistantEntry.id()).thenReturn(UUID.randomUUID());
+    when(assistantEntry.payload()).thenReturn(messagePayload);
+    when(assistantEntry.createdAt()).thenReturn(NOW.plusSeconds(2));
+
+    TurnEndPayload turnEndPayload =
+        new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null);
+    Entry turnEndEntry = mock(Entry.class);
+    when(turnEndEntry.id()).thenReturn(turnEndId);
+    when(turnEndEntry.payload()).thenReturn(turnEndPayload);
+    when(turnEndEntry.createdAt()).thenReturn(NOW.plusSeconds(3));
+
+    when(snapshot.entryPath().entries())
+        .thenReturn(List.of(turnStartEntry, assistantEntry, turnEndEntry));
+
+    QualifiedSubmission submission = controller.findQualifiedSubmission(run, snapshot, false);
+    assertNotNull(submission);
+    assertEquals(turnEndId, submission.finalEntryId());
+    assertEquals("Work completed successfully.", submission.summary());
+
+    // 3. 若有未处理的 targeted activities -> 不应作为 submission
+    assertNull(controller.findQualifiedSubmission(run, snapshot, true));
+  }
+
+  @Test
+  void deliverActivityAndSystemContinuationUseDeterministicKeys() {
+    // 测试意图：验证 activity 与 system continuation 使用正确的 owner、target、正文和幂等键。
     Issue issue = issue();
-    issue.setSpecRevision(9L);
     IssueRun run = run(IssueRunRole.EXECUTOR);
     run.setContinuationCount(2);
-    run.setObservedSpecRevision(4L);
-    run.setObservedInputSequence(5L);
-    ThreadState thread = thread(UUID.randomUUID(), NOW);
+    run.setObservedActivitySequence(5L);
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(run.getAgentName())
+            .sessionId(UUID.randomUUID())
+            .threadId(UUID.randomUUID())
+            .build();
+    ThreadState thread = thread(agentSession.getSessionId(), NOW);
     ThreadSnapshot snapshot = baseSnapshot(thread);
-    Inspection inspection = new Inspection(InspectionStatus.QUIESCENT, snapshot);
-    IssueInput input =
-        IssueInput.builder()
+
+    IssueActivity activity =
+        IssueActivity.builder()
             .issueId(issue.getId())
             .sequence(6L)
-            .kind(IssueInputKind.HUMAN)
-            .body("  exact input  ")
+            .kind(IssueActivityKind.HUMAN_INPUT)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Please update the requirement")
             .build();
 
-    controller.sendUserContinuation(issue, run, input, inspection);
-    controller.sendSystemContinuation(issue, run, inspection);
+    controller.deliverActivity(issue, run, activity, agentSession, snapshot);
+    controller.sendSystemContinuation(issue, run, agentSession, snapshot);
 
     ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
     ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
         ArgumentCaptor.forClass(AcceptCommandsCommand.class);
     verify(acceptanceOrchestrator, times(2)).accept(ownerCaptor.capture(), commandCaptor.capture());
+
     assertEquals(
         List.of(
-            new OwnerRef(OwnerType.ISSUE_RUN, run.getId()),
-            new OwnerRef(OwnerType.ISSUE_RUN, run.getId())),
+            new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, agentSession.getId()),
+            new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, agentSession.getId())),
         ownerCaptor.getAllValues());
 
-    AcceptCommandsCommand userBatch = commandCaptor.getAllValues().get(0);
-    assertThreadCursor(userBatch, thread);
-    NewThreadCommand userCommand = userBatch.commands().getFirst();
+    AcceptCommandsCommand activityBatch = commandCaptor.getAllValues().get(0);
+    assertThreadCursor(activityBatch, thread);
+    NewThreadCommand activityCommand = activityBatch.commands().getFirst();
     assertEquals(
-        IssueHarnessController.continuationKey(run.getId(), 2, 9L, 6L, "USER"),
-        userCommand.idempotencyKey());
-    UserMessageCommandPayload userPayload = (UserMessageCommandPayload) userCommand.payload();
-    assertEquals(
-        "New issue input (spec revision 9, sequence 6, kind HUMAN):\n  exact input  ",
-        text(userPayload.message()));
+        IssueHarnessController.activityDeliveryKey(run.getId(), 6L),
+        activityCommand.idempotencyKey());
 
     AcceptCommandsCommand systemBatch = commandCaptor.getAllValues().get(1);
     assertThreadCursor(systemBatch, thread);
     NewThreadCommand systemCommand = systemBatch.commands().getFirst();
     assertEquals(
-        IssueHarnessController.continuationKey(run.getId(), 2, 4L, 5L, "SYSTEM"),
+        IssueHarnessController.continuationKey(run.getId(), 2, 5L, "SYSTEM"),
         systemCommand.idempotencyKey());
-    CustomMessageCommandPayload systemPayload =
-        (CustomMessageCommandPayload) systemCommand.payload();
-    // 内部 steering 以 durable USER 提醒形态进入历史，精确包裹在 system-reminder 定界符中。
-    assertEquals(AgentMessageRole.USER, systemPayload.message().role());
-    assertEquals(
-        SystemReminder.wrap("Continue working on issue #7."), text(systemPayload.message()));
-  }
-
-  @Test
-  void continuationRequiresQuiescenceAndSanitizesAcceptanceFailure() {
-    // 测试意图：非静止 snapshot 不得投递；下游异常不得携带私密输入向上冒泡。
-    Issue issue = issue();
-    IssueRun run = run(IssueRunRole.EXECUTOR);
-    Inspection processing =
-        new Inspection(InspectionStatus.PROCESSING, baseSnapshot(thread(UUID.randomUUID(), NOW)));
-    assertThrows(
-        IllegalStateException.class,
-        () -> controller.sendSystemContinuation(issue, run, processing));
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-
-    Inspection quiescent =
-        new Inspection(InspectionStatus.QUIESCENT, baseSnapshot(thread(UUID.randomUUID(), NOW)));
-    doThrow(new IllegalArgumentException("private-value"))
-        .when(acceptanceOrchestrator)
-        .accept(any(), any());
-    IllegalStateException failure =
-        assertThrows(
-            IllegalStateException.class,
-            () -> controller.sendSystemContinuation(issue, run, quiescent));
-    assertEquals("Harness continuation delivery failed", failure.getMessage());
-    assertNull(failure.getCause());
-  }
-
-  @Test
-  void attentionOnlyTargetsAnExistingCoordinatorAndIsReplaySafe() {
-    // 测试意图：不得抢建 Coordinator Session；已有相同 key 时 no-op，否则投递带原因的通知。
-    Project project = project();
-    Issue issue = issue();
-    IssueRun run = run(IssueRunRole.EXECUTOR);
-    run.setStatus(IssueRunStatus.WAITING_HUMAN);
-    run.setWaitingReason("Need a decision");
-    controller.deliverAttention(project, issue, run);
-    verify(harnessRuntime, never()).listThreadsBySession(any());
-
-    UUID sessionId = UUID.randomUUID();
-    when(projectSessionRepository.findByProjectId(project.getId()))
-        .thenReturn(
-            ProjectSession.builder().projectId(project.getId()).sessionId(sessionId).build());
-    when(harnessRuntime.listThreadsBySession(sessionId)).thenReturn(List.of());
-    controller.deliverAttention(project, issue, run);
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-
-    ThreadState thread = thread(sessionId, NOW);
-    when(harnessRuntime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
-    UUID key = IssueHarnessController.coordinatorAttentionKey(run);
-    when(harnessRuntime.findThreadCommand(thread.id(), key))
-        .thenReturn(Optional.of(mock(ThreadCommand.class)));
-    controller.deliverAttention(project, issue, run);
-    verify(acceptanceOrchestrator, never()).accept(any(), any());
-
-    when(harnessRuntime.findThreadCommand(thread.id(), key)).thenReturn(Optional.empty());
-    controller.deliverAttention(project, issue, run);
-    ArgumentCaptor<OwnerRef> ownerCaptor = ArgumentCaptor.forClass(OwnerRef.class);
-    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(acceptanceOrchestrator).accept(ownerCaptor.capture(), commandCaptor.capture());
-    assertEquals(new OwnerRef(OwnerType.PROJECT, project.getId()), ownerCaptor.getValue());
-    assertThreadCursor(commandCaptor.getValue(), thread);
-    NewThreadCommand command = commandCaptor.getValue().commands().getFirst();
-    assertEquals(key, command.idempotencyKey());
-    CustomMessageCommandPayload payload = (CustomMessageCommandPayload) command.payload();
-    assertEquals(AgentMessageRole.USER, payload.message().role());
-    assertEquals(
-        SystemReminder.wrap("Issue #7 run entered WAITING_HUMAN: Need a decision"),
-        text(payload.message()));
-  }
-
-  @Test
-  void attentionFailureIsSanitized() {
-    // 测试意图：Coordinator 投递失败只暴露稳定边界错误，不回显下游敏感文本。
-    Project project = project();
-    Issue issue = issue();
-    IssueRun run = run(IssueRunRole.EXECUTOR);
-    UUID sessionId = UUID.randomUUID();
-    ThreadState thread = thread(sessionId, NOW);
-    when(projectSessionRepository.findByProjectId(project.getId()))
-        .thenReturn(
-            ProjectSession.builder().projectId(project.getId()).sessionId(sessionId).build());
-    when(harnessRuntime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
-    doThrow(new IllegalArgumentException("private-value"))
-        .when(harnessRuntime)
-        .findThreadCommand(any(), any());
-
-    IllegalStateException failure =
-        assertThrows(
-            IllegalStateException.class, () -> controller.deliverAttention(project, issue, run));
-
-    assertEquals("Coordinator attention delivery failed", failure.getMessage());
-    assertNull(failure.getCause());
-    assertFalse(failure.toString().contains("private-value"));
   }
 
   @Test
   void stopRunsAfterCommitAndContinuesPastIndividualFailures() {
     // 测试意图：事务内只登记回调；提交后按稳定顺序 best-effort 停止所有 Thread。
+    Issue issue = issue();
     IssueRun run = run(IssueRunRole.EXECUTOR);
     UUID sessionId = UUID.randomUUID();
-    when(issueRunSessionRepository.findByRunId(run.getId()))
-        .thenReturn(IssueRunSession.builder().runId(run.getId()).sessionId(sessionId).build());
+    IssueAgentSession agentSession =
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(run.getAgentName())
+            .sessionId(sessionId)
+            .threadId(UUID.randomUUID())
+            .build();
+    when(issueAgentSessionRepository.findByIssueIdAndAgentName(issue.getId(), run.getAgentName()))
+        .thenReturn(agentSession);
+
     ThreadState later = thread(sessionId, NOW.plusSeconds(1));
     ThreadState earliest = thread(sessionId, NOW);
     when(harnessRuntime.listThreadsBySession(sessionId)).thenReturn(List.of(later, earliest));
@@ -377,7 +387,7 @@ class IssueHarnessControllerTest {
         .stop(any(StopCommand.class));
 
     TransactionSynchronizationManager.initSynchronization();
-    controller.stopAfterCommit(run);
+    controller.stopAfterCommit(issue.getId(), run.getAgentName());
     verify(harnessRuntime, never()).listThreadsBySession(any());
     List<TransactionSynchronization> synchronizations =
         TransactionSynchronizationManager.getSynchronizations();
@@ -394,25 +404,19 @@ class IssueHarnessControllerTest {
   @Test
   void stopWithoutTransactionIsImmediateAndMissingRelationIsNoOp() {
     // 测试意图：无 Spring synchronization 时立即 stop，缺失归属关系时不触碰 Runtime。
+    Issue issue = issue();
     IssueRun run = run(IssueRunRole.EXECUTOR);
-    controller.stopAfterCommit(run);
+    controller.stopAfterCommit(issue.getId(), run.getAgentName());
     verify(harnessRuntime, never()).listThreadsBySession(any());
-
-    UUID sessionId = UUID.randomUUID();
-    when(issueRunSessionRepository.findByRunId(run.getId()))
-        .thenReturn(IssueRunSession.builder().runId(run.getId()).sessionId(sessionId).build());
-    when(harnessRuntime.listThreadsBySession(sessionId))
-        .thenThrow(new IllegalStateException("private-value"));
-    controller.stopAfterCommit(run);
-    verify(harnessRuntime).listThreadsBySession(sessionId);
   }
 
   @Test
   void inspectionAndIdempotencyHelpersRejectInvalidUsage() {
     // 测试意图：Inspection 形状不变量和 deterministic key 输入差异不会产生别名。
     assertThrows(
-        IllegalArgumentException.class, () -> new Inspection(InspectionStatus.QUIESCENT, null));
-    Inspection missing = new Inspection(InspectionStatus.MISSING_SESSION, null);
+        IllegalArgumentException.class,
+        () -> new Inspection(InspectionStatus.QUIESCENT, null, null));
+    Inspection missing = new Inspection(InspectionStatus.MISSING_SESSION, null, null);
     assertThrows(IllegalStateException.class, missing::requireQuiescentSnapshot);
 
     UUID runId = UUID.randomUUID();
@@ -420,12 +424,8 @@ class IssueHarnessControllerTest {
         IssueHarnessController.initialCommandKey(runId),
         IssueHarnessController.initialCommandKey(runId));
     assertNotEquals(
-        IssueHarnessController.continuationKey(runId, 1, 2L, 3L, "USER"),
-        IssueHarnessController.continuationKey(runId, 1, 2L, 3L, "SYSTEM"));
-    IssueRun run = run(IssueRunRole.EXECUTOR);
-    UUID first = IssueHarnessController.coordinatorAttentionKey(run);
-    run.setVersion(1L);
-    assertNotEquals(first, IssueHarnessController.coordinatorAttentionKey(run));
+        IssueHarnessController.continuationKey(runId, 1, 2L, "USER"),
+        IssueHarnessController.continuationKey(runId, 1, 2L, "SYSTEM"));
   }
 
   private ThreadSnapshot baseSnapshot(ThreadState thread) {
@@ -453,15 +453,12 @@ class IssueHarnessControllerTest {
     assertEquals(thread.nextCommandSequence(), target.expectedNextCommandSequence());
   }
 
-  private String text(AgentMessage message) {
-    return ((TextMessageContent) message.contents().getFirst()).text();
-  }
-
   private Project project() {
     return Project.builder()
         .id(UUID.randomUUID())
         .title("Project")
-        .coordinatorAgentName("coordinator")
+        .yoloEnabled(true)
+        .maxReviewRejections(3)
         .version(0L)
         .build();
   }
@@ -473,8 +470,8 @@ class IssueHarnessControllerTest {
         .projectId(project.getId())
         .number(7L)
         .title("Title")
-        .specRevision(1L)
-        .inputSequence(0L)
+        .assigneeAgentName("executor-agent")
+        .reviewerAgentName("reviewer-agent")
         .version(0L)
         .build();
   }
@@ -485,6 +482,7 @@ class IssueHarnessControllerTest {
         .issueId(UUID.randomUUID())
         .ordinal(1L)
         .role(role)
+        .agentName("executor-agent")
         .status(IssueRunStatus.RUNNING)
         .continuationCount(0)
         .maxContinuations(3)

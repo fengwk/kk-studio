@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.builtin.goal.GetGoalTool;
+import fun.fengwk.kkstudio.harness.builtin.goal.UpdateGoalTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
@@ -469,7 +471,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  /** 从最新 Agent 配置派生本 turn 的模型可见工具名；随后注入 Project 角色工具。 */
+  /** 从最新 Agent 配置派生本 turn 的模型可见工具名；随后注入 Project 角色工具，Issue Agent Branch 关闭 Goal 工具。 */
   private List<String> resolveToolNames(AgentDefinitionConfigDTO config, UUID threadId) {
     LinkedHashSet<String> toolNames = new LinkedHashSet<>();
     for (String toolName : config.getTools()) {
@@ -497,6 +499,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
     List<String> roleTools =
         Objects.requireNonNull(roleToolSelector.select(threadId), "role tools");
     toolNames.addAll(roleTools);
+    if (roleToolSelector.isIssueAgentBranch(threadId)) {
+      // Issue Agent Branch 不提供 Goal 工具：Issue 当前要求与活动本身才是权威，Agent 不得读写或报告 Branch Goal。
+      // 这里的裁剪只收敛工具面，真正的拒绝边界是 HarnessCommandAcceptanceOrchestrator 对 GOAL 命令的守卫。
+      toolNames.remove(GetGoalTool.NAME);
+      toolNames.remove(UpdateGoalTool.NAME);
+    }
     return List.copyOf(toolNames);
   }
 
@@ -728,7 +736,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     roleContext.ifPresent(context -> addSection(sections, context));
     for (ContextProjectorContribution contribution : harnessCatalog.contextProjectors()) {
       String contributorId = contribution.id().contributorId().value();
-      BranchView branch = new ScopedBranchView(path.entries(), contributorId);
+      BranchView branch =
+          new ScopedBranchView(path.entries(), contributorId, path.baseSettings().goal());
       List<ContextFragment> projected =
           Objects.requireNonNull(
               contribution.projector().project(branch),

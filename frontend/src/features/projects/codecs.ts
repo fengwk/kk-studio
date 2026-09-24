@@ -1,18 +1,17 @@
 import { ApiError } from '@/shared/api/client'
 import type {
-  HarnessSessionSummaryDTO,
-  HarnessThreadSummaryDTO,
+  IssueActivityActorType,
+  IssueActivityDTO,
+  IssueActivityKind,
+  IssueAgentSessionDTO,
   IssueDTO,
   IssueDependencyDTO,
   IssueDetailDTO,
-  IssueInputKind,
-  IssueInputDTO,
   IssueRunDTO,
-  IssueRunActorType,
   IssueRunOutcome,
   IssueRunRole,
-  IssueRunSummaryDTO,
   IssueRunStatus,
+  IssueRunSummaryDTO,
   IssueStatus,
   ProjectDTO,
   ProjectIssueSnapshotDTO,
@@ -26,17 +25,26 @@ const ISSUE_STATUSES: readonly IssueStatus[] = [
   'TODO',
   'IN_PROGRESS',
   'IN_REVIEW',
+  'BLOCKED',
   'DONE',
   'CANCELED',
 ]
-const ISSUE_INPUT_KINDS: readonly IssueInputKind[] = [
-  'HUMAN',
-  'REVIEW_FEEDBACK',
+const ISSUE_ACTIVITY_KINDS: readonly IssueActivityKind[] = [
+  'SPEC_CHANGE',
+  'INSTRUCTION',
+  'COMMENT',
+  'HUMAN_INPUT',
+  'REVIEW_DECISION',
+  'RECOVERY',
   'RETRY',
   'SYSTEM',
 ]
+const ISSUE_ACTIVITY_ACTOR_TYPES: readonly IssueActivityActorType[] = [
+  'HUMAN',
+  'AGENT',
+  'SYSTEM',
+]
 const ISSUE_RUN_ROLES: readonly IssueRunRole[] = ['EXECUTOR', 'REVIEWER']
-const ISSUE_RUN_ACTOR_TYPES: readonly IssueRunActorType[] = ['AGENT', 'HUMAN']
 const ISSUE_RUN_STATUSES: readonly IssueRunStatus[] = [
   'RUNNING',
   'WAITING_HUMAN',
@@ -182,7 +190,8 @@ export function decodeProject(raw: unknown, path = 'project'): ProjectDTO {
     id: requireUuid(obj.id, `${path}.id`),
     title: requireString(obj.title, `${path}.title`),
     description: requireString(obj.description, `${path}.description`),
-    coordinatorAgentName: requireString(obj.coordinatorAgentName, `${path}.coordinatorAgentName`),
+    yoloEnabled: requireBoolean(obj.yoloEnabled, `${path}.yoloEnabled`),
+    maxReviewRejections: requireDecimalLong(obj.maxReviewRejections, `${path}.maxReviewRejections`),
     nextIssueNumber: requireDecimalLong(obj.nextIssueNumber, `${path}.nextIssueNumber`),
     version: requireDecimalLong(obj.version, `${path}.version`),
     archivedAt: requireNullableString(obj.archivedAt, `${path}.archivedAt`),
@@ -213,8 +222,6 @@ export function decodeIssue(raw: unknown, path = 'issue'): IssueDTO {
       `${path}.reviewerAgentName`,
     ),
     version: requireDecimalLong(obj.version, `${path}.version`),
-    specRevision: requireDecimalLong(obj.specRevision, `${path}.specRevision`),
-    inputSequence: requireDecimalLong(obj.inputSequence, `${path}.inputSequence`),
     archivedAt: requireNullableString(obj.archivedAt, `${path}.archivedAt`),
     createdAt: requireString(obj.createdAt, `${path}.createdAt`),
     updatedAt: requireString(obj.updatedAt, `${path}.updatedAt`),
@@ -238,20 +245,45 @@ export function decodeIssueDependencyList(
   return requireArray(raw, path, decodeIssueDependency)
 }
 
-export function decodeIssueInput(raw: unknown, path = 'input'): IssueInputDTO {
+export function decodeIssueAgentSession(
+  raw: unknown,
+  path = 'agentSession',
+): IssueAgentSessionDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    id: requireUuid(obj.id, `${path}.id`),
+    issueId: requireUuid(obj.issueId, `${path}.issueId`),
+    agentName: requireString(obj.agentName, `${path}.agentName`),
+    role: requireEnumValue(obj.role, `${path}.role`, ISSUE_RUN_ROLES),
+    sessionId: requireUuid(obj.sessionId, `${path}.sessionId`),
+    branchId: requireUuid(obj.branchId, `${path}.branchId`),
+    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
+  }
+}
+
+export function decodeIssueActivity(raw: unknown, path = 'activity'): IssueActivityDTO {
   const obj = requireRecord(raw, path)
   return {
     issueId: requireUuid(obj.issueId, `${path}.issueId`),
     sequence: requireDecimalLong(obj.sequence, `${path}.sequence`),
-    kind: requireEnumValue(obj.kind, `${path}.kind`, ISSUE_INPUT_KINDS),
+    kind: requireEnumValue(obj.kind, `${path}.kind`, ISSUE_ACTIVITY_KINDS),
+    actorType: requireEnumValue(obj.actorType, `${path}.actorType`, ISSUE_ACTIVITY_ACTOR_TYPES),
+    actorAgentName: requireNullableString(obj.actorAgentName, `${path}.actorAgentName`),
+    targetRole: requireNullableEnumValue(obj.targetRole, `${path}.targetRole`, ISSUE_RUN_ROLES),
+    runId: requireNullableUuid(obj.runId, `${path}.runId`),
+    submissionRunId: requireNullableUuid(obj.submissionRunId, `${path}.submissionRunId`),
+    decision: requireNullableString(obj.decision, `${path}.decision`),
     body: requireString(obj.body, `${path}.body`),
     idempotencyKey: requireNullableString(obj.idempotencyKey, `${path}.idempotencyKey`),
     createdAt: requireString(obj.createdAt, `${path}.createdAt`),
   }
 }
 
-export function decodeIssueInputList(raw: unknown, path = 'inputs'): IssueInputDTO[] {
-  return requireArray(raw, path, decodeIssueInput)
+export function decodeIssueActivityList(
+  raw: unknown,
+  path = 'activities',
+): IssueActivityDTO[] {
+  return requireArray(raw, path, decodeIssueActivity)
 }
 
 export function decodeIssueRunSummary(raw: unknown, path = 'runSummary'): IssueRunSummaryDTO {
@@ -261,7 +293,6 @@ export function decodeIssueRunSummary(raw: unknown, path = 'runSummary'): IssueR
     issueId: requireUuid(obj.issueId, `${path}.issueId`),
     ordinal: requireDecimalLong(obj.ordinal, `${path}.ordinal`),
     role: requireEnumValue(obj.role, `${path}.role`, ISSUE_RUN_ROLES),
-    actorType: requireEnumValue(obj.actorType, `${path}.actorType`, ISSUE_RUN_ACTOR_TYPES),
     agentName: requireNullableString(obj.agentName, `${path}.agentName`),
     submissionRunId: requireNullableUuid(obj.submissionRunId, `${path}.submissionRunId`),
     status: requireEnumValue(obj.status, `${path}.status`, ISSUE_RUN_STATUSES),
@@ -279,18 +310,15 @@ export function decodeIssueRun(raw: unknown, path = 'run'): IssueRunDTO {
     issueId: requireUuid(obj.issueId, `${path}.issueId`),
     ordinal: requireDecimalLong(obj.ordinal, `${path}.ordinal`),
     role: requireEnumValue(obj.role, `${path}.role`, ISSUE_RUN_ROLES),
-    actorType: requireEnumValue(obj.actorType, `${path}.actorType`, ISSUE_RUN_ACTOR_TYPES),
     agentName: requireNullableString(obj.agentName, `${path}.agentName`),
+    agentSessionId: requireNullableUuid(obj.agentSessionId, `${path}.agentSessionId`),
+    sessionId: requireNullableUuid(obj.sessionId, `${path}.sessionId`),
     submissionRunId: requireNullableUuid(obj.submissionRunId, `${path}.submissionRunId`),
     status: requireEnumValue(obj.status, `${path}.status`, ISSUE_RUN_STATUSES),
     outcome: requireNullableEnumValue(obj.outcome, `${path}.outcome`, ISSUE_RUN_OUTCOMES),
-    observedSpecRevision: requireDecimalLong(
-      obj.observedSpecRevision,
-      `${path}.observedSpecRevision`,
-    ),
-    observedInputSequence: requireDecimalLong(
-      obj.observedInputSequence,
-      `${path}.observedInputSequence`,
+    observedActivitySequence: requireDecimalLong(
+      obj.observedActivitySequence,
+      `${path}.observedActivitySequence`,
     ),
     continuationCount: requireSafeInteger(obj.continuationCount, `${path}.continuationCount`, 0),
     maxContinuations: requireSafeInteger(obj.maxContinuations, `${path}.maxContinuations`, 0),
@@ -302,7 +330,6 @@ export function decodeIssueRun(raw: unknown, path = 'run'): IssueRunDTO {
     createdAt: requireString(obj.createdAt, `${path}.createdAt`),
     updatedAt: requireString(obj.updatedAt, `${path}.updatedAt`),
     completedAt: requireNullableString(obj.completedAt, `${path}.completedAt`),
-    sessionId: requireNullableUuid(obj.sessionId, `${path}.sessionId`),
   }
 }
 
@@ -319,57 +346,11 @@ export function decodeProjectIssueSnapshot(
   return {
     issue: decodeIssue(obj.issue, `${path}.issue`),
     blocked: requireBoolean(obj.blocked, `${path}.blocked`),
+    reviewRejectionCount: requireDecimalLong(
+      obj.reviewRejectionCount,
+      `${path}.reviewRejectionCount`,
+    ),
     currentOrLatestRun,
-  }
-}
-
-function decodeCoordinatorSessionSummary(
-  raw: unknown,
-  path = 'coordinatorSession',
-): HarnessSessionSummaryDTO | null {
-  if (raw === null || raw === undefined) {
-    return null
-  }
-  const obj = requireRecord(raw, path)
-  return {
-    sessionId: requireUuid(obj.sessionId, `${path}.sessionId`),
-    name: requireString(obj.name, `${path}.name`),
-    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
-    lastActivityAt: requireString(obj.lastActivityAt, `${path}.lastActivityAt`),
-    firstMessagePreview: requireNullableString(
-      obj.firstMessagePreview,
-      `${path}.firstMessagePreview`,
-    ),
-    threadCount: requireSafeInteger(obj.threadCount, `${path}.threadCount`, 0),
-  }
-}
-
-function decodeCoordinatorThreadSummary(
-  raw: unknown,
-  path = 'coordinatorThread',
-): HarnessThreadSummaryDTO | null {
-  if (raw === null || raw === undefined) {
-    return null
-  }
-  const obj = requireRecord(raw, path)
-  const modelObj = requireRecord(obj.model, `${path}.model`)
-  const model = {
-    providerName: requireString(modelObj.providerName, `${path}.model.providerName`),
-    modelName: requireString(modelObj.modelName, `${path}.model.modelName`),
-    variant: requireString(modelObj.variant, `${path}.model.variant`),
-  }
-
-  return {
-    threadId: requireUuid(obj.threadId, `${path}.threadId`),
-    name: requireString(obj.name, `${path}.name`),
-    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
-    updatedAt: requireString(obj.updatedAt, `${path}.updatedAt`),
-    status: requireString(obj.status, `${path}.status`),
-    model,
-    headMessagePreview: requireNullableString(
-      obj.headMessagePreview,
-      `${path}.headMessagePreview`,
-    ),
   }
 }
 
@@ -382,18 +363,6 @@ export function decodeProjectSnapshot(
     project: decodeProject(obj.project, `${path}.project`),
     issues: requireArray(obj.issues, `${path}.issues`, decodeProjectIssueSnapshot),
     dependencies: decodeIssueDependencyList(obj.dependencies, `${path}.dependencies`),
-    coordinatorSessionId: requireNullableUuid(
-      obj.coordinatorSessionId,
-      `${path}.coordinatorSessionId`,
-    ),
-    coordinatorSession: decodeCoordinatorSessionSummary(
-      obj.coordinatorSession,
-      `${path}.coordinatorSession`,
-    ),
-    coordinatorThread: decodeCoordinatorThreadSummary(
-      obj.coordinatorThread,
-      `${path}.coordinatorThread`,
-    ),
   }
 }
 
@@ -412,7 +381,12 @@ export function decodeIssueDetail(raw: unknown, path = 'issueDetail'): IssueDeta
     issue: decodeIssue(obj.issue, `${path}.issue`),
     blocked: requireBoolean(obj.blocked, `${path}.blocked`),
     dependencies: decodeIssueDependencyList(obj.dependencies, `${path}.dependencies`),
-    inputs: decodeIssueInputList(obj.inputs, `${path}.inputs`),
+    sessions: requireArray(obj.sessions ?? [], `${path}.sessions`, decodeIssueAgentSession),
+    activities: requireArray(obj.activities ?? [], `${path}.activities`, decodeIssueActivity),
+    nextActivityCursor: requireNullableString(
+      obj.nextActivityCursor,
+      `${path}.nextActivityCursor`,
+    ),
     runs: requireArray(obj.runs, `${path}.runs`, decodeIssueRun),
     currentRun,
     latestRun,

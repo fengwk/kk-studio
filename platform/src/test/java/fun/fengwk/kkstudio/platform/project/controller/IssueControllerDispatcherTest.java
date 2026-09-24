@@ -19,9 +19,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.platform.project.model.ClaimedControllerWork;
-import fun.fengwk.kkstudio.platform.project.model.IssueControllerWork;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
+import fun.fengwk.kkstudio.platform.project.model.ClaimedIssueWork;
+import fun.fengwk.kkstudio.platform.project.model.IssueWork;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -105,7 +105,7 @@ class IssueControllerDispatcherTest {
   }
 
   private IssueControllerDispatcher newDispatcher(
-      Executor drainExecutor, Executor workerExecutor, Consumer<ClaimedControllerWork> reconciler) {
+      Executor drainExecutor, Executor workerExecutor, Consumer<ClaimedIssueWork> reconciler) {
     return new IssueControllerDispatcher(
         workStore, reconciler, properties, clock, drainExecutor, workerExecutor, scheduler);
   }
@@ -119,7 +119,7 @@ class IssueControllerDispatcherTest {
     UUID issueId = UUID.randomUUID();
     workStore.seedWork(issueId, NOW);
 
-    CopyOnWriteArrayList<ClaimedControllerWork> claims = new CopyOnWriteArrayList<>();
+    CopyOnWriteArrayList<ClaimedIssueWork> claims = new CopyOnWriteArrayList<>();
     IssueControllerDispatcher dispatcher =
         newDispatcher(singleThread(), singleThread(), claims::add);
 
@@ -211,7 +211,7 @@ class IssueControllerDispatcherTest {
     ControlledExecutor worker = new ControlledExecutor(singleThread());
     CountDownLatch taskRunning = new CountDownLatch(1);
     CountDownLatch releaseTask = new CountDownLatch(1);
-    CopyOnWriteArrayList<ClaimedControllerWork> claims = new CopyOnWriteArrayList<>();
+    CopyOnWriteArrayList<ClaimedIssueWork> claims = new CopyOnWriteArrayList<>();
 
     UUID first = UUID.randomUUID();
     UUID second = UUID.randomUUID();
@@ -248,7 +248,7 @@ class IssueControllerDispatcherTest {
   /** 测试意图：验证 drain 收尾窗口到达的 wake 不会丢失，由 finally recheck 重新提交 drain。 */
   @Test
   void tailWindowWakeRecheckedAndSubmitted() {
-    CopyOnWriteArrayList<ClaimedControllerWork> claims = new CopyOnWriteArrayList<>();
+    CopyOnWriteArrayList<ClaimedIssueWork> claims = new CopyOnWriteArrayList<>();
     ControlledExecutor drain = new ControlledExecutor(singleThread());
 
     IssueControllerDispatcher dispatcher = newDispatcher(drain, singleThread(), claims::add);
@@ -279,7 +279,7 @@ class IssueControllerDispatcherTest {
     }
 
     CountDownLatch blockWorkers = new CountDownLatch(1);
-    CopyOnWriteArrayList<ClaimedControllerWork> received = new CopyOnWriteArrayList<>();
+    CopyOnWriteArrayList<ClaimedIssueWork> received = new CopyOnWriteArrayList<>();
 
     IssueControllerDispatcher dispatcher =
         newDispatcher(
@@ -314,14 +314,14 @@ class IssueControllerDispatcherTest {
     UUID issueId = UUID.randomUUID();
     workStore.seedWork(issueId, NOW);
 
-    AtomicReference<ClaimedControllerWork> captured = new AtomicReference<>();
+    AtomicReference<ClaimedIssueWork> captured = new AtomicReference<>();
     IssueControllerDispatcher dispatcher =
         newDispatcher(singleThread(), singleThread(), captured::set);
 
     dispatcher.start();
     awaitTrue(() -> captured.get() != null, "claim must be captured");
 
-    ClaimedControllerWork claim = captured.get();
+    ClaimedIssueWork claim = captured.get();
     assertEquals(issueId, claim.getIssueId());
     assertNotNull(claim.getLeaseToken());
     // 验证 leaseToken 为合法的 UUID 格式
@@ -339,7 +339,7 @@ class IssueControllerDispatcherTest {
     UUID issueId = UUID.randomUUID();
     workStore.seedWork(issueId, NOW);
 
-    AtomicReference<ClaimedControllerWork> captured = new AtomicReference<>();
+    AtomicReference<ClaimedIssueWork> captured = new AtomicReference<>();
     IssueControllerDispatcher dispatcher =
         newDispatcher(
             singleThread(),
@@ -478,7 +478,7 @@ class IssueControllerDispatcherTest {
           }
         });
 
-    CopyOnWriteArrayList<ClaimedControllerWork> handedOff = new CopyOnWriteArrayList<>();
+    CopyOnWriteArrayList<ClaimedIssueWork> handedOff = new CopyOnWriteArrayList<>();
     IssueControllerDispatcher dispatcher =
         newDispatcher(singleThread(), singleThread(), handedOff::add);
     dispatcherRef.set(dispatcher);
@@ -559,7 +559,9 @@ class IssueControllerDispatcherTest {
     validDispatcher.close();
   }
 
-  /** 测试意图：验证异常日志脱敏保护，日志中不得回显 leaseToken、issue input/action id 或异常的 message， 仅能包含 issueId 与异常类名。 */
+  /**
+   * 测试意图：验证异常日志脱敏保护，日志中不得回显 leaseToken、Issue Activity/action id 或异常的 message， 仅能包含 issueId 与异常类名。
+   */
   @Test
   void logsDoNotEchoTokenInputIdOrExceptionMessage() {
     Logger logger = (Logger) LoggerFactory.getLogger(IssueControllerDispatcher.class);
@@ -700,7 +702,7 @@ class IssueControllerDispatcherTest {
     }
   }
 
-  static final class TestWorkStore implements IssueControllerWorkStore {
+  static final class TestWorkStore implements IssueWorkStore {
     record WorkItem(
         UUID issueId, Instant dueAt, long wakeVersion, String leaseToken, Instant leaseUntil) {}
 
@@ -738,13 +740,13 @@ class IssueControllerDispatcherTest {
     }
 
     @Override
-    public IssueControllerWork requestWork(UUID issueId, Instant dueAt) {
+    public IssueWork requestWork(UUID issueId, Instant dueAt) {
       storage.put(issueId, new WorkItem(issueId, dueAt, 1L, null, null));
       return null;
     }
 
     @Override
-    public Optional<ClaimedControllerWork> claimNext(
+    public Optional<ClaimedIssueWork> claimNext(
         Instant now, String leaseToken, Instant leaseUntil) {
       claimCount.incrementAndGet();
       synchronized (storage) {
@@ -761,7 +763,7 @@ class IssueControllerDispatcherTest {
               onClaimNext.run();
             }
             return Optional.of(
-                ClaimedControllerWork.builder()
+                ClaimedIssueWork.builder()
                     .issueId(claimed.issueId())
                     .claimedWakeVersion(claimed.wakeVersion())
                     .leaseToken(claimed.leaseToken())
@@ -804,12 +806,12 @@ class IssueControllerDispatcherTest {
     }
 
     @Override
-    public IssueControllerWork getWork(UUID issueId) {
+    public IssueWork getWork(UUID issueId) {
       WorkItem item = storage.get(issueId);
       if (item == null) {
         return null;
       }
-      return IssueControllerWork.builder()
+      return IssueWork.builder()
           .issueId(item.issueId())
           .dueAt(item.dueAt())
           .wakeVersion(item.wakeVersion())

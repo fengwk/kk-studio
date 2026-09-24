@@ -24,8 +24,9 @@ import java.util.Set;
  * 5 类 typed Thread command payload 的严格、确定性 JSON codec。
  *
  * <p>command type 本身不编码：durable {@code command_type} 单列与 HTTP DTO 外层 discriminator 负责类型。
- * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；SET_MODEL 携带完整 {@link
- * ModelSelection}；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除环境选择）。
+ * USER/CUSTOM 的 {@code message} 子树委派 {@link AgentMessageJsonCodec}；GOAL 携带 nullable 目标正文（null 表示清除
+ * Goal）；SET_MODEL 携带完整 {@link ModelSelection}；SET_ENVIRONMENT 携带 nullable Environment 名（null 表示解除
+ * 环境选择）。
  *
  * <p>codec 边界拒绝：未知 / 缺失 / 错误类型 / 显式 JSON null（除规定 optional 字段）；trailing token（共享 {@link
  * ObjectMapper} 启用 {@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS}）；duplicate field（启用
@@ -38,6 +39,7 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static final Set<String> USER_MESSAGE_FIELDS = orderedSet("message");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS = orderedSet("message");
+  private static final Set<String> GOAL_FIELDS = orderedSet("text");
   private static final Set<String> SET_AGENT_FIELDS = orderedSet("agentName");
   private static final Set<String> SET_MODEL_FIELDS = orderedSet("model");
   private static final Set<String> SET_ENVIRONMENT_FIELDS = orderedSet("environmentName");
@@ -118,6 +120,7 @@ public final class ThreadCommandPayloadJsonCodec {
     return switch (type) {
       case USER_MESSAGE -> decodeUserMessage(root);
       case CUSTOM_MESSAGE -> decodeCustomMessage(root);
+      case GOAL -> decodeGoal(root);
       case SET_AGENT -> decodeSetAgent(root);
       case SET_MODEL -> decodeSetModel(root);
       case SET_ENVIRONMENT -> decodeSetEnvironment(root);
@@ -149,6 +152,16 @@ public final class ThreadCommandPayloadJsonCodec {
       case CustomMessageCommandPayload value -> NODES
           .objectNode()
           .set("message", MESSAGE_CODEC.encodeNode(value.message()));
+      case GoalCommandPayload value -> {
+        ObjectNode node = NODES.objectNode();
+        // text 必须显式存在：null 表示清除 Goal，与「字段缺失」严格区分。
+        if (value.text() == null) {
+          node.putNull("text");
+        } else {
+          node.put("text", value.text());
+        }
+        yield node;
+      }
       case SetAgentCommandPayload value -> NODES.objectNode().put("agentName", value.agentName());
       case SetModelCommandPayload value -> NODES
           .objectNode()
@@ -186,6 +199,25 @@ public final class ThreadCommandPayloadJsonCodec {
     ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
     requireExactFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
+  }
+
+  private static GoalCommandPayload decodeGoal(JsonNode value) {
+    ObjectNode node = requireObject(value, "GOAL");
+    requireExactFields(node, GOAL_FIELDS, "GOAL");
+    return new GoalCommandPayload(nullableGoalText(node, "text", "GOAL"));
+  }
+
+  /** 解码可空 Goal 正文：text 或 null；其他类型（含对象/数组）确定性拒绝。 */
+  private static String nullableGoalText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isTextual()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return CommandValueValidation.requireCanonicalGoalText(
+        value.textValue(), context + "." + field);
   }
 
   private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {

@@ -8,28 +8,23 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.postgresql.util.PSQLException;
-import org.postgresql.util.ServerErrorMessage;
-import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueInput;
-import fun.fengwk.kkstudio.platform.project.model.IssueInputKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.repo.IssueControllerWorkRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectSessionRepository;
 import fun.fengwk.kkstudio.platform.project.service.impl.ProjectServiceImpl;
 
 import java.time.Instant;
@@ -41,60 +36,56 @@ class ProjectServiceDefensiveUnitTest {
 
   private ProjectServiceImpl createService(
       ProjectRepository projectRepository,
-      ProjectSessionRepository sessionRepository,
       IssueRepository issueRepository,
       IssueDependencyRepository issueDependencyRepository,
-      IssueInputRepository issueInputRepository,
+      IssueActivityRepository issueActivityRepository,
       IssueRunRepository issueRunRepository,
-      IssueControllerWorkRepository issueControllerWorkRepository,
+      IssueAgentSessionRepository issueAgentSessionRepository,
+      IssueWorkRepository issueWorkRepository,
       SessionDeletionOrchestrator sessionDeletionOrchestrator) {
     return new ProjectServiceImpl(
         projectRepository,
-        sessionRepository,
         issueRepository,
         issueDependencyRepository,
-        issueInputRepository,
+        issueActivityRepository,
         issueRunRepository,
-        issueControllerWorkRepository,
+        issueAgentSessionRepository,
+        issueWorkRepository,
         sessionDeletionOrchestrator);
   }
 
-  private ProjectServiceImpl createService(
-      ProjectRepository projectRepository, ProjectSessionRepository sessionRepository) {
+  private ProjectServiceImpl createService(ProjectRepository projectRepository) {
     return createService(
         projectRepository,
-        sessionRepository,
         mock(IssueRepository.class),
         mock(IssueDependencyRepository.class),
-        mock(IssueInputRepository.class),
+        mock(IssueActivityRepository.class),
         mock(IssueRunRepository.class),
-        mock(IssueControllerWorkRepository.class),
+        mock(IssueAgentSessionRepository.class),
+        mock(IssueWorkRepository.class),
         mock(SessionDeletionOrchestrator.class));
   }
 
   @Test
-  void testCreateAndBindFalseResultsFailFast() {
+  void testCreateProjectFalseResultFailsFast() {
+    // 测试意图：Repository 创建返回 false 时必须快速失败抛出 AiValidationException，禁止返回未落库对象。
     ProjectRepository projectRepository = mock(ProjectRepository.class);
-    ProjectSessionRepository sessionRepository = mock(ProjectSessionRepository.class);
-    ProjectServiceImpl service = createService(projectRepository, sessionRepository);
+    ProjectServiceImpl service = createService(projectRepository);
 
-    // Repository 的布尔返回值必须被检查，禁止把未落库的对象当作成功结果。
     when(projectRepository.create(any(Project.class))).thenReturn(false);
     assertEquals(
         "Failed to create project",
         assertThrows(
-                AiValidationException.class,
-                () -> service.createProject("Title", null, "coordinator"))
+                AiValidationException.class, () -> service.createProject("Title", null, true, 3))
             .getMessage());
   }
 
   @Test
   void testMutationCasFailuresReportLatestVersion() {
+    // 测试意图：锁后 UPDATE 仍可能因底层 CAS 冲突失败；服务必须重新读取并报告最新版本号。
     ProjectRepository projectRepository = mock(ProjectRepository.class);
-    ProjectServiceImpl service =
-        createService(projectRepository, mock(ProjectSessionRepository.class));
+    ProjectServiceImpl service = createService(projectRepository);
 
-    // 锁后 UPDATE 仍可能因底层 CAS 失败；服务必须报告重新读取到的版本。
     UUID updateId = UUID.randomUUID();
     when(projectRepository.lockById(updateId)).thenReturn(project(updateId, 0L, false));
     when(projectRepository.updateById(any(Project.class), eq(0L))).thenReturn(false);
@@ -102,7 +93,7 @@ class ProjectServiceDefensiveUnitTest {
     AiVersionConflictException updateConflict =
         assertThrows(
             AiVersionConflictException.class,
-            () -> service.updateProject(updateId, 0L, "New", null, "coordinator"));
+            () -> service.updateProject(updateId, 0L, "New", null, false, 5));
     assertEquals("0", updateConflict.expectedVersion());
     assertEquals("7", updateConflict.actualVersion());
     assertEquals("project version conflict: expected=0 actual=7", updateConflict.getMessage());
@@ -128,26 +119,27 @@ class ProjectServiceDefensiveUnitTest {
 
   @Test
   void testDeleteProjectDefensiveValidationBranches() {
+    // 测试意图：验证深删除项目时各个阶段的防御性校验、活动 Run 阻断及子项级联 CAS 冲突处理。
     ProjectRepository projectRepository = mock(ProjectRepository.class);
-    ProjectSessionRepository sessionRepository = mock(ProjectSessionRepository.class);
     IssueRepository issueRepository = mock(IssueRepository.class);
     IssueDependencyRepository issueDependencyRepository = mock(IssueDependencyRepository.class);
-    IssueInputRepository issueInputRepository = mock(IssueInputRepository.class);
+    IssueActivityRepository issueActivityRepository = mock(IssueActivityRepository.class);
     IssueRunRepository issueRunRepository = mock(IssueRunRepository.class);
-    IssueControllerWorkRepository issueControllerWorkRepository =
-        mock(IssueControllerWorkRepository.class);
+    IssueAgentSessionRepository issueAgentSessionRepository =
+        mock(IssueAgentSessionRepository.class);
+    IssueWorkRepository issueWorkRepository = mock(IssueWorkRepository.class);
     SessionDeletionOrchestrator sessionDeletionOrchestrator =
         mock(SessionDeletionOrchestrator.class);
 
     ProjectServiceImpl service =
         createService(
             projectRepository,
-            sessionRepository,
             issueRepository,
             issueDependencyRepository,
-            issueInputRepository,
+            issueActivityRepository,
             issueRunRepository,
-            issueControllerWorkRepository,
+            issueAgentSessionRepository,
+            issueWorkRepository,
             sessionDeletionOrchestrator);
 
     UUID projectId = UUID.randomUUID();
@@ -163,6 +155,8 @@ class ProjectServiceDefensiveUnitTest {
             .title("Issue")
             .description("")
             .status(IssueStatus.TODO)
+            .assigneeAgentName("agent")
+            .reviewerAgentName("reviewer-agent")
             .version(0L)
             .build();
     when(issueRepository.listByProjectId(projectId)).thenReturn(List.of(issue));
@@ -239,23 +233,7 @@ class ProjectServiceDefensiveUnitTest {
     // 恢复 normal run delete
     when(issueRunRepository.deleteById(executorRunId, 0L)).thenReturn(true);
 
-    // 分支 5: input 数量不匹配
-    IssueInput input =
-        IssueInput.builder()
-            .issueId(issueId)
-            .sequence(1L)
-            .kind(IssueInputKind.HUMAN)
-            .body("input")
-            .idempotencyKey("k")
-            .build();
-    when(issueInputRepository.listByIssueId(issueId)).thenReturn(List.of(input));
-    when(issueInputRepository.deleteByIssueId(issueId)).thenReturn(0);
-    assertThrows(AiValidationException.class, () -> service.deleteProject(projectId, 0L));
-
-    // 恢复 normal input delete
-    when(issueInputRepository.deleteByIssueId(issueId)).thenReturn(1);
-
-    // 分支 6: dependency 数量不匹配
+    // 分支 5: dependency 删除数量不匹配
     IssueDependency dep =
         IssueDependency.builder()
             .projectId(projectId)
@@ -269,6 +247,13 @@ class ProjectServiceDefensiveUnitTest {
     // 恢复 normal dependency delete
     when(issueDependencyRepository.deleteByProjectId(projectId)).thenReturn(1);
 
+    // 分支 6: issue 删除 CAS 失败
+    when(issueRepository.deleteById(issueId, 0L)).thenReturn(false);
+    assertThrows(AiVersionConflictException.class, () -> service.deleteProject(projectId, 0L));
+
+    // 恢复 issue 删除成功
+    when(issueRepository.deleteById(issueId, 0L)).thenReturn(true);
+
     // 分支 7: project 删除 CAS 失败
     when(projectRepository.deleteById(projectId, 0L)).thenReturn(false);
     when(projectRepository.getById(projectId)).thenReturn(project(projectId, 1L, false));
@@ -280,17 +265,11 @@ class ProjectServiceDefensiveUnitTest {
         .id(id)
         .title("Title")
         .description("")
-        .coordinatorAgentName("coordinator")
+        .yoloEnabled(true)
+        .maxReviewRejections(3)
         .nextIssueNumber(1L)
         .version(version)
         .archivedAt(archived ? Instant.now() : null)
         .build();
-  }
-
-  private static DataIntegrityViolationException constraintViolation(String constraint) {
-    ServerErrorMessage serverError =
-        new ServerErrorMessage("SERROR\0C23505\0n" + constraint + "\0\0");
-    return new DataIntegrityViolationException(
-        "Database write failed", new PSQLException(serverError));
   }
 }

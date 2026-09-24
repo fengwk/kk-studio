@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -641,12 +643,9 @@ class EntryPathTest {
                 id(4L), id(3L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
   }
 
-  /**
-   * 测试意图：CONTINUATION 只额外允许运行时注入的 core {@code <system-reminder>} 设置提醒（可多条），普通 contributor
-   * CUSTOM_MESSAGE 与普通 USER 消息仍然拒绝——设置变更必须进入对话，但用户输入不能借提醒形态搭车。
-   */
+  /** 测试意图：CONTINUATION 的设置仅在 TURN_START 快照中，任何 USER/CUSTOM 消息都不能搭车。 */
   @Test
-  void continuationAllowsSettingRemindersButRejectsOrdinaryMessages() {
+  void continuationRejectsAllMessagesIncludingCoreReminders() {
     Entry root = root(settings("root"));
     UUID threadId = id(9L);
     Entry start =
@@ -656,59 +655,20 @@ class EntryPathTest {
             id(1L),
             new TurnStartPayload(TurnStartReason.CONTINUATION, settings("turn"), threadId),
             time(id(2L)));
-    Entry agentReminder =
-        runtimeReminder(id(3L), id(2L), "The agent for this branch is now `reviewer`.");
-    Entry modelReminder =
-        runtimeReminder(id(4L), id(3L), "The model for this branch is now `acme/gpt-x`.");
-    Entry assistant = assistantMessage(id(5L), id(4L));
-    Entry end = turnEnd(id(6L), id(5L), id(2L), TurnEndOutcome.COMPLETED, null, null);
-
-    // 合法：多条设置提醒按序位于 assistant 结果之前。
-    EntryPath accepted =
-        new EntryPath(List.of(root, start, agentReminder, modelReminder, assistant, end));
+    Entry assistant = assistantMessage(id(3L), id(2L));
+    Entry end = turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, null, null);
+    EntryPath accepted = new EntryPath(List.of(root, start, assistant, end));
     assertEquals(end, accepted.head());
 
-    // 非法：contributor 普通 CUSTOM_MESSAGE 即便带 USER 角色也不得进入 continuation turn。
     assertThrows(
         IllegalArgumentException.class,
         () -> new EntryPath(List.of(root, start, customMessage(id(3L), id(2L)))));
-    // 非法：core 元数据但正文没有精确 <system-reminder> 定界符。
-    Entry unlabeledCore =
-        new Entry(
-            id(3L),
-            SESSION_ID,
-            id(2L),
-            new CustomMessagePayload(
-                CustomMessagePayload.CORE_CONTRIBUTOR_ID,
-                CustomMessagePayload.CORE_CUSTOM_TYPE,
-                CustomMessagePayload.CORE_RENDERER_KEY,
-                new AgentMessage(
-                    AgentMessageRole.USER, List.of(new TextMessageContent("not a reminder"))),
-                CustomMessagePayload.CORE_DETAILS_JSON),
-            time(id(3L)));
+    Entry coreReminder = runtimeReminder(id(3L), id(2L), "Runtime context.");
     assertThrows(
-        IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, unlabeledCore)));
-    // 非法：提醒形态但伪装成 contributor 元数据。
-    Entry foreignReminder =
-        new Entry(
-            id(3L),
-            SESSION_ID,
-            id(2L),
-            new CustomMessagePayload(
-                "com.example.plugin",
-                CustomMessagePayload.CORE_CUSTOM_TYPE,
-                CustomMessagePayload.CORE_RENDERER_KEY,
-                SystemReminder.message("The model for this branch is now `acme/gpt-x`."),
-                CustomMessagePayload.CORE_DETAILS_JSON),
-            time(id(3L)));
-    assertThrows(
-        IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, foreignReminder)));
-    // 非法：提醒之后仍不得出现 assistant 结果之外的用户消息。
+        IllegalArgumentException.class, () -> new EntryPath(List.of(root, start, coreReminder)));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new EntryPath(
-                List.of(root, start, agentReminder, userMessage(id(4L), id(3L)), assistant, end)));
+        () -> new EntryPath(List.of(root, start, userMessage(id(3L), id(2L)))));
   }
 
   @Test
@@ -1132,6 +1092,27 @@ class EntryPathTest {
 
   private static final UUID SESSION_ID = id(1L);
 
+  /** 测试意图：分叉以分叉点的 Entry 作为新 head，自然继承该点的完整 settings 快照（含用户 Goal）；Goal 之前的分叉点仍然无 Goal。 */
+  @Test
+  void forkInheritsGoalSnapshotAtTheForkPoint() {
+    GoalSetting goal = new GoalSetting(id(700L), "ship it");
+    Entry root = root(settings("root"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
+    Entry goalUser = userMessage(id(3L), id(2L));
+    Entry reply = assistantMessage(id(4L), id(3L));
+    Entry end = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, null, null);
+    // 6 号 Entry：携带 Goal 的 TURN_START（分叉点）。
+    Entry goalStart =
+        turnStart(id(6L), id(5L), TurnStartReason.INPUT, settings("turn").withGoal(goal));
+
+    // 分叉点在 Goal 设置之前：新 branch 没有 Goal。
+    assertNull(new EntryPath(List.of(root, start, goalUser)).baseSettings().goal());
+    // 从携带 Goal 的 TURN_START 分叉：Goal 快照自然继承。
+    assertEquals(
+        goal,
+        new EntryPath(List.of(root, start, goalUser, reply, end, goalStart)).baseSettings().goal());
+  }
+
   private static Entry root(BranchSettings settings) {
     return new Entry(id(1L), SESSION_ID, null, new RootPayload(settings), BASE);
   }
@@ -1198,7 +1179,7 @@ class EntryPathTest {
         time(id));
   }
 
-  /** 运行时注入的 core {@code <system-reminder>} CUSTOM_MESSAGE（与 SettingsReminder 同形）。 */
+  /** 形状合法的 core {@code <system-reminder>} CUSTOM_MESSAGE。 */
   private static Entry runtimeReminder(UUID id, UUID parentId, String text) {
     return new Entry(
         id,

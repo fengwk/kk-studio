@@ -2,13 +2,15 @@ package fun.fengwk.kkstudio.platform.storage.service;
 
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
+import java.io.InputStream;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * 最小的 Blob 内容读取边界接口。
  *
- * <p>短事务 retain ACTIVE blob 并取得权威元数据； 事务外通过原始对象 key 下载内容； finally 短事务 release 释放引用。 任何 S3 或外部 IO
- * 均不得发生在 DB 事务或行锁中。
+ * <p>短事务 retain ACTIVE blob 并取得权威元数据；事务外通过原始对象 key 读取内容；流关闭后在独立短事务中 release。 任何 S3 或外部 IO 均不得发生在 DB
+ * 事务或行锁中。
  *
  * @author fengwk
  */
@@ -25,4 +27,7 @@ public interface StorageBlobContentService {
    * @throws IllegalArgumentException 当 blob 大小超过最大允许限制时抛出
    */
   StorageBlobContent readBlobContent(UUID blobId, long maxSizeBytes);
+
+  /** 在短事务 retain/release 之间提供原始对象流；consumer 在事务外执行，流不能逃逸回调。 */
+  <T> T withBlobStream(UUID blobId, Function<InputStream, T> consumer);
 }

@@ -57,6 +57,7 @@ export interface ThreadPanelComposerInput {
   onHistoryPartsChange?: (parts: ComposerPart[]) => void
   /** 提交载荷：payload（server uploadId）与 localDraft（客户端 localId 快照）分开传递。 */
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
+  onSubmitGoal?: (goalText: string, localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
   /** 当前交互作用域是否允许 Escape 把焦点恢复到此 Composer。 */
@@ -150,6 +151,7 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
           onPartsChange={composer.onPartsChange}
           onHistoryPartsChange={composer.onHistoryPartsChange}
           onSubmit={composer.onSubmit}
+          onSubmitGoal={composer.onSubmitGoal}
           onCommand={composer.onCommand}
           commands={composer.commands}
           focusOnEscape={composer.focusOnEscape && !interactionOpen}

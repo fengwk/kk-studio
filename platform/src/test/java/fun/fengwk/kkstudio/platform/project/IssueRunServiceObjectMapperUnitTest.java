@@ -16,13 +16,13 @@ import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueInputRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueControllerWorkStore;
+import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.impl.IssueRunServiceImpl;
 
 import java.util.UUID;
@@ -44,18 +44,18 @@ class IssueRunServiceObjectMapperUnitTest {
             mock(ProjectRepository.class),
             mock(IssueRepository.class),
             mock(IssueDependencyRepository.class),
-            mock(IssueInputRepository.class),
+            mock(IssueActivityRepository.class),
             mock(IssueRunRepository.class),
-            mock(IssueRunSessionRepository.class),
-            mock(IssueControllerWorkStore.class),
+            mock(IssueAgentSessionRepository.class),
+            mock(IssueWorkStore.class),
             mockedMapper);
 
     AiValidationException ex =
         assertThrows(
             AiValidationException.class,
             () ->
-                service.submitRun(
-                    UUID.randomUUID(), "action-1", 0L, 0L, "Summary", "Verification"));
+                service.completeExecutorRun(
+                    UUID.randomUUID(), "action-1", "Summary", "Verification"));
     assertEquals("Failed to serialize run result to JSON", ex.getMessage());
   }
 
@@ -76,8 +76,7 @@ class IssueRunServiceObjectMapperUnitTest {
             .role(IssueRunRole.EXECUTOR)
             .status(IssueRunStatus.COMPLETED)
             .outcome(IssueRunOutcome.SUBMITTED)
-            .observedSpecRevision(0L)
-            .observedInputSequence(0L)
+            .observedActivitySequence(0L)
             .result("{\"different\":\"json\"}")
             .terminalActionId(actionId)
             .build();
@@ -89,17 +88,17 @@ class IssueRunServiceObjectMapperUnitTest {
             mock(ProjectRepository.class),
             mock(IssueRepository.class),
             mock(IssueDependencyRepository.class),
-            mock(IssueInputRepository.class),
+            mock(IssueActivityRepository.class),
             runRepo,
-            mock(IssueRunSessionRepository.class),
-            mock(IssueControllerWorkStore.class),
+            mock(IssueAgentSessionRepository.class),
+            mock(IssueWorkStore.class),
             mockedMapper);
 
     // 当 readTree 解析失败时，两 JSON 判定不等，fail-fast 抛出 Terminal action ID conflict
     AiValidationException ex =
         assertThrows(
             AiValidationException.class,
-            () -> service.submitRun(runId, actionId, 0L, 0L, "Summary", "Verification"));
+            () -> service.completeExecutorRun(runId, actionId, "Summary", "Verification"));
     assertEquals("Terminal action ID conflict", ex.getMessage());
   }
 }

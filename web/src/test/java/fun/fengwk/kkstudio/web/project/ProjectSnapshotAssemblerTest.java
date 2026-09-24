@@ -7,32 +7,34 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ProjectSession;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /** 验证 ProjectSnapshotAssembler 的权威组装与 fail-closed 跨实体隔离校验。 */
 class ProjectSnapshotAssemblerTest {
@@ -40,7 +42,6 @@ class ProjectSnapshotAssemblerTest {
   private ProjectService projectService;
   private IssueService issueService;
   private IssueRunService issueRunService;
-  private HarnessOwnerQueryService harnessOwnerQueryService;
   private ProjectDtoMapper mapper;
   private ProjectSnapshotAssembler assembler;
 
@@ -52,21 +53,19 @@ class ProjectSnapshotAssemblerTest {
     projectService = mock(ProjectService.class);
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
-    harnessOwnerQueryService = mock(HarnessOwnerQueryService.class);
     mapper = new ProjectDtoMapper();
-    assembler =
-        new ProjectSnapshotAssembler(
-            projectService, issueService, issueRunService, harnessOwnerQueryService, mapper);
+    assembler = new ProjectSnapshotAssembler(projectService, issueService, issueRunService, mapper);
   }
 
   @Test
   void testAssembleSuccessful() {
-    // 测试意图：验证完整 snapshot 组装：Issues 排序、blocked 判定、activeRun、coordinator 映射
+    // 测试意图：验证完整 snapshot 组装：Issues 排序、blocked 判定、activeRun 映射
     Project project =
         Project.builder()
             .id(projectId)
             .title("Proj")
-            .coordinatorAgentName("coord")
+            .yoloEnabled(false)
+            .maxReviewRejections(3)
             .nextIssueNumber(3L)
             .version(1L)
             .createdAt(now)
@@ -103,13 +102,16 @@ class ProjectSnapshotAssemblerTest {
     when(issueService.isBlocked(issue1Id)).thenReturn(true);
     when(issueService.isBlocked(issue2Id)).thenReturn(false);
 
+    // 打回次数必须来自 IssueService 的当前审查窗口权威计数，assembler 不得自行推导
+    when(issueService.countRejections(issue1Id)).thenReturn(2L);
+    when(issueService.countRejections(issue2Id)).thenReturn(0L);
+
     IssueRun run =
         IssueRun.builder()
             .id(UUID.randomUUID())
             .issueId(issue2Id)
             .ordinal(1L)
             .role(IssueRunRole.EXECUTOR)
-            .actorType(IssueRunActorType.AGENT)
             .status(IssueRunStatus.RUNNING)
             .version(0L)
             .createdAt(now)
@@ -128,21 +130,6 @@ class ProjectSnapshotAssemblerTest {
             .build();
     when(issueService.listProjectDependencies(projectId)).thenReturn(List.of(dep));
 
-    UUID sessionId = UUID.randomUUID();
-    ProjectSession ps =
-        ProjectSession.builder().projectId(projectId).sessionId(sessionId).createdAt(now).build();
-    when(projectService.getCoordinatorSession(projectId)).thenReturn(ps);
-
-    HarnessSessionSummaryDTO sessionSummary = new HarnessSessionSummaryDTO();
-    sessionSummary.setSessionId(sessionId.toString().toLowerCase());
-    when(harnessOwnerQueryService.listProjectSessions(projectId))
-        .thenReturn(List.of(sessionSummary));
-
-    HarnessThreadSummaryDTO threadSummary = new HarnessThreadSummaryDTO();
-    threadSummary.setThreadId(UUID.randomUUID().toString().toLowerCase());
-    when(harnessOwnerQueryService.listThreadSummaries(sessionId))
-        .thenReturn(List.of(threadSummary));
-
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
 
     assertNotNull(snapshot);
@@ -152,14 +139,30 @@ class ProjectSnapshotAssemblerTest {
     assertEquals("1", snapshot.getIssues().get(0).getIssue().getNumber());
     assertFalse(snapshot.getIssues().get(0).getBlocked());
     assertNotNull(snapshot.getIssues().get(0).getCurrentOrLatestRun());
+    // 未被 block 的 issue 打回次数为 0，但仍显式输出，保证前端解码字段确定性存在
+    assertEquals("0", snapshot.getIssues().get(0).getReviewRejectionCount());
     assertEquals("2", snapshot.getIssues().get(1).getIssue().getNumber());
     assertTrue(snapshot.getIssues().get(1).getBlocked());
+    // blocked issue 打回次数为服务端权威计数，BLOCKED 卡片据此展示 current / maxReviewRejections
+    assertEquals("2", snapshot.getIssues().get(1).getReviewRejectionCount());
     assertNull(snapshot.getIssues().get(1).getCurrentOrLatestRun());
+    verify(issueService).countRejections(issue1Id);
+    verify(issueService).countRejections(issue2Id);
 
     assertEquals(1, snapshot.getDependencies().size());
-    assertEquals(sessionId.toString().toLowerCase(), snapshot.getCoordinatorSessionId());
-    assertNotNull(snapshot.getCoordinatorSession());
-    assertNotNull(snapshot.getCoordinatorThread());
+    assertEquals(
+        dep.getIssueId().toString().toLowerCase(), snapshot.getDependencies().get(0).getIssueId());
+    assertEquals(
+        dep.getDependsOnIssueId().toString().toLowerCase(),
+        snapshot.getDependencies().get(0).getDependsOnIssueId());
+
+    // 验证 ProjectSnapshotDTO 权威聚合只包含 project, issues, dependencies，彻底无 coordinator 关联
+    assertEquals(
+        Set.of("project", "issues", "dependencies"),
+        Arrays.stream(ProjectSnapshotDTO.class.getDeclaredFields())
+            .filter(f -> !Modifier.isStatic(f.getModifiers()))
+            .map(Field::getName)
+            .collect(Collectors.toSet()));
   }
 
   @Test
@@ -171,7 +174,7 @@ class ProjectSnapshotAssemblerTest {
 
   @Test
   void testFailClosedOnForeignIssue() {
-    // 测试意图：若查询结果中混入了非本项目 Issue，必须 fail-closed 抛异常
+    // 测试意图：若查询结果中混入了非本项目 Issue，必须 fail-closed 抛异常，且不得对该 foreign issue 发起打回次数查询
     Project project =
         Project.builder()
             .id(projectId)
@@ -182,9 +185,10 @@ class ProjectSnapshotAssemblerTest {
             .build();
     when(projectService.getProject(projectId)).thenReturn(project);
 
+    UUID foreignIssueId = UUID.randomUUID();
     Issue foreignIssue =
         Issue.builder()
-            .id(UUID.randomUUID())
+            .id(foreignIssueId)
             .projectId(UUID.randomUUID()) // 属于另外一个项目
             .number(1L)
             .title("Foreign")
@@ -198,6 +202,8 @@ class ProjectSnapshotAssemblerTest {
     IllegalStateException ex =
         assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
     assertTrue(ex.getMessage().contains("Foreign issue"));
+    // 归属校验先于任何计数查询，foreign issue 的权威数据不会被读取，杜绝跨项目泄漏
+    verify(issueService, never()).countRejections(foreignIssueId);
   }
 
   @Test
