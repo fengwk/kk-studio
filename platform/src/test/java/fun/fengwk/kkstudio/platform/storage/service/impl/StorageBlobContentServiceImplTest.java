@@ -27,11 +27,14 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -40,6 +43,7 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -120,7 +124,7 @@ class StorageBlobContentServiceImplTest {
             super.close();
           }
         };
-    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+    when(s3StorageService.readObject(eq(StorageObjectKeys.blobOriginal(blobId)), any()))
         .thenReturn(new S3ObjectStream(stream, new S3ObjectMetadata(3, "text/plain", null)));
     when(blobManager.release(blobId))
         .thenAnswer(
@@ -131,6 +135,7 @@ class StorageBlobContentServiceImplTest {
     int first =
         contentService.withBlobStream(
             blobId,
+            newDeadline(),
             input -> {
               assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
               try {
@@ -140,7 +145,7 @@ class StorageBlobContentServiceImplTest {
               }
             });
     assertEquals(1, first);
-    verify(s3StorageService).readObject(StorageObjectKeys.blobOriginal(blobId));
+    verify(s3StorageService).readObject(eq(StorageObjectKeys.blobOriginal(blobId)), any());
     verify(blobManager).release(blobId);
   }
 
@@ -160,13 +165,14 @@ class StorageBlobContentServiceImplTest {
             super.close();
           }
         };
-    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+    when(s3StorageService.readObject(eq(StorageObjectKeys.blobOriginal(blobId)), any()))
         .thenReturn(new S3ObjectStream(stream, new S3ObjectMetadata(1, "text/plain", null)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             contentService.withBlobStream(
                 blobId,
+                newDeadline(),
                 input -> {
                   throw new IllegalArgumentException("invalid text");
                 }));
@@ -180,8 +186,8 @@ class StorageBlobContentServiceImplTest {
     UUID blobId = UUID.randomUUID();
     assertThrows(
         IllegalStateException.class,
-        () -> contentService.withBlobStream(blobId, input -> "unreachable"));
-    verify(s3StorageService, never()).readObject(any());
+        () -> contentService.withBlobStream(blobId, newDeadline(), input -> "unreachable"));
+    verify(s3StorageService, never()).readObject(any(), any());
     verify(blobManager, never()).release(any());
   }
 
@@ -192,13 +198,13 @@ class StorageBlobContentServiceImplTest {
     StorageBlob blob = new StorageBlob();
     blob.setId(blobId);
     when(blobManager.retain(blobId)).thenReturn(blob);
-    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+    when(s3StorageService.readObject(eq(StorageObjectKeys.blobOriginal(blobId)), any()))
         .thenThrow(new IllegalStateException("S3 unavailable"));
     doThrow(new IllegalStateException("release failed")).when(blobManager).release(blobId);
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () -> contentService.withBlobStream(blobId, input -> "unreachable"));
+            () -> contentService.withBlobStream(blobId, newDeadline(), input -> "unreachable"));
     assertEquals("S3 unavailable", error.getMessage());
     assertEquals("release failed", error.getSuppressed()[0].getMessage());
   }
@@ -210,7 +216,7 @@ class StorageBlobContentServiceImplTest {
     StorageBlob blob = new StorageBlob();
     blob.setId(blobId);
     when(blobManager.retain(blobId)).thenReturn(blob);
-    when(s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId)))
+    when(s3StorageService.readObject(eq(StorageObjectKeys.blobOriginal(blobId)), any()))
         .thenReturn(
             new S3ObjectStream(
                 new ByteArrayInputStream(new byte[] {1}),
@@ -219,9 +225,89 @@ class StorageBlobContentServiceImplTest {
     assertTrue(
         assertThrows(
                 IllegalStateException.class,
-                () -> contentService.withBlobStream(blobId, input -> "ok"))
+                () -> contentService.withBlobStream(blobId, newDeadline(), input -> "ok"))
             .getMessage()
             .contains("release returned false"));
+  }
+
+  /** 测试意图：响应体阻塞时读取在有界时间内超时失败，中止连接（不排水）并释放 blob 引用。 */
+  @Test
+  void streamFailsWithTimeoutAndAbortsConnectionWhenBodyStalls() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    StallingAbortableInputStream source = StallingAbortableInputStream.stallingAfter(8);
+    when(s3StorageService.readObject(eq(StorageObjectKeys.blobOriginal(blobId)), any()))
+        .thenReturn(new S3ObjectStream(source, new S3ObjectMetadata(4096, "text/plain", null)));
+
+    long startedAt = System.nanoTime();
+    StorageReadTimeoutException failure =
+        assertThrows(
+            StorageReadTimeoutException.class,
+            () ->
+                contentService.withBlobStream(
+                    blobId,
+                    ReadDeadline.after(Duration.ofMillis(200L)),
+                    input -> {
+                      byte[] buffer = new byte[64];
+                      try {
+                        while (input.read(buffer) != -1) {
+                          // 持续消费直到看门狗中止响应流。
+                        }
+                      } catch (IOException e) {
+                        throw new IllegalStateException(e);
+                      }
+                      return "unreachable";
+                    }));
+
+    assertTrue(failure.getMessage().contains(blobId.toString()));
+    assertTrue(source.aborted(), "超时必须中止 S3 连接");
+    assertFalse(source.drainAttempted(), "超时不能排空剩余响应体");
+    assertTrue(
+        Duration.ofNanos(System.nanoTime() - startedAt).toMillis() < 3_000L, "阻塞读必须在截止点附近失败");
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：截止已过时不得发起 S3 读取，但 retain 已建立的引用必须 release。 */
+  @Test
+  void streamRejectsExpiredDeadlineWithoutTouchingS3AndReleasesBlob() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+    ReadDeadline expiredDeadline = ReadDeadline.after(Duration.ofMillis(1L));
+    sleepQuietly(20L);
+    assertTrue(expiredDeadline.isExpired());
+
+    assertThrows(
+        StorageReadTimeoutException.class,
+        () -> contentService.withBlobStream(blobId, expiredDeadline, input -> "unreachable"));
+
+    verify(s3StorageService, never()).readObject(any(), any());
+    verify(blobManager).release(blobId);
+  }
+
+  /** 测试意图：读取被取消（中断）时以可区分的取消失败结束，不发起 S3 读取，释放引用并保留中断状态。 */
+  @Test
+  void streamRejectsInterruptedReadWithoutTouchingS3AndReleasesBlob() {
+    UUID blobId = UUID.randomUUID();
+    StorageBlob blob = new StorageBlob();
+    blob.setId(blobId);
+    when(blobManager.retain(blobId)).thenReturn(blob);
+
+    Thread.currentThread().interrupt();
+    try {
+      assertThrows(
+          StorageReadInterruptedException.class,
+          () -> contentService.withBlobStream(blobId, newDeadline(), input -> "unreachable"));
+      assertTrue(Thread.currentThread().isInterrupted(), "中断状态必须保留给调用方继续取消");
+    } finally {
+      Thread.interrupted();
+    }
+
+    verify(s3StorageService, never()).readObject(any(), any());
+    verify(blobManager).release(blobId);
   }
 
   /** 测试意图：验证任何 S3 下载 IO 发生时，当前线程绝不处于 DB 事务中（保证短事务边界）。 */
@@ -388,6 +474,20 @@ class StorageBlobContentServiceImplTest {
             IllegalStateException.class, () -> contentService.readBlobContent(blobId, -1L));
     assertTrue(exception.getMessage().contains("blob release returned false for " + blobId));
     verify(blobManager).release(blobId);
+  }
+
+  /** 缺省读取预算：本测试只关注读取边界行为，不关心具体预算长度。 */
+  private static ReadDeadline newDeadline() {
+    return ReadDeadline.after(Duration.ofSeconds(30));
+  }
+
+  private static void sleepQuietly(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 
   /** 极简测试事务管理器：模拟事务开启与提交，在事务执行期间维护实际事务活跃标志。 */

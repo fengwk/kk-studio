@@ -806,9 +806,16 @@ Skill binding。
 
 统一 `read` 根据 `path` 路由：`kkstudio:/skills/<package>/<skill>/...` 从 Platform
 bare Git cache 的 Package 当前 commit 读取，`kkstudio:/resources/<blobId>` 在校验当前
-Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（无 8 MiB 源文件上限，单次输出最多 48 KiB；扫描不能在 30 秒内完成时明确失败），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
+Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（无 8 MiB 源文件上限，单次输出最多 48 KiB），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
 路径要求显式 `workdir`；`workdir` 只参与同一地址空间内的相对解析，不提供隐藏默认值。
 Platform URI 不接受任意 HTTP(S) 透传。
+
+`kkstudio:/resources/<blobId>` 的读取预算在读取入口冻结一次（30 秒），覆盖 S3 `getObject`
+握手与响应体消费：剩余预算写入请求级 `apiCallTimeout`（SDK 定时器在响应头返回后即停止，
+只能约束握手），响应体侧由读取边界在到点时 abort 响应流，因此在 S3 长期不返回响应头或
+缓慢/停滞地发送响应体时都会以明确的读取超时结束，而不是等待 socket 空闲超时或把剩余响应
+体读完。读取被取消（线程中断）按取消而非超时失败，并保留中断状态。尚未建立连接的阻塞
+（例如 TCP 建连）无法由应用层中止，只能依赖 HTTP 客户端自身的连接超时。
 
 Debug 预览与正式 Turn 复用相同的 Agent/Environment/Tool/Skill 解析纯函数。结构化投影
 同时返回最终 systemInstruction、有效与过滤 Tool、Skill 交付路径和 planning error；

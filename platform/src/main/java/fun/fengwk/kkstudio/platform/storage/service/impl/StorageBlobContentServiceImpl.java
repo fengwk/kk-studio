@@ -4,8 +4,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
-import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -13,9 +13,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
@@ -98,21 +96,20 @@ public class StorageBlobContentServiceImpl implements StorageBlobContentService 
   }
 
   @Override
-  public <T> T withBlobStream(UUID blobId, Function<InputStream, T> consumer) {
+  public <T> T withBlobStream(
+      UUID blobId, ReadDeadline deadline, Function<InputStream, T> consumer) {
     Objects.requireNonNull(blobId, "blobId");
+    Objects.requireNonNull(deadline, "deadline");
     Objects.requireNonNull(consumer, "consumer");
     StorageBlob blob = newTransactionTemplate().execute(status -> blobManager.retain(blobId));
     if (blob == null) {
       throw new IllegalStateException("blob retain returned null for " + blobId);
     }
     Throwable readError = null;
-    try (S3ObjectStream object =
-        s3StorageService.readObject(StorageObjectKeys.blobOriginal(blobId))) {
-      return consumer.apply(object.inputStream());
-    } catch (IOException e) {
-      UncheckedIOException failure = new UncheckedIOException("failed to close blob stream", e);
-      readError = failure;
-      throw failure;
+    try (DeadlineBoundedBlobStream stream =
+        DeadlineBoundedBlobStream.open(
+            s3StorageService, StorageObjectKeys.blobOriginal(blobId), deadline)) {
+      return consumer.apply(stream);
     } catch (RuntimeException | Error e) {
       readError = e;
       throw e;
