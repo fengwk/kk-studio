@@ -32,7 +32,13 @@ public interface IssueRunService {
 
   IssueRun failRun(UUID runId, IssueRunStatus terminalStatus, String waitingReason);
 
-  IssueActivity retryRun(UUID issueId, String idempotencyKey);
+  /**
+   * 显式重试最新已终态（FAILED / UNKNOWN）的 Run，追加一条 RETRY 事实并唤醒 Issue 工作。
+   *
+   * <p>UNKNOWN 无法判定外部副作用是否已发生，必须由人工核对残留调用后提交 {@code verification} 说明；该说明写入 RETRY Activity 正文。同一
+   * {@code idempotencyKey} 只允许重放完全相同的请求。
+   */
+  IssueActivity retryRun(UUID issueId, String idempotencyKey, String verification);
 
   IssueRun getRun(UUID runId);
 

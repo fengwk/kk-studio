@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -130,6 +131,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_command_queued",
             "idx_harness_thread_command_stop_request",
             "idx_harness_thread_session",
+            "idx_harness_tool_invocation_model_nonterminal",
             "idx_harness_work_available",
             "idx_harness_work_lease_until",
             "uk_harness_entry_session_id",
@@ -145,6 +147,7 @@ class PostgresqlHarnessSchemaTest {
     String workLease = indexDefinition("idx_harness_work_lease_until");
     String threadSession = indexDefinition("idx_harness_thread_session");
     String stopRequest = indexDefinition("idx_harness_thread_command_stop_request");
+    String toolNonterminal = indexDefinition("idx_harness_tool_invocation_model_nonterminal");
     assertTrue(modelResult.contains("WHERE (result_entry_id IS NOT NULL)"));
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
     assertTrue(workLease.contains("(lease_until, target_type, target_id)"));
@@ -153,6 +156,14 @@ class PostgresqlHarnessSchemaTest {
     // Stop 幂等键索引必须按 stop_request_id 聚合并只覆盖非 null 行。
     assertTrue(stopRequest.contains("(thread_id, stop_request_id, sequence)"));
     assertTrue(stopRequest.contains("WHERE (stop_request_id IS NOT NULL)"));
+    // 未收尾 ToolInvocation 的按 ModelInvocation 查找路径必须只覆盖四个非终态，且按 model_invocation_id 建键。
+    assertTrue(toolNonterminal.contains("(model_invocation_id)"));
+    for (String nonterminal : List.of("WAITING_APPROVAL", "READY", "DISPATCHING", "RUNNING")) {
+      assertTrue(toolNonterminal.contains("'" + nonterminal + "'"));
+    }
+    for (String terminal : List.of("SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN")) {
+      assertFalse(toolNonterminal.contains("'" + terminal + "'"));
+    }
   }
 
   private String indexDefinition(String indexName) {

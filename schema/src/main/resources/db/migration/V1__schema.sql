@@ -1103,6 +1103,12 @@ comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON
 comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
 
+create index idx_harness_tool_invocation_model_nonterminal
+    on harness_tool_invocation (model_invocation_id)
+    where status in ('WAITING_APPROVAL', 'READY', 'DISPATCHING', 'RUNNING');
+
+comment on index idx_harness_tool_invocation_model_nonterminal is '未收尾 ToolInvocation 按所属 ModelInvocation 的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
+
 create table harness_work (
     target_type varchar(16) not null,
     target_id uuid not null,

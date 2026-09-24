@@ -21,6 +21,9 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
@@ -352,21 +355,53 @@ class IssueRunServiceDefensiveUnitTest {
 
     Fixture blankKey = new Fixture();
     assertValidation(
-        "idempotencyKey must not be blank", () -> blankKey.service.retryRun(issueId, "  "));
+        "idempotencyKey must not be blank", () -> blankKey.service.retryRun(issueId, "  ", null));
 
     Fixture noLatestRun = new Fixture();
     noLatestRun.stubIssue(issue(issueId, IssueStatus.IN_PROGRESS));
     when(noLatestRun.runs.findLatestByIssueId(issueId)).thenReturn(null);
     assertValidation(
         "Retry is only allowed when the latest run is FAILED or UNKNOWN, but was null",
-        () -> noLatestRun.service.retryRun(issueId, "retry"));
+        () -> noLatestRun.service.retryRun(issueId, "retry", null));
 
-    Fixture activeRun = retryFixture(issueId);
+    // UNKNOWN 必须提交人工核对说明，缺失即拒绝，且不进入任何后续副作用
+    Fixture unknownWithoutVerification = retryFixture(issueId, IssueRunStatus.UNKNOWN);
+    assertValidation(
+        "verification must not be blank",
+        () -> unknownWithoutVerification.service.retryRun(issueId, "retry", "   "));
+    verify(unknownWithoutVerification.activities, never()).appendOrGet(any(IssueActivity.class));
+    verify(unknownWithoutVerification.workStore, never())
+        .requestWork(eq(issueId), any(Instant.class));
+
+    Fixture activeRun = retryFixture(issueId, IssueRunStatus.FAILED);
     when(activeRun.runs.lockActiveByIssueId(issueId))
         .thenReturn(run(UUID.randomUUID(), issueId, IssueRunRole.EXECUTOR));
     assertValidation(
         "Cannot retry while an active run exists",
-        () -> activeRun.service.retryRun(issueId, "retry"));
+        () -> activeRun.service.retryRun(issueId, "retry", null));
+  }
+
+  @Test
+  void testUnknownRetryRejectsIdempotencyKeyReuseWithAlteredVerification() {
+    // 测试意图：同一 idempotencyKey 已存在不同正文的 RETRY 事实时必须拒绝，绝不能返回他人的事实。
+    UUID issueId = UUID.randomUUID();
+    Fixture fixture = retryFixture(issueId, IssueRunStatus.UNKNOWN);
+    IssueActivity stored =
+        IssueActivity.builder()
+            .issueId(issueId)
+            .sequence(7L)
+            .kind(IssueActivityKind.RETRY)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("Retry requested for run x\nHuman verification: 旧说明")
+            .idempotencyKey("k-reuse")
+            .createdAt(Instant.now())
+            .build();
+    when(fixture.activities.appendOrGet(any(IssueActivity.class))).thenReturn(stored);
+
+    assertValidation(
+        "idempotencyKey was already used for a different retry request",
+        () -> fixture.service.retryRun(issueId, "k-reuse", "新说明"));
+    verify(fixture.workStore, never()).requestWork(eq(issueId), any(Instant.class));
   }
 
   private static Fixture humanReviewFixture(UUID issueId) {
@@ -382,11 +417,11 @@ class IssueRunServiceDefensiveUnitTest {
     return fixture;
   }
 
-  private static Fixture retryFixture(UUID issueId) {
+  private static Fixture retryFixture(UUID issueId, IssueRunStatus latestStatus) {
     Fixture fixture = new Fixture();
     fixture.stubIssue(issue(issueId, IssueStatus.IN_PROGRESS));
     IssueRun latest = run(UUID.randomUUID(), issueId, IssueRunRole.EXECUTOR);
-    latest.setStatus(IssueRunStatus.FAILED);
+    latest.setStatus(latestStatus);
     when(fixture.runs.findLatestByIssueId(issueId)).thenReturn(latest);
     return fixture;
   }

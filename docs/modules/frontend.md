@@ -366,7 +366,9 @@ MiniMax Mavis 卡片的 Connect 流程是：
 BLOCKED 卡片用 Snapshot 中服务端计数与 Project 当前阈值显示「本轮打回次数 / 上限」，不从分页 Activity 推导。
 Issue 创建与规格编辑的执行者、审查者从分页 Agent Catalog 完整枚举后受控选择；下线的历史分配名称在编辑时保留为选项，不静默清空。
 IssueDetailModal 用 Snapshot 中的 decimal version 做 CAS，成功后重读 Snapshot，
-并在 BLOCKED 上提供人工恢复与解除阻塞的理由输入。Issue Agent 的会话与工作 Branch 由 Issue 归属驱动，不在
+并在 BLOCKED 上提供人工恢复与解除阻塞的理由输入。执行与审核页只对最新 `FAILED`/`UNKNOWN` Run 提供
+显式重试：`UNKNOWN` 下必须先填写人工核对说明（说明 trim 后随请求提交，为空时按钮禁用并给出内联校验
+提示），`FAILED` 保持原有直接重试。Issue Agent 的会话与工作 Branch 由 Issue 归属驱动，不在
 Project 页另建会话入口，Project feature 不维护自己的运行时状态机。
 
 [ProjectsInvalidationBridge](../../frontend/src/features/projects/extensions/projects-extension.tsx)

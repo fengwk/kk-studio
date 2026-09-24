@@ -527,4 +527,158 @@ class ProjectServiceIntegrationTest extends ProjectTestSupport {
         jdbcTemplate.queryForObject(
             "select count(*) from harness_session where id = ?", Integer.class, sessionId));
   }
+
+  @Test
+  void testUpdateProjectYoloRejectedWhileHarnessInvocationInFlight() {
+    // 测试意图：YOLO 是 Issue Agent Branch 的工作策略快照。IssueRun 进入终态后 Thread 上仍可能残留未收尾的
+    // 模型/工具调用并继续产生外部副作用，此时必须与活动 Run 一样拒绝切换 YOLO，且拒绝时不落地任何字段；
+    // 只有该 Project 的 Branch 调用全部收尾后才放行，其它 Project 的在途调用不影响本 Project。
+    String agentName = createTestAgent();
+    Project project = projectService.createProject("Harness Guard", "Desc", true, 3);
+    UUID projectId = project.getId();
+    Issue issue =
+        issueService.createIssue(projectId, "Issue A", "Desc", agentName, null, IssueStatus.TODO);
+
+    // IssueRun 已终态：Run 层面不再阻塞 YOLO 修改
+    IssueRun run =
+        issueRunService.startExecutorRun(
+            issue.getId(), agentName, Instant.now().plusSeconds(60), 5);
+    issueRunService.failRun(run.getId(), IssueRunStatus.FAILED, "stopped by human");
+
+    UUID sessionId = createHarnessSession();
+    UUID threadId = createHarnessThread(sessionId);
+    UUID rootEntryId = threadHeadEntryId(threadId);
+    issueAgentSessionRepository.bindOrGet(
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(issue.getId())
+            .agentName(agentName)
+            .sessionId(sessionId)
+            .threadId(threadId)
+            .build());
+
+    // 未收尾 ModelInvocation（RUNNING）拒绝切换，且同请求的其它字段与版本保持原样
+    UUID runningModelInvocationId = insertModelInvocation(threadId, rootEntryId, "RUNNING");
+    AiValidationException modelRejected =
+        assertThrows(
+            AiValidationException.class,
+            () -> projectService.updateProject(projectId, 0L, "Renamed", "New Desc", false, 5));
+    assertTrue(modelRejected.getMessage().contains("yoloEnabled"));
+    Project afterModelReject = projectService.getProject(projectId);
+    assertTrue(afterModelReject.isYoloEnabled());
+    assertEquals("Harness Guard", afterModelReject.getTitle());
+    assertEquals(0L, afterModelReject.getVersion());
+
+    // 模型调用收尾后放行
+    updateModelInvocationStatus(runningModelInvocationId, "SUCCEEDED");
+    Project afterModelTerminal =
+        projectService.updateProject(projectId, 0L, "Renamed", "New Desc", false, 5);
+    assertFalse(afterModelTerminal.isYoloEnabled());
+
+    // 所属 ModelInvocation 已终态、但 ToolInvocation 仍未收尾（WAITING_APPROVAL）同样拒绝
+    UUID turnStartEntryId = insertTurnStartEntry(sessionId, rootEntryId);
+    UUID terminalModelInvocationId = insertModelInvocation(threadId, turnStartEntryId, "SUCCEEDED");
+    UUID waitingToolInvocationId =
+        insertToolInvocation(terminalModelInvocationId, rootEntryId, "WAITING_APPROVAL");
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            projectService.updateProject(
+                projectId, afterModelTerminal.getVersion(), null, null, true, null));
+    assertFalse(projectService.getProject(projectId).isYoloEnabled());
+
+    // 工具调用收尾后放行
+    updateToolInvocationStatus(waitingToolInvocationId, "UNKNOWN");
+    Project afterToolTerminal =
+        projectService.updateProject(
+            projectId, afterModelTerminal.getVersion(), null, null, true, null);
+    assertTrue(afterToolTerminal.isYoloEnabled());
+
+    // 其它 Project 的在途调用不阻塞本 Project
+    String otherAgentName = createTestAgent();
+    Project otherProject = projectService.createProject("Other Harness Project", "Desc", true, 3);
+    Issue otherIssue =
+        issueService.createIssue(
+            otherProject.getId(), "Other Issue", "Desc", otherAgentName, null, IssueStatus.TODO);
+    IssueRun otherRun =
+        issueRunService.startExecutorRun(
+            otherIssue.getId(), otherAgentName, Instant.now().plusSeconds(60), 5);
+    issueRunService.failRun(otherRun.getId(), IssueRunStatus.FAILED, "stopped by human");
+    UUID otherSessionId = createHarnessSession();
+    UUID otherThreadId = createHarnessThread(otherSessionId);
+    issueAgentSessionRepository.bindOrGet(
+        IssueAgentSession.builder()
+            .id(UUID.randomUUID())
+            .issueId(otherIssue.getId())
+            .agentName(otherAgentName)
+            .sessionId(otherSessionId)
+            .threadId(otherThreadId)
+            .build());
+    insertModelInvocation(otherThreadId, threadHeadEntryId(otherThreadId), "DISPATCHING");
+
+    Project unaffected =
+        projectService.updateProject(
+            projectId, afterToolTerminal.getVersion(), null, null, false, null);
+    assertFalse(unaffected.isYoloEnabled());
+  }
+
+  private UUID threadHeadEntryId(UUID threadId) {
+    return jdbcTemplate.queryForObject(
+        "select head_entry_id from harness_thread where id = ?", UUID.class, threadId);
+  }
+
+  private UUID insertTurnStartEntry(UUID sessionId, UUID parentEntryId) {
+    UUID entryId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'TURN_START', '{}'::jsonb, current_timestamp)",
+        entryId,
+        sessionId,
+        parentEntryId);
+    return entryId;
+  }
+
+  private UUID insertModelInvocation(UUID threadId, UUID turnStartEntryId, String status) {
+    UUID invocationId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "insert into harness_model_invocation (id, thread_id, turn_start_entry_id,"
+            + " request_head_entry_id, request_spec, status, attempt, failed_attempts, created_at,"
+            + " updated_at) values (?, ?, ?, ?, '{}'::jsonb, ?, 0, '[]'::jsonb, current_timestamp,"
+            + " current_timestamp)",
+        invocationId,
+        threadId,
+        turnStartEntryId,
+        turnStartEntryId,
+        status);
+    return invocationId;
+  }
+
+  private void updateModelInvocationStatus(UUID invocationId, String status) {
+    jdbcTemplate.update(
+        "update harness_model_invocation set status = ?, updated_at = current_timestamp"
+            + " where id = ?",
+        status,
+        invocationId);
+  }
+
+  private UUID insertToolInvocation(UUID modelInvocationId, UUID assistantEntryId, String status) {
+    UUID invocationId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "insert into harness_tool_invocation (id, model_invocation_id, assistant_entry_id,"
+            + " call_index, call, status, attempt, effects, created_at, updated_at) values"
+            + " (?, ?, ?, 0, '{}'::jsonb, ?, 0, '{\"version\": 1, \"customEntries\": []}'::jsonb,"
+            + " current_timestamp, current_timestamp)",
+        invocationId,
+        modelInvocationId,
+        assistantEntryId,
+        status);
+    return invocationId;
+  }
+
+  private void updateToolInvocationStatus(UUID invocationId, String status) {
+    jdbcTemplate.update(
+        "update harness_tool_invocation set status = ?, updated_at = current_timestamp where id = ?",
+        status,
+        invocationId);
+  }
 }

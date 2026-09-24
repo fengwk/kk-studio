@@ -489,7 +489,10 @@ Chat 本身不持有 Environment；具体 branch 的环境身份由该 branch �
 与 [IssueServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/IssueServiceImpl.java)
 提供 Project/Issue 的事务边界。Project 持有 `yoloEnabled`、`maxReviewRejections`、项目内单调 Issue
 编号、CAS `version` 与归档状态，没有 Coordinator Agent；Issue 持有七态生命周期、可空
-assignee/reviewer Agent、`version` 与归档状态。状态迁移白名单由
+assignee/reviewer Agent、`version` 与归档状态。`yoloEnabled` 是 Issue Agent Branch 的工作策略快照，
+只要项目仍有活动 Run，或任一 Issue Agent Session 的工作 Branch 上还有未收尾的 Model/Tool 调用
+（`READY`/`DISPATCHING`/`RUNNING` 与 `WAITING_APPROVAL`），切换该策略就整体拒绝且不落地任何字段；
+判定全部来自数据库中的 Run 与 Harness 调用事实，不在 Project 锁内调用 runtime。状态迁移白名单由
 [IssueStatusTransition](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueStatusTransition.java)
 单点维护，action 与状态的对应关系以该类为准：
 
@@ -510,7 +513,9 @@ assignee/reviewer Agent、`version` 与归档状态。状态迁移白名单由
 输入、审查决定、恢复、重试与系统指令），可用 `idempotencyKey` 精确重放，并作为 Agent 的投递游标；
 正文约束 `body = btrim(body)`，只对非 `SPEC_CHANGE`/`REVIEW_DECISION` 要求非空。打回次数不落库，
 按「最近一次 `RECOVERY`/`SPEC_CHANGE` 之后、`REVIEW_DECISION` 且 `REQUEST_CHANGES` 的不同提交 Run」
-实时推导。
+实时推导。显式重试最新 `FAILED`/`UNKNOWN` Run 只追加一条 `RETRY` 事实、不复活旧 Run：`UNKNOWN` 表示
+已派发调用的外部副作用是否发生不可判定，请求必须携带人工核对说明并写入该事实正文，同一
+`idempotencyKey` 只在请求完全相同时重放。
 
 每个 `(Issue, Agent)` 由
 [IssueAgentSession](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueAgentSession.java)

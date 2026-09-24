@@ -211,6 +211,8 @@ export interface CancelIssueRequest {
 
 export interface RetryIssueRequest {
   idempotencyKey?: string | null
+  // 最新 Run 为 UNKNOWN 时必填：人工核对残留模型/工具调用与外部副作用后的说明。
+  verification?: string | null
 }
 
 export interface ArchiveIssueRequest {

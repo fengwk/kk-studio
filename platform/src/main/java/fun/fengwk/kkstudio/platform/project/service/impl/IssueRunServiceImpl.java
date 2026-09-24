@@ -47,6 +47,11 @@ import java.util.UUID;
 @Service
 public class IssueRunServiceImpl implements IssueRunService {
 
+  /** UNKNOWN 重试的人工核对说明上限：65536 个码点且不超过 65536 UTF-8 字节。 */
+  private static final int MAX_VERIFICATION_CHARS = 65536;
+
+  private static final int MAX_VERIFICATION_UTF8_BYTES = 65536;
+
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueDependencyRepository issueDependencyRepository;
@@ -716,7 +721,7 @@ public class IssueRunServiceImpl implements IssueRunService {
 
   @Transactional
   @Override
-  public IssueActivity retryRun(UUID issueId, String idempotencyKey) {
+  public IssueActivity retryRun(UUID issueId, String idempotencyKey, String verification) {
     Objects.requireNonNull(issueId, "issueId");
     String trimmedKey =
         ProjectValidationUtils.trimAndValidate(idempotencyKey, "idempotencyKey", 128, true);
@@ -748,23 +753,49 @@ public class IssueRunServiceImpl implements IssueRunService {
               + (latestRun != null ? latestRun.getStatus() : "null"));
     }
 
+    // UNKNOWN 意味着已派发的调用是否有外部副作用不可判定，必须由人工先核对残留调用并留下说明。
+    String trimmedVerification =
+        ProjectValidationUtils.trimAndValidate(
+            verification,
+            "verification",
+            MAX_VERIFICATION_CHARS,
+            latestRun.getStatus() == IssueRunStatus.UNKNOWN);
+    if (trimmedVerification != null) {
+      ProjectValidationUtils.validateUtf8Bytes(
+          trimmedVerification, "verification", MAX_VERIFICATION_UTF8_BYTES, true);
+    }
+
     IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
     if (activeRun != null) {
       throw new AiValidationException("issue_run", "Cannot retry while an active run exists");
     }
 
+    String body = retryActivityBody(latestRun.getId(), trimmedVerification);
     IssueActivity retryActivity =
         IssueActivity.builder()
             .issueId(issueId)
             .kind(IssueActivityKind.RETRY)
             .actorType(IssueActivityActorType.HUMAN)
-            .body("Retry requested for run " + latestRun.getId())
+            .body(body)
             .idempotencyKey(trimmedKey)
             .build();
 
     IssueActivity appended = issueActivityRepository.appendOrGet(retryActivity);
+    // 同一 idempotencyKey 只允许重放同一请求：正文不同说明该键被改写的请求复用，拒绝而不是返回他人的事实。
+    if (appended != null && !body.equals(appended.getBody())) {
+      throw new AiValidationException(
+          "idempotencyKey", "idempotencyKey was already used for a different retry request");
+    }
     workStore.requestWork(issueId, Instant.now());
     return appended;
+  }
+
+  /** RETRY 正文由重试目标 Run 与人工核对说明确定性构成，因此相同请求重放必然得到相同正文。 */
+  private static String retryActivityBody(UUID latestRunId, String verification) {
+    if (verification == null) {
+      return "Retry requested for run " + latestRunId;
+    }
+    return "Retry requested for run " + latestRunId + "\nHuman verification: " + verification;
   }
 
   @Override

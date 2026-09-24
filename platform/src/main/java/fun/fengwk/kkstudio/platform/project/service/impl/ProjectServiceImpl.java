@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueHarnessInvocationRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
@@ -45,6 +46,7 @@ public class ProjectServiceImpl implements ProjectService {
   private final IssueDependencyRepository issueDependencyRepository;
   private final IssueActivityRepository issueActivityRepository;
   private final IssueRunRepository issueRunRepository;
+  private final IssueHarnessInvocationRepository issueHarnessInvocationRepository;
   private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final IssueWorkRepository issueWorkRepository;
   private final SessionDeletionOrchestrator sessionDeletionOrchestrator;
@@ -97,11 +99,15 @@ public class ProjectServiceImpl implements ProjectService {
     if (current.isArchived()) {
       throw new AiValidationException("project", "Archived project cannot be modified");
     }
-    // Run 使用启动时的 YOLO 快照；持有 Project 锁时禁止在活动 Run 期间切换该策略。
+    // Run 使用启动时的 YOLO 快照；持有 Project 锁时禁止在项目仍有在途 Agent 工作时切换该策略。
+    // 在途状态只由 Database 中的 Run 与 Harness 调用事实判定，不在锁内调用 runtime。
     if (yoloEnabled != null && yoloEnabled != current.isYoloEnabled()) {
-      if (issueRunRepository.hasActiveByProjectId(id)) {
+      if (issueRunRepository.hasActiveByProjectId(id)
+          || issueHarnessInvocationRepository.hasNonTerminalByProjectId(id)) {
         throw new AiValidationException(
-            "project", "Cannot change yoloEnabled while the project has active issue runs");
+            "project",
+            "Cannot change yoloEnabled while the project has in-flight issue runs or harness"
+                + " invocations");
       }
     }
     if (title != null) {

@@ -823,4 +823,105 @@ describe('IssueDetailModal', () => {
     expect(api.addIssueEvidence).not.toHaveBeenCalled()
     expect(storageService.deleteUpload).toHaveBeenCalledWith('stale-upload-id')
   })
+
+  it('requires human verification before retrying an UNKNOWN run', async () => {
+    // 测试意图：UNKNOWN 表示外部副作用不可判定，重试按钮必须先由人工填写核对说明才可用，说明 trim 后随请求提交。
+    const unknownRun = {
+      ...mockActiveIssueDetail.runs[0],
+      status: 'UNKNOWN' as const,
+      completedAt: '2026-09-20T10:20:00Z',
+    }
+    const unknownDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      runs: [unknownRun],
+      currentRun: null,
+      latestRun: unknownRun,
+    }
+    const api = createMockApi(unknownDetail)
+    const onUpdated = vi.fn()
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={onUpdated}
+        api={api}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^执行与审核/ })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^执行与审核/ }))
+
+    expect(
+      screen.getByText(/Run 处于 UNKNOWN 状态：外部副作用是否已发生不可判定/),
+    ).toBeInTheDocument()
+    const retryBtn = screen.getByRole('button', { name: /重试 Run/i })
+    expect(retryBtn).toBeDisabled()
+    // 空输入时给出内联校验提示
+    expect(screen.getByText('必须填写人工核对说明才能重试 UNKNOWN Run')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText(/人工核对说明/), {
+      target: { value: '  已核对残留调用：无外部副作用  ' },
+    })
+    expect(retryBtn).toBeEnabled()
+    expect(
+      screen.queryByText('必须填写人工核对说明才能重试 UNKNOWN Run'),
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(retryBtn)
+    await waitFor(() => {
+      expect(api.retryIssue).toHaveBeenCalledWith(issueId, {
+        idempotencyKey: expect.any(String),
+        verification: '已核对残留调用：无外部副作用',
+      })
+    })
+    expect(onUpdated).toHaveBeenCalled()
+  })
+
+  it('retries a FAILED run without human verification', async () => {
+    // 测试意图：FAILED 保持原有简单重试语义，不要求核对说明也不渲染输入框。
+    const failedRun = { ...mockActiveIssueDetail.runs[0], status: 'FAILED' as const }
+    const failedDetail: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      runs: [failedRun],
+      currentRun: null,
+      latestRun: failedRun,
+    }
+    const api = createMockApi(failedDetail)
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={vi.fn()}
+        api={api}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^执行与审核/ })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^执行与审核/ }))
+
+    expect(
+      screen.getByText('Run 执行失败或处于未知状态，可执行显式重试。'),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText(/人工核对说明/)).not.toBeInTheDocument()
+    const retryBtn = screen.getByRole('button', { name: /重试 Run/i })
+    expect(retryBtn).toBeEnabled()
+
+    fireEvent.click(retryBtn)
+    await waitFor(() => {
+      expect(api.retryIssue).toHaveBeenCalledWith(issueId, {
+        idempotencyKey: expect.any(String),
+        verification: null,
+      })
+    })
+  })
 })
