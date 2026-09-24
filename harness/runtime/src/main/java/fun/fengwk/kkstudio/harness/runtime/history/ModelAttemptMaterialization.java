@@ -168,7 +168,9 @@ public final class ModelAttemptMaterialization {
       }
       return;
     }
-    if (!Objects.equals(invocation.providerReplayState(), resultEntry.providerReplayState())) {
+    // Attach 时已比对并将 replay state 从 Invocation 转移到不可变的 Assistant Entry。
+    if (invocation.resultEntryId() == null
+        && !Objects.equals(invocation.providerReplayState(), resultEntry.providerReplayState())) {
       throw new IllegalArgumentException(
           "materialized assistant entry must match the invocation provider replay state");
     }
