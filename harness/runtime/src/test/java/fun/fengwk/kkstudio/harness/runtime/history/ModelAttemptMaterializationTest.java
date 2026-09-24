@@ -747,6 +747,46 @@ class ModelAttemptMaterializationTest {
         "compaction result must match the assembled summary exactly");
   }
 
+  /** 测试意图：压缩结果只持久化摘要，不能将 provider 的原生 replay state 强制转移到非 Assistant Entry。 */
+  @Test
+  void compactionMayDiscardProviderReplayState() {
+    CompactionStart compaction = historyCompactionStart();
+    ModelInvocation base = compactionSucceededInvocation();
+    ModelInvocation stored =
+        new ModelInvocation(
+            base.id(),
+            base.threadId(),
+            base.turnStartEntryId(),
+            base.requestHeadEntryId(),
+            base.requestSpec(),
+            base.status(),
+            base.attempt(),
+            base.streamCheckpoint(),
+            base.result(),
+            base.error(),
+            base.resultEntryId(),
+            base.failedAttempts(),
+            base.createdAt(),
+            base.updatedAt(),
+            sampleReplayState());
+    EntryPath preResult =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
+    Entry result =
+        new Entry(
+            id(4L),
+            id(100L),
+            id(2L),
+            CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary"),
+            T6);
+    EntryPath path =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
+
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored, stored.attachResultEntry(result.id(), T6), path));
+  }
+
   /**
    * preResultPath 下界：compaction 成功结果前的 preResult 前缀必须至少保留 ROOT + requestHead（即 resultPath 至少 3 项）。
    */
