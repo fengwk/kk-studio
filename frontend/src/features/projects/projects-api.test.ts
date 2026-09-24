@@ -354,4 +354,27 @@ describe('projectsApi', () => {
       expectedVersion: '4',
     })
   })
+
+  it('addIssueEvidence should post to /issues/:issueId/evidence and return decoded evidence', async () => {
+    // 测试意图：验证 addIssueEvidence 向 /issues/:issueId/evidence 提交 uploadId 并正确解码 IssueEvidenceDTO
+    const rawEvidence = {
+      issueId: mockIssue.id,
+      blobId: 'blob-00000000-0000-0000-0000-000000000001',
+      uri: 'kkstudio:/resources/blob-00000000-0000-0000-0000-000000000001',
+      origin: 'HUMAN',
+      name: 'screenshot.png',
+      runId: null,
+      publishedAt: '2026-09-20T12:00:00Z',
+    }
+    vi.mocked(mockClient.post).mockResolvedValueOnce(rawEvidence)
+    const res = await api.addIssueEvidence(mockIssue.id, {
+      uploadId: 'upload-00000000-0000-0000-0000-000000000001',
+    })
+    expect(mockClient.post).toHaveBeenCalledWith(`/issues/${mockIssue.id}/evidence`, {
+      uploadId: 'upload-00000000-0000-0000-0000-000000000001',
+    })
+    expect(res.blobId).toBe(rawEvidence.blobId)
+    expect(res.origin).toBe('HUMAN')
+    expect(res.name).toBe('screenshot.png')
+  })
 })

@@ -51,6 +51,8 @@ export {
   decodeIssueAgentSession,
   decodeIssueActivity,
   decodeIssueActivityList,
+  decodeIssueEvidence,
+  decodeIssueEvidenceList,
   decodeIssueRun,
   decodeIssueRunSummary,
   decodeProjectIssueSnapshot,
@@ -92,5 +94,8 @@ export type {
   ProjectIssueSnapshotDTO,
   ProjectSnapshotDTO,
   IssueDetailDTO,
+  IssueEvidenceDTO,
+  IssueEvidenceOrigin,
+  AddIssueEvidenceRequest,
   ProjectsChangedEventPayload,
 } from './types'

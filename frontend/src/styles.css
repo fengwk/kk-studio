@@ -3915,6 +3915,13 @@ div.is-error {
   white-space: nowrap;
 }
 
+.attachment-reference-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .attachment-reference-status {
   min-width: 0;
   overflow: hidden;
@@ -3922,6 +3929,29 @@ div.is-error {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attachment-reference-tier-select {
+  padding: 1px 4px;
+  font-size: 10px;
+  font-family: inherit;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-active, rgba(255, 255, 255, 0.08));
+  color: var(--fg-muted);
+  cursor: pointer;
+  outline: none;
+  line-height: 1.2;
+}
+
+.attachment-reference-tier-select:focus {
+  border-color: var(--info);
+  color: var(--fg);
+}
+
+.attachment-reference-tier-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .attachment-reference-remove {

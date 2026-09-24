@@ -2,6 +2,7 @@ import {
   createPartId,
   partsKey,
   type ComposerPart,
+  type ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 
 /**
@@ -59,6 +60,8 @@ export function extractPartsFromEditor(root: HTMLElement): ComposerPart[] {
     }
     if (isPillElement(node)) {
       const partId = node.getAttribute('data-part-id') ?? createPartId()
+      const rawTier = node.getAttribute('data-image-tier')
+      const imageTier = parseImageTier(rawTier)
       if (node.getAttribute('data-part-type') === 'attachment') {
         const uploadId = node.getAttribute('data-upload-id') ?? ''
         const filename = node.getAttribute('data-filename') ?? ''
@@ -70,6 +73,7 @@ export function extractPartsFromEditor(root: HTMLElement): ComposerPart[] {
           partId,
           uploadId,
           filename,
+          ...(imageTier ? { imageTier } : {}),
         })
         continue
       }
@@ -84,11 +88,19 @@ export function extractPartsFromEditor(root: HTMLElement): ComposerPart[] {
           ...(node.hasAttribute('data-preview')
             ? { preview: node.getAttribute('data-preview') ?? '' }
             : {}),
+          ...(imageTier ? { imageTier } : {}),
         })
       }
     }
   }
   return parts
+}
+
+function parseImageTier(value: string | null | undefined): ImageInputTier | undefined {
+  if (value === '720P' || value === '1080P' || value === 'ORIGINAL') {
+    return value
+  }
+  return undefined
 }
 
 export function extractPartsKeyFromEditor(root: HTMLElement): string {
@@ -107,12 +119,18 @@ function createPillElement(root: HTMLElement, part: PillPart): HTMLSpanElement {
   if (part.type === 'attachment') {
     pill.dataset.uploadId = part.uploadId
     pill.dataset.filename = part.filename
+    if (part.imageTier) {
+      pill.dataset.imageTier = part.imageTier
+    }
     pill.textContent = `[${part.filename}]`
   } else {
     pill.dataset.blobId = part.blobId
     pill.dataset.name = part.name
     if (part.preview !== undefined) {
       pill.dataset.preview = part.preview
+    }
+    if (part.imageTier) {
+      pill.dataset.imageTier = part.imageTier
     }
     pill.textContent = `[${part.name}]`
   }

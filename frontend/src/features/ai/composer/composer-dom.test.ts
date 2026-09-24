@@ -578,6 +578,33 @@ describe('normalizeEditorDom', () => {
     const restored = extractPartsFromEditor(root)
     expect(partsToMessageContents(restored)).toEqual(partsToMessageContents(parts))
   })
+
+  it('preserves imageTier on attachment and resource pills through render and extraction', () => {
+    // 测试意图：验证 attachment 与 resource 的 imageTier 在 DOM pill (data-image-tier) 渲染与提取中完整保留
+    const root = document.createElement('div')
+    const parts = [
+      createAttachmentPart('upload-img', 'photo.png', '1080P'),
+      createAttachmentPart('upload-raw', 'original.png', 'ORIGINAL'),
+      createResourcePart('00000000-0000-0000-0000-000000000001', 'ref.png', undefined, '720P'),
+    ]
+    renderPartsToEditor(root, parts)
+    const pills = root.querySelectorAll('.composer-pill')
+    expect(pills[0].getAttribute('data-image-tier')).toBe('1080P')
+    expect(pills[1].getAttribute('data-image-tier')).toBe('ORIGINAL')
+    expect(pills[2].getAttribute('data-image-tier')).toBe('720P')
+
+    const restored = extractPartsFromEditor(root)
+    expect(partsToMessageContents(restored)).toEqual([
+      { type: 'ATTACHMENT', uploadId: 'upload-img', imageTier: '1080P' },
+      { type: 'ATTACHMENT', uploadId: 'upload-raw', imageTier: 'ORIGINAL' },
+      {
+        type: 'RESOURCE',
+        blobId: '00000000-0000-0000-0000-000000000001',
+        name: 'ref.png',
+        imageTier: '720P',
+      },
+    ])
+  })
 })
 
 describe('isPillElement', () => {

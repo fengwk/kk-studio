@@ -1,4 +1,9 @@
-import type { HarnessUserMessageContentDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessUserMessageContentDTO,
+  ImageInputTier,
+} from '@/shared/api/contracts/ai-runtime'
+
+export type { ImageInputTier }
 import { createUuid } from '@/shared/lib/uuid'
 
 /**
@@ -11,14 +16,21 @@ import { createUuid } from '@/shared/lib/uuid'
  */
 export type ComposerPart =
   | { type: 'text'; partId: string; text: string }
-  | { type: 'attachment'; partId: string; uploadId: string; filename: string }
   | {
-    type: 'resource'
-    partId: string
-    blobId: string
-    name: string
-    preview?: string
-  }
+      type: 'attachment'
+      partId: string
+      uploadId: string
+      filename: string
+      imageTier?: ImageInputTier
+    }
+  | {
+      type: 'resource'
+      partId: string
+      blobId: string
+      name: string
+      preview?: string
+      imageTier?: ImageInputTier
+    }
 
 export function createPartId(): string {
   return createUuid()
@@ -28,14 +40,25 @@ export function createTextPart(text: string): ComposerPart {
   return { type: 'text', partId: createPartId(), text }
 }
 
-export function createAttachmentPart(uploadId: string, filename: string): ComposerPart {
-  return { type: 'attachment', partId: createPartId(), uploadId, filename }
+export function createAttachmentPart(
+  uploadId: string,
+  filename: string,
+  imageTier?: ImageInputTier,
+): ComposerPart {
+  return {
+    type: 'attachment',
+    partId: createPartId(),
+    uploadId,
+    filename,
+    ...(imageTier ? { imageTier } : {}),
+  }
 }
 
 export function createResourcePart(
   blobId: string,
   name: string,
   preview?: string,
+  imageTier?: ImageInputTier,
 ): ComposerPart {
   return {
     type: 'resource',
@@ -43,6 +66,7 @@ export function createResourcePart(
     blobId,
     name,
     ...(preview !== undefined ? { preview } : {}),
+    ...(imageTier ? { imageTier } : {}),
   }
 }
 
@@ -143,9 +167,9 @@ export function partsKey(parts: ComposerPart[]): string {
         return ['t', part.text]
       }
       if (part.type === 'attachment') {
-        return ['a', part.uploadId, part.filename, part.partId]
+        return ['a', part.uploadId, part.filename, part.imageTier ?? null, part.partId]
       }
-      return ['r', part.blobId, part.name, part.preview ?? null, part.partId]
+      return ['r', part.blobId, part.name, part.preview ?? null, part.imageTier ?? null, part.partId]
     }),
   )
 }
@@ -174,13 +198,18 @@ export function partsToMessageContents(parts: ComposerPart[]): HarnessUserMessag
       return { type: 'TEXT', text: part.text }
     }
     if (part.type === 'attachment') {
-      return { type: 'ATTACHMENT', uploadId: part.uploadId }
+      return {
+        type: 'ATTACHMENT',
+        uploadId: part.uploadId,
+        ...(part.imageTier ? { imageTier: part.imageTier } : {}),
+      }
     }
     return {
       type: 'RESOURCE',
       blobId: part.blobId,
       name: part.name,
       ...(part.preview !== undefined ? { preview: part.preview } : {}),
+      ...(part.imageTier ? { imageTier: part.imageTier } : {}),
     }
   })
 }

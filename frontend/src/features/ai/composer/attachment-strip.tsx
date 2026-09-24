@@ -17,7 +17,10 @@ import {
   uploadOccurrence,
   type AttachmentUpload,
 } from '@/features/ai/composer/use-attachment-uploads'
-import type { ComposerPart } from '@/features/ai/composer/composer-parts'
+import type {
+  ComposerPart,
+  ImageInputTier,
+} from '@/features/ai/composer/composer-parts'
 import { useI18n } from '@/shared/i18n'
 import { MediaLightbox } from '@/shared/ui/media/MediaLightbox'
 
@@ -27,11 +30,13 @@ export function AttachmentStrip({
   parts,
   disabled,
   onRemove,
+  onTierChange,
 }: {
   uploads: AttachmentUpload[]
   parts: ComposerPart[]
   disabled: boolean
   onRemove: (upload: AttachmentUpload) => void
+  onTierChange?: (upload: AttachmentUpload, tier: ImageInputTier) => void
 }) {
   const { t } = useI18n()
   const visible = uploads.filter((upload) => !upload.detached)
@@ -61,12 +66,14 @@ export function AttachmentStrip({
           upload.status === 'uploading'
             ? `${t('ai.runtime.composer.uploading')} ${progress}%`
             : formatFileSize(upload.sizeBytes)
+        const isImage = mediaKindOf(upload.mediaType) === 'image'
         return (
           <div
             key={upload.localId}
             role="listitem"
             data-filename={upload.filename}
             data-media-kind={mediaKindOf(upload.mediaType)}
+            data-image-tier={upload.imageTier}
             className={[
               'attachment-reference',
               `is-${upload.status}`,
@@ -78,7 +85,22 @@ export function AttachmentStrip({
               <span className="attachment-reference-name" title={upload.filename}>
                 [{displayName}]
               </span>
-              <span className="attachment-reference-status">{status}</span>
+              <span className="attachment-reference-status-row">
+                <span className="attachment-reference-status">{status}</span>
+                {isImage && (
+                  <select
+                    className="attachment-reference-tier-select"
+                    aria-label={t('ai.runtime.composer.imageTier', { name: displayName })}
+                    value={upload.imageTier ?? '720P'}
+                    disabled={disabled}
+                    onChange={(e) => onTierChange?.(upload, e.target.value as ImageInputTier)}
+                  >
+                    <option value="720P">720P</option>
+                    <option value="1080P">1080P</option>
+                    <option value="ORIGINAL">{t('ai.runtime.composer.tierOriginal')}</option>
+                  </select>
+                )}
+              </span>
             </span>
             <button
               type="button"

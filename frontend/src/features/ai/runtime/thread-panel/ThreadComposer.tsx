@@ -43,6 +43,7 @@ import {
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
+  type ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 import {
   canSubmitParts,
@@ -61,7 +62,7 @@ import { useI18n } from '@/shared/i18n'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
 
-export function extractGoalCommand(parts: ComposerPart[]): { isGoalCommand: boolean; objective: string | null } {
+function extractGoalCommand(parts: ComposerPart[]): { isGoalCommand: boolean; objective: string | null } {
   let text = ''
   for (const part of parts) {
     if (part.type === 'text') {
@@ -239,7 +240,42 @@ export function ThreadComposer({
     addFiles,
     releaseUpload,
     markDetached,
+    updateImageTier,
   } = useAttachmentUploads({ storageService, hashFile, onError: handleUploadError })
+
+  const handleTierChange = useCallback(
+    (upload: AttachmentUpload, tier: ImageInputTier) => {
+      updateImageTier(upload.localId, tier)
+      const next = parts.map((part) => {
+        if (
+          part.type === 'attachment'
+          && (part.uploadId === upload.localId || (upload.uploadId && part.uploadId === upload.uploadId))
+        ) {
+          return { ...part, imageTier: tier }
+        }
+        return part
+      })
+      const el = editorRef.current
+      if (el) {
+        const pills = el.querySelectorAll<HTMLElement>(
+          `span[data-part-type="attachment"][data-upload-id="${upload.localId}"]`,
+        )
+        pills.forEach((p) => {
+          p.dataset.imageTier = tier
+        })
+        if (upload.uploadId) {
+          const serverPills = el.querySelectorAll<HTMLElement>(
+            `span[data-part-type="attachment"][data-upload-id="${upload.uploadId}"]`,
+          )
+          serverPills.forEach((p) => {
+            p.dataset.imageTier = tier
+          })
+        }
+      }
+      changeDraft(next)
+    },
+    [changeDraft, parts, updateImageTier],
+  )
 
   const goalCommandInfo = extractGoalCommand(parts)
   const isGoalCommand = goalCommandInfo.isGoalCommand
@@ -421,11 +457,21 @@ export function ThreadComposer({
       if (part.type !== 'attachment') {
         return part
       }
-      const record = uploads.find((upload) => upload.localId === part.uploadId)
+      const record = uploads.find(
+        (upload) => upload.localId === part.uploadId || upload.uploadId === part.uploadId,
+      )
+      const imageTier = part.imageTier ?? record?.imageTier
       if (record?.uploadId) {
-        return { ...part, uploadId: record.uploadId }
+        return {
+          ...part,
+          uploadId: record.uploadId,
+          ...(imageTier ? { imageTier } : {}),
+        }
       }
-      return part
+      return {
+        ...part,
+        ...(imageTier ? { imageTier } : {}),
+      }
     })
   }
 
@@ -473,7 +519,21 @@ export function ThreadComposer({
     // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
     // 本地草稿（trim 后），与 payload 分开——恢复比对只命中本地 id 草稿。
     const resolved = resolveUploadIds(parts)
-    const localDraft = trimMessageParts(parts)
+    const localDraft = trimMessageParts(
+      parts.map((part) => {
+        if (part.type !== 'attachment') {
+          return part
+        }
+        const record = uploads.find(
+          (upload) => upload.localId === part.uploadId || upload.uploadId === part.uploadId,
+        )
+        const imageTier = part.imageTier ?? record?.imageTier
+        return {
+          ...part,
+          ...(imageTier ? { imageTier } : {}),
+        }
+      }),
+    )
     commit(localDraft)
     onSubmit(resolved, localDraft)
   }
@@ -693,6 +753,7 @@ export function ThreadComposer({
           parts={parts}
           disabled={disabled}
           onRemove={handleRemoveUpload}
+          onTierChange={handleTierChange}
         />
         <div
           ref={editorRef}

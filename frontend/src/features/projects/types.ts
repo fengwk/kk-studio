@@ -234,12 +234,29 @@ export interface ProjectSnapshotDTO {
   dependencies: IssueDependencyDTO[]
 }
 
+export type IssueEvidenceOrigin = 'EXECUTOR' | 'HUMAN'
+
+export interface IssueEvidenceDTO {
+  issueId: string
+  blobId: string
+  uri: string
+  origin: IssueEvidenceOrigin | string
+  name: string | null
+  runId: string | null
+  publishedAt: string
+}
+
+export interface AddIssueEvidenceRequest {
+  uploadId: string
+}
+
 export interface IssueDetailDTO {
   issue: IssueDTO
   blocked: boolean
   dependencies: IssueDependencyDTO[]
   sessions: IssueAgentSessionDTO[]
   activities: IssueActivityDTO[]
+  evidence: IssueEvidenceDTO[]
   nextActivityCursor: string | null
   runs: IssueRunDTO[]
   currentRun: IssueRunDTO | null

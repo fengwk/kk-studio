@@ -8,6 +8,8 @@ import {
   decodeIssueDependency,
   decodeIssueDependencyList,
   decodeIssueDetail,
+  decodeIssueEvidence,
+  decodeIssueEvidenceList,
   decodeIssueRun,
   decodeIssueRunSummary,
   decodeProject,
@@ -465,6 +467,115 @@ describe('projects codecs', () => {
       expect(decoded.activities[0].targetRole).toBe('EXECUTOR')
       expect(decoded.nextActivityCursor).toBeNull()
       expect(decoded.currentRun).toBeNull()
+      expect(decoded.evidence).toEqual([])
+    })
+
+    it('decodeIssueDetail should decode evidence list correctly', () => {
+      // 测试意图：验证 decodeIssueDetail 能完整解析包含 evidence 的 Issue 详情
+      const detail = {
+        issue: {
+          id: 'b0000000-0000-0000-0000-000000000001',
+          projectId: 'a0000000-0000-0000-0000-000000000001',
+          number: '1',
+          title: 'Evidence test',
+          description: 'Desc',
+          status: 'IN_REVIEW',
+          assigneeAgentName: null,
+          reviewerAgentName: null,
+          version: '1',
+          archivedAt: null,
+          createdAt: '2026-09-14T00:00:00Z',
+          updatedAt: '2026-09-14T00:00:00Z',
+        },
+        blocked: false,
+        dependencies: [],
+        sessions: [],
+        activities: [],
+        nextActivityCursor: null,
+        runs: [],
+        currentRun: null,
+        latestRun: null,
+        evidence: [
+          {
+            issueId: 'b0000000-0000-0000-0000-000000000001',
+            blobId: 'c0000000-0000-0000-0000-000000000001',
+            uri: 'kkstudio:/resources/c0000000-0000-0000-0000-000000000001',
+            origin: 'EXECUTOR',
+            name: 'executor-evidence.png',
+            runId: 'd0000000-0000-0000-0000-000000000001',
+            publishedAt: '2026-09-14T00:05:00Z',
+          },
+        ],
+      }
+
+      const decoded = decodeIssueDetail(detail)
+      expect(decoded.evidence).toHaveLength(1)
+      expect(decoded.evidence[0].origin).toBe('EXECUTOR')
+      expect(decoded.evidence[0].name).toBe('executor-evidence.png')
+      expect(decoded.evidence[0].runId).toBe('d0000000-0000-0000-0000-000000000001')
+    })
+  })
+
+  describe('decodeIssueEvidence and decodeIssueEvidenceList', () => {
+    it('should decode valid evidence object with optional fields correctly', () => {
+      // 测试意图：验证 decodeIssueEvidence 正确解析合法证据，规范化空白 name 与合法 origin
+      const valid = {
+        issueId: 'b0000000-0000-0000-0000-000000000001',
+        blobId: 'c0000000-0000-0000-0000-000000000001',
+        uri: 'kkstudio:/resources/c0000000-0000-0000-0000-000000000001',
+        origin: 'HUMAN',
+        name: '  ',
+        runId: null,
+        publishedAt: '2026-09-14T00:00:00Z',
+      }
+      const decoded = decodeIssueEvidence(valid)
+      expect(decoded.issueId).toBe(valid.issueId)
+      expect(decoded.blobId).toBe(valid.blobId)
+      expect(decoded.uri).toBe(valid.uri)
+      expect(decoded.origin).toBe('HUMAN')
+      expect(decoded.name).toBeNull() // normalized whitespace to null
+      expect(decoded.runId).toBeNull()
+      expect(decoded.publishedAt).toBe('2026-09-14T00:00:00Z')
+    })
+
+    it('should reject invalid evidence origin or missing ids', () => {
+      // 测试意图：验证 decodeIssueEvidence 拒绝非法 origin 或缺失关键字段的对象
+      expect(() =>
+        decodeIssueEvidence({
+          issueId: 'b0000000-0000-0000-0000-000000000001',
+          blobId: 'c0000000-0000-0000-0000-000000000001',
+          uri: 'kkstudio:/resources/c0000000-0000-0000-0000-000000000001',
+          origin: 'INVALID_ORIGIN',
+          publishedAt: '2026-09-14T00:00:00Z',
+        }),
+      ).toThrow(ApiError)
+
+      expect(() =>
+        decodeIssueEvidence({
+          issueId: 'not-a-uuid',
+          blobId: 'c0000000-0000-0000-0000-000000000001',
+          uri: 'kkstudio:/resources/c0000000-0000-0000-0000-000000000001',
+          origin: 'HUMAN',
+          publishedAt: '2026-09-14T00:00:00Z',
+        }),
+      ).toThrow(ApiError)
+    })
+
+    it('decodeIssueEvidenceList should decode arrays', () => {
+      // 测试意图：验证 decodeIssueEvidenceList 正确批量解码列表
+      const list = [
+        {
+          issueId: 'b0000000-0000-0000-0000-000000000001',
+          blobId: 'c0000000-0000-0000-0000-000000000001',
+          uri: 'kkstudio:/resources/c0000000-0000-0000-0000-000000000001',
+          origin: 'HUMAN',
+          name: 'doc.txt',
+          publishedAt: '2026-09-14T00:00:00Z',
+        },
+      ]
+      const decoded = decodeIssueEvidenceList(list)
+      expect(decoded).toHaveLength(1)
+      expect(decoded[0].name).toBe('doc.txt')
     })
   })
 })

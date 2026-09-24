@@ -83,6 +83,34 @@ describe('composer draft storage', () => {
     )
   })
 
+  it('round-trips resource parts with explicit imageTier', () => {
+    const storage = new MemoryStorage()
+    const scope = 'thread:t-tier'
+    const source = [
+      createResourcePart('00000000-0000-0000-0000-000000000001', 'photo.png', '', '1080P'),
+      createResourcePart('00000000-0000-0000-0000-000000000002', 'orig.png', undefined, 'ORIGINAL'),
+    ]
+
+    storeComposerDraft(scope, source, storage)
+    const restored = loadStoredComposerDraft(scope, storage)
+
+    expect(partsToMessageContents(restored)).toEqual([
+      {
+        type: 'RESOURCE',
+        blobId: '00000000-0000-0000-0000-000000000001',
+        name: 'photo.png',
+        preview: '',
+        imageTier: '1080P',
+      },
+      {
+        type: 'RESOURCE',
+        blobId: '00000000-0000-0000-0000-000000000002',
+        name: 'orig.png',
+        imageTier: 'ORIGINAL',
+      },
+    ])
+  })
+
   it('clears storage for blank or attachment-bearing drafts', () => {
     const storage = new MemoryStorage()
     const scope = 'thread:t1'

@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
-import type { IssueDetailDTO } from '../types'
+import type { IssueDetailDTO, IssueEvidenceDTO } from '../types'
+import type { StorageService } from '@/shared/api/storage-service'
+import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -117,6 +119,7 @@ describe('IssueDetailModal', () => {
       completedAt: null,
     },
     latestRun: null,
+    evidence: [],
   }
 
   const mockBlockedIssueDetail: IssueDetailDTO = {
@@ -170,6 +173,15 @@ describe('IssueDetailModal', () => {
     retryIssue: vi.fn().mockResolvedValue(detail.activities[0]),
     archiveIssue: vi.fn().mockResolvedValue({ ...detail.issue, archivedAt: 'now' }),
     unarchiveIssue: vi.fn().mockResolvedValue({ ...detail.issue, archivedAt: null }),
+    addIssueEvidence: vi.fn().mockResolvedValue({
+      issueId: detail.issue.id,
+      blobId: 'blob-default',
+      uri: 'kkstudio:/resources/blob-default',
+      origin: 'HUMAN',
+      name: 'evidence.png',
+      runId: null,
+      publishedAt: '2026-09-20T12:00:00Z',
+    }),
     ...overrides,
   })
 
@@ -450,5 +462,365 @@ describe('IssueDetailModal', () => {
         reviewerAgentName: null,
       })
     })
+  })
+
+  const createMockStorageService = (
+    overrides: Partial<StorageService> = {},
+  ): StorageService => ({
+    reserveUpload: vi.fn().mockResolvedValue({
+      id: 'upload-id-1',
+      state: 'PENDING',
+      sha256: 'abc123sha256',
+      mediaType: 'image/png',
+      sizeBytes: 1024,
+      presignedPut: {
+        url: 'https://upload.example.com/put',
+        headers: {},
+        expiresAt: '2026-09-20T12:00:00Z',
+      },
+    }),
+    completeUpload: vi.fn().mockResolvedValue({
+      id: 'upload-id-1',
+      state: 'READY',
+      sha256: 'abc123sha256',
+      mediaType: 'image/png',
+      sizeBytes: 1024,
+      presignedPut: null,
+    }),
+    uploadFile: vi.fn().mockResolvedValue(undefined),
+    deleteUpload: vi.fn().mockResolvedValue(undefined),
+    getBlobDownloadUrl: vi.fn().mockResolvedValue({
+      url: 'https://download.example.com/file.png',
+      mediaType: 'image/png',
+      sizeBytes: 1024,
+      expiresAt: '2026-09-20T13:00:00Z',
+    }),
+    getBlobPreviewUrl: vi.fn().mockResolvedValue({
+      url: 'https://preview.example.com/file.png',
+      mediaType: 'image/png',
+      sizeBytes: 1024,
+      expiresAt: '2026-09-20T13:00:00Z',
+    }),
+    ...overrides,
+  })
+
+  it('displays evidence list with origin badges and URI, fetching download URL only on click', async () => {
+    // 测试意图：验证证据列表正常展示来源徽章、名称与显式 URI，且仅在用户点击时按需换取原件下载地址
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const evidenceList: IssueEvidenceDTO[] = [
+      {
+        issueId,
+        blobId: 'blob-human-1',
+        uri: 'kkstudio:/resources/blob-human-1',
+        origin: 'HUMAN',
+        name: 'test-evidence.png',
+        runId: null,
+        publishedAt: '2026-09-20T11:00:00Z',
+      },
+      {
+        issueId,
+        blobId: 'blob-exec-2',
+        uri: 'kkstudio:/resources/blob-exec-2',
+        origin: 'EXECUTOR',
+        name: null,
+        runId: 'run-exec-12345678-abcd',
+        publishedAt: '2026-09-20T11:05:00Z',
+      },
+    ]
+
+    const detailWithEvidence: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      evidence: evidenceList,
+    }
+
+    const api = createMockApi(detailWithEvidence)
+    const storageService = createMockStorageService()
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={vi.fn()}
+        api={api}
+        storageService={storageService}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('已发布证据 (2)')).toBeInTheDocument()
+    })
+
+    // 切换到已发布证据标签页
+    fireEvent.click(screen.getByText('已发布证据 (2)'))
+
+    // 验证展示来源与名称
+    expect(screen.getByText('人工上传')).toBeInTheDocument()
+    expect(screen.getByText('test-evidence.png')).toBeInTheDocument()
+    expect(screen.getByText('kkstudio:/resources/blob-human-1')).toBeInTheDocument()
+
+    expect(screen.getByText('执行者交付')).toBeInTheDocument()
+    expect(screen.getAllByText('kkstudio:/resources/blob-exec-2')).toHaveLength(2)
+    expect(screen.getByText(/关联 Run: #run-exec/)).toBeInTheDocument()
+
+    // 验证尚未调用下载 URL
+    expect(storageService.getBlobDownloadUrl).not.toHaveBeenCalled()
+
+    // 点击第一项下载原件
+    const downloadBtns = screen.getAllByRole('button', { name: /下载/i })
+    fireEvent.click(downloadBtns[0])
+
+    await waitFor(() => {
+      expect(storageService.getBlobDownloadUrl).toHaveBeenCalledWith('blob-human-1')
+      expect(clickSpy).toHaveBeenCalled()
+    })
+
+    clickSpy.mockRestore()
+  })
+
+  it('filters out evidence from unrelated issues (no cross-issue display)', async () => {
+    // 测试意图：隔离安全校验，确保绝不展示非当前 Issue 的证据项
+    const evidenceList: IssueEvidenceDTO[] = [
+      {
+        issueId,
+        blobId: 'blob-current',
+        uri: 'kkstudio:/resources/blob-current',
+        origin: 'HUMAN',
+        name: 'current-issue-evidence.png',
+        runId: null,
+        publishedAt: '2026-09-20T11:00:00Z',
+      },
+      {
+        issueId: 'unrelated-issue-999',
+        blobId: 'blob-foreign',
+        uri: 'kkstudio:/resources/blob-foreign',
+        origin: 'HUMAN',
+        name: 'leaked-foreign-evidence.png',
+        runId: null,
+        publishedAt: '2026-09-20T11:00:00Z',
+      },
+    ]
+
+    const detailWithForeignEvidence: IssueDetailDTO = {
+      ...mockActiveIssueDetail,
+      evidence: evidenceList,
+    }
+
+    const api = createMockApi(detailWithForeignEvidence)
+    const storageService = createMockStorageService()
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={vi.fn()}
+        api={api}
+        storageService={storageService}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/已发布证据/)).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /已发布证据/ }))
+
+    expect(screen.getByText('current-issue-evidence.png')).toBeInTheDocument()
+    expect(screen.queryByText('leaked-foreign-evidence.png')).not.toBeInTheDocument()
+  })
+
+  it('uploads human evidence via storage pipeline and calls addIssueEvidence', async () => {
+    // 测试意图：验证人工上传证据流程完整执行预留、直传、完成并调用 addIssueEvidence 发布
+    const onUpdated = vi.fn()
+    const api = createMockApi(mockActiveIssueDetail)
+    const storageService = createMockStorageService()
+    const mockHasher = vi.fn().mockResolvedValue('hash-123456')
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={onUpdated}
+        api={api}
+        storageService={storageService}
+        hashFile={mockHasher}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/规格与状态/)).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /已发布证据/ }))
+
+    // 暂无证据提示
+    expect(screen.getByText(/暂无已发布证据/)).toBeInTheDocument()
+
+    // 查找上传 input 并触发文件选择
+    const file = new File(['evidence-bytes'], 'manual-spec.pdf', { type: 'application/pdf' })
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(fileInput).toBeTruthy()
+
+    fireEvent.change(fileInput, { target: { files: [file] } })
+
+    await waitFor(() => {
+      expect(mockHasher).toHaveBeenCalledWith(file)
+      expect(storageService.reserveUpload).toHaveBeenCalledWith({
+        filename: 'manual-spec.pdf',
+        mediaType: 'application/pdf',
+        sizeBytes: file.size,
+        sha256: 'hash-123456',
+      })
+      expect(storageService.uploadFile).toHaveBeenCalled()
+      expect(storageService.completeUpload).toHaveBeenCalledWith('upload-id-1')
+      expect(api.addIssueEvidence).toHaveBeenCalledWith(issueId, { uploadId: 'upload-id-1' })
+      expect(api.getIssue).toHaveBeenCalledTimes(2) // 初始 + refetch
+      expect(onUpdated).toHaveBeenCalled()
+    })
+  })
+
+  it('shows error banner when download URL fetch fails and allows dismissal', async () => {
+    // 测试意图：验证下载地址换取失败时展示错误提示，且用户可手动关闭
+    const evidenceList: IssueEvidenceDTO[] = [
+      {
+        issueId,
+        blobId: 'blob-err-1',
+        uri: 'kkstudio:/resources/blob-err-1',
+        origin: 'HUMAN',
+        name: 'failed.png',
+        runId: null,
+        publishedAt: '2026-09-20T11:00:00Z',
+      },
+    ]
+
+    const api = createMockApi({
+      ...mockActiveIssueDetail,
+      evidence: evidenceList,
+    })
+    const storageService = createMockStorageService({
+      getBlobDownloadUrl: vi.fn().mockRejectedValue(new Error('未获取到有效下载权限')),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={vi.fn()}
+        api={api}
+        storageService={storageService}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/已发布证据/)).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /已发布证据/ }))
+
+    const downloadBtn = screen.getByRole('button', { name: /下载/i })
+    fireEvent.click(downloadBtn)
+
+    await waitFor(() => {
+      expect(screen.getByText('未获取到有效下载权限')).toBeInTheDocument()
+    })
+
+    // 关闭错误提示
+    const closeErrorBtn = screen.getByRole('button', { name: '关闭下载错误提示' })
+    fireEvent.click(closeErrorBtn)
+
+    await waitFor(() => {
+      expect(screen.queryByText('未获取到有效下载权限')).not.toBeInTheDocument()
+    })
+  })
+
+  it('stale protection: cancels or discards completion if issueId changes before upload completes', async () => {
+    // 测试意图：验证当异步上传尚未完成时，若用户切换到其它 Issue，丢弃旧 Issue 的 addIssueEvidence 调用并释放已预留资源
+    let resolveReserve: (val: StorageUploadDTO) => void
+    const reservePromise = new Promise<StorageUploadDTO>((resolve) => {
+      resolveReserve = resolve
+    })
+
+    const onUpdated = vi.fn()
+    const api = createMockApi(mockActiveIssueDetail)
+    const storageService = createMockStorageService({
+      reserveUpload: vi.fn().mockImplementation(() => reservePromise),
+    })
+
+    const { rerender } = renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        projectId={projectId}
+        onClose={vi.fn()}
+        onUpdated={onUpdated}
+        api={api}
+        storageService={storageService}
+        hashFile={vi.fn().mockResolvedValue('hash-123')}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/已发布证据/)).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /已发布证据/ }))
+
+    const file = new File(['evidence'], 'evidence.png', { type: 'image/png' })
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(fileInput, { target: { files: [file] } })
+
+    // 等待预留已发起（哈希已完成，但 reserveUpload 挂起）
+    await waitFor(() => {
+      expect(storageService.reserveUpload).toHaveBeenCalled()
+    })
+
+    // 在异步 reserve 仍在挂起时，修改 props 将 issueId 切换到 issue-2
+    const nextIssueId = 'issue-00000000-0000-0000-0000-000000000002'
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+          })
+        }
+      >
+        <IssueDetailModal
+          isOpen={true}
+          issueId={nextIssueId}
+          projectId={projectId}
+          onClose={vi.fn()}
+          onUpdated={onUpdated}
+          api={api}
+          storageService={storageService}
+        />
+      </QueryClientProvider>,
+    )
+
+    // 现在 resolve 旧的 reservePromise
+    resolveReserve!({
+      id: 'stale-upload-id',
+      state: 'PENDING',
+      sha256: 'hash-123',
+      mediaType: 'image/png',
+      sizeBytes: 8,
+      presignedPut: {
+        url: 'https://upload.example.com',
+        headers: {},
+        expiresAt: '2026-09-20T12:00:00Z',
+      },
+    })
+
+    // 等待 microtask 执行完毕
+    await new Promise((r) => setTimeout(r, 50))
+
+    // 验证：绝不向旧的 issueId 发送 addIssueEvidence，并对已预留的上传句柄进行释放 (deleteUpload)
+    expect(api.addIssueEvidence).not.toHaveBeenCalled()
+    expect(storageService.deleteUpload).toHaveBeenCalledWith('stale-upload-id')
   })
 })

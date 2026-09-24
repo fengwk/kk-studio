@@ -13,6 +13,7 @@ export {
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
+  type ImageInputTier,
 } from '@/features/ai/composer/composer-parts'
 export {
   extractPartsFromEditor,
