@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.impl.IssueRunServiceImpl;
 
@@ -48,6 +49,7 @@ class IssueRunServiceObjectMapperUnitTest {
             mock(IssueRunRepository.class),
             mock(IssueAgentSessionRepository.class),
             mock(IssueWorkStore.class),
+            mock(IssueEvidenceService.class),
             mockedMapper);
 
     AiValidationException ex =
@@ -92,6 +94,7 @@ class IssueRunServiceObjectMapperUnitTest {
             runRepo,
             mock(IssueAgentSessionRepository.class),
             mock(IssueWorkStore.class),
+            mock(IssueEvidenceService.class),
             mockedMapper);
 
     // 当 readTree 解析失败时，两 JSON 判定不等，fail-fast 抛出 Terminal action ID conflict

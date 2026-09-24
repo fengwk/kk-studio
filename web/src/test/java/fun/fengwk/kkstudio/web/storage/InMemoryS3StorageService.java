@@ -20,6 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -41,6 +42,11 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   public boolean hasObject(String key) {
     return objects.containsKey(key);
+  }
+
+  /** 当前全部对象 key 的快照：供「引用转移不复制字节」等断言逐对象比对。 */
+  public Set<String> keys() {
+    return Set.copyOf(objects.keySet());
   }
 
   public byte[] objectBytes(String key) {

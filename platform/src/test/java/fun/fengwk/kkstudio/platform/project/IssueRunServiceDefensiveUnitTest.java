@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.impl.IssueRunServiceImpl;
 
@@ -459,6 +460,7 @@ class IssueRunServiceDefensiveUnitTest {
     private final IssueAgentSessionRepository agentSessions =
         mock(IssueAgentSessionRepository.class);
     private final IssueWorkStore workStore = mock(IssueWorkStore.class);
+    private final IssueEvidenceService evidenceService = mock(IssueEvidenceService.class);
     private final IssueRunServiceImpl service =
         new IssueRunServiceImpl(
             projects,
@@ -468,6 +470,7 @@ class IssueRunServiceDefensiveUnitTest {
             runs,
             agentSessions,
             workStore,
+            evidenceService,
             new ObjectMapper());
 
     private void stubIssue(Issue issue) {

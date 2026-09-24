@@ -9,7 +9,9 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.impl.mapper.IssueAgentSessionMapper;
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueAgentSessionDO;
 
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @AllArgsConstructor
 @Repository
@@ -101,6 +103,13 @@ public class PostgresqlIssueAgentSessionRepository implements IssueAgentSessionR
   @Override
   public IssueAgentSession findByThreadId(UUID threadId) {
     return toModel(issueAgentSessionMapper.findByThreadId(threadId));
+  }
+
+  @Override
+  public List<IssueAgentSession> listByIssueId(UUID issueId) {
+    return issueAgentSessionMapper.listByIssueId(issueId).stream()
+        .map(this::toModel)
+        .collect(Collectors.toList());
   }
 
   @Override

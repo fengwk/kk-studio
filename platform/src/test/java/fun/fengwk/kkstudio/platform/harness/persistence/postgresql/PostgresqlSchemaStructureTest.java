@@ -70,6 +70,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "project_issue_agent_session",
           "project_issue_run",
           "project_issue_activity",
+          "project_issue_evidence",
           "project_issue_work",
           "session_owner",
           "session_blob_ref",

@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.impl.ProjectValidationUtils;
 
 import java.util.List;
@@ -40,13 +41,15 @@ public class ProjectHarnessSessionBootstrapService {
   private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
+  private final IssueEvidenceService issueEvidenceService;
 
   public ProjectHarnessSessionBootstrapService(
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueAgentSessionRepository issueAgentSessionRepository,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator) {
+      HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
+      IssueEvidenceService issueEvidenceService) {
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
     this.issueAgentSessionRepository =
@@ -55,6 +58,8 @@ public class ProjectHarnessSessionBootstrapService {
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
     this.acceptanceOrchestrator =
         Objects.requireNonNull(acceptanceOrchestrator, "acceptanceOrchestrator");
+    this.issueEvidenceService =
+        Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
   }
 
   @Transactional
@@ -119,9 +124,14 @@ public class ProjectHarnessSessionBootstrapService {
     AcceptCommandsTarget.NewSession target =
         new AcceptCommandsTarget.NewSession(
             request.sessionId(), request.threadId(), settings, null, project.isYoloEnabled());
-    return acceptanceOrchestrator.accept(
-        new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, agentSession.getId()),
-        new AcceptCommandsCommand(target, List.of(command)));
+    AcceptedCommands accepted =
+        acceptanceOrchestrator.accept(
+            new OwnerRef(OwnerType.ISSUE_AGENT_SESSION, agentSession.getId()),
+            new AcceptCommandsCommand(target, List.of(command)));
+    // Session 行已建立：把该 Issue 已发布证据的指定 Blob 引用幂等授予它，使后续参与者能读取公开证据（只授已发布
+    // Blob，不存在通配可见性）。授权失败让整个引导回滚，绝不留下已接受命令却看不到公开证据的 Session。
+    issueEvidenceService.grantPublishedEvidence(issue.getId(), request.sessionId());
+    return accepted;
   }
 
   @Transactional

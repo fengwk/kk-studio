@@ -12,6 +12,7 @@ import org.apache.ibatis.annotations.Select;
 
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueAgentSessionDO;
 
+import java.util.List;
 import java.util.UUID;
 
 @Mapper
@@ -62,6 +63,13 @@ public interface IssueAgentSessionMapper extends BaseMapper {
   @Select("select " + COLUMNS + " from project_issue_agent_session where thread_id = #{threadId}")
   @ResultMap("issueAgentSessionResultMap")
   IssueAgentSessionDO findByThreadId(@Param("threadId") UUID threadId);
+
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue_agent_session where issue_id = #{issueId} order by agent_name")
+  @ResultMap("issueAgentSessionResultMap")
+  List<IssueAgentSessionDO> listByIssueId(@Param("issueId") UUID issueId);
 
   @Delete("delete from project_issue_agent_session where id = #{id}")
   int deleteById(@Param("id") UUID id);

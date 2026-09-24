@@ -21,13 +21,16 @@ import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.share.project.AddIssueDependencyRequestDTO;
+import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.BlockIssueRequestDTO;
@@ -39,6 +42,7 @@ import fun.fengwk.kkstudio.share.project.IssueAgentSessionDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
 import fun.fengwk.kkstudio.share.project.IssueDependencyDTO;
 import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
+import fun.fengwk.kkstudio.share.project.IssueEvidenceDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RetryIssueRequestDTO;
@@ -79,6 +83,7 @@ public class StudioIssueController {
 
   private final IssueService issueService;
   private final IssueRunService issueRunService;
+  private final IssueEvidenceService issueEvidenceService;
   private final ProjectDtoMapper mapper;
 
   @PostMapping("/api/projects/{projectId}/issues")
@@ -136,6 +141,8 @@ public class StudioIssueController {
             .dependencies(deps.stream().map(mapper::toDto).toList())
             .sessions(listAgentSessions(issue))
             .activities(activities.stream().map(mapper::toDto).toList())
+            .evidence(
+                issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList())
             .nextActivityCursor(nextActivityCursor(issueId, activities, activityLimit))
             .runs(runDtos)
             .currentRun(
@@ -293,6 +300,22 @@ public class StudioIssueController {
     IssueActivity appended = issueService.appendActivity(activity);
 
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(appended)));
+  }
+
+  /**
+   * 人工上传转为 Issue 公开证据：请求只携带已 READY 的 {@code uploadId}，服务端在单个事务内 {@code lockReady -> retain Issue 引用
+   * -> delete upload} 原子转移引用，不复制字节，也不信任客户端声明的文件名。
+   */
+  @PostMapping("/api/issues/{issueId}/evidence")
+  public ResponseEntity<Result<IssueEvidenceDTO>> addEvidence(
+      @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID uploadId = ProjectDtoMapper.parseUuid(request.getUploadId(), "uploadId");
+
+    IssueEvidence evidence = issueEvidenceService.publishHumanUpload(issueId, uploadId);
+
+    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(evidence)));
   }
 
   /** 人工评审：被审查提交由服务端按当前 {@code IN_REVIEW} 的合格提交确定，{@code idempotencyKey} 支持安全重放。 */

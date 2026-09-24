@@ -32,6 +32,8 @@ import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidenceOrigin;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
@@ -39,6 +41,7 @@ import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -76,11 +79,14 @@ class ProjectRoleToolTest {
   private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-000000000050");
   private static final UUID INVOCATION_ID = UUID.fromString("00000000-0000-0000-0000-000000000060");
   private static final UUID SESSION_ID = UUID.fromString("00000000-0000-0000-0000-000000000070");
+  private static final UUID EVIDENCE_BLOB_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000080");
   private static final String CALL_ID = "call-123";
 
   private ProjectService projectService;
   private IssueService issueService;
   private IssueRunService issueRunService;
+  private IssueEvidenceService issueEvidenceService;
   private ProjectRoleToolService toolService;
   private ProjectThreadOwnerResolver ownerResolver;
 
@@ -93,9 +99,12 @@ class ProjectRoleToolTest {
     projectService = mock(ProjectService.class);
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
+    issueEvidenceService = mock(IssueEvidenceService.class);
     ownerResolver = mock(ProjectThreadOwnerResolver.class);
 
-    toolService = new ProjectRoleToolService(projectService, issueService, issueRunService);
+    toolService =
+        new ProjectRoleToolService(
+            projectService, issueService, issueRunService, issueEvidenceService);
 
     executorOwner =
         new ProjectThreadOwnerContext(
@@ -498,6 +507,18 @@ class ProjectRoleToolTest {
             .build();
     when(issueRunService.getAgentSession(ISSUE_ID, "coder-agent")).thenReturn(agentSession);
 
+    // 已发布证据以规范 URI 暴露：它是资源标识而不是读取凭据，因此只投影元数据，不暴露 blob 内部字段之外的敏感值
+    when(issueEvidenceService.listEvidence(ISSUE_ID))
+        .thenReturn(
+            List.of(
+                IssueEvidence.builder()
+                    .issueId(ISSUE_ID)
+                    .blobId(EVIDENCE_BLOB_ID)
+                    .origin(IssueEvidenceOrigin.EXECUTOR)
+                    .runId(RUN_ID)
+                    .createdAt(Instant.now())
+                    .build()));
+
     String args = String.format("{\"issue_id\":\"%s\"}", ISSUE_ID);
     ToolExecutionRequest request = createRequest(tool.descriptor(), args, executionContext);
     TestListener listener = new TestListener();
@@ -512,6 +533,10 @@ class ProjectRoleToolTest {
     assertTrue(text.contains("Prerequisite Task"));
     assertTrue(text.contains("Initial requirements"));
     assertTrue(text.contains("\"satisfied\" : true"));
+    assertTrue(
+        text.contains("kkstudio:/resources/" + EVIDENCE_BLOB_ID),
+        "published evidence must be exposed as a canonical resource uri");
+    assertTrue(text.contains("\"origin\" : \"EXECUTOR\""));
     assertFalse(text.contains("secret-idempotency-key"), "idempotencyKey must not be exposed");
     assertFalse(text.contains("secret-terminal-action-id"), "terminalActionId must not be exposed");
   }

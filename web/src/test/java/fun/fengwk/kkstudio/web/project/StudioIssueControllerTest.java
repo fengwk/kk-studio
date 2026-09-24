@@ -29,14 +29,18 @@ import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidenceOrigin;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
 import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.share.project.AddIssueDependencyRequestDTO;
+import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.BlockIssueRequestDTO;
@@ -58,6 +62,7 @@ class StudioIssueControllerTest {
 
   private IssueService issueService;
   private IssueRunService issueRunService;
+  private IssueEvidenceService issueEvidenceService;
 
   private MockMvc mockMvc;
   private final ObjectMapper objectMapper = ObjectMapperHolder.getInstance();
@@ -69,9 +74,11 @@ class StudioIssueControllerTest {
   void setUp() {
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
+    issueEvidenceService = mock(IssueEvidenceService.class);
 
     StudioIssueController controller =
-        new StudioIssueController(issueService, issueRunService, new ProjectDtoMapper());
+        new StudioIssueController(
+            issueService, issueRunService, issueEvidenceService, new ProjectDtoMapper());
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -169,6 +176,19 @@ class StudioIssueControllerTest {
     when(issueRunService.getAgentSession(issueId, "coder")).thenReturn(coderSession);
     when(issueRunService.getAgentSession(issueId, "reviewer")).thenReturn(reviewerSession);
 
+    // 已发布证据以规范 URI + 元数据暴露；URI 只是资源标识，读取仍由平台按已发布证据授予的 Session 引用决定
+    UUID evidenceBlobId = UUID.randomUUID();
+    when(issueEvidenceService.listEvidence(issueId))
+        .thenReturn(
+            List.of(
+                IssueEvidence.builder()
+                    .issueId(issueId)
+                    .blobId(evidenceBlobId)
+                    .origin(IssueEvidenceOrigin.EXECUTOR)
+                    .runId(runId)
+                    .createdAt(now)
+                    .build()));
+
     mockMvc
         .perform(get("/api/issues/" + issueId))
         .andExpect(status().isOk())
@@ -182,7 +202,43 @@ class StudioIssueControllerTest {
             jsonPath("$.data.runs[0].sessionId").value(runSessionId.toString().toLowerCase()))
         .andExpect(jsonPath("$.data.currentRun.id").value(runId.toString().toLowerCase()))
         .andExpect(jsonPath("$.data.latestRun.id").value(runId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.data.evidence[0].blobId").value(evidenceBlobId.toString()))
+        .andExpect(
+            jsonPath("$.data.evidence[0].uri").value("kkstudio:/resources/" + evidenceBlobId))
+        .andExpect(jsonPath("$.data.evidence[0].origin").value("EXECUTOR"))
+        .andExpect(jsonPath("$.data.evidence[0].name").isEmpty())
         .andExpect(jsonPath("$.data.nextActivityCursor").isEmpty());
+  }
+
+  /** 人工上传转为公开证据：请求只携带 uploadId，响应给出规范 URI，绝不回显对象 key 或字节。 */
+  @Test
+  void testAddIssueEvidence() throws Exception {
+    UUID uploadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    when(issueEvidenceService.publishHumanUpload(issueId, uploadId))
+        .thenReturn(
+            IssueEvidence.builder()
+                .issueId(issueId)
+                .blobId(blobId)
+                .origin(IssueEvidenceOrigin.HUMAN)
+                .name("report.pdf")
+                .createdAt(now)
+                .build());
+
+    AddIssueEvidenceRequestDTO req =
+        AddIssueEvidenceRequestDTO.builder().uploadId(uploadId.toString()).build();
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/evidence")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.blobId").value(blobId.toString()))
+        .andExpect(jsonPath("$.data.uri").value("kkstudio:/resources/" + blobId))
+        .andExpect(jsonPath("$.data.origin").value("HUMAN"))
+        .andExpect(jsonPath("$.data.name").value("report.pdf"))
+        .andExpect(jsonPath("$.data.runId").isEmpty());
   }
 
   @Test

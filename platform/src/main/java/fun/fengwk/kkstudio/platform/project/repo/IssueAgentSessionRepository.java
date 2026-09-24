@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.project.repo;
 
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -21,6 +22,9 @@ public interface IssueAgentSessionRepository {
   IssueAgentSession findBySessionId(UUID sessionId);
 
   IssueAgentSession findByThreadId(UUID threadId);
+
+  /** 该 Issue 当前已绑定的全部 Agent 归属（用于向现有参与者授予已发布证据）。 */
+  List<IssueAgentSession> listByIssueId(UUID issueId);
 
   boolean deleteById(UUID id);
 

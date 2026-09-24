@@ -523,6 +523,26 @@ Thread、首条 Command、Work 与 owner relation；`project_issue_agent_session
 而 `ON DELETE RESTRICT` 仍立即生效。数据库 `session_owner.session_id` 主键与排他弧 check 保证
 Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。
 
+[IssueEvidenceServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/IssueEvidenceServiceImpl.java)
+管理 Issue **自有的**公开证据：`project_issue_evidence` 一行是 Issue 持有的一个已发布 Blob 引用
+（`origin = EXECUTOR | HUMAN`，PK `(issue_id, blob_id)`），与 Session 引用各自独立计数，不由 Session
+生命周期决定。公开只有两条入口，都发生在调用方业务事务内且都不复制字节：
+
+- **执行者 final**：最终答复里出现规范 `kkstudio:/resources/<blobId>`（严格小写、无查询参数；近似形态
+  一律不解析）且**来源 Run 的 Session 在提交时确实持有该引用**时才发布；任一引用不被持有就让整个
+  `issue_submit` 失败，不产生部分证据，URI 本身不是权限凭据。
+- **人工附件**：人经 Issue 入口提交已 READY 的 `uploadId`，服务端在同一事务内完成
+  `lockReady -> retain Issue 引用 -> delete upload` 的引用转移，展示名取自上传行而不是客户端，并追加一条
+  HUMAN `COMMENT` 事实。
+
+发布与授权都是幂等的：证据行已存在时不再 retain（重复交付不双计），授权对当时已绑定的参与者 Session，
+以及在**发布之后**才引导的 Session（`ProjectHarnessSessionBootstrapService` 在命令接受后调用
+`grantPublishedEvidence`）都只补差集；没有任何通配可见性，未获授权的历史附件仍然不可读。授权失败让引导
+整体回滚，不会留下已接受命令却看不到公开证据的 Session。`issue_read` 以规范 URI 与元数据（来源、发布
+Run、展示名、发布时间）暴露最新的有界证据窗口；`SessionDeletionOrchestrator` 深删除 Session 只释放该
+Session 自己的引用，撤回标记也不回收过去已披露的内容，只有 Issue/Project 深删除才按
+`project_issue_evidence -> Issue 引用释放` 的顺序释放 Issue 持有的引用。
+
 [IssueControllerDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueControllerDispatcher.java)
 只负责 `project_issue_work` 的短事务 claim、bounded handoff、合并 wake 与 poll；
 [IssueReconciler](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconciler.java)
@@ -546,8 +566,9 @@ poll 收敛。
 [ProjectRoleContextProjector](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectRoleContextProjector.java)
 只把可信 Run 元数据（issue/run/role/agent）注入系统指令，Issue 正文与 Activity 一律作为数据读取，
 绝不提升为指令。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或 UNKNOWN Run，再按
-work -> Agent Session（`deleteSessionsByOwner`）-> Runs（先 reviewer 后 executor）->
-Activities/Dependencies/Issues -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
+work -> Agent Session（`deleteSessionsByOwner`）-> Evidence（删证据行并逐行 release Issue 持有的
+Blob 引用，必须先于 Run 行，因为 `project_issue_evidence.run_id` 是 RESTRICT FK）-> Runs（先
+reviewer 后 executor）-> Activities/Dependencies/Issues -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
 这些工具通过
 [ProjectHistoryRenderers](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHistoryRenderers.java)
 提供历史语义动作：只保留动作与相关 issue/status/dependency 身份，省略
@@ -810,7 +831,8 @@ Skill binding。
 
 统一 `read` 根据 `path` 路由：`kkstudio:/skills/<package>/<skill>/...` 从 Platform
 bare Git cache 的 Package 当前 commit 读取，`kkstudio:/resources/<blobId>` 在校验当前
-Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（无 8 MiB 源文件上限，单次输出最多 48 KiB），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
+Session 引用后经 S3 流式读取 Blob 文本并格式化有界行窗口（该引用既可能来自该 Session 自己消费的附件，也
+可能来自 Issue 已发布证据的幂等授予，因此 Blob 实际可用时规范形态就是活动形态，不可用时确定性拒绝）（无 8 MiB 源文件上限，单次输出最多 48 KiB），本地绝对路径委托当前 `BoundEnvironment.fs.read`。相对
 路径要求显式 `workdir`；`workdir` 只参与同一地址空间内的相对解析，不提供隐藏默认值。
 Platform URI 不接受任意 HTTP(S) 透传。
 
