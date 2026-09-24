@@ -25,12 +25,27 @@ public final class SessionResourceUri {
   private static final Pattern CANONICAL_UUID =
       Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
 
+  /** 规范 URI 之后的普通文本分隔符：空白（含换行）、句末标点与引用/成对符号；非 ASCII（中文标点与引号等）同样按分隔符处理。 */
+  private static final String TEXT_DELIMITER = "\\s,;:!)\\]}>\"'`|*";
+
   /**
-   * 自由文本中内嵌的规范 URI：前缀前不得紧邻 URL/标识符字符（避免把更长的 URL 片段误认成平台 URI），UUID 之后不得再跟 hex 或连字符（避免截断更长 token）。
+   * 自由文本中内嵌的规范 URI 的边界，两侧都必须与 {@link #parse} 的精确形态一致。
+   *
+   * <p>前缀之前不得紧邻 URL/标识符字符，避免把更长的 URL 片段误认成平台 URI。UUID 之后必须是文本结束、普通文本分隔符或非 ASCII
+   * 字符；路径、查询、片段与点续写（{@code <uuid>/suffix}、{@code <uuid>?token}、{@code <uuid>#anchor}、 {@code
+   * <uuid>.txt}）以及更长 token（{@code <uuid>0f}）一律整体不匹配，绝不截断出一个文本里并不存在的标识。句末 {@code .}/{@code ?}
+   * 只有紧随分隔符或文本结束才算分隔符。
    */
   private static final Pattern EMBEDDED =
       Pattern.compile(
-          "(?<![A-Za-z0-9._/-])" + PREFIX + CANONICAL_UUID.pattern() + "(?![0-9a-fA-F-])");
+          "(?<![A-Za-z0-9._/-])"
+              + PREFIX
+              + CANONICAL_UUID.pattern()
+              + "(?=$|["
+              + TEXT_DELIMITER
+              + "]|[^\\x00-\\x7F]|[.?](?=$|["
+              + TEXT_DELIMITER
+              + "]|[^\\x00-\\x7F]))");
 
   private SessionResourceUri() {}
 

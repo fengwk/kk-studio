@@ -529,7 +529,8 @@ Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。
 生命周期决定。公开只有两条入口，都发生在调用方业务事务内且都不复制字节：
 
 - **执行者 final**：最终答复里出现规范 `kkstudio:/resources/<blobId>`（严格小写、无查询参数；近似形态
-  一律不解析）且**来源 Run 的 Session 在提交时确实持有该引用**时才发布；任一引用不被持有就让整个
+  一律不解析——`<blobId>/suffix`、`?query`、`#fragment` 或更长的 token 都整体不算引用，绝不从中截断出一个
+  文本里并不存在的标识）且**来源 Run 的 Session 在提交时确实持有该引用**时才发布；任一引用不被持有就让整个
   `issue_submit` 失败，不产生部分证据，URI 本身不是权限凭据。
 - **人工附件**：人经 Issue 入口提交已 READY 的 `uploadId`，服务端在同一事务内完成
   `lockReady -> retain Issue 引用 -> delete upload` 的引用转移，展示名取自上传行而不是客户端，并追加一条
