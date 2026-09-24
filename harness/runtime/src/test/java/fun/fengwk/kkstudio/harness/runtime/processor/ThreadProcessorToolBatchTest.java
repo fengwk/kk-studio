@@ -36,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
@@ -47,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
@@ -61,7 +63,11 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -150,6 +156,68 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
+  }
+
+  /** 回归：Provider replay state 在 Model attach 时转移到 Assistant Entry，两个 terminal Tool 仍须完成 batch。 */
+  @Test
+  void toolSiblingBatchAcceptsReplayStateTransferredToAssistantEntry() {
+    Fixture fixture = fixture();
+    var turn = seedOpenInputTurn(fixture.store);
+    ModelRequestSpec requestSpec = tooledRequest(List.of("bash"));
+    ProviderResponse response = successResponse(List.of("call-1", "call-2"), "bash");
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            new ProviderReplayAffinity(
+                ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 1L), "claude-3-5-sonnet"),
+            "0123456789abcdef".repeat(4),
+            JsonNodeFactory.instance.objectNode().put("k", "v"));
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            turn.threadId(),
+            turn.turnStartEntryId(),
+            turn.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            requestSpec,
+            response,
+            null,
+            replayState);
+    UUID assistantId =
+        fixture.store.transaction(
+            tx -> {
+              var thread = tx.lockThread(turn.threadId()).orElseThrow();
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      turn.sessionId(),
+                      turn.userEntryId(),
+                      new HistoryPayloadMapper()
+                          .assistantPayload(response, requestSpec.toolBindings()),
+                      NOW,
+                      replayState));
+              tx.updateThread(thread.advanceHead(id, NOW));
+              return id;
+            });
+    transitionModel(fixture.store, modelId, model -> model.attachResultEntry(assistantId, NOW));
+    seedToolInvocation(
+        fixture.store, modelId, assistantId, 0, "call-1", ToolInvocationStatus.SUCCEEDED);
+    seedToolInvocation(
+        fixture.store, modelId, assistantId, 1, "call-2", ToolInvocationStatus.SUCCEEDED);
+    requestThreadWork(fixture.store, turn.threadId());
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(turn.threadId()));
+    List<Entry> entries = path(fixture.store, turn.threadId()).entries();
+    assertEquals(7, entries.size());
+    assertEquals(replayState, entries.get(3).providerReplayState());
+    assertEquals(
+        AgentMessageRole.TOOL, ((MessagePayload) entries.get(4).payload()).message().role());
+    assertEquals(
+        AgentMessageRole.TOOL, ((MessagePayload) entries.get(5).payload()).message().role());
+    assertInstanceOf(TurnEndPayload.class, entries.get(6).payload());
+    assertTrue(toolsByAssistant(fixture.store, assistantId).isEmpty());
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
   }
 
   @Test

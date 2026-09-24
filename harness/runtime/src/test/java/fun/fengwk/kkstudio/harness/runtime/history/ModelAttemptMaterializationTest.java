@@ -351,6 +351,8 @@ class ModelAttemptMaterializationTest {
     EntryPath path = attachedToolPath(assistant);
 
     assertDoesNotThrow(() -> ModelAttemptMaterialization.validate(stored, attached, path));
+    // 测试意图：attach 已把 replay state 转移到不可变 Entry，Tool batch 的二次校验不能把清空后的 Invocation 与 Entry 比较。
+    assertDoesNotThrow(() -> ModelAttemptMaterialization.validateAttached(attached, path));
   }
 
   @Test
@@ -743,6 +745,46 @@ class ModelAttemptMaterializationTest {
             ModelAttemptMaterialization.validate(
                 stored, stored.attachResultEntry(drifted.id(), T6), driftedPath),
         "compaction result must match the assembled summary exactly");
+  }
+
+  /** 测试意图：压缩结果只持久化摘要，不能将 provider 的原生 replay state 强制转移到非 Assistant Entry。 */
+  @Test
+  void compactionMayDiscardProviderReplayState() {
+    CompactionStart compaction = historyCompactionStart();
+    ModelInvocation base = compactionSucceededInvocation();
+    ModelInvocation stored =
+        new ModelInvocation(
+            base.id(),
+            base.threadId(),
+            base.turnStartEntryId(),
+            base.requestHeadEntryId(),
+            base.requestSpec(),
+            base.status(),
+            base.attempt(),
+            base.streamCheckpoint(),
+            base.result(),
+            base.error(),
+            base.resultEntryId(),
+            base.failedAttempts(),
+            base.createdAt(),
+            base.updatedAt(),
+            sampleReplayState());
+    EntryPath preResult =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction)));
+    Entry result =
+        new Entry(
+            id(4L),
+            id(100L),
+            id(2L),
+            CompactionSummaryAssembler.resultPayload(preResult, compaction, "final summary"),
+            T6);
+    EntryPath path =
+        new EntryPath(List.of(root(), compactionTurnStart(id(2L), id(1L), T1, compaction), result));
+
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                stored, stored.attachResultEntry(result.id(), T6), path));
   }
 
   /**

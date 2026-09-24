@@ -352,6 +352,10 @@ Flyway owner，也是唯一的 Harness worker，Thread/Model/Tool 的异步执�
 是替换镜像 tag 并重启容器，而不是在容器内改源码，因此容器不挂载源码工作区、Maven/npm cache
 或 `gh` 配置。
 
+`prod` profile 的应用日志写在容器内 `/app/logs/kk-studio-all.log`，不写到 Docker 控制台；
+`docker logs` 中只有 JVM 或启动横幅不代表没有应用错误。排查异步 Work 时用
+`docker exec vps-kk-studio sh -c 'tail -n 100 /app/logs/kk-studio-all.log'` 查看，并在分享前脱敏。
+
 ### 本机 preview 与 NAS 数据面
 
 前端与同步 API 的日常开发在笔记本上进行：[scripts/dev/shared-preview.sh](../../scripts/dev/shared-preview.sh)
