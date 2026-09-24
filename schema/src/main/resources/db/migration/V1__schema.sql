@@ -1994,7 +1994,60 @@ comment on column session_blob_ref.created_at is '引用创建时间（timestamp
 comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
 
 ------------------------------------------------------------------------------
--- 8. Canvas resource blob FK (must follow the global blob storage section)
+-- 8. Issue published evidence
+--
+-- 一条记录是 Issue 显式持有的一个已发布 Blob 引用：只有执行者最终答复明确引用（summary
+-- 正文含规范 kkstudio:/resources/<blobId>）且来源 Run 的 Session 在提交时确实持有该引用的
+-- 产物，以及人经 Issue 入口上传的附件，才成为公开证据；其余附件保持私有。主键即“同 Issue
+-- 同 Blob 至多一条”的幂等键，重复发布不新增行也不重复 retain。
+--
+-- 本表是 Issue 自有的 owner edge，与 Session 无关：删除 Session 不释放这里的引用，只有
+-- Issue/Project 深删除才逐行 release。两个 FK 都是 RESTRICT，行必须早于 project_issue_run
+-- 删除；ref_count 变更完全由应用事务完成，不依赖 cascade 或触发器。
+------------------------------------------------------------------------------
+create table project_issue_evidence (
+    issue_id   uuid          not null,
+    blob_id    uuid          not null,
+    origin     varchar(16)   not null,
+    run_id     uuid,
+    name       varchar(512),
+    created_at timestamptz(3) not null default clock_timestamp(),
+    constraint pk_project_issue_evidence primary key (issue_id, blob_id),
+    constraint fk_project_issue_evidence_issue foreign key (issue_id)
+        references project_issue (id) on delete restrict,
+    constraint fk_project_issue_evidence_blob foreign key (blob_id)
+        references storage_blob (id) on delete restrict,
+    constraint fk_project_issue_evidence_run foreign key (run_id, issue_id)
+        references project_issue_run (id, issue_id) on delete restrict,
+    constraint chk_project_issue_evidence_origin check (origin in ('EXECUTOR', 'HUMAN')),
+    constraint chk_project_issue_evidence_origin_shape check (
+        (origin = 'EXECUTOR' and run_id is not null) or
+        (origin = 'HUMAN' and run_id is null and name is not null)
+    ),
+    constraint chk_project_issue_evidence_name check (
+        name is null or (length(trim(name)) > 0 and name = btrim(name))
+    )
+);
+
+create index idx_project_issue_evidence_blob
+    on project_issue_evidence (blob_id);
+
+comment on table project_issue_evidence is
+    'Issue 公开证据：Issue 自有 owner edge 持有的已发布 Blob 引用（执行者 final 明确引用或人工附件）';
+comment on column project_issue_evidence.issue_id is '所属 Issue UUID（复合主键）';
+comment on column project_issue_evidence.blob_id is '已发布 Blob UUID（复合主键，RESTRICT FK，ACTIVE 行）';
+comment on column project_issue_evidence.origin is '发布来源：EXECUTOR（执行者 final 明确引用）或 HUMAN（人工上传）';
+comment on column project_issue_evidence.run_id is
+    'EXECUTOR 必填，指向发布该证据的执行 Run（同 Issue 约束）；HUMAN 为空';
+comment on column project_issue_evidence.name is
+    '权威展示名（varchar(512)，非空且无首尾空白）：HUMAN 必填且取自上传行；EXECUTOR 为空——final 正文只携带规范 URI，'
+    '不携带可伪造的文件名';
+comment on column project_issue_evidence.created_at is '发布时间戳（毫秒精度）';
+
+comment on index idx_project_issue_evidence_blob is '按 blob 反向枚举引用它的 Issue（对账与深删除）';
+
+------------------------------------------------------------------------------
+-- 9. Canvas resource blob FK (must follow the global blob storage section)
 ------------------------------------------------------------------------------
 
 alter table canvas_resource

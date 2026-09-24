@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -46,6 +47,7 @@ class ProjectToolConfigurationTest {
         .withBean(ProjectService.class, () -> mock(ProjectService.class))
         .withBean(IssueService.class, () -> mock(IssueService.class))
         .withBean(IssueRunService.class, () -> mock(IssueRunService.class))
+        .withBean(IssueEvidenceService.class, () -> mock(IssueEvidenceService.class))
         .withUserConfiguration(
             ProjectToolConfiguration.class,
             ProjectRoleToolService.class,

@@ -47,11 +47,13 @@ erDiagram
     STORAGE_BLOB ||--o{ CANVAS_RESOURCE : backs
     STORAGE_BLOB ||--o{ STORAGE_UPLOAD : completes_to
     STORAGE_BLOB ||--o{ SESSION_BLOB_REF : retained_by
+    STORAGE_BLOB ||--o{ PROJECT_ISSUE_EVIDENCE : published_as
     PROJECT ||--o{ PROJECT_ISSUE : contains
     PROJECT_ISSUE ||--o{ PROJECT_ISSUE_DEPENDENCY : blocked_side
     PROJECT_ISSUE ||--o{ PROJECT_ISSUE_ACTIVITY : receives
     PROJECT_ISSUE ||--o{ PROJECT_ISSUE_AGENT_SESSION : binds
     PROJECT_ISSUE ||--o{ PROJECT_ISSUE_RUN : attempts
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_EVIDENCE : publishes
     PROJECT_ISSUE ||--o| PROJECT_ISSUE_WORK : schedules
 ```
 
@@ -66,7 +68,7 @@ erDiagram
 | MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控） |
 | Environment | `environment`、`environment_connection` |
 | Chat / Canvas | `chat`、`canvas_document`、`canvas_group`、`canvas_node`、`canvas_link`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
-| Project / Issue | `project`、`project_issue`、`project_issue_dependency`、`project_issue_activity`、`project_issue_agent_session`、`project_issue_run`、`project_issue_work` |
+| Project / Issue | `project`、`project_issue`、`project_issue_dependency`、`project_issue_activity`、`project_issue_agent_session`、`project_issue_run`、`project_issue_work`、`project_issue_evidence` |
 | Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
 | Session 归属 | 单行排他弧 `session_owner` |
 | Global Storage | `storage_blob`、`storage_upload`、`session_blob_ref` |
@@ -155,6 +157,16 @@ Plugin opaque payload，不按 provider token 字段建列；管理查询永远�
 ### Blob 生命周期
 
 `storage_blob` 是按 `(sha256, size_bytes)` 去重的不可变内容地址，字节在 S3，行只保存媒体事实与 `ref_count`/`state`。`uk_storage_blob_active_hash` 是部分唯一索引（`where state = 'ACTIVE'`），所以同一内容在 DELETING 期间可以重新上传；`ck_storage_blob_state_ref_count` 固定 ACTIVE 必须有正引用、DELETING 必须为零。`storage_upload.blob_id` 为空表示 PENDING（客户端 PUT 到 `uploads/{id}/original`）、非空表示 READY；`session_blob_ref` 让 Session 以显式边持有 blob。所有释放与 `ref_count` 变更都由应用事务完成，不依赖 cascade 或 trigger。
+
+### Issue 公开证据
+
+`project_issue_evidence` 是 Issue 自有的**已发布 Blob 引用**（PK `(issue_id, blob_id)`），与
+`session_blob_ref` 并列而不是替代关系：Issue 引用决定公开面，Session 引用决定读取授权，两者各自
+`retain`/`release` 同一个 `storage_blob`，`ref_count` 因此同时反映两侧持有。`origin` 只有
+`EXECUTOR`（必须带发布该证据的执行 `run_id`，复合 FK `(run_id, issue_id)` 保证 Run 属于同一 Issue）与
+`HUMAN`（`run_id` 必须为空、`name` 必须非空且取自上传行）两种形态，由 shape check 固定；没有 CASCADE，
+Issue/Project 深删除必须按引用逐一释放。发布时按当时已绑定的参与者 Session 幂等补授引用，发布之后
+引导的 Session 在引导事务内补齐，因此「Issue 可见证据永久不可读」不可达。
 
 ### 应用拥有的版本与提示
 

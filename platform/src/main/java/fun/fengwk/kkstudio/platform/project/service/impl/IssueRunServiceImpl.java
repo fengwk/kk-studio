@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 
@@ -53,6 +54,7 @@ public class IssueRunServiceImpl implements IssueRunService {
   private final IssueRunRepository issueRunRepository;
   private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final IssueWorkStore workStore;
+  private final IssueEvidenceService issueEvidenceService;
   private final ObjectMapper objectMapper;
 
   @Transactional
@@ -338,6 +340,10 @@ public class IssueRunServiceImpl implements IssueRunService {
     if (!issueUpdated) {
       throw new AiValidationException("issue", "Failed to update issue status to IN_REVIEW");
     }
+
+    // 与提交同一事务：只公开来源 Session 在提交时确实持有、且 final 正文明确引用的产物；不满足即拒绝整个提交，
+    // 绝不静默公开私有资源。
+    issueEvidenceService.publishExecutorEvidence(issueId, run.getId(), run.getAgentName(), summary);
 
     workStore.requestWork(issue.getId(), Instant.now());
     return issueRunRepository.getById(runId);

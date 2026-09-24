@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.impl.ProjectServiceImpl;
 
 import java.time.Instant;
@@ -42,7 +43,8 @@ class ProjectServiceDefensiveUnitTest {
       IssueRunRepository issueRunRepository,
       IssueAgentSessionRepository issueAgentSessionRepository,
       IssueWorkRepository issueWorkRepository,
-      SessionDeletionOrchestrator sessionDeletionOrchestrator) {
+      SessionDeletionOrchestrator sessionDeletionOrchestrator,
+      IssueEvidenceService issueEvidenceService) {
     return new ProjectServiceImpl(
         projectRepository,
         issueRepository,
@@ -51,7 +53,8 @@ class ProjectServiceDefensiveUnitTest {
         issueRunRepository,
         issueAgentSessionRepository,
         issueWorkRepository,
-        sessionDeletionOrchestrator);
+        sessionDeletionOrchestrator,
+        issueEvidenceService);
   }
 
   private ProjectServiceImpl createService(ProjectRepository projectRepository) {
@@ -63,7 +66,8 @@ class ProjectServiceDefensiveUnitTest {
         mock(IssueRunRepository.class),
         mock(IssueAgentSessionRepository.class),
         mock(IssueWorkRepository.class),
-        mock(SessionDeletionOrchestrator.class));
+        mock(SessionDeletionOrchestrator.class),
+        mock(IssueEvidenceService.class));
   }
 
   @Test
@@ -140,7 +144,8 @@ class ProjectServiceDefensiveUnitTest {
             issueRunRepository,
             issueAgentSessionRepository,
             issueWorkRepository,
-            sessionDeletionOrchestrator);
+            sessionDeletionOrchestrator,
+            mock(IssueEvidenceService.class));
 
     UUID projectId = UUID.randomUUID();
     Project proj = project(projectId, 0L, false);

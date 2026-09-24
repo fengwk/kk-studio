@@ -2,16 +2,19 @@ package fun.fengwk.kkstudio.web.project;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
 import fun.fengwk.kkstudio.share.project.IssueAgentSessionDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
 import fun.fengwk.kkstudio.share.project.IssueDependencyDTO;
+import fun.fengwk.kkstudio.share.project.IssueEvidenceDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunSummaryDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
@@ -129,6 +132,20 @@ public class ProjectDtoMapper {
         .body(activity.getBody())
         .idempotencyKey(activity.getIdempotencyKey())
         .createdAt(formatInstant(activity.getCreatedAt()))
+        .build();
+  }
+
+  /** 投影 Issue 已发布证据：URI 由 blob id 派生，绝不持久化；它是资源标识，不是读取凭据。 */
+  public IssueEvidenceDTO toDto(IssueEvidence evidence) {
+    Objects.requireNonNull(evidence, "evidence");
+    return IssueEvidenceDTO.builder()
+        .issueId(formatUuid(evidence.getIssueId()))
+        .blobId(formatUuid(evidence.getBlobId()))
+        .uri(SessionResourceUri.format(evidence.getBlobId()))
+        .origin(evidence.getOrigin() != null ? evidence.getOrigin().name() : null)
+        .name(evidence.getName())
+        .runId(formatUuid(evidence.getRunId()))
+        .publishedAt(formatInstant(evidence.getCreatedAt()))
         .build();
   }
 

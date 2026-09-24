@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -71,6 +72,7 @@ class ProjectHarnessSessionBootstrapServiceTest {
   private IssueAgentSessionRepository issueAgentSessionRepository;
   private AgentBranchSettingsMaterializer settingsMaterializer;
   private HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
+  private IssueEvidenceService issueEvidenceService;
   private ProjectHarnessSessionBootstrapService service;
 
   @BeforeEach
@@ -80,6 +82,7 @@ class ProjectHarnessSessionBootstrapServiceTest {
     issueAgentSessionRepository = mock(IssueAgentSessionRepository.class);
     settingsMaterializer = mock(AgentBranchSettingsMaterializer.class);
     acceptanceOrchestrator = mock(HarnessCommandAcceptanceOrchestrator.class);
+    issueEvidenceService = mock(IssueEvidenceService.class);
 
     service =
         new ProjectHarnessSessionBootstrapService(
@@ -87,7 +90,8 @@ class ProjectHarnessSessionBootstrapServiceTest {
             issueRepository,
             issueAgentSessionRepository,
             settingsMaterializer,
-            acceptanceOrchestrator);
+            acceptanceOrchestrator,
+            issueEvidenceService);
   }
 
   @Test

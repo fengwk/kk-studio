@@ -3,14 +3,17 @@ package fun.fengwk.kkstudio.platform.project.tool;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.platform.plugin.resource.SessionResourceUri;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
 import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -43,12 +46,18 @@ public class ProjectRoleToolService {
   private final ProjectService projectService;
   private final IssueService issueService;
   private final IssueRunService issueRunService;
+  private final IssueEvidenceService issueEvidenceService;
 
   public ProjectRoleToolService(
-      ProjectService projectService, IssueService issueService, IssueRunService issueRunService) {
+      ProjectService projectService,
+      IssueService issueService,
+      IssueRunService issueRunService,
+      IssueEvidenceService issueEvidenceService) {
     this.projectService = Objects.requireNonNull(projectService, "projectService");
     this.issueService = Objects.requireNonNull(issueService, "issueService");
     this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
+    this.issueEvidenceService =
+        Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
   }
 
   /**
@@ -85,6 +94,11 @@ public class ProjectRoleToolService {
       data.put("submission_run", toRunMap(requireSubmissionRun(owner, run.getSubmissionRunId())));
     }
     data.put("agent_session", toAgentSessionMap(run));
+    data.put(
+        "evidence",
+        issueEvidenceService.listEvidence(owner.issueId()).stream()
+            .map(ProjectRoleToolService::toEvidenceMap)
+            .toList());
     data.put(
         "dependencies",
         issueService.listDependencies(owner.issueId()).stream()
@@ -272,6 +286,16 @@ public class ProjectRoleToolService {
       map.put("session_id", text(agentSession.getSessionId()));
       map.put("branch_id", text(agentSession.getThreadId()));
     }
+    return map;
+  }
+
+  private static Map<String, Object> toEvidenceMap(IssueEvidence evidence) {
+    Map<String, Object> map = new LinkedHashMap<>();
+    map.put("uri", SessionResourceUri.format(evidence.getBlobId()));
+    map.put("origin", name(evidence.getOrigin()));
+    map.put("name", evidence.getName());
+    map.put("run_id", text(evidence.getRunId()));
+    map.put("published_at", text(evidence.getCreatedAt()));
     return map;
   }
 

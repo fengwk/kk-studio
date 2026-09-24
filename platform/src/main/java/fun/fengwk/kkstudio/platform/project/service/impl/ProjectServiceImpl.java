@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 
 import java.time.Instant;
@@ -47,6 +48,7 @@ public class ProjectServiceImpl implements ProjectService {
   private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final IssueWorkRepository issueWorkRepository;
   private final SessionDeletionOrchestrator sessionDeletionOrchestrator;
+  private final IssueEvidenceService issueEvidenceService;
 
   @Transactional
   @Override
@@ -271,7 +273,13 @@ public class ProjectServiceImpl implements ProjectService {
       issueAgentSessionRepository.deleteByIssueId(issue.getId());
     }
 
-    // (c) run rows：先删 reviewer (有 submission_run_id)，再删 executor
+    // (c) issue evidence：Issue 持有的已发布 Blob 引用必须先于 Run 行删除（run FK RESTRICT），
+    // 逐行 release Issue 引用；Session 侧引用已由 (b) 的深删除各自释放。
+    for (Issue issue : sortedIssues) {
+      issueEvidenceService.deleteByIssue(issue.getId());
+    }
+
+    // (d) run rows：先删 reviewer (有 submission_run_id)，再删 executor
     List<IssueRun> reviewerRuns =
         sortedRuns.stream().filter(r -> r.getSubmissionRunId() != null).toList();
     List<IssueRun> executorRuns =
@@ -292,12 +300,12 @@ public class ProjectServiceImpl implements ProjectService {
       }
     }
 
-    // (d) activities
+    // (e) activities
     for (Issue issue : sortedIssues) {
       issueActivityRepository.deleteByIssueId(issue.getId());
     }
 
-    // (e) dependency edges
+    // (f) dependency edges
     List<IssueDependency> deps = issueDependencyRepository.listByProjectId(id);
     if (!deps.isEmpty()) {
       int deleted = issueDependencyRepository.deleteByProjectId(id);
@@ -308,7 +316,7 @@ public class ProjectServiceImpl implements ProjectService {
       }
     }
 
-    // (f) issues
+    // (g) issues
     for (Issue issue : sortedIssues) {
       boolean deleted = issueRepository.deleteById(issue.getId(), issue.getVersion());
       if (!deleted) {
@@ -317,7 +325,7 @@ public class ProjectServiceImpl implements ProjectService {
       }
     }
 
-    // (g) project CAS 删除
+    // (h) project CAS 删除
     boolean projectDeleted = projectRepository.deleteById(id, expectedVersion);
     if (!projectDeleted) {
       throw new AiVersionConflictException("project", String.valueOf(expectedVersion), "unknown");

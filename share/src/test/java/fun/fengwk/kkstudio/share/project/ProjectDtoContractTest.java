@@ -51,6 +51,8 @@ class ProjectDtoContractTest {
     "IssueDetailDTO.nextActivityCursor",
     "IssueDetailDTO.currentRun",
     "IssueDetailDTO.latestRun",
+    "IssueEvidenceDTO.name",
+    "IssueEvidenceDTO.runId",
     "IssueRunSummaryDTO.agentName",
     "IssueRunSummaryDTO.submissionRunId",
     "IssueRunSummaryDTO.outcome",
@@ -215,11 +217,17 @@ class ProjectDtoContractTest {
             "dependencies",
             "sessions",
             "activities",
+            "evidence",
             "nextActivityCursor",
             "runs",
             "currentRun",
             "latestRun"),
         getInstanceFieldNames(IssueDetailDTO.class));
+
+    assertEquals(
+        Set.of("issueId", "blobId", "uri", "origin", "name", "runId", "publishedAt"),
+        getInstanceFieldNames(IssueEvidenceDTO.class));
+    assertEquals(Set.of("uploadId"), getInstanceFieldNames(AddIssueEvidenceRequestDTO.class));
 
     assertEquals(
         Set.of(
@@ -334,6 +342,9 @@ class ProjectDtoContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new UnarchiveIssueRequestDTO().rejectUnknownField("extra", "junk"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new AddIssueEvidenceRequestDTO().rejectUnknownField("extra", "junk"));
   }
 
   @Test
@@ -362,6 +373,12 @@ class ProjectDtoContractTest {
     assertThrows(
         Exception.class,
         () -> objectMapper.readValue("{\"unknownField\":123}", IssueAgentSessionDTO.class));
+    assertThrows(
+        Exception.class,
+        () -> objectMapper.readValue("{\"unknownField\":123}", IssueEvidenceDTO.class));
+    assertThrows(
+        Exception.class,
+        () -> objectMapper.readValue("{\"unknownField\":123}", AddIssueEvidenceRequestDTO.class));
   }
 
   @Test
@@ -405,6 +422,24 @@ class ProjectDtoContractTest {
             .createdAt("2026-09-13T10:00:00Z")
             .updatedAt("2026-09-13T10:00:00Z")
             .build();
+    IssueEvidenceDTO humanEvidence =
+        IssueEvidenceDTO.builder()
+            .issueId(issue.getId())
+            .blobId("33333333-3333-3333-3333-333333333333")
+            .uri("kkstudio:/resources/33333333-3333-3333-3333-333333333333")
+            .origin("HUMAN")
+            .name("report.txt")
+            .runId(null)
+            .publishedAt("2026-09-13T10:00:00Z")
+            .build();
+    String evidenceJson = objectMapper.writeValueAsString(humanEvidence);
+    // 人工证据没有发布 Run：nullable 字段必须显式为 null 而不是缺失，前端解码形态才确定
+    assertTrue(evidenceJson.contains("\"runId\":null"));
+    IssueEvidenceDTO readEvidence = objectMapper.readValue(evidenceJson, IssueEvidenceDTO.class);
+    assertNull(readEvidence.getRunId());
+    assertEquals("report.txt", readEvidence.getName());
+    assertEquals("HUMAN", readEvidence.getOrigin());
+
     String issueJson = objectMapper.writeValueAsString(issue);
     assertTrue(issueJson.contains("\"assigneeAgentName\":null"));
     assertTrue(issueJson.contains("\"reviewerAgentName\":null"));
