@@ -10,12 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 
 import java.util.UUID;
 
 /**
- * ResourceMessageContent：durable blob 引用（blobId/name/totalBytes/totalLines/preview）。 普通媒体的 totals 为
- * null；外部化文本的 totals 必须成对出现且非负。
+ * ResourceMessageContent：durable blob 引用（blobId/name/totalBytes/totalLines/preview/imageTier）。
+ * 普通媒体的 totals 为 null；外部化文本的 totals 必须成对出现且非负，且绝不携带图片输入档位。
  */
 class ResourceMessageContentTest {
 
@@ -89,22 +90,47 @@ class ResourceMessageContentTest {
         () -> ResourceMessageContent.media(BLOB_ID, "a\u0001b", "x"));
   }
 
+  /** 意图：图片输入档位属于普通媒体；文本工件携带档位是无意义事实，必须显式拒绝。 */
+  @Test
+  void imageTierIsCarriedOnlyByPlainMediaResources() {
+    assertEquals(
+        ImageInputTier.P1080,
+        ResourceMessageContent.media(BLOB_ID, "photo.png", "preview", ImageInputTier.P1080)
+            .imageTier());
+    assertEquals(
+        ImageInputTier.ORIGINAL,
+        ResourceMessageContent.media(BLOB_ID, "photo.png", null, ImageInputTier.ORIGINAL)
+            .imageTier());
+    // 未显式选择档位：durable 事实为 null，平台默认（720P）由物化边界决定。
+    assertNull(ResourceMessageContent.media(BLOB_ID, "photo.png").imageTier());
+    assertNull(ResourceMessageContent.media(BLOB_ID, "photo.png", "preview").imageTier());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ResourceMessageContent(
+                BLOB_ID, "result.txt", 100L, 10L, "preview", ImageInputTier.P720));
+    assertNull(
+        ResourceMessageContent.externalizedText(BLOB_ID, "result.txt", 100L, 10L, "preview")
+            .imageTier());
+  }
+
   @Test
   void rejectsPartialOrInvalidExternalizedTextTotals() {
     // 外部化文本 totals 必须成对出现。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", 100L, null, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", 100L, null, "x", null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", null, 10L, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", null, 10L, "x", null));
 
     // totals 不允许负数。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", -1L, 10L, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", -1L, 10L, "x", null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ResourceMessageContent(BLOB_ID, "a.txt", 100L, -1L, "x"));
+        () -> new ResourceMessageContent(BLOB_ID, "a.txt", 100L, -1L, "x", null));
   }
 }

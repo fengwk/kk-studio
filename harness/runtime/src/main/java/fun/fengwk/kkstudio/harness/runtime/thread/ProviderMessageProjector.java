@@ -248,14 +248,15 @@ public final class ProviderMessageProjector {
       return projectToolResult(value);
     }
     if (content instanceof ResourceMessageContent value) {
-      // durable blob 引用原样投影；Provider attempt 物化（platform ProviderResourceMaterializer）在每次
-      // attempt 时按 storage_blob 事实替换为携带新鲜预签名 URL 的 media 块或确定性文本回退。
+      // durable blob 引用与冻结的图片档位原样投影；Provider attempt 物化（platform ProviderResourceMaterializer）
+      // 在每次 attempt 时按 storage_blob 事实把该引用替换为内联 Base64 媒体块或确定性文本回退。
       return new ProviderResourceBlock(
           value.blobId(),
           value.name(),
           value.totalBytes(),
           value.totalLines(),
-          value.preview() == null ? "" : value.preview());
+          value.preview() == null ? "" : value.preview(),
+          value.imageTier());
     }
     throw new IllegalArgumentException("unsupported agent message content: " + content.getClass());
   }

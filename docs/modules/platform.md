@@ -734,11 +734,20 @@ virtual-thread-per-task executor。
 4. 通过 `ProviderResourceMaterializer` 物化当前 attempt 的 Resource：模型输入模态、
    adapter 用户/工具结果能力与 Blob MIME 同时匹配时，图片、音频、视频和 PDF 统一转成
    Base64 data URI；非 PDF 文档、缺失或非 ACTIVE Blob、能力不匹配及 ASSISTANT
-   资源使用确定性文本回退，不读取内容、不生成预签名 URL。
+   资源使用确定性文本回退，不读取内容、不生成预签名 URL。图片是例外：图片无法送达时
+   显式失败，绝不降级成「描述该文件的文本」让模型误以为已经看到内容。
+
+图片按冻结的 `ImageInputTier` 物化：`720P`（横向 1280x720、纵向 720x1280、正方形
+720x720）、`1080P`（1920x1080 / 1080x1920 / 1080x1080）按显示方向等比缩小，
+`ORIGINAL` 始终使用原字节；命中档位框的图片逐字节保留原编码与 EXIF，超出才重新编码。
+方向来自 JPEG APP1 EXIF orientation（1..8），无法解析时显式失败而不猜测方向；缩小后含
+alpha 的图片无损转 PNG，不透明 JPEG 保持 JPEG、其余不透明源转 PNG；动画/多帧、
+像素数超过 **4000 万**、声明 MIME 无解码器或与字节不一致时显式失败，不取首帧也不截断。
+request 内联字符预算按**转化后**的实际 data URI 记账。
 
 持久化只保存自己的 `ResourceMessageContent` / `ProviderResourceBlock`（Blob ID、名称、
-有界预览与外部化事实），Base64 只存在于 attempt 的有效请求，durable codec 拒绝
-Image/Audio/Video/Document 媒体块。物化保留 assistant 的原生 `replayState`，不改写
+有界预览、外部化事实与图片输入档位），Base64 只存在于 attempt 的有效请求，durable codec
+拒绝 Image/Audio/Video/Document 媒体块。物化保留 assistant 的原生 `replayState`，不改写
 签名、加密回放数据、affinity 或源前缀 hash。
 
 [ProviderInlineBlobReader](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/model/ProviderInlineBlobReader.java)

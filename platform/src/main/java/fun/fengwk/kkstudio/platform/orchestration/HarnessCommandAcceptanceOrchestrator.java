@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -36,7 +37,10 @@ import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -71,6 +75,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final StorageUploadService uploadService;
   private final SessionBlobRefManager refManager;
+  private final StorageBlobManager blobManager;
 
   public HarnessCommandAcceptanceOrchestrator(
       ChatSessionRepository chatSessionRepository,
@@ -84,7 +89,8 @@ public class HarnessCommandAcceptanceOrchestrator {
       ObjectProvider<HarnessStore> stores,
       ObjectProvider<HarnessRuntime> runtimes,
       StorageUploadService uploadService,
-      SessionBlobRefManager refManager) {
+      SessionBlobRefManager refManager,
+      StorageBlobManager blobManager) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.canvasSessionRepository =
@@ -102,6 +108,7 @@ public class HarnessCommandAcceptanceOrchestrator {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
+    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
   /** 接受 owner 的一次命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
@@ -316,8 +323,8 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * 消费一个 READY upload：锁定上传行（PENDING / 过期 / 不存在确定性拒绝）、以上传行权威文件名构造 RESOURCE、写 session blob ref
-   * （retain 先于 release）、标记已消费上传 cleanup（release 其引用）。全部在同一外事务内，失败整体回滚；S3 清理由提交后的 Storage
+   * 消费一个 READY upload：锁定上传行（PENDING / 过期 / 不存在确定性拒绝）、以上传行权威文件名与权威媒体类型构造 RESOURCE、写 session blob
+   * ref（retain 先于 release）、标记已消费上传 cleanup（release 其引用）。全部在同一外事务内，失败整体回滚；S3 清理由提交后的 Storage
    * Maintenance 完成。
    */
   private ResourceMessageContent consumeAttachment(
@@ -331,7 +338,11 @@ public class HarnessCommandAcceptanceOrchestrator {
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
-    return ResourceMessageContent.media(ready.blobId(), ready.filename());
+    return ResourceMessageContent.media(
+        ready.blobId(),
+        ready.filename(),
+        null,
+        imageTierForBlob(ready.blobId(), attachment.imageTier()));
   }
 
   /** RESOURCE 只复用当前 Session 已持有的 durable ref，不新增 retain，也不信任跨 Session blob id。 */
@@ -340,7 +351,30 @@ public class HarnessCommandAcceptanceOrchestrator {
     if (!refManager.contains(sessionId, resource.blobId())) {
       throw new IllegalArgumentException("Resource is not owned by the current session");
     }
-    return resource;
+    if (resource.imageTier() == null) {
+      return resource;
+    }
+    ImageInputTier imageTier = imageTierForBlob(resource.blobId(), resource.imageTier());
+    if (imageTier == resource.imageTier()) {
+      return resource;
+    }
+    return ResourceMessageContent.media(
+        resource.blobId(), resource.name(), resource.preview(), imageTier);
+  }
+
+  /**
+   * 只有图片媒体真正使用档位：wire 上的档位对 ATTACHMENT/RESOURCE 缺省即 720P，非图片媒体在这里收敛为 null，绝不持久化 无意义的档位（音频、视频、PDF
+   * 与外部化文本都不携带档位）。
+   */
+  private ImageInputTier imageTierForBlob(UUID blobId, ImageInputTier requested) {
+    StorageBlob blob = blobManager.getBlob(blobId);
+    if (blob == null
+        || blob.getState() != StorageBlobState.ACTIVE
+        || blob.getMediaType() == null
+        || !blob.getMediaType().startsWith("image/")) {
+      return null;
+    }
+    return requested == null ? ImageInputTier.P720 : requested;
   }
 
   private HarnessRuntime requireRuntime() {

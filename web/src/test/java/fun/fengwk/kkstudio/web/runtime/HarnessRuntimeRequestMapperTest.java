@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.RenameSessionCommand;
 import fun.fengwk.kkstudio.harness.runtime.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -354,6 +356,76 @@ class HarnessRuntimeRequestMapperTest {
     assertEquals(id(71), mapped.blobId());
     assertEquals("report.txt", mapped.name());
     assertNull(mapped.preview());
+  }
+
+  /**
+   * 图片输入档位的 wire 契约：ATTACHMENT / RESOURCE 缺省即平台默认 720P，显式取值必须无损映射；未知名称一律 fail closed。
+   *
+   * <p>测试意图：档位决定真正送达的像素尺寸，因此缺省绝不能被解释成「原图」，并且客户端拼错档位名时必须在接受命令前拒绝，而不是静默降级。
+   */
+  @Test
+  void mapsUserContentImageTierWithPlatformDefaultAndStrictValidation() {
+    HarnessUserMessageContentDTO attachment = new HarnessUserMessageContentDTO();
+    attachment.setType("ATTACHMENT");
+    attachment.setUploadId(idText(70));
+    assertEquals(
+        ImageInputTier.P720,
+        assertInstanceOf(AttachmentMessageContent.class, mapContent(attachment)).imageTier());
+
+    attachment.setImageTier("1080P");
+    assertEquals(
+        ImageInputTier.P1080,
+        assertInstanceOf(AttachmentMessageContent.class, mapContent(attachment)).imageTier());
+
+    HarnessUserMessageContentDTO resource = new HarnessUserMessageContentDTO();
+    resource.setType("RESOURCE");
+    resource.setBlobId(idText(71));
+    resource.setName("photo.png");
+    ResourceMessageContent defaultTier =
+        assertInstanceOf(ResourceMessageContent.class, mapContent(resource));
+    assertEquals(ImageInputTier.P720, defaultTier.imageTier());
+    assertEquals("photo.png", defaultTier.name());
+
+    resource.setImageTier("ORIGINAL");
+    assertEquals(
+        ImageInputTier.ORIGINAL,
+        assertInstanceOf(ResourceMessageContent.class, mapContent(resource)).imageTier());
+
+    // 未知名称、枚举名、空白与非文本取值都必须拒绝：档位不能被猜测。
+    for (String imageTier : List.of("4K", "P720", "720p", "  ", "")) {
+      resource.setImageTier(imageTier);
+      assertRejectedUserContent(resource, imageTier);
+    }
+    resource.setImageTier(null);
+    assertRejectedUserContent(resource, "explicit null");
+    // 档位只对附件/资源有意义：TEXT 上出现该字段一律拒绝。
+    HarnessUserMessageContentDTO text = new HarnessUserMessageContentDTO();
+    text.setType("TEXT");
+    text.setText("hello");
+    text.setImageTier("720P");
+    assertRejectedUserContent(text, "text");
+  }
+
+  private static AgentMessageContent mapContent(HarnessUserMessageContentDTO content) {
+    HarnessCommandCreateDTO command = command("USER_MESSAGE", "user-content");
+    command.setContents(List.of(content));
+    UserMessageCommandPayload payload =
+        assertInstanceOf(
+            UserMessageCommandPayload.class,
+            HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command))
+                .commands()
+                .getFirst()
+                .payload());
+    return payload.message().contents().getFirst();
+  }
+
+  private static void assertRejectedUserContent(HarnessUserMessageContentDTO content, String why) {
+    HarnessCommandCreateDTO command = command("USER_MESSAGE", "rejected-user-content");
+    command.setContents(List.of(content));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toAcceptCommandsCommand(request(threadTarget(), command)),
+        why);
   }
 
   @Test

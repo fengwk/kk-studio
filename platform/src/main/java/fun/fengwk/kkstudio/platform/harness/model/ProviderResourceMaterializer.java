@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.model;
 
 import com.github.benmanes.caffeine.cache.Ticker;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
@@ -164,7 +165,12 @@ public final class ProviderResourceMaterializer {
     return media != null ? media : new ProviderTextBlock(fallbackText(resource, blob));
   }
 
-  /** 仅在 model 模态与 adapter 位置能力同时支持时才读取内容；返回 null 表示必须走文本回退。 */
+  /**
+   * 仅在 model 模态与 adapter 位置能力同时支持时才读取内容；返回 null 表示必须走文本回退。
+   *
+   * <p>图片就不支持的情况绝不返回 null：把用户或工具真正产出的图片降级成「描述该文件的文本」会让模型以为它已经看到了图片内容，因此这里显式失败，
+   * 而不是回退成文本（非图片媒体保持既有的文本回退）。
+   */
   private ProviderContentBlock inlineMedia(
       ProviderResourceBlock resource,
       StorageBlob blob,
@@ -173,6 +179,12 @@ public final class ProviderResourceMaterializer {
       boolean toolResult,
       InlineBudget budget) {
     ModelInputModality modality = modalityOf(blob.getMediaType());
+    if (modality == ModelInputModality.IMAGE
+        && (!inputModalities.contains(ModelInputModality.IMAGE)
+            || !mediaCapabilities.supports(ModelInputModality.IMAGE, toolResult))) {
+      throw new IllegalArgumentException(
+          imageRejectedMessage(resource, blob, inputModalities, toolResult));
+    }
     if (modality == null
         || !inputModalities.contains(modality)
         || !mediaCapabilities.supports(modality, toolResult)) {
@@ -187,6 +199,9 @@ public final class ProviderResourceMaterializer {
               + limits.maxBlobBytes()
               + " bytes");
     }
+    if (modality == ModelInputModality.IMAGE) {
+      return inlineImage(resource, blob, budget);
+    }
     long required =
         ProviderInlineBlobReader.estimatedDataUriChars(blob.getMediaType(), blob.getSizeBytes());
     // 先按完整 Base64 长度记账再读取；读取器校验实际长度，任一失败都会终止整个 attempt 物化。
@@ -195,12 +210,57 @@ public final class ProviderResourceMaterializer {
         blobReader.readDataUri(
             resource.blobId(), blob.getMediaType(), blob.getSizeBytes(), required);
     return switch (modality) {
-      case IMAGE -> new ProviderImageBlock(blob.getMediaType(), source);
       case AUDIO -> new ProviderAudioBlock(blob.getMediaType(), source);
       case VIDEO -> new ProviderVideoBlock(blob.getMediaType(), source);
       case DOCUMENT -> new ProviderDocumentBlock(blob.getMediaType(), source);
-      case TEXT -> null;
+      case TEXT, IMAGE -> null;
     };
+  }
+
+  /**
+   * 图片按冻结档位物化：{@link ImageInputTier#ORIGINAL} 与未指定档位的媒体一样保留原字节，字符数由声明事实确定，因此先记账再读取；
+   * 缩放档位的实际字节数只有读取完成后才知道，先把本次剩余预算交给读取器，再按实际 data URI 字符数记账。
+   */
+  private ProviderImageBlock inlineImage(
+      ProviderResourceBlock resource, StorageBlob blob, InlineBudget budget) {
+    // 档位在命令接受事务中冻结；历史数据可能没有档位，按平台默认 720P 处理。
+    ImageInputTier tier = resource.imageTier() == null ? ImageInputTier.P720 : resource.imageTier();
+    boolean original = tier.isOriginal();
+    long allowedChars =
+        original
+            ? ProviderInlineBlobReader.estimatedDataUriChars(
+                blob.getMediaType(), blob.getSizeBytes())
+            : budget.remaining();
+    if (original) {
+      budget.reserve(allowedChars);
+    }
+    ProviderInlineBlobReader.InlineBlob inline =
+        blobReader.readImage(
+            resource.blobId(), blob.getMediaType(), blob.getSizeBytes(), tier, allowedChars);
+    if (!original) {
+      budget.reserve(inline.dataUri().length());
+    }
+    return new ProviderImageBlock(inline.mediaType(), inline.dataUri());
+  }
+
+  /** 图片无法送达时的显式失败信息：只包含资源名、MIME 与位置，不包含任何内容。 */
+  private static String imageRejectedMessage(
+      ProviderResourceBlock resource,
+      StorageBlob blob,
+      Set<ModelInputModality> inputModalities,
+      boolean toolResult) {
+    String reason =
+        !inputModalities.contains(ModelInputModality.IMAGE)
+            ? "the selected model does not declare IMAGE input"
+            : "the current adapter does not accept IMAGE in "
+                + (toolResult ? "tool results" : "user messages");
+    return "image resource "
+        + resource.name()
+        + " ("
+        + blob.getMediaType()
+        + ") cannot be sent: "
+        + reason
+        + "; it must not be silently degraded to a text description";
   }
 
   /** Blob MIME 到输入模态的映射；未支持类型返回 null（继续走确定性文本回退）。 */
@@ -268,6 +328,10 @@ public final class ProviderResourceMaterializer {
 
     private InlineBudget(long maxChars) {
       this.maxChars = maxChars;
+    }
+
+    private long remaining() {
+      return maxChars - usedChars;
     }
 
     private void reserve(long chars) {

@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
@@ -86,7 +87,7 @@ public final class ProviderRequestJsonCodec {
   private static final Set<String> TOOL_RESULT_BLOCK_FIELDS =
       orderedSet("type", "toolCallId", "toolName", "contents", "error", "detailsJson");
   private static final Set<String> RESOURCE_BLOCK_FIELDS =
-      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview");
+      orderedSet("type", "blobId", "name", "totalBytes", "totalLines", "preview", "imageTier");
 
   static {
     OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -325,6 +326,11 @@ public final class ProviderRequestJsonCodec {
         node.putNull("totalLines");
       }
       node.put("preview", value.preview());
+      if (value.imageTier() == null) {
+        node.putNull("imageTier");
+      } else {
+        node.put("imageTier", value.imageTier().wireName());
+      }
       return node;
     }
     throw new IllegalArgumentException("unsupported provider content block: " + content.getClass());
@@ -378,7 +384,8 @@ public final class ProviderRequestJsonCodec {
             text(node, "name"),
             decodeNullableLong(node, "totalBytes"),
             decodeNullableLong(node, "totalLines"),
-            textAllowEmpty(node, "preview"));
+            textAllowEmpty(node, "preview"),
+            decodeImageTier(node, "imageTier"));
       }
       default -> throw new IllegalArgumentException("unknown provider content block type: " + type);
     };
@@ -469,6 +476,19 @@ public final class ProviderRequestJsonCodec {
       throw new IllegalArgumentException(field + " must be integer or null");
     }
     return value.longValue();
+  }
+
+  /** 可空图片输入档位：JSON null 或档位 wire 名称；未知名称显式失败。 */
+  private static ImageInputTier decodeImageTier(ObjectNode node, String field) {
+    String wireName = decodeNullableText(node, field);
+    if (wireName == null) {
+      return null;
+    }
+    try {
+      return ImageInputTier.fromWireName(wireName);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(field + " " + error.getMessage(), error);
+    }
   }
 
   private static int positiveInt(ObjectNode node, String field) {

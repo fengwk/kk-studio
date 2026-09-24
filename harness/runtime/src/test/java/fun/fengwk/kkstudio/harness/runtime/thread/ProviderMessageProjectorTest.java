@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -510,6 +511,37 @@ class ProviderMessageProjectorTest {
             ProviderResourceBlock.media(new UUID(0L, 1L), "a.txt", ""),
             ProviderResourceBlock.media(new UUID(0L, 2L), "b.txt", "preview")),
         projected.get(0).contents());
+  }
+
+  /** 意图：冻结的图片输入档位是 durable 事实，投影必须原样带过（文本工件不带档位）。 */
+  @Test
+  void projectsFrozenImageInputTierIntoProviderBlocks() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(
+                        ResourceMessageContent.media(
+                            new UUID(0L, 1L), "photo.png", "preview", ImageInputTier.P1080),
+                        ResourceMessageContent.media(
+                            new UUID(0L, 2L), "original.png", null, ImageInputTier.ORIGINAL),
+                        ResourceMessageContent.media(new UUID(0L, 3L), "default.png")))));
+
+    assertEquals(
+        List.of(
+            ProviderResourceBlock.media(
+                new UUID(0L, 1L), "photo.png", "preview", ImageInputTier.P1080),
+            ProviderResourceBlock.media(
+                new UUID(0L, 2L), "original.png", "", ImageInputTier.ORIGINAL),
+            ProviderResourceBlock.media(new UUID(0L, 3L), "default.png", "")),
+        projected.get(0).contents());
+    assertEquals(
+        ImageInputTier.P1080,
+        ((ProviderResourceBlock) projected.get(0).contents().get(0)).imageTier());
+    assertNull(((ProviderResourceBlock) projected.get(0).contents().get(2)).imageTier());
   }
 
   @Test

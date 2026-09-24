@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * NewThreadCommand 的 requestHash 语义：两参构造对 raw payload 计算；三参构造只校验 hash 格式（不重算）；{@code withPayload} 在
@@ -47,6 +49,26 @@ class NewThreadCommandTest {
     assertEquals(raw.requestHash(), new NewThreadCommand(rawPayload, TestIds.id(1)).requestHash());
   }
 
+  /** 意图：图片输入档位是请求事实，同一 upload 的不同档位必须产生不同的原始请求 hash（幂等键不得吞掉档位差异）。 */
+  @Test
+  void rawRequestHashIsSensitiveToImageInputTier() {
+    UUID uploadId = TestIds.id(77);
+    UserMessageCommandPayload p720 = userPayloadWithAttachmentTier(uploadId, ImageInputTier.P720);
+    UserMessageCommandPayload p1080 = userPayloadWithAttachmentTier(uploadId, ImageInputTier.P1080);
+    UserMessageCommandPayload defaultTier = userPayloadWithAttachment(uploadId);
+
+    String hashP720 = ThreadCommandPayloadJsonCodec.requestHash(p720);
+    assertNotEquals(hashP720, ThreadCommandPayloadJsonCodec.requestHash(p1080));
+    assertNotEquals(hashP720, ThreadCommandPayloadJsonCodec.requestHash(defaultTier));
+    // 同一档位必须稳定：重试不会因为重新计算 hash 而被当成新请求。
+    assertEquals(hashP720, ThreadCommandPayloadJsonCodec.requestHash(p720));
+    assertEquals(
+        hashP720,
+        new NewThreadCommand(
+                userPayloadWithAttachmentTier(uploadId, ImageInputTier.P720), TestIds.id(1))
+            .requestHash());
+  }
+
   /** 三参构造只严格校验 hash 格式，不重算也不要求等于 payload 自身 hash（因此可承载已物化命令）。 */
   @Test
   void canonicalConstructorValidatesOnlyHashFormat() {
@@ -65,11 +87,25 @@ class NewThreadCommandTest {
   }
 
   private static UserMessageCommandPayload userPayloadWithAttachment() {
+    return userPayloadWithAttachment(TestIds.id(77));
+  }
+
+  private static UserMessageCommandPayload userPayloadWithAttachment(UUID uploadId) {
     return new UserMessageCommandPayload(
         new AgentMessage(
             AgentMessageRole.USER,
             List.of(
-                new AttachmentMessageContent(TestIds.id(77)),
+                new AttachmentMessageContent(uploadId),
+                new TextMessageContent("please summarize"))));
+  }
+
+  private static UserMessageCommandPayload userPayloadWithAttachmentTier(
+      UUID uploadId, ImageInputTier tier) {
+    return new UserMessageCommandPayload(
+        new AgentMessage(
+            AgentMessageRole.USER,
+            List.of(
+                new AttachmentMessageContent(uploadId, tier),
                 new TextMessageContent("please summarize"))));
   }
 

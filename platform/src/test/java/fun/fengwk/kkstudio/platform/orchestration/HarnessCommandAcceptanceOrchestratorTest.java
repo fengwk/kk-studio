@@ -2,11 +2,14 @@ package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -33,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -60,7 +64,10 @@ import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
 import java.time.Instant;
 import java.util.List;
@@ -104,6 +111,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private HarnessRuntime runtime;
   private StorageUploadService uploadService;
   private SessionBlobRefManager refManager;
+  private StorageBlobManager blobManager;
   private AcceptedCommands accepted;
   private IssueAgentSession agentSessionBinding;
   private Project project;
@@ -128,6 +136,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     runtime = mock(HarnessRuntime.class);
     uploadService = mock(StorageUploadService.class);
     refManager = mock(SessionBlobRefManager.class);
+    blobManager = mock(StorageBlobManager.class);
     accepted = mock(AcceptedCommands.class);
 
     when(stores.getIfAvailable()).thenReturn(store);
@@ -186,7 +195,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
             stores,
             runtimes,
             uploadService,
-            refManager);
+            refManager,
+            blobManager);
   }
 
   @Test
@@ -508,9 +518,116 @@ class HarnessCommandAcceptanceOrchestratorTest {
     order.verify(uploadService).delete(UPLOAD_ID);
   }
 
+  /** 意图：图片输入档位随命令冻结，且只对图片媒体有意义——wire 缺省即平台默认 720P，非图片媒体与无法确认媒体类型的 blob 一律收敛为 null。 */
+  @Test
+  void freezesAttachmentImageTierButDropsItForNonImageMedia() {
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
+    when(uploadService.lockReady(UPLOAD_ID))
+        .thenReturn(new StorageUploadService.ReadyUpload(BLOB_ID, "photo.png"));
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png"));
+
+    assertEquals(
+        ImageInputTier.P1080,
+        preparedAttachmentTier(41L, new AttachmentMessageContent(UPLOAD_ID, ImageInputTier.P1080)));
+    // wire 未选择档位：图片按平台默认 720P 冻结，绝不落成 null（否则历史重放会退回原图）。
+    assertEquals(
+        ImageInputTier.P720,
+        preparedAttachmentTier(42L, new AttachmentMessageContent(UPLOAD_ID, null)));
+
+    when(uploadService.lockReady(UPLOAD_ID))
+        .thenReturn(new StorageUploadService.ReadyUpload(BLOB_ID, "report.pdf"));
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("application/pdf"));
+    assertNull(
+        preparedAttachmentTier(43L, new AttachmentMessageContent(UPLOAD_ID, ImageInputTier.P1080)));
+
+    // 缺失或非 ACTIVE：无法确认媒体类型，必须收敛为 null 而不是持久化无意义档位。
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(null);
+    assertNull(
+        preparedAttachmentTier(44L, new AttachmentMessageContent(UPLOAD_ID, ImageInputTier.P1080)));
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(deletingBlob("image/png"));
+    assertNull(
+        preparedAttachmentTier(45L, new AttachmentMessageContent(UPLOAD_ID, ImageInputTier.P1080)));
+  }
+
+  /** 意图：复用已有 RESOURCE 时同样按权威媒体类型收敛档位；图片档位原样保留且不重写 durable 实例。 */
+  @Test
+  void normalizesReusedResourceTierAgainstAuthoritativeMediaType() {
+    when(chatSessionRepository.insert(SESSION_ID, CHAT_ID)).thenReturn(true);
+    when(refManager.contains(SESSION_ID, BLOB_ID)).thenReturn(true);
+    ResourceMessageContent imageResource =
+        ResourceMessageContent.media(BLOB_ID, "photo.png", "preview", ImageInputTier.P1080);
+    ResourceMessageContent videoResource =
+        ResourceMessageContent.media(BLOB_ID, "clip.mp4", "preview", ImageInputTier.P1080);
+
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png"));
+    assertSame(imageResource, preparedResource(46L, imageResource));
+
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("video/mp4"));
+    ResourceMessageContent normalized = preparedResource(47L, videoResource);
+    assertNotSame(videoResource, normalized);
+    assertNull(normalized.imageTier());
+    assertEquals("clip.mp4", normalized.name());
+    assertEquals(BLOB_ID, normalized.blobId());
+
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(null);
+    assertNull(preparedResource(48L, videoResource).imageTier());
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(deletingBlob("image/png"));
+    assertNull(preparedResource(49L, imageResource).imageTier());
+  }
+
+  private ImageInputTier preparedAttachmentTier(long key, AttachmentMessageContent attachment) {
+    UserMessageCommandPayload payload = preparedPayload(newSession(uniqueUser(key, attachment)));
+    return ((ResourceMessageContent) payload.message().contents().getFirst()).imageTier();
+  }
+
+  private ResourceMessageContent preparedResource(long key, ResourceMessageContent resource) {
+    UserMessageCommandPayload payload = preparedPayload(newSession(uniqueUser(key, resource)));
+    return assertInstanceOf(ResourceMessageContent.class, payload.message().contents().getFirst());
+  }
+
+  private UserMessageCommandPayload preparedPayload(AcceptCommandsCommand command) {
+    AcceptancePreflight preflight = acceptAndCapture(command);
+    return assertInstanceOf(
+        UserMessageCommandPayload.class,
+        preflight
+            .prepare(transaction, new Session(SESSION_ID, "session", NOW), command.commands())
+            .getFirst()
+            .payload());
+  }
+
+  /** 每个命令单独捕获 preflight；同一测试内不同用例使用不同幂等键，避免重复提交同一命令。 */
+  private AcceptancePreflight acceptAndCapture(AcceptCommandsCommand command) {
+    service.accept(CHAT_OWNER, command);
+    ArgumentCaptor<AcceptancePreflight> captor = ArgumentCaptor.forClass(AcceptancePreflight.class);
+    verify(runtime, atLeastOnce()).acceptCommands(eq(command), captor.capture());
+    return captor.getValue();
+  }
+
+  private static NewThreadCommand uniqueUser(long key, AgentMessageContent... contents) {
+    return new NewThreadCommand(
+        new UserMessageCommandPayload(new AgentMessage(AgentMessageRole.USER, List.of(contents))),
+        id(key));
+  }
+
+  private static StorageBlob activeBlob(String mediaType) {
+    return blob(mediaType, StorageBlobState.ACTIVE);
+  }
+
+  private static StorageBlob deletingBlob(String mediaType) {
+    return blob(mediaType, StorageBlobState.DELETING);
+  }
+
+  private static StorageBlob blob(String mediaType, StorageBlobState state) {
+    StorageBlob blob = new StorageBlob();
+    blob.setId(BLOB_ID);
+    blob.setMediaType(mediaType);
+    blob.setState(state);
+    return blob;
+  }
+
   @Test
   void rejectsNullDependenciesInConstructor() {
-    // 强依赖验证：各 Repository、Store、Runtime、Upload service 与 Session ref manager 必须非空注入。
+    // 强依赖验证：各 Repository、Store、Runtime、Upload service、Session ref manager 与 Blob manager 必须非空注入。
     assertThrows(
         NullPointerException.class,
         () ->
@@ -526,7 +643,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 stores,
                 runtimes,
                 uploadService,
-                refManager));
+                refManager,
+                blobManager));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -542,7 +660,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 stores,
                 runtimes,
                 null,
-                refManager));
+                refManager,
+                blobManager));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -558,6 +677,24 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 stores,
                 runtimes,
                 uploadService,
+                null,
+                blobManager));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new HarnessCommandAcceptanceOrchestrator(
+                chatSessionRepository,
+                canvasSessionRepository,
+                chatRepository,
+                canvasStore,
+                projectRepository,
+                issueRepository,
+                issueAgentSessionRepository,
+                issueAgentSessionOwnershipRepository,
+                stores,
+                runtimes,
+                uploadService,
+                refManager,
                 null));
   }
 

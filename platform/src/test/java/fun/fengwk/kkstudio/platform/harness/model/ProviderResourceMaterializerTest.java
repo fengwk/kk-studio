@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDocumentBlock;
@@ -58,6 +59,9 @@ import java.util.UUID;
  *
  * <p>测试意图涵盖：四类媒体块与模态/能力交集、DOCUMENT 仅 PDF、SYSTEM/ASSISTANT 与非支持媒体类型的免读取回退、缺失或转 DELETING 的 Blob
  * 每次都重新判定状态（含缓存命中）、声明大小与单次 request 字符总量上限（重复与嵌套引用同样计入）、缓存对读 取的合并，以及 replay state/顺序/嵌套元数据的透传。
+ *
+ * <p>图片档位部分额外覆盖：档位决定实际送达的像素尺寸（含档位缺失时的平台默认）、档位框内逐字节直通、request 字符预算按转化后的实际字符数记账， 以及档位转化失败时整个 attempt
+ * 显式失败而不是退回原图。
  */
 class ProviderResourceMaterializerTest {
 
@@ -65,8 +69,9 @@ class ProviderResourceMaterializerTest {
   private static final UUID OTHER_BLOB_ID = new UUID(0L, 2L);
   private static final byte[] BYTES = new byte[] {0, 1, 2};
   private static final String IMAGE_DATA_URI = "data:image/png;base64,AAEC";
+  // 原字节档位：内联/预算/缓存用例只验证字节直通语义，不引入解码（扫描件语义的固定夹具）。
   private static final ProviderResourceBlock IMAGE_RESOURCE =
-      new ProviderResourceBlock(BLOB_ID, "scan.png", "tiny preview");
+      ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", ImageInputTier.ORIGINAL);
   private static final ProviderMediaCapabilities ALL_MEDIA =
       new ProviderMediaCapabilities(
           Set.of(
@@ -191,6 +196,7 @@ class ProviderResourceMaterializerTest {
     verify(contentService, never()).readBlobContent(any(), anyLong());
   }
 
+  /** 意图：图片是显式请求的输入，位置能力只声明在另一侧时绝不借用，也绝不降级成文本让模型以为看到了图片。 */
   @Test
   void toolResultContentsUseToolResultCapabilitiesNotUserCapabilities() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
@@ -205,22 +211,20 @@ class ProviderResourceMaterializerTest {
     ProviderMediaCapabilities toolOnly =
         new ProviderMediaCapabilities(Set.of(), Set.of(ModelInputModality.IMAGE));
 
-    // 能力只声明在用户位置：TOOL 内容必须回退，绝不借用用户能力读取内容。
-    ProviderToolResultBlock degraded =
-        assertInstanceOf(
-            ProviderToolResultBlock.class,
-            materializer(blobManager, contentService)
-                .materialize(
-                    List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(toolResult))),
-                    Set.of(ModelInputModality.IMAGE),
-                    userOnly)
-                .get(0)
-                .contents()
-                .get(0));
-    assertInstanceOf(ProviderTextBlock.class, degraded.contents().get(0));
+    // 能力只声明在用户位置：TOOL 内容显式失败，绝不借用用户能力读取内容。
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(new ProviderMessage(ProviderMessageRole.TOOL, List.of(toolResult))),
+                        Set.of(ModelInputModality.IMAGE),
+                        userOnly));
+    assertTrue(error.getMessage().contains("tool results"), error.getMessage());
     verify(contentService, never()).readBlobContent(any(), anyLong());
 
-    // 能力只声明在工具结果位置：TOOL 内容正常内联，用户普通内容仍回退。
+    // 能力只声明在工具结果位置：TOOL 内容正常内联，用户普通内容显式失败。
     ProviderToolResultBlock inlined =
         assertInstanceOf(
             ProviderToolResultBlock.class,
@@ -235,53 +239,97 @@ class ProviderResourceMaterializerTest {
     ProviderImageBlock image =
         assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
     assertEquals(IMAGE_DATA_URI, image.source());
-    List<ProviderMessage> userMessage =
-        materializer(blobManager, contentService)
-            .materialize(
-                List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(IMAGE_RESOURCE))),
-                Set.of(ModelInputModality.IMAGE),
-                toolOnly);
-    assertInstanceOf(ProviderTextBlock.class, userMessage.get(0).contents().get(0));
+    IllegalArgumentException userError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(
+                            new ProviderMessage(ProviderMessageRole.USER, List.of(IMAGE_RESOURCE))),
+                        Set.of(ModelInputModality.IMAGE),
+                        toolOnly));
+    assertTrue(userError.getMessage().contains("user messages"), userError.getMessage());
   }
 
+  /** 意图：图片没有任何可用位置时显式失败，且失败发生在读取之前。 */
   @Test
-  void noCapabilitiesFallBackToTextWithoutReading() {
+  void imageWithoutAnyMediaCapabilityFailsExplicitlyWithoutReading() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(
+                            new ProviderMessage(ProviderMessageRole.USER, List.of(IMAGE_RESOURCE))),
+                        Set.of(ModelInputModality.IMAGE),
+                        ProviderMediaCapabilities.NONE));
+
+    assertTrue(error.getMessage().contains("scan.png"), error.getMessage());
+    assertTrue(error.getMessage().contains("image/png"), error.getMessage());
+    assertTrue(error.getMessage().contains("does not accept IMAGE"), error.getMessage());
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+    verify(blobManager, never()).presignOriginalUrl(any());
+  }
+
+  /** 意图：模型没有声明 IMAGE 输入时图片显式失败，而不是被描述成文本。 */
+  @Test
+  void unsupportedModelModalityFailsExplicitlyForImages() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(
+                            new ProviderMessage(ProviderMessageRole.USER, List.of(IMAGE_RESOURCE))),
+                        Set.of(ModelInputModality.TEXT),
+                        ALL_MEDIA));
+
+    assertTrue(error.getMessage().contains("model does not declare IMAGE"), error.getMessage());
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+  }
+
+  /** 意图：非图片媒体保持既有文本回退，且回退不读取内容、不产生任何 URL。 */
+  @Test
+  void nonImageWithoutCapabilityFallsBackToTextWithStorageFacts() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("audio/mpeg", BYTES.length));
 
     List<ProviderMessage> materialized =
         materializer(blobManager, contentService)
             .materialize(
                 List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(IMAGE_RESOURCE))),
-                Set.of(ModelInputModality.IMAGE),
+                Set.of(ModelInputModality.AUDIO),
                 ProviderMediaCapabilities.NONE);
 
     ProviderTextBlock fallback =
         assertInstanceOf(ProviderTextBlock.class, materialized.get(0).contents().get(0));
     assertTrue(fallback.text().contains("[Resource: scan.png]"), fallback.text());
-    assertTrue(fallback.text().contains("mediaType: image/png"), fallback.text());
+    assertTrue(fallback.text().contains("mediaType: audio/mpeg"), fallback.text());
     assertTrue(fallback.text().contains("size: 3"), fallback.text());
     assertTrue(fallback.text().contains("preview: tiny preview"), fallback.text());
     verify(contentService, never()).readBlobContent(any(), anyLong());
     verify(blobManager, never()).presignOriginalUrl(any());
-  }
 
-  @Test
-  void unsupportedModelModalityFallsBackToTextWithStorageFacts() {
-    StorageBlobManager blobManager = mock(StorageBlobManager.class);
-    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
-    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
-
-    List<ProviderMessage> materialized =
+    List<ProviderMessage> unsupportedModality =
         materializer(blobManager, contentService)
             .materialize(
                 List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(IMAGE_RESOURCE))),
                 Set.of(ModelInputModality.TEXT),
                 ALL_MEDIA);
-
     ProviderTextBlock text =
-        assertInstanceOf(ProviderTextBlock.class, materialized.get(0).contents().get(0));
+        assertInstanceOf(ProviderTextBlock.class, unsupportedModality.get(0).contents().get(0));
     assertTrue(text.text().contains("blobId: " + BLOB_ID), text.text());
     verify(contentService, never()).readBlobContent(any(), anyLong());
   }
@@ -415,6 +463,293 @@ class ProviderResourceMaterializerTest {
     assertEquals(
         IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(1).contents().get(0)).source());
     verify(contentService, times(1)).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
+  }
+
+  // ---------- 图片输入档位 ----------
+
+  /** 意图：档位是请求事实，同一 Blob 的两个档位必须各自成条目、各自产出自己的像素尺寸。 */
+  @Test
+  void imageTierDeterminesDeliveredPixelsAndIsolatesCacheEntries() {
+    byte[] png = TestImages.png(4000, 2000);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", png.length));
+    stubContent(contentService, BLOB_ID, "image/png", png);
+    ProviderResourceMaterializer materializer = materializer(blobManager, contentService);
+
+    assertEquals(1280, materializedImageWidth(materializer, tieredResource(ImageInputTier.P720)));
+    assertEquals(1920, materializedImageWidth(materializer, tieredResource(ImageInputTier.P1080)));
+    // 档位是缓存 key 的组成部分：两次读取不会互相复用转化结果。
+    verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  /** 意图：历史数据可能没有档位事实，此时必须按平台默认 720P 送达，而不是原图。 */
+  @Test
+  void missingTierFallsBackToPlatformDefault720() {
+    byte[] png = TestImages.png(4000, 2000);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", png.length));
+    stubContent(contentService, BLOB_ID, "image/png", png);
+
+    ProviderResourceBlock withoutTier =
+        ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", null);
+
+    assertEquals(
+        1280, materializedImageWidth(materializer(blobManager, contentService), withoutTier));
+  }
+
+  /** 意图：档位框内的图片逐字节直通（不重编码、不加任何前缀），字节数与原文件一致。 */
+  @Test
+  void imageWithinTierBoxIsDeliveredAsExactOriginalBytes() {
+    byte[] png = TestImages.png(200, 100);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", png.length));
+    stubContent(contentService, BLOB_ID, "image/png", png);
+
+    ProviderImageBlock image =
+        firstImage(
+            materializer(blobManager, contentService),
+            tieredResource(ImageInputTier.P720),
+            Set.of(ModelInputModality.IMAGE),
+            ALL_MEDIA);
+
+    assertEquals(
+        "data:image/png;base64," + Base64.getEncoder().encodeToString(png), image.source());
+  }
+
+  /** 意图：缩放后的实际字符数只有在读取完成后才知道，request 预算必须按实际产物记账，而不是按原始大小。 */
+  @Test
+  void requestBudgetAccountsActualTransformedCharacters() {
+    byte[] png = TestImages.png(4000, 2000);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", png.length));
+    stubContent(contentService, BLOB_ID, "image/png", png);
+    ProviderResourceBlock resource = tieredResource(ImageInputTier.P720);
+
+    ProviderImageBlock image =
+        firstImage(
+            materializer(blobManager, contentService),
+            resource,
+            Set.of(ModelInputModality.IMAGE),
+            ALL_MEDIA);
+    long actualChars = image.source().length();
+    long rawChars = ProviderInlineBlobReader.estimatedDataUriChars("image/png", png.length);
+    assertTrue(actualChars < rawChars, "缩小的图片必须比原图更小，否则该用例无法证明按实际产物记账：" + actualChars);
+
+    // 预算等于实际产物字符数：必须成功（若按原始大小记账就会误判为超限）。
+    assertEquals(
+        actualChars,
+        firstImage(
+                materializer(blobManager, contentService, defaultReaderLimits(), actualChars),
+                resource,
+                Set.of(ModelInputModality.IMAGE),
+                ALL_MEDIA)
+            .source()
+            .length());
+    // 预算比实际产物少一个字符：整个 attempt 显式失败，绝不丢弃或截断图片。
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService, defaultReaderLimits(), actualChars - 1L)
+                    .materialize(
+                        List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(resource))),
+                        Set.of(ModelInputModality.IMAGE),
+                        ALL_MEDIA));
+    assertTrue(error.getMessage().contains("characters"), error.getMessage());
+  }
+
+  /** 意图：档位框内的图片按原始字节记账（直通不缩小），预算同样以真实送达的字符为准。 */
+  @Test
+  void imageWithinTierBoxIsAccountedByRawCharacters() {
+    byte[] png = TestImages.png(200, 100);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", png.length));
+    stubContent(contentService, BLOB_ID, "image/png", png);
+    ProviderResourceBlock resource = tieredResource(ImageInputTier.P720);
+    long rawChars = ProviderInlineBlobReader.estimatedDataUriChars("image/png", png.length);
+
+    assertEquals(
+        rawChars,
+        firstImage(
+                materializer(blobManager, contentService, defaultReaderLimits(), rawChars),
+                resource,
+                Set.of(ModelInputModality.IMAGE),
+                ALL_MEDIA)
+            .source()
+            .length());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            materializer(blobManager, contentService, defaultReaderLimits(), rawChars - 1L)
+                .materialize(
+                    List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(resource))),
+                    Set.of(ModelInputModality.IMAGE),
+                    ALL_MEDIA));
+  }
+
+  /** 意图：TOOL 结果里的图片同样按冻结档位送达（默认 720P 由工具结果物化器写入）。 */
+  @Test
+  void toolResultImageUsesItsFrozenTier() {
+    byte[] png = TestImages.png(4000, 2000);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", png.length));
+    stubContent(contentService, BLOB_ID, "image/png", png);
+
+    ProviderToolResultBlock inlined =
+        assertInstanceOf(
+            ProviderToolResultBlock.class,
+            materializer(blobManager, contentService)
+                .materialize(
+                    List.of(
+                        new ProviderMessage(
+                            ProviderMessageRole.TOOL,
+                            List.of(
+                                new ProviderToolResultBlock(
+                                    "call-image",
+                                    "read",
+                                    List.of(tieredResource(ImageInputTier.P720)),
+                                    false,
+                                    "{}")))),
+                    Set.of(ModelInputModality.IMAGE),
+                    ALL_MEDIA)
+                .get(0)
+                .contents()
+                .get(0));
+
+    ProviderImageBlock image =
+        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
+    assertEquals(
+        1280, TestImages.decode(image.mediaType(), decodeSource(image.source())).getWidth());
+  }
+
+  /** 意图：档位转化不可完成（动画/多帧）时整个 attempt 显式失败，绝不静默退回原图或首帧。 */
+  @Test
+  void untransformableImageFailsTheWholeAttemptExplicitly() {
+    byte[] animated = TestImages.animatedGif(2000, 1000, 3);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/gif", animated.length));
+    stubContent(contentService, BLOB_ID, "image/gif", animated);
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(
+                            new ProviderMessage(
+                                ProviderMessageRole.USER,
+                                List.of(
+                                    ProviderResourceBlock.media(
+                                        BLOB_ID, "anim.gif", "preview", ImageInputTier.P720)))),
+                        Set.of(ModelInputModality.IMAGE),
+                        ALL_MEDIA));
+    assertTrue(error.getMessage().contains("multi-frame"), error.getMessage());
+    assertNoStorageLeakOnFailure(error);
+    verify(blobManager, never()).presignOriginalUrl(any());
+    verify(blobManager, never()).presignPreviewUrl(any());
+  }
+
+  /** 意图：档位转化失败（声明 MIME 与内容不一致、超出解码像素预算）必须整体失败，且失败路径不产生任何 URL 或内容回显。 */
+  @Test
+  void mismatchedMediaTypeFailsExplicitlyWithoutStorageLeak() {
+    byte[] png = TestImages.png(4000, 2000);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/jpeg", png.length));
+    stubContent(contentService, BLOB_ID, "image/jpeg", png);
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(
+                            new ProviderMessage(
+                                ProviderMessageRole.USER,
+                                List.of(tieredResource(ImageInputTier.P720)))),
+                        Set.of(ModelInputModality.IMAGE),
+                        ALL_MEDIA));
+
+    assertTrue(error.getMessage().contains("cannot be decoded"), error.getMessage());
+    assertNoStorageLeakOnFailure(error);
+    verify(blobManager, never()).presignOriginalUrl(any());
+    verify(blobManager, never()).presignPreviewUrl(any());
+  }
+
+  /** 意图：解码像素预算在读取像素前生效；失败是确定性的，不产生 URL，也不生成部分请求。 */
+  @Test
+  void oversizedDeclaredPixelsFailBeforeDecodingWithoutStorageLeak() {
+    byte[] hugeHeader = TestImages.pngWithDeclaredDimensions(20_000, 20_000);
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", hugeHeader.length));
+    stubContent(contentService, BLOB_ID, "image/png", hugeHeader);
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                materializer(blobManager, contentService)
+                    .materialize(
+                        List.of(
+                            new ProviderMessage(
+                                ProviderMessageRole.USER,
+                                List.of(tieredResource(ImageInputTier.P720)))),
+                        Set.of(ModelInputModality.IMAGE),
+                        ALL_MEDIA));
+
+    assertTrue(error.getMessage().contains("pixel budget"), error.getMessage());
+    assertNoStorageLeakOnFailure(error);
+    verify(blobManager, never()).presignOriginalUrl(any());
+    verify(blobManager, never()).presignPreviewUrl(any());
+  }
+
+  /** 失败路径的共同断言：错误信息不回显内容，也不产生任何 URL 形态的文本。 */
+  private static void assertNoStorageLeakOnFailure(IllegalArgumentException error) {
+    assertFalse(error.getMessage().contains("http"), error.getMessage());
+    assertFalse(error.getMessage().contains("base64"), error.getMessage());
+    assertFalse(error.getMessage().contains("data:"), error.getMessage());
+  }
+
+  private static ProviderResourceBlock tieredResource(ImageInputTier tier) {
+    return ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", tier);
+  }
+
+  private static int materializedImageWidth(
+      ProviderResourceMaterializer materializer, ProviderResourceBlock resource) {
+    ProviderImageBlock image =
+        firstImage(materializer, resource, Set.of(ModelInputModality.IMAGE), ALL_MEDIA);
+    return TestImages.decode(image.mediaType(), decodeSource(image.source())).getWidth();
+  }
+
+  private static ProviderImageBlock firstImage(
+      ProviderResourceMaterializer materializer,
+      ProviderResourceBlock resource,
+      Set<ModelInputModality> inputModalities,
+      ProviderMediaCapabilities mediaCapabilities) {
+    return assertInstanceOf(
+        ProviderImageBlock.class,
+        materializer
+            .materialize(
+                List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(resource))),
+                inputModalities,
+                mediaCapabilities)
+            .get(0)
+            .contents()
+            .get(0));
+  }
+
+  private static byte[] decodeSource(String dataUri) {
+    return Base64.getDecoder().decode(dataUri.substring(dataUri.indexOf(";base64,") + 8));
   }
 
   @Test
@@ -574,7 +909,8 @@ class ProviderResourceMaterializerTest {
     long singleDataUriChars =
         ProviderInlineBlobReader.estimatedDataUriChars("image/png", BYTES.length);
     ProviderResourceBlock otherResource =
-        new ProviderResourceBlock(OTHER_BLOB_ID, "other.png", "other preview");
+        ProviderResourceBlock.media(
+            OTHER_BLOB_ID, "other.png", "other preview", ImageInputTier.ORIGINAL);
 
     IllegalArgumentException error =
         assertThrows(

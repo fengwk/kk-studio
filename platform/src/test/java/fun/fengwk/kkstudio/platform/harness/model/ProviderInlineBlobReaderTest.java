@@ -18,6 +18,7 @@ import com.github.benmanes.caffeine.cache.Ticker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
@@ -46,7 +47,8 @@ import java.util.function.BiFunction;
  *   <li>成功路径的 data URI 必须等于实际字节的 Base64，且绝不携带任何 URL；
  *   <li>读取上限、MIME 安全性、大小合法性与权威内容一致性都在读取路径上显式失败（绝不截断内容，错误信息不回显 URI）；
  *   <li>相同 Blob 事实的重复请求命中缓存，TTL 到期或权重淘汰后重新读取，超单条目上限的大对象永不缓存；
- *   <li>并发 miss 合并为一次读取；等待下载许可被中断时保留中断标志并失败，失败路径释放许可且不写入缓存。
+ *   <li>并发 miss 合并为一次读取；等待下载许可被中断时保留中断标志并失败，失败路径释放许可且不写入缓存；
+ *   <li>图片档位读取按 blob 事实 + 档位隔离缓存（ORIGINAL 与原字节共用一条记录），缩放结果的字符预算在转化完成后校验，格式不支持时显式失败且不污染 原字节路径。
  * </ul>
  */
 @Timeout(15)
@@ -57,6 +59,9 @@ class ProviderInlineBlobReaderTest {
   private static final String DATA_URI = "data:image/png;base64,AQIDBAU=";
   private static final String MEDIA_TYPE = "image/png";
   private static final long GENEROUS_CHARS = 1024L;
+
+  /** 真实图片 scene 的 data URI 远大于 1 KiB，档位相关用例使用独立预算以免混淆两类上限。 */
+  private static final long IMAGE_CHARS = 1L << 22;
 
   private final StorageBlobContentService contentService = mock(StorageBlobContentService.class);
 
@@ -424,6 +429,141 @@ class ProviderInlineBlobReaderTest {
         () -> new ProviderInlineBlobReader(contentService, null, Ticker.systemTicker()));
   }
 
+  // ---------- 图片档位 ----------
+
+  /** 意图：档位产物是缓存条目的组成部分，任何档位都不会复用另一档位的结果，ORIGINAL 与原字节共用同一条记录。 */
+  @Test
+  void imageTierIsolationKeepsOneCacheEntryPerTier() {
+    byte[] png = TestImages.png(2000, 1000);
+    stub(BLOB_ID, png, "image/png");
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    ProviderInlineBlobReader.InlineBlob p720 =
+        reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P720, IMAGE_CHARS);
+    assertEquals("image/png", p720.mediaType());
+    assertEquals(1280, decodedWidth(p720));
+
+    assertEquals(
+        1280,
+        decodedWidth(
+            reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P720, IMAGE_CHARS)));
+    assertEquals(
+        1920,
+        decodedWidth(
+            reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P1080, IMAGE_CHARS)));
+    ProviderInlineBlobReader.InlineBlob original =
+        reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.ORIGINAL, IMAGE_CHARS);
+    assertEquals(rawDataUri("image/png", png), original.dataUri());
+    // 未指定档位的原字节读取与 ORIGINAL 等价，必须命中同一条缓存记录。
+    assertEquals(
+        original.dataUri(), reader.readDataUri(BLOB_ID, "image/png", png.length, IMAGE_CHARS));
+
+    reader.cleanUp();
+    assertEquals(3L, reader.cachedEntryCount(), "每个档位各一条记录");
+    verify(contentService, times(3)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  /** 意图：缩放后的字符数只有读取完成才知道，因此预算在转化后校验；失败不得让调用方反复付出解码代价，也不得产生 URL。 */
+  @Test
+  void tieredReadEnforcesBudgetAfterTransformationAndCachesTheResult() {
+    byte[] png = TestImages.png(2000, 1000);
+    stub(BLOB_ID, png, "image/png");
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P720, 64L));
+    assertTrue(error.getMessage().contains("characters"), error.getMessage());
+    assertFalse(error.getMessage().contains("base64"), "错误信息不得包含内容或 URI");
+    assertFalse(error.getMessage().contains("data:"), "错误信息不得回显内联内容");
+
+    // 预算不足只是本次调用失败：同一档位的转化结果已缓存，第二次调用不再读取存储。
+    ProviderInlineBlobReader.InlineBlob p720 =
+        reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P720, IMAGE_CHARS);
+    assertFalse(p720.dataUri().contains("http"), "内联路径绝不产生任何 URL");
+    verify(contentService, times(1)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  /** 意图：声明的图片格式没有可用解码器时必须显式失败（绝不退化为原字节），且原字节路径仍然可用。 */
+  @Test
+  void unsupportedImageMediaTypeFailsExplicitlyWithoutPoisoningRawReads() {
+    byte[] png = TestImages.png(2000, 1000);
+    stub(BLOB_ID, png, "image/webp");
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                reader.readImage(
+                    BLOB_ID, "image/webp", png.length, ImageInputTier.P720, IMAGE_CHARS));
+    assertTrue(error.getMessage().contains("unsupported image media type"), error.getMessage());
+    assertEquals(0L, reader.cachedEntryCount(), "失败绝不写入缓存");
+
+    assertEquals(
+        rawDataUri("image/webp", png),
+        reader.readDataUri(BLOB_ID, "image/webp", png.length, IMAGE_CHARS));
+  }
+
+  /** 意图：ORIGINAL 只做原字节直通，因此对没有解码器的格式也必须成功，并且与未指定档位共用一条缓存记录。 */
+  @Test
+  void originalTierNeverDecodesAndSharesRawCacheEntry() {
+    byte[] webpLike = {'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P'};
+    stub(BLOB_ID, webpLike, "image/webp");
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    ProviderInlineBlobReader.InlineBlob original =
+        reader.readImage(
+            BLOB_ID, "image/webp", webpLike.length, ImageInputTier.ORIGINAL, IMAGE_CHARS);
+
+    assertEquals(rawDataUri("image/webp", webpLike), original.dataUri());
+    assertEquals(
+        original.dataUri(),
+        reader.readDataUri(BLOB_ID, "image/webp", webpLike.length, IMAGE_CHARS));
+    reader.cleanUp();
+    assertEquals(1L, reader.cachedEntryCount(), "ORIGINAL 与原字节必须是同一条记录");
+    verify(contentService, times(1)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  /** 意图：转化后的实际大小超过单条目记账上限时不得长期占用缓存预算，但本次调用仍然成功返回产物。 */
+  @Test
+  void oversizedTransformedEntryIsNotRetainedInCache() {
+    byte[] png = TestImages.png(2000, 1000);
+    stub(BLOB_ID, png, "image/png");
+    ProviderInlineBlobReader reader =
+        reader(limits(builder().maxCacheEntryWeightBytes(1L)), Ticker.systemTicker());
+
+    assertEquals(
+        1280,
+        decodedWidth(
+            reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P720, IMAGE_CHARS)));
+    reader.cleanUp();
+    assertEquals(0L, reader.cachedEntryCount(), "超限条目不得留在缓存中");
+
+    reader.readImage(BLOB_ID, "image/png", png.length, ImageInputTier.P720, IMAGE_CHARS);
+    verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
+  }
+
+  @Test
+  void rejectsNullTierBeforeReading() {
+    ProviderInlineBlobReader reader = reader(testLimits(), Ticker.systemTicker());
+
+    assertThrows(
+        NullPointerException.class,
+        () -> reader.readImage(BLOB_ID, MEDIA_TYPE, BYTES.length, null, IMAGE_CHARS));
+    verify(contentService, never()).readBlobContent(any(), anyLong());
+  }
+
+  private static int decodedWidth(ProviderInlineBlobReader.InlineBlob inline) {
+    String encoded = inline.dataUri().substring(inline.dataUri().indexOf(";base64,") + 8);
+    return TestImages.decode(inline.mediaType(), Base64.getDecoder().decode(encoded)).getWidth();
+  }
+
+  private static String rawDataUri(String mediaType, byte[] bytes) {
+    return "data:" + mediaType + ";base64," + Base64.getEncoder().encodeToString(bytes);
+  }
+
   private ProviderInlineBlobReader reader(ProviderInlineBlobReader.Limits limits, Ticker ticker) {
     return new ProviderInlineBlobReader(contentService, limits, ticker);
   }
@@ -454,8 +594,12 @@ class ProviderInlineBlobReaderTest {
   }
 
   private void stub(UUID blobId, byte[] bytes) {
+    stub(blobId, bytes, MEDIA_TYPE);
+  }
+
+  private void stub(UUID blobId, byte[] bytes, String mediaType) {
     when(contentService.readBlobContent(blobId, testLimits().maxBlobBytes()))
-        .thenReturn(new StorageBlobContent(blobId, bytes, MEDIA_TYPE, bytes.length));
+        .thenReturn(new StorageBlobContent(blobId, bytes, mediaType, bytes.length));
   }
 
   private static void awaitQuietly(CountDownLatch latch) {

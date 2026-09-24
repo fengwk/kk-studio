@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
 
+import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 
@@ -16,7 +17,7 @@ import java.util.regex.Pattern;
 
 /**
  * Provider attempt 内联 Resource 的 Blob 内容读取：通过 {@link StorageBlobContentService} 有界读取原始字节并生成
- * attempt-only {@code data:<mime>;base64,...} 字符串。
+ * attempt-only {@code data:<mime>;base64,...} 字符串；图片可按 {@link ImageInputTier} 在读取后立即缩小。
  *
  * <p>职责只有三件事：
  *
@@ -25,12 +26,13 @@ import java.util.regex.Pattern;
  *       实际字节长度，任何不一致都显式失败（绝不回退成截断内容）；
  *   <li>并发闸门：同一时刻最多 {@link Limits#maxConcurrentDownloads()} 个下载，缓存命中不占用闸门，等待被中断时保留中断标志并失败，
  *       失败路径释放许可；
- *   <li>缓存：以不可变 Blob 事实（{@code blobId + mime + size}）为 key 缓存 data URI 字符串，让重复出现的同一 Resource 与并发
+ *   <li>缓存：以不可变 Blob 事实（{@code blobId + mime + size + tier}）为 key 缓存 data URI，让重复出现的同一 Resource 与并发
  *       miss 合并为一次读取；超过单条目记账上限的大对象不进入缓存。
  * </ol>
  *
  * <p>本类不判断 ACTIVE 状态、不判断模态与 Provider 能力，也不产生任何 URL：状态与能力判定在每次 attempt 的 {@link
- * ProviderResourceMaterializer} 中完成，本类只负责已确认可读的 Blob。缓存条目是源数据的纯函数，因此不需要失效通知，只受 TTL 与 权重上限约束。
+ * ProviderResourceMaterializer} 中完成，本类只负责已确认可读的 Blob。缓存条目是源数据与档位的纯函数（同一 key 必有同一值），因此不需要失效 通知，只受
+ * TTL 与权重上限约束；不同档位的转化结果绝不互相复用缓存条目。
  */
 final class ProviderInlineBlobReader {
 
@@ -46,7 +48,7 @@ final class ProviderInlineBlobReader {
 
   private final StorageBlobContentService contentService;
   private final Limits limits;
-  private final Cache<BlobKey, String> cache;
+  private final Cache<BlobKey, InlineBlob> cache;
   private final Semaphore downloads;
 
   /** 测试注入入口：limits 与 ticker 决定上限、缓存预算与过期时间，便于确定性验证边界。 */
@@ -58,8 +60,8 @@ final class ProviderInlineBlobReader {
         Caffeine.newBuilder()
             .maximumWeight(limits.maxCacheWeightBytes())
             .weigher(
-                (BlobKey key, String value) ->
-                    (int) Math.min(Integer.MAX_VALUE, accountedWeight(value.length())))
+                (BlobKey key, InlineBlob value) ->
+                    (int) Math.min(Integer.MAX_VALUE, accountedWeight(value.dataUri().length())))
             .expireAfterWrite(limits.cacheTtl())
             .ticker(ticker)
             .build();
@@ -67,7 +69,7 @@ final class ProviderInlineBlobReader {
   }
 
   /**
-   * 读取 blob 原始内容并生成内联 data URI。
+   * 读取 blob 原始内容并生成内联 data URI（不做任何转换）。
    *
    * @param blobId 目标 blob（调用方已确认 ACTIVE）
    * @param mediaType 权威 MIME
@@ -77,6 +79,39 @@ final class ProviderInlineBlobReader {
    * @throws IllegalStateException 权威内容与声明事实不一致、或读取被中断时抛出
    */
   String readDataUri(UUID blobId, String mediaType, long sizeBytes, long maxDataUriChars) {
+    return inline(blobId, mediaType, sizeBytes, null, maxDataUriChars).dataUri();
+  }
+
+  /**
+   * 读取 blob 原始内容并按 {@code tier} 物化图片后生成内联 data URI：命中档位框保留原字节，超出时按显示方向等比缩小。
+   *
+   * <p>{@link ImageInputTier#ORIGINAL} 与未指定档位等价（都是原字节），共用同一缓存 key；其他档位各自独立记账，绝不互相复用转化结果。
+   * 转化后的字符数只有在读取完成后才知道，因此这里在取值后再次校验调用方预算（缓存命中同样受本次调用约束）。
+   *
+   * @param tier 目标档位，不能为空
+   * @throws IllegalArgumentException 上限非正、MIME 或大小非法、声明大小超出上限、图片格式不支持、动画或多帧、超出解码像素预算，或
+   *     物化结果超出本次允许的字符数时抛出
+   * @throws IllegalStateException 权威内容与声明事实不一致、或读取被中断时抛出
+   */
+  InlineBlob readImage(
+      UUID blobId, String mediaType, long sizeBytes, ImageInputTier tier, long maxDataUriChars) {
+    Objects.requireNonNull(tier, "tier");
+    InlineBlob inline = inline(blobId, mediaType, sizeBytes, tier, maxDataUriChars);
+    if (inline.dataUri().length() > maxDataUriChars) {
+      throw new IllegalArgumentException(
+          "inline data URI for image input tier "
+              + tier.wireName()
+              + " requires "
+              + inline.dataUri().length()
+              + " characters but only "
+              + maxDataUriChars
+              + " are allowed");
+    }
+    return inline;
+  }
+
+  private InlineBlob inline(
+      UUID blobId, String mediaType, long sizeBytes, ImageInputTier tier, long maxDataUriChars) {
     Objects.requireNonNull(blobId, "blobId");
     if (maxDataUriChars <= 0L) {
       throw new IllegalArgumentException("maxDataUriChars must be positive");
@@ -90,22 +125,37 @@ final class ProviderInlineBlobReader {
               + limits.maxBlobBytes()
               + " bytes");
     }
-    long estimatedChars = estimatedDataUriChars(safeMediaType, sizeBytes);
-    if (estimatedChars > maxDataUriChars) {
-      throw new IllegalArgumentException(
-          "inline data URI requires "
-              + estimatedChars
-              + " characters but only "
-              + maxDataUriChars
-              + " are allowed");
-    }
-    BlobKey key = new BlobKey(blobId, safeMediaType, sizeBytes);
-    if (accountedWeight(estimatedChars) > limits.maxCacheEntryWeightBytes()) {
-      // 大对象不进入缓存，避免单条目挤占缓存预算；仍走同一并发闸门与同一套校验。
-      return load(key, maxDataUriChars);
+    // ORIGINAL 与未指定档位都是原字节，共用同一缓存 key；缩放档位各自独立，绝不把某一档位的转化结果当作另一档位。
+    BlobKey key =
+        new BlobKey(
+            blobId, safeMediaType, sizeBytes, tier == null || tier.isOriginal() ? null : tier);
+    long exactChars = 0L;
+    if (key.tier() == null) {
+      // 原字节路径的字符数是声明的确定函数：读取前就能给出精确的预算错误。
+      exactChars = estimatedDataUriChars(safeMediaType, sizeBytes);
+      if (exactChars > maxDataUriChars) {
+        throw new IllegalArgumentException(
+            "inline data URI requires "
+                + exactChars
+                + " characters but only "
+                + maxDataUriChars
+                + " are allowed");
+      }
+      if (accountedWeight(exactChars) > limits.maxCacheEntryWeightBytes()) {
+        // 大对象不进入缓存，避免单条目挤占缓存预算；仍走同一并发闸门与同一套校验。
+        return load(key, maxDataUriChars);
+      }
     }
     // cache.get 让并发 miss 与重复引用合并为一次读取；loader 失败时 Caffeine 不写入任何条目。
-    return cache.get(key, missedKey -> load(missedKey, maxDataUriChars));
+    InlineBlob inline = cache.get(key, missedKey -> load(missedKey, maxDataUriChars));
+    if ((key.tier() == null
+            ? accountedWeight(exactChars)
+            : accountedWeight(inline.dataUri().length()))
+        > limits.maxCacheEntryWeightBytes()) {
+      // 转化后的实际大小只有在读取完成后才确定：确认超限时立刻移除，不长期占用缓存预算。
+      cache.invalidate(key);
+    }
+    return inline;
   }
 
   /** 已缓存的 data URI 条目数（测试与诊断用；权重淘汰可能滞后于写入，使用前可先 {@link #cleanUp()}）。 */
@@ -123,12 +173,19 @@ final class ProviderInlineBlobReader {
     cache.cleanUp();
   }
 
-  private String load(BlobKey key, long maxDataUriChars) {
+  private InlineBlob load(BlobKey key, long maxDataUriChars) {
     acquireDownloadPermit();
     try {
       StorageBlobContent content =
           contentService.readBlobContent(key.blobId(), limits.maxBlobBytes());
-      return toDataUri(key, content, maxDataUriChars);
+      byte[] bytes = requireAuthoritativeBytes(key, content);
+      if (key.tier() == null) {
+        return toInline(key.blobId(), key.mediaType(), bytes, maxDataUriChars);
+      }
+      ProviderImageScaler.Scaled scaled =
+          ProviderImageScaler.scale(key.mediaType(), bytes, key.tier(), limits.maxBlobBytes());
+      // 转化后的字符数由实际编码结果决定，调用方预算由 readImage 在拿到产物后统一校验。
+      return toInline(key.blobId(), scaled.mediaType(), scaled.bytes(), Long.MAX_VALUE);
     } finally {
       downloads.release();
     }
@@ -143,8 +200,8 @@ final class ProviderInlineBlobReader {
     }
   }
 
-  /** 校验权威内容与声明事实一致后拼接 data URI；错误信息只包含 blobId 与大小，绝不回显内容或 URI。 */
-  private static String toDataUri(BlobKey key, StorageBlobContent content, long maxDataUriChars) {
+  /** 校验权威内容与声明事实一致后返回原始字节；错误信息只包含 blobId 与大小，绝不回显内容。 */
+  private static byte[] requireAuthoritativeBytes(BlobKey key, StorageBlobContent content) {
     if (!key.blobId().equals(content.getBlobId())) {
       throw new IllegalStateException("blob content identity mismatch for " + key.blobId());
     }
@@ -170,16 +227,18 @@ final class ProviderInlineBlobReader {
               + " bytes but read "
               + bytes.length);
     }
+    return bytes;
+  }
+
+  /** 拼接 data URI（header 使用传入的 MIME，必须与实际编码格式一致）；错误信息只包含 blobId 与大小。 */
+  private static InlineBlob toInline(
+      UUID blobId, String mediaType, byte[] bytes, long maxDataUriChars) {
     String dataUri =
-        DATA_URI_PREFIX
-            + key.mediaType()
-            + DATA_URI_SUFFIX
-            + Base64.getEncoder().encodeToString(bytes);
+        DATA_URI_PREFIX + mediaType + DATA_URI_SUFFIX + Base64.getEncoder().encodeToString(bytes);
     if (dataUri.length() > maxDataUriChars) {
-      throw new IllegalStateException(
-          "blob content exceeds the inline size allowed for " + key.blobId());
+      throw new IllegalStateException("blob content exceeds the inline size allowed for " + blobId);
     }
-    return dataUri;
+    return new InlineBlob(mediaType, dataUri);
   }
 
   private static String requireSafeMediaType(String mediaType) {
@@ -204,8 +263,17 @@ final class ProviderInlineBlobReader {
     return 2L * valueChars + ENTRY_WEIGHT_OVERHEAD_BYTES;
   }
 
-  /** 不可变 Blob 事实：UUID + MIME + 大小，任一变化都对应新的 key。 */
-  private record BlobKey(UUID blobId, String mediaType, long sizeBytes) {}
+  /** 不可变 Blob 事实：UUID + MIME + 大小 + 图片档位，任一变化都对应新的 key（档位为 null 表示原字节）。 */
+  private record BlobKey(UUID blobId, String mediaType, long sizeBytes, ImageInputTier tier) {}
+
+  /** 内联产物：{@code mediaType} 与 data URI header 一致（按档位缩放后可能与权威 MIME 不同）。 */
+  record InlineBlob(String mediaType, String dataUri) {
+
+    InlineBlob {
+      Objects.requireNonNull(mediaType, "mediaType");
+      Objects.requireNonNull(dataUri, "dataUri");
+    }
+  }
 
   /**
    * 可注入上限：默认值只是应用安全闸门，不代表任何 Provider 能力或供应商限制。

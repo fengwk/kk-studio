@@ -14,6 +14,9 @@ import lombok.Setter;
  * <p>{@code type} 仅允许 TEXT / ATTACHMENT / RESOURCE；mapper 按类型严格校验其余字段。ATTACHMENT 携带瞬时 {@code
  * uploadId}（READY 上传的 canonical UUID），由应用 use-case 在入队事务内物化为 durable RESOURCE。RESOURCE 只能复用目标
  * Session 已拥有的 blob ref。
+ *
+ * <p>{@code imageTier} 只允许出现在 ATTACHMENT / RESOURCE 上，取值是 {@code 720P} / {@code 1080P} / {@code
+ * ORIGINAL}；字段缺省即平台默认 {@code 720P}。该值随命令冻结，重试与压缩沿用同一档位。
  */
 @Data
 public class HarnessUserMessageContentDTO {
@@ -56,6 +59,13 @@ public class HarnessUserMessageContentDTO {
   @Setter(AccessLevel.NONE)
   private boolean previewFieldPresent;
 
+  /** 仅 ATTACHMENT / RESOURCE 使用：图片输入档位（720P / 1080P / ORIGINAL）；缺省即平台默认 720P。 */
+  private String imageTier;
+
+  @Getter(AccessLevel.NONE)
+  @Setter(AccessLevel.NONE)
+  private boolean imageTierFieldPresent;
+
   @JsonSetter("text")
   public void setText(String text) {
     this.text = text;
@@ -86,6 +96,12 @@ public class HarnessUserMessageContentDTO {
     this.previewFieldPresent = true;
   }
 
+  @JsonSetter("imageTier")
+  public void setImageTier(Object imageTier) {
+    this.imageTier = HarnessRuntimeDtoSupport.requireJsonString(imageTier, "content.imageTier");
+    this.imageTierFieldPresent = true;
+  }
+
   @JsonIgnore
   public boolean hasTextField() {
     return textFieldPresent;
@@ -109,6 +125,11 @@ public class HarnessUserMessageContentDTO {
   @JsonIgnore
   public boolean hasPreviewField() {
     return previewFieldPresent;
+  }
+
+  @JsonIgnore
+  public boolean hasImageTierField() {
+    return imageTierFieldPresent;
   }
 
   @JsonAnySetter

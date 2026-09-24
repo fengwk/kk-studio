@@ -129,7 +129,9 @@ class PromptCacheAffinityKeyFactoryTest {
     ProviderMessage resourceMsg =
         new ProviderMessage(
             ProviderMessageRole.USER,
-            List.of(new ProviderResourceBlock(UUID.randomUUID(), "res.txt", 100L, 10L, "preview")));
+            List.of(
+                new ProviderResourceBlock(
+                    UUID.randomUUID(), "res.txt", 100L, 10L, "preview", null)));
 
     assertEquals(baseKey, factory.create(SESSION_ID, withMessages(template, List.of(thinkingMsg))));
     assertEquals(baseKey, factory.create(SESSION_ID, withMessages(template, List.of(jsonMsg))));
