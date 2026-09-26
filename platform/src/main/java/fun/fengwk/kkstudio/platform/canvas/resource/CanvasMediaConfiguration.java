@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 /** Canvas 媒体集成装配：ffprobe/ffmpeg 二进制与临时目录来自部署属性，运行参数来自 SystemSettings.storageMedia。 */
@@ -32,11 +33,11 @@ public class CanvasMediaConfiguration {
   }
 
   @Bean
-  public CanvasBlobPreviewService canvasBlobPreviewService(
+  public StorageBlobPreviewService storageBlobPreviewService(
       CanvasMediaProperties properties,
       SystemSettingsSnapshot snapshot,
       S3StorageService storageService) {
-    return new CanvasBlobPreviewService(properties, snapshot, storageService);
+    return new FfmpegStorageBlobPreviewService(properties, snapshot, storageService);
   }
 
   @Bean
@@ -46,7 +47,6 @@ public class CanvasMediaConfiguration {
       CanvasStore canvasStore,
       CanvasFunctionResourcePinRepository pinRepository,
       CanvasResourceRepository resourceRepository,
-      CanvasBlobPreviewService previewService,
       TransactionTemplate transactionTemplate) {
     return new CanvasBlobResourceMaterializer(
         uploadService,
@@ -54,7 +54,6 @@ public class CanvasMediaConfiguration {
         canvasStore,
         pinRepository,
         resourceRepository,
-        previewService,
         transactionTemplate);
   }
 }

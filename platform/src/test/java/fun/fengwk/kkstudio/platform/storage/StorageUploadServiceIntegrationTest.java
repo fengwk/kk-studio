@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +29,7 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
@@ -37,6 +41,8 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadState;
 import javax.sql.DataSource;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -83,6 +89,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   // 本类显式驱动 expireOnce，禁用会异步消费相同 cleanup rows 的后台 maintenance。
   @MockitoBean private StorageMaintenance storageMaintenance;
+  @MockitoBean private StorageBlobPreviewService blobPreviewService;
 
   private TransactionTemplate tx;
 
@@ -120,6 +127,18 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         jdbc.queryForObject(
             "select blob_id from storage_upload where id = ?", UUID.class, staged.uploadId()));
     assertArrayEquals(content, s3Storage.download(StorageObjectKeys.blobOriginal(staged.blobId())));
+  }
+
+  @Test
+  void serverStageGeneratesImagePreviewAfterBinding() throws Exception {
+    // Canvas/Tool 的服务端 staging 也必须经过统一预览入口，不能依赖后续业务消费补生成。
+    byte[] content = tinyPng();
+
+    StorageUploadService.StagedUpload staged =
+        storageUploadService.stage(
+            "tiny.png", "image/png", new ByteArrayInputStream(content), content.length);
+
+    verify(blobPreviewService).ensurePreview(staged.blobId(), "image/png");
   }
 
   @Test
@@ -223,6 +242,27 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   }
 
   @Test
+  void reserveHitRetriesImagePreviewWithoutBreakingReadyResult() throws Exception {
+    // READY 去重命中可能来自历史 Blob 或上次预览失败；reserve 应在事务外幂等补生成。
+    byte[] content = tinyPng();
+    StorageUploadDTO pending = reserve("tiny.png", "image/png", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "image/png");
+    StorageUploadDTO first = storageUploadService.complete(UUID.fromString(pending.getId()));
+    UUID blobId = UUID.fromString(first.getBlobId());
+
+    doThrow(new IllegalStateException("preview failed"))
+        .when(blobPreviewService)
+        .ensurePreview(blobId, "image/png");
+    StorageUploadDTO duplicate =
+        assertDoesNotThrow(
+            () -> reserve("tiny-copy.png", "image/png", content.length, sha256Hex(content)));
+
+    assertEquals(StorageUploadState.READY, duplicate.getState());
+    assertEquals(first.getBlobId(), duplicate.getBlobId());
+    verify(blobPreviewService, times(2)).ensurePreview(blobId, "image/png");
+  }
+
+  @Test
   void reserveValidatesDeclarationsAndNormalizesSha256Case() throws Exception {
     assertThrows(
         IllegalArgumentException.class,
@@ -287,6 +327,27 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     assertFalse(
         s3Storage.hasObject(StorageObjectKeys.uploadOriginal(UUID.fromString(pending.getId()))),
         "complete must delete the temp upload object");
+  }
+
+  @Test
+  void completeGeneratesImagePreviewAndToleratesGeneratorFailureOnRetry() throws Exception {
+    // 图片 Blob 绑定后立即生成 webp 预览；重试时生成器失败也不得破坏 READY 幂等结果。
+    byte[] content = tinyPng();
+    StorageUploadDTO pending = reserve("tiny.png", "image/png", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "image/png");
+
+    StorageUploadDTO first = storageUploadService.complete(UUID.fromString(pending.getId()));
+    UUID blobId = UUID.fromString(first.getBlobId());
+    verify(blobPreviewService).ensurePreview(blobId, "image/png");
+
+    doThrow(new IllegalStateException("preview failed"))
+        .when(blobPreviewService)
+        .ensurePreview(blobId, "image/png");
+    StorageUploadDTO second =
+        assertDoesNotThrow(() -> storageUploadService.complete(UUID.fromString(pending.getId())));
+
+    assertEquals(first.getBlobId(), second.getBlobId());
+    verify(blobPreviewService, times(2)).ensurePreview(blobId, "image/png");
   }
 
   @Test
@@ -1075,6 +1136,15 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         reserve("first.bin", "application/octet-stream", content.length, sha256Hex(content));
     putUploadContent(pending.getId(), content, "application/octet-stream");
     return storageUploadService.complete(UUID.fromString(pending.getId())).getBlobId();
+  }
+
+  private static byte[] tinyPng() throws IOException {
+    try (InputStream input =
+        StorageUploadServiceIntegrationTest.class.getResourceAsStream(
+            "/fun/fengwk/kkstudio/platform/canvas/resource/tiny.png")) {
+      assertNotNull(input);
+      return input.readAllBytes();
+    }
   }
 
   private void backdateUpload(String uploadId) {

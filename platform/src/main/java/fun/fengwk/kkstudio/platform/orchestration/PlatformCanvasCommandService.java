@@ -4,12 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasCommandService;
@@ -34,10 +31,8 @@ import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
-import fun.fengwk.kkstudio.platform.canvas.resource.CanvasBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -60,9 +55,8 @@ import java.util.UUID;
  * <p>修改或删除现有画布前先锁定 document 行，因此同一画布的写事务串行执行。命令批次在该锁内完成幂等键校验、版本校验、图变更、资源所有权变更和版本 CAS。
  *
  * <p>相同幂等键和命令哈希返回当前版本的空 Patch；相同键对应不同哈希时拒绝请求。消费上传时，Blob retain、上传所有权释放和 CanvasResource
- * 写入位于同一事务。预览只在事务提交后触发，删除则按外键依赖顺序由应用层显式编排。
+ * 写入位于同一事务。预览由统一上传服务在 Blob 绑定后生成，删除则按外键依赖顺序由应用层显式编排。
  */
-@Slf4j
 @Service
 public class PlatformCanvasCommandService implements CanvasCommandService {
 
@@ -75,7 +69,6 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
   private final CanvasResourceLifecycle resourceLifecycle;
   private final StorageUploadService uploadService;
   private final StorageBlobManager blobManager;
-  private final CanvasBlobPreviewService previewService;
   private final CanvasFunctionConfigCodecPort functionConfigCodec;
   private final CanvasFunctionCatalog functionCatalog;
   private final ObjectMapper objectMapper;
@@ -88,7 +81,6 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
       CanvasResourceLifecycle resourceLifecycle,
       StorageUploadService uploadService,
       StorageBlobManager blobManager,
-      CanvasBlobPreviewService previewService,
       CanvasFunctionConfigCodecPort functionConfigCodec,
       CanvasFunctionCatalog functionCatalog,
       ObjectMapper objectMapper,
@@ -99,7 +91,6 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
-    this.previewService = Objects.requireNonNull(previewService, "previewService");
     this.functionConfigCodec = Objects.requireNonNull(functionConfigCodec, "functionConfigCodec");
     this.functionCatalog = Objects.requireNonNull(functionCatalog, "functionCatalog");
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
@@ -270,7 +261,6 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
     }
     for (CanvasResource resource : resources) {
       resourceRepository.add(resource);
-      registerPreviewAfterCommit(resource);
     }
     accumulator.upsertNode(projectNode(node, resources, Map.of()));
   }
@@ -528,37 +518,6 @@ public class PlatformCanvasCommandService implements CanvasCommandService {
         filename == null || filename.isBlank() ? nodeName : filename,
         null,
         Instant.now());
-  }
-
-  /** 提交成功后生成预览，使慢 I/O 不占用画布写事务；失败只记录日志。 */
-  private void registerPreviewAfterCommit(CanvasResource resource) {
-    if (resource.blobId() == null) {
-      return;
-    }
-    StorageBlob blob = blobManager.getBlob(resource.blobId());
-    if (blob == null || !isPreviewable(blob.getMediaType())) {
-      return;
-    }
-    UUID blobId = resource.blobId();
-    String mediaType = blob.getMediaType();
-    TransactionSynchronizationManager.registerSynchronization(
-        new TransactionSynchronization() {
-          @Override
-          public void afterCommit() {
-            try {
-              previewService.ensurePreview(blobId, mediaType);
-            } catch (RuntimeException error) {
-              log.warn(
-                  "blob preview generation failed after upload consumption blobId={} type={}",
-                  blobId,
-                  error.getClass().getSimpleName());
-            }
-          }
-        });
-  }
-
-  private static boolean isPreviewable(String mediaType) {
-    return mediaType != null && (mediaType.startsWith("image/") || mediaType.startsWith("video/"));
   }
 
   private CanvasResourceNode projectNode(

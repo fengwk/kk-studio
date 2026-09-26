@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,13 +23,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * blob webp 预览对象生成：{@code blobs/{blobId}/preview.webp} 只由本服务写入，已存在（幂等）时跳过。
- *
- * <p>调用方（上传消费 afterCommit、输出物化）决定何时 best-effort 调用；生成失败抛出异常但不破坏 blob 事实。
- */
+/** 基于 ffmpeg 的 Blob webp 预览生成器：{@code blobs/{blobId}/preview.webp} 只由本服务写入，已存在时幂等跳过。 */
 @Slf4j
-public class CanvasBlobPreviewService {
+public class FfmpegStorageBlobPreviewService implements StorageBlobPreviewService {
 
   private static final long MAX_PREVIEW_INPUT = 512L * 1024 * 1024;
 
@@ -37,7 +34,7 @@ public class CanvasBlobPreviewService {
   private final S3StorageService storageService;
   private final MediaProcessRunner processRunner = new MediaProcessRunner();
 
-  public CanvasBlobPreviewService(
+  public FfmpegStorageBlobPreviewService(
       CanvasMediaProperties properties,
       SystemSettingsSnapshot snapshot,
       S3StorageService storageService) {
@@ -51,6 +48,7 @@ public class CanvasBlobPreviewService {
    *
    * @return 是否需要生成（true = 已生成；false = 已存在或非图片/视频）
    */
+  @Override
   public boolean ensurePreview(UUID blobId, String mediaType) {
     Objects.requireNonNull(blobId, "blobId");
     if (!isPreviewable(mediaType)) {

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StoragePresignedUrls;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -80,6 +81,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private final S3StorageService s3StorageService;
   private final S3PresignService s3PresignService;
   private final StorageMediaProbe mediaProbe;
+  private final StorageBlobPreviewService blobPreviewService;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
   private final S3StorageProperties s3Properties;
   private final SystemSettings.StorageMedia storageMedia;
@@ -95,6 +97,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
+      StorageBlobPreviewService blobPreviewService,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups,
       S3StorageProperties s3Properties,
       SystemSettings.StorageMedia storageMedia,
@@ -107,6 +110,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
     this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
+    this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
     this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
@@ -173,6 +177,8 @@ public class StorageUploadServiceImpl implements StorageUploadService {
               Base64.getEncoder().encodeToString(decodeHex(sha256)),
               presignExpiresSeconds());
       presignedPut = StoragePresignedUrls.from(signed);
+    } else {
+      generatePreviewBestEffort(outcome.blobId);
     }
     return toDTO(
         outcome.upload.getId(), outcome.blobId, outcome.upload.getExpiresAt(), presignedPut);
@@ -192,6 +198,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       ensureBlobOriginal(upload.getBlobId(), uploadId);
       s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
       cleanupUnusedCandidate(upload);
+      generatePreviewBestEffort(upload.getBlobId());
       return toDTO(uploadId, upload.getBlobId(), upload.getExpiresAt(), null);
     }
 
@@ -316,7 +323,30 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     } else {
       s3StorageService.deleteObjectIfExists(tempKey);
     }
+    generatePreviewBestEffort(blobId);
     return blobId;
+  }
+
+  /** Blob 已提交且对象可读后生成轻量预览；失败不改变 READY 上传事实，展示层回退原件。 */
+  private void generatePreviewBestEffort(UUID blobId) {
+    try {
+      StorageBlob blob = blobManager.getBlob(blobId);
+      if (blob == null
+          || blob.getState() != StorageBlobState.ACTIVE
+          || !isPreviewable(blob.getMediaType())) {
+        return;
+      }
+      blobPreviewService.ensurePreview(blobId, blob.getMediaType());
+    } catch (RuntimeException error) {
+      log.warn(
+          "blob preview generation failed blobId={} type={}",
+          blobId,
+          error.getClass().getSimpleName());
+    }
+  }
+
+  private static boolean isPreviewable(String mediaType) {
+    return mediaType != null && (mediaType.startsWith("image/") || mediaType.startsWith("video/"));
   }
 
   @Override

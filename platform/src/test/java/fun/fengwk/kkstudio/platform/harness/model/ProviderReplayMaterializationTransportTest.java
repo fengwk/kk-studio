@@ -348,8 +348,7 @@ class ProviderReplayMaterializationTransportTest {
 
   private ProviderAdapter adapter(ProviderType type) {
     return switch (type) {
-      case OPENAI -> new OpenAiChatProviderAdapter(
-          transport, "test-key", "{\"openAiChatMediaTypes\":[\"IMAGE\",\"AUDIO\",\"PDF\"]}");
+      case OPENAI -> new OpenAiChatProviderAdapter(transport, "test-key");
       case OPENAI_RESPONSES -> new OpenAiResponsesProviderAdapter(transport, "test-key");
       case ANTHROPIC -> new AnthropicProviderAdapter(transport, "test-key");
       case GOOGLE -> new GeminiProviderAdapter(transport, "test-key");

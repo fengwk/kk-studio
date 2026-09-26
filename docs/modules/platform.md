@@ -619,10 +619,11 @@ preview → original → 条件删除 Blob 行。
 的上传协议是：
 
 1. `reserve` 在短事务内按 hash/size 命中 ACTIVE 或创建 PENDING upload，未命中再生成
-   checksum PUT presign；
+   checksum PUT presign；READY 命中在事务外为图片与视频 best-effort 补生成预览；
 2. `complete` 在数据库事务外 HEAD、校验 size/SHA-256、probe 媒体事实并复制 candidate
    object，随后短事务锁 upload 行、做 ACTIVE dedup、设置 blobId；并发 complete 只有
-   一个绑定成功；
+   一个绑定成功；绑定完成后在事务外为图片与视频 best-effort 生成
+   `blobs/{blobId}/preview.webp`，失败不改变 READY 事实；
 3. `delete` 在短事务记录 cleanup request，READY upload 同时 release upload owner；
 4. `expireOnce` 先用 `SKIP LOCKED` claim 有界批次，事务外幂等删除临时/candidate
    object，再用 cleanup token 做 fenced finalize；删除或 finalize 失败时保留 lease，
@@ -904,9 +905,9 @@ unowned target。这使 Resource row、Session ref 和 upload owner 各自只维
 [CanvasBlobResourceMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobResourceMaterializer.java)
 把 Function 输出 spool 到临时目录（上限 512 MiB），在事务外写 `blobs/{blobId}/original`
 并 probe 媒体事实，然后在事务内锁 Canvas、确认恰好一个 RUNNING output pin、做 Blob
-dedup 和 `resourceId` 幂等 insert；并发落败方释放自身刚创建的 Blob 引用，预览生成在
-提交后 best-effort 执行。
-[CanvasBlobPreviewService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobPreviewService.java)
+dedup 和 `resourceId` 幂等 insert；并发落败方释放自身刚创建的 Blob 引用。所有浏览器上传
+与服务端 `stage` 都由统一上传服务在 Blob 绑定后调用
+[FfmpegStorageBlobPreviewService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/FfmpegStorageBlobPreviewService.java)，
 通过不经 shell 的 `MediaProcessRunner` 调用 ffmpeg 生成 webp，输入上限 512 MiB，超时与
 缩略图参数来自 SystemSettings。
 

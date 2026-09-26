@@ -42,9 +42,14 @@ describe('ResourceAttachmentChip', () => {
     const preview = await screen.findByRole('button', { name: '预览 report.pdf' })
     expect(within(preview).getByRole('img', { name: 'report.pdf' })).toHaveAttribute(
       'src',
-      'https://s3.test/orig',
+      'https://s3.test/prev',
     )
     expect(preview.querySelector('.resource-media-preview-name')).toHaveTextContent('report.pdf')
+    fireEvent.error(within(preview).getByRole('img', { name: 'report.pdf' }))
+    expect(within(preview).getByRole('img', { name: 'report.pdf' })).toHaveAttribute(
+      'src',
+      'https://s3.test/orig',
+    )
 
     await user.click(preview)
     const dialog = screen.getByRole('dialog', { name: '预览 report.pdf' })
