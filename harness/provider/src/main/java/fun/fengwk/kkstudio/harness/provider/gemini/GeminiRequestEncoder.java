@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
+import java.math.BigInteger;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -79,6 +80,15 @@ final class GeminiRequestEncoder {
 
   /** 工具结果唯一可内联的文档 MIME。 */
   private static final String TOOL_RESULT_DOCUMENT_TYPE = "application/pdf";
+
+  private static final Set<String> HOSTED_TOOL_KEYS =
+      Set.of(
+          "googleSearch",
+          "googleSearchRetrieval",
+          "retrieval",
+          "codeExecution",
+          "urlContext",
+          "googleMaps");
 
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
@@ -248,6 +258,14 @@ final class GeminiRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST,
           "Gemini protocol options must not override runtime-owned generationConfig.maxOutputTokens");
     }
+    if (genConfig.has("candidateCount")) {
+      JsonNode count = genConfig.get("candidateCount");
+      if (!count.isIntegralNumber() || !count.bigIntegerValue().equals(BigInteger.ONE)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions generationConfig.candidateCount must be exactly 1");
+      }
+    }
 
     // reasoning effort 映射到 thinkingConfig：未声明时不生成，off 显式关闭，其余级别下发生效级别
     String reasoningEffort = request.variant().reasoningEffort();
@@ -289,6 +307,19 @@ final class GeminiRequestEncoder {
       toolsArray = root.putArray("tools");
     } else if (nativeNode instanceof ArrayNode nativeTools) {
       toolsArray = nativeTools;
+      for (int i = 0; i < nativeTools.size(); i++) {
+        JsonNode nativeTool = nativeTools.get(i);
+        if (!nativeTool.isObject()
+            || nativeTool.size() != 1
+            || !HOSTED_TOOL_KEYS.contains(nativeTool.fieldNames().next())
+            || !nativeTool.elements().next().isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "protocolOptions tools["
+                  + i
+                  + "] must be a hosted tool object; bind client tools through runtime ProviderToolDefinition");
+        }
+      }
     } else {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "Gemini protocol options tools must be a JSON array");

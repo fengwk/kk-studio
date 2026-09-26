@@ -254,23 +254,18 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     }
   }
 
-  /**
-   * 测试意图：原生 native 工具按声明顺序保留在 runtime function 工具之前，整段 native 工具（含 web/file search、 computer、code
-   * interpreter、image generation、local shell、MCP、custom）逐字节透传。
-   */
+  /** 测试意图：可执行的 hosted 工具按声明顺序保留在 runtime function 工具之前，原生字段无损透传。 */
   @Test
   void test_nativeToolsPrecedeRuntimeFunctionTools() throws Exception {
     String nativeTools =
         """
         [
           {"type": "web_search"},
+          {"type": "web_search_preview"},
           {"type": "file_search", "vector_store_ids": ["vs_1"]},
-          {"type": "computer_use_preview", "display_width": 1024, "display_height": 768},
           {"type": "code_interpreter", "container": {"type": "auto"}},
           {"type": "image_generation", "size": "1024x1024"},
-          {"type": "local_shell"},
-          {"type": "mcp", "server_label": "srv", "server_url": "https://example.com/mcp"},
-          {"type": "custom", "name": "my_tool", "format": {"type": "text"}}
+          {"type": "mcp", "server_label": "srv", "server_url": "https://example.com/mcp", "require_approval": "never"}
         ]
         """;
     JsonNode root =
@@ -331,6 +326,55 @@ class OpenAiResponsesNativeProtocolOptionsTest {
                         List.of())));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertTrue(ex.getMessage().contains("tools"), ex.getMessage());
+  }
+
+  /** 测试意图：只接受能够由当前流式运行时闭环的 hosted 工具与同步请求，非法项必须在编码时拒绝。 */
+  @Test
+  void rejectsUnsupportedExecutionOptions() {
+    for (String option :
+        List.of(
+            "{\"background\":true}",
+            "{\"background\":null}",
+            "{\"background\":\"false\"}",
+            "{\"tools\":[null]}",
+            "{\"tools\":[{\"type\":\"function\",\"name\":\"secret\"}]}",
+            "{\"tools\":[{\"type\":\"custom\"}]}",
+            "{\"tools\":[{\"type\":\"computer_use_preview\"}]}",
+            "{\"tools\":[{\"type\":\"local_shell\"}]}",
+            "{\"tools\":[{\"type\":\"shell\"}]}",
+            "{\"tools\":[{\"type\":\"apply_patch\"}]}",
+            "{\"tools\":[{\"type\":\"tool_search\"}]}",
+            "{\"tools\":[{\"type\":\"mcp\",\"require_approval\":\"always\"}]}",
+            "{\"tools\":[{\"type\":\"mcp\",\"require_approval\":false}]}")) {
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () -> encode(request(variant("v", null, option), userMessage(), List.of())));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+      assertFalse(error.getMessage().contains("secret"));
+    }
+  }
+
+  /** 测试意图：hosted 工具若提供名称，重复名称与 runtime 绑定冲突均必须在编码阶段失败。 */
+  @Test
+  void rejectsNamedToolCollisions() {
+    for (String options :
+        List.of(
+            "{\"tools\":[{\"type\":\"web_search\",\"name\":\"lookup\"}]}",
+            "{\"tools\":[{\"type\":\"web_search\",\"name\":\"same\"},"
+                + "{\"type\":\"file_search\",\"name\":\"same\"}]}")) {
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encode(
+                      request(
+                          variant("v", null, options),
+                          userMessage(),
+                          List.of(functionTool("lookup")))));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+      assertTrue(error.getMessage().contains("tools["));
+    }
   }
 
   /**
