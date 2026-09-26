@@ -18,17 +18,18 @@ import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import { Select } from '@/shared/ui/console/Select'
 
-const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
-  { id: 'single', label: '1' },
-  { id: 'split-2', label: '2' },
-  { id: 'split-3', label: '3' },
-  { id: 'grid-4', label: '4' },
-  { id: 'grid-5', label: '5' },
-  { id: 'grid-6', label: '6' },
-  { id: 'grid-7', label: '7' },
-  { id: 'grid-8', label: '8' },
-  { id: 'grid-9', label: '9' },
+const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [
+  { value: 'single', label: '1' },
+  { value: 'split-2', label: '2' },
+  { value: 'split-3', label: '3' },
+  { value: 'grid-4', label: '4' },
+  { value: 'grid-5', label: '5' },
+  { value: 'grid-6', label: '6' },
+  { value: 'grid-7', label: '7' },
+  { value: 'grid-8', label: '8' },
+  { value: 'grid-9', label: '9' },
 ]
 
 export interface ChatLayoutSelectorProps {
@@ -44,24 +45,15 @@ export function ChatLayoutSelector({
 }: ChatLayoutSelectorProps) {
   const { t } = useI18n()
   return (
-    <label className="chat-layout-selector" htmlFor={selectId}>
-      <span className="sr-only">{t('ai.chat.layout')}</span>
-      <select
-        id={selectId}
-        className="chat-layout-select"
-        aria-label={t('ai.chat.layout')}
-        value={layout}
-        onChange={(event) => {
-          onChange(parseLayout(event.target.value))
-        }}
-      >
-        {LAYOUTS.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Select
+      id={selectId}
+      className="chat-layout-selector"
+      compact
+      value={layout}
+      options={LAYOUTS}
+      aria-label={t('ai.chat.layout')}
+      onChange={(next) => onChange(parseLayout(next))}
+    />
   )
 }
 

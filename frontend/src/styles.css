@@ -6429,6 +6429,8 @@ select.settings-input option {
 }
 
 .chat-workspace-header {
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6466,52 +6468,17 @@ select.settings-input option {
 
 .chat-layout-selector {
   display: inline-flex;
-  align-items: center;
 }
 
-.chat-layout-select {
+.chat-layout-selector .ui-select-trigger {
   height: 28px;
-  min-width: 48px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.15s ease;
+  min-height: 28px;
+  min-width: 52px;
+  padding: 0 8px;
 }
 
-.chat-layout-select:hover,
-.chat-layout-select:focus-visible {
-  border-color: var(--border-hover);
-}
-
-.chat-layout-switch {
-  display: inline-flex;
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.chat-layout-switch button {
-  min-width: 32px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-muted);
-  cursor: pointer;
-}
-
-.chat-layout-switch button.active,
-.chat-layout-switch button:hover {
-  background: var(--green-soft);
-  color: var(--green-primary);
+.chat-layout-selector .ui-select-menu {
+  min-width: max(100%, 80px);
 }
 
 /*

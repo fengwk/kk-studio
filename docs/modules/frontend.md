@@ -226,7 +226,7 @@ Composer 区域包含编辑器、命令菜单、底栏 controls 与附件栏，�
 关闭 slash 提示时主动 blur 避免立即再开。菜单可见时 Enter 执行可见选项；收起状态下不执行隐藏命令，
 且 `canSend` 阻止 slash 发送普通消息。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
 
-Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用原生可访问 `<select>` 下拉切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。底部 ThreadStatusFooter 严格左对齐并以细竖线分隔各只读单元（`环境 | 上下文 | 累计usage | cache N% | tok/s`），在小屏下自然折行；上下文输入 token 采用最新模型调用估算，同回合内多个 Assistant 调用的 usage 和 cost 予以累计聚合，有效流式时长与解码 token 共同计算 `tok/s` 速率。target 三态是：
+Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用可访问下拉菜单切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。底部 ThreadStatusFooter 严格左对齐并以细竖线分隔各只读单元（`环境 | 上下文 | 累计usage | cache N% | tok/s`），在小屏下自然折行；上下文输入 token 采用最新模型调用估算，同回合内多个 Assistant 调用的 usage 和 cost 予以累计聚合，有效流式时长与解码 token 共同计算 `tok/s` 速率。target 三态是：
 
 | Pane target | 入口 | 本地事实 | 发送结果 |
 | --- | --- | --- | --- |
