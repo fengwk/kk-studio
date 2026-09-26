@@ -9,5 +9,8 @@ public enum GenerationStopReason {
   LENGTH,
 
   /** 生成因命中内容安全过滤策略而结束。 */
-  FILTERED
+  FILTERED,
+
+  /** Provider 协议要求立即续写本次生成（例如上游以协议终止态暂停）：本次响应不得携带任何工具意图。 */
+  CONTINUE
 }

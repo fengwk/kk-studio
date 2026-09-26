@@ -98,12 +98,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>每次成功 action 都在同一事务 complete 当前 THREAD claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
  * complete，依赖 wakeVersion 保留新 wake。Model terminal apply 按 planner 决策落地：active Tool phase 仅为 READY
  * 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经 ToolTerminalPending 应用）；
- * closed turn（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel / unknown /
- * compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有 queued
- * user demand、HISTORY / OVERFLOW obligation、fallback 或 hard overflow 已确定时请求 THREAD；完全结束的 idle run
- * 不因 soft threshold 自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。 Tool sibling batch 追加
- * outcome 后追加 continueModel=true TURN_END、同事务删除 children+parent，固定先请求 THREAD 再 complete，下一 claim 才做
- * continuation。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
+ * closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED / terminal failure / cancel /
+ * unknown / compaction 关闭结果）在同一事务追加 TURN_END 与严格物化校验（attach-then-delete）并物理删除 ModelInvocation，且仅在已有
+ * queued user demand、HISTORY / OVERFLOW obligation、fallback、hard overflow 或 CONTINUE 的
+ * continueModel obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold 自唤醒。失败 / 停止 / complete
+ * COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求 THREAD 再 complete，下一 claim
+ * 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加 continueModel=true TURN_END 并同事务删除
+ * children+parent。resolve commit 的 resolved 只请求 MODEL Work，绝不因 deferred messages 制造无意义 THREAD claim
  * （terminal apply 会按 queued 快照重建 wake）；rejected 在保留 deferred messages 或闭合即出现 compaction action 时先请求
  * THREAD 再 complete。
  *
@@ -316,15 +317,16 @@ public final class ThreadProcessor {
   /**
    * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序），单 action 恰好执行一次并完成 claim。
    *
-   * <p>关闭 turn 的路径（COMPLETE 无 calls / LENGTH 无 calls / FILTERED / terminal failure / cancel /
-   * unknown / compaction 关闭结果）在同一事务追加 TURN_END 后执行严格物化校验（attach-then-delete，经 Store 的 {@link
-   * ModelAttemptMaterialization} 校验）并物理删除 ModelInvocation；只有 active Tool phase（SUCCEEDED 带 calls）保留
-   * parent 并 attach resultEntryId。
+   * <p>关闭 turn 的路径（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED / terminal failure /
+   * cancel / unknown / compaction 关闭结果）在同一事务追加 TURN_END 后执行严格物化校验（attach-then-delete，经 Store 的
+   * {@link ModelAttemptMaterialization} 校验）并物理删除 ModelInvocation；只有 active Tool phase （SUCCEEDED 带
+   * calls）保留 parent 并 attach resultEntryId。CONTINUE 以 COMPLETED + continueModel=true 关闭 turn，与 Tool
+   * sibling batch 一致地机械请求 THREAD，续写由既有 durable continuation 机制在下一 claim 启动。
    *
    * <p>wake 决定：active Tool phase 只为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 经
    * ToolTerminalPending 应用并反馈模型）；完全结束的 closed turn 在新 Entries 插入、Thread advanced 后，只在已有 queued user
-   * demand 或 fallback/hard-overflow obligation 已确定时请求 THREAD。soft threshold 没有新 demand 时保持
-   * idle；新命令在事务后到达会自行 requestWork。
+   * demand、fallback/hard-overflow obligation 或 CONTINUE 的 continueModel obligation 已确定时请求
+   * THREAD。soft threshold 没有新 demand 时保持 idle；新命令在事务后到达会自行 requestWork。
    */
   private void applyModel(
       HarnessStore.Transaction tx,
@@ -384,22 +386,22 @@ public final class ThreadProcessor {
             succeeded ? model.providerReplayState() : null));
     UUID head = resultEntryId;
     boolean toolPhase = false;
+    boolean continueModel = false;
     List<ToolInvocation> invocations = List.of();
     if (succeeded) {
       // canonical response 已在 SUCCEEDED 前通过 validator；这里只按 planner 的纯决策落地。
       ModelResponsePlan plan = responsePlanner.plan(response, model.requestSpec().toolBindings());
       switch (plan) {
-        case ModelResponsePlan.Completed ignored -> {
-          UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  sessionId,
-                  resultEntryId,
-                  new TurnEndPayload(
-                      model.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
-                  mutationNow));
-          head = turnEndId;
+        case ModelResponsePlan.Completed ignored -> head =
+            appendCompletedTurnEnd(
+                tx, sessionId, resultEntryId, model.turnStartEntryId(), false, mutationNow);
+        case ModelResponsePlan.Continue ignored -> {
+          // 上游协议要求立即续写：本 turn 以 COMPLETED + continueModel=true 关闭，下一 claim 由既有 durable
+          // continuation 机制启动下一轮模型调用（不在此处复制 continuation 逻辑）。
+          continueModel = true;
+          head =
+              appendCompletedTurnEnd(
+                  tx, sessionId, resultEntryId, model.turnStartEntryId(), true, mutationNow);
         }
         case ModelResponsePlan.Failed failed -> {
           UUID turnEndId = tx.nextId();
@@ -481,7 +483,8 @@ public final class ThreadProcessor {
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
       // 完全结束的 closed turn 只重建 queued user / fallback / hard-overflow obligation；soft threshold
-      // 无新 demand 时不 self-wake。
+      // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
+      // obligation 并启动续写。
       boolean compactionDue =
           automaticCompactionPlanner.plan(
                   advancedThread,
@@ -489,7 +492,7 @@ public final class ThreadProcessor {
                   config.compactionProvider().compactionConfig(),
                   hasQueuedMessage)
               != null;
-      requestThread = hasQueuedMessage || compactionDue;
+      requestThread = continueModel || hasQueuedMessage || compactionDue;
     }
     tx.updateThread(advancedThread);
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
@@ -518,6 +521,26 @@ public final class ThreadProcessor {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
     }
     tx.completeWork(claim, now);
+  }
+
+  /** COMPLETED TURN_END（COMPLETE 无 calls 与 CONTINUE 共用）；返回新 head。 */
+  private static UUID appendCompletedTurnEnd(
+      HarnessStore.Transaction tx,
+      UUID sessionId,
+      UUID parentId,
+      UUID turnStartEntryId,
+      boolean continueModel,
+      Instant mutationNow) {
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            sessionId,
+            parentId,
+            new TurnEndPayload(
+                turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+            mutationNow));
+    return turnEndId;
   }
 
   /** 应用一个 terminal Compaction Model；摘要语义失败也关闭本 turn，让 reducer决定一次 fallback或停止。 */

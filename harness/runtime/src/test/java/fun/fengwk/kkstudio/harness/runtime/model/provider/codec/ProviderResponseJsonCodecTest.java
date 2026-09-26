@@ -167,6 +167,25 @@ class ProviderResponseJsonCodecTest {
     assertRejected(root -> root.put("stopReason", 1));
   }
 
+  /** CONTINUE 是 durable stop reason：零工具意图时可无损往返，携带 tool call 的 payload 在 boundary 上被拒绝。 */
+  @Test
+  void roundTripsContinuationStopReasonAndRejectsToolIntent() {
+    ProviderResponse continuation =
+        new ProviderResponse(
+            "paused",
+            "",
+            List.of(),
+            GenerationStopReason.CONTINUE,
+            new ModelUsage(1, 2, 0, 0, 0, 0, 3),
+            zeroCost(),
+            "request-8",
+            null,
+            "{}");
+
+    assertEquals(continuation, codec.decode(codec.encode(continuation)));
+    assertRejected(root -> root.put("stopReason", "CONTINUE"));
+  }
+
   /**
    * Malformed 根节点、numeric 越界、raw JSON 字段以及缺失 nullable 字段都必须在持久化 boundary 上 抛出
    * IllegalArgumentException。

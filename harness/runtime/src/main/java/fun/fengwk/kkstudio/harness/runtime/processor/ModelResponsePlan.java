@@ -12,14 +12,24 @@ import java.util.Objects;
 /**
  * {@link ModelResponsePlanner} 的纯规划结果：Thread 的 terminal Model apply 只消费该形状，不重新决策。
  *
- * <p>变体语义：{@link Completed} 关闭 turn（COMPLETE 无 calls）；{@link Failed} 以稳定 reason 关闭 failed turn
- * （LENGTH 无 calls -&gt; OUTPUT_TRUNCATED，FILTERED -&gt; CONTENT_FILTERED）；{@link ToolBatch} 为每个
- * observed call 携带一个 callIndex 槽位（仅 READY 请求 TOOL Work，全部 immediate terminal 时由 Thread 自唤醒）。
+ * <p>变体语义：{@link Completed} 关闭 turn（COMPLETE 无 calls）；{@link Continue} 以 COMPLETED +
+ * continueModel=true 关闭 turn，由既有 durable continuation 启动下一轮模型调用（CONTINUE 无 calls 与 diagnostics）；
+ * {@link Failed} 以稳定 reason 关闭 failed turn （LENGTH 无 calls -&gt; OUTPUT_TRUNCATED，FILTERED ->
+ * CONTENT_FILTERED）；{@link ToolBatch} 为每个 observed call 携带一个 callIndex 槽位（仅 READY 请求 TOOL Work，全部
+ * immediate terminal 时由 Thread 自唤醒）。
  */
 public sealed interface ModelResponsePlan {
 
   /** COMPLETE 且无 tool calls：0 ToolInvocation，直接 completed TURN_END。 */
   record Completed() implements ModelResponsePlan {}
+
+  /**
+   * CONTINUE：0 ToolInvocation，completed TURN_END(continueModel=true)。
+   *
+   * <p>Thread 借此关闭当前 turn 并请求 THREAD Work，下一 claim 由既有 durable continuation 机制启动模型续写； {@link
+   * ProviderResponse} 已保证 CONTINUE 无 tool calls 与 diagnostics。
+   */
+  record Continue() implements ModelResponsePlan {}
 
   /** LENGTH 无 calls / FILTERED：0 ToolInvocation，failed TURN_END（reason 为稳定截断/过滤原因）。 */
   record Failed(TurnEndReason reason) implements ModelResponsePlan {

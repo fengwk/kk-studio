@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +34,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -2160,6 +2165,41 @@ class ModelExecutionStreamFlushTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, finalModel.error().kind());
   }
 
+  /**
+   * 意图：验证 provider native replay state 的保留集合与「非撤下终态」一致——CONTINUE 续写请求必须原样携带上游 native 字段，FILTERED
+   * 这类协议撤下态则不保留。
+   */
+  @Test
+  void continuationTerminalRetainsProviderReplayStateWhileFilteredDropsIt() {
+    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    Fixture continuationFixture = createFixture(flushConfig, NO_RETRY);
+    continuationFixture.start();
+    ProviderReplayState replayState = sampleReplayState();
+
+    continuationFixture
+        .listener()
+        .onSucceeded(
+            new ProviderCompletion(response("paused", GenerationStopReason.CONTINUE), replayState));
+
+    ModelInvocation continued = continuationFixture.currentModel();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, continued.status());
+    assertEquals(GenerationStopReason.CONTINUE, continued.result().stopReason());
+    assertNull(continued.resultEntryId());
+    assertEquals(replayState, continued.providerReplayState());
+
+    Fixture filteredFixture = createFixture(flushConfig, NO_RETRY);
+    filteredFixture.start();
+
+    filteredFixture
+        .listener()
+        .onSucceeded(
+            new ProviderCompletion(response("", GenerationStopReason.FILTERED), replayState));
+
+    ModelInvocation filtered = filteredFixture.currentModel();
+    assertEquals(ModelInvocationStatus.SUCCEEDED, filtered.status());
+    assertNull(filtered.providerReplayState());
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Test Helpers & Fixtures
   // ---------------------------------------------------------------------------------------------
@@ -2358,6 +2398,16 @@ class ModelExecutionStreamFlushTest {
 
   private static ModelUsage usage() {
     return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+  }
+
+  /** 测试用 native replay state：CONTINUE 等非撤下终态必须原样保留它（FILTERED 不保留）。 */
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.OPENAI_RESPONSES,
+        new ProviderReplayAffinity(
+            ProviderType.OPENAI_RESPONSES, "minimax", new UUID(0L, 63L), "minimax-m2"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   private static ModelCost cost() {

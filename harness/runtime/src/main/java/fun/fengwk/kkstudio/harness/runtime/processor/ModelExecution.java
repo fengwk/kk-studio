@@ -844,7 +844,9 @@ final class ModelExecution implements ModelGateway.Listener {
     ProviderReplayState replayState = null;
     if (!compaction
         && (validatedResponse.stopReason() == GenerationStopReason.COMPLETE
-            || validatedResponse.stopReason() == GenerationStopReason.LENGTH)
+            || validatedResponse.stopReason() == GenerationStopReason.LENGTH
+            // CONTINUE 是撤下工具意图的续写终止态：下一请求必须原样回放上游 native 字段。
+            || validatedResponse.stopReason() == GenerationStopReason.CONTINUE)
         && validatedResponse.toolCallDiagnostics().isEmpty()) {
       replayState = completion.replayState();
     }

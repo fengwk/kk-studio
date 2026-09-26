@@ -90,6 +90,51 @@ class ProviderResponseTest {
                 List.of(diag)));
   }
 
+  /** CONTINUE 是纯协议续写终止态：既不能携带 calls，也不能携带被丢弃的 calls 的 diagnostics。 */
+  @Test
+  void rejectsToolIntentOnContinuationResponse() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "",
+                "",
+                List.of(new ProviderToolCall("c1", "tool_a", "{}")),
+                GenerationStopReason.CONTINUE,
+                USAGE,
+                COST,
+                null,
+                null,
+                "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "",
+                "",
+                List.of(),
+                GenerationStopReason.CONTINUE,
+                USAGE,
+                COST,
+                null,
+                null,
+                "{}",
+                List.of(new ProviderToolCallDiagnostic(0, "c1", "tool_a", "{", "truncated"))));
+  }
+
+  /** withToolCalls 必须复用同一 stop-reason 约束，不能绕过 CONTINUE 的零工具意图要求。 */
+  @Test
+  void continuationCopyWithToolCallsIsRejected() {
+    ProviderResponse continuation =
+        new ProviderResponse(
+            "paused", "", List.of(), GenerationStopReason.CONTINUE, USAGE, COST, null, null, "{}");
+
+    assertEquals(GenerationStopReason.CONTINUE, continuation.stopReason());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> continuation.withToolCalls(List.of(new ProviderToolCall("c1", "tool_a", "{}"))));
+  }
+
   @Test
   void rejectsOutOfBoundIndex() {
     ProviderToolCall call = new ProviderToolCall("c1", "tool_a", "{}");

@@ -772,6 +772,69 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
   }
 
+  /**
+   * CONTINUE：provider 协议要求立即续写。apply 在同一 claim 关闭 COMPLETED(continueModel=true) 并请求 THREAD，下一 claim
+   * 由既有 durable continuation 启动 TURN_START(CONTINUATION) + MODEL Work。
+   */
+  @Test
+  void continuationResponseClosesCompletedTurnAndStartsNextModelOnFollowingClaim() {
+    Fixture fixture = fixture();
+    var baseline = seedOpenInputTurn(fixture.store);
+    UUID modelId =
+        seedModelInvocation(
+            fixture.store,
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.userEntryId(),
+            ModelInvocationStatus.SUCCEEDED,
+            tooledRequest(List.of("bash")),
+            successResponse("paused text", List.of(), GenerationStopReason.CONTINUE),
+            null);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
+
+    // claim1：CONTINUE 关闭 COMPLETED(continueModel=true)，无 queued input 也机械请求 THREAD。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+
+    EntryPath path = path(fixture.store, baseline.threadId());
+    assertEquals(5, path.entries().size());
+    MessagePayload assistant = (MessagePayload) path.entries().get(3).payload();
+    assertEquals(
+        "paused text", ((TextMessageContent) assistant.message().contents().get(0)).text());
+    assertEquals(GenerationStopReason.CONTINUE, assistant.assistantMetadata().stopReason());
+    assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
+    TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
+    assertEquals(baseline.turnStartEntryId(), end.turnStartEntryId());
+    assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
+    assertTrue(end.continueModel());
+    assertNull(end.reason());
+    // 关闭 turn：Model 行被物理删除，续写义务只由 durable continueModel=true TURN_END 表达。
+    assertNull(fixture.store.transaction(tx -> tx.findModelInvocation(modelId)).orElse(null));
+    Work threadWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+    assertNotNull(threadWork);
+    assertNull(threadWork.leaseToken());
+
+    // claim2：保留的 wake 偿还 continueModel obligation，启动 continuation 并只请求 MODEL Work。
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    EntryPath continued = path(fixture.store, baseline.threadId());
+    assertEquals(6, continued.entries().size());
+    assertEquals(
+        TurnStartReason.CONTINUATION,
+        ((TurnStartPayload) continued.entries().get(5).payload()).reason());
+    ModelInvocation continuationModel =
+        inTx(
+                fixture,
+                tx ->
+                    tx.findModelInvocationByTurn(
+                        baseline.threadId(), continued.entries().get(5).id()))
+            .orElseThrow();
+    assertNotNull(
+        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, continuationModel.id())));
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    assertEquals(1, fixture.resolver.calls);
+  }
+
   /** LENGTH 有 calls：每个 observed call 一个 immediate FAILED(MODEL_OUTPUT_TRUNCATED)，执行零个并反馈模型。 */
   @Test
   void lengthWithCallsMaterializesTruncatedFailuresAndFeedsBackToModel() {

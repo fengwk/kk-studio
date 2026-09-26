@@ -18,12 +18,13 @@ import java.util.Objects;
  * 的模型结果。
  *
  * <p>决策顺序固定为 generation stop reason -&gt; frozen binding lookup -&gt; {@link
- * ToolCall#validateFor(ToolDescriptor)} 归一化兼容校验，与 {@code ProviderResponse.toolCalls()} 正交。每个
- * observed tool call 恰好产生一个 {@link ModelResponsePlan.ToolSlot}（保持 mixed batch 的完整
- * callIndex）：COMPLETE 下 valid 为 READY（仍保留 raw canonical call，执行边界再确定性归一化）、schema-invalid 为
- * FAILED(INVALID_TOOL_ARGUMENTS)、unknown 为 FAILED(UNKNOWN_TOOL)；LENGTH 下全部为
- * FAILED(MODEL_OUTPUT_TRUNCATED)，binding 尽力查找（可空）。invalid canonical response 不会到达这里—— {@link
- * ModelExecution} 在 SUCCEEDED 前已把它转为 {@code INVALID_RESPONSE} retry。
+ * ToolCall#validateFor(ToolDescriptor)} 归一化兼容校验，与 {@code ProviderResponse.toolCalls()} 正交。CONTINUE
+ * 没有 tool intent，直接规划为 {@link ModelResponsePlan.Continue}。其余每个 observed tool call 恰好产生一个 {@link
+ * ModelResponsePlan.ToolSlot}（保持 mixed batch 的完整 callIndex）：COMPLETE 下 valid 为 READY（仍保留 raw
+ * canonical call，执行边界再确定性归一化）、schema-invalid 为 FAILED(INVALID_TOOL_ARGUMENTS)、unknown 为
+ * FAILED(UNKNOWN_TOOL)；LENGTH 下全部为 FAILED(MODEL_OUTPUT_TRUNCATED)，binding 尽力查找（可空）。invalid
+ * canonical response 不会到达这里—— {@link ModelExecution} 在 SUCCEEDED 前已把它转为 {@code INVALID_RESPONSE}
+ * retry。
  */
 public final class ModelResponsePlanner {
 
@@ -38,6 +39,7 @@ public final class ModelResponsePlanner {
       case COMPLETE -> planComplete(response, frozenBindings);
       case LENGTH -> planLength(response, frozenBindings);
       case FILTERED -> new ModelResponsePlan.Failed(TurnEndReason.CONTENT_FILTERED);
+      case CONTINUE -> new ModelResponsePlan.Continue();
     };
   }
 
