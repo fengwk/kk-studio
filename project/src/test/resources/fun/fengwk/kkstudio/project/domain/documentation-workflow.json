@@ -1,0 +1,23 @@
+{
+  "states": [
+    {"state": "INIT", "name": "待开始", "next": ["DESIGN"]},
+    {
+      "state": "DESIGN",
+      "name": "设计",
+      "agent": "designer",
+      "instructions": "完成可交付方案",
+      "maxRuns": 3,
+      "next": ["REVIEW"]
+    },
+    {
+      "state": "REVIEW",
+      "name": "检查",
+      "agent": "reviewer",
+      "instructions": "按 Issue 验收要求检查",
+      "maxRuns": 3,
+      "next": ["DESIGN", "DONE"]
+    },
+    {"state": "BLOCKED", "name": "业务阻塞"},
+    {"state": "DONE", "name": "完成"}
+  ]
+}
