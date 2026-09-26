@@ -23,13 +23,10 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 
 import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -37,15 +34,14 @@ import java.util.Set;
  * Agent model 配置的唯一类型化 codec/parser。
  *
  * <p>variant 只承载 reasoning effort（由厂商自定义，如 high/medium/low/max/xhigh，off 为显式关闭、null 为协议默认）与厂商原生
- * 协议选项 {@code protocolOptions}（严格 JSON object，null 等价于空 object）；输出预算由 {@code limit.output}
+ * 协议选项 {@code protocolOptionsJson}（严格 JSON object 文本，null 等价于空 object）；输出预算由 {@code limit.output}
  * 承担，采样参数与单次上限不属于本 schema。
  *
  * <p>本类独占对持久化 {@code config} JSONB 列的所有读写。变更与读取都必须经过 {@link #decode(String)} / {@link
  * #encode(AgentModelConfigDTO)}；任何自行执行 ObjectMapper 映射的其他路径都会与规范漂移。 校验针对类型化 DTO 进行；持久化 JSON
  * 只作为不透明载体。校验消息使用公开的 {@code config.*} 术语。
  *
- * <p>解析边界拒绝 duplicate field 与 trailing token；原生协议选项在写入持久化之前完成严格校验与 canonical 化，其中的未类型化数字使用 {@link
- * BigInteger}/{@link BigDecimal}，既避免本地 Long 字符串化约定，也不经过二进制浮点数。
+ * <p>原生协议选项在写入持久化之前由 {@link ProviderProtocolOptions} 严格校验；原始文本保留 JSON 数值精度。
  */
 @Component
 public final class AgentModelRuntimeConfigParser {
@@ -59,8 +55,6 @@ public final class AgentModelRuntimeConfigParser {
     strictMapper.disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
     strictMapper.enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
     strictMapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    strictMapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-    strictMapper.enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS);
     strictMapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     strictMapper
         .coercionConfigFor(LogicalType.Integer)
@@ -96,6 +90,9 @@ public final class AgentModelRuntimeConfigParser {
       validate(config);
       return config;
     } catch (JsonMappingException error) {
+      if (mappingPath(error).endsWith(".protocolOptionsJson")) {
+        throw invalid(mappingPath(error) + " must be a JSON string");
+      }
       throw invalid(mappingPath(error) + " is invalid: " + error.getOriginalMessage(), error);
     } catch (JsonProcessingException error) {
       throw invalid("config must be valid JSON object", error);
@@ -214,7 +211,8 @@ public final class AgentModelRuntimeConfigParser {
       if (variant.getReasoningEffort() != null) {
         variant.setReasoningEffort(variant.getReasoningEffort().trim().toLowerCase(Locale.ROOT));
       }
-      normalizeProtocolOptions(variant, path);
+      variant.setProtocolOptionsJson(
+          normalizeProtocolOptionsJson(variant.getProtocolOptionsJson(), path));
     }
     String defaultVariant = config.getDefaultVariant();
     if (defaultVariant == null || defaultVariant.isBlank()) {
@@ -272,52 +270,23 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  /**
-   * 校验并就地归一化 variant 的厂商原生协议选项。
-   *
-   * <p>选项必须是严格 JSON object（类型由 {@link AgentModelVariantDTO} 字段类型与解析边界保证），{@code null} 与空 object
-   * 等价，UTF-8 字节上限由 {@link ProviderProtocolOptions} 强制。解析边界已把未类型化数字读为 {@link BigInteger}/{@link
-   * BigDecimal}；这里仍递归处理程序化构造 DTO 中的 {@code Long}，避免本地 Long 字符串化约定改写厂商数值。
-   */
-  private static void normalizeProtocolOptions(AgentModelVariantDTO variant, String path) {
-    Map<String, Object> protocolOptions = variant.getProtocolOptions();
-    if (protocolOptions == null) {
-      return;
-    }
+  /** 只去除外层空白；ProviderProtocolOptions 严格校验但不替换用户的内部数值文本。 */
+  private static String normalizeProtocolOptionsJson(String json, String path) {
     try {
-      Map<String, Object> normalized = new LinkedHashMap<>(protocolOptions.size());
-      for (Map.Entry<String, Object> entry : protocolOptions.entrySet()) {
-        normalized.put(entry.getKey(), normalizeProtocolOptionValue(entry.getValue()));
-      }
-      ProviderProtocolOptions.of(normalized);
-      variant.setProtocolOptions(normalized);
+      ProviderProtocolOptions parsed = new ProviderProtocolOptions(json);
+      return parsed.isEmpty() ? "{}" : json.trim();
     } catch (IllegalArgumentException error) {
-      throw invalid(path + ".protocolOptions is invalid: " + error.getMessage(), error);
-    }
-  }
-
-  private static Object normalizeProtocolOptionValue(Object value) {
-    if (value instanceof Long longValue) {
-      return BigInteger.valueOf(longValue);
-    }
-    if (value instanceof Map<?, ?> nested) {
-      Map<String, Object> normalized = new LinkedHashMap<>(nested.size());
-      for (Map.Entry<?, ?> entry : nested.entrySet()) {
-        if (!(entry.getKey() instanceof String key)) {
-          throw new IllegalArgumentException("protocolOptions must use string keys");
-        }
-        normalized.put(key, normalizeProtocolOptionValue(entry.getValue()));
+      // 丢弃 cause：底层异常可能包含原始输入，HTTP 和日志不能泄露选项值。
+      if (error.getMessage() != null
+          && error.getMessage().startsWith("protocolOptions must not exceed ")) {
+        throw invalid(
+            path
+                + ".protocolOptionsJson must not exceed "
+                + ProviderProtocolOptions.MAX_UTF8_BYTES
+                + " UTF-8 bytes");
       }
-      return normalized;
+      throw invalid(path + ".protocolOptionsJson is invalid");
     }
-    if (value instanceof List<?> list) {
-      List<Object> normalized = new ArrayList<>(list.size());
-      for (Object item : list) {
-        normalized.add(normalizeProtocolOptionValue(item));
-      }
-      return normalized;
-    }
-    return value;
   }
 
   private static void requireNonBlank(String value, String path) {
@@ -370,7 +339,7 @@ public final class AgentModelRuntimeConfigParser {
       return new ModelVariant(
           variant.getId(),
           variant.getReasoningEffort(),
-          ProviderProtocolOptions.of(variant.getProtocolOptions()));
+          new ProviderProtocolOptions(variant.getProtocolOptionsJson()));
     } catch (IllegalArgumentException error) {
       throw invalid(
           "config.variants[" + variant.getId() + "] is invalid: " + error.getMessage(), error);
