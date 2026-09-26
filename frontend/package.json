@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:layout": "playwright test --config playwright.layout.config.ts",
     "coverage": "vitest run --coverage",
     "e2e": "../scripts/dev/verify/e2e/run.sh",
     "e2e:ui": "../scripts/dev/verify/e2e/run.sh --ui",
