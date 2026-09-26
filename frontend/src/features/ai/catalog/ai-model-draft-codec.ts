@@ -62,44 +62,35 @@ export function emptyModelDraft(
   }
 }
 
-export function formatProtocolOptions(
-  options?: Record<string, unknown> | null,
-): string {
-  if (!options || typeof options !== 'object' || Array.isArray(options)) {
-    return ''
-  }
-  try {
-    return JSON.stringify(options, null, 2)
-  } catch {
-    return ''
-  }
-}
-
-export function parseProtocolOptions(
+/** 只借助 JSON.parse 校验语法与根节点；绝不序列化解析后的浮点数。 */
+export function parseProtocolOptionsJson(
   raw: string | undefined,
   variantId: string,
-): Record<string, unknown> | undefined {
+): string | undefined {
   if (!raw || !raw.trim()) {
     return undefined
   }
   const trimmed = raw.trim()
+  if (new TextEncoder().encode(trimmed).length > 65536) {
+    throw new Error(`variant ${variantId} protocolOptionsJson must not exceed 65536 UTF-8 bytes`)
+  }
   let parsed: unknown
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    throw new Error(`variant ${variantId} protocolOptions must be valid JSON`)
+    throw new Error(`variant ${variantId} protocolOptionsJson must be valid JSON`)
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`variant ${variantId} protocolOptions must be a JSON object`)
+    throw new Error(`variant ${variantId} protocolOptionsJson must be a JSON object`)
   }
-  return parsed as Record<string, unknown>
+  return trimmed
 }
 
 function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
   return newVariantDraft({
     id: variant.id,
     reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
-    protocolOptions: formatProtocolOptions(variant.protocolOptions),
+    protocolOptionsJson: variant.protocolOptionsJson ?? '',
   })
 }
 
@@ -208,9 +199,9 @@ function serializeVariants(
       }
       payload.reasoningEffort = reasoningEffort
     }
-    const protocolOptions = parseProtocolOptions(variant.protocolOptions, id)
-    if (protocolOptions !== undefined) {
-      payload.protocolOptions = protocolOptions
+    const protocolOptionsJson = parseProtocolOptionsJson(variant.protocolOptionsJson, id)
+    if (protocolOptionsJson !== undefined) {
+      payload.protocolOptionsJson = protocolOptionsJson
     }
     return payload
   })

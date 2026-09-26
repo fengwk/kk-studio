@@ -98,9 +98,9 @@ export function VariantListEditor({
               <textarea
                 className="code-textarea"
                 aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
-                value={variant.protocolOptions ?? ''}
+                value={variant.protocolOptionsJson}
                 onChange={(event) =>
-                  updateVariant(index, { protocolOptions: event.target.value })
+                  updateVariant(index, { protocolOptionsJson: event.target.value })
                 }
                 placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
                 rows={3}

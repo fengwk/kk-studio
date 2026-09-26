@@ -187,7 +187,7 @@ describe('ai-resource-form-validation', () => {
                 draftId: 'v1',
                 id: 'medium',
                 reasoningEffort: '',
-                protocolOptions: '{\n  "temperature": 0.7\n}',
+                protocolOptionsJson: '{\n  "temperature": 0.7\n}',
               },
             ],
           }),
@@ -211,7 +211,7 @@ describe('ai-resource-form-validation', () => {
                 draftId: 'v1',
                 id: 'fast',
                 reasoningEffort: '',
-                protocolOptions: '{ not valid json }',
+                protocolOptionsJson: '{ not valid json }',
               },
             ],
           }),
@@ -237,7 +237,7 @@ describe('ai-resource-form-validation', () => {
                 draftId: 'v1',
                 id: 'fast',
                 reasoningEffort: '',
-                protocolOptions: '[1, 2, 3]',
+                protocolOptionsJson: '[1, 2, 3]',
               },
             ],
           }),
@@ -264,7 +264,7 @@ describe('ai-resource-form-validation', () => {
                 draftId: 'v1',
                 id: 'standard',
                 reasoningEffort: '',
-                protocolOptions: 'null',
+                protocolOptionsJson: 'null',
               },
             ],
           }),
@@ -280,10 +280,10 @@ describe('ai-resource-form-validation', () => {
     it('supports English locale for protocolOptions validation error messages', () => {
       setLocale('en-US')
       expect(
-        toUserFacingErrorMessage(new Error('variant fast protocolOptions must be valid JSON')),
+        toUserFacingErrorMessage(new Error('variant fast protocolOptionsJson must be valid JSON')),
       ).toBe('Variant "fast" protocolOptions must be valid JSON')
       expect(
-        toUserFacingErrorMessage(new Error('variant fast protocolOptions must be a JSON object')),
+        toUserFacingErrorMessage(new Error('variant fast protocolOptionsJson must be a JSON object')),
       ).toBe('Variant "fast" protocolOptions must be a JSON object')
       setLocale('zh-CN')
     })

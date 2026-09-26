@@ -446,8 +446,8 @@ export const aiCatalog = {
     'zh-CN': '{\n  "temperature": 0.7\n}',
   },
   'ai.catalog.form.protocolOptionsHint': {
-    'en-US': 'Optional JSON object for provider-native request options; leave blank if unused.',
-    'zh-CN': '可留空；必须为严格 JSON 对象，用于厂商原生请求选项。',
+    'en-US': 'Optional JSON object (max 65536 UTF-8 bytes). Duplicate keys are rejected on save; numeric text is preserved.',
+    'zh-CN': '可留空；JSON 对象最多 65536 UTF-8 字节。保存时拒绝重复键，数字文本原样保留。',
   },
   'ai.catalog.form.useModelDefault': {
     'en-US': '(Use model default)',
@@ -633,6 +633,14 @@ export const aiCatalog = {
   'ai.catalog.validation.protocolOptionsNotObjectSimple': {
     'en-US': 'protocolOptions must be a JSON object',
     'zh-CN': 'protocolOptions 必须是 JSON 对象',
+  },
+  'ai.catalog.validation.protocolOptionsTooLarge': {
+    'en-US': 'Protocol options must not exceed 65536 UTF-8 bytes',
+    'zh-CN': '原生协议选项不能超过 65536 UTF-8 字节',
+  },
+  'ai.catalog.validation.protocolOptionsStrict': {
+    'en-US': 'Protocol options must be a strict JSON object with no duplicate keys',
+    'zh-CN': '原生协议选项必须为无重复键的严格 JSON 对象',
   },
   'ai.catalog.validation.defaultVariant': {
     'en-US': 'Select a valid default Variant',

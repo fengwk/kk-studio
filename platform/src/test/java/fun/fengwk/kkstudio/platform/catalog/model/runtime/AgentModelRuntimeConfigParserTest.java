@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
@@ -22,7 +23,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -123,9 +123,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(PROTOCOL_OPTIONS_JSON, parsed.variants().get(0).protocolOptions().canonicalJson());
 
     AgentModelConfigDTO decoded = parser.decode(config);
-    assertEquals(
-        Map.of("user_id", "u-1"),
-        decoded.getVariants().get(0).getProtocolOptions().get("metadata"));
+    assertEquals(PROTOCOL_OPTIONS_JSON, decoded.getVariants().get(0).getProtocolOptionsJson());
 
     String encoded = parser.encode(decoded);
     ParsedAgentModelConfig reparsed = parser.parse(encoded);
@@ -133,12 +131,98 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(encoded, parser.encode(parser.decode(encoded)));
   }
 
+  /** HTTP 使用的普通 mapper 也只能收取真正的 JSON string token；校验后可存回 config 并作为 string 响应。 */
+  @Test
+  void acceptsOnlyStringTokenAtHttpDtoBoundary() throws Exception {
+    ObjectMapper httpMapper = new ObjectMapper();
+    String options =
+        "{\"n\":9007199254740993,\"nested\":{\"ratio\":0.12345678901234567890123456789}}";
+    AgentModelConfigDTO request =
+        httpMapper.readValue(
+            withProtocolOptions(validConfig(), options), AgentModelConfigDTO.class);
+    String persisted = parser.encode(request);
+    AgentModelConfigDTO response = parser.decode(persisted);
+    String responseJson = httpMapper.writeValueAsString(response);
+    assertEquals(
+        options,
+        httpMapper
+            .readTree(responseJson)
+            .path("variants")
+            .get(0)
+            .path("protocolOptionsJson")
+            .textValue());
+    assertEquals(
+        options,
+        httpMapper
+            .readValue(responseJson, AgentModelConfigDTO.class)
+            .getVariants()
+            .get(0)
+            .getProtocolOptionsJson());
+
+    for (String token : List.of("1", "false", "{}", "[]")) {
+      Exception error =
+          assertThrows(
+              Exception.class,
+              () ->
+                  httpMapper.readValue(
+                      withProtocolOptionsToken(validConfig(), token), AgentModelConfigDTO.class));
+      assertTrue(error.getMessage().contains("protocolOptionsJson must be a JSON string"));
+    }
+    Exception secret =
+        assertThrows(
+            Exception.class,
+            () ->
+                httpMapper.readValue(
+                    withProtocolOptionsToken(validConfig(), "{\"secret-option-value\":1}"),
+                    AgentModelConfigDTO.class));
+    assertFalse(secret.getMessage().contains("secret-option-value"));
+  }
+
+  /** null、空白与显式空对象均落到相同的 runtime 默认值和持久化文本。 */
+  @Test
+  void normalizesEmptyOptionsToEmptyObject() {
+    for (String text : List.of("null", "\"\"", "\"  \"", "\"{}\"")) {
+      String config = withProtocolOptionsToken(validConfig(), text);
+      assertEquals("{}", parser.decode(config).getVariants().get(0).getProtocolOptionsJson());
+      assertEquals(
+          ProviderProtocolOptions.EMPTY, parser.parse(config).variants().get(0).protocolOptions());
+    }
+  }
+
+  /** 按原生 JSON 的 UTF-8 字节计数；恰好达到上限可保存，多字节字符造成的溢出必须拒绝。 */
+  @Test
+  void enforcesProtocolOptionsUtf8Boundary() {
+    String exact = "{\"x\":\"" + "a".repeat(ProviderProtocolOptions.MAX_UTF8_BYTES - 8) + "\"}";
+    assertEquals(
+        exact,
+        parser
+            .decode(withProtocolOptions(validConfig(), exact))
+            .getVariants()
+            .get(0)
+            .getProtocolOptionsJson());
+    String multiByte = "{\"x\":\"" + "测".repeat(22000) + "\"}";
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> parser.decode(withProtocolOptions(validConfig(), multiByte)));
+    assertTrue(error.getMessage().contains("must not exceed"));
+    assertFalse(error.getMessage().contains("测"));
+    assertEquals(null, error.getCause());
+  }
+
   /** 原生协议选项同样受严格约束：非 object、对象内重复键、trailing token 与超限 payload 都必须明确失败，且错误消息绝不回显 选项内容。 */
   @Test
   void rejectsInvalidProtocolOptionsWithoutEchoingPayload() {
-    assertInvalid(withProtocolOptions(validConfig(), "[{\"a\":1}]"), ".protocolOptions");
-    assertInvalid(withProtocolOptions(validConfig(), "\"not-an-object\""), ".protocolOptions");
-    assertInvalid(withProtocolOptions(validConfig(), "{\"a\":1,\"a\":2}"), "protocolOptions");
+    assertInvalid(withProtocolOptions(validConfig(), "[{\"a\":1}]"), ".protocolOptionsJson");
+    assertInvalid(withProtocolOptions(validConfig(), "\"not-an-object\""), ".protocolOptionsJson");
+    assertInvalid(withProtocolOptions(validConfig(), "{\"a\":1,\"a\":2}"), "protocolOptionsJson");
+    assertInvalid(withProtocolOptions(validConfig(), "{} true"), "protocolOptionsJson");
+    for (String token : List.of("1", "false", "{}", "[]")) {
+      assertInvalid(withProtocolOptionsToken(validConfig(), token), ".protocolOptionsJson");
+    }
+    assertInvalid(
+        withProtocolOptionsToken(validConfig(), "{\"protocolOptions\":{\"x\":1}}"),
+        "protocolOptions");
 
     String marker = "top-secret-marker";
     IllegalArgumentException oversized =
@@ -161,26 +245,24 @@ class AgentModelRuntimeConfigParserTest {
             () ->
                 parser.parse(withProtocolOptions(validConfig(), "{\"a\":\"" + marker + "\"} {}")));
     assertFalse(malformed.getMessage().contains(marker), malformed.getMessage());
+    assertEquals(null, malformed.getCause());
   }
 
-  /** 程序化构造的 DTO 也必须走同一校验：无法序列化为 JSON 的值不得进入持久化。 */
+  /** 程序化构造的 DTO 也必须走同一严格校验。 */
   @Test
-  void rejectsNonJsonProtocolOptionsValuesFromTypedConfig() {
+  void rejectsMalformedProtocolOptionsFromTypedConfig() {
     AgentModelConfigDTO config = parser.decode(withProtocolOptions(validConfig(), "{}"));
-    Map<String, Object> invalid = new LinkedHashMap<>();
-    invalid.put("bad", new Object());
-    config.getVariants().get(0).setProtocolOptions(invalid);
+    config.getVariants().get(0).setProtocolOptionsJson("{\"secret-marker\":1,\"secret-marker\":2}");
 
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> parser.parse(config));
     assertTrue(
-        error.getMessage().contains("config.variants[0].protocolOptions"), error.getMessage());
+        error.getMessage().contains("config.variants[0].protocolOptionsJson"), error.getMessage());
+    assertFalse(error.getMessage().contains("secret-marker"));
+    assertEquals(null, error.getCause());
   }
 
-  /**
-   * 本地 JSON 约定（convention4j 与 HTTP mapper）把 Long 序列化为字符串以避免 JS 精度丢失；厂商原生选项必须不受该约定影响， 因此解析时把整数归一化为
-   * BigInteger，encode 之后仍是 JSON 数值。
-   */
+  /** 本地 JSON 约定把 Long 序列化为字符串；协议文本在 HTTP 和 config 中均作为字符串传输，运行时才严格解码为数值。 */
   @Test
   void keepsLargeIntegerProtocolOptionsNumericUnderLocalLongToStringConvention() throws Exception {
     ObjectMapper conventionMapper = longToStringMapper();
@@ -190,38 +272,47 @@ class AgentModelRuntimeConfigParserTest {
 
     AgentModelRuntimeConfigParser conventionParser =
         new AgentModelRuntimeConfigParser(conventionMapper);
-    String config =
-        withProtocolOptions(validConfig(), "{\"revision\":1758880000000,\"ratio\":0.5}");
+    String options =
+        "{\"large\":9007199254740993,\"beyond\":9223372036854775808,"
+            + "\"nested\":{\"ratio\":0.12345678901234567890123456789,\"exp\":1.234567890123456789e+45}}";
+    String config = withProtocolOptions(validConfig(), options);
 
     AgentModelConfigDTO decoded = conventionParser.decode(config);
-    // 整数与小数分别使用 BigInteger/BigDecimal，既不命中 Long 字符串化约定，也不经过二进制浮点数。
-    assertEquals(
-        List.of(BigInteger.valueOf(1758880000000L), new BigDecimal("0.5")),
-        List.of(
-            decoded.getVariants().get(0).getProtocolOptions().get("revision"),
-            decoded.getVariants().get(0).getProtocolOptions().get("ratio")));
-
+    assertEquals(options, decoded.getVariants().get(0).getProtocolOptionsJson());
     String encoded = conventionParser.encode(decoded);
-    assertTrue(encoded.contains("\"revision\":1758880000000"), encoded);
-    assertFalse(encoded.contains("\"revision\":\"1758880000000\""), encoded);
+    assertTrue(
+        encoded.contains("\"protocolOptionsJson\":\"{\\\"large\\\":9007199254740993"), encoded);
     assertEquals(
-        "{\"revision\":1758880000000,\"ratio\":0.5}",
-        conventionParser.parse(encoded).variants().get(0).protocolOptions().canonicalJson());
-  }
-
-  /** Untyped protocolOptions 必须用十进制任意精度解析，不能先落入 Double 后静默损失厂商参数精度。 */
-  @Test
-  void preservesHighPrecisionDecimalProtocolOptions() {
-    String decimal = "0.12345678901234567890123456789";
-    String config = withProtocolOptions(validConfig(), "{\"threshold\":" + decimal + "}");
-
-    AgentModelConfigDTO decoded = parser.decode(config);
-    Object threshold = decoded.getVariants().get(0).getProtocolOptions().get("threshold");
-
-    assertEquals(new BigDecimal(decimal), threshold);
+        options, conventionParser.decode(encoded).getVariants().get(0).getProtocolOptionsJson());
+    String httpResponse = conventionMapper.writeValueAsString(decoded);
     assertEquals(
-        "{\"threshold\":" + decimal + "}",
-        parser.parse(parser.encode(decoded)).variants().get(0).protocolOptions().canonicalJson());
+        options,
+        conventionMapper
+            .readValue(httpResponse, AgentModelConfigDTO.class)
+            .getVariants()
+            .get(0)
+            .getProtocolOptionsJson());
+    String runtime =
+        conventionParser.parse(encoded).variants().get(0).protocolOptions().canonicalJson();
+    assertTrue(runtime.contains("9007199254740993"), runtime);
+    assertTrue(runtime.contains("9223372036854775808"), runtime);
+    assertTrue(runtime.contains("0.12345678901234567890123456789"), runtime);
+    assertTrue(runtime.contains("1.234567890123456789E+45"), runtime);
+    // 协议编码器实际使用的树仍是 JSON 数字；写成 wire 后不能变为字符串或 JS 浮点近似值。
+    var wireOptions =
+        ProviderProtocolOptionsJson.copyOfOptions(
+            conventionParser.parse(encoded).variants().get(0));
+    assertEquals(new BigInteger("9007199254740993"), wireOptions.path("large").bigIntegerValue());
+    assertEquals(
+        new BigInteger("9223372036854775808"), wireOptions.path("beyond").bigIntegerValue());
+    assertEquals(
+        new BigDecimal("0.12345678901234567890123456789"),
+        wireOptions.path("nested").path("ratio").decimalValue());
+    String wireJson = new ObjectMapper().writeValueAsString(wireOptions);
+    assertTrue(wireJson.contains("\"large\":9007199254740993"), wireJson);
+    assertTrue(wireJson.contains("\"beyond\":9223372036854775808"), wireJson);
+    assertTrue(wireJson.contains("\"ratio\":0.12345678901234567890123456789"), wireJson);
+    assertTrue(wireJson.contains("\"exp\":1.234567890123456789E+45"), wireJson);
   }
 
   /** 禁用的 reasoning 在描述符上以 falsy 的 tools/reasoning 布尔形式呈现。 */
@@ -437,9 +528,18 @@ class AgentModelRuntimeConfigParserTest {
           "\"stopSequences\":[\"done\"],");
 
   private static String withProtocolOptions(String config, String protocolOptionsJson) {
+    try {
+      return withProtocolOptionsToken(
+          config, new ObjectMapper().writeValueAsString(protocolOptionsJson));
+    } catch (IOException error) {
+      throw new AssertionError(error);
+    }
+  }
+
+  private static String withProtocolOptionsToken(String config, String token) {
     return config.replace(
         "\"reasoningEffort\":\"high\"",
-        "\"reasoningEffort\":\"high\",\"protocolOptions\":" + protocolOptionsJson);
+        "\"reasoningEffort\":\"high\",\"protocolOptionsJson\":" + token);
   }
 
   /** 模拟本地真相：convention4j 与 HTTP mapper 都把 Long 序列化为字符串以避免 JS 精度丢失。 */

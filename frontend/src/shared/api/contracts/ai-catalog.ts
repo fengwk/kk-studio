@@ -74,7 +74,7 @@ export interface AgentModelPricingDTO {
 export interface AgentModelVariantDTO {
   id: string
   reasoningEffort?: string | null
-  protocolOptions?: Record<string, unknown> | null
+  protocolOptionsJson?: string | null
 }
 
 /**
