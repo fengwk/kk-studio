@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
@@ -25,6 +26,9 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
   private final String apiKey;
   private final AnthropicConfiguration configuration;
 
+  /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 configuration 的请求编码器，供无网络预览复用。 */
+  private final AnthropicRequestEncoder encoder;
+
   public AnthropicProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
     this(transport, apiKey, AnthropicConfiguration.defaults());
   }
@@ -38,6 +42,7 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.apiKey = apiKey;
     this.configuration = Objects.requireNonNull(configuration, "configuration");
+    this.encoder = new AnthropicRequestEncoder(this.configuration);
   }
 
   public AnthropicConfiguration configuration() {
@@ -67,6 +72,11 @@ public final class AnthropicProviderAdapter implements ProviderAdapter {
     }
     URI messagesUri = AnthropicEndpoints.resolveMessagesUri(descriptor.endpoint());
     return new AnthropicModelProvider(transport, descriptor, apiKey, messagesUri, configuration);
+  }
+
+  @Override
+  public byte[] encodeRequestBody(ProviderRequest request, ProviderDescriptor descriptor) {
+    return encoder.encode(request, descriptor).bodyUtf8Bytes();
   }
 
   @Override
