@@ -37,24 +37,38 @@ describe('content-utils usage & speed & cache calculations', () => {
     })
   })
 
-  // 验证解码速率：仅有效样本 (duration > 0 && decodeTokens >= 0) 参与，无样本返回 null
+  // 验证解码速率：仅有效样本（有限非负 token + 有限正 duration）参与，无样本返回 null
   describe('calculateDecodeTokensPerSecond', () => {
-    it('returns null when decodeDurationMillis is missing, null, or zero', () => {
+    it('returns null when there is no valid sample', () => {
       expect(calculateDecodeTokensPerSecond({})).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: null, decodeTokens: 100 })).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 0, decodeTokens: 100 })).toBeNull()
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: -10, decodeTokens: 100 })).toBeNull()
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: null })).toBeNull()
     })
 
-    it('returns rounded tok/s when valid sample exists', () => {
-      // 100 tokens in 2000ms = 50 tok/s
+    // 坏样本：负数/NaN/Infinity token 与非有限 duration 一律不进入分子分母，杜绝 Infinity 速率
+    it('rejects bad samples without producing Infinity or NaN', () => {
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: -1 })).toBeNull()
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: Number.NaN })).toBeNull()
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: Number.POSITIVE_INFINITY })).toBeNull()
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: Number.POSITIVE_INFINITY, decodeTokens: 100 })).toBeNull()
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: Number.NaN, decodeTokens: 100 })).toBeNull()
+    })
+
+    it('rounds to integer at rate >= 10 and keeps one decimal below 10', () => {
+      // >= 10 取整
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 2000, decodeTokens: 100 })).toBe(50)
-      // 40 tokens in 750ms = 53.33 -> 53 tok/s
       expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 750, decodeTokens: 40 })).toBe(53)
+      // < 10 保留 1 位小数
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 2000, decodeTokens: 5 })).toBe(2.5)
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 1000, decodeTokens: 3 })).toBe(3)
+      // 9.96 进位为 10（对齐参考展示规范）
+      expect(calculateDecodeTokensPerSecond({ decodeDurationMillis: 100000, decodeTokens: 996 })).toBe(10)
     })
   })
 
-  // 验证 parseAssistantUsage 能防御兼容 wire number/string，严格有限正 duration 解析
+  // 验证 parseAssistantUsage 只接受 backend 形态的安全整数正 duration
   describe('parseAssistantUsage duration and decode tokens', () => {
     it('parses valid numeric decodeDurationMillis and computes decodeTokens', () => {
       const usage = parseAssistantUsage({
@@ -82,22 +96,28 @@ describe('content-utils usage & speed & cache calculations', () => {
       })
     })
 
-    it('parses valid string decodeDurationMillis safely and filters non-positive', () => {
-      const usageWithString = parseAssistantUsage({
+    // 新持久字段无历史包袱：仅接受 backend 的安全整数 > 0
+    it('accepts only positive safe integer decodeDurationMillis', () => {
+      const valid = parseAssistantUsage({
         usage: { inputTokens: 10, outputTokens: 20 },
         cost: 0.01,
-        decodeDurationMillis: ' 800 ',
+        decodeDurationMillis: 800,
       })
-      expect(usageWithString?.decodeDurationMillis).toBe(800)
-      expect(usageWithString?.decodeTokens).toBe(20)
+      expect(valid?.decodeDurationMillis).toBe(800)
+      expect(valid?.decodeTokens).toBe(20)
+    })
 
-      const usageWithInvalid = parseAssistantUsage({
-        usage: { inputTokens: 10, outputTokens: 20 },
-        cost: 0.01,
-        decodeDurationMillis: 'not-a-number',
-      })
-      expect(usageWithInvalid?.decodeDurationMillis).toBeNull()
-      expect(usageWithInvalid?.decodeTokens).toBeNull()
+    // invalid/fraction/Infinity/超安全整数 -> null；不再兼容字符串与 snake_case 别名
+    it('rejects invalid, fractional, unsafe and aliased decodeDurationMillis', () => {
+      const base = { usage: { inputTokens: 10, outputTokens: 20 }, cost: 0.01 }
+      for (const bad of ['800', 0, -5, 1.5, Number.POSITIVE_INFINITY, Number.NaN, 2 ** 53]) {
+        const usage = parseAssistantUsage({ ...base, decodeDurationMillis: bad })
+        expect(usage?.decodeDurationMillis).toBeNull()
+        expect(usage?.decodeTokens).toBeNull()
+      }
+      const aliased = parseAssistantUsage({ ...base, decode_duration_millis: 800 })
+      expect(aliased?.decodeDurationMillis).toBeNull()
+      expect(aliased?.decodeTokens).toBeNull()
     })
   })
 
@@ -140,6 +160,37 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(merged.decodeTokens).toBe(85)
       expect(merged.decodeDurationMillis).toBe(1700)
       expect(merged.contextInputTokens).toBe(200)
+    })
+
+    // 坏样本（Infinity token / 非法 duration）不得污染合并后的测速分子分母
+    it('ignores invalid speed samples when merging', () => {
+      const invalid: TurnUsage = {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 0,
+        providerTotal: 2,
+        cost: 0,
+        decodeTokens: Number.POSITIVE_INFINITY,
+        decodeDurationMillis: 100,
+        contextInputTokens: 2,
+      }
+      const valid: TurnUsage = {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 0,
+        providerTotal: 2,
+        cost: 0,
+        decodeTokens: 5,
+        decodeDurationMillis: 200,
+        contextInputTokens: 2,
+      }
+      const merged = mergeTurnUsage(invalid, valid)
+      expect(merged.decodeTokens).toBe(5)
+      expect(merged.decodeDurationMillis).toBe(200)
     })
 
     it('preserves existing speed if next call has no measurement', () => {
@@ -189,6 +240,20 @@ describe('content-utils usage & speed & cache calculations', () => {
       // 50 / (100 + 50 + 0) = 33%
       // 50 * 1000 / 1000 = 50 tok/s
       expect(text).toBe('↑100 · ↓50 · R50 · $0.005 · cache 33% · 50 tok/s')
+    })
+
+    // 小速率（< 10）展示保留 1 位小数
+    it('formats sub-10 rate with one decimal', () => {
+      const text = formatTurnUsageText({
+        input: 0,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0.001,
+        decodeTokens: 5,
+        decodeDurationMillis: 2000,
+      })
+      expect(text).toBe('↑0 · ↓5 · $0.001 · cache — · 2.5 tok/s')
     })
 
     it('formats empty cache rate and speed as em dash placeholders', () => {

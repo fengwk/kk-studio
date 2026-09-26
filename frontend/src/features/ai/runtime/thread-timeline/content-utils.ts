@@ -201,19 +201,14 @@ export function parseAssistantUsage(metadata: Record<string, unknown>): TurnUsag
     cost = numberField(asRecord(costNode), 'total', 'amount', 'usd')
   }
 
-  const rawDuration = metadata.decodeDurationMillis ?? metadata.decode_duration_millis
-  let decodeDurationMillis: number | null = null
-  if (typeof rawDuration === 'number' && Number.isFinite(rawDuration) && rawDuration > 0) {
-    decodeDurationMillis = Math.round(rawDuration)
-  } else if (typeof rawDuration === 'string') {
-    const trimmed = rawDuration.trim()
-    if (/^\d+$/.test(trimmed)) {
-      const parsed = parseInt(trimmed, 10)
-      if (parsed > 0) {
-        decodeDurationMillis = parsed
-      }
-    }
-  }
+  // decodeDurationMillis 是 harness 新持久字段，无历史包袱：只接受 backend 形态的安全整数 > 0。
+  // 小数、Infinity、超安全整数、字符串以及 snake_case 别名一律视为无效（null）。
+  const decodeDurationMillis =
+    typeof metadata.decodeDurationMillis === 'number'
+    && Number.isSafeInteger(metadata.decodeDurationMillis)
+    && metadata.decodeDurationMillis > 0
+      ? metadata.decodeDurationMillis
+      : null
   const decodeTokens = decodeDurationMillis != null ? output + reasoning : null
   const contextInputTokens = input + cacheRead + cacheWrite
 
@@ -260,22 +255,36 @@ export function calculateCacheHitRate(usage: {
 }
 
 /**
+ * 有效测速样本：decodeTokens 为有限非负 token、decodeDurationMillis 为有限正 duration。
+ * 缺失、负数、NaN/Infinity 或 0 样本一律视为无效，绝不进入速率分子与分母。
+ */
+export function isValidDecodeSample(sample: {
+  decodeTokens?: number | null
+  decodeDurationMillis?: number | null
+}): sample is { decodeTokens: number; decodeDurationMillis: number } {
+  return (
+    sample.decodeTokens != null
+    && Number.isFinite(sample.decodeTokens)
+    && sample.decodeTokens >= 0
+    && sample.decodeDurationMillis != null
+    && Number.isFinite(sample.decodeDurationMillis)
+    && sample.decodeDurationMillis > 0
+  )
+}
+
+/**
  * 估算解码速率：decodeTokens * 1000 / decodeDurationMillis。
- * 仅在具有严格有限正 duration 样本时计算，无样本时返回 null，展示为 "—"。
+ * 仅在有效样本上计算，无样本返回 null，展示为 "—"；速率 >= 10 取整、< 10 保留 1 位小数。
  */
 export function calculateDecodeTokensPerSecond(usage: {
   decodeTokens?: number | null
   decodeDurationMillis?: number | null
 }): number | null {
-  if (
-    usage.decodeDurationMillis != null
-    && usage.decodeDurationMillis > 0
-    && usage.decodeTokens != null
-    && usage.decodeTokens >= 0
-  ) {
-    return Math.round((usage.decodeTokens * 1000) / usage.decodeDurationMillis)
+  if (!isValidDecodeSample(usage)) {
+    return null
   }
-  return null
+  const rate = (usage.decodeTokens * 1000) / usage.decodeDurationMillis
+  return rate >= 10 ? Math.round(rate) : Math.round(rate * 10) / 10
 }
 
 /**
@@ -294,24 +303,16 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
 
   let decodeTokens: number | null = null
   let decodeDurationMillis: number | null = null
-  const existingHasSpeed =
-    existing.decodeDurationMillis != null
-    && existing.decodeDurationMillis > 0
-    && existing.decodeTokens != null
-  const nextHasSpeed =
-    next.decodeDurationMillis != null
-    && next.decodeDurationMillis > 0
-    && next.decodeTokens != null
 
-  if (existingHasSpeed && nextHasSpeed) {
-    decodeTokens = (existing.decodeTokens ?? 0) + (next.decodeTokens ?? 0)
-    decodeDurationMillis = (existing.decodeDurationMillis ?? 0) + (next.decodeDurationMillis ?? 0)
-  } else if (existingHasSpeed) {
-    decodeTokens = existing.decodeTokens ?? null
-    decodeDurationMillis = existing.decodeDurationMillis ?? null
-  } else if (nextHasSpeed) {
-    decodeTokens = next.decodeTokens ?? null
-    decodeDurationMillis = next.decodeDurationMillis ?? null
+  if (isValidDecodeSample(existing) && isValidDecodeSample(next)) {
+    decodeTokens = existing.decodeTokens + next.decodeTokens
+    decodeDurationMillis = existing.decodeDurationMillis + next.decodeDurationMillis
+  } else if (isValidDecodeSample(existing)) {
+    decodeTokens = existing.decodeTokens
+    decodeDurationMillis = existing.decodeDurationMillis
+  } else if (isValidDecodeSample(next)) {
+    decodeTokens = next.decodeTokens
+    decodeDurationMillis = next.decodeDurationMillis
   }
 
   return {

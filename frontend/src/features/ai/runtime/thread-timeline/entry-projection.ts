@@ -39,8 +39,6 @@ export interface EntryProjectionContext {
   pendingTurnSummary: MetaDialogueMessage | null
   lastSettings: SettingsSnapshot | null
   pendingTurnUsage?: TurnUsage | null
-  pendingTurnEntryId?: string | null
-  pendingTurnCreatedAt?: MetaDialogueMessage['createdAt'] | null
 }
 
 export function projectDurableEntry(
@@ -64,8 +62,6 @@ export function projectDurableEntry(
       const summary = context.pendingTurnSummary
       context.pendingTurnSummary = null
       context.pendingTurnUsage = null
-      context.pendingTurnEntryId = null
-      context.pendingTurnCreatedAt = null
       if (summary != null) {
         messages.push(summary)
       }
@@ -73,8 +69,6 @@ export function projectDurableEntry(
       // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
       context.pendingTurnSummary = null
       context.pendingTurnUsage = null
-      context.pendingTurnEntryId = null
-      context.pendingTurnCreatedAt = null
       if (entryType === 'TURN_START' && getString(payload.reason) !== 'COMPACTION') {
         const settings = parseSettingsSnapshot(payload.settings)
         if (settings === null) {
@@ -214,19 +208,12 @@ export function projectDurableEntry(
     const metadata = asRecord(payload.assistantMetadata)
     const usage = parseAssistantUsage(metadata)
     if (usage != null) {
-      if (!context.pendingTurnUsage) {
-        context.pendingTurnUsage = usage
-        context.pendingTurnEntryId = entry.entryId
-        context.pendingTurnCreatedAt = entry.createTime
-      } else {
-        context.pendingTurnUsage = mergeTurnUsage(context.pendingTurnUsage, usage)
-        context.pendingTurnEntryId = entry.entryId
-        context.pendingTurnCreatedAt = entry.createTime
-      }
+      context.pendingTurnUsage =
+        context.pendingTurnUsage == null ? usage : mergeTurnUsage(context.pendingTurnUsage, usage)
       context.pendingTurnSummary = createTurnUsageMetaMessage(
-        context.pendingTurnEntryId,
+        entry.entryId,
         context.pendingTurnUsage,
-        context.pendingTurnCreatedAt,
+        entry.createTime,
       )
     }
     return

@@ -49,18 +49,36 @@ describe('aggregateBranchUsage', () => {
       }),
     ]
 
-    expect(aggregateBranchUsage(messages)).toEqual({
+    const aggregated = aggregateBranchUsage(messages)
+    expect(aggregated).toMatchObject({
       input: 30,
       output: 9,
       cacheRead: 14,
       cacheWrite: 17,
       reasoning: 22,
       providerTotal: 92,
-      cost: 0.5,
       decodeTokens: null,
       decodeDurationMillis: null,
       contextInputTokens: null,
     })
+    // 费用按浮点原值累加，不做低精度 round
+    expect(aggregated?.cost).toBeCloseTo(0.5, 10)
+  })
+
+  // 验证费用不再 toFixed(6) 截断：亚微级费用必须原样保留
+  it('preserves sub-micro cost precision without truncation', () => {
+    const aggregated = aggregateBranchUsage([
+      usageMessage('usage-1', {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: 0,
+        providerTotal: 0,
+        cost: 0.0000004,
+      }),
+    ])
+    expect(aggregated?.cost).toBe(0.0000004)
   })
 
   // 验证多回合聚合时，contextInputTokens 取最新调用，而测速有效样本分子与分母各自累加
@@ -106,18 +124,19 @@ describe('aggregateBranchUsage', () => {
     ]
 
     const aggregated = aggregateBranchUsage(messages)
-    expect(aggregated).toEqual({
+    expect(aggregated).toMatchObject({
       input: 350,
       output: 160,
       cacheRead: 70,
       cacheWrite: 10,
       reasoning: 20,
       providerTotal: 610,
-      cost: 0.035,
       decodeTokens: 170, // 50 + 120
       decodeDurationMillis: 3000, // 1000 + 2000
       contextInputTokens: 50, // 取最新 usage-3 的 contextInputTokens
     })
+    // 0.01 + 0.02 + 0.005 的浮点原值不应被 round 篡改
+    expect(aggregated?.cost).toBeCloseTo(0.035, 10)
   })
 
   it('returns null when the branch has no TURN_END usage summary', () => {
