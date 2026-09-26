@@ -184,6 +184,38 @@ class AnthropicProtocolOptionsTest {
     assertEquals("protocolOptions tools must be a JSON array", error.getMessage());
   }
 
+  /** 测试意图：原生工具仅限带名称的 server 工具；未绑定的客户端工具和同名 runtime 工具不得下发。 */
+  @Test
+  void rejectsUnboundNativeTools() {
+    for (String option :
+        List.of(
+            "{\"tools\":[null]}",
+            "{\"tools\":[{}]}",
+            "{\"tools\":[{\"name\":\"secret\",\"input_schema\":{}}]}",
+            "{\"tools\":[{\"type\":\"custom\",\"name\":\"secret\"}]}",
+            "{\"tools\":[{\"type\":\"computer_20250124\",\"name\":\"secret\"}]}",
+            "{\"tools\":[{\"type\":\"bash_20250124\",\"name\":\"secret\"}]}",
+            "{\"tools\":[{\"type\":\"text_editor_20250124\",\"name\":\"secret\"}]}",
+            "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\" \"}]}",
+            "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"calc\"}]}")) {
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(
+                          reasoningModel(),
+                          variant(null, option),
+                          1024,
+                          List.of(userMsg()),
+                          List.of(
+                              new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}"))),
+                      descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+      assertFalse(error.getMessage().contains("secret"));
+    }
+  }
+
   /** 测试意图：TOOLS cache marker 必须打在最终合并工具数组的最后一个条目上，native 条目保持原样。 */
   @Test
   void placesToolCacheMarkerOnFinalMergedToolsArray() throws IOException {

@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -116,6 +117,15 @@ final class OpenAiResponsesRequestEncoder {
    */
   private static final Set<String> STATEFUL_FIELD_NAMES =
       Set.of("previous_response_id", "conversation");
+
+  private static final Set<String> HOSTED_TOOL_TYPES =
+      Set.of(
+          "web_search",
+          "web_search_preview",
+          "file_search",
+          "code_interpreter",
+          "image_generation",
+          "mcp");
 
   /** runtime 要求 encrypted reasoning 密文随响应返回时使用的 include 条目。 */
   private static final String INCLUDE_REASONING_ENCRYPTED_CONTENT = "reasoning.encrypted_content";
@@ -205,6 +215,11 @@ final class OpenAiResponsesRequestEncoder {
       }
     }
     requireNativeArray(root, "tools");
+    if (root.has("background")
+        && (!root.get("background").isBoolean() || root.get("background").booleanValue())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "protocolOptions background must be false");
+    }
     requireNativeArray(root, "include");
     requireNativeObject(root, "reasoning");
     dedupeInclude(root);
@@ -321,10 +336,7 @@ final class OpenAiResponsesRequestEncoder {
     include.add(entry);
   }
 
-  /**
-   * tools 合并：原生工具（web/file search、computer、code interpreter、image generation、local shell、MCP、custom
-   * 等）按声明顺序保留，runtime function 工具追加在其后；无任何工具时不发送 {@code tools}。
-   */
+  /** tools 合并：只保留可执行的 hosted 工具，runtime function 工具追加在其后；无任何工具时不发送 {@code tools}。 */
   private static ArrayNode mergeTools(ObjectNode root, ArrayNode runtimeTools) {
     if (!root.has("tools")) {
       if (runtimeTools == null || runtimeTools.isEmpty()) {
@@ -334,6 +346,38 @@ final class OpenAiResponsesRequestEncoder {
       return runtimeTools;
     }
     ArrayNode tools = (ArrayNode) root.get("tools");
+    Set<String> names = new HashSet<>();
+    for (int i = 0; i < tools.size(); i++) {
+      JsonNode tool = tools.get(i);
+      JsonNode type = tool.path("type");
+      String kind = type.isTextual() ? type.textValue() : "";
+      if (!tool.isObject()
+          || !HOSTED_TOOL_TYPES.contains(kind)
+          || ("mcp".equals(kind)
+              && (!tool.path("require_approval").isTextual()
+                  || !"never".equals(tool.path("require_approval").textValue())))) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions tools["
+                + i
+                + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
+      }
+      JsonNode name = tool.get("name");
+      if (name != null && name.isTextual() && !names.add(name.textValue())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions tools[" + i + "] duplicates a tool name");
+      }
+      if (name != null && name.isTextual() && runtimeTools != null) {
+        for (JsonNode runtimeTool : runtimeTools) {
+          if (name.textValue().equals(runtimeTool.path("name").asText())) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "protocolOptions tools[" + i + "] name conflicts with runtime tool");
+          }
+        }
+      }
+    }
     if (runtimeTools != null) {
       tools.addAll(runtimeTools);
     }

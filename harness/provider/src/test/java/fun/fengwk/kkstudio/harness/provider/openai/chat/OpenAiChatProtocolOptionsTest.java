@@ -113,7 +113,7 @@ class OpenAiChatProtocolOptionsTest {
               "presence_penalty": 0.5,
               "stop": ["END"],
               "user": "u-1",
-              "n": 2
+              "n": 1
             }
             """);
 
@@ -136,7 +136,7 @@ class OpenAiChatProtocolOptionsTest {
     assertEquals(0.5, root.path("presence_penalty").asDouble());
     assertEquals("END", root.path("stop").get(0).asText());
     assertEquals("u-1", root.path("user").asText());
-    assertEquals(2, root.path("n").asInt());
+    assertEquals(1, root.path("n").asInt());
 
     // 运行时事实不被 native 影响
     assertEquals("gpt-4o-reasoning", root.path("model").asText());
@@ -145,6 +145,18 @@ class OpenAiChatProtocolOptionsTest {
     assertFalse(root.has("max_completion_tokens"));
     assertTrue(root.path("stream_options").path("include_usage").asBoolean());
     assertEquals("system", root.path("messages").get(0).path("role").asText());
+  }
+
+  /** 测试意图：原始小数/指数经 protocolOptions 规范化为整数 1 后，单候选请求仍可执行；非 1 小数另有拒绝用例。 */
+  @Test
+  void acceptsNormalizedSingleCandidateNumbers() throws Exception {
+    for (String numeric : List.of("1.0", "1e0")) {
+      ModelVariant variant = nativeVariant("{\"n\":" + numeric + "}");
+      assertEquals("{\"n\":1}", variant.protocolOptions().canonicalJson());
+      JsonNode root = encode(plainModel, variant, List.of());
+      assertEquals(1, root.path("n").intValue());
+      assertTrue(root.path("stream").booleanValue());
+    }
   }
 
   @ParameterizedTest(name = "runtime-owned 字段 {0} 冲突拒绝且不回显 native 值")
@@ -224,12 +236,10 @@ class OpenAiChatProtocolOptionsTest {
   }
 
   @Test
-  @DisplayName("native tools 与运行时 function tools 合并为同一数组并共同参与 prefix hash")
+  @DisplayName("空 native tools 与运行时 function tools 合并为同一数组并共同参与 prefix hash")
   void mergesNativeAndRuntimeToolsIntoHashedArray() throws Exception {
-    ModelVariant variant =
-        nativeVariant(
-            """
-            {"tools":[{"type":"function","function":{"name":"native_lookup","parameters":{"type":"object"}}}]}
+    ModelVariant variant = nativeVariant("""
+            {"tools":[]}
             """);
     ProviderToolDefinition runtimeTool =
         new ProviderToolDefinition("runtime_calc", "calc", "{\"type\":\"object\"}");
@@ -241,22 +251,21 @@ class OpenAiChatProtocolOptionsTest {
             OpenAiChatConfiguration.defaults());
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     ArrayNode tools = (ArrayNode) root.path("tools");
-    assertEquals(2, tools.size());
-    assertEquals("native_lookup", tools.get(0).path("function").path("name").asText());
-    assertEquals("runtime_calc", tools.get(1).path("function").path("name").asText());
+    assertEquals(1, tools.size());
+    assertEquals("runtime_calc", tools.get(0).path("function").path("name").asText());
 
-    // prefix hash 覆盖最终 wire 数组（native 条目 + runtime 条目）
+    // prefix hash 覆盖最终 wire 数组（runtime 工具）
     assertEquals(
         OpenAiChatPrefixHasher.calculateHash(tools, (ArrayNode) root.path("messages")),
         encoded.sourcePrefixHash());
 
-    // 仅 native tools 时同样保留，且 hash 与无 native tools 的请求不同
+    // 仅空 native tools 时保留空声明
     OpenAiChatEncodedRequest nativeOnlyEncoded =
         encoder.encode(
             request(reasoningModel, variant, List.of()),
             descriptor,
             OpenAiChatConfiguration.defaults());
-    assertEquals(1, MAPPER.readTree(nativeOnlyEncoded.bodyUtf8Bytes()).path("tools").size());
+    assertEquals(0, MAPPER.readTree(nativeOnlyEncoded.bodyUtf8Bytes()).path("tools").size());
     String plainHash =
         encoder
             .encode(
@@ -272,6 +281,32 @@ class OpenAiChatProtocolOptionsTest {
             ProviderException.class,
             () -> encode(reasoningModel, nativeVariant("{\"tools\":{}}"), List.of()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, illegalShape.kind());
+  }
+
+  /** 测试意图：多候选和原生客户端工具在编码阶段失败，不允许以无法闭环的工具调用进入流。 */
+  @Test
+  void rejectsUnsupportedExecutionOptions() {
+    for (String options :
+        List.of(
+            "{\"n\":null}",
+            "{\"n\":true}",
+            "{\"n\":1.5}",
+            "{\"n\":\"1\"}",
+            "{\"n\":0}",
+            "{\"n\":2}",
+            "{\"n\":99999999999999999999999}",
+            "{\"tools\":[null]}",
+            "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"secret\"}}]}",
+            "{\"functions\":[]}",
+            "{\"function_call\":\"none\"}")) {
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () -> encode(plainModel, nativeVariant(options), List.of()),
+              options);
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+      assertFalse(error.getMessage().contains("secret"));
+    }
   }
 
   @Test

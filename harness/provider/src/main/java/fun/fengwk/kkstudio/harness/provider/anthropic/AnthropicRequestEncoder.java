@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -327,7 +328,34 @@ final class AnthropicRequestEncoder {
 
     ArrayNode merged = NODES.arrayNode();
     if (nativeTools != null) {
-      for (JsonNode nativeTool : nativeTools) {
+      Set<String> names = new HashSet<>();
+      for (int i = 0; i < nativeTools.size(); i++) {
+        JsonNode nativeTool = nativeTools.get(i);
+        JsonNode type = nativeTool.path("type");
+        JsonNode name = nativeTool.path("name");
+        if (!nativeTool.isObject()
+            || !type.isTextual()
+            || !type.textValue().matches("(web_search|web_fetch|code_execution)_[0-9]{8}")
+            || !name.isTextual()
+            || name.textValue().isBlank()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "protocolOptions tools["
+                  + i
+                  + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
+        }
+        if (!names.add(name.textValue())) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "protocolOptions tools[" + i + "] duplicates a tool name");
+        }
+        for (ProviderToolDefinition runtimeTool : runtimeTools) {
+          if (name.textValue().equals(runtimeTool.name())) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "protocolOptions tools[" + i + "] name conflicts with runtime tool");
+          }
+        }
         merged.add(nativeTool.deepCopy());
       }
     }

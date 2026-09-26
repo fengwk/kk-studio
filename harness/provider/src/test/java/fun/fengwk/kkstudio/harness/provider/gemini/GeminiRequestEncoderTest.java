@@ -444,6 +444,82 @@ class GeminiRequestEncoderTest {
     assertTrue(tools.get(0).has("googleSearch"));
   }
 
+  /** 测试意图：单候选与六种 hosted capability 保留原生声明，运行时仍独占输出预算。 */
+  @Test
+  void preservesAllHostedCapabilitiesAndSingleCandidate() throws Exception {
+    String options =
+        "{\"generationConfig\":{\"candidateCount\":1},\"tools\":["
+            + "{\"googleSearch\":{}},{\"googleSearchRetrieval\":{}},{\"retrieval\":{}},"
+            + "{\"codeExecution\":{}},{\"urlContext\":{}},{\"googleMaps\":{}}]}";
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            new ModelVariant("v1", null, new ProviderProtocolOptions(options)),
+            1024,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode wire = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    assertEquals(MAPPER.readTree(options).path("tools"), wire.path("tools"));
+    assertEquals(1, wire.path("generationConfig").path("candidateCount").intValue());
+    assertEquals(1024, wire.path("generationConfig").path("maxOutputTokens").intValue());
+  }
+
+  /** 测试意图：原始 1.0/1e0 规范化后等价于单候选 1；非 1 小数仍在拒绝测试中覆盖。 */
+  @Test
+  void acceptsNormalizedSingleCandidateNumbers() throws Exception {
+    for (String numeric : List.of("1.0", "1e0")) {
+      ModelVariant variant =
+          new ModelVariant(
+              "v1",
+              null,
+              new ProviderProtocolOptions(
+                  "{\"generationConfig\":{\"candidateCount\":" + numeric + "}}"));
+      assertEquals(
+          "{\"generationConfig\":{\"candidateCount\":1}}",
+          variant.protocolOptions().canonicalJson());
+      ProviderRequest request =
+          new ProviderRequest(
+              model(false),
+              variant,
+              1024,
+              "system",
+              List.of(
+                  new ProviderMessage(
+                      ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+              List.of(),
+              ProviderCacheControl.none());
+      JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+      assertEquals(1, root.path("generationConfig").path("candidateCount").intValue());
+      assertEquals(1024, root.path("generationConfig").path("maxOutputTokens").intValue());
+    }
+  }
+
+  /** 测试意图：原生客户端工具和多候选无法被 runtime 执行/收敛，在发请求之前阻断。 */
+  @Test
+  void rejectsUnsupportedNativeExecutionOptions() {
+    for (String option :
+        List.of(
+            "{\"generationConfig\":{\"candidateCount\":null}}",
+            "{\"generationConfig\":{\"candidateCount\":true}}",
+            "{\"generationConfig\":{\"candidateCount\":1.5}}",
+            "{\"generationConfig\":{\"candidateCount\":\"1\"}}",
+            "{\"generationConfig\":{\"candidateCount\":0}}",
+            "{\"generationConfig\":{\"candidateCount\":2}}",
+            "{\"generationConfig\":{\"candidateCount\":99999999999999999999999}}",
+            "{\"tools\":[null]}",
+            "{\"tools\":[{}]}",
+            "{\"tools\":[{\"googleSearch\":null}]}",
+            "{\"tools\":[{\"googleSearch\":{},\"urlContext\":{}}]}",
+            "{\"tools\":[{\"functionDeclarations\":[{\"name\":\"secret\"}]}]}",
+            "{\"tools\":[{\"computerUse\":{}}]}")) {
+      assertConflictingOptionsRejected(option, null, "secret");
+    }
+  }
+
   /**
    * 验证 native options 覆盖 runtime-owned 事实或与 variant reasoningEffort 冲突时明确 INVALID_REQUEST，且不回显
    * value。

@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -112,6 +113,22 @@ final class OpenAiChatRequestEncoder {
     // variant 的原生协议选项是请求体的合并基座：官方顶层能力无损保留，运行时所有权字段随后覆盖并在 native 声明时冲突
     ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
     rejectRuntimeOwnedNativeFields(root);
+    for (String field : List.of("functions", "function_call")) {
+      if (root.has(field)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions "
+                + field
+                + " is unsupported; bind client tools through runtime ProviderToolDefinition");
+      }
+    }
+    if (root.has("n")) {
+      JsonNode n = root.get("n");
+      if (!n.isIntegralNumber() || !BigInteger.ONE.equals(n.bigIntegerValue())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "protocolOptions n must be exactly 1");
+      }
+    }
 
     root.put("model", request.model().modelId());
     root.put("stream", true);
@@ -122,7 +139,7 @@ final class OpenAiChatRequestEncoder {
     // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
     root.put("max_tokens", request.outputTokens());
 
-    // native tools 与运行时 function tools 合并为同一个最终数组，并共同参与 prefix hash
+    // native 只能声明空 tools；运行时 function tools 构成最终数组并参与 prefix hash
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
     // 从左到右构建 wire messages 并维护 prefix hash；系统指令合成为唯一的前导 system message。
@@ -198,8 +215,7 @@ final class OpenAiChatRequestEncoder {
   }
 
   /**
-   * native tools 必须是 array 且原样保留，运行时 function tools 追加在其后；返回的合并数组是 wire 事实，参与 prefix hash 与 cache
-   * 打标。
+   * native tools 必须是空 array，运行时 function tools 追加在其后；返回的合并数组是 wire 事实，参与 prefix hash 与 cache 打标。
    *
    * <p>native 未声明 tools 且运行时无工具时返回 {@code null}，不产生空的 {@code tools} 字段。
    */
@@ -212,6 +228,11 @@ final class OpenAiChatRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "protocolOptions field tools must be an array");
       }
       toolsArray = (ArrayNode) nativeTools;
+      if (!toolsArray.isEmpty()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions tools must be empty; bind client tools through runtime ProviderToolDefinition");
+      }
     }
     ArrayNode encodedRuntimeTools = encodeTools(runtimeTools);
     if (encodedRuntimeTools != null) {
