@@ -3,6 +3,20 @@ import { describe, expect, it } from 'vitest'
 import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
 
 describe('ThreadStatusFooter', () => {
+  // 缺失最新调用上下文时，累计输入不能伪装成单次上下文占用。
+  it('does not substitute aggregate usage for an unknown context estimate', () => {
+    render(
+      <ThreadStatusFooter
+        branchUsage={{
+          input: 300_000, output: 9, cacheRead: 10, cacheWrite: 0,
+          reasoning: 0, providerTotal: 300_019, cost: 0.5,
+        }}
+        contextWindow={128_000}
+      />,
+    )
+    expect(screen.getByLabelText('会话状态')).toHaveTextContent('ctx —/128k')
+  })
+
   it('renders zero usage facts when no closed-turn usage exists', () => {
     render(<ThreadStatusFooter />)
     const footer = screen.getByLabelText('会话状态')
