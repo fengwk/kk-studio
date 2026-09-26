@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -38,7 +40,7 @@ import java.util.Objects;
  * 伪协议，也不产生额外的 TOOL 结果。降级只发生在投影结果中，durable Entry 与 callIndex 永不被改写。
  *
  * <p>同一 assistant 之后的 native TOOL 结果先于该 USER 上下文输出，以保证 provider 要求的 tool-call adjacency；组内保持相对顺序。被
- * 降级改写的 assistant 消息不再携带 {@link ProviderReplayState}（native payload 已与投影内容不一致），未被改写的消息保留。
+ * 降级改写的 assistant 消息若携带 {@link ProviderReplayState} 则拒绝投影（opaque native payload 无法安全改写）；未被改写的消息保留。
  *
  * <p>USER 上下文中每一项的动作来自调用冻结时的 Tool 语义 action（{@link
  * fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent#historyAction()}）；缺失 action
@@ -147,8 +149,17 @@ public final class ProviderMessageProjector {
       ProviderReplayState replayState,
       Batch batch,
       List<ProviderMessage> result) {
+    // Native replay 是不透明的；在改写 batch 或丢弃纯工具 assistant 前拒绝不兼容的绑定。
+    if (replayState != null) {
+      for (AgentMessageContent content : message.contents()) {
+        if (content instanceof ToolCallMessageContent call && !isNative(call)) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST,
+              "Cannot project assistant replay with changed tool bindings/environment; restore original tool bindings/environment or start a new context with an explicit summary");
+        }
+      }
+    }
     List<ProviderContentBlock> contents = new ArrayList<>(message.contents().size());
-    boolean downgraded = false;
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof ToolCallMessageContent call) {
         if (isNative(call)) {
@@ -157,7 +168,6 @@ public final class ProviderMessageProjector {
           contents.add(block);
         } else {
           batch.downgradeCall(call);
-          downgraded = true;
         }
         continue;
       }
@@ -166,9 +176,7 @@ public final class ProviderMessageProjector {
     if (contents.isEmpty()) {
       return;
     }
-    result.add(
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT, contents, downgraded ? null : replayState));
+    result.add(new ProviderMessage(ProviderMessageRole.ASSISTANT, contents, replayState));
   }
 
   private ProviderToolResultBlock projectToolResult(ToolResultMessageContent content) {

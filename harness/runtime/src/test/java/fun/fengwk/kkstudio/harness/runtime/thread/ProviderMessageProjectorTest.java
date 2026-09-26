@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -42,7 +44,7 @@ import java.util.UUID;
 /**
  * Provider 投影契约：native 资格按「调用名在当前 bindings + 冻结 Environment 名与当前同名工具一致」逐次判定；未命中者从 ASSISTANT wire
  * 移除，与其结果配对后合并为单条 USER 自然语言上下文（含 Tool 冻结的 action、中性回退、orphan 文本）。durable Entry 与 callIndex 永不被改写；
- * 同一 assistant 之后 native TOOL 结果先于该 USER 上下文输出；被降级改写的 assistant 不再保留 replay state。
+ * 同一 assistant 之后 native TOOL 结果先于该 USER 上下文输出；携带 opaque replay 的 assistant 不允许降级改写。
  */
 class ProviderMessageProjectorTest {
 
@@ -312,52 +314,90 @@ class ProviderMessageProjectorTest {
     assertEquals(CONTEXT_HEADER + "\nrun bash:\n```\nlegacy output\n```", textOf(projected.get(2)));
   }
 
-  /** assistant 消息只有降级调用时整条消息不再输出：没有空 ASSISTANT 消息，也没有被改写的 replay state 泄漏。 */
+  /** 纯工具 assistant 即使投影后为空，也必须先拒绝不兼容的 opaque replay。 */
   @Test
-  void assistantWithOnlyDowngradedCallsIsDroppedWithItsReplayState() {
+  void assistantWithOnlyDowngradedCallsRejectsReplay() {
     ProviderReplayState replayState = sampleReplayState();
     ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
-    List<ProviderMessage> projected =
-        projector.projectSources(
-            List.of(
-                ProviderMessageProjector.ProjectedMessage.of(
-                    assistantToolCall("call-1", "bash", "{}"), replayState),
-                ProviderMessageProjector.ProjectedMessage.of(
-                    toolResult("call-1", "bash", "output"), null)));
-
-    assertEquals(
-        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
-    assertNull(projected.get(0).replayState());
-    assertTrue(
-        textOf(projected.get(0)).startsWith(CONTEXT_HEADER + "\nexternal operation:\n"),
-        textOf(projected.get(0)));
+    assertReplayRejected(
+        projector,
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(toolCall("call-1", "bash", "bash", "{\"secret\":1}", null, null))),
+        replayState);
   }
 
-  /** 部分降级改写保留 assistant 消息本身（仍有文本内容），但清除 replay state。 */
+  /** 文本加降级调用不能通过只保留文本来丢弃 opaque replay。 */
   @Test
-  void partiallyDowngradedAssistantKeepsContentWithoutReplayState() {
+  void partiallyDowngradedAssistantRejectsReplay() {
     ProviderReplayState replayState = sampleReplayState();
     ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("lookup"));
 
-    List<ProviderMessage> projected =
-        projector.projectSources(
+    assertReplayRejected(
+        projector,
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
             List.of(
-                ProviderMessageProjector.ProjectedMessage.of(
+                new TextMessageContent("answer"),
+                toolCall("call-1", "bash", "bash", "{\"secret\":1}", "run bash", null))),
+        replayState);
+  }
+
+  /** 无 replay 的旧历史仍可保留 assistant 文本，并将失去绑定的调用降级为 USER 上下文。 */
+  @Test
+  void replayFreeAssistantKeepsTextWhenToolDowngrades() {
+    List<ProviderMessage> projected =
+        ProviderMessageProjector.byNames(Set.of("lookup"))
+            .project(
+                List.of(
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT,
                         List.of(
                             new TextMessageContent("answer"),
                             toolCall("call-1", "bash", "bash", "{}", "run bash", null))),
-                    replayState),
-                ProviderMessageProjector.ProjectedMessage.of(
-                    toolResult("call-1", "bash", "output"), null)));
-
+                    toolResult("call-1", "bash", "output")));
     assertEquals(
         List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.USER),
         projected.stream().map(ProviderMessage::role).toList());
     assertEquals(List.of(new ProviderTextBlock("answer")), projected.get(0).contents());
     assertNull(projected.get(0).replayState());
+    assertEquals(CONTEXT_HEADER + "\nrun bash:\n```\noutput\n```", textOf(projected.get(1)));
+  }
+
+  /** 混合 native/降级调用不能把 replay 错误地附着到部分保留的 assistant 内容上。 */
+  @Test
+  void mixedCallsRejectOpaqueReplayBeforeDowngrade() {
+    assertReplayRejected(
+        ProviderMessageProjector.byNames(Set.of("lookup")),
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                toolCall("call-native", "lookup", "lookup", "{}", null, null),
+                toolCall("call-legacy", "bash", "bash", "{\"secret\":1}", null, null))),
+        sampleReplayState());
+  }
+
+  /** 同名工具的冻结环境变化也必须拒绝 opaque replay，而非静默转为 USER 语义。 */
+  @Test
+  void environmentMismatchRejectsOpaqueReplay() {
+    assertReplayRejected(
+        new ProviderMessageProjector(List.of(new NativeTool("fs_read", "prod"))),
+        toolCallAssistant("call-1", "fs_read", "{\"secret\":1}", null, "dev"),
+        sampleReplayState());
+  }
+
+  /** 环境匹配时纯工具 assistant 的 replay 必须原样保留。 */
+  @Test
+  void environmentMatchPreservesOpaqueReplay() {
+    ProviderReplayState replay = sampleReplayState();
+    List<ProviderMessage> messages =
+        new ProviderMessageProjector(List.of(new NativeTool("fs_read", "dev")))
+            .projectSources(
+                List.of(
+                    ProviderMessageProjector.ProjectedMessage.of(
+                        toolCallAssistant("call-1", "fs_read", "{}", null, "dev"), replay)));
+    assertEquals(replay, messages.get(0).replayState());
   }
 
   /** 同一 assistant 后的多条 native 结果必须保持投影相对顺序。 */
@@ -682,5 +722,22 @@ class ProviderMessageProjectorTest {
             ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         JsonNodeFactory.instance.objectNode().put("k", "v"));
+  }
+
+  private static void assertReplayRejected(
+      ProviderMessageProjector projector, AgentMessage assistant, ProviderReplayState replay) {
+    ProviderException failure =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                projector.projectSources(
+                    List.of(ProviderMessageProjector.ProjectedMessage.of(assistant, replay))));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, failure.kind());
+    assertTrue(failure.getMessage().contains("restore original tool bindings/environment"));
+    assertTrue(failure.getMessage().contains("start a new context with an explicit summary"));
+    assertFalse(failure.getMessage().contains("bash"));
+    assertFalse(failure.getMessage().contains("fs_read"));
+    assertFalse(failure.getMessage().contains("secret"));
+    assertFalse(failure.getMessage().contains("call-"));
   }
 }

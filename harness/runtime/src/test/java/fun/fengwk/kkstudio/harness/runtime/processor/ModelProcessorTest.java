@@ -312,6 +312,79 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
+  /** 真实历史物化遇到被移除的工具及 opaque replay：不得启动网关或留在 DISPATCHING/UNKNOWN。 */
+  @Test
+  void replayProjectionFailureRejectsDispatchBeforeGatewayStart() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    UserBasis basis = seedUserBasis(store);
+    UUID invocationId =
+        store.transaction(
+            tx -> {
+              UUID assistantId = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      assistantId,
+                      basis.sessionId(),
+                      basis.userEntryId(),
+                      new HistoryPayloadMapper()
+                          .assistantPayload(
+                              toolResponse(
+                                  "answer",
+                                  new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
+                              requestWithTool().toolBindings()),
+                      NOW.plusMillis(3),
+                      sampleReplayState()));
+              tx.updateThread(
+                  tx.lockThread(basis.threadId()).orElseThrow().advanceHead(assistantId, NOW));
+              UUID id = tx.nextId();
+              tx.insertModelInvocation(
+                  new ModelInvocation(
+                      id,
+                      basis.threadId(),
+                      basis.turnStartEntryId(),
+                      assistantId,
+                      requestSpec(),
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      NOW,
+                      NOW));
+              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, basis.threadId()), NOW);
+              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), NOW);
+              return id;
+            });
+    FakeGateway gateway = new FakeGateway();
+    ModelProcessor processor =
+        new ModelProcessor(
+            store,
+            gateway,
+            new RecordingSink(),
+            new ModelProcessorConfig(
+                LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, StreamFlushConfig.DEFAULT, null),
+            Clock.fixed(NOW, ZoneOffset.UTC),
+            newScheduler(),
+            Runnable::run,
+            Runnable::run);
+
+    assertEquals(ProcessResult.TERMINATED, processor.process(claim(store, invocationId, NOW)));
+    ModelInvocation failed = model(store, invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(0, failed.attempt());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
+    assertTrue(failed.error().message().contains("restore original tool bindings/environment"));
+    assertFalse(failed.error().message().contains("secret"));
+    assertFalse(failed.error().message().contains("bash"));
+    assertEquals(0, gateway.startCalls);
+    assertNull(work(store, new WorkTarget(WorkTargetType.MODEL, invocationId)));
+    assertEquals(
+        2, work(store, new WorkTarget(WorkTargetType.THREAD, basis.threadId())).wakeVersion());
+    assertFalse(processor.hasActiveExecution());
+  }
+
   /** Indeterminate：UNKNOWN 并消费 proposed attempt（DISPATCHING attempt+1）。 */
   @Test
   void indeterminateAdmissionTerminatesUnknownConsumingProposedAttempt() {
