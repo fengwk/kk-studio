@@ -1,8 +1,8 @@
 /**
- * Studio 应用适配器（Canvas 端口的组合根）。
+ * Studio 产品 owner 编排：Chat/Canvas/IssueAgentSession 的会话归属行、接受校验与 owner 深删除顺序。
  *
- * <p>拥有 Spring 装配、typed command transaction 与 PostgreSQL Canvas 八表适配器。领域类型与端口位于 {@code
- * fun.fengwk.kkstudio.canvas}。HTTP 映射位于 {@code fun.fengwk.kkstudio.web.controller} 与 {@code
+ * <p>Canvas 领域与持久化分别位于 {@code fun.fengwk.kkstudio.canvas} 与 {@code
+ * fun.fengwk.kkstudio.canvas.infra}；HTTP 映射位于 {@code fun.fengwk.kkstudio.web.controller} 与 {@code
  * fun.fengwk.kkstudio.web.mapper}。
  */
 package fun.fengwk.kkstudio.platform.orchestration;
