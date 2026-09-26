@@ -38,6 +38,9 @@ function mapError(error: unknown): ResourceFormValidationResult {
   const message = toUserFacingErrorMessage(error)
   const raw = error instanceof Error ? error.message : String(error ?? '')
 
+  if (/protocolOptions|原生协议选项/i.test(raw) || /protocolOptions|原生协议选项/.test(message)) {
+    return { ok: false, message, fields: { variants: message } }
+  }
   if (/reasoningEffort|思考强度/i.test(raw) || /思考强度/.test(message)) {
     return { ok: false, message, fields: { variants: message } }
   }

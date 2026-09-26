@@ -62,10 +62,44 @@ export function emptyModelDraft(
   }
 }
 
+export function formatProtocolOptions(
+  options?: Record<string, unknown> | null,
+): string {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    return ''
+  }
+  try {
+    return JSON.stringify(options, null, 2)
+  } catch {
+    return ''
+  }
+}
+
+export function parseProtocolOptions(
+  raw: string | undefined,
+  variantId: string,
+): Record<string, unknown> | undefined {
+  if (!raw || !raw.trim()) {
+    return undefined
+  }
+  const trimmed = raw.trim()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    throw new Error(`variant ${variantId} protocolOptions must be valid JSON`)
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`variant ${variantId} protocolOptions must be a JSON object`)
+  }
+  return parsed as Record<string, unknown>
+}
+
 function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
   return newVariantDraft({
     id: variant.id,
     reasoningEffort: variant.reasoningEffort == null ? '' : String(variant.reasoningEffort),
+    protocolOptions: formatProtocolOptions(variant.protocolOptions),
   })
 }
 
@@ -173,6 +207,10 @@ function serializeVariants(
         throw new Error(`variant ${id} reasoningEffort must not exceed 64 characters`)
       }
       payload.reasoningEffort = reasoningEffort
+    }
+    const protocolOptions = parseProtocolOptions(variant.protocolOptions, id)
+    if (protocolOptions !== undefined) {
+      payload.protocolOptions = protocolOptions
     }
     return payload
   })

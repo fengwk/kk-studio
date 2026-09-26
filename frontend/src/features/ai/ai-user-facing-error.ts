@@ -8,7 +8,24 @@ export function toUserFacingErrorMessage(error: unknown): string {
     return translate('ai.catalog.validation.saveForm')
   }
 
+  const invalidJsonMatch = text.match(
+    /^variant\s+(?:["']([^"']+)["']|(\S+))\s+protocolOptions\s+must be valid JSON$/i,
+  )
+  if (invalidJsonMatch) {
+    const id = invalidJsonMatch[1] || invalidJsonMatch[2]
+    return translate('ai.catalog.validation.protocolOptionsInvalidJson', { id })
+  }
+  const notObjectMatch = text.match(
+    /^variant\s+(?:["']([^"']+)["']|(\S+))\s+protocolOptions\s+must be a JSON object$/i,
+  )
+  if (notObjectMatch) {
+    const id = notObjectMatch[1] || notObjectMatch[2]
+    return translate('ai.catalog.validation.protocolOptionsNotObject', { id })
+  }
+
   const rules: Array<{ match: RegExp; key: string }> = [
+    { match: /protocolOptions.*valid JSON/i, key: 'ai.catalog.validation.protocolOptionsInvalidJsonSimple' },
+    { match: /protocolOptions.*JSON object/i, key: 'ai.catalog.validation.protocolOptionsNotObjectSimple' },
     { match: /reasoningEffort|思考强度/i, key: 'ai.catalog.validation.reasoningEnabled' },
     { match: /^variant must not be blank$/i, key: 'ai.catalog.validation.variantRequired' },
     { match: /at least one variant|variant \d+ id is required/i, key: 'ai.catalog.validation.variantAddOne' },

@@ -70,10 +70,11 @@ export interface AgentModelPricingDTO {
   reasoningPerMillionTokens: number | string
 }
 
-/** Variant 只表达 reasoning effort；`off` 为显式关闭，缺省表示协议默认。 */
+/** Variant 表达 reasoning effort 与厂商原生协议请求选项；`off` 为显式关闭，缺省表示协议默认。 */
 export interface AgentModelVariantDTO {
   id: string
   reasoningEffort?: string | null
+  protocolOptions?: Record<string, unknown> | null
 }
 
 /**

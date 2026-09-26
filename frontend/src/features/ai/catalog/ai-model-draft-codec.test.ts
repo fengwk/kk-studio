@@ -7,6 +7,8 @@ import {
   extractDefaultVariantFromModel,
   extractMaxOutputTokens,
   extractVariantIdsFromModel,
+  formatProtocolOptions,
+  parseProtocolOptions,
   toEditableModel,
   toEditableModelUpdate,
   toModelDraft,
@@ -360,5 +362,163 @@ describe('ai-model-draft-codec', () => {
   it('uses the explicit provider argument when no model is supplied', () => {
     const seeded = emptyModelDraft({ name: 'provider-x' })
     expect(seeded.providerName).toBe('provider-x')
+  })
+
+  describe('protocolOptions codec and validation', () => {
+    /** formatProtocolOptions: 非对象/空值返回空串，对象输出 2 空格缩进的稳定 JSON。 */
+    it('formats protocolOptions safely and stably', () => {
+      expect(formatProtocolOptions(null)).toBe('')
+      expect(formatProtocolOptions(undefined)).toBe('')
+      expect(formatProtocolOptions(123 as unknown as Record<string, unknown>)).toBe('')
+      expect(formatProtocolOptions('string' as unknown as Record<string, unknown>)).toBe('')
+      expect(formatProtocolOptions(['item'] as unknown as Record<string, unknown>)).toBe('')
+      expect(formatProtocolOptions({})).toBe('{}')
+      expect(formatProtocolOptions({ temperature: 0.7 })).toBe('{\n  "temperature": 0.7\n}')
+    })
+
+    /** parseProtocolOptions: 空文本返回 undefined，有效普通对象保留嵌套结构与数值。 */
+    it('parses valid protocolOptions and preserves nested values and numbers', () => {
+      expect(parseProtocolOptions('', 'v1')).toBeUndefined()
+      expect(parseProtocolOptions('   \n\t  ', 'v1')).toBeUndefined()
+      expect(parseProtocolOptions('{}', 'v1')).toEqual({})
+
+      const complex = {
+        thinking: { budget_tokens: 2048, enabled: true },
+        tags: ['fast', 'chat'],
+        temperature: 0.75,
+        threshold: 9007199254740991,
+      }
+      expect(parseProtocolOptions(JSON.stringify(complex), 'v1')).toEqual(complex)
+    })
+
+    /** parseProtocolOptions: 非法 JSON 抛出明确带有 variant id 的错误。 */
+    it('rejects invalid JSON syntax with variant id in the error message', () => {
+      expect(() => parseProtocolOptions('{ invalid: json }', 'fast-variant')).toThrow(
+        'variant fast-variant protocolOptions must be valid JSON',
+      )
+    })
+
+    /** parseProtocolOptions: 根节点非普通对象（如数组、null、数字、字符串）抛出对应错误。 */
+    it.each([
+      ['[1, 2, 3]', 'an array'],
+      ['null', 'null'],
+      ['123', 'a number'],
+      ['"scalar string"', 'a string'],
+      ['true', 'a boolean'],
+    ])('rejects non-object root (%s: %s)', (raw) => {
+      expect(() => parseProtocolOptions(raw, 'custom-variant')).toThrow(
+        'variant custom-variant protocolOptions must be a JSON object',
+      )
+    })
+
+    /** 包含 protocolOptions 的模型能加载到草稿，并在提交时无损往返保留结构。 */
+    it('loads and round-trips protocolOptions without loss of object structure', () => {
+      const source = model({
+        ...fullConfig(),
+        variants: [
+          {
+            id: 'quality',
+            reasoningEffort: 'high',
+            protocolOptions: {
+              anthropic_beta: ['prompt-caching-2024-07-31'],
+              max_tokens: 4096,
+              nested: { key: 'value', count: 42 },
+            },
+          },
+          {
+            id: 'empty-options',
+            protocolOptions: {},
+          },
+          {
+            id: 'no-options',
+          },
+        ],
+        defaultVariant: 'quality',
+      })
+
+      const draftFromModel = toModelDraft(source)
+      expect(draftFromModel.variants[0]?.protocolOptions).toBe(
+        '{\n  "anthropic_beta": [\n    "prompt-caching-2024-07-31"\n  ],\n  "max_tokens": 4096,\n  "nested": {\n    "key": "value",\n    "count": 42\n  }\n}',
+      )
+      expect(draftFromModel.variants[1]?.protocolOptions).toBe('{}')
+      expect(draftFromModel.variants[2]?.protocolOptions).toBe('')
+
+      const rebuilt = buildModelConfig(draftFromModel)
+      expect(rebuilt.variants).toEqual([
+        {
+          id: 'quality',
+          reasoningEffort: 'high',
+          protocolOptions: {
+            anthropic_beta: ['prompt-caching-2024-07-31'],
+            max_tokens: 4096,
+            nested: { key: 'value', count: 42 },
+          },
+        },
+        {
+          id: 'empty-options',
+          protocolOptions: {},
+        },
+        {
+          id: 'no-options',
+        },
+      ])
+    })
+
+    /** 用户清空 protocolOptions 文本后，序列化 payload 中该字段被干净地省略。 */
+    it('omits protocolOptions when user clears or enters empty input', () => {
+      const input = draft({
+        defaultVariant: 'v1',
+        variants: [
+          { ...emptyModelDraft().variants[0]!, id: 'v1', protocolOptions: '   \n  ' },
+        ],
+      })
+      const config = buildModelConfig(input)
+      expect(config.variants[0]).toEqual({ id: 'v1' })
+      expect(config.variants[0]).not.toHaveProperty('protocolOptions')
+    })
+
+    /** Reasoning 关闭的模型仍然可以配置并序列化 protocolOptions。 */
+    it('allows protocolOptions editing and serialization even when reasoning is disabled', () => {
+      const input = draft({
+        reasoning: false,
+        defaultVariant: 'standard',
+        variants: [
+          {
+            ...emptyModelDraft().variants[0]!,
+            id: 'standard',
+            reasoningEffort: 'high', // reasoning 禁用时将被忽略
+            protocolOptions: '{\n  "temperature": 0.2\n}',
+          },
+        ],
+      })
+      const config = buildModelConfig(input)
+      expect(config.variants[0]).toEqual({
+        id: 'standard',
+        protocolOptions: { temperature: 0.2 },
+      })
+      expect(config.variants[0]).not.toHaveProperty('reasoningEffort')
+    })
+
+    /** buildModelConfig 拒绝非法 protocolOptions JSON，阻止提交。 */
+    it('rejects invalid protocolOptions in buildModelConfig with localized variant error', () => {
+      const input = draft({
+        defaultVariant: 'fast',
+        variants: [
+          { ...emptyModelDraft().variants[0]!, id: 'fast', protocolOptions: '{ bad json }' },
+        ],
+      })
+      expect(() => buildModelConfig(input)).toThrow('variant fast protocolOptions must be valid JSON')
+    })
+
+    /** buildModelConfig 拒绝非 object 根的 protocolOptions，阻止提交。 */
+    it('rejects non-object protocolOptions in buildModelConfig', () => {
+      const input = draft({
+        defaultVariant: 'fast',
+        variants: [
+          { ...emptyModelDraft().variants[0]!, id: 'fast', protocolOptions: '[1, 2]' },
+        ],
+      })
+      expect(() => buildModelConfig(input)).toThrow('variant fast protocolOptions must be a JSON object')
+    })
   })
 })

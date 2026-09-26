@@ -25,6 +25,8 @@ export interface VariantDraft {
   id: string
   /** 厂商定义的思考强度；off 表示显式关闭，空串表示协议默认。 */
   reasoningEffort: string
+  /** 厂商原生协议请求选项（JSON 文本）。 */
+  protocolOptions?: string
 }
 
 /**

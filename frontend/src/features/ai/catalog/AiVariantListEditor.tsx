@@ -93,6 +93,22 @@ export function VariantListEditor({
               ) : null}
             </div>
 
+            <label className="form-group">
+              <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
+              <textarea
+                className="code-textarea"
+                aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
+                value={variant.protocolOptions ?? ''}
+                onChange={(event) =>
+                  updateVariant(index, { protocolOptions: event.target.value })
+                }
+                placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
+                rows={3}
+                spellCheck={false}
+              />
+              <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
+            </label>
+
             <div className="variant-editor-actions">
               <button
                 className="ghost-inline-btn danger"
