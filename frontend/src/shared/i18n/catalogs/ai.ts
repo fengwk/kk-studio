@@ -1786,6 +1786,26 @@ export const aiCatalog = {
     'en-US': 'Close event details',
     'zh-CN': '关闭事件详情',
   },
+  'ai.runtime.debug.tabPreview': {
+    'en-US': 'Request Preview',
+    'zh-CN': '请求预览',
+  },
+  'ai.runtime.debug.tabEvents': {
+    'en-US': 'Events',
+    'zh-CN': '事件',
+  },
+  'ai.runtime.debug.tabDetail': {
+    'en-US': 'Detail',
+    'zh-CN': '详情',
+  },
+  'ai.runtime.debug.noSelection': {
+    'en-US': 'No event or inspection target selected',
+    'zh-CN': '未选择任何事件或检查项',
+  },
+  'ai.runtime.debug.noPreview': {
+    'en-US': 'No request preview data',
+    'zh-CN': '暂无请求预览数据',
+  },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',
     'zh-CN': 'Entry ID',

@@ -1,11 +1,9 @@
 import {
   ChatPanel,
-  ThreadEventDetail,
   ThreadPanel,
   ThreadShortcutsPanel,
   ThreadStatusFooter,
 } from '@/features/ai/runtime'
-import { ThreadDebugInspector } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import { AgentSelectionPanel, SelectionPanel } from '@/features/ai/chat/SelectionPanel'
 import { HistoryBranchPanel } from '@/features/ai/chat/HistoryBranchPanel'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -85,19 +83,6 @@ export function AgentPane({
         composer={{ ...pane.composer, interactionPanel }}
         activity={{
           working: pane.controller.working,
-          widgets:
-            pane.boundViews.debugSelection && pane.boundViews.debug ? (
-              <ThreadDebugInspector
-                selection={pane.boundViews.debugSelection}
-                debug={pane.boundViews.debug}
-                onClose={() => pane.boundViews.setDebugSelection(null)}
-              />
-            ) : pane.boundViews.selectedRecord ? (
-              <ThreadEventDetail
-                record={pane.boundViews.selectedRecord}
-                onClose={() => pane.boundViews.selectEvent(null)}
-              />
-            ) : null,
           onDecideTaskApproval: pane.onDecideTaskApproval,
           actionError: pane.error,
           onDismissActionError,

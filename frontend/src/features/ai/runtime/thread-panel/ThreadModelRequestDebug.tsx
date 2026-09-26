@@ -53,35 +53,25 @@ export function ThreadModelRequestDebug({
   return (
     <section className="thread-system-prompt thread-model-request-debug" aria-label="Next Request Preview">
       {/* 头部条：DEBUG · NEXT REQUEST PREVIEW 与操作按钮 */}
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '8px',
-          paddingBottom: '4px',
-          borderBottom: '1px solid var(--color-border, rgba(255,255,255,0.1))',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: 'var(--color-primary, #3b82f6)' }}>
+      <header className="thread-debug-preview-header">
+        <div className="thread-debug-preview-title-group">
+          <span className="thread-debug-preview-title">
             DEBUG · NEXT REQUEST PREVIEW
           </span>
           {debug.environmentName ? (
-            <span className="status-pill is-ready" style={{ fontSize: '10px' }}>
+            <span className="status-pill is-ready">
               env: {debug.environmentName}
             </span>
           ) : (
-            <span className="status-pill is-offline" style={{ fontSize: '10px' }}>
+            <span className="status-pill is-offline">
               no env
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div className="thread-debug-preview-actions">
           <button
             type="button"
             className="ghost-inline-btn"
-            style={{ fontSize: '11px', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: '4px' }}
             aria-label="View request"
             onClick={() => onSelectInspector({ type: 'request' })}
           >
@@ -91,7 +81,6 @@ export function ThreadModelRequestDebug({
           <button
             type="button"
             className="ghost-inline-btn"
-            style={{ fontSize: '11px', padding: '2px 6px', display: 'flex', alignItems: 'center', gap: '4px' }}
             aria-label="Copy system prompt"
             onClick={handleCopyPrompt}
           >
@@ -103,174 +92,107 @@ export function ThreadModelRequestDebug({
 
       {/* PLANNING ERROR */}
       {debug.planningError ? (
-        <div
-          role="alert"
-          style={{
-            padding: '6px 10px',
-            marginBottom: '8px',
-            borderRadius: '4px',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid var(--color-danger, #ef4444)',
-            color: 'var(--color-danger, #ef4444)',
-            fontSize: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
+        <div role="alert" className="thread-debug-planning-error">
           <AlertCircle size={14} aria-hidden="true" />
           <span>Planning Error: {debug.planningError}</span>
         </div>
       ) : null}
 
-      {/* SYSTEM PROMPT (有界纵向滚动) */}
-      <div style={{ marginBottom: '8px' }}>
-        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px', textTransform: 'uppercase' }}>
-          System Prompt
+      {/* SYSTEM PROMPT (单列唯一纵向滚动，内部完整展开换行) */}
+      <div className="thread-debug-section">
+        <div className="thread-debug-section-header">
+          <span>System Prompt</span>
         </div>
-        <pre
-          className="thread-system-prompt-body"
-          tabIndex={0}
-          style={{
-            maxHeight: '120px',
-            overflowY: 'auto',
-            margin: 0,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
+        <pre className="thread-system-prompt-body" tabIndex={0}>
           {debug.systemInstruction || '(empty)'}
         </pre>
       </div>
 
-      {/* TOOLS (单行横向滚动，SENT 在前，FILTERED 在后) */}
-      <div style={{ marginBottom: '8px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px' }}>
+      {/* TOOLS (SENT 在前，FILTERED 在后) */}
+      <div className="thread-debug-section">
+        <div className="thread-debug-section-header">
           <span>TOOLS {sentTools.length} sent · {filteredTools.length} filtered</span>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            gap: '6px',
-            overflowX: 'auto',
-            whiteSpace: 'nowrap',
-            paddingBottom: '4px',
-          }}
-          data-testid="debug-tools-rail"
-        >
+        <div className="thread-debug-rail" data-testid="debug-tools-rail">
           {sentTools.map((tool) => (
             <button
               key={tool.name}
               type="button"
-              className="ghost-inline-btn"
-              style={{
-                padding: '2px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                background: 'var(--color-surface, rgba(255,255,255,0.05))',
-                border: '1px solid var(--color-border, rgba(255,255,255,0.15))',
-                cursor: 'pointer',
-              }}
+              className="ghost-inline-btn thread-debug-chip"
               aria-label={`Tool ${tool.name}`}
               onClick={() => onSelectInspector({ type: 'tool', tool })}
             >
               <code>{tool.name}</code>{' '}
-              <span style={{ opacity: 0.7, fontSize: '10px' }}>
+              <span className="thread-debug-chip-badge">
                 {envBadge(tool.environmentSupport)}
               </span>
             </button>
           ))}
 
           {filteredTools.length > 0 && sentTools.length > 0 ? (
-            <span style={{ opacity: 0.3, alignSelf: 'center' }}>│</span>
+            <span className="thread-debug-rail-divider" aria-hidden="true">│</span>
           ) : null}
 
           {filteredTools.map((tool) => (
             <button
               key={tool.name}
               type="button"
-              className="ghost-inline-btn"
-              style={{
-                padding: '2px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                background: 'rgba(100, 116, 139, 0.1)',
-                border: '1px dashed rgba(100, 116, 139, 0.4)',
-                color: 'var(--color-text-muted)',
-                cursor: 'pointer',
-              }}
+              className="ghost-inline-btn thread-debug-chip is-filtered"
               aria-label={`Filtered tool ${tool.name}`}
               onClick={() => onSelectInspector({ type: 'tool', tool })}
             >
               <span>⊘ </span>
               <code>{tool.name}</code>{' '}
-              <span style={{ opacity: 0.7, fontSize: '10px' }}>
+              <span className="thread-debug-chip-badge">
                 {envBadge(tool.environmentSupport)}
               </span>
             </button>
           ))}
 
           {sentTools.length === 0 && filteredTools.length === 0 ? (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>none</span>
+            <span className="thread-debug-empty-text">none</span>
           ) : null}
         </div>
       </div>
 
-      {/* SKILLS (单行横向滚动，delivery/commits) */}
-      <div style={{ marginBottom: '6px' }}>
-        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-          SKILLS {debug.skills?.length || 0}
+      {/* SKILLS */}
+      <div className="thread-debug-section">
+        <div className="thread-debug-section-header">
+          <span>SKILLS {debug.skills?.length || 0}</span>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            gap: '6px',
-            overflowX: 'auto',
-            whiteSpace: 'nowrap',
-            paddingBottom: '4px',
-          }}
-          data-testid="debug-skills-rail"
-        >
+        <div className="thread-debug-rail" data-testid="debug-skills-rail">
           {(debug.skills || []).map((skill) => (
             <button
               key={`${skill.packageName}/${skill.name}`}
               type="button"
-              className="ghost-inline-btn"
-              style={{
-                padding: '2px 8px',
-                fontSize: '11px',
-                borderRadius: '4px',
-                background: 'var(--color-surface, rgba(255,255,255,0.05))',
-                border: '1px solid var(--color-border, rgba(255,255,255,0.15))',
-                cursor: 'pointer',
-              }}
+              className="ghost-inline-btn thread-debug-chip"
               aria-label={`Skill ${skill.name}`}
               onClick={() => onSelectInspector({ type: 'skill', skill })}
             >
               <code>{skill.name}</code>{' '}
-              <span style={{ opacity: 0.7, fontSize: '10px' }}>
+              <span className="thread-debug-chip-badge">
                 · {skill.delivery.toLowerCase()}
               </span>
             </button>
           ))}
           {(!debug.skills || debug.skills.length === 0) ? (
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>none</span>
+            <span className="thread-debug-empty-text">none</span>
           ) : null}
         </div>
       </div>
 
       {/* SUBAGENTS / CACHE CONTROL */}
       {((debug.subagents && debug.subagents.length > 0) || debug.cacheControl) ? (
-        <div style={{ display: 'flex', gap: '12px', fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+        <div className="thread-debug-meta-row">
           {debug.subagents && debug.subagents.length > 0 ? (
             <div>
-              <span style={{ fontWeight: 600 }}>Subagents:</span>{' '}
+              <span className="thread-debug-meta-label">Subagents:</span>{' '}
               {debug.subagents.map((s) => s.name).join(', ')}
             </div>
           ) : null}
           {debug.cacheControl ? (
             <div>
-              <span style={{ fontWeight: 600 }}>Cache:</span>{' '}
+              <span className="thread-debug-meta-label">Cache:</span>{' '}
               {debug.cacheControl.retention}
               {debug.cacheControl.affinityKey ? ` (${debug.cacheControl.affinityKey})` : ''}
             </div>

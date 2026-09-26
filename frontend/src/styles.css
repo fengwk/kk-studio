@@ -1951,24 +1951,201 @@ div.is-error {
   gap: 14px;
 }
 
+/* Debug 主体三区容器 (由 ResizeObserver 监听容器宽度驱动 data-layout="wide"|"narrow") */
 .thread-events-shell {
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: var(--stage-bg);
+}
+
+/* 窄面板下的选项卡栏 */
+.thread-debug-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.thread-debug-tab {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.thread-debug-tab:hover {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+
+.thread-debug-tab.active {
+  color: var(--fg);
+  font-weight: 600;
+  background: var(--surface-active);
+  border-color: var(--border);
+}
+
+/* 主网格容器 */
+.thread-debug-grid {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 列基础样式 */
+.thread-debug-col {
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
+.thread-debug-col-preview {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 12px;
+}
+
+.thread-debug-col-events {
+  overflow: hidden;
+}
+
+.thread-debug-col-detail {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 12px;
+}
+
+/* 窄面板 (< 1100px) 行为：由 data-active-tab 决定显示哪一列，单列填满可用空间 */
+.thread-events-shell[data-layout="narrow"] .thread-debug-tabs {
+  display: flex;
+}
+
+.thread-events-shell[data-layout="narrow"] .thread-debug-grid .thread-debug-col {
+  display: none;
+  width: 100%;
+  flex: 1;
+}
+
+.thread-events-shell[data-layout="narrow"] .thread-debug-grid[data-active-tab="preview"] .thread-debug-col-preview,
+.thread-events-shell[data-layout="narrow"] .thread-debug-grid[data-active-tab="events"] .thread-debug-col-events,
+.thread-events-shell[data-layout="narrow"] .thread-debug-grid[data-active-tab="detail"] .thread-debug-col-detail {
+  display: flex;
+}
+
+/* 宽面板 (>= 1100px) 行为：三等宽列 repeat(3, minmax(0, 1fr))，各自唯一纵向滚动，外框无滚动 */
+.thread-events-shell[data-layout="wide"] .thread-debug-tabs {
+  display: none;
+}
+
+.thread-events-shell[data-layout="wide"] .thread-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 0;
+}
+
+.thread-events-shell[data-layout="wide"] .thread-debug-grid .thread-debug-col {
+  display: flex;
+  width: auto;
+  border-right: 1px solid var(--border);
+}
+
+.thread-events-shell[data-layout="wide"] .thread-debug-grid .thread-debug-col:last-child {
+  border-right: none;
+}
+
+/* 请求预览列内部样式 */
 .thread-system-prompt {
   flex: 0 0 auto;
   min-height: 0;
-  padding: 8px 12px 0;
+  padding: 0;
+}
+
+.thread-model-request-debug {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.thread-debug-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.thread-debug-preview-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.thread-debug-preview-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.thread-debug-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thread-debug-planning-error {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.thread-debug-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.thread-debug-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .thread-system-prompt-body {
-  max-height: calc(10 * 1.45em);
   margin: 0;
   padding: 8px 10px;
-  overflow: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface-active);
@@ -1978,6 +2155,60 @@ div.is-error {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.thread-debug-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+.thread-debug-chip {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.thread-debug-chip.is-filtered {
+  background: rgba(100, 116, 139, 0.1);
+  border: 1px dashed rgba(100, 116, 139, 0.4);
+  color: var(--fg-dim);
+}
+
+.thread-debug-chip-badge {
+  opacity: 0.7;
+  font-size: 10px;
+}
+
+.thread-debug-rail-divider {
+  opacity: 0.3;
+  align-self: center;
+}
+
+.thread-debug-empty-text {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.thread-debug-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-top: 4px;
+}
+
+.thread-debug-meta-label {
+  font-weight: 600;
 }
 
 /* Event 主视图：与 Conversation 互斥的滚动区，listbox/option 语义 */
@@ -2070,18 +2301,30 @@ div.is-error {
   }
 }
 
-/* 只读 Event detail widget（ThreadWidgetStack 内、Composer 上方） */
+/* 详情列占位与空预览占位 */
+.thread-debug-placeholder,
+.thread-debug-empty-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 140px;
+  padding: 24px;
+  color: var(--fg-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* 详情面板 (ThreadEventDetail 与 ThreadDebugInspector 共享单列唯一纵向滚动) */
 .thread-event-detail {
   width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--overlay-surface-strong);
-  padding: 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 380px;
-  overflow: hidden;
+  gap: 12px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .thread-event-detail-header {
@@ -2089,6 +2332,8 @@ div.is-error {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
 }
 
 .thread-event-detail-header h3 {
@@ -2108,21 +2353,20 @@ div.is-error {
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .thread-event-detail-rows {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-  padding-right: 2px;
+  gap: 6px;
+  padding: 0;
 }
 
 .thread-event-detail-row {
   display: grid;
-  grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
   align-items: baseline;
   gap: 10px;
 }
@@ -2140,22 +2384,53 @@ div.is-error {
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 140px;
-  overflow-y: auto;
+  word-break: break-word;
 }
 
 .thread-event-detail-payload {
-  max-height: 160px;
   margin: 0;
-  padding: 8px 10px;
-  overflow: auto;
+  padding: 10px 12px;
   border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg-dim);
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-family: var(--mono);
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.thread-debug-payload-section {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.thread-debug-payload-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.thread-debug-filter-reason {
+  margin-left: 8px;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.thread-debug-frozen-badge {
+  margin-bottom: 8px;
+}
+
+.thread-debug-empty-hint {
+  padding: 16px 0;
+  color: var(--fg-dim);
+  font-size: 12px;
 }
 
 .thread-turn {

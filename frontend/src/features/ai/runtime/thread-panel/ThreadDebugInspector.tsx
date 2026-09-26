@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 'react'
 import { X } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
@@ -27,24 +27,26 @@ export function ThreadDebugInspector({
   selection,
   debug,
   onClose,
+  closeButtonRef,
 }: {
   selection: DebugInspectorSelection
   debug: ThreadModelRequestDebugData
   onClose: () => void
+  closeButtonRef?: Ref<HTMLButtonElement>
 }) {
-  const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const containerRef = useRef<HTMLElement>(null)
+  const internalCloseBtnRef = useRef<HTMLButtonElement>(null)
+  const resolvedCloseBtnRef = (closeButtonRef as RefObject<HTMLButtonElement | null>) ?? internalCloseBtnRef
 
   useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        onClose()
-      }
+    // 挂载时安全将焦点引导至详情内部（优先关闭按钮），收敛 Escape 局部处理且不丢焦点
+    const btn = resolvedCloseBtnRef.current
+    if (btn) {
+      btn.focus({ preventScroll: true })
+    } else {
+      containerRef.current?.focus({ preventScroll: true })
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [resolvedCloseBtnRef])
 
   let title = 'INSPECTOR'
   if (selection.type === 'tool') {
@@ -55,16 +57,30 @@ export function ThreadDebugInspector({
     title = 'INSPECTOR: Request'
   }
 
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+    }
+  }
+
   return (
     <section
+      ref={containerRef}
+      tabIndex={-1}
       className="thread-event-detail thread-debug-inspector"
       aria-label={title}
       data-testid="thread-debug-inspector"
+      onKeyDown={handleKeyDown}
     >
       <header className="thread-event-detail-header">
         <h3>{title}</h3>
         <button
-          ref={closeBtnRef}
+          ref={resolvedCloseBtnRef}
           type="button"
           className="thread-interaction-close"
           aria-label="Close inspector"
@@ -88,7 +104,7 @@ export function ThreadDebugInspector({
                   {selection.tool.state}
                 </span>
                 {selection.tool.filterReason ? (
-                  <span style={{ marginLeft: '8px', color: 'var(--color-text-muted)' }}>
+                  <span className="thread-debug-filter-reason">
                     ({selection.tool.filterReason})
                   </span>
                 ) : null}
@@ -113,8 +129,8 @@ export function ThreadDebugInspector({
               <dd>{selection.tool.description}</dd>
             </div>
           </dl>
-          <div style={{ marginTop: '12px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+          <div className="thread-debug-payload-section">
+            <span className="thread-debug-payload-title">
               Input Schema JSON:
             </span>
             <pre className="thread-event-detail-payload" tabIndex={0}>
@@ -164,8 +180,8 @@ export function ThreadDebugInspector({
               <dd><code>{selection.skill.installedCommit || '—'}</code></dd>
             </div>
           </dl>
-          <div style={{ marginTop: '12px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+          <div className="thread-debug-payload-section">
+            <span className="thread-debug-payload-title">
               Prompt XML:
             </span>
             <pre className="thread-event-detail-payload" tabIndex={0}>
@@ -179,7 +195,7 @@ export function ThreadDebugInspector({
         <div className="thread-debug-inspector-body">
           {debug.frozenInvocation ? (
             <div>
-              <div style={{ marginBottom: '8px' }}>
+              <div className="thread-debug-frozen-badge">
                 <span className="status-pill is-ready">
                   {debug.frozenInvocation.kind}
                 </span>
@@ -193,7 +209,7 @@ export function ThreadDebugInspector({
               </pre>
             </div>
           ) : (
-            <div className="inline-hint" style={{ padding: '16px 0' }}>
+            <div className="inline-hint thread-debug-empty-hint">
               No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.
             </div>
           )}

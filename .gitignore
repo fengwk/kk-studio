@@ -19,6 +19,7 @@ buildNumber.properties
 node_modules/
 dist/
 coverage/
+test-results/
 
 # Local runtime, reports, and workspaces
 /runtime/
