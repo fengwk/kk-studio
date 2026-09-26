@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -47,7 +48,10 @@ import java.util.Set;
 /**
  * OpenAI Chat Completions 协议请求编码器。
  *
- * <p>负责将运行时 {@link ProviderRequest} 转换为符合 OpenAI 规范的 UTF-8 请求 JSON 字节数组， 并提取冻结的 sourcePrefixHash。
+ * <p>负责将运行时 {@link ProviderRequest} 转换为符合 OpenAI 规范的 UTF-8 请求 JSON 字节数组， 并提取冻结的
+ * sourcePrefixHash。请求体以 variant 的 native protocolOptions
+ * 为合并基座：运行时所有权字段（model、messages、stream、输出预算、prompt cache、已声明的 reasoning）优先并在 native 声明时冲突，
+ * 其余官方字段原样保留。
  */
 final class OpenAiChatRequestEncoder {
 
@@ -59,10 +63,24 @@ final class OpenAiChatRequestEncoder {
     OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
   }
 
-  private static final Set<String> ALLOWED_REPLAY_FIELDS =
-      Set.of("role", "content", "refusal", "tool_calls", "reasoning_content", "reasoning_details");
   private static final Set<String> ALLOWED_TOOL_CALL_FIELDS = Set.of("id", "type", "function");
   private static final Set<String> ALLOWED_TOOL_FUNCTION_FIELDS = Set.of("name", "arguments");
+
+  /** 运行时所有权字段：native protocolOptions 一旦声明即冲突，避免厂商选项覆盖运行时事实。 */
+  private static final Set<String> RUNTIME_OWNED_FIELDS =
+      Set.of(
+          "model",
+          "messages",
+          "stream",
+          "max_tokens",
+          "max_completion_tokens",
+          "prompt_cache_key",
+          "prompt_cache_retention",
+          "prompt_cache_options");
+
+  /** 回放时值为 null 即视为未声明的 known 字段；与语义 fallback 的省略规则保持一致。 */
+  private static final List<String> NULLABLE_REPLAY_FIELDS =
+      List.of("content", "refusal", "reasoning_content", "reasoning_details", "tool_calls");
 
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
@@ -81,21 +99,21 @@ final class OpenAiChatRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
     Objects.requireNonNull(config, "config");
 
-    ObjectNode root = NODES.objectNode();
+    // variant 的原生协议选项是请求体的合并基座：官方顶层能力无损保留，运行时所有权字段随后覆盖并在 native 声明时冲突
+    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    rejectRuntimeOwnedNativeFields(root);
+
     root.put("model", request.model().modelId());
     root.put("stream", true);
 
-    ObjectNode streamOptions = root.putObject("stream_options");
-    streamOptions.put("include_usage", config.includeUsage());
+    applyStreamOptions(root, config);
 
     applyReasoningParameters(root, request.model(), request.variant(), config);
     // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
     root.put("max_tokens", request.outputTokens());
 
-    ArrayNode toolsArray = encodeTools(request.tools());
-    if (toolsArray != null && !toolsArray.isEmpty()) {
-      root.set("tools", toolsArray);
-    }
+    // native tools 与运行时 function tools 合并为同一个最终数组，并共同参与 prefix hash
+    ArrayNode toolsArray = mergeTools(root, request.tools());
 
     // 从左到右构建 wire messages 并维护 prefix hash；系统指令合成为唯一的前导 system message。
     ArrayNode wireMessagesArray = NODES.arrayNode();
@@ -133,21 +151,91 @@ final class OpenAiChatRequestEncoder {
     return new OpenAiChatEncodedRequest(bodyUtf8Bytes, sourcePrefixHash);
   }
 
+  /** native protocolOptions 不得声明运行时所有权字段：冲突一律以 INVALID_REQUEST 明确失败，且错误信息只描述字段名，不回显厂商值。 */
+  private static void rejectRuntimeOwnedNativeFields(ObjectNode root) {
+    for (String field : RUNTIME_OWNED_FIELDS) {
+      if (root.has(field)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions must not declare runtime-owned field " + field);
+      }
+    }
+  }
+
   /**
-   * reasoning effort 编码：未声明（null）表示不覆盖服务端默认，不发送任何推理字段；{@code off} 表示显式关闭推理，其他厂商定义值原样下发。 STANDARD
-   * 格式下显式关闭映射为本协议关闭值 {@code none}；DEEPSEEK 格式改用显式 {@code thinking} 开关，且仅在启用推理时附带 {@code
-   * reasoning_effort}。非 reasoning 模型不发送推理字段。
+   * {@code stream_options} 由运行时与 native 共同构造：native 必须是 object 且保留自己的子字段，{@code include_usage}
+   * 由运行时独占。
+   */
+  private static void applyStreamOptions(ObjectNode root, OpenAiChatConfiguration config) {
+    JsonNode nativeOptions = root.get("stream_options");
+    ObjectNode streamOptions;
+    if (nativeOptions == null) {
+      streamOptions = root.putObject("stream_options");
+    } else {
+      if (!nativeOptions.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions field stream_options must be a JSON object");
+      }
+      if (nativeOptions.has("include_usage")) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions must not declare runtime-owned field stream_options.include_usage");
+      }
+      streamOptions = (ObjectNode) nativeOptions;
+    }
+    streamOptions.put("include_usage", config.includeUsage());
+  }
+
+  /**
+   * native tools 必须是 array 且原样保留，运行时 function tools 追加在其后；返回的合并数组是 wire 事实，参与 prefix hash 与 cache
+   * 打标。
+   *
+   * <p>native 未声明 tools 且运行时无工具时返回 {@code null}，不产生空的 {@code tools} 字段。
+   */
+  private static ArrayNode mergeTools(ObjectNode root, List<ProviderToolDefinition> runtimeTools) {
+    JsonNode nativeTools = root.get("tools");
+    ArrayNode toolsArray = null;
+    if (nativeTools != null) {
+      if (!nativeTools.isArray()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "protocolOptions field tools must be an array");
+      }
+      toolsArray = (ArrayNode) nativeTools;
+    }
+    ArrayNode encodedRuntimeTools = encodeTools(runtimeTools);
+    if (encodedRuntimeTools != null) {
+      if (toolsArray == null) {
+        toolsArray = NODES.arrayNode();
+      }
+      toolsArray.addAll(encodedRuntimeTools);
+    }
+    if (toolsArray != null) {
+      root.set("tools", toolsArray);
+    }
+    return toolsArray;
+  }
+
+  /**
+   * reasoning effort 编码：未声明（null）表示不覆盖服务端默认，此时 native 的 {@code reasoning_effort} / {@code thinking}
+   * 属于厂商原生事实，原样保留； 已声明（含 {@code off}）时这两个字段由运行时独占，native 声明即冲突，随后按 STANDARD / DEEPSEEK 写现有字段。非
+   * reasoning 模型不发送推理字段。
    */
   private static void applyReasoningParameters(
       ObjectNode root,
       ModelDescriptor model,
       ModelVariant variant,
       OpenAiChatConfiguration config) {
-    if (!model.reasoning()) {
-      return;
-    }
     String effort = variant == null ? null : variant.reasoningEffort();
     if (effort == null) {
+      return;
+    }
+    if (root.has("reasoning_effort") || root.has("thinking")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions must not declare runtime-owned field reasoning_effort/thinking");
+    }
+    if (!model.reasoning()) {
       return;
     }
     boolean off = variant.reasoningOff();
@@ -319,7 +407,7 @@ final class OpenAiChatRequestEncoder {
 
     ProviderReplayState replayState = message.replayState();
     if (replayState != null && replayState.format() == ProviderReplayFormat.OPENAI_CHAT) {
-      // 同 format 即使 affinity/hash 失配，也必须先严格校验 shape、白名单和 durable 一致性，损坏必须 INVALID_REQUEST
+      // 同 format 即使 affinity/hash 失配，也必须先严格校验 shape 与 durable 一致性，损坏必须 INVALID_REQUEST
       validateReplayPayload(replayState.payload(), message.contents());
 
       boolean runtimeMatch =
@@ -327,23 +415,8 @@ final class OpenAiChatRequestEncoder {
               && replayState.affinity().equals(descriptor.affinity(requestedModel))
               && replayState.sourcePrefixHash().equals(currentPrefixHash);
       if (runtimeMatch) {
-        JsonNode payload = replayState.payload();
-        if (payload.has("content") && !payload.get("content").isNull()) {
-          msgNode.set("content", payload.get("content").deepCopy());
-        }
-        if (payload.has("refusal") && !payload.get("refusal").isNull()) {
-          msgNode.set("refusal", payload.get("refusal").deepCopy());
-        }
-        if (payload.has("tool_calls") && payload.get("tool_calls").isArray()) {
-          msgNode.set("tool_calls", payload.get("tool_calls").deepCopy());
-        }
-        if (payload.has("reasoning_content") && !payload.get("reasoning_content").isNull()) {
-          msgNode.set("reasoning_content", payload.get("reasoning_content").deepCopy());
-        }
-        if (payload.has("reasoning_details") && !payload.get("reasoning_details").isNull()) {
-          msgNode.set("reasoning_details", payload.get("reasoning_details").deepCopy());
-        }
-        return msgNode;
+        // 原位回放：known 字段已在 validateReplayPayload 中完成类型校验与 durable 一致性校验，其余厂商原生 assistant 字段原样透传
+        return buildReplayMessage(replayState.payload());
       }
       // affinity 或 hash 失配但 payload 合法一致，走语义 fallback
     }
@@ -381,23 +454,30 @@ final class OpenAiChatRequestEncoder {
     return msgNode;
   }
 
+  /**
+   * 从 native replay payload 构造 wire assistant message。
+   *
+   * <p>provider 返回的其他合法 assistant 字段（如 {@code audio}、{@code function_call}
+   * 及未识别的未来字段）不在协议白名单内，但属于厂商原生事实，必须原样透传； known 字段为 null 时与语义 fallback 一样省略。
+   */
+  private static ObjectNode buildReplayMessage(JsonNode payload) {
+    ObjectNode msgNode = (ObjectNode) payload.deepCopy();
+    msgNode.put("role", "assistant");
+    for (String field : NULLABLE_REPLAY_FIELDS) {
+      JsonNode value = msgNode.get(field);
+      if (value != null && value.isNull()) {
+        msgNode.remove(field);
+      }
+    }
+    return msgNode;
+  }
+
   private static void validateReplayPayload(
       JsonNode payload, List<ProviderContentBlock> durableContents) {
     if (payload == null || !payload.isObject()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "invalid OpenAI chat assistant replay payload: not a JSON object");
-    }
-
-    // 校验白名单字段
-    Iterator<String> fields = payload.fieldNames();
-    while (fields.hasNext()) {
-      String field = fields.next();
-      if (!ALLOWED_REPLAY_FIELDS.contains(field)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "invalid OpenAI chat assistant replay payload: unknown field " + field);
-      }
     }
 
     // 校验 role

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -51,6 +52,10 @@ final class OpenAiChatStreamAccumulator {
   private static final Set<String> VALID_FINISH_REASONS =
       Set.of("stop", "tool_calls", "length", "content_filter");
 
+  /** known assistant 字段：replay 时由规范化 durable 事实重新写入，不沿用 native 片段形状。 */
+  private static final Set<String> KNOWN_ASSISTANT_FIELDS =
+      Set.of("content", "refusal", "reasoning_content", "reasoning_details", "tool_calls");
+
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
   private final OpenAiChatConfiguration config;
@@ -68,6 +73,14 @@ final class OpenAiChatStreamAccumulator {
   private JsonNode reasoningDetailsNode = null;
 
   private final Map<Integer, ToolCallBuilder> toolCallBuilders = new TreeMap<>();
+
+  /**
+   * provider 原生 assistant message：只合并 {@code choices[0].delta}，绝不混入 chunk 级 transport
+   * metadata（id、object、usage 等）。
+   *
+   * <p>它保留规范化通道之外的官方事实（audio、function_call、未来字段），并在终态作为 replay payload 的基座。
+   */
+  private final ObjectNode nativeAssistantMessage = NODES.objectNode();
 
   private long promptTokens = 0L;
   private long cachedTokens = 0L;
@@ -151,6 +164,7 @@ final class OpenAiChatStreamAccumulator {
   private void parseChoice(JsonNode choice) {
     if (choice.has("delta") && choice.get("delta").isObject()) {
       JsonNode delta = choice.get("delta");
+      mergeNativeDelta(delta);
 
       // 1. content
       if (delta.has("content") && delta.get("content").isTextual()) {
@@ -233,6 +247,88 @@ final class OpenAiChatStreamAccumulator {
         this.stopReason = mapFinishReason(reasonText);
       }
     }
+  }
+
+  /**
+   * 把一条 {@code choices[0].delta} 合并进原生 assistant message。
+   *
+   * <p>合并规则只描述「同名字段如何叠加」：字符串增量追加，带 {@code index} 的数组按 index 合并条目（tool_calls 片段因此按 index 累加）， object
+   * 递归合并，其余标量覆盖。因此未规范化的官方字段与未来字段都能无损保留到 replay，而 chunk 级 transport metadata 不在合并范围内。
+   */
+  private void mergeNativeDelta(JsonNode delta) {
+    Iterator<Map.Entry<String, JsonNode>> fields = delta.fields();
+    while (fields.hasNext()) {
+      Map.Entry<String, JsonNode> field = fields.next();
+      mergeNativeField(nativeAssistantMessage, field.getKey(), field.getValue());
+    }
+  }
+
+  private static void mergeNativeField(ObjectNode target, String field, JsonNode incoming) {
+    JsonNode existing = target.get(field);
+    if (incoming.isTextual() && existing != null && existing.isTextual()) {
+      target.put(field, existing.textValue() + incoming.textValue());
+      return;
+    }
+    if (incoming.isObject() && existing != null && existing.isObject()) {
+      mergeNativeObject((ObjectNode) existing, (ObjectNode) incoming);
+      return;
+    }
+    if (incoming.isArray()
+        && existing != null
+        && existing.isArray()
+        && isIndexedArray((ArrayNode) incoming)) {
+      mergeNativeIndexedArray((ArrayNode) existing, (ArrayNode) incoming);
+      return;
+    }
+    target.set(field, incoming.deepCopy());
+  }
+
+  private static void mergeNativeObject(ObjectNode target, ObjectNode incoming) {
+    Iterator<Map.Entry<String, JsonNode>> fields = incoming.fields();
+    while (fields.hasNext()) {
+      Map.Entry<String, JsonNode> field = fields.next();
+      mergeNativeField(target, field.getKey(), field.getValue());
+    }
+  }
+
+  private static boolean isIndexedArray(ArrayNode array) {
+    if (array.isEmpty()) {
+      return false;
+    }
+    for (JsonNode item : array) {
+      if (!item.isObject()) {
+        return false;
+      }
+      JsonNode index = item.get("index");
+      if (index == null || !index.isIntegralNumber()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** 按条目自身的 {@code index} 定位既有槽位并递归合并，槽位不存在时追加，保持 provider 给出的片段顺序。 */
+  private static void mergeNativeIndexedArray(ArrayNode target, ArrayNode incoming) {
+    for (JsonNode item : incoming) {
+      int index = item.get("index").asInt();
+      ObjectNode slot = indexedSlot(target, index);
+      mergeNativeObject(slot, (ObjectNode) item);
+    }
+  }
+
+  private static ObjectNode indexedSlot(ArrayNode target, int index) {
+    for (JsonNode item : target) {
+      if (!item.isObject()) {
+        continue;
+      }
+      JsonNode itemIndex = item.get("index");
+      if (itemIndex != null && itemIndex.isIntegralNumber() && itemIndex.asInt() == index) {
+        return (ObjectNode) item;
+      }
+    }
+    ObjectNode slot = target.addObject();
+    slot.put("index", index);
+    return slot;
   }
 
   private void mergeReasoningDetails(JsonNode incoming) {
@@ -451,8 +547,12 @@ final class OpenAiChatStreamAccumulator {
 
     ProviderReplayState replayState = null;
     if (canReplay) {
-      ObjectNode payload = NODES.objectNode();
+      // replay 以 provider 原生 assistant message 为基座保留官方非规范化字段，known 字段再以 durable 事实补齐
+      ObjectNode payload = nativeAssistantMessage.deepCopy();
       payload.put("role", "assistant");
+      for (String knownField : KNOWN_ASSISTANT_FIELDS) {
+        payload.remove(knownField);
+      }
       if (!contentBuilder.isEmpty() || (refusalBuilder.isEmpty() && toolCalls.isEmpty())) {
         payload.put("content", contentBuilder.toString());
       }
