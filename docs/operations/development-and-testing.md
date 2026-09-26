@@ -179,6 +179,7 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
+| `run test:layout` | Playwright Chromium 离线布局回归 | 预览固有尺寸、等比缩小与窄屏约束；不依赖 Backend，产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
 | `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
@@ -188,6 +189,9 @@ npm --prefix frontend run coverage
 报告目录是 `frontend/coverage/`。[test-setup.ts](../../frontend/src/test-setup.ts) 为每个测试清空
 localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、dialog、
 scrollIntoView 和 React Flow layout 提供确定性 stub。
+
+布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
+用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
 
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
