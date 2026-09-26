@@ -3,6 +3,7 @@ import { X } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugSkill,
+  ThreadModelRequestDebugSubagent,
   ThreadModelRequestDebugTool,
 } from '@/features/ai/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
@@ -10,6 +11,8 @@ import { useI18n } from '@/shared/i18n'
 export type DebugInspectorSelection =
   | { type: 'tool'; tool: ThreadModelRequestDebugTool }
   | { type: 'skill'; skill: ThreadModelRequestDebugSkill }
+  | { type: 'subagent'; subagent: ThreadModelRequestDebugSubagent }
+  | { type: 'cache' }
   | { type: 'request' }
 
 function formatJson(raw: string | undefined): string {
@@ -95,11 +98,15 @@ export function ThreadDebugInspector({
 
   let title = t('ai.runtime.debug.inspectorTitle')
   if (selection.type === 'tool') {
-    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.toolLabel')} · ${selection.tool.name}`
+    title = selection.tool.name
   } else if (selection.type === 'skill') {
-    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.skillLabel')} · ${selection.skill.name}`
+    title = selection.skill.name
+  } else if (selection.type === 'subagent') {
+    title = selection.subagent.name
+  } else if (selection.type === 'cache') {
+    title = t('ai.runtime.debug.inspector.cacheTitle')
   } else if (selection.type === 'request') {
-    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.requestLabel')}`
+    title = t('ai.runtime.debug.requestLabel')
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -235,6 +242,59 @@ export function ThreadDebugInspector({
               {selection.skill.promptXml}
             </pre>
           </div>
+        </div>
+      )}
+
+      {selection.type === 'subagent' && (
+        <div className="thread-debug-inspector-body">
+          <dl className="thread-event-detail-rows">
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.name')}</dt>
+              <dd><code>{selection.subagent.name}</code></dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.description')}</dt>
+              <dd>{selection.subagent.description || '—'}</dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
+      {selection.type === 'cache' && (
+        <div className="thread-debug-inspector-body">
+          <dl className="thread-event-detail-rows">
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.cacheRetention')}</dt>
+              <dd>
+                <code>{debug.cacheControl?.retention ?? 'NONE'}</code>
+                {(!debug.cacheControl || debug.cacheControl.retention === 'NONE') ? (
+                  <span className="thread-debug-filter-reason">
+                    ({t('ai.runtime.debug.inspector.cacheProviderDisclaimer')})
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.cacheAffinityKey')}</dt>
+              <dd>
+                {debug.cacheControl?.affinityKey ? (
+                  <code>{debug.cacheControl.affinityKey}</code>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.cacheBreakpoints')}</dt>
+              <dd>
+                {debug.cacheControl?.breakpoints && debug.cacheControl.breakpoints.length > 0 ? (
+                  <code>{debug.cacheControl.breakpoints.join(', ')}</code>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+          </dl>
         </div>
       )}
 

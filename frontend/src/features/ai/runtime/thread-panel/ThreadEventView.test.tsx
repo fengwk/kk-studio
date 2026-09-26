@@ -447,7 +447,7 @@ describe('ThreadEventView', () => {
       expect(detailTab).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByTestId('thread-debug-inspector')).toHaveAttribute(
         'aria-label',
-        expect.stringMatching(/检查器: 工具 · read|INSPECTOR: Tool · read/),
+        'read',
       )
 
       // 关闭详情
@@ -455,6 +455,78 @@ describe('ThreadEventView', () => {
       await user.click(closeBtn)
 
       // 来源是 preview，故返回 preview tab
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveAttribute('aria-selected', 'false')
+    })
+
+    it('automatically activates detail tab on subagent chip click and restores focus on Escape', async () => {
+      const user = userEvent.setup()
+      render(
+        <ResponsiveHarness
+          initialDebug={sampleDebugData({
+            subagents: [{ name: 'Explorer', description: 'Read-only exploration subagent' }],
+          })}
+        />,
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+
+      const previewTab = screen.getByRole('tab', { name: '请求预览' })
+      const detailTab = screen.getByRole('tab', { name: '详情' })
+
+      await user.click(previewTab)
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+
+      // 点击 Subagent 按钮
+      const subagentBtn = screen.getByRole('button', { name: '子代理 Explorer' })
+      await user.click(subagentBtn)
+
+      // 自动激活详情并显示 Subagent Inspector
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', 'Explorer')
+      expect(screen.getByRole('heading', { level: 3, name: 'Explorer' })).toBeInTheDocument()
+      expect(screen.getByText('Read-only exploration subagent')).toBeInTheDocument()
+
+      // 按 Escape 局部关闭详情
+      await user.keyboard('{Escape}')
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveAttribute('aria-selected', 'false')
+    })
+
+    it('automatically activates detail tab on cache chip click and restores focus on Escape', async () => {
+      const user = userEvent.setup()
+      render(
+        <ResponsiveHarness
+          initialDebug={sampleDebugData({
+            cacheControl: {
+              retention: 'SHORT',
+              affinityKey: 'key-1',
+              breakpoints: ['SYSTEM'],
+            },
+          })}
+        />,
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+
+      const previewTab = screen.getByRole('tab', { name: '请求预览' })
+      const detailTab = screen.getByRole('tab', { name: '详情' })
+
+      await user.click(previewTab)
+
+      // 点击 Cache 按钮
+      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 \(SHORT\) \(key-1\)/ })
+      await user.click(cacheBtn)
+
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', '缓存策略')
+      expect(screen.getByRole('heading', { level: 3, name: '缓存策略' })).toBeInTheDocument()
+      expect(screen.getByText('SHORT')).toBeInTheDocument()
+
+      // 按 Escape 局部关闭详情
+      await user.keyboard('{Escape}')
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
     })

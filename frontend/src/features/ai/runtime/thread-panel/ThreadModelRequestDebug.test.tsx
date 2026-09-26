@@ -145,7 +145,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     // 打开 Tool 检查器，断言英文标题与行标题
     await user.click(screen.getByRole('button', { name: 'Tool read' }))
     const inspector = screen.getByTestId('thread-debug-inspector')
-    expect(inspector).toHaveAttribute('aria-label', 'INSPECTOR: Tool · read')
+    expect(inspector).toHaveAttribute('aria-label', 'read')
+    expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('Name')).toBeInTheDocument()
     expect(screen.getByText('Status')).toBeInTheDocument()
     expect(screen.getByText('Environment Support')).toBeInTheDocument()
@@ -170,7 +171,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     await user.click(screen.getByRole('button', { name: '工具 read' }))
 
     const inspector = screen.getByTestId('thread-debug-inspector')
-    expect(inspector).toHaveAttribute('aria-label', '检查器: 工具 · read')
+    expect(inspector).toHaveAttribute('aria-label', 'read')
+    expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('名称')).toBeInTheDocument()
     expect(screen.getByText('已发送 (SENT)')).toBeInTheDocument()
     expect(screen.getByText('可选环境 (OPTIONAL)')).toBeInTheDocument()
@@ -190,7 +192,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     await user.click(screen.getByRole('button', { name: '技能 dev' }))
 
     const inspector = screen.getByTestId('thread-debug-inspector')
-    expect(inspector).toHaveAttribute('aria-label', '检查器: 技能 · dev')
+    expect(inspector).toHaveAttribute('aria-label', 'dev')
+    expect(screen.getByRole('heading', { level: 3, name: 'dev' })).toBeInTheDocument()
     expect(screen.getByText('技能名称')).toBeInTheDocument()
     expect(screen.getByText('包名 (Package)')).toBeInTheDocument()
     expect(screen.getByText('交付方式 (Delivery)')).toBeInTheDocument()
@@ -216,7 +219,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       await user.click(snapshotBtn)
 
       const inspector = screen.getByTestId('thread-debug-inspector')
-      expect(inspector).toHaveAttribute('aria-label', '检查器: 请求快照')
+      expect(inspector).toHaveAttribute('aria-label', '请求快照')
+      expect(screen.getByRole('heading', { level: 3, name: '请求快照' })).toBeInTheDocument()
 
       const pre = screen.getByTestId('frozen-request-json')
       expect(pre).toHaveTextContent('"model": "minimax"')
@@ -245,7 +249,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     })
   })
 
-  it('maps cache retention NONE to localized no cache text and handles empty tools/skills', () => {
+  it('maps cache retention NONE to localized no cache text and handles empty tools/skills/subagents', () => {
     render(
       <DebugViewHarness
         debug={sampleDebug({
@@ -263,7 +267,149 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     )
     expect(screen.getByText('未选择环境')).toBeInTheDocument()
     expect(screen.getByText('暂无技能')).toBeInTheDocument()
-    expect(screen.getByText(/无缓存 \(NONE\)/)).toBeInTheDocument()
+    expect(screen.getByText('无缓存')).toBeInTheDocument()
+    expect(screen.queryByText(/无缓存 \(NONE\)/)).not.toBeInTheDocument()
+  })
+
+  describe('Subagents and Cache inspection', () => {
+    it('renders subagent chips as clickable buttons, opens subagent inspector with direct title and actual fields', async () => {
+      const user = userEvent.setup()
+      render(
+        <DebugViewHarness
+          debug={sampleDebug({
+            subagents: [
+              { name: 'Explorer', description: 'Read-only exploration subagent' },
+              { name: 'helper', description: 'General-purpose execution subagent' },
+            ],
+          })}
+        />,
+      )
+
+      const explorerChip = screen.getByRole('button', { name: '子代理 Explorer' })
+      expect(explorerChip).toBeInTheDocument()
+      const helperChip = screen.getByRole('button', { name: '子代理 helper' })
+      expect(helperChip).toBeInTheDocument()
+
+      await user.click(explorerChip)
+
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', 'Explorer')
+      expect(screen.getByRole('heading', { level: 3, name: 'Explorer' })).toBeInTheDocument()
+      expect(screen.getByText('名称')).toBeInTheDocument()
+      expect(screen.getByText('描述')).toBeInTheDocument()
+      expect(screen.getByText('Read-only exploration subagent')).toBeInTheDocument()
+
+      // 按 Escape 关闭
+      await user.keyboard('{Escape}')
+      expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
+    })
+
+    it('renders factual empty text for subagents when list is empty or undefined', () => {
+      render(<DebugViewHarness debug={sampleDebug({ subagents: [] })} />)
+      const metaRow = screen.getByTestId('debug-meta-row')
+      expect(metaRow).toHaveTextContent('子代理： 无')
+      expect(screen.queryByRole('button', { name: /子代理 helper/ })).not.toBeInTheDocument()
+    })
+
+    it('renders cache chip with clean summary, opens cache inspector with Cache Policy title and actual fields (SHORT)', async () => {
+      const user = userEvent.setup()
+      render(
+        <DebugViewHarness
+          debug={sampleDebug({
+            cacheControl: {
+              retention: 'SHORT',
+              affinityKey: 'aff-key-42',
+              breakpoints: ['SYSTEM', 'TOOLS'],
+            },
+          })}
+        />,
+      )
+
+      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 \(SHORT\) \(aff-key-42\)/ })
+      expect(cacheBtn).toBeInTheDocument()
+
+      await user.click(cacheBtn)
+
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', '缓存策略')
+      expect(screen.getByRole('heading', { level: 3, name: '缓存策略' })).toBeInTheDocument()
+      expect(screen.getByText('留存档位')).toBeInTheDocument()
+      expect(screen.getByText('SHORT')).toBeInTheDocument()
+      expect(screen.getByText('前缀标识 (Affinity Key)')).toBeInTheDocument()
+      expect(screen.getByText('aff-key-42')).toBeInTheDocument()
+      expect(screen.getByText('Cache 断点')).toBeInTheDocument()
+      expect(screen.getByText('SYSTEM, TOOLS')).toBeInTheDocument()
+
+      await user.keyboard('{Escape}')
+      expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
+    })
+
+    it('opens cache inspector when retention is NONE: retains literal NONE and disclaimer', async () => {
+      const user = userEvent.setup()
+      render(
+        <DebugViewHarness
+          debug={sampleDebug({
+            cacheControl: {
+              retention: 'NONE',
+              affinityKey: null,
+              breakpoints: [],
+            },
+          })}
+        />,
+      )
+
+      const cacheBtn = screen.getByRole('button', { name: '缓存 无缓存' })
+      expect(cacheBtn).toBeInTheDocument()
+
+      await user.click(cacheBtn)
+
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', '缓存策略')
+      expect(screen.getByText('NONE')).toBeInTheDocument()
+      expect(screen.getByText('(不保证 Provider 自动缓存)')).toBeInTheDocument()
+      // affinityKey 和 breakpoints 为空时如实显示 '—'
+      const dashes = screen.getAllByText('—')
+      expect(dashes.length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('verifies subagent and cache inspector localization in en-US', async () => {
+      setLocale('en-US')
+      const user = userEvent.setup()
+      render(
+        <DebugViewHarness
+          debug={sampleDebug({
+            subagents: [{ name: 'Explorer', description: 'Exploring code' }],
+            cacheControl: {
+              retention: 'NONE',
+              affinityKey: null,
+              breakpoints: [],
+            },
+          })}
+        />,
+      )
+
+      expect(screen.getByText('No cache')).toBeInTheDocument()
+      expect(screen.queryByText(/NONE/)).not.toBeInTheDocument()
+
+      // 点击 Subagent 验证英文
+      await user.click(screen.getByRole('button', { name: 'Subagent Explorer' }))
+      expect(screen.getByTestId('thread-debug-inspector')).toHaveAttribute('aria-label', 'Explorer')
+      expect(screen.getByText('Name')).toBeInTheDocument()
+      expect(screen.getByText('Description')).toBeInTheDocument()
+      expect(screen.getByText('Exploring code')).toBeInTheDocument()
+
+      await user.keyboard('{Escape}')
+
+      // 点击 Cache 验证英文
+      await user.click(screen.getByRole('button', { name: 'Cache No cache' }))
+      expect(screen.getByTestId('thread-debug-inspector')).toHaveAttribute('aria-label', 'Cache Policy')
+      expect(screen.getByRole('heading', { level: 3, name: 'Cache Policy' })).toBeInTheDocument()
+      expect(screen.getByText('Retention')).toBeInTheDocument()
+      expect(screen.getByText('NONE')).toBeInTheDocument()
+      expect(screen.getByText('(Provider automatic caching is not guaranteed)')).toBeInTheDocument()
+      expect(screen.getByText('Affinity Key')).toBeInTheDocument()
+      expect(screen.getByText('Breakpoints')).toBeInTheDocument()
+    })
   })
 
   it('handles invalid json gracefully in tool inspector schema display', async () => {
@@ -700,6 +846,64 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         />,
       )
       expect(screen.getByText('· CUSTOM_CARRIER')).toBeInTheDocument()
+    })
+
+    it('covers platform and custom delivery in skill inspector and custom filter reason in tool inspector', async () => {
+      const user = userEvent.setup()
+      render(
+        <DebugViewHarness
+          debug={sampleDebug({
+            tools: [
+              {
+                name: 'filtered-tool',
+                description: 'Custom filtered tool',
+                inputSchemaJson: '{}',
+                environmentSupport: 'UNKNOWN_ENV' as unknown as 'NONE',
+                requiredEnvironmentId: null,
+                provenance: 'custom:tool',
+                state: 'FILTERED',
+                filterReason: 'RATE_LIMIT_EXCEEDED',
+              },
+            ],
+            skills: [
+              {
+                packageName: 'pkg-p',
+                name: 'platform-skill',
+                description: 'platform delivery skill',
+                path: '/p',
+                delivery: 'PLATFORM',
+                currentCommit: '222',
+                observedHeadCommit: null,
+                installedCommit: null,
+                promptXml: '<skill />',
+              },
+              {
+                packageName: 'pkg-c',
+                name: 'custom-carrier-skill',
+                description: 'custom carrier skill',
+                path: '/c',
+                delivery: 'S3_BUCKET' as unknown as 'LOCAL',
+                currentCommit: '333',
+                observedHeadCommit: null,
+                installedCommit: null,
+                promptXml: '<skill />',
+              },
+            ],
+          })}
+        />,
+      )
+
+      await user.click(screen.getByRole('button', { name: '已过滤工具 filtered-tool' }))
+      expect(screen.getByText('(RATE_LIMIT_EXCEEDED)')).toBeInTheDocument()
+      expect(screen.getAllByText('UNKNOWN_ENV').length).toBeGreaterThanOrEqual(1)
+      await user.keyboard('{Escape}')
+
+      await user.click(screen.getByRole('button', { name: '技能 platform-skill' }))
+      expect(screen.getByText('平台')).toBeInTheDocument()
+      await user.keyboard('{Escape}')
+
+      await user.click(screen.getByRole('button', { name: '技能 custom-carrier-skill' }))
+      expect(screen.getByText('S3_BUCKET')).toBeInTheDocument()
     })
   })
 })

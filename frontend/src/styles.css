@@ -2253,6 +2253,13 @@ div.is-error {
   margin-top: 4px;
 }
 
+.thread-debug-meta-item {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .thread-debug-meta-label {
   font-weight: 600;
 }
@@ -6495,8 +6502,16 @@ select.settings-input option {
   padding: 0 8px;
 }
 
-.chat-layout-selector .ui-select-menu {
-  min-width: max(100%, 80px);
+.ui-select.chat-layout-selector.is-compact .ui-select-menu {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  max-height: min(290px, calc(100dvh - 48px));
+}
+
+.ui-select.chat-layout-selector.is-compact .ui-select-option {
+  min-height: 28px;
+  padding: 0 8px;
 }
 
 /*
