@@ -1,121 +1,94 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
-import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
-import fun.fengwk.kkstudio.canvas.CanvasLink;
+import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.CanvasReference;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
-import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
-import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 
-import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
-/** {@link PostgresqlCanvasQueryService} 对 document/graph/resource/run 的完整 snapshot 投影测试。 */
+/** {@link PostgresqlCanvasQueryService} 的快照与引用投影在真实 PostgreSQL 上的契约。 */
 class PostgresqlCanvasQueryServiceIntegrationTest extends PostgresCanvasInfraTestSupport {
 
-  private static final Instant FIXED_TIME = Instant.parse("2026-03-04T05:06:07.123Z");
+  @Autowired private CanvasQueryService queryService;
 
-  @Autowired private CanvasQueryService query;
-  @Autowired private CanvasResourceRepository resources;
-  @Autowired private CanvasFunctionRunRepository runs;
-  @Autowired private CanvasFunctionResourcePinRepository pins;
-
-  /**
-   * Snapshot 必须将普通资源节点、Function 节点、run、group 与 link 从真实表投影为 Core 读模型；不存在的 document 返回 empty，不能产生半个
-   * snapshot。
-   */
+  /** 连线是 args 的读取投影：引用只存一份，快照按消费节点 args 的保留形状还原 source/target/index，未知函数形状不产生连线。 */
   @Test
-  void snapshotProjectsCompleteCanvasGraph() {
-    assertTrue(query.findSnapshot(UUID.randomUUID()).isEmpty());
-
+  void snapshotProjectsReferencesFromFunctionArgs() {
     UUID canvasId = addDocument();
-    CanvasGroup group =
-        new CanvasGroup(
-            UUID.randomUUID(), canvasId, "projected group", new CanvasTransform(1, 2, 600, 400));
-    canvasStore.addGroup(group);
-    NodeRecord source =
-        new NodeRecord(
-            UUID.randomUUID(),
-            canvasId,
-            "source",
-            new CanvasTransform(10, 20, 300, 200),
-            group.id(),
-            null,
-            null);
-    NodeRecord function =
-        new NodeRecord(
-            UUID.randomUUID(),
-            canvasId,
-            "function",
-            new CanvasTransform(400, 200, 300, 200),
-            null,
-            "projection-model",
-            "{\"prompt\":{\"segments\":[{\"type\":\"TEXT\",\"text\":\"hello\"}]},\"parameters\":{}}");
-    canvasStore.addNode(source);
-    canvasStore.addNode(function);
-    CanvasResource resource =
-        new CanvasResource(
-            UUID.randomUUID(), canvasId, source.id(), 0, null, "prompt.txt", "hello", FIXED_TIME);
-    resources.add(resource);
-    CanvasLink link = new CanvasLink(canvasId, source.id(), function.id());
-    canvasStore.addLink(link);
-    UUID requestId = UUID.randomUUID();
-    runs.insertReady(
-        new CanvasFunctionRun(
-            function.id(),
-            requestId,
-            CanvasFunctionRunStatus.READY,
-            0,
-            FIXED_TIME,
-            null,
-            null,
-            "QUEUED",
-            "{\"stage\":\"QUEUED\"}",
-            null,
-            FIXED_TIME,
-            FIXED_TIME));
+    NodeFixture source = addTextNode(canvasId, "first");
+    resourceRepository.add(source.textResource(1, "second"));
+    UUID groupId = UUID.randomUUID();
+    canvasStore.addGroup(
+        new CanvasGroup(groupId, canvasId, "group", new CanvasTransform(0, 0, 10, 10)));
+    NodeFixture consumer = addFunctionNode(canvasId, "video.generate");
+    canvasStore.updateNode(
+        consumer.record(
+            new CanvasFunction(
+                "video.generate",
+                CanvasJson.parseObject(
+                    """
+                    {"prompt":{"segments":[
+                      {"type":"TEXT","text":"prompt"},
+                      {"type":"resource","nodeId":"%s","index":1}
+                    ]}}
+                    """
+                        .formatted(source.nodeId)))));
 
-    CanvasSnapshot snapshot = query.findSnapshot(canvasId).orElseThrow();
-    assertEquals(canvasId, snapshot.document().id());
-    assertEquals(1, query.listDocuments().size());
-    assertEquals(group, snapshot.groups().getFirst());
-    assertEquals(link, snapshot.links().getFirst());
-    assertEquals(2, snapshot.nodes().size());
+    CanvasSnapshot snapshot = queryService.findSnapshot(canvasId).orElseThrow();
 
-    CanvasResourceNode projectedSource = node(snapshot, source.id());
-    assertEquals(group.id(), projectedSource.groupId());
-    assertEquals(resource, projectedSource.resources().getFirst());
-    assertEquals(null, projectedSource.function());
-    assertEquals(null, projectedSource.run());
-
-    CanvasResourceNode projectedFunction = node(snapshot, function.id());
-    assertTrue(projectedFunction.resources().isEmpty());
-    assertNotNull(projectedFunction.function());
-    assertEquals("projection-model", projectedFunction.function().modelKey());
-    assertEquals(requestId, projectedFunction.run().requestId());
-    assertEquals("QUEUED", projectedFunction.run().stage());
-
-    assertTrue(pins.findByNode(canvasId, function.id()).isEmpty());
+    assertEquals(canvasStore.findDocument(canvasId).orElseThrow(), snapshot.document());
+    assertEquals(
+        List.of(new CanvasReference(canvasId, source.nodeId, consumer.nodeId, 1)),
+        snapshot.references());
+    assertEquals(1, snapshot.groups().size());
+    CanvasResourceNode sourceNode =
+        snapshot.nodes().stream()
+            .filter(node -> node.id().equals(source.nodeId))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        List.of("first", "second"),
+        sourceNode.resources().stream().map(CanvasResource::textContent).toList());
+    assertEquals(
+        List.of(0, 1), sourceNode.resources().stream().map(CanvasResource::resourceIndex).toList());
+    CanvasResourceNode consumerNode =
+        snapshot.nodes().stream()
+            .filter(node -> node.id().equals(consumer.nodeId))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("video.generate", consumerNode.function().name());
+    assertTrue(consumerNode.resources().isEmpty());
+    assertNull(consumerNode.run());
   }
 
-  private static CanvasResourceNode node(CanvasSnapshot snapshot, UUID nodeId) {
-    return snapshot.nodes().stream()
-        .filter(node -> node.id().equals(nodeId))
-        .findFirst()
-        .orElseThrow();
+  /** 无引用的配置、未知画布与文档列表都必须保持空/缺失语义，不臆造连线或占位行。 */
+  @Test
+  void snapshotWithoutReferencesAndUnknownCanvas() {
+    UUID canvasId = addDocument();
+    addFunctionNode(canvasId, "image.crop");
+
+    CanvasSnapshot snapshot = queryService.findSnapshot(canvasId).orElseThrow();
+    assertTrue(snapshot.references().isEmpty());
+    assertTrue(snapshot.groups().isEmpty());
+    assertEquals(1, snapshot.nodes().size());
+
+    CanvasDocument document = canvasStore.findDocument(canvasId).orElseThrow();
+    assertEquals(List.of(document), queryService.listDocuments());
+    assertTrue(queryService.findSnapshot(UUID.randomUUID()).isEmpty());
   }
 }

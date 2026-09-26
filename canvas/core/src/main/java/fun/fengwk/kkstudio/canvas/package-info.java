@@ -1,7 +1,7 @@
 /**
- * Canvas v1 领域：document（可绑定至多一个根 Harness Thread）、ResourceNode/Resource/FunctionRun、 Function
- * adapter/ResourceRef pin、Group、Link、typed command 与持久化端口。
+ * Canvas 领域：document（revision 同步位置）、ResourceNode/Resource/Function、typed command、引用投影与持久化端口。
  *
- * <p>Canvas Core 只依赖 JDK；Spring、MyBatis、HTTP 与 Harness adapter 位于外层模块。
+ * <p>Canvas Core 只依赖 JDK；JSON args 由 Core 的严格 {@link fun.fengwk.kkstudio.canvas.CanvasJson}
+ * 模型表达，Spring、MyBatis、HTTP 与宿主适配位于外层模块。
  */
 package fun.fengwk.kkstudio.canvas;

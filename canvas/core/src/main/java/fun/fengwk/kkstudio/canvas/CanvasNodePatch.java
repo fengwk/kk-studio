@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.canvas;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Canvas node 的 patch 项：完整 UPSERT（含 resources/function/run 内嵌投影）或按 id REMOVE。 */
+/** Canvas node 的 patch 项：完整 UPSERT（含当前资源与运行投影）或按 id REMOVE。 */
 public sealed interface CanvasNodePatch permits CanvasNodePatch.Upsert, CanvasNodePatch.Remove {
 
   record Upsert(CanvasResourceNode node) implements CanvasNodePatch {

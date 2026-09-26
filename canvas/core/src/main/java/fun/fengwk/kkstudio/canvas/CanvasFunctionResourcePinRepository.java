@@ -12,6 +12,8 @@ public interface CanvasFunctionResourcePinRepository {
 
   List<CanvasFunctionResourcePin> findByNode(UUID canvasId, UUID nodeId);
 
+  List<CanvasFunctionResourcePin> findByCanvas(UUID canvasId);
+
   int countByResource(UUID canvasId, UUID resourceId);
 
   List<CanvasFunctionResourcePin> findRunningOutputPins(UUID canvasId, UUID resourceId);

@@ -6,10 +6,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Canvas document 与 graph 行状态的聚合持久化端口。
+ * Canvas document 可变行状态（document/node/group/dedup）的聚合持久化端口。
  *
- * <p>锁语义是跨域事务协议的一部分：命令、Function Run 与 owner 删除先锁 document；Function Run 再锁 node。实现必须保留 PostgreSQL
- * 当前的 {@code FOR UPDATE}/{@code FOR KEY SHARE} 行为。
+ * <p>锁语义是跨域事务协议的一部分：命令、Function Run 与 owner 删除先锁 document，Function Run 再锁 node。实现必须保留 PostgreSQL
+ * 当前的 {@code FOR UPDATE}/{@code FOR KEY SHARE} 行为。引用连线是 args 的读取投影，因此这里没有 link 行。
  */
 public interface CanvasStore {
 
@@ -23,7 +23,8 @@ public interface CanvasStore {
 
   List<CanvasDocument> listDocuments();
 
-  boolean advanceDocumentVersion(UUID canvasId, long expectedVersion, long newVersion);
+  /** 在已持有 document 行锁的事务内推进 revision；返回是否命中预期值。 */
+  boolean advanceRevision(UUID canvasId, long expectedRevision, long newRevision);
 
   boolean deleteDocument(UUID canvasId);
 
@@ -35,20 +36,8 @@ public interface CanvasStore {
 
   List<NodeRecord> listNodes(UUID canvasId);
 
-  boolean updateNodeTransform(NodeRecord node);
-
-  boolean renameNode(UUID canvasId, UUID nodeId, String name);
-
-  boolean updateNodeFunction(
-      UUID canvasId, UUID nodeId, String modelKey, String functionConfigJson);
-
-  boolean attachNodeToGroupIfUngrouped(UUID canvasId, UUID nodeId, UUID groupId);
-
-  boolean detachNodeFromGroup(UUID canvasId, UUID groupId, UUID nodeId);
-
-  int detachAllNodesFromGroup(UUID canvasId, UUID groupId);
-
-  int moveGroupNodes(UUID canvasId, UUID groupId, double deltaX, double deltaY);
+  /** 写入节点的名称、几何、分组与 Function 全行值。 */
+  boolean updateNode(NodeRecord node);
 
   boolean deleteNode(UUID canvasId, UUID nodeId);
 
@@ -58,23 +47,9 @@ public interface CanvasStore {
 
   List<CanvasGroup> listGroups(UUID canvasId);
 
-  boolean moveGroup(CanvasGroup group);
-
-  boolean renameGroup(UUID canvasId, UUID groupId, String title);
+  boolean updateGroup(CanvasGroup group);
 
   boolean deleteGroup(UUID canvasId, UUID groupId);
-
-  void addLink(CanvasLink link);
-
-  List<CanvasLink> listLinks(UUID canvasId);
-
-  boolean linkExists(UUID canvasId, UUID sourceNodeId, UUID targetNodeId);
-
-  boolean deleteLink(UUID canvasId, UUID sourceNodeId, UUID targetNodeId);
-
-  int deleteLinksByNode(UUID canvasId, UUID nodeId);
-
-  int deleteLinksByCanvas(UUID canvasId);
 
   Optional<CommandDedup> findCommandDedup(UUID canvasId, UUID idempotencyKey);
 
@@ -82,15 +57,14 @@ public interface CanvasStore {
 
   int deleteCommandDedupByCanvas(UUID canvasId);
 
-  /** 仅 Canvas Core 领域类型无法表达的可变 graph 行状态。 */
+  /** Core 领域类型无法表达的可变 node 行状态。 */
   record NodeRecord(
       UUID id,
       UUID canvasId,
       String name,
       CanvasTransform transform,
       UUID groupId,
-      String modelKey,
-      String functionConfigJson) {
+      CanvasFunction function) {
 
     public NodeRecord {
       id = Objects.requireNonNull(id, "id");
@@ -98,35 +72,19 @@ public interface CanvasStore {
       name = Objects.requireNonNull(name, "name");
       transform = Objects.requireNonNull(transform, "transform");
     }
-
-    public NodeRecord withName(String newName) {
-      return new NodeRecord(
-          id, canvasId, newName, transform, groupId, modelKey, functionConfigJson);
-    }
-
-    public NodeRecord withTransform(CanvasTransform newTransform) {
-      return new NodeRecord(
-          id, canvasId, name, newTransform, groupId, modelKey, functionConfigJson);
-    }
-
-    public NodeRecord withGroupId(UUID newGroupId) {
-      return new NodeRecord(
-          id, canvasId, name, transform, newGroupId, modelKey, functionConfigJson);
-    }
-
-    public NodeRecord withFunction(String newModelKey, String newFunctionConfigJson) {
-      return new NodeRecord(
-          id, canvasId, name, transform, groupId, newModelKey, newFunctionConfigJson);
-    }
   }
 
-  /** Canvas command batch 幂等键对应的持久化事实。 */
-  record CommandDedup(UUID canvasId, UUID idempotencyKey, String requestHash) {
+  /** Canvas command batch 幂等键对应的持久化事实：请求指纹与首次接受位置。 */
+  record CommandDedup(
+      UUID canvasId, UUID idempotencyKey, String requestHash, long acceptedRevision) {
 
     public CommandDedup {
       canvasId = Objects.requireNonNull(canvasId, "canvasId");
       idempotencyKey = Objects.requireNonNull(idempotencyKey, "idempotencyKey");
       requestHash = Objects.requireNonNull(requestHash, "requestHash");
+      if (acceptedRevision < 0L) {
+        throw new IllegalArgumentException("acceptedRevision must be >= 0");
+      }
     }
   }
 }

@@ -48,18 +48,10 @@ public interface CanvasGroupMapper extends BaseMapper {
   @Update(
       """
       update canvas_group
-      set x = #{x}, y = #{y}
+      set title = #{title}, x = #{x}, y = #{y}, width = #{width}, height = #{height}
       where id = #{id} and canvas_id = #{canvasId}
       """)
-  int updatePosition(CanvasGroupDO group);
-
-  @Update(
-      """
-      update canvas_group
-      set title = #{title}
-      where id = #{id} and canvas_id = #{canvasId}
-      """)
-  int updateTitle(CanvasGroupDO group);
+  int update(CanvasGroupDO group);
 
   @Delete("delete from canvas_group where id = #{id} and canvas_id = #{canvasId}")
   int deleteById(@Param("canvasId") UUID canvasId, @Param("id") UUID id);

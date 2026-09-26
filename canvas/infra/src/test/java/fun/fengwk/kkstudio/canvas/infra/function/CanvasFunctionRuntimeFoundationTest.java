@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -14,12 +15,13 @@ import org.springframework.context.annotation.Import;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.canvas.CanvasLink;
+import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
@@ -29,6 +31,7 @@ import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
@@ -68,7 +71,27 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   @Autowired private CanvasResourceRepository resourceRepository;
   @Autowired private CanvasFunctionRunRepository runRepository;
   @Autowired private CanvasFunctionResourcePinRepository pinRepository;
-  @Autowired private CanvasFunctionRunTransactions runtimeTransactions;
+  @Autowired private CanvasFunctionConfigCodecPort configCodec;
+  @Autowired private Clock clock;
+  private CanvasFunctionRunTransactions runtimeTransactions;
+
+  /** Runtime foundation 使用模块内的忠实 pin/owner 双替身，避免与实际 Blob ref_count 端口耦合。 */
+  @BeforeEach
+  void buildRuntimeTransactions() {
+    runtimeTransactions =
+        new CanvasFunctionRunTransactions(
+            canvasStore,
+            resourceRepository,
+            runRepository,
+            pinRepository,
+            catalog,
+            configCodec,
+            stateCodec,
+            new TestResourceLifecycle(resourceRepository, pinRepository),
+            blobAccess,
+            clock);
+  }
+
   @Autowired private CanvasFunctionCatalog catalog;
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
   @Autowired private CanvasFunctionWorkStore workStore;
@@ -84,11 +107,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     CanvasFunctionRun first = runtimeTransactions.start(canvasId, nodeId, REQUEST_1).run();
     assertEquals(CanvasFunctionRunStatus.READY, first.status());
     assertEquals(1L, version(canvasId));
-    assertEquals(
-        1,
-        pinRepository.findByRun(canvasId, nodeId, first.requestId()).stream()
-            .filter(pin -> pin.role() == CanvasFunctionResourcePin.Role.OUTPUT)
-            .count());
+    // 无引用的 Run 在启动阶段不产生 pin：预分配目标没有 Resource 行，OUTPUT pin 属于物化事务。
+    assertTrue(pinRepository.findByRun(canvasId, nodeId, first.requestId()).isEmpty());
 
     CanvasFunctionStartResult replay = runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
     assertFalse(replay.created());
@@ -102,7 +122,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     CanvasFunctionFrozenRun firstFrozen = decode(first);
     CanvasResource cancelledTarget =
-        addBlobResource(canvasId, null, null, firstFrozen.targetResourceId());
+        materializeTarget(canvasId, nodeId, first.requestId(), firstFrozen.targetResourceId());
     runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
     CanvasFunctionRun cancelledReplay = runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
     assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelledReplay.status());
@@ -120,7 +140,6 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID canvasId = addDocument();
     UUID sourceNodeId = addPlainNode(canvasId, "source");
     UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
-    canvasStore.addLink(new CanvasLink(canvasId, sourceNodeId, targetNodeId));
     CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
     ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "foundation-success");
@@ -128,7 +147,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(source.blobId(), frozen.manifest().get(0).blobId());
     assertEquals(3L, frozen.manifest().get(0).sizeBytes());
 
-    CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
+    CanvasResource target =
+        materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.targetResourceId());
     assertTrue(
         runtimeTransactions.completeSuccess(
             frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
@@ -205,7 +225,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
     ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-success-fence");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
-    CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
+    CanvasResource target =
+        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.targetResourceId());
 
     assertFalse(
         runtimeTransactions.completeSuccess(frozen, "stale", List.of(frozen.targetResourceId())));
@@ -223,9 +244,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
     ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-node-fence");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
-    jdbc.update(
-        "update canvas_node set model_key = null, function_config_json = null where id = ?",
-        nodeId);
+    jdbc.update("update canvas_node set \"function\" = null where id = ?", nodeId);
 
     assertFalse(
         runtimeTransactions.completeSuccess(
@@ -254,7 +273,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         () ->
             runtimeTransactions.completeSuccess(
                 frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
-    CanvasResource target = addBlobResource(canvasId, null, null, frozen.targetResourceId());
+    CanvasResource target =
+        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.targetResourceId());
     blobAccess.put(
         new CanvasFunctionBlobAccess.BlobFacts(
             target.blobId(), "video/mp4", 3L, null, null, 1_000L));
@@ -306,14 +326,38 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   private UUID addFunctionNode(UUID canvasId, String name, String config) {
     UUID nodeId = UUID.randomUUID();
     canvasStore.addNode(
-        new NodeRecord(nodeId, canvasId, name, TRANSFORM, null, MODEL.key(), config));
+        new NodeRecord(
+            nodeId,
+            canvasId,
+            name,
+            TRANSFORM,
+            null,
+            new CanvasFunction(MODEL.key(), CanvasJson.parseObject(config))));
     return nodeId;
   }
 
   private UUID addPlainNode(UUID canvasId, String name) {
     UUID nodeId = UUID.randomUUID();
-    canvasStore.addNode(new NodeRecord(nodeId, canvasId, name, TRANSFORM, null, null, null));
+    canvasStore.addNode(new NodeRecord(nodeId, canvasId, name, TRANSFORM, null, null));
     return nodeId;
+  }
+
+  /** 宿主物化的忠实双替身：Resource 行与 OUTPUT pin 必须同事务写入，才能同时满足 pin→resource 外键与「pin 只指向真实资源」的约定。 */
+  private CanvasResource materializeTarget(
+      UUID canvasId, UUID nodeId, UUID requestId, UUID targetResourceId) {
+    return transactions.execute(
+        status -> {
+          CanvasResource resource = addBlobResource(canvasId, null, null, targetResourceId);
+          pinRepository.addAll(
+              List.of(
+                  new CanvasFunctionResourcePin(
+                      canvasId,
+                      nodeId,
+                      requestId,
+                      targetResourceId,
+                      CanvasFunctionResourcePin.Role.OUTPUT)));
+          return resource;
+        });
   }
 
   private CanvasResource addBlobResource(
@@ -352,7 +396,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   }
 
   private long version(UUID canvasId) {
-    return canvasStore.findDocument(canvasId).orElseThrow().version();
+    return canvasStore.findDocument(canvasId).orElseThrow().revision();
   }
 
   private static String configWithoutReferences() {
@@ -362,7 +406,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
   private static String configWithReference(UUID sourceNodeId) {
     return "{\"prompt\":{\"segments\":[{\"type\":\"TEXT\",\"text\":\"use reference\"},"
-        + "{\"type\":\"REFERENCE\",\"nodeId\":\""
+        + "{\"type\":\"resource\",\"nodeId\":\""
         + sourceNodeId
         + "\",\"index\":0}]},\"parameters\":{}}";
   }
@@ -407,12 +451,6 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     @Bean
     TestBlobAccess testBlobAccess() {
       return new TestBlobAccess();
-    }
-
-    @Bean
-    CanvasResourceLifecycle testResourceLifecycle(
-        CanvasResourceRepository resources, CanvasFunctionResourcePinRepository pins) {
-      return new TestResourceLifecycle(resources, pins);
     }
   }
 
@@ -473,14 +511,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     }
 
     @Override
-    public void deleteOwnedResources(UUID canvasId, UUID nodeId) {
-      for (CanvasResource resource : resources.findByOwnerNode(canvasId, nodeId)) {
-        if (pins.countByResource(canvasId, resource.id()) > 0) {
-          resources.detachOwner(canvasId, resource.id(), nodeId);
-        } else {
-          resources.delete(canvasId, resource.id());
-        }
-      }
+    public void discardResource(UUID canvasId, UUID resourceId) {
+      resources.delete(canvasId, resourceId);
     }
 
     @Override

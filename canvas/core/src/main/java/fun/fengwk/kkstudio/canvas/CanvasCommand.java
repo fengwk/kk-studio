@@ -4,174 +4,146 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Canvas v1 支持的原子 command batch 元素。 */
+/**
+ * Canvas 支持的原子命令批元素，每条命令只修改一个语义组。
+ *
+ * <p>前置条件是编辑起点中该语义组的旧值，而不是整图版本：名称用旧名称，资源数组用有序 Resource id 列表，Function 用完整 {@code {name,args}}（JSON
+ * 语义比较），布局可选携带旧几何以便拒绝离线积压。 批内全部命令一起校验、一起提交或一起回滚。
+ */
 public sealed interface CanvasCommand
-    permits CanvasCommand.CreateTextNode,
-        CanvasCommand.UpdateTextNode,
-        CanvasCommand.CreateResourceNode,
-        CanvasCommand.CreateFunctionNode,
-        CanvasCommand.UpdateFunction,
+    permits CanvasCommand.CreateNode,
         CanvasCommand.RenameNode,
-        CanvasCommand.UpdateNodeTransforms,
+        CanvasCommand.SetNodeResources,
+        CanvasCommand.SetNodeFunction,
+        CanvasCommand.SetNodeGroup,
         CanvasCommand.DeleteNode,
-        CanvasCommand.CreateLink,
-        CanvasCommand.DeleteLink,
+        CanvasCommand.UpdateNodeTransform,
         CanvasCommand.CreateGroup,
-        CanvasCommand.MoveGroup,
-        CanvasCommand.Ungroup,
-        CanvasCommand.DeleteGroup,
-        CanvasCommand.RenameGroup {
+        CanvasCommand.RenameGroup,
+        CanvasCommand.UpdateGroupTransform,
+        CanvasCommand.DeleteGroup {
 
-  record CreateTextNode(UUID nodeId, String name, String markdown, CanvasTransform transform)
+  /** 创建节点：id 由客户端生成，资源数组可为空以便同批再用 {@link SetNodeFunction} 赋予函数。 */
+  record CreateNode(
+      UUID nodeId, String name, CanvasTransform transform, List<CanvasResourceInput> resources)
       implements CanvasCommand {
-    public CreateTextNode {
+
+    public CreateNode {
       Objects.requireNonNull(nodeId, "nodeId");
-      CanvasValidation.requireNonBlank(name, "name");
-      Objects.requireNonNull(markdown, "markdown");
+      name = CanvasValidation.requireName(name, "node name");
       Objects.requireNonNull(transform, "transform");
+      resources = CanvasValidation.requireList(resources, "resources");
     }
   }
 
-  record UpdateTextNode(UUID nodeId, String markdown) implements CanvasCommand {
-    public UpdateTextNode {
-      Objects.requireNonNull(nodeId, "nodeId");
-      Objects.requireNonNull(markdown, "markdown");
-    }
-  }
+  /** 改名：前置条件是编辑起点的旧名称。 */
+  record RenameNode(UUID nodeId, String expectedName, String name) implements CanvasCommand {
 
-  record CreateResourceNode(
-      UUID nodeId, String name, List<UUID> uploadIds, CanvasTransform transform)
-      implements CanvasCommand {
-    public CreateResourceNode {
-      Objects.requireNonNull(nodeId, "nodeId");
-      CanvasValidation.requireNonBlank(name, "name");
-      Objects.requireNonNull(uploadIds, "uploadIds");
-      uploadIds = List.copyOf(uploadIds);
-      if (uploadIds.isEmpty()) {
-        throw new IllegalArgumentException("uploadIds must not be empty");
-      }
-      uploadIds.forEach(uploadId -> Objects.requireNonNull(uploadId, "uploadId"));
-      Objects.requireNonNull(transform, "transform");
-    }
-  }
-
-  record CreateFunctionNode(
-      UUID nodeId, String name, String modelKey, String configJson, CanvasTransform transform)
-      implements CanvasCommand {
-    public CreateFunctionNode {
-      Objects.requireNonNull(nodeId, "nodeId");
-      CanvasValidation.requireNonBlank(name, "name");
-      CanvasValidation.requireNonBlank(modelKey, "modelKey");
-      CanvasValidation.requireNonBlank(configJson, "configJson");
-      Objects.requireNonNull(transform, "transform");
-    }
-  }
-
-  record UpdateFunction(UUID nodeId, String modelKey, String configJson) implements CanvasCommand {
-    public UpdateFunction {
-      Objects.requireNonNull(nodeId, "nodeId");
-      CanvasValidation.requireNonBlank(modelKey, "modelKey");
-      CanvasValidation.requireNonBlank(configJson, "configJson");
-    }
-  }
-
-  record RenameNode(UUID nodeId, String name) implements CanvasCommand {
     public RenameNode {
       Objects.requireNonNull(nodeId, "nodeId");
-      CanvasValidation.requireNonBlank(name, "name");
+      CanvasValidation.requireName(expectedName, "expectedName");
+      name = CanvasValidation.requireName(name, "node name");
     }
   }
 
-  record NodeTransformUpdate(UUID nodeId, CanvasTransform transform) {
-    public NodeTransformUpdate {
+  /** 替换节点资源数组：前置条件是编辑起点的有序 Resource id 列表。 */
+  record SetNodeResources(
+      UUID nodeId, List<UUID> expectedResourceIds, List<CanvasResourceInput> resources)
+      implements CanvasCommand {
+
+    public SetNodeResources {
       Objects.requireNonNull(nodeId, "nodeId");
-      Objects.requireNonNull(transform, "transform");
+      expectedResourceIds =
+          CanvasValidation.requireList(expectedResourceIds, "expectedResourceIds");
+      CanvasValidation.requireDistinct(expectedResourceIds, "expectedResourceIds");
+      resources = CanvasValidation.requireList(resources, "resources");
     }
   }
 
-  record UpdateNodeTransforms(List<NodeTransformUpdate> updates) implements CanvasCommand {
-    public UpdateNodeTransforms {
-      Objects.requireNonNull(updates, "updates");
-      updates = List.copyOf(updates);
-      if (updates.isEmpty()) {
-        throw new IllegalArgumentException("updates must not be empty");
-      }
+  /** 设置或清除 Function：前置条件是编辑起点的完整 {@code {name,args}}。 */
+  record SetNodeFunction(UUID nodeId, CanvasFunction expectedFunction, CanvasFunction function)
+      implements CanvasCommand {
+
+    public SetNodeFunction {
+      Objects.requireNonNull(nodeId, "nodeId");
     }
   }
 
-  record DeleteNode(UUID nodeId) implements CanvasCommand {
+  /** 设置或清除节点分组：前置条件是编辑起点的分组 id。 */
+  record SetNodeGroup(UUID nodeId, UUID expectedGroupId, UUID groupId) implements CanvasCommand {
+
+    public SetNodeGroup {
+      Objects.requireNonNull(nodeId, "nodeId");
+    }
+  }
+
+  /** 删除节点：前置条件是编辑起点的资源数组与 Function；仍被引用的节点必须先在同一批中解除引用。 */
+  record DeleteNode(UUID nodeId, List<UUID> expectedResourceIds, CanvasFunction expectedFunction)
+      implements CanvasCommand {
+
     public DeleteNode {
       Objects.requireNonNull(nodeId, "nodeId");
+      expectedResourceIds =
+          CanvasValidation.requireList(expectedResourceIds, "expectedResourceIds");
+      CanvasValidation.requireDistinct(expectedResourceIds, "expectedResourceIds");
     }
   }
 
-  record CreateLink(UUID sourceNodeId, UUID targetNodeId) implements CanvasCommand {
-    public CreateLink {
-      validateLink(sourceNodeId, targetNodeId);
-    }
-  }
-
-  record DeleteLink(UUID sourceNodeId, UUID targetNodeId) implements CanvasCommand {
-    public DeleteLink {
-      validateLink(sourceNodeId, targetNodeId);
-    }
-  }
-
-  record CreateGroup(
-      UUID groupId, String title, CanvasTransform transform, List<UUID> memberNodeIds)
+  /**
+   * 更新节点几何：在线操作按服务端接受顺序收敛。
+   *
+   * <p>{@code expectedTransform} 非空时表示重连积压的布局基线，与服务端当前值不一致会被拒绝，从而不重放过期位置；为空时表示在线操作。
+   */
+  record UpdateNodeTransform(
+      UUID nodeId, CanvasTransform transform, CanvasTransform expectedTransform)
       implements CanvasCommand {
+
+    public UpdateNodeTransform {
+      Objects.requireNonNull(nodeId, "nodeId");
+      Objects.requireNonNull(transform, "transform");
+    }
+  }
+
+  /** 创建不嵌套的视觉分组；成员关系由各节点的 {@link SetNodeGroup} 命令建立。 */
+  record CreateGroup(UUID groupId, String title, CanvasTransform transform)
+      implements CanvasCommand {
+
     public CreateGroup {
       Objects.requireNonNull(groupId, "groupId");
-      CanvasValidation.requireNonBlank(title, "title");
+      title = CanvasValidation.requireName(title, "group title");
       Objects.requireNonNull(transform, "transform");
-      Objects.requireNonNull(memberNodeIds, "memberNodeIds");
-      memberNodeIds = List.copyOf(memberNodeIds);
-      if (memberNodeIds.isEmpty()) {
-        throw new IllegalArgumentException("memberNodeIds must not be empty");
-      }
-      memberNodeIds.forEach(memberNodeId -> Objects.requireNonNull(memberNodeId, "memberNodeId"));
     }
   }
 
-  record MoveGroup(UUID groupId, double x, double y) implements CanvasCommand {
-    public MoveGroup {
-      Objects.requireNonNull(groupId, "groupId");
-      if (!Double.isFinite(x) || !Double.isFinite(y)) {
-        throw new IllegalArgumentException("group x/y must be finite");
-      }
-    }
-  }
+  /** 重命名分组：前置条件是编辑起点的旧标题。 */
+  record RenameGroup(UUID groupId, String expectedTitle, String title) implements CanvasCommand {
 
-  record Ungroup(UUID groupId, List<UUID> memberNodeIds) implements CanvasCommand {
-    public Ungroup {
-      Objects.requireNonNull(groupId, "groupId");
-      Objects.requireNonNull(memberNodeIds, "memberNodeIds");
-      memberNodeIds = List.copyOf(memberNodeIds);
-      if (memberNodeIds.isEmpty()) {
-        throw new IllegalArgumentException("memberNodeIds must not be empty");
-      }
-      memberNodeIds.forEach(memberNodeId -> Objects.requireNonNull(memberNodeId, "memberNodeId"));
-    }
-  }
-
-  record DeleteGroup(UUID groupId) implements CanvasCommand {
-    public DeleteGroup {
-      Objects.requireNonNull(groupId, "groupId");
-    }
-  }
-
-  record RenameGroup(UUID groupId, String title) implements CanvasCommand {
     public RenameGroup {
       Objects.requireNonNull(groupId, "groupId");
-      CanvasValidation.requireNonBlank(title, "title");
+      CanvasValidation.requireName(expectedTitle, "expectedTitle");
+      title = CanvasValidation.requireName(title, "group title");
     }
   }
 
-  private static void validateLink(UUID sourceNodeId, UUID targetNodeId) {
-    Objects.requireNonNull(sourceNodeId, "sourceNodeId");
-    Objects.requireNonNull(targetNodeId, "targetNodeId");
-    if (Objects.equals(sourceNodeId, targetNodeId)) {
-      throw new IllegalArgumentException("sourceNodeId must differ from targetNodeId");
+  /** 更新分组几何，语义与 {@link UpdateNodeTransform} 的布局基线一致。 */
+  record UpdateGroupTransform(
+      UUID groupId, CanvasTransform transform, CanvasTransform expectedTransform)
+      implements CanvasCommand {
+
+    public UpdateGroupTransform {
+      Objects.requireNonNull(groupId, "groupId");
+      Objects.requireNonNull(transform, "transform");
+    }
+  }
+
+  /** 删除分组：前置条件是编辑起点的成员节点集合；成员节点在同批中解除分组。 */
+  record DeleteGroup(UUID groupId, List<UUID> expectedMemberNodeIds) implements CanvasCommand {
+
+    public DeleteGroup {
+      Objects.requireNonNull(groupId, "groupId");
+      expectedMemberNodeIds =
+          CanvasValidation.requireList(expectedMemberNodeIds, "expectedMemberNodeIds");
+      CanvasValidation.requireDistinct(expectedMemberNodeIds, "expectedMemberNodeIds");
     }
   }
 }

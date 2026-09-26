@@ -4,7 +4,6 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
-import fun.fengwk.kkstudio.canvas.CanvasLink;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 
@@ -21,19 +20,16 @@ public class PostgresqlCanvasStore implements CanvasStore {
   private final CanvasDocumentMapper documentMapper;
   private final CanvasNodeMapper nodeMapper;
   private final CanvasGroupMapper groupMapper;
-  private final CanvasLinkMapper linkMapper;
   private final CanvasCommandDedupMapper commandDedupMapper;
 
   public PostgresqlCanvasStore(
       CanvasDocumentMapper documentMapper,
       CanvasNodeMapper nodeMapper,
       CanvasGroupMapper groupMapper,
-      CanvasLinkMapper linkMapper,
       CanvasCommandDedupMapper commandDedupMapper) {
     this.documentMapper = Objects.requireNonNull(documentMapper, "documentMapper");
     this.nodeMapper = Objects.requireNonNull(nodeMapper, "nodeMapper");
     this.groupMapper = Objects.requireNonNull(groupMapper, "groupMapper");
-    this.linkMapper = Objects.requireNonNull(linkMapper, "linkMapper");
     this.commandDedupMapper = Objects.requireNonNull(commandDedupMapper, "commandDedupMapper");
   }
 
@@ -42,7 +38,6 @@ public class PostgresqlCanvasStore implements CanvasStore {
     CanvasDocumentDO document = new CanvasDocumentDO();
     document.setId(canvasId);
     document.setTitle(title);
-    document.setVersion(0L);
     if (documentMapper.insert(document) != 1) {
       throw new IllegalStateException("insert canvas document failed");
     }
@@ -81,8 +76,8 @@ public class PostgresqlCanvasStore implements CanvasStore {
   }
 
   @Override
-  public boolean advanceDocumentVersion(UUID canvasId, long expectedVersion, long newVersion) {
-    return documentMapper.compareAndSetVersion(canvasId, expectedVersion, newVersion) == 1;
+  public boolean advanceRevision(UUID canvasId, long expectedRevision, long newRevision) {
+    return documentMapper.advanceRevision(canvasId, expectedRevision, newRevision) == 1;
   }
 
   @Override
@@ -119,52 +114,8 @@ public class PostgresqlCanvasStore implements CanvasStore {
   }
 
   @Override
-  public boolean updateNodeTransform(NodeRecord node) {
-    return nodeMapper.updateTransform(toData(node)) == 1;
-  }
-
-  @Override
-  public boolean renameNode(UUID canvasId, UUID nodeId, String name) {
-    CanvasNodeDO node = new CanvasNodeDO();
-    node.setCanvasId(canvasId);
-    node.setId(nodeId);
-    node.setName(name);
-    return nodeMapper.updateName(node) == 1;
-  }
-
-  @Override
-  public boolean updateNodeFunction(
-      UUID canvasId, UUID nodeId, String modelKey, String functionConfigJson) {
-    CanvasNodeDO node = new CanvasNodeDO();
-    node.setCanvasId(canvasId);
-    node.setId(nodeId);
-    node.setModelKey(modelKey);
-    node.setFunctionConfigJson(functionConfigJson);
-    return nodeMapper.updateFunction(node) == 1;
-  }
-
-  @Override
-  public boolean attachNodeToGroupIfUngrouped(UUID canvasId, UUID nodeId, UUID groupId) {
-    CanvasNodeDO node = new CanvasNodeDO();
-    node.setCanvasId(canvasId);
-    node.setId(nodeId);
-    node.setGroupId(groupId);
-    return nodeMapper.attachGroupIfUngrouped(node) == 1;
-  }
-
-  @Override
-  public boolean detachNodeFromGroup(UUID canvasId, UUID groupId, UUID nodeId) {
-    return nodeMapper.detachGroupMember(canvasId, groupId, nodeId) == 1;
-  }
-
-  @Override
-  public int detachAllNodesFromGroup(UUID canvasId, UUID groupId) {
-    return nodeMapper.detachAllGroupMembers(canvasId, groupId);
-  }
-
-  @Override
-  public int moveGroupNodes(UUID canvasId, UUID groupId, double deltaX, double deltaY) {
-    return nodeMapper.moveGroupMembers(canvasId, groupId, deltaX, deltaY);
+  public boolean updateNode(NodeRecord node) {
+    return nodeMapper.update(toData(node)) == 1;
   }
 
   @Override
@@ -195,59 +146,13 @@ public class PostgresqlCanvasStore implements CanvasStore {
   }
 
   @Override
-  public boolean moveGroup(CanvasGroup group) {
-    return groupMapper.updatePosition(toData(group)) == 1;
-  }
-
-  @Override
-  public boolean renameGroup(UUID canvasId, UUID groupId, String title) {
-    CanvasGroupDO group = new CanvasGroupDO();
-    group.setCanvasId(canvasId);
-    group.setId(groupId);
-    group.setTitle(title);
-    return groupMapper.updateTitle(group) == 1;
+  public boolean updateGroup(CanvasGroup group) {
+    return groupMapper.update(toData(group)) == 1;
   }
 
   @Override
   public boolean deleteGroup(UUID canvasId, UUID groupId) {
     return groupMapper.deleteById(canvasId, groupId) == 1;
-  }
-
-  @Override
-  public void addLink(CanvasLink link) {
-    if (linkMapper.insert(toData(link)) != 1) {
-      throw new IllegalStateException(
-          "insert canvas link failed: " + link.sourceNodeId() + " -> " + link.targetNodeId());
-    }
-  }
-
-  @Override
-  public List<CanvasLink> listLinks(UUID canvasId) {
-    List<CanvasLink> links = new ArrayList<>();
-    for (CanvasLinkDO link : linkMapper.listByCanvas(canvasId)) {
-      links.add(toDomain(link));
-    }
-    return List.copyOf(links);
-  }
-
-  @Override
-  public boolean linkExists(UUID canvasId, UUID sourceNodeId, UUID targetNodeId) {
-    return linkMapper.exists(canvasId, sourceNodeId, targetNodeId) == 1;
-  }
-
-  @Override
-  public boolean deleteLink(UUID canvasId, UUID sourceNodeId, UUID targetNodeId) {
-    return linkMapper.delete(canvasId, sourceNodeId, targetNodeId) == 1;
-  }
-
-  @Override
-  public int deleteLinksByNode(UUID canvasId, UUID nodeId) {
-    return linkMapper.deleteByNode(canvasId, nodeId);
-  }
-
-  @Override
-  public int deleteLinksByCanvas(UUID canvasId) {
-    return linkMapper.deleteByCanvas(canvasId);
   }
 
   @Override
@@ -272,7 +177,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
     return new CanvasDocument(
         document.getId(),
         document.getTitle(),
-        document.getVersion(),
+        document.getRevision(),
         document.getCreatedAt().toInstant(),
         document.getUpdatedAt().toInstant());
   }
@@ -284,8 +189,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
         node.getName(),
         new CanvasTransform(node.getX(), node.getY(), node.getWidth(), node.getHeight()),
         node.getGroupId(),
-        node.getModelKey(),
-        node.getFunctionConfigJson());
+        CanvasNodeFunctionJson.decode(node.getFunctionJson()));
   }
 
   private static CanvasNodeDO toData(NodeRecord node) {
@@ -298,8 +202,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
     data.setWidth(node.transform().width());
     data.setHeight(node.transform().height());
     data.setGroupId(node.groupId());
-    data.setModelKey(node.modelKey());
-    data.setFunctionConfigJson(node.functionConfigJson());
+    data.setFunctionJson(CanvasNodeFunctionJson.encode(node.function()));
     return data;
   }
 
@@ -323,23 +226,12 @@ public class PostgresqlCanvasStore implements CanvasStore {
     return data;
   }
 
-  private static CanvasLink toDomain(CanvasLinkDO link) {
-    return new CanvasLink(link.getCanvasId(), link.getSourceNodeId(), link.getTargetNodeId());
-  }
-
-  private static CanvasLinkDO toData(CanvasLink link) {
-    CanvasLinkDO data = new CanvasLinkDO();
-    data.setCanvasId(link.canvasId());
-    data.setSourceNodeId(link.sourceNodeId());
-    data.setTargetNodeId(link.targetNodeId());
-    return data;
-  }
-
   private static CommandDedup toDomain(CanvasCommandDedupDO commandDedup) {
     return new CommandDedup(
         commandDedup.getCanvasId(),
         commandDedup.getIdempotencyKey(),
-        commandDedup.getRequestHash());
+        commandDedup.getRequestHash(),
+        commandDedup.getAcceptedRevision());
   }
 
   private static CanvasCommandDedupDO toData(CommandDedup commandDedup) {
@@ -347,6 +239,7 @@ public class PostgresqlCanvasStore implements CanvasStore {
     data.setCanvasId(commandDedup.canvasId());
     data.setIdempotencyKey(commandDedup.idempotencyKey());
     data.setRequestHash(commandDedup.requestHash());
+    data.setAcceptedRevision(commandDedup.acceptedRevision());
     return data;
   }
 }

@@ -37,20 +37,17 @@ public class PostgresqlCanvasFunctionResourcePinRepository
 
   @Override
   public List<CanvasFunctionResourcePin> findByRun(UUID canvasId, UUID nodeId, UUID requestId) {
-    List<CanvasFunctionResourcePin> refs = new ArrayList<>();
-    for (CanvasFunctionResourcePinDO ref : refMapper.findByRun(canvasId, nodeId, requestId)) {
-      refs.add(toDomain(ref));
-    }
-    return List.copyOf(refs);
+    return toDomain(refMapper.findByRun(canvasId, nodeId, requestId));
   }
 
   @Override
   public List<CanvasFunctionResourcePin> findByNode(UUID canvasId, UUID nodeId) {
-    List<CanvasFunctionResourcePin> refs = new ArrayList<>();
-    for (CanvasFunctionResourcePinDO ref : refMapper.findByNode(canvasId, nodeId)) {
-      refs.add(toDomain(ref));
-    }
-    return List.copyOf(refs);
+    return toDomain(refMapper.findByNode(canvasId, nodeId));
+  }
+
+  @Override
+  public List<CanvasFunctionResourcePin> findByCanvas(UUID canvasId) {
+    return toDomain(refMapper.findByCanvas(canvasId));
   }
 
   @Override
@@ -60,11 +57,7 @@ public class PostgresqlCanvasFunctionResourcePinRepository
 
   @Override
   public List<CanvasFunctionResourcePin> findRunningOutputPins(UUID canvasId, UUID resourceId) {
-    List<CanvasFunctionResourcePin> refs = new ArrayList<>();
-    for (CanvasFunctionResourcePinDO ref : refMapper.findRunningOutputPins(canvasId, resourceId)) {
-      refs.add(toDomain(ref));
-    }
-    return List.copyOf(refs);
+    return toDomain(refMapper.findRunningOutputPins(canvasId, resourceId));
   }
 
   @Override
@@ -82,13 +75,18 @@ public class PostgresqlCanvasFunctionResourcePinRepository
     return refMapper.deleteByCanvas(canvasId);
   }
 
-  private static CanvasFunctionResourcePin toDomain(CanvasFunctionResourcePinDO ref) {
-    return new CanvasFunctionResourcePin(
-        ref.getCanvasId(),
-        ref.getNodeId(),
-        ref.getRequestId(),
-        ref.getResourceId(),
-        CanvasFunctionResourcePin.Role.valueOf(ref.getRole()));
+  private static List<CanvasFunctionResourcePin> toDomain(List<CanvasFunctionResourcePinDO> refs) {
+    List<CanvasFunctionResourcePin> pins = new ArrayList<>(refs.size());
+    for (CanvasFunctionResourcePinDO ref : refs) {
+      pins.add(
+          new CanvasFunctionResourcePin(
+              ref.getCanvasId(),
+              ref.getNodeId(),
+              ref.getRequestId(),
+              ref.getResourceId(),
+              CanvasFunctionResourcePin.Role.valueOf(ref.getRole())));
+    }
+    return List.copyOf(pins);
   }
 
   private static CanvasFunctionResourcePinDO toDO(CanvasFunctionResourcePin ref) {

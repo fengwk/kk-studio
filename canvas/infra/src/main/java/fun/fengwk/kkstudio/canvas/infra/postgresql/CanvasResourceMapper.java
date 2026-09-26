@@ -84,13 +84,6 @@ public interface CanvasResourceMapper extends BaseMapper {
   List<CanvasResourceDO> listByOwnerNode(
       @Param("canvasId") UUID canvasId, @Param("nodeId") UUID nodeId);
 
-  @Select(
-      "select "
-          + COLUMNS
-          + " from canvas_resource where owner_node_id = #{nodeId} order by resource_index")
-  @ResultMap("canvasResourceMap")
-  List<CanvasResourceDO> listByOwnerNodeId(@Param("nodeId") UUID nodeId);
-
   @Delete("delete from canvas_resource where canvas_id = #{canvasId} and id = #{id}")
   int delete(@Param("canvasId") UUID canvasId, @Param("id") UUID id);
 
@@ -121,20 +114,6 @@ public interface CanvasResourceMapper extends BaseMapper {
       @Param("id") UUID id,
       @Param("ownerNodeId") UUID ownerNodeId,
       @Param("resourceIndex") int resourceIndex);
-
-  /** 更新文本节点唯一文本资源（resource_index = 0）的正文；普通节点无匹配返回 0。 */
-  @Update(
-      """
-      update canvas_resource
-      set text_content = #{textContent}
-      where canvas_id = #{canvasId}
-        and owner_node_id = #{nodeId}
-        and resource_index = 0
-      """)
-  int updateTextContent(
-      @Param("canvasId") UUID canvasId,
-      @Param("nodeId") UUID nodeId,
-      @Param("textContent") String textContent);
 
   @Delete("delete from canvas_resource where canvas_id = #{canvasId} and owner_node_id = #{nodeId}")
   int deleteByOwnerNode(@Param("canvasId") UUID canvasId, @Param("nodeId") UUID nodeId);

@@ -66,15 +66,6 @@ public class PostgresqlCanvasResourceRepository implements CanvasResourceReposit
   }
 
   @Override
-  public List<CanvasResource> findByOwnerNodeId(UUID nodeId) {
-    List<CanvasResource> resources = new ArrayList<>();
-    for (CanvasResourceDO resource : resourceMapper.listByOwnerNodeId(nodeId)) {
-      resources.add(toDomain(resource));
-    }
-    return List.copyOf(resources);
-  }
-
-  @Override
   public boolean detachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId) {
     return resourceMapper.detachOwner(canvasId, resourceId, ownerNodeId) == 1;
   }
@@ -82,11 +73,6 @@ public class PostgresqlCanvasResourceRepository implements CanvasResourceReposit
   @Override
   public boolean attachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId, int resourceIndex) {
     return resourceMapper.attachOwner(canvasId, resourceId, ownerNodeId, resourceIndex) == 1;
-  }
-
-  @Override
-  public boolean updateTextContent(UUID canvasId, UUID nodeId, String textContent) {
-    return resourceMapper.updateTextContent(canvasId, nodeId, textContent) == 1;
   }
 
   @Override

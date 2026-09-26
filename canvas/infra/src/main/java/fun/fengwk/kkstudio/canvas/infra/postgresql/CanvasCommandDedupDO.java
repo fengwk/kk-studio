@@ -10,4 +10,5 @@ public class CanvasCommandDedupDO {
   private UUID canvasId;
   private UUID idempotencyKey;
   private String requestHash;
+  private Long acceptedRevision;
 }

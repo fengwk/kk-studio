@@ -19,17 +19,15 @@ import java.util.UUID;
 public interface CanvasNodeMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, canvas_id, name, x, y, width, height, group_id, model_key, function_config_json";
+      "id, canvas_id, name, x, y, width, height, group_id, \"function\"::text as function_json";
 
   @Insert(
       """
       insert into canvas_node (
-          id, canvas_id, name, x, y, width, height,
-          group_id, model_key, function_config_json
+          id, canvas_id, name, x, y, width, height, group_id, "function"
       ) values (
-          #{id}, #{canvasId}, #{name},
-          #{x}, #{y}, #{width}, #{height}, #{groupId}, #{modelKey},
-          cast(#{functionConfigJson} as jsonb)
+          #{id}, #{canvasId}, #{name}, #{x}, #{y}, #{width}, #{height}, #{groupId},
+          cast(#{functionJson} as jsonb)
       )
       """)
   int insert(CanvasNodeDO node);
@@ -45,8 +43,7 @@ public interface CanvasNodeMapper extends BaseMapper {
         @Result(column = "width", property = "width"),
         @Result(column = "height", property = "height"),
         @Result(column = "group_id", property = "groupId"),
-        @Result(column = "model_key", property = "modelKey"),
-        @Result(column = "function_config_json", property = "functionConfigJson")
+        @Result(column = "function_json", property = "functionJson")
       })
   @Select("select " + COLUMNS + " from canvas_node where canvas_id = #{canvasId} order by id")
   List<CanvasNodeDO> listByCanvas(@Param("canvasId") UUID canvasId);
@@ -65,62 +62,11 @@ public interface CanvasNodeMapper extends BaseMapper {
   @Update(
       """
       update canvas_node
-      set x = #{x}, y = #{y}, width = #{width}, height = #{height}
+      set name = #{name}, x = #{x}, y = #{y}, width = #{width}, height = #{height},
+          group_id = #{groupId}, "function" = cast(#{functionJson} as jsonb)
       where id = #{id} and canvas_id = #{canvasId}
       """)
-  int updateTransform(CanvasNodeDO node);
-
-  @Update(
-      """
-      update canvas_node
-      set name = #{name}
-      where id = #{id} and canvas_id = #{canvasId}
-      """)
-  int updateName(CanvasNodeDO node);
-
-  @Update(
-      """
-      update canvas_node
-      set model_key = #{modelKey}, function_config_json = cast(#{functionConfigJson} as jsonb)
-      where id = #{id} and canvas_id = #{canvasId} and model_key is not null
-      """)
-  int updateFunction(CanvasNodeDO node);
-
-  @Update(
-      """
-      update canvas_node
-      set group_id = #{groupId}
-      where id = #{id} and canvas_id = #{canvasId} and group_id is null
-      """)
-  int attachGroupIfUngrouped(CanvasNodeDO node);
-
-  @Update(
-      """
-      update canvas_node
-      set group_id = null
-      where id = #{nodeId} and canvas_id = #{canvasId} and group_id = #{groupId}
-      """)
-  int detachGroupMember(
-      @Param("canvasId") UUID canvasId,
-      @Param("groupId") UUID groupId,
-      @Param("nodeId") UUID nodeId);
-
-  @Update(
-      "update canvas_node set group_id = null"
-          + " where canvas_id = #{canvasId} and group_id = #{groupId}")
-  int detachAllGroupMembers(@Param("canvasId") UUID canvasId, @Param("groupId") UUID groupId);
-
-  @Update(
-      """
-      update canvas_node
-      set x = x + #{deltaX}, y = y + #{deltaY}
-      where canvas_id = #{canvasId} and group_id = #{groupId}
-      """)
-  int moveGroupMembers(
-      @Param("canvasId") UUID canvasId,
-      @Param("groupId") UUID groupId,
-      @Param("deltaX") double deltaX,
-      @Param("deltaY") double deltaY);
+  int update(CanvasNodeDO node);
 
   @Delete("delete from canvas_node where id = #{id} and canvas_id = #{canvasId}")
   int deleteById(@Param("canvasId") UUID canvasId, @Param("id") UUID id);

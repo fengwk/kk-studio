@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.util.UUID;
 
-/** {@code canvas_node} 行映射。 */
+/** {@code canvas_node} 行映射；{@code functionJson} 是 base shape {@code {name,args}} 的 JSONB 文本。 */
 @Data
 public class CanvasNodeDO {
   private UUID id;
@@ -15,6 +15,5 @@ public class CanvasNodeDO {
   private Double width;
   private Double height;
   private UUID groupId;
-  private String modelKey;
-  private String functionConfigJson;
+  private String functionJson;
 }

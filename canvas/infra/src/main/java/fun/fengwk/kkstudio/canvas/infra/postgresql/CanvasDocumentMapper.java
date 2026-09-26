@@ -18,12 +18,12 @@ import java.util.UUID;
 @Mapper
 public interface CanvasDocumentMapper extends BaseMapper {
 
-  String COLUMNS = "id, title, version, created_at, updated_at";
+  String COLUMNS = "id, title, revision, created_at, updated_at";
 
   @Insert(
       """
-      insert into canvas_document (id, title, version, created_at, updated_at)
-      values (#{id}, #{title}, #{version}, current_timestamp, current_timestamp)
+      insert into canvas_document (id, title, revision, created_at, updated_at)
+      values (#{id}, #{title}, 0, current_timestamp, current_timestamp)
       """)
   int insert(CanvasDocumentDO document);
 
@@ -32,7 +32,7 @@ public interface CanvasDocumentMapper extends BaseMapper {
       value = {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
-        @Result(column = "version", property = "version"),
+        @Result(column = "revision", property = "revision"),
         @Result(column = "created_at", property = "createdAt"),
         @Result(column = "updated_at", property = "updatedAt")
       })
@@ -52,26 +52,17 @@ public interface CanvasDocumentMapper extends BaseMapper {
   @ResultMap("canvasDocumentMap")
   List<CanvasDocumentDO> listAll();
 
-  /** CAS 递增 graph 版本：仅当当前版本等于 expected 时前进，返回受影响行数。 */
+  /** CAS 推进同步位置：仅当当前 revision 等于 expected 时前进，返回受影响行数。 */
   @Update(
       """
       update canvas_document
-      set version = #{newVersion}, updated_at = greatest(updated_at, clock_timestamp())
-      where id = #{id} and version = #{expectedVersion}
+      set revision = #{newRevision}, updated_at = greatest(updated_at, clock_timestamp())
+      where id = #{id} and revision = #{expectedRevision}
       """)
-  int compareAndSetVersion(
+  int advanceRevision(
       @Param("id") UUID id,
-      @Param("expectedVersion") long expectedVersion,
-      @Param("newVersion") long newVersion);
-
-  /** 行锁内单语句递增版本（Function Run 状态前进等非命令路径）。 */
-  @Update(
-      """
-      update canvas_document
-      set version = version + 1, updated_at = greatest(updated_at, clock_timestamp())
-      where id = #{id}
-      """)
-  int incrementVersion(@Param("id") UUID id);
+      @Param("expectedRevision") long expectedRevision,
+      @Param("newRevision") long newRevision);
 
   @Delete("delete from canvas_document where id = #{id}")
   int deleteById(@Param("id") UUID id);
