@@ -11,7 +11,8 @@ import java.util.UUID;
 /**
  * 一次 Tool Invocation 的持久化当前状态。
  *
- * <p>直接持有冻结的 {@code call} 与可空 {@code binding}，不保留冗余的持久化 request 包装。{@code attempt}
+ * <p>直接持有冻结的 {@code call} 与可空 {@code binding}，不保留冗余的持久化 request 包装；{@code inputReceipt} 只在
+ * 内部人工输入工具（{@code ask_user}）被回答后随 SUCCEEDED 出现，是该回答的 durable 提交回执。{@code attempt}
  * 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带
  * terminal 事实。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry：batch apply 后行被物理删除。
  *
@@ -33,9 +34,10 @@ public record ToolInvocation(
     ToolEffectBatch effects,
     ToolInvocationError error,
     Instant createdAt,
-    Instant updatedAt) {
+    Instant updatedAt,
+    ToolInputReceipt inputReceipt) {
 
-  /** 构造不携带 branch effects 的 invocation；普通 Tool 与非成功状态使用此便捷入口。 */
+  /** 构造不携带 branch effects 与人工输入回执的 invocation；普通 Tool 与非成功状态使用此便捷入口。 */
   public ToolInvocation(
       UUID id,
       UUID modelInvocationId,
@@ -64,7 +66,42 @@ public record ToolInvocation(
         ToolEffectBatch.EMPTY,
         error,
         createdAt,
-        updatedAt);
+        updatedAt,
+        null);
+  }
+
+  /** 构造携带 branch effects、但不携带人工输入回执的 invocation。 */
+  public ToolInvocation(
+      UUID id,
+      UUID modelInvocationId,
+      UUID assistantEntryId,
+      int callIndex,
+      ToolCall call,
+      ToolBinding binding,
+      ToolInvocationStatus status,
+      int attempt,
+      ToolApproval approval,
+      ToolResult result,
+      ToolEffectBatch effects,
+      ToolInvocationError error,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        modelInvocationId,
+        assistantEntryId,
+        callIndex,
+        call,
+        binding,
+        status,
+        attempt,
+        approval,
+        result,
+        effects,
+        error,
+        createdAt,
+        updatedAt,
+        null);
   }
 
   public ToolInvocation {
@@ -80,7 +117,7 @@ public record ToolInvocation(
       throw new IllegalArgumentException("attempt must not be negative");
     }
     effects = Objects.requireNonNull(effects, "effects");
-    validateStatusFields(status, attempt, approval, result, effects, error, call);
+    validateStatusFields(status, attempt, approval, result, effects, error, call, inputReceipt);
     validateBindingConstraint(status, attempt, call, binding);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
@@ -113,6 +150,7 @@ public record ToolInvocation(
     requireLegalStatusMove(stored.status(), next.status());
     requireAttemptDelta(stored, next, attemptDelta);
     requireApprovalRules(stored, next);
+    requireInputReceiptRules(stored, next);
     if (stored.status().isTerminal()) {
       requireTerminalImmutability(stored, next);
     }
@@ -140,8 +178,12 @@ public record ToolInvocation(
               || next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.FAILED
               || next == ToolInvocationStatus.CANCELLED;
+          case WAITING_INPUT -> next == ToolInvocationStatus.WAITING_INPUT
+              || next == ToolInvocationStatus.SUCCEEDED
+              || next == ToolInvocationStatus.CANCELLED;
           case READY -> next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.WAITING_APPROVAL
+              || next == ToolInvocationStatus.WAITING_INPUT
               || next == ToolInvocationStatus.DISPATCHING
               || next == ToolInvocationStatus.FAILED
               || next == ToolInvocationStatus.CANCELLED;
@@ -243,12 +285,36 @@ public record ToolInvocation(
     }
   }
 
+  /**
+   * input receipt 只能从“无回执的 WAITING_INPUT”引入到“已回答的 SUCCEEDED”，引入后不可变；terminal 行的回执由 {@link
+   * #requireTerminalImmutability} 保证不变。
+   */
+  private static void requireInputReceiptRules(ToolInvocation stored, ToolInvocation next) {
+    ToolInputReceipt storedReceipt = stored.inputReceipt();
+    ToolInputReceipt nextReceipt = next.inputReceipt();
+    if (storedReceipt != null) {
+      if (!storedReceipt.equals(nextReceipt)) {
+        throw new IllegalArgumentException("an accepted input receipt must not change");
+      }
+      return;
+    }
+    if (nextReceipt == null) {
+      return;
+    }
+    if (stored.status() != ToolInvocationStatus.WAITING_INPUT
+        || next.status() != ToolInvocationStatus.SUCCEEDED) {
+      throw new IllegalArgumentException(
+          "an input receipt may only be introduced by answering WAITING_INPUT as SUCCEEDED");
+    }
+  }
+
   private static void requireTerminalImmutability(ToolInvocation stored, ToolInvocation next) {
     if (stored.status() != next.status()
         || stored.attempt() != next.attempt()
         || !Objects.equals(stored.result(), next.result())
         || !stored.effects().equals(next.effects())
-        || !Objects.equals(stored.error(), next.error())) {
+        || !Objects.equals(stored.error(), next.error())
+        || !Objects.equals(stored.inputReceipt(), next.inputReceipt())) {
       throw new IllegalArgumentException("terminal tool invocation facts must not change");
     }
   }
@@ -285,6 +351,42 @@ public record ToolInvocation(
         ToolEffectBatch.EMPTY,
         null,
         effectiveNow);
+  }
+
+  /**
+   * READY（attempt 0、无 approval） -&gt; WAITING_INPUT：内部人工输入工具已接受调用，冻结问卷等待用户回答。
+   *
+   * <p>等待不进入 DISPATCHING、不消耗 attempt，也不产生 approval：问卷不能授权工具，YOLO 也不代替用户回答。
+   */
+  public ToolInvocation requestInput(Instant now) {
+    if (status != ToolInvocationStatus.READY || attempt != 0 || approval != null) {
+      throw new IllegalArgumentException(
+          "requestInput requires a READY invocation with attempt 0 and no approval");
+    }
+    return withState(
+        ToolInvocationStatus.WAITING_INPUT, attempt, null, null, ToolEffectBatch.EMPTY, null, now);
+  }
+
+  /**
+   * WAITING_INPUT -&gt; SUCCEEDED：用户已提交冻结问卷的答案（或明确拒答），结果与 durable 回执同事务落盘。
+   *
+   * <p>人工作答不是执行：attempt 保持 0、不携带 approval；回执只用于结果进入 Entry 前的重试与崩溃恢复。
+   */
+  public ToolInvocation acceptInput(ToolResult result, ToolInputReceipt receipt, Instant now) {
+    Objects.requireNonNull(result, "result");
+    Objects.requireNonNull(receipt, "receipt");
+    if (status != ToolInvocationStatus.WAITING_INPUT) {
+      throw new IllegalArgumentException("acceptInput requires WAITING_INPUT status");
+    }
+    return withState(
+        ToolInvocationStatus.SUCCEEDED,
+        attempt,
+        null,
+        result,
+        ToolEffectBatch.EMPTY,
+        null,
+        receipt,
+        now);
   }
 
   /**
@@ -444,7 +546,10 @@ public record ToolInvocation(
         now);
   }
 
-  /** 仅替换给定的当前状态字段来复制本行，并在同一处校验转换；identity、frozen call/binding 与 createdAt 通过构造得以保留。 */
+  /**
+   * 仅替换给定的当前状态字段来复制本行（inputReceipt 原样保留），并在同一处校验转换；identity、frozen call/binding 与 createdAt
+   * 通过构造得以保留。
+   */
   private ToolInvocation withState(
       ToolInvocationStatus status,
       int attempt,
@@ -452,6 +557,22 @@ public record ToolInvocation(
       ToolResult result,
       ToolEffectBatch effects,
       ToolInvocationError error,
+      Instant now) {
+    return withState(status, attempt, approval, result, effects, error, inputReceipt, now);
+  }
+
+  /**
+   * 与 {@link #withState(ToolInvocationStatus, int, ToolApproval, ToolResult, ToolEffectBatch,
+   * ToolInvocationError, Instant)} 相同，但显式指定 inputReceipt（仅接受回答时写入，其余转换原样保留）。
+   */
+  private ToolInvocation withState(
+      ToolInvocationStatus status,
+      int attempt,
+      ToolApproval approval,
+      ToolResult result,
+      ToolEffectBatch effects,
+      ToolInvocationError error,
+      ToolInputReceipt inputReceipt,
       Instant now) {
     ToolInvocation next =
         new ToolInvocation(
@@ -468,7 +589,8 @@ public record ToolInvocation(
             effects,
             error,
             createdAt,
-            effectiveMutationTime(now));
+            effectiveMutationTime(now),
+            inputReceipt);
     validateTransition(this, next);
     return next;
   }
@@ -519,7 +641,8 @@ public record ToolInvocation(
       ToolResult result,
       ToolEffectBatch effects,
       ToolInvocationError error,
-      ToolCall call) {
+      ToolCall call,
+      ToolInputReceipt inputReceipt) {
     if (status == ToolInvocationStatus.WAITING_APPROVAL) {
       if (approval == null || !approval.required() || !approval.isUndecided()) {
         throw new IllegalArgumentException(
@@ -529,25 +652,36 @@ public record ToolInvocation(
         throw new IllegalArgumentException("WAITING_APPROVAL requires attempt 0");
       }
       requireNoTerminalFacts(status, result, effects, error);
+      requireNoInputReceipt(status, inputReceipt);
+    } else if (status == ToolInvocationStatus.WAITING_INPUT) {
+      if (attempt != 0) {
+        throw new IllegalArgumentException("WAITING_INPUT requires attempt 0");
+      }
+      if (approval != null) {
+        throw new IllegalArgumentException(
+            "WAITING_INPUT must not carry an approval: a questionnaire never authorizes a tool");
+      }
+      requireNoTerminalFacts(status, result, effects, error);
+      requireNoInputReceipt(status, inputReceipt);
     } else if (status == ToolInvocationStatus.READY) {
       requireNoTerminalFacts(status, result, effects, error);
+      requireNoInputReceipt(status, inputReceipt);
       if (approval != null
           && (approval.isUndecided() || approval.decision() == ToolApprovalDecision.DENIED)) {
         throw new IllegalArgumentException("READY must not carry an undecided or denied approval");
       }
     } else if (status == ToolInvocationStatus.DISPATCHING) {
       requireNoTerminalFacts(status, result, effects, error);
+      requireNoInputReceipt(status, inputReceipt);
       requireCompletedPreflightApproval(status, approval);
     } else if (status == ToolInvocationStatus.RUNNING) {
       if (attempt <= 0) {
         throw new IllegalArgumentException("RUNNING requires a positive attempt");
       }
       requireNoTerminalFacts(status, result, effects, error);
+      requireNoInputReceipt(status, inputReceipt);
       requireCompletedPreflightApproval(status, approval);
     } else if (status == ToolInvocationStatus.SUCCEEDED) {
-      if (attempt <= 0) {
-        throw new IllegalArgumentException("SUCCEEDED requires a positive attempt");
-      }
       if (result == null) {
         throw new IllegalArgumentException("SUCCEEDED requires a result");
       }
@@ -558,7 +692,20 @@ public record ToolInvocation(
       if (error != null) {
         throw new IllegalArgumentException("SUCCEEDED must not carry an error");
       }
-      requireCompletedPreflightApproval(status, approval);
+      if (inputReceipt == null) {
+        if (attempt <= 0) {
+          throw new IllegalArgumentException("SUCCEEDED requires a positive attempt");
+        }
+        requireCompletedPreflightApproval(status, approval);
+      } else {
+        // 人工作答不是执行：attempt 保持 0，且不经过任何 tool approval 门禁。
+        if (attempt != 0) {
+          throw new IllegalArgumentException("an answered invocation must keep attempt 0");
+        }
+        if (approval != null) {
+          throw new IllegalArgumentException("an answered invocation must not carry an approval");
+        }
+      }
     } else if (status == ToolInvocationStatus.UNKNOWN) {
       if (attempt <= 0) {
         throw new IllegalArgumentException("UNKNOWN requires a positive attempt");
@@ -571,6 +718,7 @@ public record ToolInvocation(
       }
       requireEmptyEffects(status, effects);
       requireCompletedPreflightApproval(status, approval);
+      requireNoInputReceipt(status, inputReceipt);
     } else if (status == ToolInvocationStatus.FAILED) {
       if (approval != null && approval.isUndecided()) {
         throw new IllegalArgumentException("FAILED must not carry an undecided approval");
@@ -581,6 +729,7 @@ public record ToolInvocation(
       if (result != null) {
         throw new IllegalArgumentException("FAILED must not carry a result");
       }
+      requireNoInputReceipt(status, inputReceipt);
       requireEmptyEffects(status, effects);
     } else {
       if (error == null) {
@@ -589,6 +738,7 @@ public record ToolInvocation(
       if (result != null) {
         throw new IllegalArgumentException(status + " must not carry a result");
       }
+      requireNoInputReceipt(status, inputReceipt);
       requireEmptyEffects(status, effects);
     }
   }
@@ -598,6 +748,15 @@ public record ToolInvocation(
     if (approval == null
         || (approval.required() && approval.decision() != ToolApprovalDecision.ALLOWED)) {
       throw new IllegalArgumentException(status + " requires a completed preflight approval");
+    }
+  }
+
+  /** 输入回执是“回答已被接受”的 durable 事实，只允许与 SUCCEEDED + result 同时存在。 */
+  private static void requireNoInputReceipt(
+      ToolInvocationStatus status, ToolInputReceipt inputReceipt) {
+    if (inputReceipt != null) {
+      throw new IllegalArgumentException(
+          status + " must not carry an input receipt: only an answered success records one");
     }
   }
 

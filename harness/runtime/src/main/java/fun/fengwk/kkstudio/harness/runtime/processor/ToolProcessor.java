@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -125,6 +127,7 @@ public final class ToolProcessor implements AutoCloseable {
         return switch (prepare) {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
+          case Prepare.Input input -> requestInput(claim, input.threadId());
           case Prepare.Preflight preflight -> preflight(claim, preflight);
           case Prepare.Allowed allowed -> applyPreflightAllow(
               claim,
@@ -207,18 +210,19 @@ public final class ToolProcessor implements AutoCloseable {
     }
     return switch (tool.status()) {
       case READY -> prepareReady(tx, claim, thread, model, tool, now);
-      case WAITING_APPROVAL -> waitingApproval(tx, claim, now);
+      case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
       case DISPATCHING, RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
     };
   }
 
   /**
-   * READY：approval null 走 preflight（ensure 完整 lease margin 后事务外执行，期间 heartbeat 维持 lease）；completed
-   * approval 同事务 beginDispatch + version+1 后直接 admission。
+   * READY：内部人工输入工具在锁内直接冻结为 WAITING_INPUT；其它调用 approval null 走 preflight（ensure 完整 lease margin
+   * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 同事务 beginDispatch + version+1 后直接 admission。
    *
    * <p>YOLO 决策在锁内完成：锁 Thread 后读取的 {@code yoloEnabled} 为 true 时直接返回 {@link Prepare.Allowed}（一次
    * preflight 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的 admission）；false 才走普通 gateway preflight。
+   * 人输入判定先于 YOLO 与 preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
    */
   private Prepare prepareReady(
       HarnessStore.Transaction tx,
@@ -230,6 +234,9 @@ public final class ToolProcessor implements AutoCloseable {
     Optional<Work> claimed = tx.lockClaimedWork(claim, now);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
+    }
+    if (HumanInputTool.isHumanInputTool(tool.binding())) {
+      return new Prepare.Input(thread.id());
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, claimed.get(), config.leaseConfig(), now);
@@ -247,8 +254,11 @@ public final class ToolProcessor implements AutoCloseable {
     return new Prepare.Dispatched(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
   }
 
-  /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不 request THREAD。 */
-  private Prepare waitingApproval(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
+  /**
+   * WAITING_APPROVAL / WAITING_INPUT 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不
+   * request THREAD。两类等待都由用户侧显式决策/作答唤醒，不占用 Worker、不重排执行。
+   */
+  private Prepare waitingForHuman(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       return new Prepare.Lost();
     }
@@ -274,6 +284,69 @@ public final class ToolProcessor implements AutoCloseable {
     tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim, now);
     return new Prepare.Terminated();
+  }
+
+  /**
+   * 内部人工输入：READY -&gt; WAITING_INPUT，version+1，complete TOOL Work，不 request THREAD、不进入 preflight /
+   * gateway。
+   *
+   * <p>问卷必须在接受时就能解析：解析失败说明 {@code ask_user} 契约被破坏（工具实现与运行时契约漂移），此时以确定性失败收敛并唤醒
+   * Thread，让模型看到无效调用，而不是冻结一个无法作答的等待。提交前二次校验 claim + READY + attempt 0 + approval null，lost 完整
+   * no-op。错误信息只报告原因，不回显问卷原文。
+   */
+  private ProcessResult requestInput(ClaimedWork claim, UUID threadId) {
+    Instant now = clock.instant();
+    boolean committed =
+        Boolean.TRUE.equals(
+            store.transaction(
+                tx -> {
+                  ThreadState thread = tx.lockThread(threadId).orElse(null);
+                  if (thread == null) {
+                    return false;
+                  }
+                  ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
+                  if (tool == null || !isFrozenReadyInput(tool)) {
+                    return false;
+                  }
+                  // 破坏契约的问卷以失败收敛并唤醒 Thread；Work 锁必须按 (type, id) 升序获取，因此先 request THREAD。
+                  boolean answerable = isFrozenQuestionnaire(tool);
+                  if (!answerable) {
+                    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+                  }
+                  if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                    throw new ClaimLostSignal();
+                  }
+                  tx.updateToolInvocations(
+                      List.of(
+                          answerable
+                              ? tool.requestInput(now)
+                              : tool.fail(
+                                  new ToolInvocationError(
+                                      INVALID_QUESTIONNAIRE_KIND,
+                                      "ask_user invocation does not carry a valid questionnaire"),
+                                  now)));
+                  tx.updateThread(thread.touchVersion(now));
+                  tx.completeWork(claim, now);
+                  return true;
+                }));
+    return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
+  }
+
+  /** 只有尚未审批、尚未执行（READY + attempt 0 + approval null）的调用才能被冻结为等待或确定性失败。 */
+  private static boolean isFrozenReadyInput(ToolInvocation tool) {
+    return tool.status() == ToolInvocationStatus.READY
+        && tool.attempt() == 0
+        && tool.approval() == null;
+  }
+
+  /** 冻结问卷是否可解析；失败只说明契约被破坏，绝不写回问题原文。 */
+  private static boolean isFrozenQuestionnaire(ToolInvocation tool) {
+    try {
+      INPUT_JSON.decodeQuestionnaire(tool.call().argumentsJson());
+      return true;
+    } catch (IllegalArgumentException invalid) {
+      return false;
+    }
   }
 
   /**
@@ -751,6 +824,11 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /** 内部回滚信号：最终 Work ownership fence 失败时使当前事务完整回滚。 */
+  /** 冻结问卷无法解析时的确定性错误 kind：契约漂移，可重试前提是工具实现修好。 */
+  private static final String INVALID_QUESTIONNAIRE_KIND = "INVALID_QUESTIONNAIRE";
+
+  private static final HumanInputJsonCodec INPUT_JSON = new HumanInputJsonCodec();
+
   private static final class ClaimLostSignal extends RuntimeException {
     private ClaimLostSignal() {
       super("claimed work lost at final fence", null, false, false);
@@ -759,12 +837,16 @@ public final class ToolProcessor implements AutoCloseable {
 
   private sealed interface Prepare
       permits Prepare.Lost,
+          Prepare.Input,
           Prepare.Preflight,
           Prepare.Allowed,
           Prepare.Dispatched,
           Prepare.Terminated {
 
     record Lost() implements Prepare {}
+
+    /** 内部人工输入工具：READY 边界已冻结为 WAITING_INPUT，不再进入 preflight / gateway。 */
+    record Input(UUID threadId) implements Prepare {}
 
     /** 普通 gateway preflight（锁内 YOLO 快照为 false）。 */
     record Preflight(

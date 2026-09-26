@@ -502,7 +502,8 @@ final class StopControl {
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
           switch (sibling.status()) {
-            case WAITING_APPROVAL, READY -> sibling.cancel(TOOL_CANCELLED_ERROR, now);
+            case WAITING_APPROVAL, WAITING_INPUT, READY -> sibling.cancel(
+                TOOL_CANCELLED_ERROR, now);
             case DISPATCHING, RUNNING -> sibling.unknown(TOOL_UNKNOWN_ERROR, now);
             case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
           };

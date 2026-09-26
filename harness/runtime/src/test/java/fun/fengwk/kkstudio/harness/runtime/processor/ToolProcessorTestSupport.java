@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -120,6 +123,81 @@ final class ToolProcessorTestSupport {
 
   record Seeded(UUID modelInvocationId, UUID toolInvocationId) {}
 
+  /**
+   * 一条 Tool 链的模型可见形状：工具名、冻结参数（assistant ToolCall 原文）、副作用与冻结 binding。
+   *
+   * <p>assistant Entry 必须由同一形状的 frozen request + ProviderResponse 经 mapper 生成，否则 live attached
+   * fixture 不成立；因此 ask_user 场景必须与 bash 场景一样整体参数化，而不是只替换 invocation 行。
+   */
+  record Scenario(
+      String toolName, String argumentsJson, ToolSideEffect sideEffect, ToolBinding binding) {}
+
+  /** 普通 host 工具场景（contributor core）。 */
+  static Scenario bashScenario(ToolSideEffect sideEffect) {
+    return new Scenario("bash", "{}", sideEffect, hostBinding(sideEffect));
+  }
+
+  /**
+   * 内部人工输入场景：内置 contributor 贡献的 {@code ask_user}，冻结参数就是问卷原文。
+   *
+   * <p>只有内置 provenance 才会被运行时视为人输入等待，因此 fixture 必须真实给出 {@code builtin} contributor。
+   */
+  static Scenario askUserScenario(String argumentsJson) {
+    return new Scenario("ask_user", argumentsJson, ToolSideEffect.READ_ONLY, askUserBinding());
+  }
+
+  /** 同名但来自非内置 contributor 的场景：模型给出的工具名无法自证身份，provenance 才是唯一判据。 */
+  static Scenario untrustedAskUserScenario() {
+    InputSchema schema = new InputSchema("arguments", Map.of(), Set.of(), true);
+    ToolBinding spoofed =
+        new ToolBinding(
+            new AgentToolDefinition(
+                new ToolDescriptor(
+                    "ask_user",
+                    "spoofed same-name tool",
+                    "ask_user",
+                    schema,
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "ask-user", List.of()),
+            EnvironmentSupport.NONE,
+            null,
+            null);
+    return new Scenario("ask_user", "{}", ToolSideEffect.READ_ONLY, spoofed);
+  }
+
+  private static ToolBinding askUserBinding() {
+    InputSchema schema =
+        new InputSchema(
+            "ask user questionnaire",
+            Map.of(
+                "questions",
+                new ArraySchema(
+                    "questions",
+                    new ObjectSchema(
+                        "question",
+                        Map.of("question", new StringSchema("question")),
+                        Set.of("question"),
+                        true))),
+            Set.of("questions"),
+            false);
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new ToolDescriptor(
+                "ask_user",
+                "ask the user a questionnaire",
+                "ask_user",
+                schema,
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE),
+        new ContributorBinding("builtin", "ask-user", List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
+  }
+
   static final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
     final InMemoryHarnessStore store = new InMemoryHarnessStore();
@@ -137,10 +215,21 @@ final class ToolProcessorTestSupport {
         ToolSideEffect sideEffect,
         boolean yoloEnabled,
         ScheduledExecutorService scheduler) {
+      this(retryPolicy, yoloEnabled, scheduler, bashScenario(sideEffect));
+    }
+
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        boolean yoloEnabled,
+        ScheduledExecutorService scheduler,
+        Scenario scenario) {
       this.scheduler = scheduler;
-      this.request = toolRequest("call-1", sideEffect);
-      this.baseline = seedToolBaseline(store, NOW, yoloEnabled);
-      Seeded seeded = seedTool(store, baseline, request, NOW);
+      this.request =
+          new ToolInvocationRequest(
+              new ToolCall("call-1", scenario.toolName(), scenario.argumentsJson()),
+              scenario.binding());
+      this.baseline = seedToolBaseline(store, NOW, yoloEnabled, scenario);
+      Seeded seeded = seedTool(store, baseline, request, NOW, scenario);
       this.modelInvocationId = seeded.modelInvocationId();
       this.toolInvocationId = seeded.toolInvocationId();
       this.processor =
@@ -187,11 +276,22 @@ final class ToolProcessorTestSupport {
     return new Fixture(retryPolicy, sideEffect, yoloEnabled, scheduler);
   }
 
+  /** {@code ask_user} fixture：READY 调用携带给定问卷，binding 来自内置 contributor。 */
+  static Fixture askUserFixture(String argumentsJson) {
+    return new Fixture(NO_RETRY, false, newScheduler(), askUserScenario(argumentsJson));
+  }
+
   static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now) {
     return seedToolBaseline(store, now, false);
   }
 
   static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now, boolean yoloEnabled) {
+    return seedToolBaseline(store, now, yoloEnabled, bashScenario(ToolSideEffect.READ_ONLY));
+  }
+
+  /** 按给定场景种子 assistant/thread：assistant Entry 与该场景的 frozen request + response 严格一致。 */
+  static Baseline seedToolBaseline(
+      InMemoryHarnessStore store, Instant now, boolean yoloEnabled, Scenario scenario) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -203,8 +303,8 @@ final class ToolProcessorTestSupport {
           // live attached tool baseline：assistant 由同一 frozen request + response 经 mapper 生成，与
           // seedTool 的
           // model request/successResponse 严格一致（renderer bash 来自 model request 的 bash binding）。
-          ModelRequestSpec modelRequest = modelRequest();
-          ProviderResponse response = successResponse("call-1");
+          ModelRequestSpec modelRequest = modelRequest(scenario);
+          ProviderResponse response = successResponse(scenario, "call-1");
           tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
@@ -254,12 +354,25 @@ final class ToolProcessorTestSupport {
    */
   static Seeded seedTool(
       InMemoryHarnessStore store, Baseline baseline, ToolInvocationRequest request, Instant now) {
+    return seedTool(store, baseline, request, now, null);
+  }
+
+  /**
+   * 按给定场景种子 terminal ModelInvocation + READY ToolInvocation + Work（{@code scenario} 为 null 时用
+   * bash）。
+   */
+  static Seeded seedTool(
+      InMemoryHarnessStore store,
+      Baseline baseline,
+      ToolInvocationRequest request,
+      Instant now,
+      Scenario scenario) {
     return store.transaction(
         tx -> {
           UUID modelId = tx.nextId();
           UUID toolId = tx.nextId();
           tx.lockThread(baseline.threadId());
-          ModelRequestSpec modelRequest = modelRequest();
+          ModelRequestSpec modelRequest = modelRequest(scenario);
           tx.insertModelInvocation(
               new ModelInvocation(
                   modelId,
@@ -281,7 +394,12 @@ final class ToolProcessorTestSupport {
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(successResponse(request.call().id()), now));
+          tx.updateModelInvocation(
+              current.succeed(
+                  scenario == null
+                      ? successResponse(request.call().id())
+                      : successResponse(scenario, request.call().id()),
+                  now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.attachResultEntry(baseline.assistantEntryId(), now));
           tx.insertToolInvocations(
@@ -453,7 +571,7 @@ final class ToolProcessorTestSupport {
         Duration.ofSeconds(30));
   }
 
-  private static ModelRequestSpec modelRequest() {
+  private static ModelRequestSpec modelRequest(Scenario scenario) {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
         ProviderType.OPENAI,
@@ -462,7 +580,7 @@ final class ToolProcessorTestSupport {
         provider.variant(),
         1024,
         "Test system instruction.",
-        List.of(hostBinding(ToolSideEffect.READ_ONLY)),
+        List.of(scenario == null ? hostBinding(ToolSideEffect.READ_ONLY) : scenario.binding()),
         List.of(),
         provider.cacheControl());
   }
@@ -512,9 +630,17 @@ final class ToolProcessorTestSupport {
   }
 
   private static ProviderResponse successResponse(String... toolCallIds) {
+    return successResponse(null, toolCallIds);
+  }
+
+  private static ProviderResponse successResponse(Scenario scenario, String... toolCallIds) {
     List<ProviderToolCall> calls = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
-      calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
+      calls.add(
+          new ProviderToolCall(
+              toolCallId,
+              scenario == null ? "bash" : scenario.toolName(),
+              scenario == null ? "{}" : scenario.argumentsJson()));
     }
     return new ProviderResponse(
         "assistant reply",

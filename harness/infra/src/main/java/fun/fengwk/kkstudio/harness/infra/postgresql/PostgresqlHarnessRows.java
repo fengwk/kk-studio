@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCode
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolCallJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolEffectBatchJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -60,6 +61,7 @@ final class PostgresqlHarnessRows {
   static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
   static final ToolEffectBatchJsonCodec TOOL_EFFECTS = new ToolEffectBatchJsonCodec();
   static final ToolInvocationErrorJsonCodec TOOL_ERRORS = new ToolInvocationErrorJsonCodec();
+  static final ToolInputReceiptJsonCodec TOOL_INPUT_RECEIPTS = new ToolInputReceiptJsonCodec();
 
   static final RowMapper<Session> SESSION =
       (resultSet, rowNumber) ->
@@ -144,7 +146,8 @@ final class PostgresqlHarnessRows {
               TOOL_EFFECTS.decode(resultSet.getString("effects")),
               decodeNullable(resultSet.getString("error"), TOOL_ERRORS::decode),
               instant(resultSet, "created_at"),
-              instant(resultSet, "updated_at"));
+              instant(resultSet, "updated_at"),
+              decodeNullable(resultSet.getString("input_receipt"), TOOL_INPUT_RECEIPTS::decode));
 
   static final RowMapper<Work> WORK =
       (resultSet, rowNumber) ->

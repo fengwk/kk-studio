@@ -150,7 +150,8 @@ public final class HistoryPayloadMapper {
             invocation.callIndex(),
             statusOf(invocation),
             false,
-            null);
+            null,
+            invocation.inputReceipt());
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
@@ -220,7 +221,8 @@ public final class HistoryPayloadMapper {
             invocation.callIndex(),
             statusOf(invocation),
             false,
-            null));
+            null,
+            invocation.inputReceipt()));
   }
 
   private ToolResultMessageContent succeededContent(ToolInvocation invocation, ToolResult result) {

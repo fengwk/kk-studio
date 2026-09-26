@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -435,6 +438,151 @@ final class HarnessRuntimeTestSupport {
               modelId,
               List.copyOf(toolIds));
         });
+  }
+
+  /** {@code ask_user} 的冻结问卷原文：一问单选 + 一问多选，用于覆盖答案覆盖度与顺序归一化。 */
+  static final String ASK_USER_QUESTIONNAIRE =
+      "{\"questions\":["
+          + "{\"question\":\"which plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\",\"recommended\":true}]},"
+          + "{\"question\":\"which tracks?\",\"multiple\":true,\"options\":[{\"label\":\"a\"},{\"label\":\"b\"},{\"label\":\"c\"}]}"
+          + "]}";
+
+  /**
+   * {@code ask_user} TOOL baseline：ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT(ask_user
+   * call)， 挂一个 SUCCEEDED Model 与 READY ToolInvocation；binding 来自内置 contributor（provenance 是身份判据）。
+   */
+  static ToolBaseline seedAskUserBaseline(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
+          ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
+          tx.insertThread(thread);
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          ModelRequestSpec requestSpec = askUserModelRequest();
+          ProviderResponse response =
+              responseWithToolCall("call-1", "ask_user", ASK_USER_QUESTIONNAIRE);
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              mappedAssistantEntry(
+                  assistantEntryId, sessionId, userEntryId, T1, requestSpec, response));
+          UUID modelId = tx.nextId();
+          ModelInvocation model =
+              modelInvocationWithRequest(
+                  modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
+          tx.insertModelInvocation(model);
+          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
+          tx.updateModelInvocation(model.beginDispatch(T2));
+          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          tx.updateModelInvocation(succeeded);
+          tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
+          UUID toolId = tx.nextId();
+          tx.insertToolInvocations(
+              List.of(
+                  new ToolInvocation(
+                      toolId,
+                      modelId,
+                      assistantEntryId,
+                      0,
+                      new ToolCall("call-1", "ask_user", ASK_USER_QUESTIONNAIRE),
+                      askUserBinding(),
+                      ToolInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      T1,
+                      T1)));
+          tx.updateThread(thread.advanceHead(assistantEntryId, T2));
+          return new ToolBaseline(
+              sessionId,
+              rootEntryId,
+              turnStartEntryId,
+              threadId,
+              assistantEntryId,
+              modelId,
+              toolId);
+        });
+  }
+
+  /** 将 {@code ask_user} 调用冻结为 WAITING_INPUT（ToolProcessor 接受等待后的 durable 形状）。 */
+  static ToolInvocation parkForInput(
+      InMemoryHarnessStore store, ToolBaseline baseline, Instant now) {
+    return store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
+          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
+          ToolInvocation waiting = tool.requestInput(now);
+          tx.updateToolInvocations(List.of(waiting));
+          tx.updateThread(thread.touchVersion(now));
+          return waiting;
+        });
+  }
+
+  private static ModelRequestSpec askUserModelRequest() {
+    ProviderRequest provider = providerRequest();
+    return new ModelRequestSpec(
+        ProviderType.OPENAI,
+        new UUID(0L, 1L),
+        provider.model(),
+        provider.variant(),
+        1024,
+        "Test system instruction.",
+        List.of(askUserBinding()),
+        List.of(),
+        provider.cacheControl());
+  }
+
+  /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
+  private static ToolBinding askUserBinding() {
+    InputSchema schema =
+        new InputSchema(
+            "ask user questionnaire",
+            Map.of(
+                "questions",
+                new ArraySchema(
+                    "questions",
+                    new ObjectSchema(
+                        "question",
+                        Map.of("question", new StringSchema("question")),
+                        Set.of("question"),
+                        true))),
+            Set.of("questions"),
+            false);
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new ToolDescriptor(
+                "ask_user",
+                "ask the user a questionnaire",
+                "ask_user",
+                schema,
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE),
+        new ContributorBinding("builtin", "ask-user", List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
+  }
+
+  static ProviderResponse responseWithToolCall(
+      String toolCallId, String toolName, String argumentsJson) {
+    return new ProviderResponse(
+        "",
+        "",
+        List.of(new ProviderToolCall(toolCallId, toolName, argumentsJson)),
+        GenerationStopReason.COMPLETE,
+        usage(),
+        cost(),
+        null,
+        null,
+        null);
   }
 
   /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */

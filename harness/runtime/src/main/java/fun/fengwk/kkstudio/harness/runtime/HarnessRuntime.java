@@ -47,9 +47,10 @@ import java.util.function.Consumer;
  * fact，以容忍本地时钟回滚与跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
  *
  * <p>本类实现 {@link #acceptCommands}（NEW_SESSION / NEW_THREAD / THREAD 单原语）、{@link #stop}、{@link
- * #decideToolApproval}、{@link #setThreadYolo}、{@link #renameThread}、{@link #renameSession}、{@link
- * #getSession}、{@link #manualCompactionAvailability}、{@link #compactThread}、{@link
- * #getThreadSnapshot}、 {@link #listThreadsBySession} 与 {@link #getSessionEntries}。
+ * #submitToolInput}、{@link #decideToolApproval}、{@link #setThreadYolo}、{@link #renameThread}、{@link
+ * #renameSession}、{@link #getSession}、{@link #manualCompactionAvailability}、{@link
+ * #compactThread}、{@link #getThreadSnapshot}、 {@link #listThreadsBySession} 与 {@link
+ * #getSessionEntries}。
  */
 @Slf4j
 public final class HarnessRuntime {
@@ -60,6 +61,7 @@ public final class HarnessRuntime {
   private final Clock clock;
   private final AcceptCommandsControl acceptCommandsControl;
   private final StopControl stopControl;
+  private final ToolInputControl toolInputControl;
   private final ManualCompactionControl manualCompactionControl;
   private final Consumer<UUID> modelExecutionCanceller;
   private final Consumer<UUID> toolExecutionCanceller;
@@ -108,6 +110,7 @@ public final class HarnessRuntime {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.acceptCommandsControl = new AcceptCommandsControl(store, this.clock);
     this.stopControl = new StopControl(store, this.clock, toolResultHistoryMaterializer);
+    this.toolInputControl = new ToolInputControl(this.store, this.clock);
     this.manualCompactionControl =
         new ManualCompactionControl(
             this.store,
@@ -297,6 +300,19 @@ public final class HarnessRuntime {
       cancelLocalExecution(toolExecutionCanceller, "Tool", toolExecutionId);
     }
     return commit.result();
+  }
+
+  /**
+   * 在单个短 transaction 内接受（或精确 replay）一次人工输入提交。
+   *
+   * <p>锁序：Session -&gt; Thread -&gt; Model -&gt; Tool siblings -&gt; Work。回答按 Invocation ID
+   * 锁定当前真实调用，校验它仍在 当前 TOOL_ACTIVE 上下文且为 WAITING_INPUT，再按冻结问卷（Assistant ToolCall
+   * arguments）校验并规范化答案；结果与 submissionId / actor / acceptedAt 回执同事务落盘，并登记 THREAD Work 以物化
+   * ToolResult。答案非法为 INPUT_SUBMISSION_INVALID，目标不适用为 INPUT_SUBMISSION_NOT_APPLICABLE，另一个提交身份或不同答案为
+   * INPUT_SUBMISSION_MISMATCH；provenance 由触发 WAITING_INPUT 时的冻结 binding 决定，本入口绝不接受 approval。
+   */
+  public ToolInvocation submitToolInput(ToolInputSubmissionCommand command) {
+    return toolInputControl.submit(command);
   }
 
   /**

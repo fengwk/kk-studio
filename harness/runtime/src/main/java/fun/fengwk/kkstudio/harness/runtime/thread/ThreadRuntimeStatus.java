@@ -30,13 +30,16 @@ public enum ThreadRuntimeStatus {
   /** 至少一个 sibling 等待审批，该状态优先于同批其他工具状态。 */
   TOOL_WAITING_APPROVAL,
 
-  /** 无待审批 sibling，且至少一个 sibling 正在运行。 */
+  /** 无待审批 sibling，且至少一个 sibling 等待用户回答冻结问卷（{@code ask_user}）。 */
+  TOOL_WAITING_INPUT,
+
+  /** 无待审批或待回答 sibling，且至少一个 sibling 正在运行。 */
   TOOL_RUNNING,
 
-  /** 无待审批或运行 sibling，且至少一个 sibling 处于分派围栏。 */
+  /** 无待审批、待回答或运行 sibling，且至少一个 sibling 处于分派围栏。 */
   TOOL_DISPATCHING,
 
-  /** 无待审批、运行或分派 sibling，且至少一个 sibling 已就绪。 */
+  /** 无待审批、待回答、运行或分派 sibling，且至少一个 sibling 已就绪。 */
   TOOL_READY;
 
   /** 从已分类的 Thread context 派生状态。非法 active 形状属于不变量破坏，不做兼容降级。 */
@@ -71,6 +74,11 @@ public enum ThreadRuntimeStatus {
     for (ToolInvocation sibling : siblings) {
       if (sibling.status() == ToolInvocationStatus.WAITING_APPROVAL) {
         return TOOL_WAITING_APPROVAL;
+      }
+    }
+    for (ToolInvocation sibling : siblings) {
+      if (sibling.status() == ToolInvocationStatus.WAITING_INPUT) {
+        return TOOL_WAITING_INPUT;
       }
     }
     for (ToolInvocation sibling : siblings) {

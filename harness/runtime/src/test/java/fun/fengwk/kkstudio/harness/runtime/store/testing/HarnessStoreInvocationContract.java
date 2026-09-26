@@ -1,10 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.ASK_USER_QUESTIONNAIRE;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserBinding;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantAbortedPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
@@ -36,6 +40,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -54,6 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -73,6 +79,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBa
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.math.BigDecimal;
@@ -1831,6 +1838,83 @@ public abstract class HarnessStoreInvocationContract {
     assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
     assertEquals(result, stored.result());
     assertEquals(effects, stored.effects());
+  }
+
+  /**
+   * 人工输入回答的 durable 形状：READY -&gt; WAITING_INPUT -&gt; SUCCEEDED + 结果 + 回执必须在两种 store 上无损往返。
+   *
+   * <p>该形状同时受物理约束保护：WAITING_INPUT 必须有 binding 且无 result，回执只能与 SUCCEEDED + result 同存。
+   */
+  @Test
+  void answeredToolInputRoundTripsResultAndReceipt() {
+    UUID assistantEntryId = seedAskUserAssistantAndModel();
+    ToolInvocation ready =
+        new ToolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            new ToolCall("call-1", "ask_user", ASK_USER_QUESTIONNAIRE),
+            askUserBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T2,
+            T2);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
+
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    ToolInvocation waiting =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
+    assertEquals(ToolInvocationStatus.WAITING_INPUT, waiting.status());
+    assertEquals(0, waiting.attempt());
+    assertNull(waiting.approval());
+    assertNull(waiting.result());
+    assertNull(waiting.inputReceipt());
+
+    ToolInputReceipt receipt = new ToolInputReceipt(TestIds.id(31), "alice", T3);
+    ToolResult result =
+        new ToolResult(
+            "call-1",
+            List.of(new JsonResultContent("{\"answers\":[[\"fast\"]]}")),
+            false,
+            "{\"answers\":[[\"fast\"]]}");
+    updateTool(TestIds.id(10), tool -> tool.acceptInput(result, receipt, T3));
+
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
+    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
+    assertEquals(0, stored.attempt());
+    assertNull(stored.approval());
+    assertEquals(result, stored.result());
+    assertEquals(receipt, stored.inputReceipt());
+  }
+
+  /**
+   * 合法 turn 链 + {@code ask_user} 的 assistant ToolCall 与 terminal model result（call/binding 必须全等）。
+   */
+  private UUID seedAskUserAssistantAndModel() {
+    ModelRequestSpec requestSpec = askUserRequest();
+    ProviderResponse response = askUserResponse("call-1");
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+    insertTerminalModel(
+        TestIds.id(1),
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec,
+        response,
+        assistantEntryId,
+        T1);
+    return assistantEntryId;
   }
 
   @Test

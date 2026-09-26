@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
+
 import java.util.Objects;
 import java.util.UUID;
 
@@ -10,6 +12,10 @@ import java.util.UUID;
  * ToolCall 关联；{@code callIndex} 是该 Assistant response 内 ToolCall 的位置下标。synthetic 结果（history
  * normalization 补写）必须是 {@code status=UNKNOWN} + {@code reason=HISTORY_CUT}，且不关联任何 ToolInvocation； 非
  * synthetic 结果不允许携带 reason。
+ *
+ * <p>{@code inputReceipt} 是内部人工输入工具（{@code ask_user}）回答的 durable 提交回执：Invocation 行在结果物化后被物理删除，
+ * 因此已接受回答的 submissionId / actor / acceptedAt 随结果一起迁入 Entry 元数据，绝不写入业务 {@code detailsJson}。synthetic
+ * 结果不携带回执。
  */
 public record ToolResultMetadata(
     UUID assistantEntryId,
@@ -17,7 +23,19 @@ public record ToolResultMetadata(
     int callIndex,
     ToolResultStatus status,
     boolean synthetic,
-    ToolResultReason reason) {
+    ToolResultReason reason,
+    ToolInputReceipt inputReceipt) {
+
+  /** 构造不携带人工输入回执的 metadata；普通结果与 synthetic 结果使用此便捷入口。 */
+  public ToolResultMetadata(
+      UUID assistantEntryId,
+      String toolCallId,
+      int callIndex,
+      ToolResultStatus status,
+      boolean synthetic,
+      ToolResultReason reason) {
+    this(assistantEntryId, toolCallId, callIndex, status, synthetic, reason, null);
+  }
 
   private static final int TOOL_CALL_ID_MAX_LENGTH = 256;
 
@@ -35,6 +53,9 @@ public record ToolResultMetadata(
       }
     } else if (reason != null) {
       throw new IllegalArgumentException("non-synthetic tool results must not carry a reason");
+    }
+    if (synthetic && inputReceipt != null) {
+      throw new IllegalArgumentException("synthetic tool results must not carry an input receipt");
     }
   }
 

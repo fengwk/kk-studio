@@ -5,6 +5,14 @@ public enum ToolInvocationStatus {
   /** 工具调用等待人工确认或策略审批。 */
   WAITING_APPROVAL,
 
+  /**
+   * 内部人工输入工具（{@code ask_user}）已冻结，等待用户回答冻结问卷。
+   *
+   * <p>与 WAITING_APPROVAL 分离：问卷不能授权工具，审批也不能代替回答。等待不占用 Worker / 外部执行；回答以 SUCCEEDED + inputReceipt
+   * 落盘，Stop 则以 CANCELLED 收敛。
+   */
+  WAITING_INPUT,
+
   /** 工具调用已就绪，等待分派执行。 */
   READY,
 

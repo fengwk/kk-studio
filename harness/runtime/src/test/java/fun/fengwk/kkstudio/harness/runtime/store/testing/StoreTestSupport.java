@@ -576,6 +576,43 @@ final class StoreTestSupport {
         base.cacheControl());
   }
 
+  /** 只有 {@code ask_user} binding 的 frozen request：assistant ToolCall 必须与该 binding 全等。 */
+  static ModelRequestSpec askUserRequest() {
+    ModelRequestSpec base = modelRequest();
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.providerConnectionGenerationId(),
+        base.model(),
+        base.variant(),
+        1024,
+        "Test system instruction.",
+        List.of(askUserBinding()),
+        List.of(),
+        base.cacheControl());
+  }
+
+  /** 单个 {@code ask_user} 调用的 provider response（参数即冻结问卷原文）。 */
+  static ProviderResponse askUserResponse(String toolCallId) {
+    return new ProviderResponse(
+        "assistant reply",
+        "",
+        List.of(new ProviderToolCall(toolCallId, "ask_user", ASK_USER_QUESTIONNAIRE)),
+        GenerationStopReason.COMPLETE,
+        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO),
+        "req-1",
+        null,
+        "{}");
+  }
+
   /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
   static MessagePayload mappedAssistant(ModelRequestSpec requestSpec, ProviderResponse response) {
     return new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings());
@@ -643,6 +680,28 @@ final class StoreTestSupport {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO));
+  }
+
+  /** {@code ask_user} 的冻结问卷原文（内置 contributor 贡献，provenance 即身份判据）。 */
+  static final String ASK_USER_QUESTIONNAIRE =
+      "{\"questions\":[{\"question\":\"which plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\"}]}]}";
+
+  /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
+  static ToolBinding askUserBinding() {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new ToolDescriptor(
+                "ask_user",
+                "ask the user a questionnaire",
+                "ask_user",
+                new InputSchema("arguments", Map.of(), Set.of(), true),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE),
+        new ContributorBinding("builtin", "ask-user", List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   static ToolBinding hostBinding() {
