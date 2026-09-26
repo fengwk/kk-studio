@@ -8,6 +8,7 @@ import { useThreadPanelViewState } from '@/features/ai/runtime/thread-panel/useT
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
+import { setLocale } from '@/shared/i18n'
 
 function record(id: string, overrides: Partial<ThreadEventRecord> = {}): ThreadEventRecord {
   return {
@@ -103,7 +104,7 @@ describe('ThreadEventView', () => {
         }}
       />,
     )
-    const preview = screen.getByLabelText('Next Request Preview')
+    const preview = screen.getByLabelText(/下一次请求预览|Next Request Preview/)
     expect(preview).toHaveTextContent('line1')
     expect(preview).toHaveTextContent('line11')
     expect(preview.querySelector('.thread-system-prompt-body')).not.toBeNull()
@@ -439,18 +440,18 @@ describe('ThreadEventView', () => {
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
 
       // 点击 Tool
-      const toolBtn = screen.getByRole('button', { name: 'Tool read' })
+      const toolBtn = screen.getByRole('button', { name: /工具 read|Tool read/ })
       await user.click(toolBtn)
 
       // 自动激活详情并显示 Inspector
       expect(detailTab).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByTestId('thread-debug-inspector')).toHaveAttribute(
         'aria-label',
-        'INSPECTOR: Tool · read',
+        expect.stringMatching(/检查器: 工具 · read|INSPECTOR: Tool · read/),
       )
 
       // 关闭详情
-      const closeBtn = screen.getByRole('button', { name: 'Close inspector' })
+      const closeBtn = screen.getByRole('button', { name: /关闭检查器|Close inspector/ })
       await user.click(closeBtn)
 
       // 来源是 preview，故返回 preview tab
@@ -599,6 +600,34 @@ describe('ThreadEventView', () => {
           autoFocusCloseButton={false}
         />,
       )
+    })
+
+    it('verifies localized tablist aria-label and tab names under zh-CN and en-US', async () => {
+      const user = userEvent.setup()
+      const { unmount } = render(<ResponsiveHarness />)
+
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+
+      // zh-CN 下
+      expect(screen.getByRole('tablist', { name: '调试视图' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: '请求预览' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: '事件' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: '详情' })).toBeInTheDocument()
+
+      unmount()
+
+      // 切换到 en-US
+      setLocale('en-US')
+      render(<ResponsiveHarness />)
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+
+      expect(screen.getByRole('tablist', { name: 'Debug views' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Request Preview' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Events' })).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'Detail' })).toBeInTheDocument()
+
+      // 切回 zh-CN
+      setLocale('zh-CN')
     })
   })
 })

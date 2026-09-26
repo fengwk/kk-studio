@@ -81,16 +81,25 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     })
     expect(await colDetail.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
 
-    // 6. 验证系统提示词正文具有有界最大高度与内部滚动（max-height: 115px; overflow-y: auto），仅 prompt 区允许内部滚动
-    const promptStyle = await page.locator('.thread-system-prompt-body').evaluate((el) => {
-      const style = window.getComputedStyle(el)
+    // 6. 验证系统提示词正文高度约为可用预览列高度的 50% (50cqh)，具有内部滚动 (overflow-y: auto)
+    const promptMetrics = await page.evaluate(() => {
+      const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
+      const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
+      const promptBox = promptEl.getBoundingClientRect()
+      const previewStyle = window.getComputedStyle(previewCol)
+      const paddingTop = parseFloat(previewStyle.paddingTop) || 0
+      const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
+      const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
+      const ratio = promptBox.height / previewContentHeight
+      const promptStyle = window.getComputedStyle(promptEl)
       return {
-        maxHeight: style.maxHeight,
-        overflowY: style.overflowY,
+        ratio,
+        overflowY: promptStyle.overflowY,
       }
     })
-    expect(promptStyle.maxHeight).toBe('115px')
-    expect(promptStyle.overflowY).toBe('auto')
+    expect(promptMetrics.ratio).toBeGreaterThan(0.45)
+    expect(promptMetrics.ratio).toBeLessThan(0.55)
+    expect(promptMetrics.overflowY).toBe('auto')
 
     // 7. 底部 Composer 驻留且可用
     const composerBox = (await composer.boundingBox())!
@@ -101,8 +110,15 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await composerInput.fill('测试任务指令')
     expect(await composerInput.inputValue()).toBe('测试任务指令')
 
-    // 8. 保存截图
+    // 8. 验证快照按钮和复制按钮存在
+    const snapshotBtn = page.getByRole('button', { name: /查看当前调用规范化请求快照|View normalized request snapshot/ })
+    await expect(snapshotBtn).toBeVisible()
+    const copyBtn = page.getByRole('button', { name: /复制系统提示词|Copy system prompt/ })
+    await expect(copyBtn).toBeVisible()
+
+    // 9. 保存截图
     await page.screenshot({ path: resolve(reportsDir, 'debug-wide-1920x900.png') })
+    await page.screenshot({ path: resolve(reportsDir, 'debug-polish-wide.png') })
   })
 
   // Case 2: 3834x681 超宽矮窗口
@@ -188,14 +204,27 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const eventsList = page.locator('.thread-events')
     await expect(eventsList).toBeFocused()
 
-    // 3. 点击请求预览页签并点击 Tool 按钮：唤起 Tool Inspector 并聚焦关闭按钮
-    await page.getByRole('tab', { name: '请求预览' }).click()
+    // 3. 点击请求预览页签并验证正文高度比近 0.5，点击 Tool 按钮唤起 Tool Inspector 并聚焦关闭按钮
+    await page.getByRole('tab', { name: /请求预览|Request Preview/ }).click()
     await expect(colPreview).toBeVisible()
 
-    const readToolBtn = colPreview.locator('button[aria-label="Tool read"]')
+    const narrowMetrics = await page.evaluate(() => {
+      const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
+      const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
+      const promptBox = promptEl.getBoundingClientRect()
+      const previewStyle = window.getComputedStyle(previewCol)
+      const paddingTop = parseFloat(previewStyle.paddingTop) || 0
+      const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
+      const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
+      return promptBox.height / previewContentHeight
+    })
+    expect(narrowMetrics).toBeGreaterThan(0.45)
+    expect(narrowMetrics).toBeLessThan(0.55)
+
+    const readToolBtn = colPreview.getByRole('button', { name: /工具 read|Tool read/ })
     await readToolBtn.click()
     await expect(colDetail).toBeVisible()
-    const inspectorCloseBtn = colDetail.locator('button[aria-label="Close inspector"]')
+    const inspectorCloseBtn = colDetail.getByRole('button', { name: /关闭检查器|Close inspector/ })
     await expect(inspectorCloseBtn).toBeFocused()
 
     // 4. 按 Escape 键关闭详情并回退到请求预览页签，且焦点恢复至被点击的 Tool 按钮
@@ -206,10 +235,11 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
 
     // 保存截图
     await page.screenshot({ path: resolve(reportsDir, 'debug-narrow-954x934.png') })
+    await page.screenshot({ path: resolve(reportsDir, 'debug-polish-narrow.png') })
   })
 
-  // Case 4: 360x740 移动端无横向溢出
-  test('360x740 mobile layout: no horizontal overflow, tabs cleanly switch', async ({
+  // Case 4: 360x740 移动端无横向溢出且提示词高度比近 0.5
+  test('360x740 mobile layout: no horizontal overflow, tabs cleanly switch and prompt body ratio near 0.5', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 360, height: 740 })
@@ -224,6 +254,21 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
       clientWidth: el.clientWidth,
     }))
     expect(shellScroll.scrollWidth).toBeLessThanOrEqual(shellScroll.clientWidth + 1)
+
+    // 切到请求预览页签检查比值
+    await page.getByRole('tab', { name: /请求预览|Request Preview/ }).click()
+    const mobileMetrics = await page.evaluate(() => {
+      const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
+      const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
+      const promptBox = promptEl.getBoundingClientRect()
+      const previewStyle = window.getComputedStyle(previewCol)
+      const paddingTop = parseFloat(previewStyle.paddingTop) || 0
+      const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
+      const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
+      return promptBox.height / previewContentHeight
+    })
+    expect(mobileMetrics).toBeGreaterThan(0.45)
+    expect(mobileMetrics).toBeLessThan(0.55)
 
     const composerInput = page.locator('[data-testid="pane-main-composer-input"]')
     await expect(composerInput).toBeVisible()
@@ -369,5 +414,35 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     await expect(pane1.locator('[data-testid="thread-debug-placeholder"]')).toBeVisible()
     // Pane 2 状态完全不受影响
     await expect(pane2.locator('[data-testid="thread-debug-placeholder"]')).toBeVisible()
+  })
+
+  // Case 9: 动态 Viewport 高度 Resize (681px - 1100px) 系统提示词与预览列可用高度比稳定保持约 0.5
+  test('viewport height resize from 681px to 1100px maintains prompt body / preview content height ratio near 0.5', async ({
+    page,
+  }) => {
+    await page.goto('/browser-tests/debug-harness.html')
+
+    const heights = [681, 750, 850, 950, 1100]
+    for (const h of heights) {
+      await page.setViewportSize({ width: 1400, height: h })
+
+      const ratio = await page.evaluate(() => {
+        const promptEl = document.querySelector('.thread-system-prompt-body') as HTMLElement
+        const previewCol = document.querySelector('.thread-debug-col-preview') as HTMLElement
+        if (!promptEl || !previewCol) {
+          return 0
+        }
+        const promptBox = promptEl.getBoundingClientRect()
+        const previewStyle = window.getComputedStyle(previewCol)
+        const paddingTop = parseFloat(previewStyle.paddingTop) || 0
+        const paddingBottom = parseFloat(previewStyle.paddingBottom) || 0
+        const previewContentHeight = previewCol.clientHeight - paddingTop - paddingBottom
+        return promptBox.height / previewContentHeight
+      })
+
+      // 允许 padding 容差，比值稳定在 0.5 左右
+      expect(ratio).toBeGreaterThan(0.45)
+      expect(ratio).toBeLessThan(0.55)
+    }
   })
 })

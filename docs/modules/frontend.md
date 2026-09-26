@@ -188,18 +188,18 @@ durable Entry 投影为恰好一条记录，把 active model/tool invocation 和
 +----------------------+----------------------+----------------------+
 ```
 
-System Prompt 正文限制 `max-height: 115px; overflow-y: auto;`，具有有界最大高度与内部滚动（覆盖此前去嵌套滚动设计，仅此 prompt 区域例外）；Tools 与 Skills 自动换行，随预览列滚动。Tools 先列最终发给模型的定义，再以灰色、虚线和 `⊘` 列出因未选择 Environment
-被过滤的 Agent 候选；`P`、`P+E`、`E` 分别表示 `NONE`、`OPTIONAL`、`REQUIRED`。
+System Prompt 正文占据预览列可用高度约 50%（通过 CSS 容器查询设置 `container-type: size;` 与 `height: 50cqh;`，具有内部独立纵向滚动）；标题旁提供“复制提示词”操作，支持剪贴板安全写入与可访问状态/错误反馈。Tools 与 Skills 自动换行，随预览列滚动。Tools 先列最终发给模型的定义，再以灰色、虚线和 `⊘` 列出因未选择 Environment
+被过滤的 Agent 候选；`P`、`P+E`、`E` 分别表示 `NONE`、`OPTIONAL`、`REQUIRED` 并包含完整本地化 title 说明。
 点击任一 Tool 或 Skill 在第 3 列（窄屏下自动切换到详情选项卡）展示：Tool
 展示完整 description、input schema、EnvironmentSupport、Contributor、发送/过滤状态；
 Skill 展示 Package、description、稳定 path、Platform current/observed commit、Daemon
 installed commit 与实际 Prompt XML。
-Detail 和 Inspector 独立渲染于第 3 列，不再侵入 `AgentPane` 的底部小部件栈，确保底部的
+Detail 和 Inspector 独立渲染于第 3列，不再侵入 `AgentPane` 的底部小部件栈，确保底部的
 Composer 和队列控制区在任何分辨率下均保持可见且交互不受遮挡。
 
-Debug API 明确区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`。顶部 Rails
-属于前者；后者通过 Request 详情展示由冻结 ModelRequestSpec 物化的 canonical
-ProviderRequest，其精确 Skill 列表已在冻结 systemInstruction 的 XML 中。预览不能冒充
+Debug 视图标题精简本地化为“下一次请求预览”（去掉 DEBUG 前缀），环境 pill 紧凑展示当前环境。视图明确区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`。顶部 Rails
+属于前者；后者通过仅在活动 `frozenInvocation` 存在时渲染的“请求快照”按钮展示由冻结 ModelRequestSpec 物化的 canonical
+ProviderRequest（空态防御留在 Inspector 内部不再常显无效按钮），其精确 Skill 列表已在冻结 systemInstruction 的 XML 中。预览不能冒充
 历史实际请求。详情完整保留可读 JSON，但不展示 credential、Authorization header、
 对象存储内部地址或 Base64 正文。前端只调用
 `GET /api/harness/threads/{threadId}/model-request-debug`，进入 Debug 拉取一次，并在
