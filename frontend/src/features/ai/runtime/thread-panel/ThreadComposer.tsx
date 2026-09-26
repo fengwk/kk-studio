@@ -184,7 +184,12 @@ export function ThreadComposer({
   })
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
+  const [slashDismissed, setSlashDismissed] = useState(false)
   const [controlMenu, setControlMenu] = useState<ThreadComposerControlMenu>(null)
+  const draftKey = partsKey(parts)
+  useEffect(() => {
+    setSlashDismissed(false)
+  }, [draftKey])
 
   /** 从当前 DOM 提取 parts 并回传（输入/粘贴/删除后统一入口）。 */
   const syncFromDom = useCallback((force = false) => {
@@ -282,7 +287,7 @@ export function ThreadComposer({
   const isGoalWithObjective = isGoalCommand && goalCommandInfo.objective != null
   const slashQuery = isGoalWithObjective ? null : slashQueryOf(parts)
   const slashMode = slashQuery != null
-  const paletteMode = plusMenuOpen ? 'menu' : slashMode ? 'slash' : null
+  const paletteMode = plusMenuOpen ? 'menu' : slashMode && !slashDismissed ? 'slash' : null
   const paletteOpen = paletteMode != null
   const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
   const filteredCommands = useFilteredThreadCommands(query, commands)
@@ -297,21 +302,14 @@ export function ThreadComposer({
     [disabled, isGoalCommand, parts, slashMode, uploads],
   )
 
-  // 全局 Escape 的覆盖层关闭：control menu 优先，其次 palette（slash 模式同时
-  // 清空命令草稿）；焦点状态机在命中后关闭覆盖层再统一恢复焦点。
+  // 关闭覆盖层只改变显隐；slash 草稿及其命令语义保留到编辑或执行。
   const closeOverlay = useCallback(() => {
+    setSlashDismissed(true)
+    setPlusMenuOpen(false)
     if (controlMenu != null) {
-      setPlusMenuOpen(false)
       setControlMenu(null)
-      return
     }
-    if (paletteMode != null) {
-      setPlusMenuOpen(false)
-      if (paletteMode === 'slash') {
-        changeDraft(parts.filter((part) => part.type !== 'text'))
-      }
-    }
-  }, [changeDraft, controlMenu, paletteMode, parts])
+  }, [controlMenu])
 
   // 组合焦点状态机：定时重试/覆盖层关闭后恢复/active 恢复/Escape/pending
   // 完成后自动聚焦/卸载清理。
@@ -334,12 +332,9 @@ export function ThreadComposer({
   })
 
   const closeCommandPalette = useCallback((forceCaretAtEnd = false) => {
-    setPlusMenuOpen(false)
-    if (paletteMode === 'slash') {
-      changeDraft(parts.filter((part) => part.type !== 'text'))
-    }
+    closeOverlay()
     focusComposer(forceCaretAtEnd)
-  }, [changeDraft, focusComposer, paletteMode, parts])
+  }, [closeOverlay, focusComposer])
 
   const changeControlMenu = useCallback((
     next: ThreadComposerControlMenu,
@@ -542,7 +537,7 @@ export function ThreadComposer({
     if (command.disabled) {
       return
     }
-    const consumeSlashCommand = paletteMode === 'slash' && command.id !== 'goal'
+    const consumeSlashCommand = !plusMenuOpen && slashMode && command.id !== 'goal'
     setPlusMenuOpen(false)
     if (consumeSlashCommand) {
       changeDraft(parts.filter((part) => part.type !== 'text'))
@@ -638,6 +633,14 @@ export function ThreadComposer({
         return
       }
       event.preventDefault()
+      if (slashMode) {
+        // 提示隐藏后仅执行完整命令，不能沿用不可见的模糊匹配选择或发送普通消息。
+        const command = commands.find((item) => item.id === slashQuery?.trim().toLowerCase())
+        if (command && !command.disabled) {
+          handleSelect(command)
+        }
+        return
+      }
       handleSubmit()
       focusComposer()
     }

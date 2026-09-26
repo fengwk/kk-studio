@@ -346,12 +346,12 @@ describe('ThreadComposer edge interactions', () => {
     expect(screen.queryByRole('listbox', { name: '权限选项' })).not.toBeInTheDocument()
     expect(editor).toHaveFocus()
 
-    // slash palette 打开时全局 Escape：closeOverlay 清空命令草稿并关闭。
+    // slash palette 关闭后保留草稿，不能靠删除文本来隐藏提示。
     await user.type(editor, '/stop')
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.keyboard('{Escape}')
     expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
-    expect(partsSnapshot()).toEqual([])
+    expect(partsSnapshot()).toEqual([{ type: 'text', text: '/stop' }])
   })
 
   it('inserts dropped plain text at the caret without creating pills', async () => {

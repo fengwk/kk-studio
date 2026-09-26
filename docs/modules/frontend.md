@@ -216,6 +216,11 @@ Turn 开始/结束时刷新。
 
 ## 变更提交与上传
 
+Composer 的命令提示显隐与 slash 命令语义独立：Escape 只关闭菜单并保留文本、附件，
+连续按键不清空草稿。编辑草稿后恢复自动提示，`+` 可主动打开命令表。提示隐藏时，
+Enter 仅执行完整且可用的命令，不使用不可见的模糊匹配选项；未完成或不可用的命令
+不会作为普通消息发送。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
+
 Chat Pane 有两个正交维度。布局是 `single`、`split-2`、`split-3`、`grid-4`、
 `grid-6`、`grid-8`，按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；target 三态是：
 
