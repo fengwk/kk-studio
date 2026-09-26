@@ -62,14 +62,18 @@ interface BaseDialogueMessage {
   status?: DialogueStatus
 }
 
+export type DialogueContent =
+  | { type: 'text'; text: string }
+  | { type: 'resource'; attachment: ToolAttachment }
+
 export interface TextDialogueMessage extends BaseDialogueMessage {
   role: 'user' | 'assistant'
   text: string
   /**
-   * 可选的 durable 附件（user 消息的 RESOURCE parts 投影）；预览/下载 URL
-   * 只在渲染时通过 storage service 解析。
+   * 用户消息的有序内容块；存在时作为展示事实源，text 仅用于摘要。
+   * 资源 URL 只在渲染时通过 storage service 解析。
    */
-  attachments?: ToolAttachment[]
+  contents?: DialogueContent[]
   // 可选的 assistant 思考文本。仅在本次 attempt 中 assistant 确实产生过思考时存在；
   // 纯文本响应及非 assistant 角色不会出现该字段。
   thinking?: string

@@ -258,7 +258,7 @@ describe('thread timeline edge branches', () => {
     )
 
     expect(timeline.messages).toMatchObject([
-      { role: 'user', attachments: [{ blobId, name: 'input.png' }] },
+      { role: 'user', contents: [{ type: 'resource', attachment: { blobId, name: 'input.png' } }] },
       { role: 'tool', phase: 'call' },
       {
         role: 'tool',

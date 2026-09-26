@@ -1,6 +1,7 @@
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type {
+  DialogueContent,
   DialogueMessage,
   MetaDialogueMessage,
   ToolDialogueMessage,
@@ -139,14 +140,23 @@ export function projectDurableEntry(
   const contents = getRecordList(message.contents)
   if (entryType === 'CUSTOM_MESSAGE' || role === 'USER') {
     const text = contents.map(contentText).filter(Boolean).join('\n')
-    const attachments = contents.flatMap(toResourceAttachment)
-    if (text || attachments.length > 0) {
+    const displayContents = contents.flatMap<DialogueContent>((content) => {
+      const value = contentText(content)
+      if (value) {
+        return [{ type: 'text', text: value }]
+      }
+      return toResourceAttachment(content).map((attachment) => ({
+        type: 'resource',
+        attachment,
+      }))
+    })
+    if (displayContents.length > 0) {
       messages.push({
         id: entry.entryId,
         role: 'user',
         subjectEntryId: entry.entryId,
         text,
-        attachments: attachments.length > 0 ? attachments : undefined,
+        contents: displayContents,
         createdAt: entry.createTime,
         status: 'done',
       })

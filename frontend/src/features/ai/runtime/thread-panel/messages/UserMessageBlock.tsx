@@ -5,17 +5,17 @@ import { ResourceAttachmentChip } from '@/features/ai/runtime/thread-panel/messa
 export function UserMessageBlock({ message }: { message: TextDialogueMessage }) {
   return (
     <section className="thread-block thread-block-user">
-      {message.text ? <div className="thread-block-body">{message.text}</div> : null}
-      {message.attachments && message.attachments.length > 0 ? (
-        <div className="thread-user-attachments">
-          {message.attachments.map((attachment, index) => (
+      {(message.contents ?? [{ type: 'text', text: message.text }]).map((content, index) =>
+        content.type === 'text' ? (
+          content.text ? <div className="thread-block-body" key={index}>{content.text}</div> : null
+        ) : (
+          <div className="thread-user-attachments" key={index}>
             <ResourceAttachmentChip
-              key={`${attachment.blobId ?? attachment.name}-${index}`}
-              attachment={attachment}
+              attachment={content.attachment}
             />
-          ))}
-        </div>
-      ) : null}
+          </div>
+        ),
+      )}
     </section>
   )
 }

@@ -186,13 +186,16 @@ describe('ChatPanel', () => {
                 text: '',
                 subjectEntryId: 'e1',
                 createdAt: null,
-                attachments: [
+                contents: [
                   {
-                    type: 'file',
-                    name: 'image.png',
-                    mime: '',
-                    data: '',
-                    blobId: '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01',
+                    type: 'resource',
+                    attachment: {
+                      type: 'file',
+                      name: 'image.png',
+                      mime: '',
+                      data: '',
+                      blobId: '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01',
+                    },
                   },
                 ],
               },
@@ -242,13 +245,16 @@ describe('ChatPanel', () => {
                 text: '',
                 subjectEntryId: 'e1',
                 createdAt: null,
-                attachments: [
+                contents: [
                   {
-                    type: 'file',
-                    name: 'image.png',
-                    mime: '',
-                    data: '',
-                    blobId: '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01',
+                    type: 'resource',
+                    attachment: {
+                      type: 'file',
+                      name: 'image.png',
+                      mime: '',
+                      data: '',
+                      blobId: '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01',
+                    },
                   },
                 ],
               },
