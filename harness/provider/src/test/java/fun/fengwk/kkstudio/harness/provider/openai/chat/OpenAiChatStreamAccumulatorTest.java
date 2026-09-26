@@ -325,6 +325,164 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(2, completion.replayState().payload().path("tool_calls").size());
   }
 
+  /** 测试意图：无 type 的 identity-only 帧暂不投射；function 意图确定后从原生槽位一次补齐，满足 runtime 的 0 起连续序号与终态一致性。 */
+  @Test
+  void seedsFunctionAfterUntypedIdentityOnlyFrameFollowingCustomCall() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"custom_1","type":"custom","custom":{"input":"x"}},
+        {"index":1,"id":"fn_"}
+        ]}}]}
+        """);
+    assertEquals(List.of(), recordedEvents);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"id":"1","function":{"name":"lookup","arguments":"{"}}
+        ]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"function":{"arguments":"}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    // ModelStreamAccumulator 按 ordinal=0 对齐 response.toolCalls[0]，不得按 wire index=1 投射。
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ToolCallDelta(0, "fn_1", "lookup", "{"),
+            new ProviderStreamEvent.ToolCallDelta(0, null, null, "}")),
+        recordedEvents);
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("fn_1", completion.response().toolCalls().get(0).id());
+    assertEquals("lookup", completion.response().toolCalls().get(0).name());
+    assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
+    JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
+    assertEquals(2, nativeCalls.size());
+    assertEquals("custom", nativeCalls.get(0).path("type").asText());
+    assertEquals("fn_1", nativeCalls.get(1).path("id").asText());
+    assertFalse(nativeCalls.get(0).has("index"));
+    assertFalse(nativeCalls.get(1).has("index"));
+  }
+
+  /** 测试意图：已声明 type=function 的 identity-only 帧可提前投射，后续分段 id 必须发布累计前缀以兼容 runtime identity 校验。 */
+  @Test
+  void retainsTypedFunctionIdentityBeforeFunctionFragments() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"id":"fn_","type":"function"}]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"id":"1","function":{"name":"lookup","arguments":"{}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ToolCallDelta(0, "fn_", null, null),
+            new ProviderStreamEvent.ToolCallDelta(0, "fn_1", "lookup", "{}")),
+        recordedEvents);
+    assertEquals("fn_1", completion.response().toolCalls().get(0).id());
+    assertEquals(
+        "fn_1", completion.replayState().payload().path("tool_calls").get(0).path("id").asText());
+  }
+
+  /** 测试意图：custom 占据 wire index=0 时，LENGTH 诊断与已发布 function delta 均使用 runtime ordinal=0。 */
+  @Test
+  void usesNormalizedOrdinalForLengthDiagnosticAfterCustomCall() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"custom_1","type":"custom","custom":{"input":"x"}},
+        {"index":1,"id":"fn_1","type":"function",
+         "function":{"name":"lookup","arguments":"{\\"q\\":"}}
+        ]},"finish_reason":"length"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(
+        List.of(new ProviderStreamEvent.ToolCallDelta(0, "fn_1", "lookup", "{\"q\":")),
+        recordedEvents);
+    assertEquals(List.of(), completion.response().toolCalls());
+    assertEquals(1, completion.response().toolCallDiagnostics().size());
+    assertEquals(0, completion.response().toolCallDiagnostics().get(0).callIndex());
+    assertEquals("fn_1", completion.response().toolCallDiagnostics().get(0).id());
+    assertEquals("lookup", completion.response().toolCallDiagnostics().get(0).name());
+    assertEquals("{\"q\":", completion.response().toolCallDiagnostics().get(0).partialArguments());
+    assertNull(completion.replayState());
+  }
+
+  /**
+   * 测试意图：两条 function 调用穿插 custom 与跨帧片段时，事件 ordinal 连续且与 response 顺序一致，符合 ModelStreamAccumulator 契约。
+   */
+  @Test
+  void keepsContiguousOrdinalsForInterleavedFunctionCalls() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"a","type":"function","function":{"name":"fir","arguments":"{"}},
+        {"index":1,"id":"c","type":"custom","custom":{"input":"x"}},
+        {"index":2,"id":"b","type":"function","function":{"name":"second","arguments":"{"}}
+        ]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":2,"function":{"arguments":"}"}},
+        {"index":0,"function":{"name":"st","arguments":"}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ToolCallDelta(0, "a", "fir", "{"),
+            new ProviderStreamEvent.ToolCallDelta(1, "b", "second", "{"),
+            new ProviderStreamEvent.ToolCallDelta(1, null, null, "}"),
+            new ProviderStreamEvent.ToolCallDelta(0, null, "first", "}")),
+        recordedEvents);
+    assertEquals(
+        List.of("a", "b"),
+        completion.response().toolCalls().stream().map(call -> call.id()).toList());
+    assertEquals("first", completion.response().toolCalls().get(0).name());
+    assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
+    assertEquals("second", completion.response().toolCalls().get(1).name());
+    assertEquals("{}", completion.response().toolCalls().get(1).argumentsJson());
+    JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
+    assertEquals(
+        List.of("a", "c", "b"),
+        List.of(
+            nativeCalls.get(0).path("id").asText(),
+            nativeCalls.get(1).path("id").asText(),
+            nativeCalls.get(2).path("id").asText()));
+    for (JsonNode call : nativeCalls) {
+      assertFalse(call.has("index"));
+    }
+  }
+
   @Test
   @DisplayName("LENGTH 截断：未闭合工具调用转诊断，不补 JSON，不执行，不存 replay")
   void testLengthTruncationDiagnostics() {
