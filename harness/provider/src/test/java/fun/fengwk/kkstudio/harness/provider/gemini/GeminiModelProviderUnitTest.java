@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -41,6 +42,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -487,5 +489,102 @@ class GeminiModelProviderUnitTest {
 
     assertNotNull(errorRef.get());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, errorRef.get().kind());
+  }
+
+  /**
+   * 意图：每条 transport SSE frame 都必须恰好交付一次原生回调，且先 raw 再 normalized；eventType 优先 SSE name，
+   * 缺省稳定为默认事件名，[DONE] 记为 done；error/blank frame 只要 transport 投递同样保留。
+   */
+  @Test
+  void emitsExactlyOneProtocolEventPerTransportFrameBeforeNormalizedHandling() {
+    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
+    JdkHttpSseTransport mockTransport =
+        new JdkHttpSseTransport(client, exec, sched) {
+          @Override
+          public ProviderStream stream(
+              HttpRequest req,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              HttpSseCallback callback) {
+            callbackRef.set(callback);
+            return new ProviderStream() {
+              @Override
+              public void cancel() {}
+
+              @Override
+              public boolean isCancelled() {
+                return false;
+              }
+            };
+          }
+        };
+
+    URI targetUri = URI.create("https://example.com/stream");
+    GeminiModelProvider provider =
+        new GeminiModelProvider(mockTransport, descriptor, "k", targetUri);
+
+    List<String> protocolEventTypes = new ArrayList<>();
+    List<String> protocolEventData = new ArrayList<>();
+    List<String> deliveryOrder = new ArrayList<>();
+
+    provider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+            deliveryOrder.add("normalized");
+          }
+
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+            deliveryOrder.add("protocol");
+            protocolEventTypes.add(event.eventType());
+            protocolEventData.add(event.data());
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {
+            deliveryOrder.add("error");
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+        });
+
+    HttpSseCallback cb = callbackRef.get();
+    cb.onOpen(new HttpOpenMetadata(200, Map.of()));
+
+    String chunk1 = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}]}";
+    String chunk2 =
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" back\"}]},\"finishReason\":\"STOP\"}]}";
+    String doneFrame = "[DONE]";
+    String blankFrame = "   ";
+    String errorFrame = "{\"error\":{\"code\":500,\"message\":\"boom\",\"status\":\"INTERNAL\"}}";
+
+    cb.onEvent(new ServerSentEvent("message", chunk1));
+    cb.onEvent(new ServerSentEvent(null, chunk2));
+    cb.onEvent(new ServerSentEvent("", doneFrame));
+    cb.onEvent(new ServerSentEvent(null, blankFrame));
+    cb.onEvent(new ServerSentEvent("error", errorFrame));
+
+    // 5 条 transport frame -> 恰好 5 次原生回调，data 原样透传
+    assertEquals(5, protocolEventTypes.size());
+    assertEquals(
+        List.of(
+            "message",
+            "gemini.generateContent.response",
+            "done",
+            "gemini.generateContent.response",
+            "error"),
+        protocolEventTypes);
+    assertEquals(List.of(chunk1, chunk2, doneFrame, blankFrame, errorFrame), protocolEventData);
+
+    // 第一条 frame 的 raw 回调必须先于其规范化增量交付
+    assertEquals(
+        List.of("protocol", "normalized", "protocol", "normalized"), deliveryOrder.subList(0, 4));
+    // error frame 同样先 raw 后 error 终态
+    assertEquals(
+        List.of("protocol", "error"),
+        deliveryOrder.subList(deliveryOrder.size() - 2, deliveryOrder.size()));
   }
 }

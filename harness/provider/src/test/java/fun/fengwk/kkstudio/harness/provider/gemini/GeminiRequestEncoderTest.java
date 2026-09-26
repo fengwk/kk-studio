@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -21,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
@@ -283,6 +285,217 @@ class GeminiRequestEncoderTest {
     JsonNode genConfig = json.path("generationConfig");
     assertEquals(1024, genConfig.path("maxOutputTokens").asInt());
     assertFalse(genConfig.has("thinkingConfig"));
+  }
+
+  /** 验证 native protocolOptions 的官方顶层字段与 generationConfig 子字段无损进入 wire，runtime 只写自己的所有权字段。 */
+  @Test
+  void mergesNativeProtocolOptionsWithoutLosingOfficialFields() throws Exception {
+    String options =
+        """
+        {
+          "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}],
+          "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
+          "cachedContent": "cachedContents/abc",
+          "labels": {"team": "ai"},
+          "generationConfig": {
+            "temperature": 0.4,
+            "topP": 0.9,
+            "topK": 20,
+            "stopSequences": ["STOP"],
+            "responseMimeType": "application/json",
+            "responseSchema": {"type": "object"},
+            "responseJsonSchema": {"type": "object"},
+            "mediaResolution": "MEDIA_RESOLUTION_LOW",
+            "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": "Kore"}}},
+            "imageConfig": {"aspectRatio": "1:1"},
+            "routingConfig": {"autoRouting": {"model": "gemini-2.5-flash"}},
+            "thinkingConfig": {"includeThoughts": true, "thinkingBudget": 512}
+          }
+        }
+        """;
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            new ModelVariant("v1", null, new ProviderProtocolOptions(options)),
+            777,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+
+    // 非 owned 官方顶层字段原样保留
+    assertEquals("cachedContents/abc", json.path("cachedContent").asText());
+    assertEquals("BLOCK_NONE", json.path("safetySettings").get(0).path("threshold").asText());
+    assertEquals(
+        "ANY", json.path("toolConfig").path("functionCallingConfig").path("mode").asText());
+    assertEquals("ai", json.path("labels").path("team").asText());
+
+    // generationConfig 官方子字段保留；无 reasoningEffort 时 native thinkingConfig 亦保留
+    JsonNode gen = json.path("generationConfig");
+    assertEquals(0.4, gen.path("temperature").asDouble());
+    assertEquals(0.9, gen.path("topP").asDouble());
+    assertEquals(20, gen.path("topK").asInt());
+    assertEquals("STOP", gen.path("stopSequences").get(0).asText());
+    assertEquals("application/json", gen.path("responseMimeType").asText());
+    assertTrue(gen.path("responseSchema").isObject());
+    assertTrue(gen.path("responseJsonSchema").isObject());
+    assertEquals("MEDIA_RESOLUTION_LOW", gen.path("mediaResolution").asText());
+    assertEquals(
+        "Kore",
+        gen.path("speechConfig")
+            .path("voiceConfig")
+            .path("prebuiltVoiceConfig")
+            .path("voiceName")
+            .asText());
+    assertEquals("1:1", gen.path("imageConfig").path("aspectRatio").asText());
+    assertEquals(
+        "gemini-2.5-flash", gen.path("routingConfig").path("autoRouting").path("model").asText());
+    assertTrue(gen.path("thinkingConfig").path("includeThoughts").asBoolean());
+    assertEquals(512, gen.path("thinkingConfig").path("thinkingBudget").asInt());
+    // 输出预算始终由 runtime 写自己的子字段
+    assertEquals(777, gen.path("maxOutputTokens").asInt());
+
+    // runtime facts 仍只由请求决定
+    assertEquals(
+        "Test system instruction.",
+        json.path("systemInstruction").path("parts").get(0).path("text").asText());
+    assertEquals("Hi", json.path("contents").get(0).path("parts").get(0).path("text").asText());
+  }
+
+  /** 验证 native hosted tools 原样保留并在末尾追加一个 runtime functionDeclarations tool，且合并结果参与 prefix hash。 */
+  @Test
+  void mergesNativeHostedToolsWithRuntimeFunctionDeclarations() throws Exception {
+    String options =
+        """
+        {
+          "tools": [
+            {"googleSearch": {}},
+            {"codeExecution": {}},
+            {"urlContext": {}},
+            {"retrieval": {"vertexAiSearch": {"datastore": "projects/p/dataStores/d"}}}
+          ]
+        }
+        """;
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("getWeather", "Get weather", "{\"type\":\"object\"}");
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            new ModelVariant("v1", null, new ProviderProtocolOptions(options)),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather?")))),
+            List.of(tool),
+            ProviderCacheControl.none());
+
+    JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
+    ArrayNode tools = (ArrayNode) json.get("tools");
+    assertEquals(5, tools.size());
+    assertTrue(tools.get(0).has("googleSearch"));
+    assertTrue(tools.get(1).has("codeExecution"));
+    assertTrue(tools.get(2).has("urlContext"));
+    assertEquals(
+        "projects/p/dataStores/d",
+        tools.get(3).path("retrieval").path("vertexAiSearch").path("datastore").asText());
+    assertEquals(
+        "getWeather", tools.get(4).path("functionDeclarations").get(0).path("name").asText());
+
+    // hosted tools 属于 cacheable 前缀：同一请求去掉 native tools 后 prefix hash 必须改变
+    ProviderRequest withoutNativeTools =
+        new ProviderRequest(
+            model(false),
+            new ModelVariant("v1"),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Weather?")))),
+            List.of(tool),
+            ProviderCacheControl.none());
+    assertNotEquals(
+        encoder.encode(withoutNativeTools, descriptor()).sourcePrefixHash(),
+        encoder.encode(request, descriptor()).sourcePrefixHash());
+  }
+
+  /** 验证 runtime 未声明 function 时，native hosted tools 仍原样保留。 */
+  @Test
+  void keepsNativeHostedToolsWhenRuntimeDeclaresNoFunctions() throws Exception {
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            new ModelVariant(
+                "v1", null, new ProviderProtocolOptions("{\"tools\":[{\"googleSearch\":{}}]}")),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode tools =
+        MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes()).path("tools");
+    assertEquals(1, tools.size());
+    assertTrue(tools.get(0).has("googleSearch"));
+  }
+
+  /**
+   * 验证 native options 覆盖 runtime-owned 事实或与 variant reasoningEffort 冲突时明确 INVALID_REQUEST，且不回显
+   * value。
+   */
+  @Test
+  void rejectsNativeOptionsConflictingWithRuntimeOwnedFacts() {
+    String secret = "AIzaSySecretValue";
+
+    // 1. contents / systemInstruction 是 runtime facts
+    assertConflictingOptionsRejected(
+        "{\"contents\":[{\"text\":\"" + secret + "\"}]}", null, secret);
+    assertConflictingOptionsRejected(
+        "{\"systemInstruction\":{\"text\":\"" + secret + "\"}}", null, secret);
+
+    // 2. maxOutputTokens 始终 runtime-owned
+    assertConflictingOptionsRejected(
+        "{\"generationConfig\":{\"maxOutputTokens\":123}}", null, "123");
+
+    // 3. variant 声明 reasoningEffort 时 thinkingConfig 由 runtime 独占
+    assertConflictingOptionsRejected(
+        "{\"generationConfig\":{\"thinkingConfig\":{\"thinkingBudget\":64}}}", "high", "64");
+  }
+
+  /** 验证 native options 中 generationConfig/tools 的形态必须分别是 object/array。 */
+  @Test
+  void rejectsNativeOptionsWithInvalidContainerTypes() {
+    assertConflictingOptionsRejected("{\"generationConfig\":[1,2]}", null, "1");
+    assertConflictingOptionsRejected(
+        "{\"generationConfig\":\"not_an_object\"}", null, "not_an_object");
+    assertConflictingOptionsRejected("{\"tools\":{\"googleSearch\":{}}}", null, "googleSearch");
+  }
+
+  /** 断言指定 native options 被拒绝为 INVALID_REQUEST，且异常消息绝不回显 value。 */
+  private void assertConflictingOptionsRejected(
+      String options, String reasoningEffort, String sensitiveValue) {
+    ProviderRequest request =
+        new ProviderRequest(
+            model(false),
+            new ModelVariant("v1", reasoningEffort, new ProviderProtocolOptions(options)),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    ProviderException ex =
+        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
+    assertFalse(ex.getMessage().contains(sensitiveValue), "error must not echo the native value");
   }
 
   /** 验证显式 cacheControl 标记被明确拒绝（Gemini 仅支持隐式自动缓存）。 */
@@ -672,6 +885,84 @@ class GeminiRequestEncoderTest {
     assertEquals(2, parts.size());
     assertEquals("sig_123", parts.get(0).get("thoughtSignature").asText());
     assertTrue(parts.get(0).get("thought").asBoolean());
+  }
+
+  /** 意图：affinity/hash 匹配后，未知官方 Part（inlineData）与 part 内未知字段必须 opaque 透传，已知 text 仍与 durable 一致。 */
+  @Test
+  void replaysOpaqueUnknownPartsAndFieldsVerbatim() throws Exception {
+    ProviderRequest req1 = userOnlyRequest("Q1");
+    String hash1 = encoder.encode(req1, descriptor()).sourcePrefixHash();
+
+    ObjectNode replayPayload = MAPPER.createObjectNode();
+    replayPayload.put("role", "model");
+    ArrayNode replayedParts = replayPayload.putArray("parts");
+    ObjectNode textPart = replayedParts.addObject();
+    textPart.put("text", "answer");
+    textPart.putObject("futurePartField").put("trace", "t-1");
+    replayedParts
+        .addObject()
+        .putObject("inlineData")
+        .put("mimeType", "image/png")
+        .put("data", "QQ==");
+
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.GEMINI_CONTENT,
+            descriptor().affinity("gemini-2.5-flash"),
+            hash1,
+            replayPayload);
+
+    ProviderRequest req2 =
+        new ProviderRequest(
+            model(false),
+            DEFAULT_VARIANT,
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q1"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(new ProviderTextBlock("answer")),
+                    replayState),
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Q2")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode json = MAPPER.readTree(encoder.encode(req2, descriptor()).bodyUtf8Bytes());
+    ArrayNode wireParts = (ArrayNode) json.get("contents").get(1).get("parts");
+    assertEquals(2, wireParts.size());
+    assertEquals("answer", wireParts.get(0).path("text").asText());
+    assertEquals("t-1", wireParts.get(0).path("futurePartField").path("trace").asText());
+    assertEquals("image/png", wireParts.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals("QQ==", wireParts.get(1).path("inlineData").path("data").asText());
+  }
+
+  /** 意图：payload 带有可 opaque 透传的未知字段时，已知 text 与 durable 不一致仍必须 INVALID_REQUEST。 */
+  @Test
+  void rejectsKnownTextMismatchEvenWithOpaqueUnknownFields() {
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "model");
+    ObjectNode part = payload.putArray("parts").addObject();
+    part.put("text", "payload_text");
+    part.put("futurePartField", "opaque");
+
+    assertReplayInvalid(
+        payload,
+        List.of(new ProviderTextBlock("durable_text")),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+  }
+
+  private ProviderRequest userOnlyRequest(String text) {
+    return new ProviderRequest(
+        model(false),
+        DEFAULT_VARIANT,
+        1024,
+        "Test system instruction.",
+        List.of(
+            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock(text)))),
+        List.of(),
+        ProviderCacheControl.none());
   }
 
   /** 验证同格式的非法/损坏 replay payload 明确抛出 INVALID_REQUEST，而非静默吞掉。 */
@@ -1616,7 +1907,8 @@ class GeminiRequestEncoderTest {
 
   /** 验证同为 GEMINI_CONTENT 格式的损坏 payload，即使 affinity 或 hash 不匹配也必须先严格校验并抛出 INVALID_REQUEST。 */
   @Test
-  void replay_validatesPayloadShapeAndFieldsStrictly_evenWhenAffinityOrHashMismatches() {
+  void replay_validatesPayloadShapeAndFieldsStrictly_evenWhenAffinityOrHashMismatches()
+      throws Exception {
     String dummyHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     // 1. role 不是 model
@@ -1677,7 +1969,8 @@ class GeminiRequestEncoderTest {
         assertThrows(ProviderException.class, () -> encoder.encode(req2, descriptor()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
-    // 3. part 内部混入未授权字段
+    // 3. part 内未知字段属于 opaque 原生事实：不再拒绝，已知语义仍与 durable 严格核对。
+    //    此处 affinity 匹配但 hash 不匹配，payload 不参与 wire，语义 fallback 生效。
     ObjectNode payloadInjectedPart = MAPPER.createObjectNode();
     payloadInjectedPart.put("role", "model");
     ObjectNode p = payloadInjectedPart.putArray("parts").addObject();
@@ -1703,9 +1996,10 @@ class GeminiRequestEncoderTest {
                     replayInjectedPart)),
             List.of(),
             ProviderCacheControl.none());
-    ProviderException ex3 =
-        assertThrows(ProviderException.class, () -> encoder.encode(req3, descriptor()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, ex3.kind());
+    JsonNode fallbackJson = MAPPER.readTree(encoder.encode(req3, descriptor()).bodyUtf8Bytes());
+    ArrayNode fallbackParts = (ArrayNode) fallbackJson.get("contents").get(1).get("parts");
+    assertEquals("text", fallbackParts.get(0).path("text").asText());
+    assertFalse(fallbackParts.get(0).has("unrecognizedField"));
   }
 
   /** 验证回放 payload 中 tool call 的 id 与 arguments 与 durable contents 必须全一致，不一致抛出 INVALID_REQUEST。 */

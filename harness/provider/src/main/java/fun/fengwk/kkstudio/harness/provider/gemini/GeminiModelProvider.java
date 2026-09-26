@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -23,6 +24,14 @@ import java.util.Objects;
 final class GeminiModelProvider implements ModelProvider {
 
   private static final String API_KEY_HEADER = "x-goog-api-key";
+
+  /** 无 SSE name 帧的稳定默认事件名。 */
+  private static final String DEFAULT_PROTOCOL_EVENT_TYPE = "gemini.generateContent.response";
+
+  /** 无 SSE name 的流结束帧的事件名。 */
+  private static final String DONE_EVENT_TYPE = "done";
+
+  private static final String DONE_DATA = "[DONE]";
 
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;
@@ -98,6 +107,9 @@ final class GeminiModelProvider implements ModelProvider {
 
           @Override
           public void onEvent(ServerSentEvent event) {
+            // 每条 transport SSE frame 先原样交付原生通道，再进入规范化累积器：两条通道独立且互补
+            bridge.emitProtocolEvent(
+                new ProviderProtocolEvent(resolveProtocolEventType(event), event.data()));
             try {
               accumulator.handleEvent(event.event(), event.data());
             } catch (ProviderException pe) {
@@ -139,5 +151,20 @@ final class GeminiModelProvider implements ModelProvider {
   @Override
   public String toString() {
     return "GeminiModelProvider[]";
+  }
+
+  /**
+   * 原生事件名：优先 SSE {@code event} name；无 name 的 {@code [DONE]} 稳定记为 {@code done}，其余无 name 帧统一使用
+   * 稳定的默认事件名。
+   */
+  private static String resolveProtocolEventType(ServerSentEvent event) {
+    String name = event.event();
+    if (name != null && !name.isBlank()) {
+      return name;
+    }
+    if (DONE_DATA.equals(event.data().trim())) {
+      return DONE_EVENT_TYPE;
+    }
+    return DEFAULT_PROTOCOL_EVENT_TYPE;
   }
 }

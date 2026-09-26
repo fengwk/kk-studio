@@ -9,8 +9,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
@@ -92,21 +92,24 @@ final class GeminiRequestEncoder {
 
     validateCacheControl(request.cacheControl());
 
-    ObjectNode root = NODES.objectNode();
+    // 1. 以 variant 原生协议选项为 root：非 runtime-owned 的官方字段无损保留
+    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    rejectRuntimeOwnedOptions(root);
 
-    // 1. 请求唯一的系统指令映射为顶层 systemInstruction.parts
-    ObjectNode systemInstruction = root.putObject("systemInstruction");
+    // 2. 请求唯一的系统指令映射为顶层 systemInstruction.parts
+    ObjectNode systemInstruction = NODES.objectNode();
     ArrayNode sysParts = systemInstruction.putArray("parts");
     ObjectNode systemPart = sysParts.addObject();
     systemPart.put("text", request.systemInstruction());
+    root.set("systemInstruction", systemInstruction);
 
-    // 2. generationConfig 映射
-    encodeGenerationConfig(root, request);
+    // 3. generationConfig：保留原生官方子字段，再写 runtime-owned 输出预算与 thinkingConfig
+    root.set("generationConfig", mergeGenerationConfig(root, request));
 
-    // 3. tools 映射
-    ArrayNode toolsArray = encodeTools(root, request.tools());
+    // 4. tools：原生 hosted tool objects无损保留，仅追加一个 runtime functionDeclarations tool
+    ArrayNode toolsArray = mergeTools(root, request.tools());
 
-    // 4. contents 映射与 prefix hash 维护（严格按当前实际构建的、已合并相邻同 role 的 wire contents 计算）
+    // 5. contents 映射与 prefix hash 维护（严格按当前实际构建的、已合并相邻同 role 的 wire contents 计算）
     ArrayNode contentsArray = root.putArray("contents");
 
     String currentRole = null;
@@ -194,18 +197,62 @@ final class GeminiRequestEncoder {
     }
   }
 
-  private static void encodeGenerationConfig(ObjectNode root, ProviderRequest request) {
-    ModelVariant variant = request.variant();
-    ObjectNode genConfig = NODES.objectNode();
+  /**
+   * native options 绝不能覆盖 runtime-owned 请求事实：{@code contents} 与 {@code systemInstruction} 出现即冲突，错误消息
+   * 只说明被违反的所有权约束，绝不回显 value。
+   */
+  private static void rejectRuntimeOwnedOptions(ObjectNode root) {
+    if (root.has("contents")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini protocol options must not override runtime-owned contents");
+    }
+    if (root.has("systemInstruction")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini protocol options must not override runtime-owned systemInstruction");
+    }
+  }
+
+  /**
+   * 合并 generationConfig：native 值必须是 object
+   * 且其官方子字段（sampling、stop、responseMimeType/Schema/JsonSchema、mediaResolution、
+   * speechConfig、imageConfig、routingConfig 等）原样保留；{@code maxOutputTokens} 始终
+   * runtime-owned，出现即冲突；variant 声明 reasoningEffort 时 {@code thinkingConfig} 同样 runtime-owned，出现即冲突。
+   */
+  private static ObjectNode mergeGenerationConfig(ObjectNode root, ProviderRequest request) {
+    JsonNode nativeNode = root.get("generationConfig");
+    ObjectNode genConfig;
+    if (nativeNode == null) {
+      genConfig = NODES.objectNode();
+    } else if (nativeNode instanceof ObjectNode nativeConfig) {
+      genConfig = nativeConfig;
+    } else {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini protocol options generationConfig must be a JSON object");
+    }
+
+    if (genConfig.has("maxOutputTokens")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini protocol options must not override runtime-owned generationConfig.maxOutputTokens");
+    }
+
+    // reasoning effort 映射到 thinkingConfig：未声明时不生成，off 显式关闭，其余级别下发生效级别
+    String reasoningEffort = request.variant().reasoningEffort();
+    if (reasoningEffort != null && genConfig.has("thinkingConfig")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini protocol options must not declare thinkingConfig when variant reasoningEffort is set");
+    }
 
     // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
     genConfig.put("maxOutputTokens", request.outputTokens());
 
-    // reasoning effort 映射到 thinkingConfig：未声明时不生成，off 显式关闭，其余级别下发生效级别
-    String reasoningEffort = variant != null ? variant.reasoningEffort() : null;
     if (reasoningEffort != null) {
       ObjectNode thinkingConfig = genConfig.putObject("thinkingConfig");
-      if (variant.reasoningOff()) {
+      if (request.variant().reasoningOff()) {
         thinkingConfig.put("includeThoughts", false);
         thinkingConfig.put("thinkingBudget", 0);
       } else {
@@ -214,16 +261,33 @@ final class GeminiRequestEncoder {
       }
     }
 
-    if (genConfig.size() > 0) {
-      root.set("generationConfig", genConfig);
-    }
+    return genConfig;
   }
 
-  private static ArrayNode encodeTools(ObjectNode root, List<ProviderToolDefinition> tools) {
-    if (tools == null || tools.isEmpty()) {
-      return null;
+  /**
+   * 合并 tools：native 值必须是 array 且其 hosted tool
+   * objects（googleSearch/codeExecution/urlContext/retrieval 等）原样保留， 之后只追加一个 runtime
+   * functionDeclarations tool object；合并结果参与 prefix hash 与缓存前缀处理。
+   */
+  private static ArrayNode mergeTools(ObjectNode root, List<ProviderToolDefinition> tools) {
+    JsonNode nativeNode = root.get("tools");
+    ArrayNode toolsArray;
+    if (nativeNode == null) {
+      if (tools == null || tools.isEmpty()) {
+        return null;
+      }
+      toolsArray = root.putArray("tools");
+    } else if (nativeNode instanceof ArrayNode nativeTools) {
+      toolsArray = nativeTools;
+    } else {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "Gemini protocol options tools must be a JSON array");
     }
-    ArrayNode toolsArray = root.putArray("tools");
+
+    if (tools == null || tools.isEmpty()) {
+      return toolsArray;
+    }
+
     ObjectNode toolObj = toolsArray.addObject();
     ArrayNode fnDecls = toolObj.putArray("functionDeclarations");
 
@@ -538,6 +602,16 @@ final class GeminiRequestEncoder {
     return true;
   }
 
+  /** thoughtSignature 属于已知字段：出现时必须是非空白字符串；未知字段与未知 Part 不在此列，原样 opaque 透传。 */
+  private static void validateReplayThoughtSignature(JsonNode part) {
+    if (part.has("thoughtSignature")
+        && (!part.get("thoughtSignature").isTextual()
+            || part.get("thoughtSignature").asText().isBlank())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+    }
+  }
+
   private static void validateGeminiReplayPayload(
       JsonNode payload, List<ProviderContentBlock> durableContents) {
     if (payload == null || !payload.isObject()) {
@@ -580,8 +654,7 @@ final class GeminiRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
 
-      // 白名单 shape 检查：必须且只能是 Text/Thinking part 或 FunctionCall part
-      // 不允许无关字段混入，保留 thoughtSignature 原位
+      // 已知语义（text/thinking/functionCall）严格核对；未知字段与未知 Part 整体 opaque 透传
       boolean hasText = item.has("text");
       boolean hasFunctionCall = item.has("functionCall");
 
@@ -590,35 +663,20 @@ final class GeminiRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
       if (!hasText && !hasFunctionCall) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        // 未知 Part（如 inlineData/executableCode 等官方 part）不参与 known 语义核对，原样回放
+        continue;
       }
+
+      validateReplayThoughtSignature(item);
 
       if (hasText) {
         if (!item.get("text").isTextual()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
-        Iterator<String> it = item.fieldNames();
-        while (it.hasNext()) {
-          String fn = it.next();
-          if ("text".equals(fn)) {
-            continue;
-          }
-          if ("thought".equals(fn)) {
-            if (!item.get(fn).isBoolean()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-            }
-          } else if ("thoughtSignature".equals(fn)) {
-            if (!item.get(fn).isTextual() || item.get(fn).asText().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-            }
-          } else {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-          }
+        if (item.has("thought") && !item.get("thought").isBoolean()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
 
         String txt = item.get("text").asText();
@@ -632,22 +690,6 @@ final class GeminiRequestEncoder {
         if (!fn.isObject()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-        Iterator<String> it = item.fieldNames();
-        while (it.hasNext()) {
-          String fnName = it.next();
-          if ("functionCall".equals(fnName)) {
-            continue;
-          }
-          if ("thoughtSignature".equals(fnName)) {
-            if (!item.get(fnName).isTextual() || item.get(fnName).asText().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-            }
-          } else {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-          }
         }
 
         if (!fn.has("name") || !fn.get("name").isTextual()) {

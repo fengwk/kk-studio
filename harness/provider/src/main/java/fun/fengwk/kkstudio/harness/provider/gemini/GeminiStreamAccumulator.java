@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -69,6 +70,10 @@ final class GeminiStreamAccumulator {
           "OTHER",
           "IMAGE_OTHER",
           "NO_IMAGE");
+
+  /** 由规范化累积逻辑负责的已知 part 字段：未知字段按原生事实保留，已知字段由累积状态统一写回。 */
+  private static final Set<String> KNOWN_PART_FIELDS =
+      Set.of("text", "thought", "thoughtSignature", "functionCall");
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
@@ -254,12 +259,66 @@ final class GeminiStreamAccumulator {
             lastPart.textBuilder.append(delta);
             bridge.emitEvent(new ProviderStreamEvent.TextDelta(delta));
           }
+          // 增量片段中的未知字段按通用规则并入同一原生 part，未知事实绝不静默丢失
+          mergeIncrementalUnknownFields(partNode, lastPart.rawPart);
         } else {
           TrackedPart newPart = createAndEmitNewPart(partNode);
           trackedParts.add(newPart);
         }
       }
     }
+  }
+
+  /**
+   * 增量片段的未知字段按可预测的通用规则合并：字符串按流追加、数组追加、对象递归、其余类型覆盖。
+   *
+   * <p>已知字段由规范化累积状态统一写回，不参与此处合并，避免与 durable 语义产生分歧。
+   */
+  private static void mergeIncrementalUnknownFields(JsonNode incoming, ObjectNode target) {
+    Iterator<String> names = incoming.fieldNames();
+    while (names.hasNext()) {
+      String name = names.next();
+      if (KNOWN_PART_FIELDS.contains(name)) {
+        continue;
+      }
+      target.set(name, mergeIncrementalNode(target.get(name), incoming.get(name)));
+    }
+  }
+
+  /** 对 cumulative snapshot，incoming 中出现的未知字段整体替换目标同名字段。 */
+  private static void mergeSnapshotUnknownFields(JsonNode incoming, ObjectNode target) {
+    Iterator<String> names = incoming.fieldNames();
+    while (names.hasNext()) {
+      String name = names.next();
+      if (KNOWN_PART_FIELDS.contains(name)) {
+        continue;
+      }
+      target.set(name, incoming.get(name).deepCopy());
+    }
+  }
+
+  /** 通用增量合并：字符串按流追加、数组追加、对象逐字段递归、类型不一致或其余类型直接覆盖。 */
+  private static JsonNode mergeIncrementalNode(JsonNode existing, JsonNode incoming) {
+    if (existing != null && existing.isTextual() && incoming.isTextual()) {
+      return NODES.textNode(existing.asText() + incoming.asText());
+    }
+    if (existing instanceof ArrayNode existingArray && incoming.isArray()) {
+      ArrayNode merged = existingArray.deepCopy();
+      for (JsonNode element : incoming) {
+        merged.add(element.deepCopy());
+      }
+      return merged;
+    }
+    if (existing instanceof ObjectNode existingObject && incoming.isObject()) {
+      ObjectNode merged = existingObject.deepCopy();
+      Iterator<String> names = incoming.fieldNames();
+      while (names.hasNext()) {
+        String name = names.next();
+        merged.set(name, mergeIncrementalNode(merged.get(name), incoming.get(name)));
+      }
+      return merged;
+    }
+    return incoming.deepCopy();
   }
 
   private void validateParts(ArrayNode partsArray) {
@@ -350,10 +409,15 @@ final class GeminiStreamAccumulator {
     if (partNode.has("functionCall") && tp.isFunctionCall() && !tp.functionCallEmitted) {
       emitFunctionCall(tp);
     }
+
+    // snapshot 中的未知字段整体替换；已知字段由规范化状态在 replay 时统一写回
+    mergeSnapshotUnknownFields(partNode, tp.rawPart);
   }
 
   private TrackedPart createAndEmitNewPart(JsonNode partNode) {
     TrackedPart tp = new TrackedPart();
+    // 保存完整原生 part：未知字段与未知 Part 原样进入下一轮 replay
+    tp.rawPart = partNode.deepCopy();
 
     if (partNode.has("thoughtSignature") && !partNode.get("thoughtSignature").isNull()) {
       tp.thoughtSignature = partNode.get("thoughtSignature").asText();
@@ -476,7 +540,8 @@ final class GeminiStreamAccumulator {
     ArrayNode partsArray = payload.putArray("parts");
 
     for (TrackedPart tp : trackedParts) {
-      ObjectNode partNode = partsArray.addObject();
+      // 完整原生 part：未知字段与未知 Part 原样保留
+      ObjectNode partNode = tp.rawPart.deepCopy();
       if (tp.isFunctionCall()) {
         if (tp.functionCallName == null
             || tp.functionCallName.isBlank()
@@ -485,24 +550,28 @@ final class GeminiStreamAccumulator {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
         }
+        // 已知 functionCall 以规范化累积结果为准
+        partNode.remove("text");
+        partNode.remove("thought");
         ObjectNode fnNode = partNode.putObject("functionCall");
         fnNode.put("name", tp.functionCallName);
         if (tp.functionCallId != null && !tp.functionCallId.isBlank()) {
           fnNode.put("id", tp.functionCallId);
         }
-        fnNode.set("args", tp.functionCallArgs);
-        if (tp.thoughtSignature != null && !tp.thoughtSignature.isBlank()) {
-          partNode.put("thoughtSignature", tp.thoughtSignature);
-        }
-      } else {
+        fnNode.set("args", tp.functionCallArgs.deepCopy());
+      } else if (tp.textBuilder.length() > 0) {
+        // 已知 text/thought 以规范化累积结果为准；纯未知 Part 不写回空 text
         partNode.put("text", tp.textBuilder.toString());
         if (tp.isThought) {
           partNode.put("thought", true);
         }
-        if (tp.thoughtSignature != null && !tp.thoughtSignature.isBlank()) {
-          partNode.put("thoughtSignature", tp.thoughtSignature);
-        }
       }
+      if (tp.thoughtSignature != null && !tp.thoughtSignature.isBlank()) {
+        partNode.put("thoughtSignature", tp.thoughtSignature);
+      } else {
+        partNode.remove("thoughtSignature");
+      }
+      partsArray.add(partNode);
     }
 
     return new ProviderReplayState(
@@ -521,6 +590,9 @@ final class GeminiStreamAccumulator {
   }
 
   private static final class TrackedPart {
+    /** 完整原生 part：未知字段与未知 Part 原样保留，供下一轮 opaque replay。 */
+    ObjectNode rawPart;
+
     boolean isThought = false;
     final StringBuilder textBuilder = new StringBuilder();
     String thoughtSignature = null;
