@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterial
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
@@ -245,6 +246,19 @@ public final class ModelProcessor implements AutoCloseable {
     } catch (ClaimLostSignal lost) {
       execution.abandon();
       return ProcessResult.LOST_OWNERSHIP;
+    } catch (ProviderException setupFailure) {
+      log.warn(
+          "model request materialization failed for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(setupFailure));
+      execution.abandon();
+      ModelInvocationError error =
+          new ModelInvocationError(
+              setupFailure.kind(),
+              messageOrClass(setupFailure, "cannot materialize provider request"));
+      return rejectDispatch(claim, dispatched, error)
+          ? ProcessResult.TERMINATED
+          : ProcessResult.LOST_OWNERSHIP;
     } catch (IllegalArgumentException | IllegalStateException setupFailure) {
       log.warn(
           "model request materialization failed for invocation {}: {}",
