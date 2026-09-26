@@ -315,60 +315,12 @@ class ModelProcessorTest {
   /** 真实历史物化遇到被移除的工具及 opaque replay：不得启动网关或留在 DISPATCHING/UNKNOWN。 */
   @Test
   void replayProjectionFailureRejectsDispatchBeforeGatewayStart() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
-    UserBasis basis = seedUserBasis(store);
-    UUID invocationId =
-        store.transaction(
-            tx -> {
-              UUID assistantId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      assistantId,
-                      basis.sessionId(),
-                      basis.userEntryId(),
-                      new HistoryPayloadMapper()
-                          .assistantPayload(
-                              toolResponse(
-                                  "answer",
-                                  new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
-                              requestWithTool().toolBindings()),
-                      NOW.plusMillis(3),
-                      sampleReplayState()));
-              tx.updateThread(
-                  tx.lockThread(basis.threadId()).orElseThrow().advanceHead(assistantId, NOW));
-              UUID id = tx.nextId();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      id,
-                      basis.threadId(),
-                      basis.turnStartEntryId(),
-                      assistantId,
-                      requestSpec(),
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      NOW,
-                      NOW));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, basis.threadId()), NOW);
-              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), NOW);
-              return id;
-            });
+    ReplayHistory history = seedReplayHistory();
+    InMemoryHarnessStore store = history.store();
+    UserBasis basis = history.basis();
+    UUID invocationId = history.invocationId();
     FakeGateway gateway = new FakeGateway();
-    ModelProcessor processor =
-        new ModelProcessor(
-            store,
-            gateway,
-            new RecordingSink(),
-            new ModelProcessorConfig(
-                LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, StreamFlushConfig.DEFAULT, null),
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            newScheduler(),
-            Runnable::run,
-            Runnable::run);
+    ModelProcessor processor = projectionProcessor(store, gateway);
 
     assertEquals(ProcessResult.TERMINATED, processor.process(claim(store, invocationId, NOW)));
     ModelInvocation failed = model(store, invocationId);
@@ -382,6 +334,64 @@ class ModelProcessorTest {
     assertNull(work(store, new WorkTarget(WorkTargetType.MODEL, invocationId)));
     assertEquals(
         2, work(store, new WorkTarget(WorkTargetType.THREAD, basis.threadId())).wakeVersion());
+    assertFalse(processor.hasActiveExecution());
+  }
+
+  /** 加载历史后丢失 claim，即使 replay 投影随后失败也不得把别人的执行标记为 FAILED。 */
+  @Test
+  void replayProjectionFailureAfterOwnershipLossDoesNotRejectDispatch() {
+    ReplayHistory history = seedReplayHistory();
+    InMemoryHarnessStore store = history.store();
+    WorkTarget target = new WorkTarget(WorkTargetType.MODEL, history.invocationId());
+    FakeGateway gateway = new FakeGateway();
+    HarnessStore hooked =
+        afterEntryPathLoad(
+            store,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(history.basis().threadId()).orElseThrow();
+                      tx.deleteWork(target);
+                      return null;
+                    }));
+    ModelProcessor processor = projectionProcessor(hooked, gateway);
+
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP, processor.process(claim(store, history.invocationId(), NOW)));
+    assertEquals(ModelInvocationStatus.DISPATCHING, model(store, history.invocationId()).status());
+    assertEquals(0, model(store, history.invocationId()).attempt());
+    assertEquals(2, thread(store, history.basis().threadId()).version());
+    assertNull(work(store, target));
+    assertEquals(0, gateway.startCalls);
+    assertFalse(processor.hasActiveExecution());
+  }
+
+  /** Store 物化阶段报告无效历史：归类 INVALID_REQUEST 并清理本地执行，而非毒化工作循环。 */
+  @Test
+  void invalidHistoryDuringMaterializationRejectsWithoutGateway() {
+    Fixture fixture = fixture();
+    HarnessStore hooked =
+        afterEntryPathLoad(
+            fixture.store,
+            () -> {
+              throw new IllegalStateException("invalid entry path");
+            });
+    ModelProcessor processor = projectionProcessor(hooked, fixture.gateway);
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
+    assertEquals("invalid entry path", failed.error().message());
+    assertEquals(0, failed.attempt());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+    assertEquals(
+        2,
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+            .wakeVersion());
+    assertEquals(0, fixture.gateway.startCalls);
     assertFalse(processor.hasActiveExecution());
   }
 
@@ -3362,6 +3372,68 @@ class ModelProcessorTest {
   /** 带 USER 输入的 open turn 基线：Thread head 与 invocation requestHead 指向 USER。 */
   private record UserBasis(
       UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
+
+  private record ReplayHistory(InMemoryHarnessStore store, UserBasis basis, UUID invocationId) {}
+
+  /** 使用真实 Entry 与 Work 初始化含工具调用及 opaque replay 的待投影历史。 */
+  private static ReplayHistory seedReplayHistory() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    UserBasis basis = seedUserBasis(store);
+    UUID invocationId =
+        store.transaction(
+            tx -> {
+              UUID assistantId = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      assistantId,
+                      basis.sessionId(),
+                      basis.userEntryId(),
+                      new HistoryPayloadMapper()
+                          .assistantPayload(
+                              toolResponse(
+                                  "answer",
+                                  new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
+                              requestWithTool().toolBindings()),
+                      NOW.plusMillis(3),
+                      sampleReplayState()));
+              tx.updateThread(
+                  tx.lockThread(basis.threadId()).orElseThrow().advanceHead(assistantId, NOW));
+              UUID id = tx.nextId();
+              tx.insertModelInvocation(
+                  new ModelInvocation(
+                      id,
+                      basis.threadId(),
+                      basis.turnStartEntryId(),
+                      assistantId,
+                      requestSpec(),
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      NOW,
+                      NOW));
+              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, basis.threadId()), NOW);
+              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), NOW);
+              return id;
+            });
+    return new ReplayHistory(store, basis, invocationId);
+  }
+
+  private ModelProcessor projectionProcessor(HarnessStore store, FakeGateway gateway) {
+    return new ModelProcessor(
+        store,
+        gateway,
+        new RecordingSink(),
+        new ModelProcessorConfig(
+            LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, StreamFlushConfig.DEFAULT, null),
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        newScheduler(),
+        Runnable::run,
+        Runnable::run);
+  }
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
   private static UserBasis seedUserBasis(HarnessStore store) {
