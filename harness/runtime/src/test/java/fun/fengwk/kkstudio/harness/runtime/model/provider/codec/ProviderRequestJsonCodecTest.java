@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheCapability;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheMode;
@@ -65,6 +66,12 @@ class ProviderRequestJsonCodecTest {
   private static final String DETAILS_JSON = "{\n  \"lat\":48.85\n}";
   private static final String INPUT_SCHEMA_JSON =
       "{\n  \"type\":\"object\",\n  \"properties\":{\n    \"q\":{\n      \"type\":\"string\"\n    }\n  }\n}";
+
+  /** canonical fixture 的 variant 原生协议选项：键顺序与 fixture 一致，数值覆盖整数与小数两种原生形态。 */
+  private static final ProviderProtocolOptions CANONICAL_OPTIONS =
+      new ProviderProtocolOptions(
+          "{\"metadata\":{\"source\":\"fixture\"},\"thinking\":{\"budget_tokens\":4096},"
+              + "\"ratio\":0.5,\"revision\":1758880000000,\"flags\":[true,false]}");
 
   private final ProviderRequestJsonCodec codec = new ProviderRequestJsonCodec();
 
@@ -230,7 +237,21 @@ class ProviderRequestJsonCodecTest {
         root -> variant(root).put("extra", true),
         root -> variant(root).remove("id"),
         root -> variant(root).put("reasoningEffort", 1));
-    // variant 只保留 id 与 reasoningEffort：已删除的采样/输出控制不得作为兼容字段被接受。
+    // protocolOptions 是 variant 的必填 object：缺失、null 与非 object 都拒绝，但 object 内部的厂商字段必须无损保留。
+    assertRejected(root -> variant(root).remove("protocolOptions"));
+    assertRejected(root -> variant(root).putNull("protocolOptions"));
+    assertRejected(root -> variant(root).set("protocolOptions", NODES.arrayNode()));
+    assertRejected(root -> variant(root).put("protocolOptions", "{}"));
+    ObjectNode vendorField = canonicalNode();
+    ((ObjectNode) variant(vendorField).path("protocolOptions")).put("vendor_extension", "kept");
+    assertTrue(
+        codec
+            .decodeNode(vendorField)
+            .variant()
+            .protocolOptions()
+            .canonicalJson()
+            .contains("\"vendor_extension\":\"kept\""));
+    // variant 只保留 id、reasoningEffort 与协议原生选项：已删除的采样/输出控制不得作为兼容字段被接受。
     for (String removed :
         List.of(
             "maxOutputTokens",
@@ -507,7 +528,7 @@ class ProviderRequestJsonCodecTest {
   }
 
   private static ProviderRequest canonicalRequest() {
-    ModelVariant selectedVariant = new ModelVariant("balanced", "medium");
+    ModelVariant selectedVariant = new ModelVariant("balanced", "medium", CANONICAL_OPTIONS);
     ModelDescriptor model =
         new ModelDescriptor(
             "openai",

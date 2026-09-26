@@ -1,17 +1,23 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -20,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 /** Provider message、流增量和完整响应的结构化契约测试。 */
@@ -92,6 +99,57 @@ class ProviderContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ProviderStreamEvent.ToolCallDelta(-1, "call-1", null, null));
+  }
+
+  /** 原生协议事件必须非空白 eventType、非 null data，并按原样保留 data；toString 绝不输出原生 payload。 */
+  @Test
+  void carriesNativeProtocolEventsWithoutLeakingPayloadIntoToString() {
+    String rawData = "{\"encrypted_content\":\"attempt-only-secret\"}";
+    ProviderProtocolEvent event = new ProviderProtocolEvent("response.output_item.done", rawData);
+
+    assertEquals("response.output_item.done", event.eventType());
+    assertEquals(rawData, event.data());
+    assertEquals(event, new ProviderProtocolEvent(event.eventType(), event.data()));
+    assertTrue(event.toString().contains("response.output_item.done"));
+    assertFalse(event.toString().contains("attempt-only-secret"));
+    assertThrows(IllegalArgumentException.class, () -> new ProviderProtocolEvent("   ", rawData));
+    assertThrows(
+        NullPointerException.class, () -> new ProviderProtocolEvent("message_delta", null));
+  }
+
+  /** 现有实现不需要任何改动：只需规范化增量的实现者不覆盖 onProtocolEvent 也能编译并安全忽略原生事件；显式覆盖者按序收到事件。 */
+  @Test
+  void deliversProtocolEventsOnlyToExplicitImplementations() {
+    ProviderStream stream = stubStream();
+    ProviderProtocolEvent event = new ProviderProtocolEvent("message_delta", "{\"delta\":{}}");
+
+    ProviderStreamHandler ignoring =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent ignoredEvent, ProviderStream ignoredStream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream ignoredStream) {}
+        };
+    ignoring.onProtocolEvent(event, stream);
+
+    List<ProviderProtocolEvent> received = new ArrayList<>();
+    ProviderStreamHandler explicit =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent ignoredEvent, ProviderStream ignoredStream) {}
+
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent protocolEvent, ProviderStream ignored) {
+            received.add(protocolEvent);
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream ignoredStream) {}
+        };
+    explicit.onProtocolEvent(event, stream);
+
+    assertEquals(List.of(event), received);
   }
 
   /** 完整响应必须携带非空 usage/cost，并原样保留由 Turn Engine 校验的结束原因。 */
@@ -181,6 +239,19 @@ class ProviderContractTest {
                 null,
                 "[{\"cached_tokens\":1}]")
             .rawUsageJson());
+  }
+
+  /** 取消控制的最小桩实现；原生事件回调只观察事件本身，不需要真实流状态。 */
+  private static ProviderStream stubStream() {
+    return new ProviderStream() {
+      @Override
+      public void cancel() {}
+
+      @Override
+      public boolean isCancelled() {
+        return false;
+      }
+    };
   }
 
   private static ModelCost zeroCost() {

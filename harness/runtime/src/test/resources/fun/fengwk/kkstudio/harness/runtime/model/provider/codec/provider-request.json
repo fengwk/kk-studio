@@ -22,7 +22,14 @@
   },
   "variant": {
     "id": "balanced",
-    "reasoningEffort": "medium"
+    "reasoningEffort": "medium",
+    "protocolOptions": {
+      "metadata": {"source": "fixture"},
+      "thinking": {"budget_tokens": 4096},
+      "ratio": 0.5,
+      "revision": 1758880000000,
+      "flags": [true, false]
+    }
   },
   "outputTokens": 1024,
   "systemInstruction": "Test system instruction.",
