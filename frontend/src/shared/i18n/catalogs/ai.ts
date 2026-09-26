@@ -1934,13 +1934,21 @@ export const aiCatalog = {
     'en-US': 'Subagents:',
     'zh-CN': '子代理：',
   },
+  'ai.runtime.debug.subagentAriaPrefix': {
+    'en-US': 'Subagent',
+    'zh-CN': '子代理',
+  },
   'ai.runtime.debug.cacheLabel': {
     'en-US': 'Cache:',
     'zh-CN': '缓存：',
   },
+  'ai.runtime.debug.cacheAriaPrefix': {
+    'en-US': 'Cache',
+    'zh-CN': '缓存',
+  },
   'ai.runtime.debug.cacheRetention.none': {
-    'en-US': 'No cache (NONE)',
-    'zh-CN': '无缓存 (NONE)',
+    'en-US': 'No cache',
+    'zh-CN': '无缓存',
   },
   'ai.runtime.debug.cacheRetention.short': {
     'en-US': 'Short (SHORT)',
@@ -1975,7 +1983,7 @@ export const aiCatalog = {
     'zh-CN': '技能',
   },
   'ai.runtime.debug.requestLabel': {
-    'en-US': 'Request',
+    'en-US': 'Request Snapshot',
     'zh-CN': '请求快照',
   },
   'ai.runtime.debug.inspectorClose': {
@@ -2053,6 +2061,26 @@ export const aiCatalog = {
   'ai.runtime.debug.inspector.promptXml': {
     'en-US': 'Prompt XML:',
     'zh-CN': '提示词 XML：',
+  },
+  'ai.runtime.debug.inspector.cacheTitle': {
+    'en-US': 'Cache Policy',
+    'zh-CN': '缓存策略',
+  },
+  'ai.runtime.debug.inspector.cacheRetention': {
+    'en-US': 'Retention',
+    'zh-CN': '留存档位',
+  },
+  'ai.runtime.debug.inspector.cacheAffinityKey': {
+    'en-US': 'Affinity Key',
+    'zh-CN': '前缀标识 (Affinity Key)',
+  },
+  'ai.runtime.debug.inspector.cacheBreakpoints': {
+    'en-US': 'Breakpoints',
+    'zh-CN': 'Cache 断点',
+  },
+  'ai.runtime.debug.inspector.cacheProviderDisclaimer': {
+    'en-US': 'Provider automatic caching is not guaranteed',
+    'zh-CN': '不保证 Provider 自动缓存',
   },
   'ai.runtime.debug.noFrozenInvocation': {
     'en-US': 'No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.',

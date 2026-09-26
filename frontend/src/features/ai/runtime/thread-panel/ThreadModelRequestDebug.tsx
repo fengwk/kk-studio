@@ -107,6 +107,17 @@ export function ThreadModelRequestDebug({
     return { sentTools: sent, filteredTools: filtered }
   }, [debug.tools])
 
+  const cacheSummary = useMemo(() => {
+    if (!debug.cacheControl || debug.cacheControl.retention === 'NONE') {
+      return t('ai.runtime.debug.cacheRetention.none')
+    }
+    const retentionText = formatCacheRetention(debug.cacheControl.retention, t)
+    if (debug.cacheControl.affinityKey) {
+      return `${retentionText} (${debug.cacheControl.affinityKey})`
+    }
+    return retentionText
+  }, [debug.cacheControl, t])
+
   async function handleCopyPrompt() {
     if (!debug.systemInstruction || copyStatus === 'copying') {
       return
@@ -295,23 +306,37 @@ export function ThreadModelRequestDebug({
       </div>
 
       {/* SUBAGENTS / CACHE CONTROL */}
-      {((debug.subagents && debug.subagents.length > 0) || debug.cacheControl) ? (
-        <div className="thread-debug-meta-row">
+      <div className="thread-debug-meta-row" data-testid="debug-meta-row">
+        <div className="thread-debug-meta-item">
+          <span className="thread-debug-meta-label">{t('ai.runtime.debug.subagentsLabel')}</span>{' '}
           {debug.subagents && debug.subagents.length > 0 ? (
-            <div>
-              <span className="thread-debug-meta-label">{t('ai.runtime.debug.subagentsLabel')}</span>{' '}
-              {debug.subagents.map((s) => s.name).join(', ')}
-            </div>
-          ) : null}
-          {debug.cacheControl ? (
-            <div>
-              <span className="thread-debug-meta-label">{t('ai.runtime.debug.cacheLabel')}</span>{' '}
-              {formatCacheRetention(debug.cacheControl.retention, t)}
-              {debug.cacheControl.affinityKey ? ` (${debug.cacheControl.affinityKey})` : ''}
-            </div>
-          ) : null}
+            debug.subagents.map((subagent) => (
+              <button
+                key={subagent.name}
+                type="button"
+                className="ghost-inline-btn thread-debug-chip"
+                aria-label={`${t('ai.runtime.debug.subagentAriaPrefix')} ${subagent.name}`}
+                onClick={() => onSelectInspector({ type: 'subagent', subagent })}
+              >
+                <code>{subagent.name}</code>
+              </button>
+            ))
+          ) : (
+            <span className="thread-debug-empty-text">{t('ai.runtime.debug.none')}</span>
+          )}
         </div>
-      ) : null}
+        <div className="thread-debug-meta-item">
+          <span className="thread-debug-meta-label">{t('ai.runtime.debug.cacheLabel')}</span>{' '}
+          <button
+            type="button"
+            className="ghost-inline-btn thread-debug-chip"
+            aria-label={`${t('ai.runtime.debug.cacheAriaPrefix')} ${cacheSummary}`}
+            onClick={() => onSelectInspector({ type: 'cache' })}
+          >
+            <span>{cacheSummary}</span>
+          </button>
+        </div>
+      </div>
     </section>
   )
 }

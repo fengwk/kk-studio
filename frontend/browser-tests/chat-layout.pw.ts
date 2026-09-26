@@ -376,4 +376,61 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     })
     expect(attachmentsMarginTop).toBe('0px')
   })
+
+  test('Compact layout selector: exact 80px menu width, 28px option min-height, all 9 items fit without scrollbar when height >= 350, scrollable on ultra-short screen, 320px non-overflowing', async ({
+    page,
+  }) => {
+    // 1. 验证高度 >= 350px (例如 500x350): 菜单宽度严格为 80px，option 最小高度为 28px，全部 9 项无滚动条
+    await page.setViewportSize({ width: 500, height: 350 })
+    await page.goto('/browser-tests/chat-layout-harness.html')
+
+    const trigger = page.locator('#chat-layout-select')
+    await trigger.click()
+    const listbox = page.getByRole('listbox')
+    await expect(listbox).toBeVisible()
+
+    const menuBox = (await listbox.boundingBox())!
+    // 宽度必须严格等于 80px (误差 <= 1px，避免 148px)
+    expect(Math.abs(menuBox.width - 80)).toBeLessThanOrEqual(1)
+
+    // 验证所有 9 个选项的 min-height 且高度 >= 28px
+    const options = listbox.locator('.ui-select-option')
+    await expect(options).toHaveCount(9)
+    for (let i = 0; i < 9; i++) {
+      const optBox = (await options.nth(i).boundingBox())!
+      expect(optBox.height).toBeGreaterThanOrEqual(27.5)
+    }
+
+    // 验证 9 项不需要滚动：scrollHeight <= clientHeight + 1
+    const scrollInfo = await listbox.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }))
+    expect(scrollInfo.scrollHeight).toBeLessThanOrEqual(scrollInfo.clientHeight + 1)
+
+    await page.keyboard.press('Escape')
+
+    // 2. 超短屏幕 (例如 500x240): 菜单仍可纵向滚动
+    await page.setViewportSize({ width: 500, height: 240 })
+    await trigger.click()
+    await expect(listbox).toBeVisible()
+
+    const shortScrollInfo = await listbox.evaluate((el) => ({
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }))
+    expect(shortScrollInfo.scrollHeight).toBeGreaterThan(shortScrollInfo.clientHeight)
+
+    await page.keyboard.press('Escape')
+
+    // 3. 320px 超窄屏：菜单不横向溢出视口
+    await page.setViewportSize({ width: 320, height: 400 })
+    await trigger.click()
+    await expect(listbox).toBeVisible()
+
+    const box320 = (await listbox.boundingBox())!
+    expect(box320.x + box320.width).toBeLessThanOrEqual(320)
+    expect(box320.x).toBeGreaterThanOrEqual(0)
+    expect(Math.abs(box320.width - 80)).toBeLessThanOrEqual(1)
+  })
 })

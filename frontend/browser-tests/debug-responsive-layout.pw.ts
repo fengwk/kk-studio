@@ -445,4 +445,54 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
       expect(ratio).toBeLessThan(0.55)
     }
   })
+
+  test('Subagent and Cache inspector click, direct title, actual fields and Escape focus restoration', async ({
+    page,
+  }) => {
+    // 954x934 窄屏视口
+    await page.setViewportSize({ width: 954, height: 934 })
+    await page.goto('/browser-tests/debug-harness.html')
+
+    const colPreview = page.locator('.thread-debug-col-preview')
+    const colDetail = page.locator('.thread-debug-col-detail')
+
+    // 切到请求预览页签
+    await page.getByRole('tab', { name: /请求预览|Request Preview/ }).click()
+    await expect(colPreview).toBeVisible()
+
+    // 1. 点击 Subagent helper chip
+    const helperBtn = colPreview.getByRole('button', { name: /子代理 helper|Subagent helper/ })
+    await expect(helperBtn).toBeVisible()
+    await helperBtn.click()
+
+    // 详情列展示，标题直写 'helper'，去前缀
+    await expect(colDetail).toBeVisible()
+    const inspector = colDetail.locator('[data-testid="thread-debug-inspector"]')
+    await expect(inspector).toHaveAttribute('aria-label', 'helper')
+    await expect(colDetail.locator('h3')).toHaveText('helper')
+    await expect(colDetail.getByText('Execution and verification helper')).toBeVisible()
+
+    // 按 Escape 局部关闭详情，焦点恢复至 helperBtn
+    await page.keyboard.press('Escape')
+    await expect(colDetail).toBeHidden()
+    await expect(helperBtn).toBeFocused()
+
+    // 2. 点击 Cache chip
+    const cacheBtn = colPreview.locator('.thread-debug-meta-item').getByRole('button', { name: /缓存|Cache/ })
+    await expect(cacheBtn).toBeVisible()
+    await cacheBtn.click()
+
+    // 详情列展示，标题直写 '缓存策略'，去前缀
+    await expect(colDetail).toBeVisible()
+    await expect(inspector).toHaveAttribute('aria-label', '缓存策略')
+    await expect(colDetail.locator('h3')).toHaveText('缓存策略')
+    await expect(colDetail.getByText('SHORT')).toBeVisible()
+    await expect(colDetail.getByText('prefix-key-1')).toBeVisible()
+    await expect(colDetail.getByText('SYSTEM, TOOLS')).toBeVisible()
+
+    // 按 Escape 局部关闭详情，焦点恢复至 cacheBtn
+    await page.keyboard.press('Escape')
+    await expect(colDetail).toBeHidden()
+    await expect(cacheBtn).toBeFocused()
+  })
 })
