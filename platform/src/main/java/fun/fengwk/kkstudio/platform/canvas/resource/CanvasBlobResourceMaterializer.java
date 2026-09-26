@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.canvas.resource;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
@@ -10,7 +9,6 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.io.InputStream;
 import java.time.Instant;
@@ -19,10 +17,9 @@ import java.util.UUID;
 
 /**
  * Canvas 输出先在事务外通过 {@link StorageUploadService#stage} 准备为可恢复 upload，再于短事务内把 upload owner 转移给 Canvas
- * Resource；提交后 best-effort 生成预览。相同 resourceId 幂等返回既有资源；并发竞争或事务失败会立即 best-effort 释放未消费
+ * Resource。预览已经由统一上传服务在 Blob 绑定完成后生成。相同 resourceId 幂等返回既有资源；并发竞争或事务失败会立即 best-effort 释放未消费
  * upload，统一过期清理仅作为兜底。
  */
-@Slf4j
 public class CanvasBlobResourceMaterializer implements CanvasResourceMaterializer {
 
   private static final long MAX_MATERIALIZE_SIZE = 512L * 1024 * 1024;
@@ -33,7 +30,6 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
   private final CanvasStore canvasStore;
   private final CanvasFunctionResourcePinRepository pinRepository;
   private final CanvasResourceRepository resourceRepository;
-  private final CanvasBlobPreviewService previewService;
   private final TransactionTemplate transactionTemplate;
 
   public CanvasBlobResourceMaterializer(
@@ -42,14 +38,12 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       CanvasStore canvasStore,
       CanvasFunctionResourcePinRepository pinRepository,
       CanvasResourceRepository resourceRepository,
-      CanvasBlobPreviewService previewService,
       TransactionTemplate transactionTemplate) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.pinRepository = Objects.requireNonNull(pinRepository, "pinRepository");
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
-    this.previewService = Objects.requireNonNull(previewService, "previewService");
     this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "transactionTemplate");
   }
 
@@ -76,12 +70,6 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       discardBestEffort(uploadId);
       throw failure;
     }
-    StorageBlob blob = blobManager.getBlob(resource.blobId());
-    if (blob == null) {
-      throw new IllegalStateException(
-          "materialized Resource references a missing blob: " + resource.blobId());
-    }
-    generatePreviewBestEffort(resource.blobId(), blob.getMediaType());
     return resource;
   }
 
@@ -112,17 +100,6 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
     blobManager.retain(ready.blobId());
     uploadService.delete(uploadId);
     return resource;
-  }
-
-  private void generatePreviewBestEffort(UUID blobId, String mediaType) {
-    try {
-      previewService.ensurePreview(blobId, mediaType);
-    } catch (RuntimeException error) {
-      log.warn(
-          "blob preview generation failed blobId={} type={}",
-          blobId,
-          error.getClass().getSimpleName());
-    }
   }
 
   private void discardBestEffort(UUID uploadId) {

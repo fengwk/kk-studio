@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -26,7 +25,6 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.io.ByteArrayInputStream;
 import java.time.Instant;
@@ -42,7 +40,6 @@ class CanvasBlobResourceMaterializerTest {
   private final CanvasFunctionResourcePinRepository pinRepository =
       mock(CanvasFunctionResourcePinRepository.class);
   private final CanvasResourceRepository resourceRepository = mock(CanvasResourceRepository.class);
-  private final CanvasBlobPreviewService previewService = mock(CanvasBlobPreviewService.class);
   private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
   private final UUID canvasId = UUID.randomUUID();
   private final UUID resourceId = UUID.randomUUID();
@@ -55,7 +52,6 @@ class CanvasBlobResourceMaterializerTest {
           canvasStore,
           pinRepository,
           resourceRepository,
-          previewService,
           transactionTemplate);
 
   @BeforeEach
@@ -71,10 +67,6 @@ class CanvasBlobResourceMaterializerTest {
     when(uploadService.lockReady(uploadId))
         .thenReturn(new StorageUploadService.ReadyUpload(blobId, "stored.bin"));
     when(resourceRepository.addIfAbsent(any())).thenReturn(true);
-    StorageBlob blob = new StorageBlob();
-    blob.setId(blobId);
-    blob.setMediaType("image/png");
-    when(blobManager.getBlob(blobId)).thenReturn(blob);
     when(transactionTemplate.execute(any()))
         .thenAnswer(
             invocation ->
@@ -90,7 +82,6 @@ class CanvasBlobResourceMaterializerTest {
     assertEquals(blobId, resource.blobId());
     verify(blobManager).retain(blobId);
     verify(uploadService).delete(uploadId);
-    verify(previewService).ensurePreview(blobId, "image/png");
   }
 
   @Test
@@ -129,22 +120,9 @@ class CanvasBlobResourceMaterializerTest {
   }
 
   @Test
-  void missingWinnerOrBlobFailsAndPreviewFailureIsBestEffort() {
+  void missingWinnerFails() {
     when(resourceRepository.addIfAbsent(any())).thenReturn(false);
     assertThrows(IllegalStateException.class, this::materialize);
-
-    when(resourceRepository.addIfAbsent(any())).thenReturn(true);
-    when(blobManager.getBlob(blobId)).thenReturn(null);
-    assertThrows(IllegalStateException.class, this::materialize);
-
-    StorageBlob blob = new StorageBlob();
-    blob.setId(blobId);
-    blob.setMediaType("image/png");
-    when(blobManager.getBlob(blobId)).thenReturn(blob);
-    doThrow(new IllegalStateException("preview failed"))
-        .when(previewService)
-        .ensurePreview(blobId, "image/png");
-    assertEquals(blobId, materialize().blobId());
   }
 
   private CanvasResource materialize() {

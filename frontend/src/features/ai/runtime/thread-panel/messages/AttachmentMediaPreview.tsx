@@ -6,8 +6,8 @@ type MediaKind = 'image' | 'video'
 type PreviewMode = 'image' | 'video'
 
 /**
- * 内容优先的媒体展示：正文内完整呈现，悬浮显示文件名，点击打开原件 Lightbox。
- * Blob video 的 preview 是缩略图，因此可用 image preview + video original 组合。
+ * 内容优先的媒体展示：正文内使用轻量预览，悬浮显示文件名，点击后才加载原件 Lightbox。
+ * Blob image/video 的 preview 都是 webp 缩略图，因此可用 image preview + 原始媒体组合。
  */
 export function AttachmentMediaPreview({
   kind,

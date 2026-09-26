@@ -8,7 +8,7 @@ import {
 import { useI18n } from '@/shared/i18n'
 
 /**
- * durable RESOURCE 展示：图片/视频使用完整媒体 + hover 名称 + Lightbox；
+ * durable RESOURCE 展示：图片/视频优先使用轻量预览 + hover 名称，点击后以原件打开 Lightbox；
  * 其他类型使用紧凑链接。URL 只在渲染时解析，不进入 durable message。
  */
 export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachment }) {
@@ -60,7 +60,7 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
   const previewUrl = urls?.preview?.trim() || null
   const mediaUrl =
     type === 'image'
-      ? downloadUrl
+      ? previewUrl ?? downloadUrl
       : type === 'video' && downloadUrl != null
         ? previewUrl ?? downloadUrl
         : null

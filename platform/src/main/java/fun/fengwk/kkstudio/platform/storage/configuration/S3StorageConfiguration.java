@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.impl.HeadOnlyStorageMediaProbe;
@@ -147,6 +148,7 @@ public class S3StorageConfiguration {
       S3StorageService s3StorageService,
       S3PresignService s3PresignService,
       StorageMediaProbe mediaProbe,
+      StorageBlobPreviewService blobPreviewService,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
       S3StorageProperties s3Properties,
       StorageMaintenanceProperties maintenanceProperties,
@@ -160,6 +162,7 @@ public class S3StorageConfiguration {
         s3StorageService,
         s3PresignService,
         mediaProbe,
+        blobPreviewService,
         maintenanceWakeup,
         s3Properties,
         snapshot.get().storageMedia(),
