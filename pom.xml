@@ -231,6 +231,11 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.convention4j</groupId>
+                <artifactId>convention4j-agent</artifactId>
+                <version>${convention4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.convention4j</groupId>
                 <artifactId>convention4j-comfyui</artifactId>
                 <version>${convention4j.version}</version>
             </dependency>
