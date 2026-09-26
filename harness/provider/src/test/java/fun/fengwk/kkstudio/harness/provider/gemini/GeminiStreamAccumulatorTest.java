@@ -771,4 +771,194 @@ class GeminiStreamAccumulatorTest {
       assertFalse(ex.getMessage().contains("99999"), "exception must not leak raw scalar payload");
     }
   }
+
+  /** 意图：未知官方 Part（inlineData/executableCode 等）整体保留进 replay payload，不再被静默丢弃或补成空 text。 */
+  @Test
+  void preservesUnknownPartsVerbatimInReplayState() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": {
+              "role": "model",
+              "parts": [
+                { "text": "answer" },
+                { "inlineData": { "mimeType": "image/png", "data": "QQ==" } },
+                { "executableCode": { "language": "PYTHON", "code": "print(1)" } }
+              ]
+            },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals("answer", completion.response().text());
+
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(3, parts.size());
+    assertEquals("answer", parts.get(0).path("text").asText());
+    assertEquals("image/png", parts.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asText());
+    assertEquals("PYTHON", parts.get(2).path("executableCode").path("language").asText());
+    assertEquals("print(1)", parts.get(2).path("executableCode").path("code").asText());
+    assertFalse(parts.get(1).has("text"), "unknown part must not be rewritten as empty text");
+  }
+
+  /** 意图：增量片段中的未知字段按可预测通用规则合并（字符串追加、数组追加、对象递归、其余覆盖）。 */
+  @Test
+  void mergesUnknownPartFieldsIncrementally() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{
+              "text": "Hello",
+              "futureString": "a",
+              "futureArray": [{ "a": 1 }],
+              "futureObject": { "nested": { "x": 1 } },
+              "futureScalar": 1
+            }] }
+          }]
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{
+              "text": " world",
+              "futureString": "b",
+              "futureArray": [{ "b": 2 }],
+              "futureObject": { "nested": { "y": 2 }, "z": 3 },
+              "futureScalar": 2
+            }] }
+          }]
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates": [{"content": {"role": "model", "parts": [{"text": "!"}]},
+          "finishReason": "STOP"}]}
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("Hello world!", completion.response().text());
+
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(1, parts.size());
+    JsonNode part = parts.get(0);
+    assertEquals("Hello world!", part.path("text").asText());
+    assertEquals("ab", part.path("futureString").asText());
+    assertEquals(2, part.path("futureArray").size());
+    assertEquals(1, part.path("futureArray").get(0).path("a").asInt());
+    assertEquals(2, part.path("futureArray").get(1).path("b").asInt());
+    assertEquals(1, part.path("futureObject").path("nested").path("x").asInt());
+    assertEquals(2, part.path("futureObject").path("nested").path("y").asInt());
+    assertEquals(3, part.path("futureObject").path("z").asInt());
+    assertEquals(2, part.path("futureScalar").asInt());
+  }
+
+  /** 意图：cumulative snapshot 中未知字段整体替换；snapshot 追加的新未知 Part 同样原样保留。 */
+  @Test
+  void replacesUnknownPartFieldsOnCumulativeSnapshot() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{
+              "text": "Hello",
+              "futureString": "a",
+              "futureObject": { "a": 1 }
+            }] }
+          }]
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              {
+                "text": "Hello world",
+                "futureString": "b",
+                "futureObject": { "b": 2 }
+              },
+              { "inlineData": { "mimeType": "image/jpeg", "data": "AA==" } }
+            ] },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("Hello world", completion.response().text());
+
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(2, parts.size());
+    assertEquals("Hello world", parts.get(0).path("text").asText());
+    assertEquals("b", parts.get(0).path("futureString").asText());
+    assertEquals(2, parts.get(0).path("futureObject").path("b").asInt());
+    assertFalse(parts.get(0).path("futureObject").has("a"), "snapshot must replace unknown field");
+    assertEquals("image/jpeg", parts.get(1).path("inlineData").path("mimeType").asText());
+  }
+
+  /** 意图：已知 functionCall 以规范化累积结果写回 replay，同时保留 part 级未知字段。 */
+  @Test
+  void normalizesFunctionCallAndPreservesUnknownPartFields() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{
+              "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } },
+              "futurePartField": { "trace": "t-1" }
+            }] },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    JsonNode part = accumulator.finish().replayState().payload().get("parts").get(0);
+    assertEquals("fn", part.path("functionCall").path("name").asText());
+    assertEquals("c1", part.path("functionCall").path("id").asText());
+    assertEquals(1, part.path("functionCall").path("args").path("k").asInt());
+    assertEquals("t-1", part.path("futurePartField").path("trace").asText());
+  }
 }

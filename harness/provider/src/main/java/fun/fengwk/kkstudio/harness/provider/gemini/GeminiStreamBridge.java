@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -93,6 +94,20 @@ final class GeminiStreamBridge implements ProviderStream {
         return;
       }
       handler.onEvent(event, this);
+    } finally {
+      dispatchLock.unlock();
+    }
+  }
+
+  /** 交付一条厂商原生协议事件；与规范化增量共用 dispatchLock，cancel 或终态后静默丢弃。 */
+  void emitProtocolEvent(ProviderProtocolEvent event) {
+    Objects.requireNonNull(event, "event");
+    dispatchLock.lock();
+    try {
+      if (this.userCancelled || this.terminal) {
+        return;
+      }
+      handler.onProtocolEvent(event, this);
     } finally {
       dispatchLock.unlock();
     }

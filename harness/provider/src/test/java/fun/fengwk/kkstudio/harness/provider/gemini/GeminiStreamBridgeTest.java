@@ -12,12 +12,14 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -186,5 +188,44 @@ class GeminiStreamBridgeTest {
     bridge.emitComplete(dummyCompletion());
 
     assertEquals(1, errorCount.get());
+  }
+
+  /** 验证协议事件与规范化增量共用 dispatch 语义：正常交付，cancel 或终态后静默丢弃。 */
+  @Test
+  void protocolEventsDeliveredUntilTerminalOrCancel() {
+    List<ProviderProtocolEvent> received = new ArrayList<>();
+    ProviderStreamHandler handler =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+            received.add(event);
+          }
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {}
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+        };
+
+    GeminiStreamBridge bridge = new GeminiStreamBridge(handler);
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("message", "{\"candidates\":[]}"));
+    assertEquals(1, received.size());
+    assertEquals("message", received.get(0).eventType());
+    assertEquals("{\"candidates\":[]}", received.get(0).data());
+
+    // 终态之后静默丢弃
+    bridge.emitComplete(dummyCompletion());
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("message", "{\"candidates\":[]}"));
+    assertEquals(1, received.size());
+
+    // cancel 之后同样静默丢弃
+    GeminiStreamBridge cancelledBridge = new GeminiStreamBridge(handler);
+    cancelledBridge.cancel();
+    cancelledBridge.emitProtocolEvent(new ProviderProtocolEvent("message", "{\"candidates\":[]}"));
+    assertEquals(1, received.size());
   }
 }
