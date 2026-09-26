@@ -108,7 +108,7 @@ final class OpenAiChatRequestEncoder {
             encodeAssistantMessage(
                 message, descriptor, request.model().modelId(), currentPrefixHash));
       } else {
-        wireMessagesArray.add(encodeMessage(message, config));
+        wireMessagesArray.add(encodeMessage(message));
       }
     }
 
@@ -192,9 +192,9 @@ final class OpenAiChatRequestEncoder {
     return toolsArray;
   }
 
-  private static ObjectNode encodeMessage(ProviderMessage message, OpenAiChatConfiguration config) {
+  private static ObjectNode encodeMessage(ProviderMessage message) {
     return switch (message.role()) {
-      case USER -> encodeUserMessage(message, config);
+      case USER -> encodeUserMessage(message);
       case TOOL -> encodeToolMessage(message);
       case ASSISTANT -> throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
@@ -210,8 +210,7 @@ final class OpenAiChatRequestEncoder {
     return msgNode;
   }
 
-  private static ObjectNode encodeUserMessage(
-      ProviderMessage message, OpenAiChatConfiguration config) {
+  private static ObjectNode encodeUserMessage(ProviderMessage message) {
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "user");
 
@@ -240,21 +239,11 @@ final class OpenAiChatRequestEncoder {
         textPart.put("type", "text");
         textPart.put("text", tb.text());
       } else if (block instanceof ProviderImageBlock ib) {
-        if (!config.mediaTypes().contains(OpenAiChatConfiguration.MediaType.IMAGE)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "IMAGE media type is not enabled in configuration");
-        }
         ObjectNode imgPart = contents.addObject();
         imgPart.put("type", "image_url");
         ObjectNode imgUrl = imgPart.putObject("image_url");
         imgUrl.put("url", ib.source());
       } else if (block instanceof ProviderAudioBlock ab) {
-        if (!config.mediaTypes().contains(OpenAiChatConfiguration.MediaType.AUDIO)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "AUDIO media type is not enabled in configuration");
-        }
         String source = ab.source().trim();
         if (source.startsWith("http://") || source.startsWith("https://")) {
           throw new ProviderException(
@@ -282,10 +271,6 @@ final class OpenAiChatRequestEncoder {
         inputAudio.put("data", data);
         inputAudio.put("format", format);
       } else if (block instanceof ProviderDocumentBlock db) {
-        if (!config.mediaTypes().contains(OpenAiChatConfiguration.MediaType.PDF)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "PDF media type is not enabled in configuration");
-        }
         String mime = db.mediaType().toLowerCase(Locale.ROOT);
         if (!mime.contains("pdf")) {
           throw new ProviderException(

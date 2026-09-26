@@ -10,12 +10,16 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilit
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
-import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
 
 /** OpenAI Chat Completions 协议适配器。 */
 public final class OpenAiChatProviderAdapter implements ProviderAdapter {
+
+  private static final ProviderMediaCapabilities MEDIA_CAPABILITIES =
+      new ProviderMediaCapabilities(
+          Set.of(ModelInputModality.IMAGE, ModelInputModality.AUDIO, ModelInputModality.DOCUMENT),
+          Set.of());
 
   private final JdkHttpSseTransport transport;
   private final String apiKey;
@@ -47,21 +51,11 @@ public final class OpenAiChatProviderAdapter implements ProviderAdapter {
   }
 
   /**
-   * 由连接配置 {@code openAiChatMediaTypes} 派生的内联媒体能力：配置的 IMAGE/AUDIO/PDF 分别映射为
-   * IMAGE/AUDIO/DOCUMENT，未配置即为空（默认 {@link ProviderMediaCapabilities#NONE} 语义）；工具结果只接受文本与
-   * JSON，因此永远为空。这是本编码器实际可编码的 schema，不构成厂商能力承诺。
+   * Chat Completions 的用户内容 schema 原生支持图片、音频与文件；具体模型是否接受仍由模型输入模态约束。tool message 只接受文本，因此工具结果媒体能力为空。
    */
   @Override
   public ProviderMediaCapabilities mediaCapabilities() {
-    Set<ModelInputModality> userModalities = EnumSet.noneOf(ModelInputModality.class);
-    for (OpenAiChatConfiguration.MediaType mediaType : configuration.mediaTypes()) {
-      switch (mediaType) {
-        case IMAGE -> userModalities.add(ModelInputModality.IMAGE);
-        case AUDIO -> userModalities.add(ModelInputModality.AUDIO);
-        case PDF -> userModalities.add(ModelInputModality.DOCUMENT);
-      }
-    }
-    return new ProviderMediaCapabilities(userModalities, Set.of());
+    return MEDIA_CAPABILITIES;
   }
 
   @Override

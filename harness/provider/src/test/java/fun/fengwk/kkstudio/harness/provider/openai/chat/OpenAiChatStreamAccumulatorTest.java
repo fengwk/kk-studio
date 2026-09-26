@@ -420,8 +420,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("openAiChatRequireDone 为 false 时已看到有效 finish_reason 且 EOF 可完成")
   void testOptionalDoneWithValidFinishReason() {
     OpenAiChatConfiguration config =
-        new OpenAiChatConfiguration(
-            true, false, Set.of(), OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, false, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
             request,
@@ -442,8 +441,7 @@ class OpenAiChatStreamAccumulatorTest {
   @DisplayName("openAiChatRequireDone 为 false 时未见有效 finish_reason 单纯 EOF 报错")
   void testOptionalDoneWithoutFinishReasonFailsOnEof() {
     OpenAiChatConfiguration config =
-        new OpenAiChatConfiguration(
-            true, false, Set.of(), OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, false, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(
             request,

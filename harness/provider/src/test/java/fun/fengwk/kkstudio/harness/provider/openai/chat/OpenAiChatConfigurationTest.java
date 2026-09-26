@@ -28,7 +28,6 @@ class OpenAiChatConfigurationTest {
     OpenAiChatConfiguration config1 = OpenAiChatConfiguration.parse(null);
     assertTrue(config1.includeUsage());
     assertTrue(config1.requireDone());
-    assertTrue(config1.mediaTypes().isEmpty());
     assertEquals(OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC, config1.promptCacheMode());
     assertEquals(PromptCacheMode.AUTOMATIC, config1.promptCacheCapability().mode());
 
@@ -44,7 +43,6 @@ class OpenAiChatConfigurationTest {
         {
           "openAiChatIncludeUsage": false,
           "openAiChatRequireDone": false,
-          "openAiChatMediaTypes": ["IMAGE", "PDF"],
           "openAiPromptCacheMode": "GPT_5_6_EXPLICIT",
           "unknownField": "should_be_ignored",
           "extraObject": {"k": 1}
@@ -53,9 +51,6 @@ class OpenAiChatConfigurationTest {
     OpenAiChatConfiguration config = OpenAiChatConfiguration.parse(json);
     assertFalse(config.includeUsage());
     assertFalse(config.requireDone());
-    assertEquals(
-        Set.of(OpenAiChatConfiguration.MediaType.IMAGE, OpenAiChatConfiguration.MediaType.PDF),
-        config.mediaTypes());
     assertEquals(
         OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT, config.promptCacheMode());
 
@@ -98,28 +93,12 @@ class OpenAiChatConfigurationTest {
         () -> OpenAiChatConfiguration.parse("{\"openAiChatRequireDone\": 1}"));
     assertThrows(
         ProviderException.class,
-        () -> OpenAiChatConfiguration.parse("{\"openAiChatMediaTypes\": \"IMAGE\"}"));
-    assertThrows(
-        ProviderException.class,
-        () -> OpenAiChatConfiguration.parse("{\"openAiChatMediaTypes\": [123]}"));
-    assertThrows(
-        ProviderException.class,
         () -> OpenAiChatConfiguration.parse("{\"openAiPromptCacheMode\": true}"));
   }
 
   @Test
   @DisplayName("不支持的枚举值严格拒绝且不泄露敏感配置内容")
   void rejectUnsupportedEnumValuesWithoutEcho() {
-    ProviderException exMedia =
-        assertThrows(
-            ProviderException.class,
-            () ->
-                OpenAiChatConfiguration.parse(
-                    "{\"openAiChatMediaTypes\": [\"SUPER_SECRET_MEDIA\"]}"));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exMedia.kind());
-    assertFalse(exMedia.getMessage().contains("SUPER_SECRET_MEDIA"));
-    assertNull(exMedia.getCause());
-
     ProviderException exCache =
         assertThrows(
             ProviderException.class,
