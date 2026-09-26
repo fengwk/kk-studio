@@ -11,10 +11,12 @@ export function ThreadEventDetail({
   record,
   onClose,
   closeButtonRef,
+  autoFocusCloseButton = true,
 }: {
   record: ThreadEventRecord
   onClose: () => void
   closeButtonRef?: Ref<HTMLButtonElement>
+  autoFocusCloseButton?: boolean
 }) {
   const { t } = useI18n()
   const containerRef = useRef<HTMLElement>(null)
@@ -22,13 +24,15 @@ export function ThreadEventDetail({
   const resolvedCloseBtnRef = (closeButtonRef as RefObject<HTMLButtonElement | null>) ?? internalCloseBtnRef
 
   useEffect(() => {
-    const btn = resolvedCloseBtnRef.current
-    if (btn) {
-      btn.focus({ preventScroll: true })
-    } else {
-      containerRef.current?.focus({ preventScroll: true })
+    if (autoFocusCloseButton) {
+      const btn = resolvedCloseBtnRef.current
+      if (btn) {
+        btn.focus({ preventScroll: true })
+      } else {
+        containerRef.current?.focus({ preventScroll: true })
+      }
     }
-  }, [resolvedCloseBtnRef])
+  }, [autoFocusCloseButton, resolvedCloseBtnRef])
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {

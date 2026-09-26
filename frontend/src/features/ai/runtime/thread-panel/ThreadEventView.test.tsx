@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThreadEventView } from '@/features/ai/runtime/thread-panel/ThreadEventView'
+import { ThreadEventDetail } from '@/features/ai/runtime/thread-panel/ThreadEventDetail'
 import { useThreadPanelViewState } from '@/features/ai/runtime/thread-panel/useThreadPanelViewState'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
@@ -382,6 +383,16 @@ describe('ThreadEventView', () => {
       expect(previewTab).toHaveAttribute('tabIndex', '0')
       expect(previewTab).toHaveFocus()
 
+      // 按 ArrowLeft 循环跳到最后一个 tab (详情)
+      await user.keyboard('{ArrowLeft}')
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveFocus()
+
+      // 按 End 键直接跳到最后一个 tab (详情)
+      await user.keyboard('{End}')
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveFocus()
+
       // 内容展示
       expect(screen.getByText('You are an expert assistant.')).toBeInTheDocument()
     })
@@ -517,6 +528,77 @@ describe('ThreadEventView', () => {
       expect(screen.getByRole('option', { name: /First Event/ })).toBeInTheDocument()
       expect(screen.getByRole('option', { name: /Second Event/ })).toBeInTheDocument()
       expect(screen.getByText('暂无请求预览数据')).toBeInTheDocument()
+    })
+
+    it('formats invalid or missing timestamps gracefully', () => {
+      render(
+        <ResponsiveHarness
+          initialEvents={[
+            record('e-inv-1', { title: 'Invalid Date', createdAt: 'not-a-valid-date' }),
+            record('e-inv-2', { title: 'Null Date', createdAt: null as unknown as string }),
+          ]}
+        />,
+      )
+      const times = screen.getAllByText('--:--:--')
+      expect(times).toHaveLength(2)
+    })
+
+    it('handles container Escape key without selection safely', async () => {
+      const user = userEvent.setup()
+      render(<ResponsiveHarness />)
+      // 在宽屏无选中的状态下按 Escape
+      await user.keyboard('{Escape}')
+      expect(screen.getByTestId('thread-debug-placeholder')).toBeInTheDocument()
+    })
+
+    it('keeps listbox focused when clicking events in wide mode allowing arrow navigation', async () => {
+      const user = userEvent.setup()
+      render(<ResponsiveHarness />)
+      const listbox = screen.getByRole('listbox', { name: '事件' })
+      const firstEvent = screen.getByRole('option', { name: /First Event/ })
+      await user.click(firstEvent)
+
+      // 宽屏点击事件后焦点仍停留在 listbox，不被详情抢焦
+      expect(listbox).toHaveFocus()
+      // 可以继续按 ArrowDown 键直接导航
+      await user.keyboard('{ArrowDown}')
+      expect(screen.getByRole('heading', { level: 3, name: 'Second Event' })).toBeInTheDocument()
+    })
+
+    it('supports direct ThreadEventDetail rendering, autoFocus, and Escape handling', async () => {
+      const user = userEvent.setup()
+      const onClose = vi.fn()
+      const { rerender } = render(
+        <ThreadEventDetail
+          record={record('e-test', {
+            title: 'Detail Test',
+            details: [{ label: 'Key', value: 'Value' }],
+            payloadJson: '{"foo":"bar"}',
+          })}
+          onClose={onClose}
+          autoFocusCloseButton={true}
+        />,
+      )
+
+      const closeBtn = screen.getByRole('button', { name: '关闭事件详情' })
+      expect(closeBtn).toHaveFocus()
+
+      // 验证 composing 状态下按 Escape 不触发 onClose
+      fireEvent.keyDown(closeBtn, { key: 'Escape', isComposing: true })
+      expect(onClose).not.toHaveBeenCalled()
+
+      // 正常按 Escape 触发关闭
+      await user.keyboard('{Escape}')
+      expect(onClose).toHaveBeenCalledTimes(1)
+
+      // autoFocusCloseButton = false 时不自动聚焦关闭按钮
+      rerender(
+        <ThreadEventDetail
+          record={record('e-test-2', { title: 'No AutoFocus' })}
+          onClose={onClose}
+          autoFocusCloseButton={false}
+        />,
+      )
     })
   })
 })

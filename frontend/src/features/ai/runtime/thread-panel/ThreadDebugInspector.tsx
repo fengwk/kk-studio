@@ -28,25 +28,29 @@ export function ThreadDebugInspector({
   debug,
   onClose,
   closeButtonRef,
+  autoFocusCloseButton = true,
 }: {
   selection: DebugInspectorSelection
   debug: ThreadModelRequestDebugData
   onClose: () => void
   closeButtonRef?: Ref<HTMLButtonElement>
+  autoFocusCloseButton?: boolean
 }) {
   const containerRef = useRef<HTMLElement>(null)
   const internalCloseBtnRef = useRef<HTMLButtonElement>(null)
   const resolvedCloseBtnRef = (closeButtonRef as RefObject<HTMLButtonElement | null>) ?? internalCloseBtnRef
 
   useEffect(() => {
-    // 挂载时安全将焦点引导至详情内部（优先关闭按钮），收敛 Escape 局部处理且不丢焦点
-    const btn = resolvedCloseBtnRef.current
-    if (btn) {
-      btn.focus({ preventScroll: true })
-    } else {
-      containerRef.current?.focus({ preventScroll: true })
+    // 挂载时根据参数安全将焦点引导至详情内部（优先关闭按钮），收敛 Escape 局部处理且不丢焦点
+    if (autoFocusCloseButton) {
+      const btn = resolvedCloseBtnRef.current
+      if (btn) {
+        btn.focus({ preventScroll: true })
+      } else {
+        containerRef.current?.focus({ preventScroll: true })
+      }
     }
-  }, [resolvedCloseBtnRef])
+  }, [autoFocusCloseButton, resolvedCloseBtnRef])
 
   let title = 'INSPECTOR'
   if (selection.type === 'tool') {

@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ThreadModelRequestDebug } from '@/features/ai/runtime/thread-panel/ThreadModelRequestDebug'
 import {
   ThreadDebugInspector,
@@ -163,5 +163,91 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     await user.click(screen.getByRole('button', { name: 'View request' }))
 
     expect(screen.getByText(/No active frozen invocation request/i)).toBeInTheDocument()
+  })
+
+  it('handles empty tools, empty skills, and missing environment name', () => {
+    render(
+      <DebugViewHarness
+        debug={sampleDebug({
+          environmentName: null,
+          tools: [],
+          skills: [],
+          subagents: [],
+          cacheControl: null,
+        })}
+      />,
+    )
+    expect(screen.getByText('no env')).toBeInTheDocument()
+    const noneElements = screen.getAllByText('none')
+    expect(noneElements.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('handles invalid json gracefully in tool inspector schema display', async () => {
+    const user = userEvent.setup()
+    render(
+      <DebugViewHarness
+        debug={sampleDebug({
+          tools: [
+            {
+              name: 'malformed_tool',
+              description: 'Malformed schema tool',
+              inputSchemaJson: '{not-valid-json}',
+              environmentSupport: 'NONE',
+              requiredEnvironmentId: null,
+              provenance: 'custom',
+              state: 'SENT',
+              filterReason: null,
+            },
+          ],
+        })}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Tool malformed_tool' }))
+    expect(screen.getByText('{not-valid-json}')).toBeInTheDocument()
+  })
+
+  it('copies system prompt when copy button is clicked', async () => {
+    const user = userEvent.setup()
+    const writeTextMock = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    })
+    render(<DebugViewHarness />)
+    await user.click(screen.getByRole('button', { name: 'Copy system prompt' }))
+    expect(writeTextMock).toHaveBeenCalledWith('System prompt content with instructions')
+  })
+
+  it('handles empty inputSchemaJson in tool inspector and ignores Escape when isComposing', async () => {
+    const user = userEvent.setup()
+    render(
+      <DebugViewHarness
+        debug={sampleDebug({
+          tools: [
+            {
+              name: 'empty_schema_tool',
+              description: 'Empty schema tool',
+              inputSchemaJson: '',
+              environmentSupport: 'NONE',
+              requiredEnvironmentId: null,
+              provenance: 'custom',
+              state: 'SENT',
+              filterReason: null,
+            },
+          ],
+        })}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Tool empty_schema_tool' }))
+    const inspector = screen.getByTestId('thread-debug-inspector')
+    expect(inspector).toBeInTheDocument()
+
+    // 验证 isComposing 状态下按 Escape 不关闭 inspector
+    fireEvent.keyDown(inspector, { key: 'Escape', isComposing: true })
+    expect(screen.getByTestId('thread-debug-inspector')).toBeInTheDocument()
+
+    // 正常按 Escape 关闭
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('thread-debug-inspector')).not.toBeInTheDocument()
   })
 })
