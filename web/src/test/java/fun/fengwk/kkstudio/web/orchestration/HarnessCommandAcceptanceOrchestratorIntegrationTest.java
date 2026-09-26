@@ -336,6 +336,51 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(1, count("harness_thread", "id", threadId));
   }
 
+  /**
+   * 测试意图：请求预览使用的只读 owner 授权必须与正式接受共用同一份归属判定——同 owner 成功、跨 owner 与不存在的 owner 确定性拒绝， 且不写任何归属 relation
+   * 或 Harness 事实（预览因此既不能绕过跨 owner 检查，也不能顺带获得消费权限）。
+   */
+  @Test
+  void readOnlyAuthorizeThreadSharesAcceptanceOwnershipJudgmentWithoutAnyWrite() {
+    UUID chatId = createChat("authorize-readonly");
+    UUID canvasId = canvasCommandService.createCanvas("authorize-readonly-canvas").id();
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    accept(
+        new OwnerRef(OwnerType.CHAT, chatId),
+        sessionId,
+        threadId,
+        new UserMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("owned")))));
+
+    int sessionOwners = count("session_owner", "session_id", sessionId);
+    int entries = count("harness_entry", "session_id", sessionId);
+    int commands = count("harness_thread_command", "thread_id", threadId);
+    int works = count("harness_work", "target_id", threadId);
+
+    acceptanceService.authorizeThread(new OwnerRef(OwnerType.CHAT, chatId), threadId);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            acceptanceService.authorizeThread(new OwnerRef(OwnerType.CANVAS, canvasId), threadId));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            acceptanceService.authorizeThread(
+                new OwnerRef(OwnerType.CHAT, UUID.randomUUID()), threadId));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            acceptanceService.authorizeThread(
+                new OwnerRef(OwnerType.CHAT, chatId), UUID.randomUUID()));
+
+    assertEquals(sessionOwners, count("session_owner", "session_id", sessionId));
+    assertEquals(entries, count("harness_entry", "session_id", sessionId));
+    assertEquals(commands, count("harness_thread_command", "thread_id", threadId));
+    assertEquals(works, count("harness_work", "target_id", threadId));
+  }
+
   @Test
   void productOwnerCannotClaimAnExistingInternalSessionThroughReplay() {
     UUID chatId = createChat("internal-session-owner");
