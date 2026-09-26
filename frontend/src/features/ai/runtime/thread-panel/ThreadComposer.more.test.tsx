@@ -44,6 +44,77 @@ function ControlledComposer({
 }
 
 describe('ThreadComposer interactions', () => {
+  // Esc 只影响可见提示；不完整命令不能因提示隐藏而被发送或模糊执行。
+  it('preserves slash text across repeated Escape and reopens after editing', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    const onCommand = vi.fn()
+    render(<ControlledComposer focusOnEscape onSubmit={onSubmit} onCommand={onCommand} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.type(editor, '/de')
+    await user.keyboard('{Escape}{Escape}{Enter}')
+    expect(editor).toHaveTextContent('/de')
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onCommand).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+    expect(editor).toHaveTextContent('/de')
+    await user.keyboard('bug')
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    await user.keyboard('{Escape}{Enter}')
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'debug' }))
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(editor).toBeEmptyDOMElement()
+  })
+
+  // + 菜单覆盖 slash 提示时，一次 Esc 必须关闭二者，不能退回自动弹出的 slash 菜单。
+  it('closes plus and slash menus without losing text or attachments', async () => {
+    const user = userEvent.setup()
+    render(<ControlledComposer
+      initial={[createTextPart('/de'), createAttachmentPart('upload-1', 'a.png')]}
+      focusOnEscape
+      onSubmit={vi.fn()}
+      onCommand={vi.fn()}
+    />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    // 含附件时保持原有 slash 识别规则；菜单关闭不得删除任意内容块。
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    const before = editor.textContent
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await user.keyboard('{Escape}')
+    expect(editor.textContent).toBe(before)
+    expect(editor.querySelector('[data-part-type="attachment"]')).not.toBeNull()
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '打开命令表' }))
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+  })
+
+  // 隐藏提示不会解禁命令，也不能执行上一次活动选项。
+  it('does not execute a disabled complete command after dismissal', async () => {
+    const user = userEvent.setup()
+    const onCommand = vi.fn()
+    const onSubmit = vi.fn()
+    render(<ThreadComposer
+      parts={[createTextPart('/debug')]}
+      commands={[{ id: 'debug', label: 'debug', description: '', disabled: true }]}
+      pending={false}
+      disabled={false}
+      onPartsChange={vi.fn()}
+      onSubmit={onSubmit}
+      onCommand={onCommand}
+    />)
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.keyboard('{Escape}{Enter}')
+    expect(onCommand).not.toHaveBeenCalled()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('给 AI 发送消息')).toHaveTextContent('/debug')
+  })
+
   it('supports slash mode command execution and Escape close', async () => {
     const user = userEvent.setup()
     const onCommand = vi.fn()

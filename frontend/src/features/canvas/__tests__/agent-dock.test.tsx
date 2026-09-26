@@ -284,6 +284,9 @@ describe('Canvas shared AgentPane', () => {
     expect(screen.getByRole('option', { name: /^debug/ })).toHaveAttribute('aria-disabled', 'false')
     expect(screen.getByRole('option', { name: /^compact/ })).toHaveAttribute('aria-disabled', 'true')
     await user.keyboard('{Escape}')
+    // 关闭命令表保留 slash 草稿；切回普通消息由用户显式删除命令前缀。
+    expect(composer).toHaveTextContent('/')
+    await user.clear(composer)
     await user.type(composer, 'continue')
     await user.click(screen.getByRole('button', { name: '发送消息' }))
 
