@@ -43,6 +43,23 @@ export function clone(value) {
 export function modelConfigMatrix() {
   const good = () => baseModelConfig()
   return [
+    // 严格 JSON 文本边界：拒绝格式错误/重复键，以及绕过字符串传输的对象值。
+    ...[
+      ['malformed', '{invalid}'],
+      ['duplicate_keys', '{"a":1,"a":2}'],
+      ['non_object', '[]'],
+      ['trailing_token', '{} true'],
+      ['non_string', { temperature: 0.5 }],
+    ].map(([suffix, protocolOptionsJson]) => ({
+      id: `invalid.protocol_options_${suffix}`,
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /protocolOptionsJson|Failed to read request|Bad Request/i,
+      title: `protocolOptionsJson 严格边界：${suffix}`,
+      build: () => baseModelConfig({
+        variants: [{ id: 'default', protocolOptionsJson }],
+      }),
+    })),
     {
       id: 'valid.minimal',
       ok: true,

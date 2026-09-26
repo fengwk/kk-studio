@@ -233,13 +233,16 @@ registerCase({
   id: 'crud.model.lifecycle',
   level: 'L1',
   title: 'Model 复合 name identity 创建/更新/硬删除/同名重建',
-  docs: 'path 定位既有复合 identity（providerName/modelName）；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名），PUT 不改 providerName；modelName 可包含 /；DELETE 硬删除后同名可重建，version 从 0 重新开始；Provider 保持到最后再删',
+  docs: 'path 定位复合 identity；PUT 不改 providerName；protocolOptionsJson 在创建/读取/更新时保留数值文本；DELETE 后同名可重建且 version 从 0 开始；Provider 最后删除',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
       (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
     )
     const name = `vendor/e2e-model-${suffix}`
+    // 文本必须跨 HTTP/持久化往返不变，不能被 JS 的 Number 舍入。
+    const originalOptions = '{"large":9007199254740993,"ratio":0.12345678901234567890123456789}'
+    const updatedOptions = '{"large":9223372036854775808,"nested":{"ratio":1.234567890123456789e+45}}'
     const model = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/models', {
@@ -247,7 +250,9 @@ registerCase({
           name,
           modelId: `wire-lifecycle-${suffix}`,
           description: 'create',
-          config: baseModelConfig(),
+          config: baseModelConfig({
+            variants: [{ id: 'default', protocolOptionsJson: originalOptions }],
+          }),
         })
       ).json,
     )
@@ -255,12 +260,15 @@ registerCase({
       model?.providerName === provider.name && model.name === name && !('id' in model),
       JSON.stringify(model),
     )
+    assert(model.config.variants[0].protocolOptionsJson === originalOptions, 'created options changed')
+    const listed = await findModel(ctx, provider.name, name)
+    assert(listed?.config.variants[0].protocolOptionsJson === originalOptions, 'listed options changed')
     const updatedConfig = baseModelConfig({
       limit: { context: 8192, output: 1024 },
       abilities: { tools: false, reasoning: true, inputModalities: ['TEXT', 'IMAGE'] },
       defaultVariant: 'fast',
       variants: [
-        { id: 'fast' },
+        { id: 'fast', protocolOptionsJson: updatedOptions },
         { id: 'quality', reasoningEffort: 'high' },
       ],
     })
@@ -277,6 +285,9 @@ registerCase({
     )
     assert(updated.providerName === provider.name && updated.name === name, JSON.stringify(updated))
     assert(updated.config.defaultVariant === 'fast', JSON.stringify(updated.config))
+    assert(updated.config.variants[0].protocolOptionsJson === updatedOptions, 'updated options changed')
+    const relisted = await findModel(ctx, provider.name, name)
+    assert(relisted?.config.variants[0].protocolOptionsJson === updatedOptions, 'relisted options changed')
     await deleteModel(ctx, updated)
     assert(!(await findModel(ctx, provider.name, name)), 'Model still listed')
 
