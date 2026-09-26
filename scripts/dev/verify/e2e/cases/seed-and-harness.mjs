@@ -274,6 +274,54 @@ registerCase({
 })
 
 registerCase({
+  id: 'thread.provider_request_preview_guard',
+  level: 'L1',
+  title: '发送前请求预览不接受不准确的游标或无法规划的草稿',
+  docs: 'POST /api/harness/threads/{threadId}/provider-request-preview 使用同一 command batch wire；陈旧 head/sequence 返回 409；无法解析 Agent 的空闲 Thread 返回 409，且预览不入队、不推进游标。完整 wire body/附件等价性由有 S3 与 Provider 编码器的自动化集成测试覆盖。',
+  async run(ctx) {
+    if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
+    if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
+    const chat = await createChat(ctx, {
+      title: `e2e-preview-${cid().slice(0, 8)}`,
+      agentName: ctx.vars.agent.name,
+      yoloEnabled: false,
+    })
+    const owner = chatOwner(chat.id)
+    const threadId = cid()
+    await createNewSession(ctx, {
+      owner,
+      sessionId: cid(),
+      threadId,
+      rootSettings: branchSettingsOf(
+        { name: `e2e-preview-missing-${cid().slice(0, 8)}` },
+        modelSelectionOf(ctx),
+      ),
+      commands: [userMessageCommand('establish history', cid())],
+    })
+    const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    const endpoint = `/api/harness/threads/${encodeURIComponent(threadId)}/provider-request-preview`
+    const draft = {
+      owner,
+      target: threadTarget({
+        threadId,
+        expectedHeadEntryId: thread.headEntryId,
+        expectedNextCommandSequence: thread.nextCommandSequence,
+      }),
+      commands: [userMessageCommand('preview only', cid())],
+    }
+    await expectHttpError(() => ctx.call('POST', endpoint, {
+      ...draft,
+      target: { ...draft.target, expectedNextCommandSequence: String(BigInt(thread.nextCommandSequence) + 1n) },
+    }), { status: 409 })
+    await expectHttpError(() => ctx.call('POST', endpoint, draft), { status: 409 })
+    const after = await getThreadSnapshot(ctx, threadId)
+    assert(after.thread.headEntryId === thread.headEntryId, 'preview advanced thread head')
+    assert(after.thread.nextCommandSequence === thread.nextCommandSequence, 'preview reserved command sequence')
+    assert(after.queuedCommands.length === 0, 'preview enqueued a command')
+  },
+})
+
+registerCase({
   id: 'thread.branch_settings_projection',
   level: 'L1',
   title: 'NEW_SESSION rootSettings 完整投影到 Thread 快照',

@@ -196,11 +196,13 @@ export function useAgentPaneController({
 
   const [previewLoading, setPreviewLoading] = useState(false)
   const previewRequestIdRef = useRef(0)
+  const previewInFlightRef = useRef(false)
 
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
 
   useEffect(() => {
     previewRequestIdRef.current += 1
+    previewInFlightRef.current = false
     setPreviewLoading(false)
   }, [boundThreadId])
   const branchPanel = useBoundBranchPanel({
@@ -833,14 +835,14 @@ export function useAgentPaneController({
     }
   }
 
-  async function handlePreview(payloadParts?: ComposerPart[]) {
+  async function handlePreview(payloadParts: ComposerPart[], localDraftParts: ComposerPart[]) {
     if (capabilities?.readOnly) {
       return
     }
     if (!isBoundTarget(target)) {
       return
     }
-    if (previewLoading) {
+    if (previewInFlightRef.current) {
       return
     }
     const currentThreadId = target.threadId
@@ -848,7 +850,7 @@ export function useAgentPaneController({
     if (!currentThread || currentThread.threadId !== currentThreadId) {
       return
     }
-    const currentPayload = trimMessageParts(payloadParts ?? (isBoundTarget(target) ? controller.draft : parts))
+    const currentPayload = trimMessageParts(payloadParts)
     if (!hasMessageContent(currentPayload)) {
       return
     }
@@ -861,35 +863,33 @@ export function useAgentPaneController({
     }
 
     const requestId = ++previewRequestIdRef.current
-    const requestPartsKey = partsKey(currentPayload)
+    // The transport payload has server uploadIds; the editable draft retains localIds.
+    const requestPartsKey = partsKey(trimMessageParts(localDraftParts))
     const requestDraft = branchPanel.draft ? cloneDraft(branchPanel.draft) : null
 
+    previewInFlightRef.current = true
     setPreviewLoading(true)
     setActionError(null)
 
-    try {
-      const response = await harnessService.previewProviderRequest(currentThreadId, plan.request)
-      if (!isMountedRef.current) {
-        return
-      }
-      if (previewRequestIdRef.current !== requestId) {
-        return
+    const isCurrentPreview = () => {
+      if (!isMountedRef.current || previewRequestIdRef.current !== requestId) {
+        return false
       }
       const latestTarget = targetRef.current
       if (!isBoundTarget(latestTarget) || latestTarget.threadId !== currentThreadId) {
-        return
+        return false
       }
-      // Guard against stale async result on draft text or settings changes
-      const latestPayload = trimMessageParts(
-        isBoundTarget(latestTarget) ? controllerRef.current.draft : partsRef.current,
-      )
-      const latestDraft = branchPanelRef.current.draft ?? null
-      if (
-        partsKey(latestPayload) !== requestPartsKey
-        || latestDraft == null
-        || requestDraft == null
-        || !branchDraftsEqual(latestDraft, requestDraft)
-      ) {
+      const latestPayload = trimMessageParts(controllerRef.current.draft)
+      const latestDraft = branchPanelRef.current.draft
+      return partsKey(latestPayload) === requestPartsKey
+        && latestDraft != null
+        && requestDraft != null
+        && branchDraftsEqual(latestDraft, requestDraft)
+    }
+
+    try {
+      const response = await harnessService.previewProviderRequest(currentThreadId, plan.request)
+      if (!isCurrentPreview()) {
         return
       }
 
@@ -899,19 +899,13 @@ export function useAgentPaneController({
 
       boundViews.selectDebugInspector({ type: 'preview', preview: response })
     } catch (error) {
-      if (!isMountedRef.current) {
-        return
-      }
-      if (previewRequestIdRef.current !== requestId) {
-        return
-      }
-      const latestTarget = targetRef.current
-      if (!isBoundTarget(latestTarget) || latestTarget.threadId !== currentThreadId) {
+      if (!isCurrentPreview()) {
         return
       }
       setActionError(errorMessage(error, t('ai.runtime.debug.previewFailed')))
     } finally {
       if (isMountedRef.current && previewRequestIdRef.current === requestId) {
+        previewInFlightRef.current = false
         setPreviewLoading(false)
       }
     }

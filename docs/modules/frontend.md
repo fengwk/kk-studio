@@ -206,9 +206,17 @@ Debug 视图标题精简本地化为“下一次请求预览”（去掉 DEBUG �
 属于前者；后者通过仅在活动 `frozenInvocation` 存在时渲染的“请求快照”按钮展示由冻结 ModelRequestSpec 物化的 canonical
 ProviderRequest（空态防御留在 Inspector 内部不再常显无效按钮），其精确 Skill 列表已在冻结 systemInstruction 的 XML 中。预览不能冒充
 历史实际请求。详情完整保留可读 JSON，但不展示 credential、Authorization header、
-对象存储内部地址或 Base64 正文。前端只调用
+对象存储内部地址或 Base64 正文。这一结构化诊断只调用
 `GET /api/harness/threads/{threadId}/model-request-debug`，进入 Debug 拉取一次，并在
 Turn 开始/结束时刷新。
+
+已绑定 Thread 的 Composer 在发送旁提供“预览请求”：沿用发送的批次构建（包括草稿设置与就绪
+附件的 uploadId），调用 `POST /api/harness/threads/{threadId}/provider-request-preview`，
+不清空草稿，也不提交命令。结果直接打开 Debug 第三列的独立“请求预览”检查器；窄屏自动进入
+“详情”页签。此处展示的是**点击时**真实 Provider 协议 JSON body，可能包含历史与附件的
+Base64 内联媒体；与上述不包含 Base64 的结构化诊断、活动请求快照互不混淆，且不展示
+认证 Header。新建 Session/Thread 无此按钮；409 等失败只提示原因并保留草稿。请求和发送
+之间的历史或配置可能变化，预览不是对后续发送字节的保证。
 
 运行控制面同样以 Snapshot 为对账依据：
 
