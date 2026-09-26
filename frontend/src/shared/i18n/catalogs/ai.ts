@@ -1834,6 +1834,230 @@ export const aiCatalog = {
     'en-US': 'No request preview data',
     'zh-CN': '暂无请求预览数据',
   },
+  'ai.runtime.debug.tabsAriaLabel': {
+    'en-US': 'Debug views',
+    'zh-CN': '调试视图',
+  },
+  'ai.runtime.debug.previewTitle': {
+    'en-US': 'Next Request Preview',
+    'zh-CN': '下一次请求预览',
+  },
+  'ai.runtime.debug.envPrefix': {
+    'en-US': 'env: ',
+    'zh-CN': '环境: ',
+  },
+  'ai.runtime.debug.noEnvironmentSelected': {
+    'en-US': 'No environment selected',
+    'zh-CN': '未选择环境',
+  },
+  'ai.runtime.debug.requestSnapshot': {
+    'en-US': 'Request Snapshot',
+    'zh-CN': '请求快照',
+  },
+  'ai.runtime.debug.requestSnapshotTitle': {
+    'en-US': 'View normalized request snapshot for current invocation',
+    'zh-CN': '查看当前调用规范化请求快照',
+  },
+  'ai.runtime.debug.copyPrompt': {
+    'en-US': 'Copy Prompt',
+    'zh-CN': '复制提示词',
+  },
+  'ai.runtime.debug.copyPromptTitle': {
+    'en-US': 'Copy system prompt',
+    'zh-CN': '复制系统提示词',
+  },
+  'ai.runtime.debug.copied': {
+    'en-US': 'Copied',
+    'zh-CN': '已复制',
+  },
+  'ai.runtime.debug.copyFailed': {
+    'en-US': 'Copy failed',
+    'zh-CN': '复制失败',
+  },
+  'ai.runtime.debug.planningError': {
+    'en-US': 'Planning Error',
+    'zh-CN': '规划错误',
+  },
+  'ai.runtime.debug.systemPromptTitle': {
+    'en-US': 'System Prompt',
+    'zh-CN': '系统提示词',
+  },
+  'ai.runtime.debug.emptyPrompt': {
+    'en-US': '(empty)',
+    'zh-CN': '（空）',
+  },
+  'ai.runtime.debug.toolsTitle': {
+    'en-US': 'TOOLS',
+    'zh-CN': '工具',
+  },
+  'ai.runtime.debug.toolsSent': {
+    'en-US': 'sent',
+    'zh-CN': '已发送',
+  },
+  'ai.runtime.debug.toolsFiltered': {
+    'en-US': 'filtered',
+    'zh-CN': '已过滤',
+  },
+  'ai.runtime.debug.toolAriaPrefix': {
+    'en-US': 'Tool',
+    'zh-CN': '工具',
+  },
+  'ai.runtime.debug.filteredToolAriaPrefix': {
+    'en-US': 'Filtered tool',
+    'zh-CN': '已过滤工具',
+  },
+  'ai.runtime.debug.none': {
+    'en-US': 'none',
+    'zh-CN': '无',
+  },
+  'ai.runtime.debug.skillsTitle': {
+    'en-US': 'SKILLS',
+    'zh-CN': '技能',
+  },
+  'ai.runtime.debug.noSkills': {
+    'en-US': 'No skills',
+    'zh-CN': '暂无技能',
+  },
+  'ai.runtime.debug.skillAriaPrefix': {
+    'en-US': 'Skill',
+    'zh-CN': '技能',
+  },
+  'ai.runtime.debug.delivery.local': {
+    'en-US': 'local',
+    'zh-CN': '本地',
+  },
+  'ai.runtime.debug.delivery.platform': {
+    'en-US': 'platform',
+    'zh-CN': '平台',
+  },
+  'ai.runtime.debug.subagentsLabel': {
+    'en-US': 'Subagents:',
+    'zh-CN': '子代理：',
+  },
+  'ai.runtime.debug.cacheLabel': {
+    'en-US': 'Cache:',
+    'zh-CN': '缓存：',
+  },
+  'ai.runtime.debug.cacheRetention.none': {
+    'en-US': 'No cache (NONE)',
+    'zh-CN': '无缓存 (NONE)',
+  },
+  'ai.runtime.debug.cacheRetention.short': {
+    'en-US': 'Short (SHORT)',
+    'zh-CN': '短期 (SHORT)',
+  },
+  'ai.runtime.debug.cacheRetention.long': {
+    'en-US': 'Long (LONG)',
+    'zh-CN': '长期 (LONG)',
+  },
+  'ai.runtime.debug.envSupport.none': {
+    'en-US': 'Platform only (NONE)',
+    'zh-CN': '平台独立 (NONE)',
+  },
+  'ai.runtime.debug.envSupport.optional': {
+    'en-US': 'Optional environment (OPTIONAL)',
+    'zh-CN': '可选环境 (OPTIONAL)',
+  },
+  'ai.runtime.debug.envSupport.required': {
+    'en-US': 'Environment required (REQUIRED)',
+    'zh-CN': '需要环境 (REQUIRED)',
+  },
+  'ai.runtime.debug.inspectorTitle': {
+    'en-US': 'INSPECTOR',
+    'zh-CN': '检查器',
+  },
+  'ai.runtime.debug.toolLabel': {
+    'en-US': 'Tool',
+    'zh-CN': '工具',
+  },
+  'ai.runtime.debug.skillLabel': {
+    'en-US': 'Skill',
+    'zh-CN': '技能',
+  },
+  'ai.runtime.debug.requestLabel': {
+    'en-US': 'Request',
+    'zh-CN': '请求快照',
+  },
+  'ai.runtime.debug.inspectorClose': {
+    'en-US': 'Close inspector',
+    'zh-CN': '关闭检查器',
+  },
+  'ai.runtime.debug.inspector.name': {
+    'en-US': 'Name',
+    'zh-CN': '名称',
+  },
+  'ai.runtime.debug.inspector.status': {
+    'en-US': 'Status',
+    'zh-CN': '状态',
+  },
+  'ai.runtime.debug.inspector.toolState.sent': {
+    'en-US': 'SENT',
+    'zh-CN': '已发送 (SENT)',
+  },
+  'ai.runtime.debug.inspector.toolState.filtered': {
+    'en-US': 'FILTERED',
+    'zh-CN': '已过滤 (FILTERED)',
+  },
+  'ai.runtime.debug.filterReason.envNotSelected': {
+    'en-US': 'Environment not selected',
+    'zh-CN': '未选择环境',
+  },
+  'ai.runtime.debug.inspector.environmentSupport': {
+    'en-US': 'Environment Support',
+    'zh-CN': '环境支持',
+  },
+  'ai.runtime.debug.inspector.requiredEnvId': {
+    'en-US': 'Required Environment ID',
+    'zh-CN': '所需环境 ID',
+  },
+  'ai.runtime.debug.inspector.provenance': {
+    'en-US': 'Contributor (Provenance)',
+    'zh-CN': '来源 (Contributor)',
+  },
+  'ai.runtime.debug.inspector.description': {
+    'en-US': 'Description',
+    'zh-CN': '描述',
+  },
+  'ai.runtime.debug.inspector.inputSchemaJson': {
+    'en-US': 'Input Schema JSON:',
+    'zh-CN': '输入 Schema JSON：',
+  },
+  'ai.runtime.debug.inspector.skillName': {
+    'en-US': 'Skill Name',
+    'zh-CN': '技能名称',
+  },
+  'ai.runtime.debug.inspector.package': {
+    'en-US': 'Package',
+    'zh-CN': '包名 (Package)',
+  },
+  'ai.runtime.debug.inspector.delivery': {
+    'en-US': 'Delivery',
+    'zh-CN': '交付方式 (Delivery)',
+  },
+  'ai.runtime.debug.inspector.path': {
+    'en-US': 'Path',
+    'zh-CN': '路径',
+  },
+  'ai.runtime.debug.inspector.currentCommit': {
+    'en-US': 'Current Commit',
+    'zh-CN': '当前提交',
+  },
+  'ai.runtime.debug.inspector.observedHeadCommit': {
+    'en-US': 'Observed HEAD Commit',
+    'zh-CN': '观察到的 HEAD 提交',
+  },
+  'ai.runtime.debug.inspector.daemonInstalledCommit': {
+    'en-US': 'Daemon Installed Commit',
+    'zh-CN': 'Daemon 安装提交',
+  },
+  'ai.runtime.debug.inspector.promptXml': {
+    'en-US': 'Prompt XML:',
+    'zh-CN': '提示词 XML：',
+  },
+  'ai.runtime.debug.noFrozenInvocation': {
+    'en-US': 'No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.',
+    'zh-CN': '当前无活动的冻结调用请求。仅在活动调用回合中显示规范化请求 JSON。',
+  },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',
     'zh-CN': 'Entry ID',

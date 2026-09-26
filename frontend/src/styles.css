@@ -2018,6 +2018,7 @@ div.is-error {
 }
 
 .thread-debug-col-preview {
+  container-type: size;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 10px 12px;
@@ -2144,6 +2145,7 @@ div.is-error {
 }
 
 .thread-system-prompt-body {
+  box-sizing: border-box;
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -2156,8 +2158,24 @@ div.is-error {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  max-height: 115px;
+  height: 50cqh;
   overflow-y: auto;
+}
+
+.thread-debug-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-transform: none;
+}
+
+.thread-debug-copy-feedback {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.thread-debug-copy-feedback.is-error {
+  color: var(--danger, #ef4444);
 }
 
 .thread-debug-rail {

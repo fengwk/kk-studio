@@ -278,7 +278,7 @@ export function ThreadEventView({
     >
       {/* 窄面板下的 WAI-ARIA Tab 导航；宽面板不渲染 tablist */}
       {!isWide ? (
-        <div className="thread-debug-tabs" role="tablist" aria-label="Debug views">
+        <div className="thread-debug-tabs" role="tablist" aria-label={t('ai.runtime.debug.tabsAriaLabel')}>
           <button
             ref={(el) => {
               tabButtonRefs.current.preview = el

@@ -5,6 +5,7 @@ import type {
   ThreadModelRequestDebugSkill,
   ThreadModelRequestDebugTool,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { useI18n } from '@/shared/i18n'
 
 export type DebugInspectorSelection =
   | { type: 'tool'; tool: ThreadModelRequestDebugTool }
@@ -23,6 +24,45 @@ function formatJson(raw: string | undefined): string {
   }
 }
 
+function formatFilterReason(
+  reason: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (reason === 'ENVIRONMENT_NOT_SELECTED') {
+    return t('ai.runtime.debug.filterReason.envNotSelected')
+  }
+  return reason
+}
+
+function formatEnvSupport(
+  support: 'NONE' | 'OPTIONAL' | 'REQUIRED',
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  switch (support) {
+    case 'NONE':
+      return t('ai.runtime.debug.envSupport.none')
+    case 'OPTIONAL':
+      return t('ai.runtime.debug.envSupport.optional')
+    case 'REQUIRED':
+      return t('ai.runtime.debug.envSupport.required')
+    default:
+      return support
+  }
+}
+
+function formatDelivery(
+  delivery: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  if (delivery === 'LOCAL') {
+    return t('ai.runtime.debug.delivery.local')
+  }
+  if (delivery === 'PLATFORM') {
+    return t('ai.runtime.debug.delivery.platform')
+  }
+  return delivery
+}
+
 export function ThreadDebugInspector({
   selection,
   debug,
@@ -36,6 +76,7 @@ export function ThreadDebugInspector({
   closeButtonRef?: Ref<HTMLButtonElement>
   autoFocusCloseButton?: boolean
 }) {
+  const { t } = useI18n()
   const containerRef = useRef<HTMLElement>(null)
   const internalCloseBtnRef = useRef<HTMLButtonElement>(null)
   const resolvedCloseBtnRef = (closeButtonRef as RefObject<HTMLButtonElement | null>) ?? internalCloseBtnRef
@@ -52,13 +93,13 @@ export function ThreadDebugInspector({
     }
   }, [autoFocusCloseButton, resolvedCloseBtnRef])
 
-  let title = 'INSPECTOR'
+  let title = t('ai.runtime.debug.inspectorTitle')
   if (selection.type === 'tool') {
-    title = `INSPECTOR: Tool · ${selection.tool.name}`
+    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.toolLabel')} · ${selection.tool.name}`
   } else if (selection.type === 'skill') {
-    title = `INSPECTOR: Skill · ${selection.skill.name}`
+    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.skillLabel')} · ${selection.skill.name}`
   } else if (selection.type === 'request') {
-    title = 'INSPECTOR: Request'
+    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.requestLabel')}`
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -87,7 +128,7 @@ export function ThreadDebugInspector({
           ref={resolvedCloseBtnRef}
           type="button"
           className="thread-interaction-close"
-          aria-label="Close inspector"
+          aria-label={t('ai.runtime.debug.inspectorClose')}
           onClick={onClose}
         >
           <X aria-hidden="true" />
@@ -98,44 +139,46 @@ export function ThreadDebugInspector({
         <div className="thread-debug-inspector-body">
           <dl className="thread-event-detail-rows">
             <div className="thread-event-detail-row">
-              <dt>Name</dt>
+              <dt>{t('ai.runtime.debug.inspector.name')}</dt>
               <dd><code>{selection.tool.name}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Status</dt>
+              <dt>{t('ai.runtime.debug.inspector.status')}</dt>
               <dd>
                 <span className={selection.tool.state === 'SENT' ? 'status-pill is-ready' : 'status-pill is-offline'}>
-                  {selection.tool.state}
+                  {selection.tool.state === 'SENT'
+                    ? t('ai.runtime.debug.inspector.toolState.sent')
+                    : t('ai.runtime.debug.inspector.toolState.filtered')}
                 </span>
                 {selection.tool.filterReason ? (
                   <span className="thread-debug-filter-reason">
-                    ({selection.tool.filterReason})
+                    ({formatFilterReason(selection.tool.filterReason, t)})
                   </span>
                 ) : null}
               </dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Environment Support</dt>
-              <dd><code>{selection.tool.environmentSupport}</code></dd>
+              <dt>{t('ai.runtime.debug.inspector.environmentSupport')}</dt>
+              <dd><code>{formatEnvSupport(selection.tool.environmentSupport, t)}</code></dd>
             </div>
             {selection.tool.requiredEnvironmentId ? (
               <div className="thread-event-detail-row">
-                <dt>Required Environment ID</dt>
+                <dt>{t('ai.runtime.debug.inspector.requiredEnvId')}</dt>
                 <dd><code>{selection.tool.requiredEnvironmentId}</code></dd>
               </div>
             ) : null}
             <div className="thread-event-detail-row">
-              <dt>Contributor (Provenance)</dt>
+              <dt>{t('ai.runtime.debug.inspector.provenance')}</dt>
               <dd><code>{selection.tool.provenance}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Description</dt>
+              <dt>{t('ai.runtime.debug.inspector.description')}</dt>
               <dd>{selection.tool.description}</dd>
             </div>
           </dl>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">
-              Input Schema JSON:
+              {t('ai.runtime.debug.inspector.inputSchemaJson')}
             </span>
             <pre className="thread-event-detail-payload" tabIndex={0}>
               {formatJson(selection.tool.inputSchemaJson)}
@@ -148,45 +191,45 @@ export function ThreadDebugInspector({
         <div className="thread-debug-inspector-body">
           <dl className="thread-event-detail-rows">
             <div className="thread-event-detail-row">
-              <dt>Skill Name</dt>
+              <dt>{t('ai.runtime.debug.inspector.skillName')}</dt>
               <dd><code>{selection.skill.name}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Package</dt>
+              <dt>{t('ai.runtime.debug.inspector.package')}</dt>
               <dd><code>{selection.skill.packageName}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Delivery</dt>
+              <dt>{t('ai.runtime.debug.inspector.delivery')}</dt>
               <dd>
                 <span className="status-pill is-ready">
-                  {selection.skill.delivery}
+                  {formatDelivery(selection.skill.delivery, t)}
                 </span>
               </dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Path</dt>
+              <dt>{t('ai.runtime.debug.inspector.path')}</dt>
               <dd><code>{selection.skill.path}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Description</dt>
+              <dt>{t('ai.runtime.debug.inspector.description')}</dt>
               <dd>{selection.skill.description}</dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Current Commit</dt>
+              <dt>{t('ai.runtime.debug.inspector.currentCommit')}</dt>
               <dd><code>{selection.skill.currentCommit}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Observed HEAD Commit</dt>
+              <dt>{t('ai.runtime.debug.inspector.observedHeadCommit')}</dt>
               <dd><code>{selection.skill.observedHeadCommit || '—'}</code></dd>
             </div>
             <div className="thread-event-detail-row">
-              <dt>Daemon Installed Commit</dt>
+              <dt>{t('ai.runtime.debug.inspector.daemonInstalledCommit')}</dt>
               <dd><code>{selection.skill.installedCommit || '—'}</code></dd>
             </div>
           </dl>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">
-              Prompt XML:
+              {t('ai.runtime.debug.inspector.promptXml')}
             </span>
             <pre className="thread-event-detail-payload" tabIndex={0}>
               {selection.skill.promptXml}
@@ -214,7 +257,7 @@ export function ThreadDebugInspector({
             </div>
           ) : (
             <div className="inline-hint thread-debug-empty-hint">
-              No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.
+              {t('ai.runtime.debug.noFrozenInvocation')}
             </div>
           )}
         </div>
