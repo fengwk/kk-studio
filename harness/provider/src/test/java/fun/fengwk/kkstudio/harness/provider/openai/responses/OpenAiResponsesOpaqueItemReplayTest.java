@@ -41,8 +41,8 @@ import java.util.UUID;
  * 验证 stateless replay 对未知官方 output item 的不透明透传。
  *
  * <p>未知 item（web/file search、image generation、code interpreter、custom tool call 等）在 affinity
- * 与冻结前缀哈希 通过后原样上 wire；已知 {@code message}/{@code reasoning}/{@code function_call} 的字段校验与 durable
- * 语义一致性 仍然严格，额外 unknown 字段不能把已知类型洗成不透明 item。
+ * 与冻结前缀哈希 通过后原样上 wire；已知 {@code message}/{@code reasoning}/{@code function_call} 在保留全部官方响应字段的同时仍受
+ * durable 语义所必需的结构/类型约束与一致性校验，绝不会被额外字段洗成不透明 item。
  */
 class OpenAiResponsesOpaqueItemReplayTest {
 
@@ -179,24 +179,76 @@ class OpenAiResponsesOpaqueItemReplayTest {
   }
 
   /**
-   * 测试意图：已知类型的字段校验不能被额外 unknown 字段绕过 —— 带额外字段的 message/reasoning/function_call 仍然被拒绝，
-   * 绝不会因为多出一个字段就被当作不透明 item 透传。
+   * 测试意图：已知类型携带官方额外字段（message 的 id/status/phase 与 output_text 的 annotations/logprobs、reasoning 与
+   * function_call 的 id/status 及未来成员）时仍然是已知类型：额外字段既不触发拒绝，也不会被清洗或降级，而是与冻结事实 逐字一致地回放；同时 durable
+   * 文本/思考/工具调用仍被严格校验。
    */
   @Test
-  void test_knownTypeCannotBypassValidationThroughExtraFields() throws Exception {
+  void test_knownItemsWithOfficialExtraFieldsReplayVerbatim() throws Exception {
+    ArrayNode output = MAPPER.createArrayNode();
+    output.add(
+        MAPPER.readTree(
+            """
+            {"type":"message","id":"msg_1","status":"completed","role":"assistant","phase":"final",
+             "content":[{"type":"output_text","text":"sunny",
+               "annotations":[{"type":"url_citation","start_index":0,"end_index":5,
+                 "url":"https://example.com","title":"src"}],
+               "logprobs":[{"token":"sun","logprob":-0.1,"bytes":[115]}]}]}
+            """));
+    output.add(
+        MAPPER.readTree(
+            """
+            {"type":"reasoning","id":"rs_1","status":"completed","encrypted_content":"enc_1",
+             "summary":[{"type":"summary_text","text":"durable thought"}],
+             "content":[{"type":"reasoning_text","text":"private reasoning"}]}
+            """));
+    output.add(
+        MAPPER.readTree(
+            "{\"type\":\"function_call\",\"id\":\"fc_1\",\"status\":\"completed\",\"call_id\":\"c1\","
+                + "\"name\":\"calc\",\"arguments\":\"{}\",\"future_member\":{\"nested\":true}}"));
+
+    ObjectNode root =
+        encodeWithReplay(
+            replayState(payloadWith(output), prefixHashBeforeAssistantMessage()),
+            List.of(
+                new ProviderTextBlock("sunny"),
+                new ProviderThinkingBlock("durable thought"),
+                new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}"))));
+
+    ArrayNode input = (ArrayNode) root.get("input");
+    assertEquals(3, input.size());
+    for (int i = 0; i < output.size(); i++) {
+      assertEquals(output.get(i), input.get(i), "replayed known item " + i);
+    }
+  }
+
+  /**
+   * 测试意图：放宽的只是已知类型的字段白名单；durable 语义所必需的结构/类型仍然严格 —— 非 assistant role、缺失 text 的 output_text、形态错误的
+   * summary 块、缺失身份或非法 arguments 的 function_call 都必须以 INVALID_REQUEST 拒绝，绝不会因为 “额外字段可透传” 而被当作不透明
+   * item 放行。
+   */
+  @Test
+  void test_knownItemStructureStillStrictlyValidated() throws Exception {
     List<ObjectNode> invalidKnownItems =
         List.of(
             (ObjectNode)
                 MAPPER.readTree(
-                    "{\"type\":\"message\",\"role\":\"assistant\",\"unknown_prop\":true,"
+                    "{\"type\":\"message\",\"role\":\"user\","
                         + "\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}"),
             (ObjectNode)
                 MAPPER.readTree(
-                    "{\"type\":\"reasoning\",\"encrypted_content\":\"enc\",\"unknown_prop\":1}"),
+                    "{\"type\":\"message\",\"role\":\"assistant\","
+                        + "\"content\":[{\"type\":\"output_text\"}]}"),
             (ObjectNode)
                 MAPPER.readTree(
-                    "{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"calc\",\"arguments\":\"{}\","
-                        + "\"unknown_prop\":\"x\"}"));
+                    "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"wrong_type\",\"text\":\"th\"}]}"),
+            (ObjectNode)
+                MAPPER.readTree(
+                    "{\"type\":\"function_call\",\"call_id\":\"c1\",\"arguments\":\"{}\"}"),
+            (ObjectNode)
+                MAPPER.readTree(
+                    "{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"calc\","
+                        + "\"arguments\":\"[1]\"}"));
 
     for (ObjectNode item : invalidKnownItems) {
       ArrayNode output = MAPPER.createArrayNode();
@@ -206,7 +258,12 @@ class OpenAiResponsesOpaqueItemReplayTest {
       ProviderException ex =
           assertThrows(
               ProviderException.class,
-              () -> encodeWithReplay(replayState, List.of(new ProviderTextBlock("hi"))));
+              () ->
+                  encodeWithReplay(
+                      replayState,
+                      List.of(
+                          new ProviderTextBlock("hi"),
+                          new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{}")))));
       assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind(), item.path("type").asText());
     }
   }

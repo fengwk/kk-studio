@@ -71,15 +71,6 @@ final class OpenAiResponsesRequestEncoder {
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
   private static final String ALLOWED_DOCUMENT_TYPE = "application/pdf";
   private static final Set<String> ALLOWED_PAYLOAD_FIELDS = Set.of("output");
-  private static final Set<String> ALLOWED_MESSAGE_FIELDS =
-      Set.of("type", "role", "content", "id", "phase");
-  private static final Set<String> ALLOWED_OUTPUT_TEXT_FIELDS = Set.of("type", "text");
-  private static final Set<String> ALLOWED_REFUSAL_FIELDS = Set.of("type", "refusal");
-  private static final Set<String> ALLOWED_REASONING_FIELDS =
-      Set.of("type", "summary", "encrypted_content", "id");
-  private static final Set<String> ALLOWED_SUMMARY_FIELDS = Set.of("type", "text");
-  private static final Set<String> ALLOWED_FUNCTION_CALL_FIELDS =
-      Set.of("type", "call_id", "id", "name", "arguments");
 
   /**
    * variant 原生选项绝不覆盖的 prompt cache 控制字段：是否下发、下发什么值完全由 runtime 的缓存策略与 affinity identity
@@ -606,9 +597,11 @@ final class OpenAiResponsesRequestEncoder {
    * affinity/前缀校验之前失败的情形。唯一例外是无 {@code encrypted_content} 且没有任何可用摘要文本的空 reasoning
    * 占位符：它是上游“原生推理不可用”的合法形态，本身不是损坏请求；当它无法承载 durable 语义思考时返回 {@code false}，由调用方回退语义编码，而不是让后续轮次永远失败。
    *
-   * <p>已知 {@code message}/{@code reasoning}/{@code function_call} 继续严格校验 runtime 关心的字段并与 durable
-   * 内容逐项比对； 其余官方 output item（web/file search、code interpreter、image generation、custom tool call
-   * 等）不承载 durable 语义，只要是非空 object 且 {@code type} 为非空白字符串，就作为不透明事实原样透传，绝不静默丢弃。
+   * <p>已知 {@code message}/{@code reasoning}/{@code function_call} 只对 durable 语义所必需的字段做结构/类型
+   * 校验（role、content 块形态、摘要块形态、函数调用标识与参数）并逐项比对 durable 内容；官方响应事实中的其余字段（{@code id}/{@code
+   * status}/output_text 的 {@code annotations}/{@code logprobs} 及未来新增成员）不参与裁决，一律原样回放。 其余官方 output
+   * item（web/file search、code interpreter、image generation、custom tool call 等）不承载 durable 语义，只要是非空
+   * object 且 {@code type} 为非空白字符串，就作为不透明事实原样透传，绝不静默丢弃。
    */
   private static boolean validateReplayOutputAgainstDurable(
       ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
@@ -633,7 +626,6 @@ final class OpenAiResponsesRequestEncoder {
       String type = item.get("type").textValue();
       switch (type) {
         case "message" -> {
-          validateAllowedFields(item, ALLOWED_MESSAGE_FIELDS, "message item");
           if (!item.has("role")
               || !item.get("role").isTextual()
               || !"assistant".equals(item.get("role").textValue())) {
@@ -672,7 +664,6 @@ final class OpenAiResponsesRequestEncoder {
             }
             switch (block.get("type").textValue()) {
               case "output_text" -> {
-                validateAllowedFields(block, ALLOWED_OUTPUT_TEXT_FIELDS, "output_text block");
                 if (!block.has("text") || !block.get("text").isTextual()) {
                   throw new ProviderException(
                       ProviderErrorKind.INVALID_REQUEST,
@@ -681,7 +672,6 @@ final class OpenAiResponsesRequestEncoder {
                 replayText.append(block.get("text").textValue());
               }
               case "refusal" -> {
-                validateAllowedFields(block, ALLOWED_REFUSAL_FIELDS, "refusal block");
                 if (!block.has("refusal") || !block.get("refusal").isTextual()) {
                   throw new ProviderException(
                       ProviderErrorKind.INVALID_REQUEST,
@@ -696,7 +686,6 @@ final class OpenAiResponsesRequestEncoder {
           }
         }
         case "reasoning" -> {
-          validateAllowedFields(item, ALLOWED_REASONING_FIELDS, "reasoning item");
           if (item.has("id")) {
             if (!item.get("id").isTextual() || item.get("id").textValue().isBlank()) {
               throw new ProviderException(
@@ -727,7 +716,6 @@ final class OpenAiResponsesRequestEncoder {
                     ProviderErrorKind.INVALID_REQUEST,
                     "replay reasoning summary block must be an object");
               }
-              validateAllowedFields(s, ALLOWED_SUMMARY_FIELDS, "reasoning summary block");
               if (!s.has("type")
                   || !s.get("type").isTextual()
                   || !"summary_text".equals(s.get("type").textValue())) {
@@ -754,7 +742,6 @@ final class OpenAiResponsesRequestEncoder {
           }
         }
         case "function_call" -> {
-          validateAllowedFields(item, ALLOWED_FUNCTION_CALL_FIELDS, "function_call item");
           String callId = null;
           if (item.has("call_id")) {
             if (!item.get("call_id").isTextual() || item.get("call_id").textValue().isBlank()) {

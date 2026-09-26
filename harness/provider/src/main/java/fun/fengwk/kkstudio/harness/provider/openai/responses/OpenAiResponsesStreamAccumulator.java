@@ -840,6 +840,14 @@ final class OpenAiResponsesStreamAccumulator {
     return finish().replayState();
   }
 
+  /**
+   * 组装 stateless replay 的 output 数组。
+   *
+   * <p>官方已知 item（{@code message}/{@code reasoning}/{@code function_call}）以终态/{@code
+   * output_item.done} 的权威 item 为唯一事实来源：整体深拷贝后只修复那些「不修复就会让下一轮必然失败或丢语义」的字段（assistant role、
+   * 可读文本、可校验的函数调用标识与参数），其余字段（{@code id}/{@code status}/注解/日志概率及未来新增成员）一律 原样保留。未知官方 item
+   * 继续作为不透明事实整体透传。
+   */
   private ArrayNode buildReplayOutputArray() {
     ArrayNode array = NODES.arrayNode();
     for (JsonNode item : rawOutputItems) {
@@ -848,102 +856,9 @@ final class OpenAiResponsesStreamAccumulator {
       }
       String type = item.path("type").asText();
       switch (type) {
-        case "message" -> {
-          ObjectNode msg = array.addObject();
-          msg.put("type", "message");
-          msg.put("role", "assistant");
-          if (item.has("phase") && !item.path("phase").asText().isBlank()) {
-            msg.put("phase", item.path("phase").asText());
-          }
-          ArrayNode contentArr = msg.putArray("content");
-          JsonNode srcContent = item.get("content");
-          if (srcContent != null && srcContent.isArray()) {
-            for (JsonNode c : srcContent) {
-              if (c.isObject() && "output_text".equals(c.path("type").asText())) {
-                ObjectNode textNode = contentArr.addObject();
-                textNode.put("type", "output_text");
-                textNode.put("text", c.path("text").asText(""));
-              } else if (c.isObject() && "refusal".equals(c.path("type").asText())) {
-                ObjectNode refusalNode = contentArr.addObject();
-                refusalNode.put("type", "refusal");
-                refusalNode.put("refusal", c.path("refusal").asText(""));
-              }
-            }
-          } else if (srcContent != null && srcContent.isTextual()) {
-            ObjectNode textNode = contentArr.addObject();
-            textNode.put("type", "output_text");
-            textNode.put("text", srcContent.asText());
-          }
-        }
-        case "reasoning" -> {
-          ObjectNode reasoning = array.addObject();
-          reasoning.put("type", "reasoning");
-          if (item.has("encrypted_content") && !item.path("encrypted_content").asText().isBlank()) {
-            reasoning.put("encrypted_content", item.path("encrypted_content").asText());
-          }
-          JsonNode summary = item.get("summary");
-          if (summary != null && summary.isArray()) {
-            ArrayNode sumArr = reasoning.putArray("summary");
-            for (JsonNode s : summary) {
-              if (s.isObject() && "summary_text".equals(s.path("type").asText())) {
-                ObjectNode sNode = sumArr.addObject();
-                sNode.put("type", "summary_text");
-                sNode.put("text", s.path("text").asText(""));
-              }
-            }
-          } else if (summary != null && summary.isTextual()) {
-            ArrayNode sumArr = reasoning.putArray("summary");
-            ObjectNode sNode = sumArr.addObject();
-            sNode.put("type", "summary_text");
-            sNode.put("text", summary.asText());
-          }
-        }
-        case "function_call" -> {
-          String itemId = item.path("id").asText(null);
-          String callId = item.path("call_id").asText(null);
-          WireToolCall tool = findToolCall(itemId, callId);
-
-          String effectiveCallId = null;
-          if (callId != null && !callId.isBlank()) {
-            effectiveCallId = callId;
-          } else if (itemId != null && !itemId.isBlank()) {
-            effectiveCallId = itemId;
-          } else if (tool != null) {
-            effectiveCallId =
-                (tool.callId != null && !tool.callId.isBlank()) ? tool.callId : tool.id;
-          }
-
-          String name = null;
-          if (item.has("name") && !item.path("name").asText().isBlank()) {
-            name = item.path("name").asText();
-          } else if (tool != null && tool.name != null && !tool.name.isBlank()) {
-            name = tool.name;
-          }
-
-          String args = null;
-          if (item.has("arguments") && item.get("arguments").isTextual()) {
-            args = item.get("arguments").asText();
-          } else if (tool != null && tool.argumentsTextual && tool.argumentsBuffer.length() > 0) {
-            args = tool.argumentsBuffer.toString();
-          }
-
-          if (effectiveCallId == null
-              || effectiveCallId.isBlank()
-              || name == null
-              || name.isBlank()
-              || args == null
-              || args.isBlank()
-              || tryParseJsonObject(args) == null) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
-          }
-
-          ObjectNode fc = array.addObject();
-          fc.put("type", "function_call");
-          fc.put("call_id", effectiveCallId);
-          fc.put("name", name);
-          fc.put("arguments", args);
-        }
+        case "message" -> array.add(normalizeReplayMessageItem(item));
+        case "reasoning" -> array.add(normalizeReplayReasoningItem(item));
+        case "function_call" -> array.add(normalizeReplayFunctionCallItem(item));
         default -> {
           // 未知但可信的官方 output item（web_search_call / file_search_call / image_generation_call /
           // 自定义工具 item 等）：保留为不透明事实供下一轮 stateless replay，绝不再静默丢弃。
@@ -1001,6 +916,156 @@ final class OpenAiResponsesStreamAccumulator {
     }
 
     return array;
+  }
+
+  /**
+   * 归一化 replay 中的 message item：整体深拷贝权威 item，只把 role 与可读 content 文本修成 durable 语义的载体形态。
+   *
+   * <p>官方响应事实（{@code id}/{@code status}/{@code phase}/content 块自身的 {@code annotations}/{@code
+   * logprobs} 及未来新增成员）一律原样保留。无法通过下一轮结构校验的空白 {@code id}/{@code phase} 不承载任何事实，剔除以免毒化冻结 replay。
+   */
+  private static ObjectNode normalizeReplayMessageItem(JsonNode item) {
+    ObjectNode msg = (ObjectNode) item.deepCopy();
+    msg.put("type", "message");
+    msg.put("role", "assistant");
+    dropNonTextualValue(msg, "id");
+    dropNonTextualValue(msg, "phase");
+
+    ArrayNode contentArr = NODES.arrayNode();
+    JsonNode srcContent = item.get("content");
+    if (srcContent != null && srcContent.isArray()) {
+      for (JsonNode c : srcContent) {
+        if (!c.isObject()) {
+          continue;
+        }
+        String blockType = c.path("type").asText();
+        if ("output_text".equals(blockType)) {
+          ObjectNode textNode = (ObjectNode) c.deepCopy();
+          textNode.put("text", c.path("text").asText(""));
+          contentArr.add(textNode);
+        } else if ("refusal".equals(blockType)) {
+          ObjectNode refusalNode = (ObjectNode) c.deepCopy();
+          refusalNode.put("refusal", c.path("refusal").asText(""));
+          contentArr.add(refusalNode);
+        }
+      }
+    } else if (srcContent != null && srcContent.isTextual()) {
+      ObjectNode textNode = contentArr.addObject();
+      textNode.put("type", "output_text");
+      textNode.put("text", srcContent.asText());
+    }
+    msg.set("content", contentArr);
+    return msg;
+  }
+
+  /**
+   * 归一化 replay 中的 reasoning item：深拷贝权威 item，仅把 summary 归一为可校验的 {@code summary_text} 数组形态。
+   *
+   * <p>{@code encrypted_content} 的合并保留（见 {@link #retainStreamedReasoningEncryptedContent}）保持原有语义；仅当
+   * 密文不是非空白字符串时才剔除，因为它不承载任何原生推理且会让下一轮校验必然失败。其余 {@code id}/{@code status} 与未来成员原样保留。
+   */
+  private static ObjectNode normalizeReplayReasoningItem(JsonNode item) {
+    ObjectNode reasoning = (ObjectNode) item.deepCopy();
+    reasoning.put("type", "reasoning");
+    dropNonTextualValue(reasoning, "id");
+    dropNonTextualValue(reasoning, "encrypted_content");
+
+    JsonNode summary = item.get("summary");
+    if (summary == null) {
+      return reasoning;
+    }
+    if (summary.isArray()) {
+      ArrayNode sumArr = NODES.arrayNode();
+      for (JsonNode s : summary) {
+        if (!s.isObject() || !"summary_text".equals(s.path("type").asText())) {
+          continue;
+        }
+        ObjectNode sNode = (ObjectNode) s.deepCopy();
+        sNode.put("text", s.path("text").asText(""));
+        sumArr.add(sNode);
+      }
+      reasoning.set("summary", sumArr);
+      return reasoning;
+    }
+    if (summary.isTextual()) {
+      ArrayNode sumArr = NODES.arrayNode();
+      ObjectNode sNode = sumArr.addObject();
+      sNode.put("type", "summary_text");
+      sNode.put("text", summary.asText());
+      reasoning.set("summary", sumArr);
+      return reasoning;
+    }
+    // 非数组且非文本的 summary 无法构成任何合法摘要，属于无摘要事实
+    reasoning.remove("summary");
+    return reasoning;
+  }
+
+  /**
+   * 归一化 replay 中的 function_call item：深拷贝权威 item，只用流式工具状态补齐 durable 语义必需的 {@code call_id}/{@code
+   * name}/{@code arguments}，其余 {@code id}/{@code status} 与未来成员原样保留。
+   *
+   * <p>缺失或畸形的函数调用标识与参数无法被下一轮严格校验承载，因此与历史行为一致地抛出 {@code INVALID_RESPONSE}，绝不合成 {@code {}} 或伪造工具身份。
+   */
+  private ObjectNode normalizeReplayFunctionCallItem(JsonNode item) {
+    String itemId = nonBlankText(item.get("id"));
+    String callId = nonBlankText(item.get("call_id"));
+    WireToolCall tool = findToolCall(itemId, callId);
+
+    String effectiveCallId = callId != null ? callId : itemId;
+    if (effectiveCallId == null && tool != null) {
+      effectiveCallId = nonBlank(tool.callId) != null ? tool.callId : tool.id;
+    }
+
+    String name = nonBlankText(item.get("name"));
+    if (name == null && tool != null) {
+      name = nonBlank(tool.name);
+    }
+
+    String args = null;
+    JsonNode argumentsNode = item.get("arguments");
+    if (argumentsNode != null && argumentsNode.isTextual()) {
+      args = argumentsNode.textValue();
+    } else if (tool != null && tool.argumentsTextual && tool.argumentsBuffer.length() > 0) {
+      args = tool.argumentsBuffer.toString();
+    }
+
+    if (effectiveCallId == null
+        || effectiveCallId.isBlank()
+        || name == null
+        || name.isBlank()
+        || args == null
+        || args.isBlank()
+        || tryParseJsonObject(args) == null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
+    }
+
+    ObjectNode fc = (ObjectNode) item.deepCopy();
+    fc.put("type", "function_call");
+    fc.put("call_id", effectiveCallId);
+    fc.put("name", name);
+    fc.put("arguments", args);
+    dropNonTextualValue(fc, "id");
+    return fc;
+  }
+
+  /** 只保留非空白字符串形态的字段值；空白、null 与非文本值都不承载协议事实，剔除它们避免冻结出必然失败的 replay。 */
+  private static void dropNonTextualValue(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value != null && nonBlankText(value) == null) {
+      node.remove(field);
+    }
+  }
+
+  private static String nonBlankText(JsonNode node) {
+    if (node == null || !node.isTextual()) {
+      return null;
+    }
+    return nonBlank(node.textValue());
+  }
+
+  private static String nonBlank(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 
   private void appendMessageContent(JsonNode content) {

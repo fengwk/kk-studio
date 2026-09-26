@@ -808,8 +808,8 @@ class OpenAiResponsesRequestEncoderTest {
   }
 
   /**
-   * 验证同 OPENAI_RESPONSES format 但 payload 结构非法、缺少白名单字段、存在未知无关字段、 或与 durable 语义矛盾时，无论 affinity/hash
-   * 是否匹配均必须抛出 INVALID_REQUEST。
+   * 验证同 OPENAI_RESPONSES format 但 payload 结构非法（含顶层非白名单字段、已知 item 结构损坏）、 与 durable 语义矛盾时，无论
+   * affinity/hash 是否匹配均必须抛出 INVALID_REQUEST。
    */
   @Test
   void test_replayState_invalidPayloadRejected() {
@@ -858,12 +858,13 @@ class OpenAiResponsesRequestEncoderTest {
                     request(List.of(msg2)), desc, OpenAiResponsesConfig.defaultConfig()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex2.kind());
 
-    // 3. output 数组内存在非白名单未知字段的 message item
+    // 3. output 数组内的已知 item 允许携带官方额外字段（如 message 的 status，不再按白名单拒绝），
+    //    但 durable 语义所必需的结构仍然严格：message 的 content 必须是数组
     ObjectNode malformedPayload3 = MAPPER.createObjectNode();
     ArrayNode outArr3 = malformedPayload3.putArray("output");
     ObjectNode msgItem3 = outArr3.addObject();
-    msgItem3.put("type", "message").put("role", "assistant").put("unknown_prop", true);
-    msgItem3.putArray("content").addObject().put("type", "output_text").put("text", "hi");
+    msgItem3.put("type", "message").put("role", "assistant").put("status", "completed");
+    msgItem3.put("content", "not_an_array");
     ProviderReplayState replayState3 =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_RESPONSES,
