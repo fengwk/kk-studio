@@ -192,6 +192,10 @@ scrollIntoView 和 React Flow layout 提供确定性 stub。
 改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
 case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
 
+Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创建、读取、更新中的文本保真，
+包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
+这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
+
 ## Compose、静态资源与文档门禁
 
 ```bash

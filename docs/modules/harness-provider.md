@@ -46,7 +46,9 @@
 
 [`ProviderAdapter`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderAdapter.java) 是协议工厂：`providerType()`、`mediaCapabilities()` 与 `create(ProviderDescriptor)`。它接收运行时定义的通用对象（[`ProviderRequest`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderRequest.java)、`ProviderMessage`、`ProviderToolDefinition`、`ProviderCacheControl`），并通过 [`ModelCallTimeoutPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ModelCallTimeoutPolicy.java)（默认 30 分钟总时长 / 120 秒闲置）接收超时策略；上游 SDK 类型完全不出现在这个边界上。会话角色 [`ProviderMessageRole`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderMessageRole.java) 仅有 `USER`、`ASSISTANT`、`TOOL`，系统指令单独由 `ProviderRequest.systemInstruction` 承载，会话消息中绝不出现系统角色。各协议把它编码到各自的顶层位置：Anthropic `system`、Gemini `systemInstruction`、OpenAI Chat 唯一的前导 wire `system` 消息、OpenAI Responses `instructions`。流式规范化增量以 sealed [`ProviderStreamEvent`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderStreamEvent.java) 交付（`TextDelta`、`ThinkingDelta`、`ToolCallDelta`），终态是一条 [`ProviderResponse`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderResponse.java) 加可选的原生回放状态。
 
-每个 model variant 可携带 [`ProviderProtocolOptions`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ProviderProtocolOptions.java)：严格 JSON object，拒绝重复键和尾随 token，canonical JSON 最多 **64 KiB UTF-8**；空值按 `{}` 处理，错误不回显选项内容。后端解析使用 `BigInteger` / `BigDecimal` 避免浮点精度损失，[`ProviderProtocolOptionsJson`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderProtocolOptionsJson.java) 为每次编码提供独立副本。选项只合并到该协议的**请求体**，不是修改凭据、endpoint、标头或传输行为的万能开关；字段所有权、嵌套对象与原生 tools 的合并规则以对应编码器为准，冲突以 `INVALID_REQUEST` 失败。前端编辑器目前用 `JSON.parse` / `JSON.stringify`，超过 JS 安全整数或需要精确十进制的值可能在前端编辑往返时丢精度；后端保真并不能消除这个限制。
+每个 model variant 可携带 [`ProviderProtocolOptions`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ProviderProtocolOptions.java)：严格 JSON object，拒绝重复键和尾随 token，canonical JSON 最多 **64 KiB UTF-8**；空值按 `{}` 处理，错误不回显选项内容。后端解析使用 `BigInteger` / `BigDecimal` 避免浮点精度损失，[`ProviderProtocolOptionsJson`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderProtocolOptionsJson.java) 为每次编码提供独立副本。选项只合并到该协议的**请求体**，不是修改凭据、endpoint、标头或传输行为的万能开关；字段所有权、嵌套对象与原生 tools 的合并规则以对应编码器为准，冲突以 `INVALID_REQUEST` 失败。
+
+Catalog API 与持久化 variant 使用 **`protocolOptionsJson` 字符串**，例如 `{"id":"default","protocolOptionsJson":"{\"temperature\":0.7}"}`。编辑器只用 `JSON.parse` 检查语法与对象根节点，不把解析后的数字重新序列化；提交和加载保留内部 JSON 文本，仅去除外层空白。后端严格校验重复键、类型、尾随内容与字节上限，运行时才将文本解码为原生对象，因此大整数与高精度小数不会经过浏览器浮点数往返。
 
 [`ProviderReplayState`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderReplayState.java) = `(format, affinity, sourcePrefixHash, payload)`，四种格式 [`ProviderReplayFormat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderReplayFormat.java) 为 `anthropic_messages` / `openai_responses` / `openai_chat` / `gemini_content`。回放是 attempt 内的原生上下文，按 JSON 字段保留可回放的上游结构（`reasoning_content`、`encrypted_content`、thinking `signature` / redacted thinking、`thoughtSignature`），不承诺保留 wire 字节排版；它不进入公共 DTO、日志或异常。
 
@@ -62,6 +64,8 @@
 原位回放须满足：原生 payload 结构合法，`affinity` 与当前 `ProviderDescriptor.affinity(requestedModel)` 相等，`sourcePrefixHash` 与当前 canonical prefix hash 相等，已规范化的文本/思考/函数工具事实与 durable 消息逐字段一致。已知 item/block 的合法原生附加字段不再被一概白名单裁剪：能证明可重建的字段可在 affinity/hash 失配时回退语义编码；签名、密文、注解、未知 item 等只有原生回放才能保真的事实若遇失配，必须 **fail closed** 为 `INVALID_REQUEST`，不得假装回退成功。非法 role、损坏结构或与 durable 事实矛盾也拒绝；回放 payload 不被改写。prefix hash 由各协议自己的 `*PrefixHasher` 计算（稳定字典序与确定性序列化，Anthropic 侧显式排除 `cache_control`），因此回放链路的稳定性不依赖 JSON 字段顺序。
 
 OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoning.encrypted_content` 在终态 output 省略该字段时会被合并保留，避免把可回放的原生推理丢掉；而当终态 `reasoning` 只给出空占位符（`summary: []` 且无密文）时，流式累积的思考是唯一可得的语义表示，会被保留用于展示，但该 replay 不承载原生推理，既不冻结也不原位回放（非空的权威终态摘要仍优先）。私有推理文本只以 `summary` / durable thinking 的形式暴露，`encrypted_content` 绝不当作文本外泄。
+
+工具绑定或 Environment 变化可能要求把历史工具调用转为普通上下文。若该助手消息携带 replay，Runtime 不理解其原生 payload，因而保守拒绝整条消息的降级，在启动 Gateway 前终止为 `INVALID_REQUEST`；没有 replay 的历史仍可按语义投影。恢复方式是还原工具绑定与环境，或在新上下文中用显式摘要继续，不能直接删除签名或密文来强行重试。模型切换与历史前缀编辑仍由各编码器检查 affinity/hash；显式压缩以摘要重建上下文，是有损语义边界，不宣称原生状态无损迁移。
 
 媒体能力由 [`ProviderMediaCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderMediaCapabilities.java) 按用户内容与工具结果分别声明；Platform 把它与模型 `inputModalities` 取交集，把 durable Blob 引用转换成 attempt-only 的 Base64 data URI。编码器不访问 Blob 存储，也不生成私网地址或预签名 URL，未声明的 adapter 默认为 `NONE`。
 
@@ -97,11 +101,19 @@ OpenAI Responses 有两处需要特别维护的边界：流式收到的 `reasoni
 | 流式协议 | 原生请求选项与运行时保护 | 原生事件、终态与回放 |
 | --- | --- | --- |
 | Anthropic Messages | 合并非运行时字段及原生 tools；拒绝覆盖 `model/max_tokens/stream/messages/system/cache_control`，运行时推理开启时保护 `thinking` 与 `output_config.effort` | 独立 SSE 原生通道；text/thinking/function tool 增量，citations 等已知 block 原样保留；`pause_turn` / `compaction` 为 CONTINUE，可按原生状态续写 |
-| OpenAI Chat Completions | 合并扩展选项与原生 tools；拒绝覆盖模型、消息、预算、stream 及缓存所有权字段；`stream_options.include_usage` 由配置决定 | 独立 SSE 原生通道；只规范化 `choices[0]`，assistant 原生字段在可证明时回放，audio 只回放 id、annotations 只保留原生帧 |
+| OpenAI Chat Completions | 合并扩展选项，客户端工具只来自运行时绑定；拒绝覆盖模型、消息、预算、stream 及缓存所有权字段；`stream_options.include_usage` 由配置决定 | 独立 SSE 原生通道；只规范化 `choices[0]`，assistant 原生字段在可证明时回放，audio 只回放 id、annotations 只保留原生帧 |
 | OpenAI Responses | 合并原生 tools/include/reasoning；运行时 `model/stream/store/instructions` 不可冲突，拒绝有状态 `previous_response_id/conversation` 与运行时缓存字段 | 独立 SSE 原生通道；已知 output item 的附加字段和未知 item 可原生保留，函数调用才进入规范化 tool 路径 |
 | Gemini streamGenerateContent | 合并 `generationConfig` 与原生 tools；拒绝覆盖 `contents/systemInstruction/cachedContent`、`maxOutputTokens` 及运行时指定的 `thinkingConfig` | 独立 SSE 原生通道；只规范化 `candidates[0]`，签名 Part 边界保留，只有可证明安全的文本片段才合并 |
 
-这不是上游全部能力的规范化交付承诺。其他 Chat choices / Gemini candidates 仅原生可见；custom/client computer/shell/MCP approval 等工具或审批没有规范化执行与结果提交路径，原生选项能表达请求不代表 Runtime 会处理其调用。遇到无法重建的原生事实、affinity/hash 失配不能保真时失败关闭；未知 delta 不凭猜测生成 replay。原生 SSE 仅限当前 attempt，不能通过 durable/realtime API 当作通用能力消费。
+编码器在 HTTP 前检查执行边界，而不是等待模型生成无法处理的调用：
+
+- 所有客户端函数工具只能从 Runtime 绑定注册，不能通过原生 `tools` 绕过执行器。
+- Anthropic 原生 tools 开放带日期版本的 `web_search`、`web_fetch`、`code_execution` 家族；工具名必须非空且不与其他声明或运行时工具冲突。
+- Responses 开放 `web_search`、`web_search_preview`、`file_search`、`code_interpreter`、`image_generation`；`mcp` 必须显式 `require_approval: "never"`。客户端 computer、shell、custom 等类型及未知类型拒绝；`background` 若出现必须为 `false`。
+- Gemini 每个原生 tool 对象只允许一个受支持的 hosted capability：`googleSearch`、`googleSearchRetrieval`、`retrieval`、`codeExecution`、`urlContext`、`googleMaps`。
+- Chat 原生 `tools` 只能为空数组，旧 `functions/function_call` 拒绝；Chat `n` 与 Gemini `candidateCount` 若声明，经 JSON 数值规范化后必须为整数 `1`，不允许请求多个候选。
+
+以上是本地执行能力边界，不代替上游对工具版本、模型与参数组合的校验，也不是上游全部能力的规范化交付承诺。上游意外返回的其他 Chat choices / Gemini candidates 仅原生可见。遇到无法重建的原生事实、affinity/hash 失配不能保真时失败关闭；未知 delta 不凭猜测生成 replay。原生 SSE 仅限当前 attempt，不能通过 durable/realtime API 当作通用能力消费。
 
 ## 协议差异
 
