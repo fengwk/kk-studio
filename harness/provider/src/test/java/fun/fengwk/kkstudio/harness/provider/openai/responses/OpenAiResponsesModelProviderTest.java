@@ -346,6 +346,46 @@ class OpenAiResponsesModelProviderTest {
     assertNotNull(handler.error);
   }
 
+  /** 测试意图：官方顶层 error 经实际 transport/accumulator 派发；raw 只上报一次且先于错误，后续终态不得完成。 */
+  @Test
+  void test_topLevelErrorFrameRawCallbackPrecedesErrorAndPreventsCompletion() {
+    for (String code : List.of("rate_limit_exceeded", "context_length_exceeded")) {
+      String error =
+          "{\"type\":\"error\",\"code\":\""
+              + code
+              + "\",\"message\":\"upstream failed\",\"param\":null,\"sequence_number\":7}";
+      JdkHttpSseTransport transport =
+          stubTransport(
+              (req, cb) -> {
+                cb.onEvent(
+                    new ServerSentEvent(
+                        "rate_limit_exceeded".equals(code) ? "error" : null, error));
+                cb.onEvent(
+                    new ServerSentEvent(
+                        "response.completed",
+                        "{\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}"));
+                cb.onComplete();
+              });
+      OpenAiResponsesProviderAdapter adapter = new OpenAiResponsesProviderAdapter(transport, "key");
+      RecordingHandler handler = new RecordingHandler();
+
+      adapter.create(createDescriptor()).stream(createRequest(), handler);
+
+      assertEquals(List.of("protocol:error", "error"), handler.callbackOrder);
+      assertEquals(1, handler.protocolEvents.size());
+      assertEquals(error, handler.protocolEvents.get(0).data());
+      assertNotNull(handler.error);
+      assertEquals(
+          "rate_limit_exceeded".equals(code)
+              ? ProviderErrorKind.TRANSIENT
+              : ProviderErrorKind.OVERFLOW,
+          handler.error.kind());
+      assertEquals(error, handler.error.getMessage());
+      assertNull(handler.completion);
+      assertTrue(handler.events.isEmpty());
+    }
+  }
+
   /** 测试意图：畸形帧同样先 exactly-once 上报原生帧再进入错误通道，原生观测不因解析失败而丢失。 */
   @Test
   void test_malformedFrameRawCallbackPrecedesError() {

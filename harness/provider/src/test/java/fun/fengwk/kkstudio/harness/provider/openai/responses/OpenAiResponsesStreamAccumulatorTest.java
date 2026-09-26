@@ -297,23 +297,26 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertNull(accumulator.replayState());
   }
 
-  /** 意图：验证流中收到 response.failed 或 response.error 事件时立即抛出 ProviderException。 */
+  /** 意图：验证三种错误事件均由状态机立即派发为异常，而非等待终态或在 finish 时才失败。 */
   @Test
   void test_streamErrorPayloadThrowsImmediately() throws Exception {
-    OpenAiResponsesStreamAccumulator accumulator =
-        new OpenAiResponsesStreamAccumulator(
-            createRequest(),
-            createDescriptor(),
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            e -> {});
-
-    JsonNode failedEvent =
-        MAPPER.readTree(
-            "{\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"fail\"}}}");
-
-    ProviderException ex =
-        assertThrows(ProviderException.class, () -> accumulator.processEvent(failedEvent));
-    assertEquals(ProviderErrorKind.TRANSIENT, ex.kind());
+    for (String payload :
+        List.of(
+            "{\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"fail\"}}}",
+            "{\"type\":\"response.error\",\"error\":{\"code\":\"server_error\",\"message\":\"fail\"}}",
+            "{\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"fail\",\"param\":null,\"sequence_number\":1}")) {
+      OpenAiResponsesStreamAccumulator accumulator =
+          new OpenAiResponsesStreamAccumulator(
+              createRequest(),
+              createDescriptor(),
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              e -> {});
+      ProviderException ex =
+          assertThrows(
+              ProviderException.class, () -> accumulator.processEvent(MAPPER.readTree(payload)));
+      assertEquals(ProviderErrorKind.TRANSIENT, ex.kind());
+      assertEquals(MAPPER.readTree(payload).toString(), ex.getMessage());
+    }
   }
 
   /** 意图：验证 SSE ping、[DONE]、空数据以及未知事件被忽略，非 JSON 数据抛出 INVALID_RESPONSE。 */

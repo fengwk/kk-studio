@@ -69,7 +69,8 @@ final class OpenAiResponsesStreamAccumulator {
           "response.completed",
           "response.incomplete",
           "response.failed",
-          "response.error");
+          "response.error",
+          "error");
 
   /** 无法从 transport 帧还原出官方事件名时使用的兜底原生事件名。 */
   private static final String UNKNOWN_PROTOCOL_EVENT_TYPE = "openai.response.event";
@@ -223,7 +224,7 @@ final class OpenAiResponsesStreamAccumulator {
     }
     String type = node.path("type").asText();
 
-    if ("response.failed".equals(type) || "response.error".equals(type)) {
+    if ("response.failed".equals(type) || "response.error".equals(type) || "error".equals(type)) {
       throw OpenAiResponsesErrorMapper.mapSseErrorEnvelope(node);
     }
 
