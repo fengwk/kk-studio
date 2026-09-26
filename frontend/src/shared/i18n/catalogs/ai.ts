@@ -1563,8 +1563,8 @@ export const aiCatalog = {
     'zh-CN': 'ctx {{used}}/{{total}}',
   },
   'ai.runtime.status.contextTitle': {
-    'en-US': 'Estimated context usage: {{used}} / {{total}} tokens',
-    'zh-CN': '估算上下文用量：{{used}} / {{total}} tokens',
+    'en-US': 'Estimated context tokens from latest model invocation: {{used}} / {{total}} (not exact for next pending request)',
+    'zh-CN': '最新模型调用已知上下文输入估计：{{used}} / {{total}} tokens（非待发请求精确值）',
   },
   'ai.runtime.status.cacheHitText': {
     'en-US': 'cache {{percent}}%',
@@ -1573,6 +1573,34 @@ export const aiCatalog = {
   'ai.runtime.status.cacheHitTitle': {
     'en-US': 'Estimated cache hit rate: {{percent}}%',
     'zh-CN': '估算缓存命中率：{{percent}}%',
+  },
+  'ai.runtime.status.cacheHitNoneText': {
+    'en-US': 'cache —',
+    'zh-CN': 'cache —',
+  },
+  'ai.runtime.status.cacheHitNoneTitle': {
+    'en-US': 'Estimated cache hit rate: no input tokens',
+    'zh-CN': '估算缓存命中率：无输入 tokens',
+  },
+  'ai.runtime.status.speedText': {
+    'en-US': '{{speed}} tok/s',
+    'zh-CN': '{{speed}} tok/s',
+  },
+  'ai.runtime.status.speedNoneText': {
+    'en-US': '— tok/s',
+    'zh-CN': '— tok/s',
+  },
+  'ai.runtime.status.speedTitle': {
+    'en-US': 'Branch decode speed: {{speed}} tokens/sec (excludes TTFT and tool duration)',
+    'zh-CN': '分支模型解码速率：{{speed}} tokens/秒（排除首字等待与工具耗时）',
+  },
+  'ai.runtime.status.speedNoneTitle': {
+    'en-US': 'Branch decode speed: no measured samples',
+    'zh-CN': '分支模型解码速率：暂无测速样本',
+  },
+  'ai.runtime.usage.metaTooltip': {
+    'en-US': '↑Uncached prompt · ↓Completion · R Cache read (not reasoning) · W Cache write · $ Total cost (reasoning included) · cache hit rate · tok/s decode speed. Note: R is prompt cache read, not reasoning tokens.',
+    'zh-CN': '↑未缓存输入 · ↓普通输出 · R缓存读取(非推理) · W缓存写入 · $总费用(含推理) · cache缓存命中率 · tok/s解码速率。注：R表示缓存读取不是推理，推理费用已包含在总费用中。',
   },
   'ai.runtime.notification.permissionTitle': {
     'en-US': 'Approval requested',

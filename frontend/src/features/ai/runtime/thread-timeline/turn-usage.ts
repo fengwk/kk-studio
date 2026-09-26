@@ -20,20 +20,55 @@ export function aggregateBranchUsage(
     reasoning: 0,
     providerTotal: 0,
     cost: 0,
+    decodeTokens: null,
+    decodeDurationMillis: null,
+    contextInputTokens: null,
   }
   let found = false
+  let speedTokens = 0
+  let speedDuration = 0
+  let hasSpeedSample = false
+
   for (const message of messages) {
     if (message.role !== 'meta' || message.kind !== 'turn_usage' || message.turnUsage == null) {
       continue
     }
     found = true
-    total.input += message.turnUsage.input
-    total.output += message.turnUsage.output
-    total.cacheRead += message.turnUsage.cacheRead
-    total.cacheWrite += message.turnUsage.cacheWrite
-    total.reasoning += message.turnUsage.reasoning
-    total.providerTotal += message.turnUsage.providerTotal
-    total.cost += message.turnUsage.cost
+    const usage = message.turnUsage
+    total.input += usage.input
+    total.output += usage.output
+    total.cacheRead += usage.cacheRead
+    total.cacheWrite += usage.cacheWrite
+    total.reasoning += usage.reasoning
+    total.providerTotal += usage.providerTotal
+    total.cost += usage.cost
+
+    // 最新一次成功模型调用的已知上下文输入估计取 latest，非 sum
+    if (usage.contextInputTokens != null) {
+      total.contextInputTokens = usage.contextInputTokens
+    }
+
+    // 测速有效样本：仅有效样本累加分子分母
+    if (
+      usage.decodeDurationMillis != null
+      && usage.decodeDurationMillis > 0
+      && usage.decodeTokens != null
+    ) {
+      speedTokens += usage.decodeTokens
+      speedDuration += usage.decodeDurationMillis
+      hasSpeedSample = true
+    }
   }
-  return found ? total : null
+
+  if (!found) {
+    return null
+  }
+
+  if (hasSpeedSample) {
+    total.decodeTokens = speedTokens
+    total.decodeDurationMillis = speedDuration
+  }
+
+  total.cost = Number(total.cost.toFixed(6))
+  return total
 }

@@ -63,8 +63,8 @@ export function ThreadModelRequestDebug({
               env: {debug.environmentName}
             </span>
           ) : (
-            <span className="status-pill is-offline">
-              no env
+            <span className="status-pill is-neutral">
+              未选择环境
             </span>
           )}
         </div>
@@ -72,7 +72,8 @@ export function ThreadModelRequestDebug({
           <button
             type="button"
             className="ghost-inline-btn"
-            aria-label="View request"
+            title="查看请求快照（未产生真实请求时可查看空态说明）"
+            aria-label="查看请求快照（未产生真实请求时可查看空态说明）"
             onClick={() => onSelectInspector({ type: 'request' })}
           >
             <Eye size={12} aria-hidden="true" />
@@ -81,7 +82,8 @@ export function ThreadModelRequestDebug({
           <button
             type="button"
             className="ghost-inline-btn"
-            aria-label="Copy system prompt"
+            title="复制系统提示词 (System Prompt)"
+            aria-label="复制系统提示词 (System Prompt)"
             onClick={handleCopyPrompt}
           >
             {copied ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
@@ -159,26 +161,28 @@ export function ThreadModelRequestDebug({
       <div className="thread-debug-section">
         <div className="thread-debug-section-header">
           <span>SKILLS {debug.skills?.length || 0}</span>
-        </div>
-        <div className="thread-debug-rail" data-testid="debug-skills-rail">
-          {(debug.skills || []).map((skill) => (
-            <button
-              key={`${skill.packageName}/${skill.name}`}
-              type="button"
-              className="ghost-inline-btn thread-debug-chip"
-              aria-label={`Skill ${skill.name}`}
-              onClick={() => onSelectInspector({ type: 'skill', skill })}
-            >
-              <code>{skill.name}</code>{' '}
-              <span className="thread-debug-chip-badge">
-                · {skill.delivery.toLowerCase()}
-              </span>
-            </button>
-          ))}
           {(!debug.skills || debug.skills.length === 0) ? (
-            <span className="thread-debug-empty-text">none</span>
+            <span className="thread-debug-inline-empty">暂无技能</span>
           ) : null}
         </div>
+        {(debug.skills && debug.skills.length > 0) ? (
+          <div className="thread-debug-rail" data-testid="debug-skills-rail">
+            {debug.skills.map((skill) => (
+              <button
+                key={`${skill.packageName}/${skill.name}`}
+                type="button"
+                className="ghost-inline-btn thread-debug-chip"
+                aria-label={`Skill ${skill.name}`}
+                onClick={() => onSelectInspector({ type: 'skill', skill })}
+              >
+                <code>{skill.name}</code>{' '}
+                <span className="thread-debug-chip-badge">
+                  · {skill.delivery.toLowerCase()}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {/* SUBAGENTS / CACHE CONTROL */}

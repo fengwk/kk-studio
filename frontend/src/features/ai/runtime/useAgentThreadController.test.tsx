@@ -1348,6 +1348,9 @@ describe('useAgentThreadController', () => {
       reasoning: 20,
       providerTotal: 1_640,
       cost: 0.25,
+      decodeTokens: null,
+      decodeDurationMillis: null,
+      contextInputTokens: 1_540,
     })
   })
 

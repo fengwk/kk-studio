@@ -182,9 +182,14 @@ describe('ChatWorkspacePage', () => {
     expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
     expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
 
-    await user.click(screen.getByRole('button', { name: '2' }))
+    const select = screen.getByLabelText('布局')
+    await user.selectOptions(select, 'split-2')
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
     expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2)
+
+    await user.selectOptions(select, 'grid-5')
+    expect(document.querySelector('.chat-pane-grid.layout-grid-5')).not.toBeNull()
+    expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(5)
   })
 
   it('uses the shared AgentPane target store instead of duplicating target fields in Chat layout state', async () => {
@@ -251,7 +256,7 @@ describe('ChatWorkspacePage', () => {
     )
     renderWorkspace()
     await screen.findByRole('heading', { name: 'Workspace' })
-    await user.click(screen.getByRole('button', { name: '2' }))
+    await user.selectOptions(screen.getByLabelText('布局'), 'split-2')
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
     expect(localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,

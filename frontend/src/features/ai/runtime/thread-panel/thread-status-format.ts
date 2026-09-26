@@ -10,7 +10,7 @@ export interface EnvironmentStatusIdentity {
 }
 
 export interface ThreadStatusSegment {
-  key: 'environment' | 'usage' | 'context' | 'cache'
+  key: 'environment' | 'context' | 'usage' | 'cache' | 'speed'
   className: string
   text: string
   title: string
@@ -69,18 +69,20 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
   }
 
   const usage = input.branchUsage ?? EMPTY_USAGE
-  const usageText = formatBranchUsage(usage)
-  segments.push({
-    key: 'usage',
-    className: 'thread-status-usage',
-    text: usageText,
-    title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
-  })
-  const used = usage.input + usage.cacheRead + usage.cacheWrite
+
+  // 1. 环境 (已在上面加入)
+
+  // 2. 上下文：使用最新成功模型调用的已知上下文输入估计，非 sum
   const contextWindow = positiveFinite(input.contextWindow)
   if (contextWindow != null) {
+    const usedContext =
+      usage.contextInputTokens != null
+        ? usage.contextInputTokens
+        : (usage.input + usage.cacheRead + usage.cacheWrite > 0
+          ? usage.input + usage.cacheRead + usage.cacheWrite
+          : 0)
     const text = translate('ai.runtime.status.contextText', {
-      used: formatCompactNumber(used),
+      used: formatCompactNumber(usedContext),
       total: formatCompactNumber(contextWindow),
     })
     segments.push({
@@ -88,19 +90,62 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       className: 'thread-status-context',
       text,
       title: translate('ai.runtime.status.contextTitle', {
-        used: String(used),
+        used: String(usedContext),
         total: String(contextWindow),
       }),
     })
   }
-  const percent = used > 0 ? Math.round((usage.cacheRead / used) * 100) : 0
-  const cacheText = translate('ai.runtime.status.cacheHitText', { percent })
+
+  // 3. 累计 usage
+  const usageText = formatBranchUsage(usage)
   segments.push({
-    key: 'cache',
-    className: 'thread-status-cache',
-    text: cacheText,
-    title: translate('ai.runtime.status.cacheHitTitle', { percent }),
+    key: 'usage',
+    className: 'thread-status-usage',
+    text: usageText,
+    title: translate('ai.runtime.status.branchUsageTitle', { usage: usageText }),
   })
+
+  // 4. cache N%：分母为 0 显示 cache —
+  const cacheDenominator = usage.input + usage.cacheRead + usage.cacheWrite
+  if (cacheDenominator > 0) {
+    const percent = Math.round((usage.cacheRead / cacheDenominator) * 100)
+    segments.push({
+      key: 'cache',
+      className: 'thread-status-cache',
+      text: translate('ai.runtime.status.cacheHitText', { percent }),
+      title: translate('ai.runtime.status.cacheHitTitle', { percent }),
+    })
+  } else {
+    segments.push({
+      key: 'cache',
+      className: 'thread-status-cache',
+      text: translate('ai.runtime.status.cacheHitNoneText'),
+      title: translate('ai.runtime.status.cacheHitNoneTitle'),
+    })
+  }
+
+  // 5. tok/s：有效样本累加，无样本显示 — tok/s
+  if (
+    usage.decodeDurationMillis != null
+    && usage.decodeDurationMillis > 0
+    && usage.decodeTokens != null
+  ) {
+    const speed = Math.round((usage.decodeTokens * 1000) / usage.decodeDurationMillis)
+    segments.push({
+      key: 'speed',
+      className: 'thread-status-speed',
+      text: translate('ai.runtime.status.speedText', { speed }),
+      title: translate('ai.runtime.status.speedTitle', { speed }),
+    })
+  } else {
+    segments.push({
+      key: 'speed',
+      className: 'thread-status-speed',
+      text: translate('ai.runtime.status.speedNoneText'),
+      title: translate('ai.runtime.status.speedNoneTitle'),
+    })
+  }
+
   return { segments }
 }
 

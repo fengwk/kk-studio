@@ -12,6 +12,7 @@ import type {
 import {
   contentText,
   formatTurnUsageText,
+  mergeTurnUsage,
   parseAssistantUsage,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type {
@@ -229,7 +230,7 @@ export function buildThreadEventTimeline(
       if (entry.entryType === 'MESSAGE' && getString(message.role) === 'ASSISTANT') {
         const parsed = parseAssistantUsage(asRecord(payload.assistantMetadata))
         if (parsed != null) {
-          pendingUsage = parsed
+          pendingUsage = pendingUsage == null ? parsed : mergeTurnUsage(pendingUsage, parsed)
         }
       }
       for (const content of getRecordList(message.contents)) {

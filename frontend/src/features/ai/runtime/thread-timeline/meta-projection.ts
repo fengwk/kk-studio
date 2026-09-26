@@ -1,23 +1,17 @@
-import type { MetaDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import type { MetaDialogueMessage, TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import {
   formatTurnUsageText,
   parseAssistantUsage,
 } from '@/features/ai/runtime/thread-timeline/content-utils'
 
 /**
- * 从持久 ASSISTANT Entry 的 assistantMetadata 投影用量。
- * 摘要文本按冻结契约：`↑input · ↓output · RcacheRead · WcacheWrite · $cost`，
- * 不附加 reasoning `T` 或 cache hit `CH`；缺失/为零的 cache 段省略。
+ * 根据已完成或聚合的 TurnUsage 生成标准 meta turn_usage 消息。
  */
-export function projectTurnUsageFromAssistantMetadata(
+export function createTurnUsageMetaMessage(
   entryId: string,
-  metadata: Record<string, unknown>,
+  usage: TurnUsage,
   createdAt: MetaDialogueMessage['createdAt'],
-): MetaDialogueMessage | null {
-  const usage = parseAssistantUsage(metadata)
-  if (usage == null) {
-    return null
-  }
+): MetaDialogueMessage {
   return {
     id: `meta-usage-entry-${entryId}`,
     role: 'meta',
@@ -33,8 +27,26 @@ export function projectTurnUsageFromAssistantMetadata(
       reasoning: usage.reasoning,
       providerTotal: usage.providerTotal,
       cost: usage.cost,
+      decodeTokens: usage.decodeTokens ?? null,
+      decodeDurationMillis: usage.decodeDurationMillis ?? null,
+      contextInputTokens: usage.contextInputTokens ?? null,
     },
     createdAt,
     status: 'done',
   }
+}
+
+/**
+ * 从持久 ASSISTANT Entry 的 assistantMetadata 投影用量。
+ */
+export function projectTurnUsageFromAssistantMetadata(
+  entryId: string,
+  metadata: Record<string, unknown>,
+  createdAt: MetaDialogueMessage['createdAt'],
+): MetaDialogueMessage | null {
+  const usage = parseAssistantUsage(metadata)
+  if (usage == null) {
+    return null
+  }
+  return createTurnUsageMetaMessage(entryId, usage, createdAt)
 }
