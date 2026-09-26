@@ -47,19 +47,20 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     expect(shellScroll.scrollHeight).toBeLessThanOrEqual(shellScroll.clientHeight + 1)
     expect(shellScroll.scrollWidth).toBeLessThanOrEqual(shellScroll.clientWidth + 1)
 
-    // 5. 各列独立纵向滚动验证 (且每列内部无嵌套纵向滚动)
-    const previewScrollBefore = await colPreview.evaluate((el) => el.scrollTop)
+    // 5. 各列独立纵向滚动验证（系统提示词内部允许独立滚动，且互不干扰）
+    const promptBody = page.locator('.thread-system-prompt-body')
+    const promptScrollBefore = await promptBody.evaluate((el) => el.scrollTop)
     const eventsList = page.locator('.thread-events')
     const eventsScrollBefore = await eventsList.evaluate((el) => el.scrollTop)
     const detailScrollBefore = await colDetail.evaluate((el) => el.scrollTop)
-    expect(previewScrollBefore).toBe(0)
+    expect(promptScrollBefore).toBe(0)
 
-    // 滚动 Preview 列
-    await colPreview.evaluate((el) => {
-      el.scrollTop = 150
+    // 滚动 System Prompt 正文（允许且仅允许此 prompt 区域内部滚动）
+    await promptBody.evaluate((el) => {
+      el.scrollTop = 50
     })
-    const previewScrollAfter = await colPreview.evaluate((el) => el.scrollTop)
-    expect(previewScrollAfter).toBeGreaterThan(0)
+    const promptScrollAfter = await promptBody.evaluate((el) => el.scrollTop)
+    expect(promptScrollAfter).toBeGreaterThan(0)
     // 其他两列滚动不受影响
     expect(await eventsList.evaluate((el) => el.scrollTop)).toBe(eventsScrollBefore)
     expect(await colDetail.evaluate((el) => el.scrollTop)).toBe(detailScrollBefore)
@@ -80,12 +81,16 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     })
     expect(await colDetail.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
 
-    // 6. 验证系统提示词无嵌套纵向滚动（无 overflow-y: auto/scroll）
-    const promptPreScrollable = await page.locator('.thread-system-prompt-body').evaluate((el) => {
+    // 6. 验证系统提示词正文具有有界最大高度与内部滚动（max-height: 115px; overflow-y: auto），仅 prompt 区允许内部滚动
+    const promptStyle = await page.locator('.thread-system-prompt-body').evaluate((el) => {
       const style = window.getComputedStyle(el)
-      return style.overflowY === 'auto' || style.overflowY === 'scroll'
+      return {
+        maxHeight: style.maxHeight,
+        overflowY: style.overflowY,
+      }
     })
-    expect(promptPreScrollable).toBe(false)
+    expect(promptStyle.maxHeight).toBe('115px')
+    expect(promptStyle.overflowY).toBe('auto')
 
     // 7. 底部 Composer 驻留且可用
     const composerBox = (await composer.boundingBox())!

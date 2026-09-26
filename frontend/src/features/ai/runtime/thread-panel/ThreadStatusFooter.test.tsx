@@ -8,7 +8,8 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     expect(footer).toHaveTextContent('none env')
     expect(footer).toHaveTextContent('↑0 · ↓0 · $0.000')
-    expect(footer).toHaveTextContent('cache 0%')
+    expect(footer).toHaveTextContent('cache —')
+    expect(footer).toHaveTextContent('— tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -51,7 +52,8 @@ describe('ThreadStatusFooter', () => {
     expect(footer).toHaveTextContent('env:dev (unavailable)')
   })
 
-  it('renders usage, context estimate, and cache hit rate in stable readonly order', () => {
+  // 验证环境、上下文、累计用量、缓存率、速率按全左对齐稳定顺序渲染
+  it('renders usage, context estimate, cache hit rate, and tok/s in stable readonly order', () => {
     render(
       <ThreadStatusFooter
         environment={{ environmentId: 'env-local-id', environmentName: 'local' }}
@@ -64,6 +66,9 @@ describe('ThreadStatusFooter', () => {
           reasoning: 0,
           providerTotal: 70,
           cost: 0.5,
+          decodeTokens: 9,
+          decodeDurationMillis: 500,
+          contextInputTokens: 61,
         }}
         contextWindow={128_000}
       />,
@@ -72,14 +77,16 @@ describe('ThreadStatusFooter', () => {
     const segments = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-seg')]
     expect(segments.map((segment) => segment.textContent)).toEqual([
       'env:local',
-      '↑30 · ↓9 · R14 · W17 · $0.500',
       'ctx 61/128k',
+      '↑30 · ↓9 · R14 · W17 · $0.500',
       'cache 23%',
+      '18 tok/s',
     ])
     expect(screen.getByLabelText('会话状态').querySelector('button')).toBeNull()
   })
 
-  it('renders zero usage, context, and cache when closed-turn totals are empty', () => {
+  // 验证闭合回合为空时，零用量与无样本空态规范渲染（分母为0显示cache —，无样本显示— tok/s）
+  it('renders zero usage, context, cache placeholder, and speed placeholder when closed-turn totals are empty', () => {
     render(
       <ThreadStatusFooter
         branchUsage={{
@@ -90,6 +97,9 @@ describe('ThreadStatusFooter', () => {
           reasoning: 0,
           providerTotal: 0,
           cost: 0,
+          decodeTokens: null,
+          decodeDurationMillis: null,
+          contextInputTokens: 0,
         }}
         contextWindow={128_000}
       />,
@@ -97,9 +107,10 @@ describe('ThreadStatusFooter', () => {
     const segments = [...screen.getByLabelText('会话状态').querySelectorAll('.thread-status-seg')]
     expect(segments.map((segment) => segment.textContent)).toEqual([
       'none env',
-      '↑0 · ↓0 · $0.000',
       'ctx 0/128k',
-      'cache 0%',
+      '↑0 · ↓0 · $0.000',
+      'cache —',
+      '— tok/s',
     ])
   })
 })

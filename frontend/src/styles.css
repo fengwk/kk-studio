@@ -2156,6 +2156,8 @@ div.is-error {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  max-height: 115px;
+  overflow-y: auto;
 }
 
 .thread-debug-rail {
@@ -2171,16 +2173,35 @@ div.is-error {
   border-radius: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
+  color: var(--fg);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
+.thread-debug-chip code {
+  color: inherit;
+}
+
+.thread-debug-chip:hover {
+  color: var(--fg);
+  border-color: var(--border-hover);
+  background: var(--surface-hover);
+}
+
 .thread-debug-chip.is-filtered {
-  background: rgba(100, 116, 139, 0.1);
-  border: 1px dashed rgba(100, 116, 139, 0.4);
+  background: rgba(100, 116, 139, 0.08);
+  border: 1px dashed rgba(100, 116, 139, 0.35);
   color: var(--fg-dim);
+  opacity: 0.75;
+}
+
+.thread-debug-chip.is-filtered:hover {
+  color: var(--fg-muted);
+  border-color: rgba(100, 116, 139, 0.5);
+  background: rgba(100, 116, 139, 0.14);
+  opacity: 0.9;
 }
 
 .thread-debug-chip-badge {
@@ -2196,6 +2217,13 @@ div.is-error {
 .thread-debug-empty-text {
   font-size: 11px;
   color: var(--fg-dim);
+}
+
+.thread-debug-inline-empty {
+  font-size: 11px;
+  color: var(--fg-dim);
+  font-weight: normal;
+  margin-left: 8px;
 }
 
 .thread-debug-meta-row {
@@ -2466,6 +2494,9 @@ div.is-error {
 
 /* User vs assistant: different surface so roles read at a glance */
 .thread-block-user {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface-active);
@@ -4280,7 +4311,6 @@ div.is-error {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 6px;
 }
 
 .resource-attachment-link {
@@ -5424,16 +5454,15 @@ select.settings-input option {
   border-top: 1px solid var(--border);
   background: var(--bg);
   padding: 7px 16px 9px;
-  container-type: inline-size;
-  container-name: thread-status;
 }
 
 .thread-status-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  justify-content: flex-start;
+  gap: 6px 10px;
   min-width: 0;
-  overflow: hidden;
   color: var(--fg-muted);
   font-size: 12px;
   line-height: 1.4;
@@ -5444,13 +5473,22 @@ select.settings-input option {
 .thread-status-unit {
   display: inline-flex;
   align-items: center;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 100%;
 }
 
+.thread-status-unit:not(:last-child)::after {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 11px;
+  margin-left: 10px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
 .thread-status-seg {
-  flex: 1;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -5462,27 +5500,12 @@ select.settings-input option {
   font-variant-numeric: tabular-nums;
 }
 
-.thread-status-environment {
-  flex: 1 1 auto;
-}
-
+.thread-status-environment,
 .thread-status-git,
 .thread-status-context,
-.thread-status-cache {
+.thread-status-cache,
+.thread-status-speed {
   flex: 0 0 auto;
-}
-
-@container thread-status (max-width: 680px) {
-  .thread-status-git,
-  .thread-status-cache {
-    display: none;
-  }
-}
-
-@container thread-status (max-width: 480px) {
-  .thread-status-context {
-    display: none;
-  }
 }
 
 .run-status {
@@ -6441,6 +6464,31 @@ select.settings-input option {
   text-overflow: ellipsis;
 }
 
+.chat-layout-selector {
+  display: inline-flex;
+  align-items: center;
+}
+
+.chat-layout-select {
+  height: 28px;
+  min-width: 48px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.chat-layout-select:hover,
+.chat-layout-select:focus-visible {
+  border-color: var(--border-hover);
+}
+
 .chat-layout-switch {
   display: inline-flex;
   gap: 6px;
@@ -6506,6 +6554,20 @@ select.settings-input option {
   background: var(--border);
 }
 
+/* 5：左侧一整高列 + 右侧 2 列 2 行（五 pane 等列宽，共 3 列） */
+.chat-pane-grid.layout-grid-5 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane-grid.layout-grid-5 > :first-child,
+.chat-pane-grid.layout-grid-5 > .chat-pane:first-child {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+
 /* 6/8：列间 + 行间 */
 .chat-pane-grid.layout-grid-6 {
   grid-template-columns: repeat(3, 1fr);
@@ -6514,9 +6576,31 @@ select.settings-input option {
   background: var(--border);
 }
 
+/* 7：左侧整高列 + 右侧 3 列 2 行（共 4 列） */
+.chat-pane-grid.layout-grid-7 {
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+.chat-pane-grid.layout-grid-7 > :first-child,
+.chat-pane-grid.layout-grid-7 > .chat-pane:first-child {
+  grid-column: 1;
+  grid-row: 1 / 3;
+}
+
 .chat-pane-grid.layout-grid-8 {
   grid-template-columns: repeat(4, 1fr);
   grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+
+/* 9：3x3 等宽等高九宫格 */
+.chat-pane-grid.layout-grid-9 {
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
   gap: 1px;
   background: var(--border);
 }
@@ -7066,7 +7150,8 @@ select.settings-input option {
 
 .status-pill.is-unapplied,
 .status-pill.is-cancelled,
-.status-pill.is-unknown {
+.status-pill.is-unknown,
+.status-pill.is-neutral {
   color: var(--fg-muted);
   border-color: var(--border);
   background: var(--surface-raised);
@@ -7721,8 +7806,11 @@ select.settings-input option {
   .chat-pane-grid.layout-split-2,
   .chat-pane-grid.layout-split-3,
   .chat-pane-grid.layout-grid-4,
+  .chat-pane-grid.layout-grid-5,
   .chat-pane-grid.layout-grid-6,
-  .chat-pane-grid.layout-grid-8 {
+  .chat-pane-grid.layout-grid-7,
+  .chat-pane-grid.layout-grid-8,
+  .chat-pane-grid.layout-grid-9 {
     grid-template-columns: 1fr;
     grid-template-rows: none;
     grid-auto-rows: 100%;
@@ -7734,11 +7822,22 @@ select.settings-input option {
     -ms-overflow-style: none;
   }
 
+  .chat-pane-grid.layout-grid-5 > :first-child,
+  .chat-pane-grid.layout-grid-5 > .chat-pane:first-child,
+  .chat-pane-grid.layout-grid-7 > :first-child,
+  .chat-pane-grid.layout-grid-7 > .chat-pane:first-child {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
   .chat-pane-grid.layout-split-2::-webkit-scrollbar,
   .chat-pane-grid.layout-split-3::-webkit-scrollbar,
   .chat-pane-grid.layout-grid-4::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-5::-webkit-scrollbar,
   .chat-pane-grid.layout-grid-6::-webkit-scrollbar,
-  .chat-pane-grid.layout-grid-8::-webkit-scrollbar {
+  .chat-pane-grid.layout-grid-7::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-8::-webkit-scrollbar,
+  .chat-pane-grid.layout-grid-9::-webkit-scrollbar {
     display: none;
     width: 0;
     height: 0;
@@ -7747,8 +7846,11 @@ select.settings-input option {
   .chat-pane-grid.layout-split-2 > .chat-pane,
   .chat-pane-grid.layout-split-3 > .chat-pane,
   .chat-pane-grid.layout-grid-4 > .chat-pane,
+  .chat-pane-grid.layout-grid-5 > .chat-pane,
   .chat-pane-grid.layout-grid-6 > .chat-pane,
-  .chat-pane-grid.layout-grid-8 > .chat-pane {
+  .chat-pane-grid.layout-grid-7 > .chat-pane,
+  .chat-pane-grid.layout-grid-8 > .chat-pane,
+  .chat-pane-grid.layout-grid-9 > .chat-pane {
     min-height: 100%;
     height: 100%;
     max-height: 100%;

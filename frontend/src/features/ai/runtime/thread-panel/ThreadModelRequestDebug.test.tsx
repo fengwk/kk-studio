@@ -146,7 +146,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     const user = userEvent.setup()
     render(<DebugViewHarness />)
 
-    await user.click(screen.getByRole('button', { name: 'View request' }))
+    await user.click(screen.getByRole('button', { name: /查看请求快照/ }))
 
     const inspector = screen.getByTestId('thread-debug-inspector')
     expect(inspector).toHaveAttribute('aria-label', 'INSPECTOR: Request')
@@ -160,11 +160,12 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     const user = userEvent.setup()
     render(<DebugViewHarness debug={sampleDebug({ frozenInvocation: null })} />)
 
-    await user.click(screen.getByRole('button', { name: 'View request' }))
+    await user.click(screen.getByRole('button', { name: /查看请求快照/ }))
 
     expect(screen.getByText(/No active frozen invocation request/i)).toBeInTheDocument()
   })
 
+  // 验证无环境时展示中性“未选择环境”pill，技能为空时展示同行紧凑空态“暂无技能”而非独立空行
   it('handles empty tools, empty skills, and missing environment name', () => {
     render(
       <DebugViewHarness
@@ -177,9 +178,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         })}
       />,
     )
-    expect(screen.getByText('no env')).toBeInTheDocument()
-    const noneElements = screen.getAllByText('none')
-    expect(noneElements.length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('未选择环境')).toBeInTheDocument()
+    expect(screen.getByText('暂无技能')).toBeInTheDocument()
   })
 
   it('handles invalid json gracefully in tool inspector schema display', async () => {
@@ -214,7 +214,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       configurable: true,
     })
     render(<DebugViewHarness />)
-    await user.click(screen.getByRole('button', { name: 'Copy system prompt' }))
+    await user.click(screen.getByRole('button', { name: /复制系统提示词/ }))
     expect(writeTextMock).toHaveBeenCalledWith('System prompt content with instructions')
   })
 

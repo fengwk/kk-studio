@@ -28,6 +28,12 @@ export interface TurnUsage {
   reasoning: number
   providerTotal: number
   cost: number
+  /** 解码输出 token 数（outputTokens + reasoningTokens），用于与 decodeDurationMillis 配对计算 tok/s */
+  decodeTokens?: number | null
+  /** 解码耗时（毫秒），严格有限正值，来自 assistantMetadata.decodeDurationMillis */
+  decodeDurationMillis?: number | null
+  /** 最新一次成功模型调用的已知上下文输入估计 (input + cacheRead + cacheWrite) */
+  contextInputTokens?: number | null
 }
 
 export interface ToolAttachment {

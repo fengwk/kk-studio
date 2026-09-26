@@ -7,6 +7,7 @@ import {
   applyChatLayout,
   focusPane,
   loadChatPaneState,
+  parseLayout,
   saveChatPaneState,
   visibleChatPanes,
   type ChatLayout,
@@ -23,9 +24,46 @@ const LAYOUTS: Array<{ id: ChatLayout; label: string }> = [
   { id: 'split-2', label: '2' },
   { id: 'split-3', label: '3' },
   { id: 'grid-4', label: '4' },
+  { id: 'grid-5', label: '5' },
   { id: 'grid-6', label: '6' },
+  { id: 'grid-7', label: '7' },
   { id: 'grid-8', label: '8' },
+  { id: 'grid-9', label: '9' },
 ]
+
+export interface ChatLayoutSelectorProps {
+  layout: ChatLayout
+  onChange: (layout: ChatLayout) => void
+  selectId?: string
+}
+
+export function ChatLayoutSelector({
+  layout,
+  onChange,
+  selectId = 'chat-layout-select',
+}: ChatLayoutSelectorProps) {
+  const { t } = useI18n()
+  return (
+    <label className="chat-layout-selector" htmlFor={selectId}>
+      <span className="sr-only">{t('ai.chat.layout')}</span>
+      <select
+        id={selectId}
+        className="chat-layout-select"
+        aria-label={t('ai.chat.layout')}
+        value={layout}
+        onChange={(event) => {
+          onChange(parseLayout(event.target.value))
+        }}
+      >
+        {LAYOUTS.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 export function ChatWorkspacePage() {
   const { chatId = '' } = useParams()
@@ -88,18 +126,12 @@ export function ChatWorkspacePage() {
           <h1>{chat.title || chat.id}</h1>
         </div>
         <div className="chat-workspace-actions">
-          <div className="chat-layout-switch" role="group" aria-label={t('ai.chat.layout')}>
-            {LAYOUTS.map((layout) => (
-              <button
-                key={layout.id}
-                type="button"
-                className={paneState.layout === layout.id ? 'active' : undefined}
-                onClick={() => setPaneState((current) => applyChatLayout(current, layout.id))}
-              >
-                {layout.label}
-              </button>
-            ))}
-          </div>
+          <ChatLayoutSelector
+            layout={paneState.layout}
+            onChange={(nextLayout) => {
+              setPaneState((current) => applyChatLayout(current, nextLayout))
+            }}
+          />
         </div>
       </header>
       <div className={`chat-pane-grid layout-${paneState.layout}`}>

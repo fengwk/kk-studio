@@ -56,8 +56,11 @@ describe('Chat pane layout state', () => {
       ['split-2', 2],
       ['split-3', 3],
       ['grid-4', 4],
+      ['grid-5', 5],
       ['grid-6', 6],
+      ['grid-7', 7],
       ['grid-8', 8],
+      ['grid-9', 9],
     ]
     for (const [layout, capacity] of expectations) {
       state = applyChatLayout(state, layout)
@@ -65,7 +68,7 @@ describe('Chat pane layout state', () => {
       expect(visibleChatPanes(state)[0]).toEqual({ id: 'pane-1' })
     }
     // 收缩到 single 再扩张：pane 槽位从未丢失。
-    expect(state.panes).toHaveLength(8)
+    expect(state.panes).toHaveLength(9)
   })
 
   it('drops focus that points at a pane hidden by the smaller layout', () => {
@@ -116,9 +119,9 @@ describe('Chat pane layout state', () => {
     expect(state.focusedPaneId).toBe('pane-1')
     expect(state.panes[0]).toEqual({ id: 'pane-1' })
     expect(state.panes[1]).toEqual({ id: 'pane-2' })
-    // 非 record pane 一律重建为规范 id；panes 始终补齐 8 个槽位。
+    // 非 record pane 一律重建为规范 id；panes 始终补齐 9 个槽位。
     expect(state.panes[2]).toEqual({ id: 'pane-3' })
-    expect(state.panes).toHaveLength(8)
+    expect(state.panes).toHaveLength(9)
   })
 
   it('skips storage entirely for an empty chat id', () => {

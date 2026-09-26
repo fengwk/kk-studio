@@ -373,6 +373,106 @@ describe('Turn usage after TURN_END', () => {
       reasoning: 2,
       providerTotal: 37,
       cost: 0.125,
+      decodeTokens: null,
+      decodeDurationMillis: null,
+      contextInputTokens: 15,
     })
+  })
+
+  // 验证同一 Turn 内多个 ASSISTANT 调用的 Usage 进行累加聚合，而非后者直接覆盖前者
+  it('aggregates multiple assistant usages within the same turn instead of overwriting', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart('turn-multi'),
+        userMessage('run multi step'),
+        // 第一次调用：调用工具
+        entry('assistant-call', 'MESSAGE', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [
+              {
+                type: 'tool_call',
+                toolCallId: 'call-1',
+                toolName: 'bash',
+                rendererKey: 'bash',
+                argumentsJson: '{"command":"echo 1"}',
+              },
+            ],
+          },
+          assistantMetadata: {
+            usage: {
+              inputTokens: 100,
+              outputTokens: 20,
+              cacheReadTokens: 50,
+              cacheWriteTokens: 10,
+              reasoningTokens: 0,
+              providerTotalTokens: 180,
+            },
+            cost: 0.01,
+            decodeDurationMillis: 500, // 20 tokens in 500ms = 40 tok/s
+          },
+        }),
+        // 工具执行结果
+        entry('tool-result', 'MESSAGE', {
+          message: {
+            role: 'TOOL',
+            contents: [
+              {
+                type: 'tool_result',
+                toolCallId: 'call-1',
+                toolName: 'bash',
+                rendererKey: 'bash',
+                contents: [{ type: 'text', text: '1' }],
+              },
+            ],
+          },
+        }),
+        // 第二次调用：最终回答（contextInputTokens 更新为 200 + 80 + 0 = 280）
+        entry('assistant-answer', 'MESSAGE', {
+          message: {
+            role: 'ASSISTANT',
+            contents: [{ type: 'text', text: '完成' }],
+          },
+          assistantMetadata: {
+            usage: {
+              inputTokens: 200,
+              outputTokens: 40,
+              cacheReadTokens: 80,
+              cacheWriteTokens: 0,
+              reasoningTokens: 10,
+              providerTotalTokens: 330,
+            },
+            cost: 0.02,
+            decodeDurationMillis: 1000, // 50 decodeTokens (40 output + 10 reasoning) in 1000ms
+          },
+        }),
+        turnEnd('multi-end'),
+      ],
+      [],
+      [],
+    )
+
+    const metaUsage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.kind === 'turn_usage',
+    )
+    expect(metaUsage).toBeDefined()
+    expect(metaUsage?.turnUsage?.cost).toBeCloseTo(0.03, 10)
+    expect(metaUsage?.turnUsage).toMatchObject({
+      input: 300, // 100 + 200
+      output: 60, // 20 + 40
+      cacheRead: 130, // 50 + 80
+      cacheWrite: 10, // 10 + 0
+      reasoning: 10, // 0 + 10
+      providerTotal: 510, // 180 + 330
+      decodeTokens: 70, // 20 + (40 + 10)
+      decodeDurationMillis: 1500, // 500 + 1000
+      contextInputTokens: 280, // 最新一次调用估算输入 (200 + 80 + 0)
+    })
+
+    // 格式化文本包含 cache 率和 tok/s
+    // 缓存率 = 130 / (300 + 130 + 10) = 130 / 440 = 30%
+    // 速率 = 70 * 1000 / 1500 = 47 tok/s
+    expect(metaUsage?.text).toContain('cache 30%')
+    expect(metaUsage?.text).toContain('47 tok/s')
   })
 })
