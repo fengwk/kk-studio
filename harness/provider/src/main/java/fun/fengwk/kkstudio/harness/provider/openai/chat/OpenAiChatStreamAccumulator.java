@@ -27,11 +27,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeMap;
 
 /**
  * OpenAI Chat Completions SSE 流式事件状态机与响应累积器。
@@ -72,7 +72,8 @@ final class OpenAiChatStreamAccumulator {
   private final StringBuilder reasoningContentBuilder = new StringBuilder();
   private JsonNode reasoningDetailsNode = null;
 
-  private final Map<Integer, ToolCallBuilder> toolCallBuilders = new TreeMap<>();
+  /** 按首次确认 function 意图的顺序分配连续的 runtime ordinal；key 仍为原生 wire index。 */
+  private final Map<Integer, ToolCallBuilder> toolCallBuilders = new LinkedHashMap<>();
 
   /**
    * provider 原生 assistant message：只合并 {@code choices[0].delta}，绝不混入 chunk 级 transport
@@ -203,15 +204,41 @@ final class OpenAiChatStreamAccumulator {
         ArrayNode toolCallsArray = (ArrayNode) delta.get("tool_calls");
         for (JsonNode tcNode : toolCallsArray) {
           if (tcNode.isObject() && tcNode.has("index") && tcNode.get("index").isInt()) {
-            int index = tcNode.get("index").asInt();
-            // Custom/unknown calls remain native-only, not executable function intent.
-            if (!tcNode.path("function").isObject()
+            int wireIndex = tcNode.get("index").asInt();
+            JsonNode nativeSlot = nativeToolCall(wireIndex);
+            // type=function 可以先于 function 对象到达；无已知 function 意图的调用只保留原生事实。
+            if (nativeSlot == null
+                || (nativeSlot.path("type").isTextual()
+                    && !"function".equals(nativeSlot.path("type").textValue()))
                 || (tcNode.path("type").isTextual()
                     && !"function".equals(tcNode.path("type").textValue()))) {
               continue;
             }
-            ToolCallBuilder builder =
-                toolCallBuilders.computeIfAbsent(index, i -> new ToolCallBuilder(i));
+            ToolCallBuilder builder = toolCallBuilders.get(wireIndex);
+            if (builder == null) {
+              if (!"function".equals(nativeSlot.path("type").asText())
+                  && !nativeSlot.path("function").isObject()) {
+                continue;
+              }
+              builder = new ToolCallBuilder(wireIndex, toolCallBuilders.size());
+              toolCallBuilders.put(wireIndex, builder);
+              // native 已合并本帧：首次确认 function 时用完整槽位一次性补齐此前 identity-only 片段。
+              JsonNode fn = nativeSlot.path("function");
+              String id = textualValue(nativeSlot.get("id"));
+              String name = textualValue(fn.get("name"));
+              String args = textualValue(fn.get("arguments"));
+              builder.appendId(id);
+              builder.appendName(name);
+              builder.appendArguments(args);
+              String projectedId = id == null || id.isBlank() ? null : id;
+              String projectedName = name == null || name.isBlank() ? null : name;
+              if (projectedId != null || projectedName != null || args != null) {
+                bridge.emitEvent(
+                    new ProviderStreamEvent.ToolCallDelta(
+                        builder.ordinal(), projectedId, projectedName, args));
+              }
+              continue;
+            }
 
             String idDelta = null;
             if (tcNode.has("id") && tcNode.get("id").isTextual()) {
@@ -231,9 +258,13 @@ final class OpenAiChatStreamAccumulator {
               builder.appendArguments(argsDelta);
             }
 
-            if (idDelta != null || nameDelta != null || argsDelta != null) {
+            String projectedId = idDelta == null || builder.id().isBlank() ? null : builder.id();
+            String projectedName =
+                nameDelta == null || builder.name().isBlank() ? null : builder.name();
+            if (projectedId != null || projectedName != null || argsDelta != null) {
               bridge.emitEvent(
-                  new ProviderStreamEvent.ToolCallDelta(index, idDelta, nameDelta, argsDelta));
+                  new ProviderStreamEvent.ToolCallDelta(
+                      builder.ordinal(), projectedId, projectedName, argsDelta));
             }
           }
         }
@@ -333,6 +364,22 @@ final class OpenAiChatStreamAccumulator {
     ObjectNode slot = target.addObject();
     slot.put("index", index);
     return slot;
+  }
+
+  private JsonNode nativeToolCall(int wireIndex) {
+    JsonNode calls = nativeAssistantMessage.path("tool_calls");
+    if (calls.isArray()) {
+      for (JsonNode call : calls) {
+        if (call.path("index").isInt() && call.path("index").intValue() == wireIndex) {
+          return call;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static String textualValue(JsonNode node) {
+    return node != null && node.isTextual() ? node.textValue() : null;
   }
 
   private void mergeReasoningDetails(JsonNode incoming) {
@@ -473,7 +520,7 @@ final class OpenAiChatStreamAccumulator {
 
     boolean canReplay = (stopReason == GenerationStopReason.COMPLETE);
     List<ProviderToolCall> toolCalls = new ArrayList<>();
-    Map<Integer, ProviderToolCall> completedCalls = new TreeMap<>();
+    Map<Integer, ProviderToolCall> completedCalls = new LinkedHashMap<>();
     List<ProviderToolCallDiagnostic> diagnostics = new ArrayList<>();
 
     if (stopReason == GenerationStopReason.FILTERED) {
@@ -493,7 +540,7 @@ final class OpenAiChatStreamAccumulator {
           if (!idValid || !nameValid || parsedJson == null) {
             diagnostics.add(
                 new ProviderToolCallDiagnostic(
-                    b.index(),
+                    b.ordinal(),
                     idValid ? id : null,
                     nameValid ? name : null,
                     args,
@@ -502,7 +549,7 @@ final class OpenAiChatStreamAccumulator {
           } else {
             ProviderToolCall call = new ProviderToolCall(id, name, args);
             toolCalls.add(call);
-            completedCalls.put(b.index(), call);
+            completedCalls.put(b.wireIndex(), call);
           }
         } else {
           // COMPLETE
@@ -512,7 +559,7 @@ final class OpenAiChatStreamAccumulator {
           }
           ProviderToolCall call = new ProviderToolCall(id, name, args);
           toolCalls.add(call);
-          completedCalls.put(b.index(), call);
+          completedCalls.put(b.wireIndex(), call);
         }
       }
     }
@@ -658,17 +705,23 @@ final class OpenAiChatStreamAccumulator {
   }
 
   private static final class ToolCallBuilder {
-    private final int index;
+    private final int wireIndex;
+    private final int ordinal;
     private final StringBuilder id = new StringBuilder();
     private final StringBuilder name = new StringBuilder();
     private final StringBuilder arguments = new StringBuilder();
 
-    ToolCallBuilder(int index) {
-      this.index = index;
+    ToolCallBuilder(int wireIndex, int ordinal) {
+      this.wireIndex = wireIndex;
+      this.ordinal = ordinal;
     }
 
-    int index() {
-      return index;
+    int wireIndex() {
+      return wireIndex;
+    }
+
+    int ordinal() {
+      return ordinal;
     }
 
     void appendId(String val) {
