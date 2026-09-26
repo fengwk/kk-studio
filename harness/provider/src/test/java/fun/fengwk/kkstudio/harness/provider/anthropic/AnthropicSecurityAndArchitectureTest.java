@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -73,10 +74,10 @@ class AnthropicSecurityAndArchitectureTest {
         new AnthropicEncodedRequest(
             "{\"secret\":\"payload_content\"}".getBytes(StandardCharsets.UTF_8),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            true);
+            List.of("interleaved-thinking-2025-05-14"));
     assertFalse(encoded.toString().contains("secret"));
     assertFalse(encoded.toString().contains("payload_content"));
-    assertTrue(encoded.toString().contains("requiresInterleavedThinkingBeta=true"));
+    assertTrue(encoded.toString().contains("betaFeatureCount=1"));
   }
 
   @Test

@@ -121,7 +121,8 @@ class AnthropicStreamingDecoderTest {
 
   /**
    * 测试意图：上游模型若下发未知类型的 content block（如未来扩展）， 流式解析器不得抛异常炸流，必须平稳忽略该 block 的 normalized
-   * 语义、保留已知语义内容，并把未知 block 的 raw 形态原样保留在 replayState 中（opaque replay）。
+   * 语义、保留已知语义内容，并把未知 block 的 raw 形态原样保留在 replayState 中（opaque replay）。未知 block 的 delta 不再按猜测性 merge
+   * 合并：只有可保真组装的 {@code input_json_delta} 被接受，其余 delta 明确失败。
    */
   @Test
   void should_deserialize_content_with_unknown_type() {
@@ -138,33 +139,28 @@ class AnthropicStreamingDecoderTest {
         "message_start",
         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_unk\",\"usage\":{\"input_tokens\":10}}}");
 
-    // 2. content_block_start: 未知类型 "future_audio_block"
+    // 2. content_block_start: 未知类型 "future_audio_block"，raw 形态原样保留
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"future_audio_block\",\"format\":\"flac\"}}");
 
-    // 3. content_block_delta: 未知 block 的 delta
-    accumulator.handleEvent(
-        "content_block_delta",
-        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"audio_data\",\"bytes\":\"AQID\"}}");
-
-    // 4. content_block_stop: 未知 block 结束
+    // 3. content_block_stop: 未知 block 结束
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
 
-    // 5. content_block_start: 常规 text block
+    // 4. content_block_start: 常规 text block
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Known text.\"}}");
 
-    // 6. content_block_stop
+    // 5. content_block_stop
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}");
 
-    // 7. message_delta
+    // 6. message_delta
     accumulator.handleEvent(
         "message_delta",
         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}");
 
-    // 8. message_stop
+    // 7. message_stop
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -175,13 +171,13 @@ class AnthropicStreamingDecoderTest {
     // 校验已知语义 text 得到保留
     assertEquals("Known text.", response.text());
 
-    // 未知但合法的 provider block 必须 opaque 保留在 replay 中，且其 delta 已按最小通用 merge 并入 raw block
+    // 未知但合法的 provider block 必须原样保留在 replay 中（无 delta 时不参与任何猜测性合并）
     assertNotNull(completion.replayState());
     JsonNode replayContent = completion.replayState().payload().path("content");
     assertEquals(2, replayContent.size());
     assertEquals("future_audio_block", replayContent.get(0).path("type").asText());
     assertEquals("flac", replayContent.get(0).path("format").asText());
-    assertEquals("AQID", replayContent.get(0).path("bytes").asText());
+    assertEquals(2, replayContent.get(0).size());
     assertEquals("text", replayContent.get(1).path("type").asText());
     assertEquals("Known text.", replayContent.get(1).path("text").asText());
 
@@ -192,6 +188,38 @@ class AnthropicStreamingDecoderTest {
     assertEquals(0, usage.totalTokens());
     assertEquals(0, usage.providerTotalTokens());
     assertEquals(15, usage.categorizedTokens());
+  }
+
+  /**
+   * 测试意图：未知 block 收到不可安全组装的 delta 时，解析器必须显式失败而不是把 delta 猜测性合并进 raw block（旧行为会把字段 label/tags/meta
+   * 等静默拼接或覆写），也不允许静默丢弃该 delta。
+   */
+  @Test
+  void should_reject_unassemblable_delta_for_unknown_block_instead_of_merging() {
+    List<ProviderStreamEvent> events = new ArrayList<>();
+    AnthropicStreamBridge bridge = new AnthropicStreamBridge(new RecordingHandler(events));
+
+    ProviderRequest request = sampleRequest();
+    ProviderDescriptor descriptor = sampleDescriptor("http://127.0.0.1:" + port);
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_unk_delta\",\"usage\":{\"input_tokens\":1}}}");
+    accumulator.handleEvent(
+        "content_block_start",
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"future_audio_block\",\"format\":\"flac\"}}");
+
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                accumulator.handleEvent(
+                    "content_block_delta",
+                    "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"audio_data\",\"bytes\":\"AQID\"}}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(error.getMessage().contains("unsupported delta type for native block"));
   }
 
   /**

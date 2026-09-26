@@ -39,8 +39,12 @@ import java.util.TreeMap;
  * <p>按原生 index 维护严格 indexed content block 状态机，支持多工具调用交错 delta、连续 toolOrdinal、累计 usage 快照更新、LENGTH
  * 截断诊断与 native replay 隔离。
  *
- * <p>已知 block（text/thinking/redacted_thinking/tool_use）保持严格语义校验，其 replay 由 normalized 状态合成；未知但合法的
- * provider block 不产生 normalized 语义，其 raw block（连同按最小通用 merge 并入的 delta）原样保留在 replay payload 中。
+ * <p>每个 block 的 {@code content_block_start} 对象都是 replay 事实源：终态只覆盖 normalized
+ * 字段（text、thinking/signature、 redacted data、tool input、citations），官方附加字段原样保留。官方 delta 只有 {@code
+ * text_delta}、{@code input_json_delta}、{@code thinking_delta}、{@code signature_delta}、{@code
+ * citations_delta}：只接受可证明安全的 block/delta 配对，未知配对显式失败而不是猜测性合并。<br>
+ * 未知但合法的 provider block（如 server tool use）本身原样保留，携带 {@code input_json_delta} 时按 deterministic 规则累积
+ * partial JSON 并在终态解析为 {@code input} 对象。
  */
 final class AnthropicStreamAccumulator {
 
@@ -90,6 +94,11 @@ final class AnthropicStreamAccumulator {
   private long cacheCreation1h = 0L;
   private long outputTokens = 0L;
   private boolean hasExplicitCacheBreakdown = false;
+
+  /** usage 快照的原始累积：按顶层字段合并，保留官方未知字段；normalized 计数在终态覆盖同名键。 */
+  private final ObjectNode rawUsage = NODES.objectNode();
+
+  private String serviceTier = null;
 
   private String cacheMissReasonType = null;
   private Long cacheMissedInputTokens = null;
@@ -167,8 +176,11 @@ final class AnthropicStreamAccumulator {
     List<ProviderToolCall> toolCalls = new ArrayList<>();
     List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();
 
+    // CONTINUE（pause_turn / compaction）同样是「下一请求必须原生回放上游字段」的终止态
     boolean canReplay =
-        (stopReason == GenerationStopReason.COMPLETE || stopReason == GenerationStopReason.LENGTH);
+        (stopReason == GenerationStopReason.COMPLETE
+            || stopReason == GenerationStopReason.LENGTH
+            || stopReason == GenerationStopReason.CONTINUE);
     ArrayNode replayBlocks = NODES.arrayNode();
 
     // blocksByIndex 升序遍历，严格保持原生 block index 顺序
@@ -177,9 +189,13 @@ final class AnthropicStreamAccumulator {
         case "text" -> {
           combinedText.append(block.textBuffer);
           if (canReplay) {
-            ObjectNode obj = replayBlocks.addObject();
-            obj.put("type", "text");
+            // start 对象是 replay 基座：只覆盖 normalized 文本，citations 等官方附加字段原样保留
+            ObjectNode obj = block.rawBlock.deepCopy();
             obj.put("text", block.textBuffer.toString());
+            if (block.citations != null) {
+              obj.set("citations", block.citations.deepCopy());
+            }
+            replayBlocks.add(obj);
           }
         }
         case "thinking" -> {
@@ -187,25 +203,31 @@ final class AnthropicStreamAccumulator {
           if (block.signature == null || block.signature.isBlank()) {
             canReplay = false;
           } else if (canReplay) {
-            ObjectNode obj = replayBlocks.addObject();
-            obj.put("type", "thinking");
+            ObjectNode obj = block.rawBlock.deepCopy();
             obj.put("thinking", block.thinkingBuffer.toString());
             obj.put("signature", block.signature);
+            replayBlocks.add(obj);
           }
         }
         case "redacted_thinking" -> {
           if (block.redactedData == null || block.redactedData.isBlank()) {
             canReplay = false;
           } else if (canReplay) {
-            ObjectNode obj = replayBlocks.addObject();
-            obj.put("type", "redacted_thinking");
+            ObjectNode obj = block.rawBlock.deepCopy();
             obj.put("data", block.redactedData);
+            replayBlocks.add(obj);
           }
         }
         case "tool_use" -> {
           if (stopReason == GenerationStopReason.FILTERED) {
             // FILTERED 协议撤回，忽略工具处理
             break;
+          }
+          if (stopReason == GenerationStopReason.CONTINUE) {
+            // CONTINUE 是撤下工具意图的续写终止态：归一化 tool call 与 native-only 续写语义不可共存，显式失败
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE,
+                "CONTINUE response must not contain tool calls");
           }
           String argsStr = block.toolArgsBuffer.toString();
           if (argsStr.isEmpty()) {
@@ -214,11 +236,9 @@ final class AnthropicStreamAccumulator {
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, "{}");
               toolCalls.add(call);
               if (canReplay) {
-                ObjectNode obj = replayBlocks.addObject();
-                obj.put("type", "tool_use");
-                obj.put("id", block.toolId);
-                obj.put("name", block.toolName);
+                ObjectNode obj = block.rawBlock.deepCopy();
                 obj.putObject("input");
+                replayBlocks.add(obj);
               }
             } else {
               if (stopReason == GenerationStopReason.LENGTH) {
@@ -241,11 +261,9 @@ final class AnthropicStreamAccumulator {
               ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, argsStr);
               toolCalls.add(call);
               if (canReplay) {
-                ObjectNode obj = replayBlocks.addObject();
-                obj.put("type", "tool_use");
-                obj.put("id", block.toolId);
-                obj.put("name", block.toolName);
+                ObjectNode obj = block.rawBlock.deepCopy();
                 obj.set("input", parsedArgs);
+                replayBlocks.add(obj);
               }
             } else {
               if (stopReason == GenerationStopReason.LENGTH) {
@@ -265,9 +283,25 @@ final class AnthropicStreamAccumulator {
           }
         }
         default -> {
+          ObjectNode obj = block.rawBlock.deepCopy();
+          if (block.nativeInputBuffer != null) {
+            JsonNode parsedInput = tryParseJsonObject(block.nativeInputBuffer.toString());
+            if (parsedInput == null) {
+              if (stopReason == GenerationStopReason.LENGTH) {
+                // 截断的 native tool 输入无法组成合法对象：保留余下 normalized 语义，但不冻结 replay
+                canReplay = false;
+              } else {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_RESPONSE,
+                    "invalid native block input JSON accumulated from input_json_delta");
+              }
+            } else {
+              obj.set("input", parsedInput);
+            }
+          }
           if (canReplay) {
-            // 未知但合法的 provider block：opaque 保留 raw block（delta 已按最小通用 merge 并入）
-            replayBlocks.add(block.rawBlock.deepCopy());
+            // 未知但合法的 provider block：opaque 原样保留，只覆盖由 delta 累积出的 input
+            replayBlocks.add(obj);
           }
         }
       }
@@ -300,7 +334,8 @@ final class AnthropicStreamAccumulator {
       }
     }
 
-    ObjectNode usageJsonNode = NODES.objectNode();
+    // usage 以原始快照的顶层合并结果为基座：官方未知字段（如 server_tool_use）原样保留，normalized 计数覆盖同名键
+    ObjectNode usageJsonNode = rawUsage;
     usageJsonNode.put("input_tokens", this.inputTokens);
     usageJsonNode.put("output_tokens", this.outputTokens);
     usageJsonNode.put("cache_read_input_tokens", this.cacheReadInputTokens);
@@ -341,7 +376,7 @@ final class AnthropicStreamAccumulator {
             usage,
             cost,
             messageId,
-            null,
+            serviceTier,
             rawUsageJson,
             Collections.unmodifiableList(toolCallDiagnostics));
 
@@ -446,7 +481,7 @@ final class AnthropicStreamAccumulator {
     }
 
     String type = blockNode.get("type").textValue();
-    // raw block 是未知合法 block 的唯一事实源；已知 block 的 replay 仍由 normalized 状态合成
+    // start 对象是所有 block 的 replay 基座：终态只覆盖 normalized 字段，官方附加字段原样保留
     WireBlockAccumulator accumulator =
         new WireBlockAccumulator(type, (ObjectNode) blockNode.deepCopy());
 
@@ -462,6 +497,10 @@ final class AnthropicStreamAccumulator {
             accumulator.textBuffer.append(text);
             bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
           }
+        }
+        if (blockNode.has("citations")) {
+          // start 已声明 citations 时，后续 citations_delta 依序追加在其后
+          accumulator.citations = requireCitationArray(blockNode.get("citations"));
         }
       }
       case "thinking" -> {
@@ -534,7 +573,7 @@ final class AnthropicStreamAccumulator {
                 initialArguments));
       }
       default -> {
-        // 未知或未来新增 block type，安全忽略
+        // 未知或未来新增 block type：不产生 normalized 语义，raw block 原样保留供 opaque replay
       }
     }
 
@@ -570,18 +609,31 @@ final class AnthropicStreamAccumulator {
     String deltaType = deltaNode.get("type").textValue();
     switch (block.type) {
       case "text" -> {
-        if (!"text_delta".equals(deltaType)) {
-          throw new ProviderException(
+        switch (deltaType) {
+          case "text_delta" -> {
+            if (!deltaNode.has("text") || !deltaNode.get("text").isTextual()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_RESPONSE, "text_delta text must be string");
+            }
+            String text = deltaNode.get("text").textValue();
+            if (!text.isEmpty()) {
+              block.textBuffer.append(text);
+              bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
+            }
+          }
+          case "citations_delta" -> {
+            if (!deltaNode.has("citation") || !deltaNode.get("citation").isObject()) {
+              throw new ProviderException(
+                  ProviderErrorKind.INVALID_RESPONSE, "citations_delta citation must be an object");
+            }
+            if (block.citations == null) {
+              block.citations = NODES.arrayNode();
+            }
+            // citation 是官方可扩展结构：原样依序累积，不做字段白名单
+            block.citations.add(deltaNode.get("citation").deepCopy());
+          }
+          default -> throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for text block");
-        }
-        if (!deltaNode.has("text") || !deltaNode.get("text").isTextual()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "text_delta text must be string");
-        }
-        String text = deltaNode.get("text").textValue();
-        if (!text.isEmpty()) {
-          block.textBuffer.append(text);
-          bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
         }
       }
       case "thinking" -> {
@@ -620,65 +672,75 @@ final class AnthropicStreamAccumulator {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "tool call arguments already finalized");
         }
-        if (!deltaNode.has("partial_json") || !deltaNode.get("partial_json").isTextual()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "input_json_delta partial_json must be string");
-        }
-        String partialJson = deltaNode.get("partial_json").textValue();
+        String partialJson =
+            requirePartialJson(deltaNode, "input_json_delta partial_json must be string");
         if (!partialJson.isEmpty()) {
           block.toolArgsBuffer.append(partialJson);
           bridge.emitEvent(
               new ProviderStreamEvent.ToolCallDelta(block.toolOrdinal, null, null, partialJson));
         }
       }
-      case "redacted_thinking" -> {
-        // 现有语义：redacted_thinking 的 delta 不参与累积
-      }
-      default -> mergeOpaqueDelta(block.rawBlock, deltaNode);
+      case "redacted_thinking" -> throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "redacted_thinking block must be complete and carries no delta");
+      default -> handleNativeBlockDelta(block, deltaType, deltaNode);
     }
   }
 
   /**
-   * 未知 content block 的 delta 按最小通用 merge 规则并入 raw block：字符串追加、数组追加、对象递归合并，其余覆盖。
-   *
-   * <p>delta 自身的 {@code type} 只是事件级字段，绝不覆盖 block 的 type。
+   * 原生（非 normalized）block 的唯一可安全组装 delta 是 {@code input_json_delta}：partial JSON 依序累积，终态解析为 {@code
+   * input} 对象。其余 delta 无法证明可保真组装，显式失败而不是猜测性合并或静默丢弃。
    */
-  private static void mergeOpaqueDelta(ObjectNode rawBlock, JsonNode deltaNode) {
-    Iterator<Map.Entry<String, JsonNode>> fields = deltaNode.fields();
-    while (fields.hasNext()) {
-      Map.Entry<String, JsonNode> field = fields.next();
-      if ("type".equals(field.getKey())) {
-        continue;
-      }
-      rawBlock.set(
-          field.getKey(), mergeOpaqueValue(rawBlock.get(field.getKey()), field.getValue()));
+  private static void handleNativeBlockDelta(
+      WireBlockAccumulator block, String deltaType, JsonNode deltaNode) {
+    if (!"input_json_delta".equals(deltaType)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "unsupported delta type for native block: " + deltaType);
     }
+    if (block.rawBlock.has("input")) {
+      JsonNode declaredInput = block.rawBlock.get("input");
+      if (!declaredInput.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "native block input must be a JSON object");
+      }
+      // 空对象占位可被 delta 累积结果替换；非空 input 无法与 delta 无损合并
+      if (!declaredInput.isEmpty()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE,
+            "native block input_json_delta conflicts with non-empty input already declared");
+      }
+    }
+    String partialJson =
+        requirePartialJson(deltaNode, "input_json_delta partial_json must be string");
+    if (block.nativeInputBuffer == null) {
+      block.nativeInputBuffer = new StringBuilder();
+    }
+    block.nativeInputBuffer.append(partialJson);
   }
 
-  private static JsonNode mergeOpaqueValue(JsonNode current, JsonNode incoming) {
-    if (current == null) {
-      return incoming.deepCopy();
+  private static String requirePartialJson(JsonNode deltaNode, String errorMessage) {
+    if (!deltaNode.has("partial_json") || !deltaNode.get("partial_json").isTextual()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, errorMessage);
     }
-    if (current.isTextual() && incoming.isTextual()) {
-      return NODES.textNode(current.textValue() + incoming.textValue());
+    return deltaNode.get("partial_json").textValue();
+  }
+
+  /** citation 集合只校验容器与元素形状，官方未来新增的 citation 字段一律无损保留。 */
+  private static ArrayNode requireCitationArray(JsonNode citationsNode) {
+    if (!citationsNode.isArray()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "content_block citations must be an array");
     }
-    if (current.isArray() && incoming.isArray()) {
-      ArrayNode merged = (ArrayNode) current.deepCopy();
-      for (JsonNode item : incoming) {
-        merged.add(item.deepCopy());
+    ArrayNode citations = NODES.arrayNode();
+    for (JsonNode citation : citationsNode) {
+      if (!citation.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "content_block citations must contain objects");
       }
-      return merged;
+      citations.add(citation.deepCopy());
     }
-    if (current.isObject() && incoming.isObject()) {
-      ObjectNode merged = (ObjectNode) current.deepCopy();
-      Iterator<Map.Entry<String, JsonNode>> fields = incoming.fields();
-      while (fields.hasNext()) {
-        Map.Entry<String, JsonNode> field = fields.next();
-        merged.set(field.getKey(), mergeOpaqueValue(merged.get(field.getKey()), field.getValue()));
-      }
-      return merged;
-    }
-    return incoming.deepCopy();
+    return citations;
   }
 
   private void handleContentBlockStop(JsonNode root) {
@@ -754,6 +816,13 @@ final class AnthropicStreamAccumulator {
   }
 
   private void applyUsageSnapshot(JsonNode usageNode) {
+    // 原始快照按顶层字段合并：官方未知字段（如 server_tool_use）原样保留，绝不被 normalized 解析丢弃
+    Iterator<Map.Entry<String, JsonNode>> rawFields = usageNode.fields();
+    while (rawFields.hasNext()) {
+      Map.Entry<String, JsonNode> field = rawFields.next();
+      rawUsage.set(field.getKey(), field.getValue().deepCopy());
+    }
+
     if (usageNode.has("input_tokens")) {
       this.inputTokens = parseNonNegativeLong(usageNode.get("input_tokens"), "input_tokens");
     }
@@ -768,6 +837,14 @@ final class AnthropicStreamAccumulator {
       this.cacheCreationInputTokens =
           parseNonNegativeLong(
               usageNode.get("cache_creation_input_tokens"), "cache_creation_input_tokens");
+    }
+    if (usageNode.has("service_tier") && !usageNode.get("service_tier").isNull()) {
+      JsonNode tierNode = usageNode.get("service_tier");
+      if (!tierNode.isTextual() || tierNode.textValue().isBlank()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "usage service_tier must be a non-blank string");
+      }
+      this.serviceTier = tierNode.textValue();
     }
     extractAndValidateCacheCreationBreakdown(usageNode);
   }
@@ -876,6 +953,8 @@ final class AnthropicStreamAccumulator {
       case "end_turn", "stop_sequence", "tool_use" -> GenerationStopReason.COMPLETE;
       case "max_tokens", "model_context_window_exceeded" -> GenerationStopReason.LENGTH;
       case "refusal" -> GenerationStopReason.FILTERED;
+        // pause_turn（server tool 仍在运行）与 compaction（历史已被摘要）都要求立即用原生 replay 续写
+      case "pause_turn", "compaction" -> GenerationStopReason.CONTINUE;
       default -> throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unsupported or missing stop_reason");
     };
@@ -910,12 +989,16 @@ final class AnthropicStreamAccumulator {
   private static final class WireBlockAccumulator {
     final String type;
 
-    /** provider 给出的原始 block：未知 block 的 delta 以最小通用 merge 并入此处，作为 opaque replay 的事实源。 */
+    /** provider 给出的原始 start 对象：所有 block 的 replay 基座，终态只覆盖 normalized 字段。 */
     final ObjectNode rawBlock;
 
     BlockLifecycle state = BlockLifecycle.ACTIVE;
 
     final StringBuilder textBuffer = new StringBuilder();
+
+    /** text block 累积到的 citation 列表；null 表示上游未下发 citations_delta（start 自带的 citations 原样保留）。 */
+    ArrayNode citations = null;
+
     final StringBuilder thinkingBuffer = new StringBuilder();
     String signature = null;
     String redactedData = null;
@@ -926,6 +1009,9 @@ final class AnthropicStreamAccumulator {
     final StringBuilder toolArgsBuffer = new StringBuilder();
     boolean initialInputPlaceholder = false;
     boolean initialArgumentsComplete = false;
+
+    /** 原生（非 normalized）block 累积到的 input_json_delta partial JSON；null 表示上游未下达该类 delta。 */
+    StringBuilder nativeInputBuffer = null;
 
     WireBlockAccumulator(String type, ObjectNode rawBlock) {
       this.type = type;

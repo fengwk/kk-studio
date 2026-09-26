@@ -30,7 +30,6 @@ final class AnthropicModelProvider implements ModelProvider {
   private static final String ANTHROPIC_VERSION_HEADER = "anthropic-version";
   private static final String ANTHROPIC_VERSION_VALUE = "2023-06-01";
   private static final String ANTHROPIC_BETA_HEADER = "anthropic-beta";
-  private static final String INTERLEAVED_THINKING_BETA_VALUE = "interleaved-thinking-2025-05-14";
   private static final String API_KEY_HEADER = "x-api-key";
   private static final String AUTHORIZATION_HEADER = "Authorization";
 
@@ -139,8 +138,9 @@ final class AnthropicModelProvider implements ModelProvider {
               .header("Content-Type", "application/json")
               .header("Accept", "text/event-stream")
               .header(ANTHROPIC_VERSION_HEADER, ANTHROPIC_VERSION_VALUE);
-      if (encoded.requiresInterleavedThinkingBeta()) {
-        requestBuilder.header(ANTHROPIC_BETA_HEADER, INTERLEAVED_THINKING_BETA_VALUE);
+      if (!encoded.betaFeatures().isEmpty()) {
+        // Anthropic 官方支持在单个 anthropic-beta 头内以逗号分隔多个能力标识
+        requestBuilder.header(ANTHROPIC_BETA_HEADER, String.join(",", encoded.betaFeatures()));
       }
       if (apiKey != null && !apiKey.isBlank()) {
         requestBuilder.header(API_KEY_HEADER, apiKey);
