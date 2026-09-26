@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 
 import java.math.BigDecimal;
 import java.util.Comparator;
@@ -41,9 +42,12 @@ import java.util.Set;
  *   <li>{@link BigDecimal} 字段以 {@code toPlainString()} 文本输出。
  *   <li>{@code ModelVariant} 的 nullable 字段 {@code reasoningEffort} 显式输出 {@code null} 而非省略，便于 schema
  *       对照。
+ *   <li>{@code ModelVariant} 的 {@code protocolOptions} 以嵌套 JSON object 输出（空选项输出 {@code {}}），保持厂商原生
+ *       选项在 durable payload 中仍是结构化的 object，数值不经过二进制浮点数。
  * </ul>
  *
- * <p>durable descriptor 固定七个字段（含 {@code modelId} 与 {@code inputModalities}），codec 严格要求完整且精确的字段集合。
+ * <p>durable descriptor 固定七个字段（含 {@code modelId} 与 {@code inputModalities}），variant 固定 {@code id} /
+ * {@code reasoningEffort} / {@code protocolOptions} 三个字段，codec 严格要求完整且精确的字段集合。
  */
 public final class ModelDescriptorJsonCodec {
 
@@ -62,7 +66,8 @@ public final class ModelDescriptorJsonCodec {
           "pricing");
 
   /** variant 字段顺序。 */
-  private static final Set<String> VARIANT_FIELDS = orderedSet("id", "reasoningEffort");
+  private static final Set<String> VARIANT_FIELDS =
+      orderedSet("id", "reasoningEffort", "protocolOptions");
 
   private static final Set<String> PRICING_FIELDS =
       orderedSet(
@@ -81,6 +86,8 @@ public final class ModelDescriptorJsonCodec {
   static {
     MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    // variant 的 protocolOptions 以厂商原生数值语义搬运，避免 Double 归一化改写第三方协议事实。
+    MAPPER.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
   }
 
   public ModelDescriptorJsonCodec() {}
@@ -206,16 +213,40 @@ public final class ModelDescriptorJsonCodec {
     } else {
       node.put("reasoningEffort", variant.reasoningEffort());
     }
+    node.set("protocolOptions", protocolOptionsNode(variant.protocolOptions()));
     return node;
   }
 
   private static ModelVariant readVariant(ObjectNode node) {
     requireFields(node, VARIANT_FIELDS, "variant");
     String reasoningEffort = decodeNullableText(node, "reasoningEffort");
+    ProviderProtocolOptions protocolOptions = readProtocolOptions(node);
     try {
-      return new ModelVariant(text(node, "id"), reasoningEffort);
+      return new ModelVariant(text(node, "id"), reasoningEffort, protocolOptions);
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException("invalid variant: " + exception.getMessage(), exception);
+    }
+  }
+
+  /**
+   * 把 variant 的 canonical protocol options 还原为可嵌入的 JSON object 节点。嵌套输出保证 durable payload 中选项仍是 结构化的
+   * object，而不是被再次转义的字符串。
+   */
+  private static ObjectNode protocolOptionsNode(ProviderProtocolOptions protocolOptions) {
+    try {
+      return object(MAPPER.readTree(protocolOptions.canonicalJson()), "protocolOptions");
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("cannot encode variant protocol options", exception);
+    }
+  }
+
+  /** 读取必填的 protocolOptions object；缺失、null 与非 object 都拒绝。 */
+  private static ProviderProtocolOptions readProtocolOptions(ObjectNode node) {
+    ObjectNode options = object(node.get("protocolOptions"), "protocolOptions");
+    try {
+      return new ProviderProtocolOptions(MAPPER.writeValueAsString(options));
+    } catch (JsonProcessingException exception) {
+      throw new IllegalArgumentException("invalid variant protocolOptions", exception);
     }
   }
 

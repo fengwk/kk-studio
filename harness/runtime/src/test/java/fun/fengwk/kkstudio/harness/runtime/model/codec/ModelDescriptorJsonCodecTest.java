@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
@@ -37,6 +38,11 @@ class ModelDescriptorJsonCodecTest {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  /** variant 原生协议选项 fixture：覆盖厂商私有字段、小数与超出 Integer 范围的整数。 */
+  private static final String CANONICAL_VARIANT_OPTIONS_JSON =
+      "{\"vendor_extension\":\"kept\",\"ratio\":1.10,\"revision\":1758880000000,"
+          + "\"thinking\":{\"budget_tokens\":4096}}";
 
   private final ModelDescriptorJsonCodec codec = new ModelDescriptorJsonCodec();
   private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
@@ -82,17 +88,72 @@ class ModelDescriptorJsonCodecTest {
 
     // 大写与外层空白在解码时被归一化
     ModelVariant decodedFromNormalized =
-        codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"  MAX \"}");
+        codec.decodeVariant(
+            "{\"id\":\"id\",\"reasoningEffort\":\"  MAX \",\"protocolOptions\":{}}");
     assertEquals("max", decodedFromNormalized.reasoningEffort());
 
     // 空白与超长 reasoningEffort 必须在解码时被拒绝
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"   \"}"));
+        () ->
+            codec.decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":\"   \",\"protocolOptions\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":\"" + "a".repeat(65) + "\"}"));
+            codec.decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":\""
+                    + "a".repeat(65)
+                    + "\",\"protocolOptions\":{}}"));
+  }
+
+  /** 原生协议选项必须作为嵌套 object 往返：厂商私有字段、整数与小数原样保留，且空选项仍输出 {@code {}}。 */
+  @Test
+  void roundTripsVariantWithProtocolOptions() throws Exception {
+    ModelVariant variant =
+        new ModelVariant("id", "high", new ProviderProtocolOptions(CANONICAL_VARIANT_OPTIONS_JSON));
+
+    String json = codec.encodeVariant(variant);
+    ModelVariant decoded = codec.decodeVariant(json);
+
+    assertEquals(variant, decoded);
+    assertEquals(json, codec.encodeVariant(decoded));
+
+    JsonNode protocolOptions = OBJECT_MAPPER.readTree(json).get("protocolOptions");
+    assertTrue(protocolOptions.isObject());
+    assertEquals("kept", protocolOptions.path("vendor_extension").asText());
+    assertEquals("1.1", protocolOptions.path("ratio").asText());
+    assertEquals(
+        List.of("id", "reasoningEffort", "protocolOptions"),
+        List.copyOf(fieldNames(OBJECT_MAPPER.readTree(json))));
+
+    JsonNode emptyOptions =
+        OBJECT_MAPPER.readTree(codec.encodeVariant(new ModelVariant("id"))).get("protocolOptions");
+    assertTrue(emptyOptions.isObject());
+    assertTrue(emptyOptions.isEmpty());
+  }
+
+  /** protocolOptions 是 variant 的必填字段：缺失、null、非 object 以及内部重复键都必须拒绝。 */
+  @Test
+  void rejectsInvalidVariantProtocolOptions() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeVariant("{\"id\":\"id\",\"reasoningEffort\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":[{\"a\":1}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decodeVariant(
+                "{\"id\":\"id\",\"reasoningEffort\":null,\"protocolOptions\":{\"a\":1,\"a\":2}}"));
   }
 
   // ---------- 确定性 / canonical ----------
@@ -351,6 +412,12 @@ class ModelDescriptorJsonCodecTest {
 
   // ---------- Fixture / 辅助方法 ----------
 
+  private static List<String> fieldNames(JsonNode node) {
+    List<String> names = new ArrayList<>();
+    node.fieldNames().forEachRemaining(names::add);
+    return names;
+  }
+
   private static ModelDescriptor canonicalDescriptor() {
     return new ModelDescriptor(
         "openai",
@@ -393,7 +460,9 @@ class ModelDescriptorJsonCodecTest {
    */
   private static ProviderRequest canonicalProviderRequest() {
     ModelDescriptor model = canonicalDescriptor();
-    ModelVariant variant = new ModelVariant("balanced", "medium");
+    ModelVariant variant =
+        new ModelVariant(
+            "balanced", "medium", new ProviderProtocolOptions(CANONICAL_VARIANT_OPTIONS_JSON));
     return new ProviderRequest(
         model,
         variant,

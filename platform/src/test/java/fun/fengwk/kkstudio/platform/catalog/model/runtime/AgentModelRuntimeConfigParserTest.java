@@ -6,15 +6,25 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -23,7 +33,7 @@ class AgentModelRuntimeConfigParserTest {
   private final AgentModelRuntimeConfigParser parser =
       new AgentModelRuntimeConfigParser(new ObjectMapper());
 
-  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来；variant 只保留 id 与 reasoningEffort。 */
+  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来；variant 只保留 id、reasoningEffort 与原生协议选项。 */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
     var parsed = parser.parse(validConfig());
@@ -87,13 +97,131 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals("xhigh", parsedXhigh.variants().get(0).reasoningEffort());
   }
 
-  /** 未声明 reasoningEffort 的 variant 保持 null，与显式 off 是不同语义。 */
+  /** 未声明 reasoningEffort 的 variant 保持 null，与显式 off 是不同语义；未声明原生选项等价于空 object。 */
   @Test
   void keepsAbsentReasoningEffortAsProtocolDefault() {
     String config = validConfig().replace(",\"reasoningEffort\":\"high\"", "");
     var parsed = parser.parse(config);
     assertEquals(new ModelVariant("quality"), parsed.variants().get(0));
     assertFalse(parsed.variants().get(0).reasoningOff());
+    assertTrue(parsed.variants().get(0).protocolOptions().isEmpty());
+    assertEquals(ProviderProtocolOptions.EMPTY, parsed.variants().get(0).protocolOptions());
+  }
+
+  /**
+   * 厂商原生协议选项必须经 public config API 无损往返并进入 runtime variant：decode → encode → parse 后仍是同一 canonical
+   * object，且协议编码器读到的选项包含全部厂商字段。
+   */
+  @Test
+  void roundTripsProtocolOptionsFromApiConfigIntoRuntimeVariant() {
+    String config = withProtocolOptions(validConfig(), PROTOCOL_OPTIONS_JSON);
+    ModelVariant expected =
+        new ModelVariant("quality", "high", new ProviderProtocolOptions(PROTOCOL_OPTIONS_JSON));
+
+    ParsedAgentModelConfig parsed = parser.parse(config);
+    assertEquals(List.of(expected), parsed.variants());
+    assertEquals(PROTOCOL_OPTIONS_JSON, parsed.variants().get(0).protocolOptions().canonicalJson());
+
+    AgentModelConfigDTO decoded = parser.decode(config);
+    assertEquals(
+        Map.of("user_id", "u-1"),
+        decoded.getVariants().get(0).getProtocolOptions().get("metadata"));
+
+    String encoded = parser.encode(decoded);
+    ParsedAgentModelConfig reparsed = parser.parse(encoded);
+    assertEquals(List.of(expected), reparsed.variants());
+    assertEquals(encoded, parser.encode(parser.decode(encoded)));
+  }
+
+  /** 原生协议选项同样受严格约束：非 object、对象内重复键、trailing token 与超限 payload 都必须明确失败，且错误消息绝不回显 选项内容。 */
+  @Test
+  void rejectsInvalidProtocolOptionsWithoutEchoingPayload() {
+    assertInvalid(withProtocolOptions(validConfig(), "[{\"a\":1}]"), ".protocolOptions");
+    assertInvalid(withProtocolOptions(validConfig(), "\"not-an-object\""), ".protocolOptions");
+    assertInvalid(withProtocolOptions(validConfig(), "{\"a\":1,\"a\":2}"), "protocolOptions");
+
+    String marker = "top-secret-marker";
+    IllegalArgumentException oversized =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                parser.parse(
+                    withProtocolOptions(
+                        validConfig(),
+                        "{\"a\":\""
+                            + marker
+                            + "b".repeat(ProviderProtocolOptions.MAX_UTF8_BYTES)
+                            + "\"}")));
+    assertTrue(oversized.getMessage().contains("must not exceed"), oversized.getMessage());
+    assertFalse(oversized.getMessage().contains(marker), oversized.getMessage());
+
+    IllegalArgumentException malformed =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                parser.parse(withProtocolOptions(validConfig(), "{\"a\":\"" + marker + "\"} {}")));
+    assertFalse(malformed.getMessage().contains(marker), malformed.getMessage());
+  }
+
+  /** 程序化构造的 DTO 也必须走同一校验：无法序列化为 JSON 的值不得进入持久化。 */
+  @Test
+  void rejectsNonJsonProtocolOptionsValuesFromTypedConfig() {
+    AgentModelConfigDTO config = parser.decode(withProtocolOptions(validConfig(), "{}"));
+    Map<String, Object> invalid = new LinkedHashMap<>();
+    invalid.put("bad", new Object());
+    config.getVariants().get(0).setProtocolOptions(invalid);
+
+    IllegalArgumentException error =
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(config));
+    assertTrue(
+        error.getMessage().contains("config.variants[0].protocolOptions"), error.getMessage());
+  }
+
+  /**
+   * 本地 JSON 约定（convention4j 与 HTTP mapper）把 Long 序列化为字符串以避免 JS 精度丢失；厂商原生选项必须不受该约定影响， 因此解析时把整数归一化为
+   * BigInteger，encode 之后仍是 JSON 数值。
+   */
+  @Test
+  void keepsLargeIntegerProtocolOptionsNumericUnderLocalLongToStringConvention() throws Exception {
+    ObjectMapper conventionMapper = longToStringMapper();
+    assertEquals(
+        "{\"revision\":\"1758880000000\"}",
+        conventionMapper.writeValueAsString(Map.of("revision", 1758880000000L)));
+
+    AgentModelRuntimeConfigParser conventionParser =
+        new AgentModelRuntimeConfigParser(conventionMapper);
+    String config =
+        withProtocolOptions(validConfig(), "{\"revision\":1758880000000,\"ratio\":0.5}");
+
+    AgentModelConfigDTO decoded = conventionParser.decode(config);
+    // 整数与小数分别使用 BigInteger/BigDecimal，既不命中 Long 字符串化约定，也不经过二进制浮点数。
+    assertEquals(
+        List.of(BigInteger.valueOf(1758880000000L), new BigDecimal("0.5")),
+        List.of(
+            decoded.getVariants().get(0).getProtocolOptions().get("revision"),
+            decoded.getVariants().get(0).getProtocolOptions().get("ratio")));
+
+    String encoded = conventionParser.encode(decoded);
+    assertTrue(encoded.contains("\"revision\":1758880000000"), encoded);
+    assertFalse(encoded.contains("\"revision\":\"1758880000000\""), encoded);
+    assertEquals(
+        "{\"revision\":1758880000000,\"ratio\":0.5}",
+        conventionParser.parse(encoded).variants().get(0).protocolOptions().canonicalJson());
+  }
+
+  /** Untyped protocolOptions 必须用十进制任意精度解析，不能先落入 Double 后静默损失厂商参数精度。 */
+  @Test
+  void preservesHighPrecisionDecimalProtocolOptions() {
+    String decimal = "0.12345678901234567890123456789";
+    String config = withProtocolOptions(validConfig(), "{\"threshold\":" + decimal + "}");
+
+    AgentModelConfigDTO decoded = parser.decode(config);
+    Object threshold = decoded.getVariants().get(0).getProtocolOptions().get("threshold");
+
+    assertEquals(new BigDecimal(decimal), threshold);
+    assertEquals(
+        "{\"threshold\":" + decimal + "}",
+        parser.parse(parser.encode(decoded)).variants().get(0).protocolOptions().canonicalJson());
   }
 
   /** 禁用的 reasoning 在描述符上以 falsy 的 tools/reasoning 布尔形式呈现。 */
@@ -292,6 +420,11 @@ class AgentModelRuntimeConfigParserTest {
   private static final String VARIANT_JSON =
       "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}],";
 
+  /** 厂商原生协议选项 fixture：覆盖嵌套 object、数组、布尔、小数与超出 Integer 范围的整数。 */
+  private static final String PROTOCOL_OPTIONS_JSON =
+      "{\"metadata\":{\"user_id\":\"u-1\"},\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":4096},"
+          + "\"ratio\":0.5,\"revision\":1758880000000,\"flags\":[true,false]}";
+
   /** 已从 variant 契约删除的字段：必须作为未知字段被严格拒绝。 */
   private static final List<String> REMOVED_VARIANT_FIELDS =
       List.of(
@@ -302,6 +435,29 @@ class AgentModelRuntimeConfigParserTest {
           "\"frequencyPenalty\":0.1,",
           "\"presencePenalty\":0.2,",
           "\"stopSequences\":[\"done\"],");
+
+  private static String withProtocolOptions(String config, String protocolOptionsJson) {
+    return config.replace(
+        "\"reasoningEffort\":\"high\"",
+        "\"reasoningEffort\":\"high\",\"protocolOptions\":" + protocolOptionsJson);
+  }
+
+  /** 模拟本地真相：convention4j 与 HTTP mapper 都把 Long 序列化为字符串以避免 JS 精度丢失。 */
+  private static ObjectMapper longToStringMapper() {
+    ObjectMapper mapper = new ObjectMapper();
+    SimpleModule module = new SimpleModule();
+    module.addSerializer(
+        Long.class,
+        new JsonSerializer<Long>() {
+          @Override
+          public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers)
+              throws IOException {
+            generator.writeString(String.valueOf(value));
+          }
+        });
+    mapper.registerModule(module);
+    return mapper;
+  }
 
   private String validConfig() {
     return "{\"limit\":{\"context\":128000,\"output\":8192},"
