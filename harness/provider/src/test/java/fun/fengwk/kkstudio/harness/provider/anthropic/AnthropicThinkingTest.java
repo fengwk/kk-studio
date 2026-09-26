@@ -592,12 +592,13 @@ class AnthropicThinkingTest {
   }
 
   /**
-   * 验证当 ReplayState 的模型亲和性（affinity）与当前请求模型不匹配时，自动禁用 native 重放并回退为语义降级。
+   * 验证当 ReplayState 的模型亲和性（affinity）与当前请求模型不匹配时：携带 thinking signature 的 native payload 无法用 durable
+   * 语义等价重建，必须 fail closed；而只含可等价重建内容的 payload 仍回退语义编码。
    *
-   * <p>测试意图：防止跨模型复用思考块或签名导致的协议不兼容或数据污染。
+   * <p>测试意图：防止跨模型复用思考块或签名导致的协议不兼容或数据污染，同时保证纯语义 payload 的既有降级行为不变。
    */
   @Test
-  void should_disable_replay_when_affinity_mismatches() throws IOException {
+  void failsClosedOnNativeOnlyReplay_when_affinity_mismatches() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-opus-4-8");
     ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
@@ -651,23 +652,56 @@ class AnthropicThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    AnthropicEncodedRequest encoded = encoder.encode(followUp, descriptor);
-    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
-    ArrayNode contents = (ArrayNode) asstWire.path("content");
+    // thinking 的 signature 无法用 durable thinking 文本重建：亲和性失配时必须 fail closed，绝不静默丢弃 signature
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> encoder.encode(followUp, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        error.getMessage());
 
-    // 亲和性不匹配，触发语义降级：thinking 块降级为 text，不输出 signature
-    assertEquals("text", contents.get(0).path("type").asText());
-    assertEquals("Thought", contents.get(0).path("text").asText());
-    assertFalse(contents.get(0).has("signature"));
+    // 只含可等价重建 text 的 payload 在同一亲和性失配下仍回退语义编码
+    ObjectNode reconstructiblePayload = NODES.objectNode();
+    reconstructiblePayload.put("role", "assistant");
+    reconstructiblePayload.putArray("content").addObject().put("type", "text").put("text", "Text");
+    ProviderMessage reconstructibleAsstMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("Text")),
+            new ProviderReplayState(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                mismatchedAffinity,
+                currentHash,
+                reconstructiblePayload));
+    ProviderRequest reconstructibleFollowUp =
+        new ProviderRequest(
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg, reconstructibleAsstMsg, userMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    ArrayNode fallbackContents =
+        (ArrayNode)
+            MAPPER
+                .readTree(encoder.encode(reconstructibleFollowUp, descriptor).bodyUtf8Bytes())
+                .path("messages")
+                .get(1)
+                .path("content");
+    assertEquals("text", fallbackContents.get(0).path("type").asText());
+    assertEquals("Text", fallbackContents.get(0).path("text").asText());
   }
 
   /**
-   * 验证当前缀哈希（sourcePrefixHash）不匹配时（例如历史对话或提示词改动），自动禁用 native 重放并回退为语义降级。
+   * 验证当前缀哈希（sourcePrefixHash）不匹配时（例如历史对话或提示词改动）：携带 thinking signature 的 native payload 必须 fail
+   * closed；只含可等价重建内容的 payload 仍回退语义编码。
    *
-   * <p>测试意图：验证对话历史前缀校验契约，杜绝由于前缀错位造成 Anthropic 拒绝请求。
+   * <p>测试意图：验证对话历史前缀校验契约，同时杜绝静默丢弃 signature 造成的原生事实丢失。
    */
   @Test
-  void should_disable_replay_when_source_prefix_hash_mismatches() throws IOException {
+  void failsClosedOnNativeOnlyReplay_when_source_prefix_hash_mismatches() throws IOException {
     ModelDescriptor modelDesc = createReasoningModel("claude-sonnet-4-6");
     ModelVariant variant = new ModelVariant("default", "high");
     ProviderMessage userMsg =
@@ -709,13 +743,46 @@ class AnthropicThinkingTest {
             List.of(),
             ProviderCacheControl.none());
 
-    AnthropicEncodedRequest encoded = encoder.encode(followUp, descriptor);
-    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
-    ArrayNode contents = (ArrayNode) asstWire.path("content");
+    // 前缀哈希不一致且 payload 含 signature：fail closed，绝不静默降级为没有 signature 的 text
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> encoder.encode(followUp, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        error.getMessage());
 
-    // 前缀哈希不一致，自动降级为语义文本
-    assertEquals("text", contents.get(0).path("type").asText());
-    assertEquals("Thought", contents.get(0).path("text").asText());
+    // 只含可等价重建 text 的 payload 在同一前缀失配下仍回退语义编码
+    ObjectNode reconstructiblePayload = NODES.objectNode();
+    reconstructiblePayload.put("role", "assistant");
+    reconstructiblePayload.putArray("content").addObject().put("type", "text").put("text", "Text");
+    ProviderMessage reconstructibleAsstMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("Text")),
+            new ProviderReplayState(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                descriptor.affinity("claude-sonnet-4-6"),
+                forgedHash,
+                reconstructiblePayload));
+    ProviderRequest reconstructibleFollowUp =
+        new ProviderRequest(
+            modelDesc,
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg, reconstructibleAsstMsg, userMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    ArrayNode fallbackContents =
+        (ArrayNode)
+            MAPPER
+                .readTree(encoder.encode(reconstructibleFollowUp, descriptor).bodyUtf8Bytes())
+                .path("messages")
+                .get(1)
+                .path("content");
+    assertEquals("text", fallbackContents.get(0).path("type").asText());
+    assertEquals("Text", fallbackContents.get(0).path("text").asText());
   }
 
   /**

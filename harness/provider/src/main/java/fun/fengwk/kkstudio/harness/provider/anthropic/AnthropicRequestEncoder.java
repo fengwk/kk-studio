@@ -54,9 +54,12 @@ import java.util.Set;
  * 思考实际启用时追加 {@code interleaved-thinking-2025-05-14}，并集为空则不发送该头。
  *
  * <p>assistant replay 的已知 block 只校验 durable 语义所必需的字段，其余官方字段（如 text block 的 {@code
- * citations}）原样回放；native-only block（未知类型、{@code redacted_thinking}、{@code compaction}）无法用 durable
- * 语义表达，因此 affinity/prefix hash 失配时 fail closed 而非降级丢弃。payload 以 {@code compaction} block 开头时代表历史已被
- * 摘要，编码器先按原 durable 前缀完成校验，再清空已编码消息使该消息成为首条消息。
+ * citations}）原样原位回放；只有能用 durable 语义等价重建的 payload（恰好 {@code type+text} 的 text block、恰好 {@code
+ * type+id+name+input} 且与 durable 工具调用一致的 tool_use，以及后者与 text 的组合）才允许在 affinity/prefix hash
+ * 失配时退回语义编码。 {@code thinking}（signature/顺序语义）、{@code redacted_thinking}、{@code
+ * compaction}、未知/server/fallback block 以及任何额外成员都无法用 durable 语义表达，因此 affinity/prefix hash 失配时 fail
+ * closed 而不是降级丢弃。 payload 以 {@code compaction} block 开头时代表历史已被摘要，编码器先按原 durable
+ * 前缀完成校验，再清空已编码消息使该消息成为首条消息。
  */
 final class AnthropicRequestEncoder {
 
@@ -580,6 +583,11 @@ final class AnthropicRequestEncoder {
                 ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
           }
           validateCitations(item.get("citations"));
+          // 只有恰好 type+text 的纯文本块能用 durable 文本等价重建；citations 或任何额外成员都携带 durable
+          // 无法表达的原生事实
+          if (item.size() != 2) {
+            nativeOnly = true;
+          }
           payloadText.append(item.get("text").textValue());
         }
         case "thinking" -> {
@@ -591,6 +599,8 @@ final class AnthropicRequestEncoder {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid thinking block in replay payload");
           }
+          // signature 与块顺序语义无法用 durable thinking 文本重建：只允许原位回放，失配时 fail closed
+          nativeOnly = true;
           payloadThinking.append(item.get("thinking").textValue());
         }
         case "redacted_thinking" -> {
@@ -615,6 +625,10 @@ final class AnthropicRequestEncoder {
               || !item.get("input").isObject()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid tool_use block in replay payload");
+          }
+          // 只有恰好 type+id+name+input 的 tool_use 能用 durable 工具调用等价重建；额外成员无法重建
+          if (item.size() != 4) {
+            nativeOnly = true;
           }
           payloadCalls.add(
               new ProviderToolCall(

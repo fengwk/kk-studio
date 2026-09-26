@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,11 +21,13 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -32,6 +35,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.math.BigDecimal;
@@ -42,7 +48,7 @@ import java.util.Set;
 /**
  * 测试意图：验证 provider 原生 assistant message 的累积与 replay 保真——delta 的字符串/对象/标量按规则合并，官方非规范化字段（audio、
  * function_call、未来字段）进入 replay 并可经次轮编码器原样回放，chunk 级 transport metadata 与 n&gt;1 的其他 choice 不混入， 而
- * known 字段与 durable 不一致时仍然失败。
+ * known 字段与 durable 不一致时仍然失败；native-only 字段在 affinity/hash 失配时必须 fail closed。
  */
 class OpenAiChatNativeReplayTest {
 
@@ -357,6 +363,156 @@ class OpenAiChatNativeReplayTest {
     JsonNode honestWire = honestRoot.path("messages").get(2);
     assertEquals("assistant", honestWire.path("role").asText());
     assertEquals("honest", honestWire.path("content").asText());
+  }
+
+  /**
+   * 测试意图：native-only 字段（audio、废弃的 function_call、reasoning_content、refusal 区分、tool_calls 的额外嵌套字段）无法由
+   * durable 语义等价重建，affinity 或 prefix hash 失配时必须 fail closed；只含 role/文本 content/现代 function
+   * tool_calls 的 payload 仍回退语义编码。
+   */
+  @Test
+  @DisplayName("native-only replay 字段失配时 fail closed，最小可重建 payload 仍回退语义编码")
+  void failsClosedForNativeOnlyFieldsAndFallsBackForMinimalPayload() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String mismatchedHash = "0".repeat(64);
+
+    // 1. audio 属于 native-only：hash 失配时 fail closed
+    ObjectNode audioPayload = MAPPER.createObjectNode();
+    audioPayload.put("role", "assistant");
+    audioPayload.put("content", "Hello");
+    audioPayload.putObject("audio").put("id", "audio_1");
+    assertNativeOnlyReplayRejected(
+        user,
+        List.of(new ProviderTextBlock("Hello")),
+        audioPayload,
+        modelAffinity(),
+        mismatchedHash);
+
+    // 2. 已废弃的 function_call 属于 native-only：affinity 失配时 fail closed
+    ObjectNode legacyCallPayload = MAPPER.createObjectNode();
+    legacyCallPayload.put("role", "assistant");
+    legacyCallPayload.put("content", "Hello");
+    legacyCallPayload.putObject("function_call").put("name", "legacy_lookup");
+    assertNativeOnlyReplayRejected(
+        user,
+        List.of(new ProviderTextBlock("Hello")),
+        legacyCallPayload,
+        descriptor.affinity("another-model"),
+        mismatchedHash);
+
+    // 3. reasoning_content 属于 native-only：即使与 durable thinking 完全一致，hash 失配时也必须 fail closed
+    ObjectNode reasoningPayload = MAPPER.createObjectNode();
+    reasoningPayload.put("role", "assistant");
+    reasoningPayload.put("content", "Hello");
+    reasoningPayload.put("reasoning_content", "hidden chain");
+    assertNativeOnlyReplayRejected(
+        user,
+        List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
+        reasoningPayload,
+        modelAffinity(),
+        mismatchedHash);
+
+    // 4. refusal 区分属于 native-only：affinity 失配时 fail closed
+    ObjectNode refusalPayload = MAPPER.createObjectNode();
+    refusalPayload.put("role", "assistant");
+    refusalPayload.put("refusal", "I cannot help");
+    assertNativeOnlyReplayRejected(
+        user,
+        List.of(new ProviderTextBlock("I cannot help")),
+        refusalPayload,
+        descriptor.affinity("another-model"),
+        mismatchedHash);
+
+    // 5. tool_calls 的额外嵌套字段属于 native-only：hash 失配时 fail closed
+    ObjectNode extendedCallPayload = MAPPER.createObjectNode();
+    extendedCallPayload.put("role", "assistant");
+    ObjectNode extendedCall = extendedCallPayload.putArray("tool_calls").addObject();
+    extendedCall.put("id", "c1").put("type", "function");
+    ObjectNode extendedFn = extendedCall.putObject("function");
+    extendedFn.put("name", "fn");
+    extendedFn.put("arguments", "{}");
+    extendedFn.put("vendorField", "v");
+    assertNativeOnlyReplayRejected(
+        user,
+        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+        extendedCallPayload,
+        descriptor.affinity("another-model"),
+        mismatchedHash);
+
+    // 6. 最小可重建 payload（role + 文本 content + 现代 function tool_calls）：affinity/hash 失配都回退语义编码
+    ObjectNode minimalPayload = MAPPER.createObjectNode();
+    minimalPayload.put("role", "assistant");
+    minimalPayload.put("content", "Hello");
+    ArrayNode minimalCalls = minimalPayload.putArray("tool_calls");
+    ObjectNode minimalCall = minimalCalls.addObject();
+    minimalCall.put("id", "c1").put("type", "function");
+    ObjectNode minimalFn = minimalCall.putObject("function");
+    minimalFn.put("name", "fn");
+    minimalFn.put("arguments", "{}");
+    List<ProviderContentBlock> durableBlocks =
+        List.of(
+            new ProviderTextBlock("Hello"),
+            new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}")));
+
+    for (ProviderReplayState replayState :
+        List.of(
+            new ProviderReplayState(
+                ProviderReplayFormat.OPENAI_CHAT,
+                descriptor.affinity("another-model"),
+                mismatchedHash,
+                minimalPayload),
+            new ProviderReplayState(
+                ProviderReplayFormat.OPENAI_CHAT,
+                modelAffinity(),
+                mismatchedHash,
+                minimalPayload))) {
+      JsonNode wire =
+          MAPPER.readTree(
+              encoder
+                  .encode(
+                      request(user, assistant(durableBlocks, replayState)),
+                      descriptor,
+                      OpenAiChatConfiguration.defaults())
+                  .bodyUtf8Bytes());
+      JsonNode wireAsst = wire.path("messages").get(2);
+      assertEquals("Hello", wireAsst.path("content").asText());
+      assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asText());
+      assertEquals("fn", wireAsst.path("tool_calls").get(0).path("function").path("name").asText());
+    }
+  }
+
+  private ProviderReplayAffinity modelAffinity() {
+    return descriptor.affinity(modelDesc.modelId());
+  }
+
+  private ProviderMessage assistant(
+      List<ProviderContentBlock> durableBlocks, ProviderReplayState replayState) {
+    return new ProviderMessage(ProviderMessageRole.ASSISTANT, durableBlocks, replayState);
+  }
+
+  /** 断言该 replay 因携带 native-only 字段而在 affinity/hash 失配时 fail closed。 */
+  private void assertNativeOnlyReplayRejected(
+      ProviderMessage user,
+      List<ProviderContentBlock> durableBlocks,
+      ObjectNode payload,
+      ProviderReplayAffinity affinity,
+      String sourcePrefixHash) {
+    ProviderReplayState replayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT, affinity, sourcePrefixHash, payload);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(user, assistant(durableBlocks, replayState)),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(
+        "native replay fields require matching affinity and source prefix hash",
+        error.getMessage());
   }
 
   private ProviderRequest request(ProviderMessage... messages) {

@@ -49,6 +49,11 @@ import java.util.regex.Pattern;
  *
  * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Gemini streamGenerateContent 规范的 UTF-8 JSON 字节数组，并生成
  * sourcePrefixHash。
+ *
+ * <p>assistant replay 只在 payload 的每个 part 都能由 durable 语义等价重建（恰好 {@code text}（可选 {@code thought}）或
+ * {@code functionCall{name,args}}）时才允许在 affinity/sourcePrefixHash 失配后退回语义编码；{@code
+ * thoughtSignature}、inlineData/fileData/executableCode/codeExecutionResult/toolCall/toolResponse 等
+ * 官方或未知 part、part 内额外成员都是 durable 无法表达的原生事实，失配时必须 fail closed 而不是静默丢弃。
  */
 final class GeminiRequestEncoder {
 
@@ -575,6 +580,15 @@ final class GeminiRequestEncoder {
         ProviderErrorKind.INVALID_REQUEST, "unsupported ASSISTANT content block");
   }
 
+  /**
+   * 判定同 format replay 能否原位回放。
+   *
+   * <p>无论 affinity/prefix hash 是否匹配，同 format (GEMINI_CONTENT) payload 都必须先通过结构、已知字段类型与 durable
+   * 一致性校验（损坏一律 INVALID_REQUEST）。校验通过后：只有全部 part 都能用 durable 语义等价重建（纯 {@code text}（可选 {@code
+   * thought}）与可重建的 {@code functionCall}）时才允许在 affinity/prefix hash 失配时退回语义编码；携带 durable 无法表达的原生事实的
+   * part（thoughtSignature、inlineData/fileData/executableCode/codeExecutionResult/toolCall/toolResponse
+   * 等未知 part、任何额外成员）则必须 fail closed，绝不静默丢弃。
+   */
   private static boolean canReplay(
       ProviderReplayState replayState,
       ProviderDescriptor descriptor,
@@ -590,19 +604,24 @@ final class GeminiRequestEncoder {
 
     // 同 format (GEMINI_CONTENT) payload 无论 affinity/hash 是否匹配都先严格校验！
     // 损坏必须 INVALID_REQUEST！
-    validateGeminiReplayPayload(replayState.payload(), durableContents);
+    boolean nativeOnly = validateGeminiReplayPayload(replayState.payload(), durableContents);
 
     // 校验通过后再按 affinity/hash 决定 replay/fallback
-    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-      return false;
-    }
-    if (!replayState.sourcePrefixHash().equals(currentPrefixHash)) {
+    boolean affinityMatches = replayState.affinity().equals(descriptor.affinity(requestedModel));
+    boolean prefixHashMatches = replayState.sourcePrefixHash().equals(currentPrefixHash);
+    if (!affinityMatches || !prefixHashMatches) {
+      if (nativeOnly) {
+        // native-only part 无法用 durable 语义表达：失配时只能 fail closed，绝不静默丢弃
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "native replay parts require matching affinity and source prefix hash");
+      }
       return false;
     }
     return true;
   }
 
-  /** thoughtSignature 属于已知字段：出现时必须是非空白字符串；未知字段与未知 Part 不在此列，原样 opaque 透传。 */
+  /** thoughtSignature 属于已知字段：出现时必须是非空白字符串；它不是可重建的语义字段，因此只允许原位回放。 */
   private static void validateReplayThoughtSignature(JsonNode part) {
     if (part.has("thoughtSignature")
         && (!part.get("thoughtSignature").isTextual()
@@ -612,7 +631,8 @@ final class GeminiRequestEncoder {
     }
   }
 
-  private static void validateGeminiReplayPayload(
+  /** 完成结构校验、已知语义与 durable 一致性校验，并返回该 payload 是否携带 durable 无法等价重建的原生事实。 */
+  private static boolean validateGeminiReplayPayload(
       JsonNode payload, List<ProviderContentBlock> durableContents) {
     if (payload == null || !payload.isObject()) {
       throw new ProviderException(
@@ -647,6 +667,7 @@ final class GeminiRequestEncoder {
     StringBuilder payloadThinking = new StringBuilder();
     record ReplayPayloadCall(String id, String name, String argsJson) {}
     List<ReplayPayloadCall> payloadCalls = new ArrayList<>();
+    boolean nativeOnly = false;
 
     for (JsonNode item : partsArray) {
       if (!item.isObject()) {
@@ -654,7 +675,7 @@ final class GeminiRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
 
-      // 已知语义（text/thinking/functionCall）严格核对；未知字段与未知 Part 整体 opaque 透传
+      // 已知语义（text/thinking/functionCall）严格核对；未知 Part 与额外成员标记为 native-only
       boolean hasText = item.has("text");
       boolean hasFunctionCall = item.has("functionCall");
 
@@ -663,7 +684,9 @@ final class GeminiRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
       if (!hasText && !hasFunctionCall) {
-        // 未知 Part（如 inlineData/executableCode 等官方 part）不参与 known 语义核对，原样回放
+        // inlineData/fileData/executableCode/codeExecutionResult/toolCall/toolResponse 等官方 Part 与未知
+        // Part 都无法用 durable 语义表达：只允许原位回放，失配时 fail closed
+        nativeOnly = true;
         continue;
       }
 
@@ -678,6 +701,10 @@ final class GeminiRequestEncoder {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
+        // 只有 text + 可选 boolean thought 是可直接重建的形态：thoughtSignature 或任何额外成员都是原生事实
+        if (item.has("thoughtSignature") || item.size() != (item.has("thought") ? 2 : 1)) {
+          nativeOnly = true;
+        }
 
         String txt = item.get("text").asText();
         if (item.has("thought") && item.get("thought").asBoolean()) {
@@ -686,6 +713,10 @@ final class GeminiRequestEncoder {
           payloadText.append(txt);
         }
       } else { // hasFunctionCall
+        // 顶层除 functionCall 外的任何成员（含 thoughtSignature）都无法重建
+        if (item.size() != 1) {
+          nativeOnly = true;
+        }
         JsonNode fn = item.get("functionCall");
         if (!fn.isObject()) {
           throw new ProviderException(
@@ -711,14 +742,9 @@ final class GeminiRequestEncoder {
               throw new ProviderException(
                   ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
             }
-          } else if ("args".equals(fnField)) {
-            if (!fn.get("args").isObject()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-            }
-          } else {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+          } else if (!"args".equals(fnField)) {
+            // 未知/新增的 functionCall 成员无法用 durable 工具调用重建
+            nativeOnly = true;
           }
         }
 
@@ -793,6 +819,8 @@ final class GeminiRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
       }
     }
+
+    return nativeOnly;
   }
 
   private static JsonNode parseStrictJson(String json, String fixedErrorMessage) {

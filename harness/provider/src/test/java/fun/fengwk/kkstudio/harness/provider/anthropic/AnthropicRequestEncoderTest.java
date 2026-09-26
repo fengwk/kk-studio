@@ -390,60 +390,92 @@ class AnthropicRequestEncoderTest {
     assertEquals("text", asstWire.path("content").get(1).path("type").asText());
   }
 
+  /**
+   * 测试意图：affinity/hash 失配时按 payload 承载的事实分流——只含可等价重建的 text / tool_use 时仍回退语义编码；一旦携带 durable
+   * 无法重建的原生事实（如 thinking 的 signature）就必须 fail closed，绝不静默丢弃。
+   */
   @Test
-  void fallbackWhenReplayAffinityOrHashMismatches() throws IOException {
+  void fallsBackForReconstructibleReplayAndFailsClosedForNativeOnlyReplay() throws IOException {
     ProviderMessage userMsg = userMsg(new ProviderTextBlock("hi"));
+    String forgedHash = "0000000000000000000000000000000000000000000000000000000000000001";
 
-    // 构造 hash 不匹配的 ReplayState
-    ObjectNode payload = NODES.objectNode();
-    payload.put("role", "assistant");
-    ArrayNode content = payload.putArray("content");
-    content
+    // 1. 恰好 type+text 的 text 与恰好 type+id+name+input 的 tool_use 都可由 durable 语义等价重建 -> 语义 fallback
+    ObjectNode reconstructiblePayload = NODES.objectNode();
+    reconstructiblePayload.put("role", "assistant");
+    ArrayNode reconstructibleContent = reconstructiblePayload.putArray("content");
+    reconstructibleContent.addObject().put("type", "text").put("text", "response text");
+    ObjectNode toolNode = reconstructibleContent.addObject();
+    toolNode.put("type", "tool_use").put("id", "call_1").put("name", "calc");
+    toolNode.putObject("input").put("x", 1);
+
+    ProviderReplayState reconstructibleState =
+        new ProviderReplayState(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            descriptor.affinity("claude-3-5-sonnet"),
+            forgedHash,
+            reconstructiblePayload);
+    ProviderMessage reconstructibleAsstMsg =
+        asstMsg(
+            List.of(
+                new ProviderTextBlock("response text"),
+                new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "{\"x\":1}"))),
+            reconstructibleState);
+
+    ProviderRequest reconstructibleRequest =
+        request(
+            defaultVariant(),
+            List.of(userMsg, reconstructibleAsstMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    AnthropicEncodedRequest encoded = encoder.encode(reconstructibleRequest, descriptor);
+    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
+
+    // Fallback: text 与 toolCall 由 durable 重建
+    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
+    assertEquals("response text", asstWire.path("content").get(0).path("text").asText());
+
+    assertEquals("tool_use", asstWire.path("content").get(1).path("type").asText());
+    assertEquals("call_1", asstWire.path("content").get(1).path("id").asText());
+    assertEquals("calc", asstWire.path("content").get(1).path("name").asText());
+    assertEquals(1, asstWire.path("content").get(1).path("input").path("x").asInt());
+
+    // 2. thinking 的 signature 无法用 durable thinking 文本重建：失配时 fail closed
+    ObjectNode nativePayload = NODES.objectNode();
+    nativePayload.put("role", "assistant");
+    ArrayNode nativeContent = nativePayload.putArray("content");
+    nativeContent
         .addObject()
         .put("type", "thinking")
         .put("thinking", "think text")
         .put("signature", "sig-123");
-    content.addObject().put("type", "text").put("text", "response text");
-    ObjectNode toolNode = content.addObject();
-    toolNode.put("type", "tool_use").put("id", "call_1").put("name", "calc");
-    toolNode.putObject("input").put("x", 1);
+    nativeContent.addObject().put("type", "text").put("text", "response text");
 
-    ProviderReplayState replayState =
+    ProviderReplayState nativeState =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
             descriptor.affinity("claude-3-5-sonnet"),
-            "0000000000000000000000000000000000000000000000000000000000000001",
-            payload);
-
-    ProviderMessage assistantMsg =
+            forgedHash,
+            nativePayload);
+    ProviderMessage nativeAsstMsg =
         asstMsg(
             List.of(
-                new ProviderThinkingBlock("think text"),
-                new ProviderTextBlock("response text"),
-                new ProviderToolCallBlock(new ProviderToolCall("call_1", "calc", "{\"x\":1}"))),
-            replayState);
+                new ProviderThinkingBlock("think text"), new ProviderTextBlock("response text")),
+            nativeState);
 
-    ProviderRequest request =
+    ProviderRequest nativeRequest =
         request(
             defaultVariant(),
-            List.of(userMsg, assistantMsg),
+            List.of(userMsg, nativeAsstMsg),
             List.of(),
             ProviderCacheControl.none());
 
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
-
-    // Fallback: thinking 降级为 text，toolCall 降级为 tool_use
-    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
-    assertEquals("think text", asstWire.path("content").get(0).path("text").asText());
-
-    assertEquals("text", asstWire.path("content").get(1).path("type").asText());
-    assertEquals("response text", asstWire.path("content").get(1).path("text").asText());
-
-    assertEquals("tool_use", asstWire.path("content").get(2).path("type").asText());
-    assertEquals("call_1", asstWire.path("content").get(2).path("id").asText());
-    assertEquals("calc", asstWire.path("content").get(2).path("name").asText());
-    assertEquals(1, asstWire.path("content").get(2).path("input").path("x").asInt());
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> encoder.encode(nativeRequest, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        error.getMessage());
   }
 
   @Test
@@ -1859,8 +1891,8 @@ class AnthropicRequestEncoderTest {
     assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asText());
     assertEquals("call_goal", wireAsst.path("content").get(2).path("id").asText());
 
-    // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则亲和性校验失败并降级为 semantic fallback（thinking 降级为
-    // text，丢失 signature）
+    // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则亲和性校验失败——payload 含 thinking signature，
+    //    无法用 durable 语义等价重建，因此必须 fail closed，绝不静默丢弃 signature。
     ProviderReplayState logicalAffinityState =
         new ProviderReplayState(
             ProviderReplayFormat.ANTHROPIC_MESSAGES,
@@ -1876,12 +1908,12 @@ class AnthropicRequestEncoderTest {
             List.of(user1, asstMismatch, toolResult),
             List.of(),
             ProviderCacheControl.none());
-    AnthropicEncodedRequest encodedMismatch = encoder.encode(requestMismatch, descriptor);
-    JsonNode wireAsstMismatch =
-        MAPPER.readTree(encodedMismatch.bodyUtf8Bytes()).path("messages").get(1);
-    assertEquals("text", wireAsstMismatch.path("content").get(0).path("type").asText());
-    assertEquals("deep reasoning", wireAsstMismatch.path("content").get(0).path("text").asText());
-    assertFalse(wireAsstMismatch.path("content").get(0).has("signature"));
+    ProviderException mismatchError =
+        assertThrows(ProviderException.class, () -> encoder.encode(requestMismatch, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, mismatchError.kind());
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        mismatchError.getMessage());
   }
 
   private static ProviderRequest requestWithModelId(
