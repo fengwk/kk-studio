@@ -16,13 +16,17 @@
 -- `version`; the database never mutates them. Application-owned relation tables
 -- and NOTIFY hints surround this protocol without duplicating its state machine.
 --
--- Canvas is fully UUID: every Canvas-generated id is allocated by the
--- application (client for node/group/request/command ids, server for
--- document/resource/run-target ids) and inserted explicitly; there are no
--- id sequences. `canvas_document.version` is the single graph version cursor;
--- version changes are hinted to the Canvas version/application event hub via the `canvas_version`
--- NOTIFY trigger (section 5). Resource blobs are owned by the global
--- `storage_blob` refcount lifecycle; Canvas rows only reference them (RESTRICT).
+-- Product facts live in one flat model: Canvas keeps a single node shape with
+-- immutable content and a replaceable current Resource[]; Project keeps one
+-- strict workflow JSON with Issue Runs, one ordered Activity timeline, explicit
+-- published Evidence and a per-Issue work mailbox; Chat holds multiple Sessions
+-- through the direct `chat_session` association. Every product id is an
+-- application-allocated UUID (client for node/group/request/command ids, server
+-- for document/resource/run ids): there are no id sequences. `revision` (Canvas)
+-- and `version` (Project) are application-owned cursors; the NOTIFY triggers
+-- below only hint listeners after commit and never mutate a row. Resource blobs
+-- are owned by the global `storage_blob` refcount lifecycle; product rows only
+-- reference them (RESTRICT).
 --
 -- DDL is grouped so cycle-closing and forward foreign keys are appended only
 -- after both target tables exist.
@@ -394,242 +398,200 @@ comment on column mcp_tool.source_name is 'MCP 工具原始名（同一 Server �
 comment on column mcp_tool.description is '工具描述（非空白），冻结进 ToolDescriptor';
 comment on column mcp_tool.input_schema is '工具 JSON input schema（JSON object），冻结进 ToolDescriptor';
 
-create table comfyui_workflow_api (
-    id                uuid          primary key,
-    api_name          varchar(64)   not null,
-    name              varchar(128)  not null,
-    description       text,
-    workflow          jsonb         not null,
-    input_bindings    jsonb         not null,
-    default_selector  varchar(1024),
-    enabled           boolean       not null,
-    created_at        timestamptz(3) not null default current_timestamp,
-    updated_at        timestamptz(3) not null default current_timestamp,
-    version           bigint        not null default 0
-);
-
-create unique index uk_comfyui_workflow_api_api_name
-    on comfyui_workflow_api (api_name);
+-- Canvas 领域：一个节点模型、不可变内容与可替换的当前 Resource[]。
+--
+-- `revision` 只是同步位置坐标（命令批与旧 ACK 的比较基准），绝不作为整图 CAS
+-- 前提。全部 ownership 外键都是 ON DELETE RESTRICT：删除顺序由应用显式编排
+-- （pins -> runs -> resources -> nodes -> groups -> dedup -> document），
+-- CASCADE 会绕过全局 storage_blob 引用计数，因此一律不用。
 
 create table canvas_document (
     id uuid primary key,
-    title varchar(256) not null,
-    version bigint not null default 0,
+    title varchar(256) not null check (btrim(title) <> ''),
+    revision bigint not null default 0 check (revision >= 0),
     created_at timestamptz(3) not null default current_timestamp,
-    updated_at timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_document_title_nonblank check (btrim(title) <> ''),
-    constraint ck_canvas_document_version_nonneg check (version >= 0)
+    updated_at timestamptz(3) not null default current_timestamp
 );
 
-comment on table canvas_document is 'Canvas 聚合头：version 是单调递增的 graph 版本（command expected 游标与 patch 坐标系的公共基准）；Harness 会话归属由 session_owner 表持有';
+comment on table canvas_document is 'Canvas 聚合头：revision 是单调递增的同步位置，旧 ACK 不覆盖新输入；标题规范化由应用负责，DB 只拒绝空白标题';
 comment on column canvas_document.id is 'Canvas 全局唯一 UUID（服务端生成）';
-comment on column canvas_document.title is '规范化标题（NFKC trim 后非空，<= 256 字符）';
-comment on column canvas_document.version is 'graph 版本：任何成功命令批或 Function Run 状态前进恰好 +1';
+comment on column canvas_document.revision is 'graph 同步位置：任何成功命令批或 Function Run 状态前进恰好 +1';
 comment on column canvas_document.created_at is '创建时间（毫秒精度）';
-comment on column canvas_document.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on column canvas_document.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 
 create index idx_canvas_document_updated
     on canvas_document (updated_at, id);
 
 create table canvas_group (
     id uuid primary key,
-    canvas_id uuid not null,
-    title varchar(256) not null,
+    canvas_id uuid not null references canvas_document (id) on delete restrict,
+    title varchar(256) not null check (btrim(title) <> ''),
     x double precision not null,
     y double precision not null,
     width double precision not null,
     height double precision not null,
-    constraint ck_canvas_group_title_nonblank check (btrim(title) <> ''),
+    unique (canvas_id, id),
     constraint ck_canvas_group_geometry check (
-        x not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and y not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and width not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and height not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and width > 0 and height > 0
-    ),
-    constraint uk_canvas_group_canvas unique (canvas_id, id)
+        x not in ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
+        and y not in ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
+        and width > 0 and width < 'Infinity'::float8
+        and height > 0 and height < 'Infinity'::float8
+    )
 );
 
-comment on table canvas_group is '不嵌套、使用 world 坐标的 Canvas group';
+comment on table canvas_group is '不嵌套、使用 world 坐标的 Canvas group；(canvas_id, id) 同时是节点同 Canvas 复合引用的目标';
 comment on column canvas_group.id is 'Group 全局唯一 UUID（客户端生成）';
-comment on column canvas_group.canvas_id is '所属 Canvas';
-comment on column canvas_group.title is '规范化标题（<= 256 字符）';
+comment on column canvas_group.canvas_id is '所属 Canvas（RESTRICT）';
+comment on column canvas_group.title is '规范化标题（非空白，<= 256 字符）';
 comment on column canvas_group.x is 'world 坐标 x（有限数）';
 comment on column canvas_group.y is 'world 坐标 y（有限数）';
 comment on column canvas_group.width is '正宽度（有限数）';
 comment on column canvas_group.height is '正高度（有限数）';
 
-create index idx_canvas_group_canvas on canvas_group (canvas_id, id);
-
 create table canvas_node (
     id uuid primary key,
-    canvas_id uuid not null,
-    name varchar(256) not null,
+    canvas_id uuid not null references canvas_document (id) on delete restrict,
+    name varchar(256) not null check (btrim(name) <> '' and name = btrim(name)),
+    -- Compatibility-folded uniqueness key. btrim runs after normalize so that
+    -- NBSP and other compatibility whitespace cannot smuggle a duplicate or an
+    -- all-whitespace name; control characters stay an application concern.
+    name_key text generated always as (lower(btrim(normalize(name, NFKC)))) stored,
     x double precision not null,
     y double precision not null,
     width double precision not null,
     height double precision not null,
     group_id uuid,
-    model_key varchar(256),
-    function_config_json jsonb,
-    constraint ck_canvas_node_name_nonblank check (btrim(name) <> ''),
+    "function" jsonb,
+    constraint uk_canvas_node_canvas_id unique (canvas_id, id),
+    constraint uk_canvas_node_canvas_name_key unique (canvas_id, name_key),
+    constraint fk_canvas_node_group foreign key (canvas_id, group_id)
+        references canvas_group (canvas_id, id) on delete restrict,
+    constraint ck_canvas_node_name_key check (name_key <> ''),
     constraint ck_canvas_node_geometry check (
-        x not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and y not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and width not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and height not in ('NaN'::double precision, 'Infinity'::double precision, '-Infinity'::double precision)
-        and width > 0 and height > 0
+        x not in ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
+        and y not in ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
+        and width > 0 and width < 'Infinity'::float8
+        and height > 0 and height < 'Infinity'::float8
     ),
-    constraint ck_canvas_node_function_pair check (
-        (model_key is null and function_config_json is null)
+    -- Base shape {name,args}; strict plugin schemas and resource-reference
+    -- validation are application responsibilities.
+    constraint ck_canvas_node_function check (
+        "function" is null
         or (
-            model_key is not null
-            and btrim(model_key) <> ''
-            and function_config_json is not null
-            and jsonb_typeof(function_config_json) = 'object'
+            jsonb_typeof("function") = 'object'
+            and coalesce(jsonb_typeof("function" -> 'name'), '') = 'string'
+            and coalesce(btrim("function" ->> 'name'), '') <> ''
+            and coalesce(jsonb_typeof("function" -> 'args'), '') = 'object'
         )
-    ),
-    constraint uk_canvas_node_canvas unique (canvas_id, id)
+    )
 );
 
-comment on table canvas_node is 'Canvas 中唯一的业务节点形态：普通资源节点（文本/媒体）或 Function 节点（可携带资源输出）';
+comment on table canvas_node is 'Canvas 唯一的节点形态：普通资源节点或可携带资源输出的 Function 节点；name_key 折叠兼容空白与大小写后同 Canvas 唯一';
 comment on column canvas_node.id is 'Node 全局唯一 UUID（客户端生成）';
-comment on column canvas_node.canvas_id is '所属 Canvas';
-comment on column canvas_node.name is '规范化节点名（<= 256 字符）';
+comment on column canvas_node.canvas_id is '所属 Canvas（RESTRICT）';
+comment on column canvas_node.name is '展示名（非空白且无环绕空白；控制字符由应用校验）';
+comment on column canvas_node.name_key is '唯一性键：lower(btrim(normalize(name, NFKC)))';
 comment on column canvas_node.x is 'world 坐标 x（有限数）';
 comment on column canvas_node.y is 'world 坐标 y（有限数）';
 comment on column canvas_node.width is '正宽度（有限数）';
 comment on column canvas_node.height is '正高度（有限数）';
-comment on column canvas_node.group_id is '所属 Group（可空）';
-comment on column canvas_node.model_key is 'Function model 标识（与 function_config_json 同存同缺）';
-comment on column canvas_node.function_config_json is '规范化 Function 配置（JSON object，与 model_key 同存同缺）';
+comment on column canvas_node.group_id is '所属 Group（可空，必须与节点同 Canvas）';
+comment on column canvas_node."function" is 'Function 配置 {name,args}（可空；严格插件 schema 与资源引用由应用校验）';
 
-create index idx_canvas_node_canvas on canvas_node (canvas_id, id);
-create index idx_canvas_node_group on canvas_node (canvas_id, group_id)
-    where group_id is not null;
+create index idx_canvas_node_group on canvas_node (canvas_id, group_id) where group_id is not null;
 
-create table canvas_link (
-    canvas_id uuid not null,
-    source_node_id uuid not null,
-    target_node_id uuid not null,
-    constraint pk_canvas_link primary key (canvas_id, source_node_id, target_node_id),
-    constraint ck_canvas_link_distinct check (source_node_id <> target_node_id)
-);
-
-comment on table canvas_link is 'Link 以 (canvas_id, source_node_id, target_node_id) 作为身份；target 必须是 Function 节点且 source 至少拥有一个当前资源';
-comment on column canvas_link.canvas_id is '所属 Canvas';
-comment on column canvas_link.source_node_id is 'source 节点（必须与 target 不同）';
-comment on column canvas_link.target_node_id is 'target Function 节点';
-
-create index idx_canvas_link_target
-    on canvas_link (canvas_id, target_node_id, source_node_id);
-
+-- 不可变内容行：blob_id 与 text_content 恰好一个；行可以在只被活跃 Run pin 时
+-- 暂时无 owner。blob_id 的 storage_blob 外键在存储区之后追加。
 create table canvas_resource (
     id uuid primary key,
-    canvas_id uuid not null,
+    canvas_id uuid not null references canvas_document (id) on delete restrict,
     owner_node_id uuid,
     resource_index integer,
+    name varchar(512) not null check (btrim(name) <> ''),
     blob_id uuid,
-    name varchar(256) not null,
     text_content text,
     created_at timestamptz(3) not null default current_timestamp,
-    constraint ck_canvas_resource_owner_pair check (
-        (owner_node_id is null) = (resource_index is null)
-    ),
-    constraint ck_canvas_resource_index_nonneg check (
-        resource_index is null or resource_index >= 0
-    ),
-    constraint ck_canvas_resource_name_nonblank check (btrim(name) <> ''),
-    constraint ck_canvas_resource_content check (
-        (blob_id is null) <> (text_content is null)
-    ),
-    constraint uk_canvas_resource_canvas unique (canvas_id, id),
-    constraint uk_canvas_resource_owner_index unique (canvas_id, owner_node_id, resource_index)
+    constraint uk_canvas_resource_canvas_id unique (canvas_id, id),
+    constraint uk_canvas_resource_slot unique (canvas_id, owner_node_id, resource_index),
+    constraint fk_canvas_resource_owner foreign key (canvas_id, owner_node_id)
+        references canvas_node (canvas_id, id) on delete restrict,
+    constraint ck_canvas_resource_owner_pair check ((owner_node_id is null) = (resource_index is null)),
+    constraint ck_canvas_resource_index check (resource_index is null or resource_index >= 0),
+    constraint ck_canvas_resource_content check ((blob_id is null) <> (text_content is null))
 );
 
-comment on table canvas_resource is '不可变资源行：可见资源直接属于节点（owner_node_id + resource_index）；Function 目标物化和 pinned orphan 可暂时无 owner；内容要么是全局 Storage blob 引用要么是内联文本';
+comment on table canvas_resource is '不可变资源行：可见资源直接属于节点（owner_node_id + resource_index）；Function 目标物化与 pinned orphan 可暂时无 owner；内容要么是全局 Storage blob 引用要么是内联文本';
 comment on column canvas_resource.id is 'Resource 全局唯一 UUID（服务端生成）';
-comment on column canvas_resource.canvas_id is '所属 Canvas';
+comment on column canvas_resource.canvas_id is '所属 Canvas（RESTRICT）';
 comment on column canvas_resource.owner_node_id is '所属节点；与 resource_index 同存同缺，无 owner 的资源只可由 Function pin 保活';
 comment on column canvas_resource.resource_index is '节点内从 0 递增的资源序号；与 owner_node_id 同存同缺';
-comment on column canvas_resource.blob_id is '全局 Storage blob 引用（TEXT 资源为 null，blob 持有者计数由全局存储管理）';
-comment on column canvas_resource.name is '资源显示名（<= 256 字符）';
+comment on column canvas_resource.name is '资源显示名（非空白，<= 512 字符）';
+comment on column canvas_resource.blob_id is '全局 Storage blob 引用（TEXT 资源为 null；RESTRICT，引用计数由全局存储管理）';
 comment on column canvas_resource.text_content is 'TEXT 资源的内联内容（blob 资源为 null），与 blob_id 恰好互斥';
 comment on column canvas_resource.created_at is '创建时间（毫秒精度）';
 
-create index idx_canvas_resource_canvas_created
-    on canvas_resource (canvas_id, created_at, id);
+create index idx_canvas_resource_blob on canvas_resource (blob_id) where blob_id is not null;
+create index idx_canvas_resource_created on canvas_resource (canvas_id, created_at, id);
 
+-- 每个 Function 节点只有一行当前/最后一次 Run；结构化列服务 status/claim 查询，
+-- state_json 只保存冻结计划与 checkpoint。
 create table canvas_function_run (
-    node_id uuid primary key,
+    node_id uuid primary key references canvas_node (id) on delete restrict,
     request_id uuid not null,
     status varchar(16) not null,
-    attempt int not null default 0,
+    attempt integer not null default 0 check (attempt >= 0),
     available_at timestamptz(3),
     lease_token varchar(128),
     lease_until timestamptz(3),
-    state_json jsonb not null,
+    state_json jsonb not null check (jsonb_typeof(state_json) = 'object'),
     error text,
-    updated_at timestamptz(3) not null default current_timestamp,
     created_at timestamptz(3) not null default current_timestamp,
-    constraint uk_canvas_function_run_request unique (node_id, request_id),
-    constraint ck_canvas_function_run_status check (
-        status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')
-    ),
-    constraint ck_canvas_function_run_attempt_nonneg check (attempt >= 0),
-    constraint ck_canvas_function_run_lease_pair check (
-        (lease_token is null) = (lease_until is null)
-    ),
-    constraint ck_canvas_function_run_work_state check (
+    updated_at timestamptz(3) not null default current_timestamp,
+    unique (node_id, request_id),
+    check (status in ('READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
+    constraint ck_canvas_function_run_lease_pair check ((lease_token is null) = (lease_until is null)),
+    check (lease_token is null or btrim(lease_token) <> ''),
+    constraint ck_canvas_function_run_status_shape check (
         (status = 'READY' and available_at is not null and lease_token is null)
         or (status = 'RUNNING' and available_at is null and lease_token is not null)
-        or (
-            status in ('SUCCEEDED', 'FAILED', 'CANCELLED')
-            and available_at is null
-            and lease_token is null
-        )
+        or (status in ('SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+            and available_at is null and lease_token is null)
     ),
-    constraint ck_canvas_function_run_state_object check (jsonb_typeof(state_json) = 'object')
+    check (status not in ('FAILED', 'UNKNOWN') or (error is not null and btrim(error) <> ''))
 );
 
 comment on table canvas_function_run is 'Function 节点当前/最后一次 Run：PK 为 node_id，request_id 全 UUID 且 (node_id, request_id) 唯一';
 comment on column canvas_function_run.node_id is 'Function 节点（一个节点同时至多一个 Run 行）';
 comment on column canvas_function_run.request_id is 'Run 请求 UUID（客户端生成，幂等键）';
-comment on column canvas_function_run.status is '生命周期：READY / RUNNING / SUCCEEDED / FAILED / CANCELLED';
+comment on column canvas_function_run.status is '生命周期：READY / RUNNING / SUCCEEDED / FAILED / CANCELLED / UNKNOWN';
 comment on column canvas_function_run.attempt is '成功 claim 次数；首次 claim 从 0 增加为 1';
 comment on column canvas_function_run.available_at is 'READY 可领取时间（毫秒精度），其它状态为 null';
 comment on column canvas_function_run.lease_token is 'RUNNING ownership fencing token，其它状态为 null';
 comment on column canvas_function_run.lease_until is 'RUNNING lease 截止时间（毫秒精度），其它状态为 null';
 comment on column canvas_function_run.state_json is 'typed/versioned 冻结计划与 checkpoint（JSON object）';
-comment on column canvas_function_run.error is '公开错误信息（terminal 失败时非空）';
-comment on column canvas_function_run.updated_at is '最后更新时间（毫秒精度）';
+comment on column canvas_function_run.error is '公开错误信息（FAILED/UNKNOWN 时非空）';
 comment on column canvas_function_run.created_at is '当前 request 创建时间（毫秒精度）';
+comment on column canvas_function_run.updated_at is '最后更新时间（毫秒精度）';
 
 create index idx_canvas_function_run_claim
     on canvas_function_run (status, available_at, lease_until, created_at, node_id)
     where status in ('READY', 'RUNNING');
 
-create table canvas_command_dedup (
-    canvas_id uuid not null,
-    idempotency_key uuid not null,
-    request_hash char(64) not null,
-    constraint pk_canvas_command_dedup primary key (canvas_id, idempotency_key),
-    constraint ck_canvas_command_dedup_request_hash check (request_hash ~ '^[0-9a-f]{64}$')
-);
-
-comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, idempotency_key) 只能以相同 request_hash 精确回放一次；graph 版本由 canvas_document.version 游标负责，本表不冗余存储';
-comment on column canvas_command_dedup.canvas_id is '所属 Canvas';
-comment on column canvas_command_dedup.idempotency_key is '客户端整批命令的幂等 UUID';
-comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
-
+-- Pin 只引用真实存在的 Resource：计划中的 OUTPUT id 在 Resource 行与 OUTPUT pin
+-- 同一事务写入前只存在于 state_json，真实外键保证 pin 不会比 Resource 存活更久。
 create table canvas_function_resource_pin (
     canvas_id uuid not null,
     node_id uuid not null,
     request_id uuid not null,
-    role varchar(16) not null,
+    role varchar(16) not null check (role in ('INPUT', 'OUTPUT')),
     resource_id uuid not null,
-    constraint pk_canvas_function_resource_pin primary key (canvas_id, node_id, request_id, role, resource_id),
-    constraint ck_canvas_function_resource_pin_role check (role in ('INPUT', 'OUTPUT'))
+    primary key (canvas_id, node_id, request_id, role, resource_id),
+    constraint fk_canvas_pin_node foreign key (canvas_id, node_id)
+        references canvas_node (canvas_id, id) on delete restrict,
+    constraint fk_canvas_pin_run foreign key (node_id, request_id)
+        references canvas_function_run (node_id, request_id) on delete restrict,
+    constraint fk_canvas_pin_resource foreign key (canvas_id, resource_id)
+        references canvas_resource (canvas_id, id) on delete restrict
 );
 
 comment on table canvas_function_resource_pin is 'Function Run 生命周期内对资源的 pin：INPUT 为启动时冻结的引用资源，OUTPUT 为预分配的目标资源；只保护生命周期，绝不参与 blob 引用计数';
@@ -637,10 +599,61 @@ comment on column canvas_function_resource_pin.canvas_id is '所属 Canvas';
 comment on column canvas_function_resource_pin.node_id is 'Function 节点';
 comment on column canvas_function_resource_pin.request_id is 'Run 请求 UUID';
 comment on column canvas_function_resource_pin.role is 'pin 角色：INPUT / OUTPUT';
-comment on column canvas_function_resource_pin.resource_id is '被 pin 的资源（OUTPUT 可为尚未物化的预分配 id）';
+comment on column canvas_function_resource_pin.resource_id is '被 pin 的资源（必须已存在）';
 
-create index idx_canvas_function_resource_pin_resource
-    on canvas_function_resource_pin (canvas_id, resource_id);
+create index idx_canvas_function_pin_resource on canvas_function_resource_pin (canvas_id, resource_id);
+
+-- 每次 Canvas 写入准入（含 Function start）都记一行；accepted_revision 记录请求
+-- 首次定位的位置，不是完整响应。
+create table canvas_command_dedup (
+    canvas_id uuid not null references canvas_document (id) on delete restrict,
+    idempotency_key uuid not null,
+    request_hash char(64) not null check (request_hash ~ '^[0-9a-f]{64}$'),
+    accepted_revision bigint not null,
+    constraint pk_canvas_command_dedup primary key (canvas_id, idempotency_key),
+    constraint ck_canvas_command_dedup_revision check (accepted_revision >= 0)
+);
+
+comment on table canvas_command_dedup is '命令批幂等：相同 (canvas_id, idempotency_key) 只能以相同 request_hash 精确回放一次；graph 同步位置由 canvas_document.revision 负责，本表不冗余存储';
+comment on column canvas_command_dedup.canvas_id is '所属 Canvas（RESTRICT）';
+comment on column canvas_command_dedup.idempotency_key is '客户端整批命令的幂等 UUID';
+comment on column canvas_command_dedup.request_hash is '整批命令的 SHA-256（64 位小写十六进制）';
+comment on column canvas_command_dedup.accepted_revision is '首次接受时的 revision 位置（非负）；重放不改变它';
+
+-- Canvas revision NOTIFY hint.
+--
+-- revision is owned by the application; PostgreSQL never bumps it. This trigger
+-- only wakes the in-process Canvas revision/application event hub after a
+-- committed insert or actual revision change. The payload is the parsable text
+-- `{canvasId}:{revision}`.
+create or replace function notify_canvas_document_revision() returns trigger as $$
+begin
+    if tg_op = 'INSERT' or new.revision is distinct from old.revision then
+        perform pg_notify('canvas_revision', new.id::text || ':' || new.revision::text);
+    end if;
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_canvas_document_revision_notify after insert or update of revision on canvas_document
+    for each row execute function notify_canvas_document_revision();
+
+-- Canvas Function durable work NOTIFY hint.
+--
+-- canvas_function_run remains the only queue fact. This trigger only hints when
+-- the row written by the current statement is immediately claimable READY work;
+-- future READY work and expired RUNNING leases are recovered by periodic poll.
+create or replace function notify_canvas_function_work() returns trigger as $$
+begin
+    if new.status = 'READY' and new.lease_token is null and new.available_at <= current_timestamp then
+        perform pg_notify('canvas_function_work', '');
+    end if;
+    return new;
+end;
+$$ language plpgsql;
+
+create trigger trg_canvas_function_work_notify after insert or update on canvas_function_run
+    for each row execute function notify_canvas_function_work();
 
 create table chat (
     id                  uuid          primary key,
@@ -652,6 +665,7 @@ create table chat (
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
+    archived_at         timestamptz(3),
     constraint ck_chat_version_nonneg check (version >= 0),
     constraint ck_chat_agent_name check (
         agent_name !~ '^[[:space:]]'
@@ -662,6 +676,10 @@ create table chat (
 );
 
 create index idx_chat_modified on chat (updated_at, created_at);
+create index idx_chat_archived on chat (archived_at, updated_at, id);
+
+comment on column chat.archived_at is '归档时间戳（毫秒精度）；非空即离开默认列表，但历史与资源保留';
+comment on index idx_chat_archived is '归档 Chat 列表按 (archived_at, updated_at, id) 读取';
 
 ------------------------------------------------------------------------------
 -- 1b. Environment connections and operations
@@ -877,6 +895,9 @@ create table harness_thread (
         references harness_session (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
+    -- 同 Session 复合引用目标：产品表（如 Issue Run）用 (session_id, id) 把
+    -- Thread 与 Session 一起冻结，无法配错 Session。
+    constraint uk_harness_thread_session unique (session_id, id),
     constraint ck_harness_thread_creation_request_hash check (
         creation_request_hash ~ '^[0-9a-f]{64}$'
     ),
@@ -886,7 +907,7 @@ create table harness_thread (
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；(session_id, id) 唯一供同 Session 复合引用';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
@@ -1060,6 +1081,7 @@ create table harness_tool_invocation (
     error jsonb check (error is null or jsonb_typeof(error) = 'object'),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
+    input_receipt jsonb,
     constraint fk_harness_tool_invocation_model foreign key (model_invocation_id)
         references harness_model_invocation (id),
     constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
@@ -1068,6 +1090,7 @@ create table harness_tool_invocation (
     constraint ck_harness_tool_invocation_status check (
         status in (
             'WAITING_APPROVAL',
+            'WAITING_INPUT',
             'READY',
             'DISPATCHING',
             'RUNNING',
@@ -1075,6 +1098,26 @@ create table harness_tool_invocation (
             'FAILED',
             'CANCELLED',
             'UNKNOWN'
+        )
+    ),
+    -- Human input is not a tool permission approval: WAITING_INPUT freezes a
+    -- binding and carries no result/error until the user answers.
+    constraint ck_harness_tool_waiting_input check (
+        status <> 'WAITING_INPUT'
+        or (binding is not null and result is null and error is null)
+    ),
+    -- Runtime-owned receipt until the ToolResult and its metadata enter Entry
+    -- history atomically. Questionnaire answers themselves remain in result.
+    constraint ck_harness_tool_input_receipt check (
+        input_receipt is null or (
+            status = 'SUCCEEDED' and result is not null
+            and jsonb_typeof(input_receipt) = 'object'
+            and coalesce(jsonb_typeof(input_receipt -> 'submissionId'), '') = 'string'
+            and coalesce(btrim(input_receipt ->> 'submissionId'), '') <> ''
+            and coalesce(jsonb_typeof(input_receipt -> 'actor'), '') = 'string'
+            and coalesce(btrim(input_receipt ->> 'actor'), '') <> ''
+            and coalesce(jsonb_typeof(input_receipt -> 'acceptedAt'), '') = 'string'
+            and coalesce(btrim(input_receipt ->> 'acceptedAt'), '') <> ''
         )
     ),
     constraint ck_harness_tool_invocation_terminal_facts check (
@@ -1087,14 +1130,14 @@ create table harness_tool_invocation (
     constraint ck_harness_tool_invocation_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, call_index) 与 assistant 消息对齐；batch apply 后行被物理删除';
+comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, call_index) 与 assistant 消息对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
 comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
 comment on column harness_tool_invocation.model_invocation_id is '所属 ModelInvocation';
 comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry';
 comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
-comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL）';
+comment on column harness_tool_invocation.status is '生命周期状态（含 WAITING_APPROVAL 与 WAITING_INPUT）';
 comment on column harness_tool_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
 comment on column harness_tool_invocation.approval is '审批记录（JSON object，可空）';
 comment on column harness_tool_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
@@ -1102,12 +1145,20 @@ comment on column harness_tool_invocation.effects is '副作用批（JSON object
 comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
 comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：仅在 SUCCEEDED 且 result 非空时存在，携带 submissionId/actor/acceptedAt，历史物化前由 runtime 持有';
 
 create index idx_harness_tool_invocation_model_nonterminal
     on harness_tool_invocation (model_invocation_id)
-    where status in ('WAITING_APPROVAL', 'READY', 'DISPATCHING', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'DISPATCHING', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_model_nonterminal is '未收尾 ToolInvocation 按所属 ModelInvocation 的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
+
+-- Pending input/approval paging uses one stable ordinal, not two status queries.
+create index idx_harness_tool_invocation_pending
+    on harness_tool_invocation (created_at, id)
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT');
+
+comment on index idx_harness_tool_invocation_pending is '待处理（审批与人工输入）统一按 (created_at, id) 稳定分页，不按状态拆成两次查询';
 
 create table harness_work (
     target_type varchar(16) not null,
@@ -1155,435 +1206,309 @@ comment on index idx_harness_work_available is 'claimNextWork 按 (available_at,
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
 ------------------------------------------------------------------------------
--- 3. Project / Issue business facts and global Session ownership
+-- 3. Project / Issue business facts
 --
--- Project 只是容器和项目级设置，不持有 Agent、Session 与执行状态；它拥有的
--- 下级表统一使用 project_ 前缀，跨领域/运行时表（session_owner、harness_*）保持本名。
+-- Project 只是容器与项目级设置：工作流是一条严格 JSON 配置，而不是关系化的
+-- states/transitions/dependencies；它拥有的下级表统一使用 project_ 前缀。Run 冻结
+-- 自己的 Issue/state/Session/Thread 坐标，Evidence 是 Issue 自有的 Blob owner
+-- edge；Issue+Agent 的 Harness Session 归属由 project_issue_agent_thread 直接
+-- 持有，没有独立的归属排他表，也没有归属变更触发器。
 ------------------------------------------------------------------------------
 
-------------------------------------------------------------------------------
--- Project
-------------------------------------------------------------------------------
+-- Project 的工作流是一条严格 JSON 配置，不是关系化的 states/transitions/
+-- dependencies。charset 正则之外的 state 合法性由应用校验。
 create table project (
-    id                    uuid          not null,
-    title                 varchar(255)  not null,
-    description           text          not null default '',
-    yolo_enabled          boolean       not null default true,
-    max_review_rejections int           not null default 3,
-    next_issue_number     bigint        not null default 1,
-    version               bigint        not null default 0,
-    archived_at           timestamptz(3),
-    created_at            timestamptz(3) not null default clock_timestamp(),
-    updated_at            timestamptz(3) not null default clock_timestamp(),
-    constraint pk_project primary key (id),
-    constraint chk_project_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
-    constraint chk_project_description_len check (octet_length(description) <= 65536),
-    constraint chk_project_max_review_rejections check (max_review_rejections >= 1),
-    constraint chk_project_next_issue_number check (next_issue_number >= 1),
-    constraint chk_project_version check (version >= 0)
+    id uuid primary key,
+    title varchar(256) not null check (btrim(title) <> '' and title = btrim(title)),
+    description text not null default '' check (octet_length(description) <= 65536),
+    workflow jsonb not null check (
+        jsonb_typeof(workflow) = 'object'
+        and coalesce(jsonb_typeof(workflow -> 'states'), '') = 'array'
+    ),
+    yolo_enabled boolean not null default true,
+    next_issue_number bigint not null default 1 check (next_issue_number >= 1),
+    version bigint not null default 0 check (version >= 0),
+    archived_at timestamptz(3),
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp
 );
 
-comment on table project is 'Project 核心实体：项目资料、YOLO 与审查打回阈值及 Issue 编号单调分配器';
+comment on table project is 'Project 核心实体：项目资料、YOLO 策略、工作流 JSON 与 Issue 编号单调分配器';
 comment on column project.id is '项目 UUID 主键（应用生成）';
-comment on column project.title is '展示标题，非空';
-comment on column project.description is '自洽目标、约束与验收规范描述';
-comment on column project.yolo_enabled is 'Project 下 Issue 工作 Branch 的 YOLO 策略：跳过普通工具审批预检，不跳过 Issue/Run 身份校验与资源授权；默认 true';
-comment on column project.max_review_rejections is '本 Issue 连续被正式审查打回后转 BLOCKED 的阈值，正整数，默认 3';
+comment on column project.title is '展示标题（非空白且无环绕空白，<= 256 字符）';
+comment on column project.description is '自洽目标、约束与验收规范描述（最大 64 KiB）';
+comment on column project.workflow is '严格工作流配置（JSON object 且携带 states array）；state 成员关系由应用校验';
+comment on column project.yolo_enabled is 'Project 下 Issue 运行的 YOLO 策略：跳过普通工具审批预检，不影响身份校验与资源授权';
 comment on column project.next_issue_number is '项目内单调递增 Issue 编号分配器，>= 1';
 comment on column project.version is '乐观锁版本号，>= 0';
 comment on column project.archived_at is '归档时间戳，为空表示活跃';
-comment on column project.created_at is '创建时间戳（毫秒精度）';
-comment on column project.updated_at is '更新时间戳（毫秒精度）';
 
-------------------------------------------------------------------------------
--- Issue
-------------------------------------------------------------------------------
+create index idx_project_updated on project (updated_at, id);
+
 create table project_issue (
-    id                  uuid          not null,
-    project_id          uuid          not null,
-    number              bigint        not null,
-    title               varchar(255)  not null,
-    description         text          not null default '',
-    status              varchar(32)   not null,
-    assignee_agent_name varchar(128),
-    reviewer_agent_name varchar(128),
-    version             bigint        not null default 0,
-    archived_at         timestamptz(3),
-    created_at          timestamptz(3) not null default clock_timestamp(),
-    updated_at          timestamptz(3) not null default clock_timestamp(),
-    constraint pk_project_issue primary key (id),
-    constraint fk_project_issue_project foreign key (project_id)
-        references project (id) on delete restrict,
-    constraint fk_project_issue_assignee foreign key (assignee_agent_name)
-        references agent_definition (name) on delete restrict,
-    constraint fk_project_issue_reviewer foreign key (reviewer_agent_name)
-        references agent_definition (name) on delete restrict,
-    constraint uk_project_issue_project_number unique (project_id, number),
-    constraint uk_project_issue_id_project unique (id, project_id),
-    constraint chk_project_issue_title_not_blank check (length(trim(title)) > 0 and title = btrim(title)),
-    constraint chk_project_issue_description_len check (octet_length(description) <= 65536),
-    constraint chk_project_issue_assignee_not_blank check (assignee_agent_name is null or (length(trim(assignee_agent_name)) > 0 and assignee_agent_name = btrim(assignee_agent_name))),
-    constraint chk_project_issue_reviewer_not_blank check (reviewer_agent_name is null or (length(trim(reviewer_agent_name)) > 0 and reviewer_agent_name = btrim(reviewer_agent_name))),
-    constraint chk_project_issue_number check (number >= 1),
-    constraint chk_project_issue_status check (status in ('BACKLOG', 'TODO', 'IN_PROGRESS', 'IN_REVIEW', 'BLOCKED', 'DONE', 'CANCELED')),
-    constraint chk_project_issue_version check (version >= 0),
-    constraint chk_project_issue_archived_status check (archived_at is null or status in ('DONE', 'CANCELED'))
-);
-
-create index idx_project_issue_project on project_issue (project_id);
-create index idx_project_issue_project_status on project_issue (project_id, status);
-
-comment on table project_issue is 'Issue 核心实体：七态生命周期与执行/审查角色分配';
-comment on column project_issue.id is 'Issue UUID 主键（应用生成）';
-comment on column project_issue.project_id is '归属项目 UUID';
-comment on column project_issue.number is '项目内单调递增编号，>= 1';
-comment on column project_issue.title is 'Issue 标题';
-comment on column project_issue.description is 'Issue 当前要求、约束与验收依据描述';
-comment on column project_issue.status is '状态：BACKLOG, TODO, IN_PROGRESS, IN_REVIEW, BLOCKED, DONE, CANCELED';
-comment on column project_issue.assignee_agent_name is '执行者（EXECUTOR）Agent 名称（可空）';
-comment on column project_issue.reviewer_agent_name is '审查者（REVIEWER）Agent 名称（可空，空表示人工审查）';
-comment on column project_issue.version is '乐观锁行版本，>= 0';
-comment on column project_issue.archived_at is '归档时间戳（仅允许终态 Issue 归档；BLOCKED 不允许归档）';
-
-------------------------------------------------------------------------------
--- Issue dependencies
-------------------------------------------------------------------------------
-create table project_issue_dependency (
-    issue_id            uuid          not null,
-    depends_on_issue_id uuid          not null,
-    project_id          uuid          not null,
-    created_at          timestamptz(3) not null default clock_timestamp(),
-    constraint pk_project_issue_dependency primary key (issue_id, depends_on_issue_id),
-    constraint fk_project_issue_dependency_issue foreign key (issue_id, project_id)
-        references project_issue (id, project_id) on delete restrict,
-    constraint fk_project_issue_dependency_depends_on foreign key (depends_on_issue_id, project_id)
-        references project_issue (id, project_id) on delete restrict,
-    constraint chk_project_issue_dependency_no_self check (issue_id <> depends_on_issue_id)
-);
-
-create index idx_project_issue_dependency_depends_on on project_issue_dependency (depends_on_issue_id);
-create index idx_project_issue_dependency_project on project_issue_dependency (project_id);
-
-comment on table project_issue_dependency is 'Issue 间依赖边：复合外键保障同项目，禁止自环';
-comment on column project_issue_dependency.issue_id is '被阻塞 Issue UUID';
-comment on column project_issue_dependency.depends_on_issue_id is '前提 Issue UUID';
-comment on column project_issue_dependency.project_id is '冗余项目 UUID，保证依赖两端必须归属同一项目';
-
-------------------------------------------------------------------------------
--- Stable Issue + Agent session and work branch ownership
---
--- 同一 Issue 的不同 Agent 各有独立 Session 与工作 Branch；同一 (Issue, Agent) 的
--- 后续 Run 复用自己的 Session 和工作 Branch，Run 每次新建。Session owner 绑定这条
--- 稳定关联，而不是会终结的 Run。
-------------------------------------------------------------------------------
-create table project_issue_agent_session (
-    id          uuid          not null,
-    issue_id    uuid          not null,
-    agent_name  varchar(128)  not null,
-    session_id  uuid          not null,
-    thread_id   uuid          not null,
-    created_at  timestamptz(3) not null default clock_timestamp(),
-    updated_at  timestamptz(3) not null default clock_timestamp(),
-    constraint pk_project_issue_agent_session primary key (id),
-    constraint fk_project_issue_agent_session_issue foreign key (issue_id)
-        references project_issue (id) on delete restrict,
-    constraint fk_project_issue_agent_session_agent foreign key (agent_name)
-        references agent_definition (name) on delete restrict,
-    -- 归属行先于 Harness Session/Thread 建立（owner 授权要求归属先存在），三者在同一次接受、同一物理事务内提交，
-    -- 形成无法用插入顺序化解的循环依赖，因此这两个外键延迟到提交时校验；删除侧 ON DELETE RESTRICT 仍立即生效，
-    -- 完整性不变：Session/Thread 被删除前必须已由 SessionDeletionOrchestrator 先行移除归属关系。
-    constraint fk_project_issue_agent_session_session foreign key (session_id)
-        references harness_session (id) on delete restrict deferrable initially deferred,
-    constraint fk_project_issue_agent_session_thread foreign key (thread_id)
-        references harness_thread (id) on delete restrict deferrable initially deferred,
-    constraint uk_project_issue_agent_session_issue_agent unique (issue_id, agent_name),
-    constraint uk_project_issue_agent_session_id_issue unique (id, issue_id),
-    constraint uk_project_issue_agent_session_session unique (session_id),
-    constraint uk_project_issue_agent_session_thread unique (thread_id),
-    constraint chk_project_issue_agent_session_agent_not_blank check (
-        length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)
+    id uuid primary key,
+    project_id uuid not null references project (id) on delete restrict,
+    number bigint not null check (number >= 1),
+    title varchar(256) not null check (btrim(title) <> ''),
+    description text not null default '' check (octet_length(description) <= 1048576),
+    state varchar(64) not null check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+    blocked_from_state varchar(64) check (
+        blocked_from_state is null or blocked_from_state ~ '^[A-Z][A-Z0-9_]{0,63}$'
+    ),
+    block_reason text,
+    pause_reason varchar(16),
+    pause_detail text,
+    next_run_ordinal bigint not null default 1 check (next_run_ordinal >= 1),
+    next_activity_sequence bigint not null default 1 check (next_activity_sequence >= 1),
+    version bigint not null default 0 check (version >= 0),
+    archived_at timestamptz(3),
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    unique (project_id, number),
+    check (
+        (state = 'BLOCKED' and blocked_from_state is not null
+            and blocked_from_state not in ('BLOCKED', 'DONE')
+            and block_reason is not null and btrim(block_reason) <> '')
+        or (state <> 'BLOCKED' and blocked_from_state is null and block_reason is null)
+    ),
+    check (
+        (pause_reason is null and pause_detail is null)
+        or (pause_reason is not null and pause_reason in ('USER', 'ERROR', 'UNKNOWN')
+            and pause_detail is not null and btrim(pause_detail) <> '')
     )
 );
 
-comment on table project_issue_agent_session is 'Issue+Agent 稳定归属：唯一的 (issue_id, agent_name) 到 Session 与工作 Branch 的绑定';
-comment on column project_issue_agent_session.id is '归属 UUID 主键（应用生成），作为 session_owner 的 owner 标识';
-comment on column project_issue_agent_session.issue_id is '归属 Issue UUID';
-comment on column project_issue_agent_session.agent_name is 'Issue 参与者身份（不是模型名）';
-comment on column project_issue_agent_session.session_id is '该 Agent 在该 Issue 上的私有 Harness Session';
-comment on column project_issue_agent_session.thread_id is '该 Agent 在该 Issue 上的工作 Branch（Harness Thread）';
+comment on table project_issue is 'Issue 核心实体：工作流 state、阻塞恢复点、控制暂停与编号/序号分配器';
+comment on column project_issue.id is 'Issue UUID 主键（应用生成）';
+comment on column project_issue.project_id is '归属项目 UUID（RESTRICT）';
+comment on column project_issue.number is '项目内单调递增编号，>= 1';
+comment on column project_issue.state is
+    'Workflow-scoped natural code; the DB only checks the charset, membership in project.workflow is application-validated';
+comment on column project_issue.blocked_from_state is 'BLOCKED 的恢复目标（不得是 BLOCKED/DONE，也不能在非 BLOCKED 状态保留）';
+comment on column project_issue.block_reason is 'BLOCKED 的原因（非空白，且非 BLOCKED 时必须为空）';
+comment on column project_issue.pause_reason is '控制暂停原因：USER / ERROR / UNKNOWN（与 pause_detail 成对）';
+comment on column project_issue.pause_detail is '控制暂停详情（非空白，且与 pause_reason 成对）';
+comment on column project_issue.next_run_ordinal is '下一个 Run ordinal 分配器，>= 1';
+comment on column project_issue.next_activity_sequence is '下一个 Activity sequence 分配器，>= 1';
+comment on column project_issue.version is '乐观锁行版本，>= 0';
+comment on column project_issue.archived_at is '归档时间戳，为空表示活跃';
 
-------------------------------------------------------------------------------
--- Issue runs
-------------------------------------------------------------------------------
-create table project_issue_run (
-    id                         uuid          not null,
-    issue_id                   uuid          not null,
-    ordinal                    bigint        not null,
-    role                       varchar(32)   not null,
-    agent_name                 varchar(128)  not null,
-    submission_run_id          uuid,
-    status                     varchar(32)   not null,
-    outcome                    varchar(32),
-    observed_activity_sequence bigint        not null default 0,
-    continuation_count         int           not null default 0,
-    max_continuations          int           not null default 10,
-    deadline                   timestamptz(3),
-    waiting_reason             text,
-    result                     jsonb,
-    terminal_action_id         varchar(255),
-    version                    bigint        not null default 0,
-    created_at                 timestamptz(3) not null default clock_timestamp(),
-    updated_at                 timestamptz(3) not null default clock_timestamp(),
-    completed_at               timestamptz(3),
-    constraint pk_project_issue_run primary key (id),
-    constraint fk_project_issue_run_issue foreign key (issue_id)
+create index idx_project_issue_board on project_issue (project_id, state, number) where archived_at is null;
+
+-- 稳定的 Issue+Agent Thread 归属：(issue_id, agent_name) -> 一条 Harness Thread。
+-- 每个 Agent Thread 由服务受控创建自己的 Harness Session，绝不跨 Agent、Issue 或
+-- 产品复用；归属行不保存 session 指针，应用无法重新指向。
+create table project_issue_agent_thread (
+    issue_id uuid not null,
+    agent_name varchar(64) not null,
+    thread_id uuid not null,
+    created_at timestamptz(3) not null default current_timestamp,
+    constraint pk_project_issue_agent_thread primary key (issue_id, agent_name),
+    constraint uk_project_issue_agent_thread_thread unique (thread_id),
+    constraint uk_project_issue_agent_thread_issue unique (issue_id, thread_id),
+    constraint fk_project_issue_agent_thread_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
-    constraint fk_project_issue_run_agent foreign key (agent_name)
+    constraint fk_project_issue_agent_thread_agent foreign key (agent_name)
         references agent_definition (name) on delete restrict,
+    constraint fk_project_issue_agent_thread_thread foreign key (thread_id)
+        references harness_thread (id) on delete restrict
+);
+
+comment on table project_issue_agent_thread is
+    'Issue+Agent 稳定 Thread 归属：每个 Agent 使用自己的 Harness Session（应用受控创建，不跨 Agent/Issue/产品复用），绑定行不保存 session_id';
+
+-- 每个 Issue 工作阶段一份预算，按 (issue_id,state) 对每个 Agent 的 Run 计数；切换
+-- Agent 既不重置也不拆分额度；保留态（INIT/BLOCKED/DONE）没有预算行。
+create table project_issue_stage_budget (
+    issue_id uuid not null,
+    state varchar(64) not null,
+    max_runs integer not null,
+    budget_after_ordinal bigint not null default 0,
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
+    constraint pk_project_issue_stage_budget primary key (issue_id, state),
+    constraint fk_project_issue_stage_budget_issue foreign key (issue_id)
+        references project_issue (id) on delete restrict,
+    constraint ck_project_issue_stage_budget_state check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+    constraint ck_project_issue_stage_budget_work_stage check (state not in ('INIT', 'BLOCKED', 'DONE')),
+    constraint ck_project_issue_stage_budget_max_runs check (max_runs > 0),
+    constraint ck_project_issue_stage_budget_after_ordinal check (budget_after_ordinal >= 0)
+);
+
+comment on table project_issue_stage_budget is 'Issue 工作阶段额度：每 Issue+state 一份，max_runs 为正，budget_after_ordinal 是重置高水位';
+comment on column project_issue_stage_budget.state is '工作阶段 state（保留态 INIT/BLOCKED/DONE 不允许建预算行）';
+comment on column project_issue_stage_budget.max_runs is '本阶段允许的 Run 数上限（正整数）';
+comment on column project_issue_stage_budget.budget_after_ordinal is
+    'Reset high-water mark; consumed = this Issue+state Runs with a greater ordinal, all statuses, never filtered by Agent';
+
+-- 一条 Run 冻结自己的 Issue/state/Session/Thread 坐标。预算外键只用
+-- (issue_id,state)，归属外键只用 (issue_id,thread_id)，因此切换 Agent 既不会重写
+-- 旧 Run，旧 Run 也不依赖今天工作流选了哪个 Agent。
+create table project_issue_run (
+    id uuid primary key,
+    issue_id uuid not null,
+    ordinal bigint not null check (ordinal >= 1),
+    state varchar(64) not null check (state ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+    session_id uuid not null,
+    thread_id uuid not null,
+    status varchar(16) not null,
+    start_entry_id uuid not null,
+    end_entry_id uuid,
+    final_answer_entry_id uuid,
+    next_state varchar(64),
+    observed_activity_sequence bigint not null default 0 check (observed_activity_sequence >= 0),
+    remaining_execution_ms bigint not null check (remaining_execution_ms >= 0),
+    active_since timestamptz(3),
+    error text,
+    version bigint not null default 0 check (version >= 0),
+    started_at timestamptz(3) not null default current_timestamp,
+    ended_at timestamptz(3),
     constraint uk_project_issue_run_issue_ordinal unique (issue_id, ordinal),
     constraint uk_project_issue_run_id_issue unique (id, issue_id),
-    constraint fk_project_issue_run_submission foreign key (submission_run_id, issue_id)
-        references project_issue_run (id, issue_id) on delete restrict,
-    constraint uk_project_issue_run_terminal_action unique (terminal_action_id),
-    constraint chk_project_issue_run_ordinal check (ordinal >= 1),
-    constraint chk_project_issue_run_role check (
-        (role = 'EXECUTOR' and submission_run_id is null) or
-        (role = 'REVIEWER' and submission_run_id is not null)
+    constraint fk_project_issue_run_stage_budget foreign key (issue_id, state)
+        references project_issue_stage_budget (issue_id, state) on delete restrict,
+    constraint fk_project_issue_run_agent_thread foreign key (issue_id, thread_id)
+        references project_issue_agent_thread (issue_id, thread_id) on delete restrict,
+    constraint fk_project_issue_run_thread_session foreign key (session_id, thread_id)
+        references harness_thread (session_id, id) on delete restrict,
+    constraint fk_project_issue_run_start_entry foreign key (session_id, start_entry_id)
+        references harness_entry (session_id, id) on delete restrict,
+    constraint fk_project_issue_run_end_entry foreign key (session_id, end_entry_id)
+        references harness_entry (session_id, id) on delete restrict,
+    constraint fk_project_issue_run_final_answer foreign key (session_id, final_answer_entry_id)
+        references harness_entry (session_id, id) on delete restrict,
+    constraint ck_project_issue_run_status check (
+        status in ('RUNNING', 'WAITING', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')
     ),
-    constraint chk_project_issue_run_agent_not_blank check (
-        length(trim(agent_name)) > 0 and agent_name = btrim(agent_name)
+    constraint ck_project_issue_run_next_state check (
+        next_state is null
+        or (next_state ~ '^[A-Z][A-Z0-9_]{0,63}$' and next_state <> state and next_state <> 'BLOCKED')
     ),
-    constraint chk_project_issue_run_status check (status in ('RUNNING', 'WAITING_HUMAN', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')),
-    constraint chk_project_issue_run_outcome check (outcome is null or outcome in ('SUBMITTED', 'APPROVED', 'CHANGES_REQUESTED')),
-    constraint chk_project_issue_run_observed_activity check (observed_activity_sequence >= 0),
-    constraint chk_project_issue_run_continuation_limit check (
-        continuation_count >= 0 and max_continuations >= 0 and continuation_count <= max_continuations
+    constraint ck_project_issue_run_clock check (
+        (status = 'RUNNING' and active_since is not null and remaining_execution_ms > 0)
+        or (status = 'WAITING' and active_since is null and remaining_execution_ms > 0)
+        or (status in ('COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN') and active_since is null)
     ),
-    constraint chk_project_issue_run_version check (version >= 0),
-    constraint chk_project_issue_run_terminal_action_not_blank check (
-        terminal_action_id is null or (length(trim(terminal_action_id)) > 0 and terminal_action_id = btrim(terminal_action_id))
+    constraint ck_project_issue_run_terminal_shape check (
+        (status in ('RUNNING', 'WAITING') and ended_at is null and end_entry_id is null
+            and final_answer_entry_id is null and error is null)
+        or (status in ('COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN')
+            and ended_at is not null and ended_at >= started_at and end_entry_id is not null)
     ),
-    constraint chk_project_issue_run_waiting_reason_len check (
-        waiting_reason is null or (length(trim(waiting_reason)) > 0 and octet_length(waiting_reason) <= 16384 and waiting_reason = btrim(waiting_reason))
+    constraint ck_project_issue_run_error_reason check (
+        status not in ('FAILED', 'UNKNOWN') or (error is not null and btrim(error) <> '')
     ),
-    constraint chk_project_issue_run_result_len check (result is null or octet_length(result::text) <= 65536),
-    constraint chk_project_issue_run_lifecycle check (
-        (
-            status = 'RUNNING' and
-            waiting_reason is null and
-            completed_at is null and
-            terminal_action_id is null and
-            outcome is null and
-            result is null
-        ) or
-        (
-            status = 'WAITING_HUMAN' and
-            waiting_reason is not null and
-            length(trim(waiting_reason)) > 0 and
-            waiting_reason = btrim(waiting_reason) and
-            completed_at is null and
-            terminal_action_id is null and
-            outcome is null and
-            result is null
-        ) or
-        (
-            status = 'COMPLETED' and
-            waiting_reason is null and
-            completed_at is not null and
-            terminal_action_id is not null and
-            length(trim(terminal_action_id)) > 0 and
-            terminal_action_id = btrim(terminal_action_id) and
-            outcome is not null and
-            result is not null and
-            jsonb_typeof(result) = 'object' and
-            (
-                (role = 'EXECUTOR' and outcome = 'SUBMITTED') or
-                (role = 'REVIEWER' and outcome in ('APPROVED', 'CHANGES_REQUESTED'))
-            )
-        ) or
-        (
-            status in ('FAILED', 'CANCELLED', 'UNKNOWN') and
-            waiting_reason is not null and
-            length(trim(waiting_reason)) > 0 and
-            waiting_reason = btrim(waiting_reason) and
-            completed_at is not null and
-            outcome is null and
-            terminal_action_id is null and
-            result is null
-        )
-    )
+    constraint ck_project_issue_run_completed_error check (status <> 'COMPLETED' or error is null)
 );
 
-create unique index uk_project_issue_run_single_active on project_issue_run (issue_id)
-    where status in ('RUNNING', 'WAITING_HUMAN');
-create index idx_project_issue_run_issue on project_issue_run (issue_id);
-
-comment on table project_issue_run is 'IssueRun 运行实体：执行/审查周期记录与围栏状态；人的审查动作不伪造 Agent Run';
+comment on table project_issue_run is 'Issue 运行实体：冻结的 Issue/state/Session/Thread 坐标、剩余执行预算与终态收尾';
 comment on column project_issue_run.id is 'Run UUID 主键（应用生成）';
 comment on column project_issue_run.issue_id is '归属 Issue UUID';
 comment on column project_issue_run.ordinal is 'Issue 内单调运行编号，>= 1';
-comment on column project_issue_run.role is '职责：EXECUTOR, REVIEWER';
-comment on column project_issue_run.agent_name is '冻结的 AgentDefinition 名称，即 Issue 参与者身份';
-comment on column project_issue_run.submission_run_id is 'REVIEWER 必填，指向被审查的 EXECUTOR Run（同 Issue 约束）';
-comment on column project_issue_run.status is '状态：RUNNING, WAITING_HUMAN, COMPLETED, FAILED, CANCELLED, UNKNOWN';
-comment on column project_issue_run.outcome is '终态业务结果：SUBMITTED, APPROVED, CHANGES_REQUESTED';
-comment on column project_issue_run.observed_activity_sequence is '已投递的 Activity sequence 游标';
-comment on column project_issue_run.continuation_count is '已投递 continuation 计数';
-comment on column project_issue_run.max_continuations is '允许最大 continuation 计数';
-comment on column project_issue_run.deadline is 'Run 绝对截止时间戳';
-comment on column project_issue_run.waiting_reason is '等待或失败原因说明（最大 16 KiB）';
-comment on column project_issue_run.result is '终态结构化结果 JSONB（最大 64 KiB）';
-comment on column project_issue_run.terminal_action_id is '终态动作唯一幂等标识';
+comment on column project_issue_run.state is '运行时冻结的工作阶段 state（必须已有阶段预算）';
+comment on column project_issue_run.session_id is '冻结的 Agent 私有 Harness Session';
+comment on column project_issue_run.thread_id is '冻结的 Issue+Agent 工作 Thread（必须已绑定且属于该 Session）';
+comment on column project_issue_run.status is '状态：RUNNING, WAITING, COMPLETED, FAILED, CANCELLED, UNKNOWN';
+comment on column project_issue_run.start_entry_id is 'Run 起始 Entry（必须属于本 Session）';
+comment on column project_issue_run.end_entry_id is '终态冻结的结束 Entry（活跃 Run 必须为空）';
+comment on column project_issue_run.final_answer_entry_id is '终态最终答复 Entry（可空，必须属于本 Session）';
+comment on column project_issue_run.next_state is
+    'Accepted handoff target; only a successful Run close commits it to Issue.state';
+comment on column project_issue_run.observed_activity_sequence is
+    'Delivery cursor in the Issue activity stream, not an Entry boundary';
+comment on column project_issue_run.remaining_execution_ms is '剩余执行预算（非负）；活跃与等待 Run 必须为正';
+comment on column project_issue_run.active_since is 'RUNNING 活跃区间起点（WAITING 与终态必须为空）';
+comment on column project_issue_run.error is 'FAILED/UNKNOWN 的失败原因（非空白；COMPLETED 必须为空）';
+comment on column project_issue_run.version is '乐观锁行版本，>= 0';
+comment on column project_issue_run.started_at is 'Run 创建时间（毫秒精度）';
+comment on column project_issue_run.ended_at is '终态时间（毫秒精度，不得早于 started_at；活跃 Run 为空）';
 
-------------------------------------------------------------------------------
--- Issue Activity
---
--- Activity 是 Issue 唯一有序事实流：一条记录保留类型、操作者、目标角色/Run（若有）、
--- 相关 Run/提交、正文、时间与幂等键。投递游标指向本表的 sequence，因此不再另存
--- 规格版本或计数；打回次数由本表按“不同有效提交”确定性计算。
-------------------------------------------------------------------------------
+create unique index uk_project_issue_run_active on project_issue_run (issue_id)
+    where status in ('RUNNING', 'WAITING');
+create index idx_project_issue_run_budget on project_issue_run (issue_id, state, ordinal);
+create index idx_project_issue_run_session on project_issue_run (session_id, thread_id);
+
+-- 一条有序、幂等的 Issue 时间线：RUN 只引用自己的 Run 而不复制正文；文本类
+-- 携带 body；事件类只携带 typed data。
 create table project_issue_activity (
-    issue_id          uuid          not null,
-    sequence          bigint        not null,
-    kind              varchar(32)   not null,
-    actor_type        varchar(32)   not null,
-    actor_agent_name  varchar(128),
-    target_role       varchar(32),
-    run_id            uuid,
-    submission_run_id uuid,
-    decision          varchar(32),
-    body              text          not null,
-    idempotency_key   varchar(128),
-    created_at        timestamptz(3) not null default clock_timestamp(),
+    issue_id uuid not null,
+    sequence bigint not null check (sequence >= 1),
+    kind varchar(24) not null,
+    actor_type varchar(16) not null check (actor_type in ('HUMAN', 'AGENT', 'SYSTEM')),
+    actor_agent_name varchar(64),
+    run_id uuid,
+    body text,
+    data jsonb not null default '{}'::jsonb check (jsonb_typeof(data) = 'object'),
+    idempotency_key varchar(128) not null check (btrim(idempotency_key) <> ''),
+    request_hash char(64) not null check (request_hash ~ '^[0-9a-f]{64}$'),
+    created_at timestamptz(3) not null default current_timestamp,
     constraint pk_project_issue_activity primary key (issue_id, sequence),
+    constraint uk_project_issue_activity_request unique (issue_id, idempotency_key),
     constraint fk_project_issue_activity_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
     constraint fk_project_issue_activity_agent foreign key (actor_agent_name)
         references agent_definition (name) on delete restrict,
     constraint fk_project_issue_activity_run foreign key (run_id, issue_id)
         references project_issue_run (id, issue_id) on delete restrict,
-    constraint fk_project_issue_activity_submission foreign key (submission_run_id, issue_id)
-        references project_issue_run (id, issue_id) on delete restrict,
-    constraint uk_project_issue_activity_idempotency unique (issue_id, idempotency_key),
-    constraint chk_project_issue_activity_sequence check (sequence >= 1),
-    constraint chk_project_issue_activity_kind check (
-        kind in ('SPEC_CHANGE', 'INSTRUCTION', 'COMMENT', 'HUMAN_INPUT', 'REVIEW_DECISION', 'RECOVERY', 'RETRY', 'SYSTEM')
+    check (
+        (actor_type = 'AGENT' and actor_agent_name is not null)
+        or (actor_type in ('HUMAN', 'SYSTEM') and actor_agent_name is null)
     ),
-    constraint chk_project_issue_activity_actor check (
-        (actor_type = 'AGENT' and actor_agent_name is not null and length(trim(actor_agent_name)) > 0 and actor_agent_name = btrim(actor_agent_name)) or
-        (actor_type in ('HUMAN', 'SYSTEM') and actor_agent_name is null)
+    check (kind in ('COMMENT', 'RUN', 'INSTRUCTION', 'SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL')),
+    check (
+        (kind = 'RUN' and run_id is not null and actor_type = 'SYSTEM'
+            and body is null and data = '{}'::jsonb)
+        or (kind = 'COMMENT' and body is not null and btrim(body) <> '' and data = '{}'::jsonb)
+        or (kind = 'INSTRUCTION' and run_id is not null
+            and body is not null and btrim(body) <> '' and data = '{}'::jsonb)
+        or (kind in ('SPEC_CHANGE', 'STATE_CHANGE', 'CONTROL') and body is null)
     ),
-    constraint chk_project_issue_activity_target_role check (
-        target_role is null or target_role in ('EXECUTOR', 'REVIEWER')
-    ),
-    constraint chk_project_issue_activity_decision check (
-        decision is null or decision in ('APPROVE', 'REQUEST_CHANGES')
-    ),
-    constraint chk_project_issue_activity_decision_shape check (
-        (kind = 'REVIEW_DECISION' and decision is not null and submission_run_id is not null) or
-        (kind <> 'REVIEW_DECISION' and decision is null and submission_run_id is null)
-    ),
-    constraint chk_project_issue_activity_body_shape check (
-        body = btrim(body)
-        and (kind in ('SPEC_CHANGE', 'REVIEW_DECISION') or length(trim(body)) > 0)
-    ),
-    constraint chk_project_issue_activity_body_len check (octet_length(body) <= 1048576),
-    constraint chk_project_issue_activity_idempotency_not_blank check (
-        idempotency_key is null or (length(trim(idempotency_key)) > 0 and idempotency_key = btrim(idempotency_key))
-    )
+    check (body is null or octet_length(body) <= 1048576)
 );
 
-comment on table project_issue_activity is 'Issue 有序幂等事实流：要求修改、指示、评论、人工输入、审查决定、人工恢复、重试与系统指令';
-comment on column project_issue_activity.issue_id is '关联 Issue UUID';
-comment on column project_issue_activity.sequence is 'Issue 内单调递增序号，>= 1，同时是输入投递位置';
-comment on column project_issue_activity.kind is '类型：SPEC_CHANGE, INSTRUCTION, COMMENT, HUMAN_INPUT, REVIEW_DECISION, RECOVERY, RETRY, SYSTEM';
-comment on column project_issue_activity.actor_type is '操作者类型：AGENT, HUMAN, SYSTEM';
-comment on column project_issue_activity.actor_agent_name is '操作者 Agent 身份（AGENT 必填，HUMAN/SYSTEM 为空）';
-comment on column project_issue_activity.target_role is '定向目标职责 EXECUTOR/REVIEWER（可空表示无目标）';
-comment on column project_issue_activity.run_id is '相关 Run（同 Issue 约束，可空）';
-comment on column project_issue_activity.submission_run_id is '正式审查决定绑定的被审查提交 Run（仅 REVIEW_DECISION）';
-comment on column project_issue_activity.decision is '正式审查决定：APPROVE, REQUEST_CHANGES（仅 REVIEW_DECISION）';
-comment on column project_issue_activity.body is '正文纯文本（最大 1 MiB，不含首尾空白）：要求修改与审查决定允许空正文，其余类型必须非空白';
-comment on column project_issue_activity.idempotency_key is '同 Issue 幂等键，重放同一动作不产生新记录';
+comment on table project_issue_activity is 'Issue 有序幂等事实流：评论、Run 呈现、指示、规格/状态变更与控制事件';
+comment on column project_issue_activity.issue_id is '关联 Issue UUID（复合主键）';
+comment on column project_issue_activity.sequence is 'Issue 内单调递增序号，>= 1，同时是投递位置';
+comment on column project_issue_activity.kind is '类型：COMMENT, RUN, INSTRUCTION, SPEC_CHANGE, STATE_CHANGE, CONTROL';
+comment on column project_issue_activity.actor_type is '操作者类型：HUMAN, AGENT, SYSTEM';
+comment on column project_issue_activity.actor_agent_name is '操作者 Agent 身份（AGENT 必填，HUMAN/SYSTEM 必须为空）';
+comment on column project_issue_activity.run_id is '相关 Run（必须属于同一 Issue；RUN/INSTRUCTION 必填）';
+comment on column project_issue_activity.body is '文本正文（最大 1 MiB；事件类必须为空）';
+comment on column project_issue_activity.data is '事件 typed data（JSON object；文本类必须为空对象）';
+comment on column project_issue_activity.idempotency_key is '同 Issue 幂等键（非空白），重放同一动作不产生新记录';
+comment on column project_issue_activity.request_hash is '请求正文的 SHA-256（64 位小写十六进制）';
 
-------------------------------------------------------------------------------
--- Session ownership
---
--- 一行只允许一个非空 owner 外键，以关系约束直接表达排他弧；session_id 主键保证
--- Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。IssueAgentSession owner 唯一，
--- 使同一 (Issue, Agent) 的独立 Session 稳定复用于后续 Run。
-------------------------------------------------------------------------------
-create table session_owner (
-    session_id             uuid          not null,
-    chat_id                uuid,
-    canvas_id              uuid,
-    issue_agent_session_id uuid,
-    created_at             timestamptz(3) not null default clock_timestamp(),
-    constraint pk_session_owner primary key (session_id),
-    constraint fk_session_owner_session foreign key (session_id)
-        references harness_session (id) on delete restrict,
-    constraint fk_session_owner_chat foreign key (chat_id)
-        references chat (id) on delete restrict,
-    constraint fk_session_owner_canvas foreign key (canvas_id)
-        references canvas_document (id) on delete restrict,
-    constraint fk_session_owner_issue_agent_session foreign key (issue_agent_session_id)
-        references project_issue_agent_session (id) on delete restrict,
-    constraint uk_session_owner_issue_agent_session unique (issue_agent_session_id),
-    constraint ck_session_owner_exactly_one check (
-        num_nonnulls(chat_id, canvas_id, issue_agent_session_id) = 1
-    )
-);
+create unique index uk_project_activity_run on project_issue_activity (issue_id, run_id)
+    where kind = 'RUN';
+create index idx_project_activity_run on project_issue_activity (run_id) where run_id is not null;
 
-create index idx_session_owner_chat
-    on session_owner (chat_id, created_at desc, session_id desc)
-    where chat_id is not null;
-
-create index idx_session_owner_canvas
-    on session_owner (canvas_id, created_at desc, session_id desc)
-    where canvas_id is not null;
-
-comment on table session_owner is 'Harness Session 的产品归属排他弧：每行恰有一个 Chat、Canvas 或 IssueAgentSession owner';
-comment on column session_owner.session_id is 'Harness Session UUID（主键，全局至多一个 owner）';
-comment on column session_owner.chat_id is 'Chat owner；非空时其他 owner 列必须为空';
-comment on column session_owner.canvas_id is 'Canvas owner；非空时其他 owner 列必须为空';
-comment on column session_owner.issue_agent_session_id is 'Issue+Agent 稳定归属 owner；非空时其他 owner 列必须为空，且每条归属至多一行';
-comment on column session_owner.created_at is '归属边建立时间（毫秒精度）';
-comment on index idx_session_owner_chat is '按 Chat 枚举 Session，覆盖最近归属优先排序';
-comment on index idx_session_owner_canvas is '按 Canvas 枚举 Session，覆盖最近归属优先排序';
-
-------------------------------------------------------------------------------
--- Issue work
-------------------------------------------------------------------------------
+-- 每个 Issue 至多一行的调度邮箱：确定性 wake/lease 围栏，是 Issue 恢复的唯一
+-- durable 入口。
 create table project_issue_work (
-    issue_id     uuid          not null,
-    wake_version bigint        not null default 1,
-    due_at       timestamptz(3) not null default clock_timestamp(),
-    lease_token  varchar(128),
-    lease_until  timestamptz(3),
-    updated_at   timestamptz(3) not null default clock_timestamp(),
+    issue_id uuid,
+    wake_version bigint not null check (wake_version > 0),
+    due_at timestamptz(3) not null,
+    lease_token varchar(128),
+    lease_until timestamptz(3),
+    created_at timestamptz(3) not null default current_timestamp,
+    updated_at timestamptz(3) not null default current_timestamp,
     constraint pk_project_issue_work primary key (issue_id),
     constraint fk_project_issue_work_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
-    constraint chk_project_issue_work_wake check (wake_version > 0),
-    constraint chk_project_issue_work_lease check (
-        (lease_token is null and lease_until is null) or
-        (lease_token is not null and lease_until is not null and length(trim(lease_token)) > 0 and length(trim(lease_token)) <= 128 and lease_token = btrim(lease_token))
-    )
+    constraint ck_project_issue_work_lease_pair check ((lease_token is null) = (lease_until is null)),
+    constraint ck_project_issue_work_lease_token check (lease_token is null or btrim(lease_token) <> '')
 );
-
-create index idx_project_issue_work_due on project_issue_work (due_at);
 
 comment on table project_issue_work is 'Issue 调度工作：每 Issue 最多单行，确定性 lease/wake 围栏';
 comment on column project_issue_work.issue_id is '所属 Issue UUID（主键）';
 comment on column project_issue_work.wake_version is '唤醒版本号，每次请求唤醒递增，> 0';
 comment on column project_issue_work.due_at is '下次可调度时间戳';
-comment on column project_issue_work.lease_token is '当前持有节点租约令牌';
+comment on column project_issue_work.lease_token is '当前持有节点租约令牌（与 lease_until 成对）';
 comment on column project_issue_work.lease_until is '租约截止时间戳';
-comment on column project_issue_work.updated_at is '更新时间戳';
 
-------------------------------------------------------------------------------
--- Issue work due notification hint
-------------------------------------------------------------------------------
+create index idx_project_issue_work_due on project_issue_work (due_at, issue_id);
+
+-- Issue work due notification hint（提交后的回读提示，不是事件日志）。
 create or replace function notify_project_issue_work_due()
 returns trigger as $$
 begin
@@ -1597,106 +1522,31 @@ $$ language plpgsql;
 create trigger trg_project_issue_work_due
     after insert or update on project_issue_work
     for each row execute function notify_project_issue_work_due();
-
 ------------------------------------------------------------------------------
--- 4. Project/Issue snapshot invalidation hint
+-- 4. Chat Session association
+--
+-- Chat 通过直接关联表持有多个 Session：Chat 创建复用 Harness NEW_SESSION 的
+-- request-hash 重放，因此不需要产品级幂等列；主键保证一个 Session 至多属于一个
+-- Chat，删除任一侧前必须先删除本行。
 ------------------------------------------------------------------------------
 
--- Project/Issue facts notify browser-facing listeners only after transaction commit.
--- The payload is a refetch hint, never an event log.
-create or replace function project_issue_changed_notify()
-returns trigger as $$
-declare
-    target_project_id uuid;
-    target_issue_id uuid;
-    target_thread_id uuid;
-    target_agent_session_id uuid;
-begin
-    if tg_table_name = 'project' then
-        if tg_op = 'DELETE' then
-            target_project_id := old.id;
-        else
-            target_project_id := new.id;
-        end if;
-    elsif tg_table_name in ('project_issue', 'project_issue_dependency') then
-        if tg_op = 'DELETE' then
-            target_project_id := old.project_id;
-        else
-            target_project_id := new.project_id;
-        end if;
-    elsif tg_table_name in ('project_issue_activity', 'project_issue_run', 'project_issue_agent_session') then
-        if tg_op = 'DELETE' then
-            target_issue_id := old.issue_id;
-        else
-            target_issue_id := new.issue_id;
-        end if;
-    elsif tg_table_name = 'session_owner' then
-        if tg_op = 'DELETE' then
-            target_agent_session_id := old.issue_agent_session_id;
-        else
-            target_agent_session_id := new.issue_agent_session_id;
-        end if;
-        if target_agent_session_id is not null then
-            select pias.issue_id into target_issue_id
-            from project_issue_agent_session pias
-            where pias.id = target_agent_session_id;
-        end if;
-    elsif tg_table_name = 'harness_thread' then
-        if tg_op = 'DELETE' then
-            target_thread_id := old.id;
-        else
-            target_thread_id := new.id;
-        end if;
-        select pias.issue_id into target_issue_id
-        from project_issue_agent_session pias
-        where pias.thread_id = target_thread_id;
-    end if;
+create table chat_session (
+    session_id uuid,
+    chat_id uuid not null,
+    created_at timestamptz(3) not null default current_timestamp,
+    constraint pk_chat_session primary key (session_id),
+    constraint fk_chat_session_session foreign key (session_id)
+        references harness_session (id) on delete restrict,
+    constraint fk_chat_session_chat foreign key (chat_id)
+        references chat (id) on delete restrict
+);
 
-    if target_project_id is null and target_issue_id is not null then
-        select pi.project_id into target_project_id
-        from project_issue pi
-        where pi.id = target_issue_id;
-    end if;
+comment on table chat_session is 'Chat 与 Harness Session 的直接关联：一个 Session 至多属于一个 Chat，删除任一侧前必须先删本行';
+comment on column chat_session.session_id is '该 Chat 持有的 Harness Session（主键，RESTRICT FK）';
+comment on column chat_session.chat_id is '所属 Chat（RESTRICT FK）';
+comment on column chat_session.created_at is '关联建立时间（毫秒精度）';
 
-    if target_project_id is not null then
-        perform pg_notify('project_issue_changed', target_project_id::text);
-    end if;
-    return null;
-end;
-$$ language plpgsql;
-
-create trigger trg_project_issue_changed_project
-    after insert or update or delete on project
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_issue
-    after insert or update or delete on project_issue
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_dependency
-    after insert or update or delete on project_issue_dependency
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_activity
-    after insert or update or delete on project_issue_activity
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_run
-    after insert or update or delete on project_issue_run
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_agent_session
-    after insert or update or delete on project_issue_agent_session
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_session_owner
-    after insert or update or delete on session_owner
-    for each row execute function project_issue_changed_notify();
-
-create trigger trg_project_issue_changed_thread
-    after insert or update or delete on harness_thread
-    for each row execute function project_issue_changed_notify();
-
+create index idx_chat_session_chat on chat_session (chat_id, created_at, session_id);
 
 ------------------------------------------------------------------------------
 -- 5. Thread version NOTIFY hint
@@ -1725,104 +1575,7 @@ create trigger trg_harness_thread_version_notify
     after insert or update of version on harness_thread
     for each row execute function harness_thread_version_notify();
 
-------------------------------------------------------------------------------
--- 6. Canvas ownership, same-canvas composite FKs and version
---    NOTIFY hint.
---
--- All Canvas ownership FKs are ON DELETE RESTRICT: deletion is always driven
--- by the application in explicit order (pins -> runs -> resources -> links ->
--- nodes -> groups -> dedup -> Session ownership -> document), never by cascades that could bypass
--- StorageBlobManager refcounts.
-------------------------------------------------------------------------------
-
-alter table canvas_group
-    add constraint fk_canvas_group_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete restrict;
-
-alter table canvas_node
-    add constraint fk_canvas_node_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete restrict;
-
-alter table canvas_node
-    add constraint fk_canvas_node_group
-    foreign key (canvas_id, group_id)
-    references canvas_group (canvas_id, id);
-
-alter table canvas_link
-    add constraint fk_canvas_link_source
-    foreign key (canvas_id, source_node_id)
-    references canvas_node (canvas_id, id) on delete restrict;
-
-alter table canvas_link
-    add constraint fk_canvas_link_target
-    foreign key (canvas_id, target_node_id)
-    references canvas_node (canvas_id, id) on delete restrict;
-
-alter table canvas_resource
-    add constraint fk_canvas_resource_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete restrict;
-
-alter table canvas_resource
-    add constraint fk_canvas_resource_owner
-    foreign key (canvas_id, owner_node_id)
-    references canvas_node (canvas_id, id) on delete restrict;
-
-alter table canvas_command_dedup
-    add constraint fk_canvas_command_dedup_canvas foreign key (canvas_id)
-    references canvas_document (id) on delete restrict;
-
-alter table canvas_function_run
-    add constraint fk_canvas_function_run_node foreign key (node_id)
-    references canvas_node (id) on delete restrict;
-
-alter table canvas_function_resource_pin
-    add constraint fk_canvas_function_resource_pin_node
-    foreign key (canvas_id, node_id)
-    references canvas_node (canvas_id, id) on delete restrict;
-
--- Canvas document version NOTIFY hint.
---
--- version is owned by the application; PostgreSQL never bumps it. This trigger
--- is only a wake-up hint for the in-process Canvas version/application event hub: it notifies when a
--- canvas_document row is inserted or its version column actually changed, and
--- never mutates the row. The NOTIFY payload is the parsable text
--- `{canvasId}:{version}`.
-
-create or replace function canvas_document_version_notify()
-returns trigger language plpgsql as $$
-begin
-    if tg_op = 'INSERT' or new.version is distinct from old.version then
-        perform pg_notify('canvas_version', new.id::text || ':' || new.version::text);
-    end if;
-    return new;
-end $$;
-
-create trigger trg_canvas_document_version_notify
-    after insert or update of version on canvas_document
-    for each row execute function canvas_document_version_notify();
-
--- Canvas Function durable work NOTIFY hint.
---
--- canvas_function_run remains the only queue fact. This trigger only hints when
--- the row written by the current statement is immediately claimable READY work;
--- future READY work and expired RUNNING leases are recovered by periodic poll.
-
-create or replace function canvas_function_work_notify()
-returns trigger language plpgsql as $$
-begin
-    if new.status = 'READY'
-        and new.lease_token is null
-        and new.available_at <= current_timestamp then
-        perform pg_notify('canvas_function_work', '');
-    end if;
-    return new;
-end $$;
-
-create trigger trg_canvas_function_work_notify
-    after insert or update on canvas_function_run
-    for each row execute function canvas_function_work_notify();
-
--- 7. Global blob storage
+-- 6. Global blob storage
 --
 -- storage_blob is the deduplicated immutable content address of the global
 -- storage foundation. sha256+size_bytes uniquely identify one content in the
@@ -2000,60 +1753,54 @@ comment on column session_blob_ref.created_at is '引用创建时间（timestamp
 comment on index idx_session_blob_ref_blob is '按 blob 反向枚举持有它的 Session（深删除与对账）';
 
 ------------------------------------------------------------------------------
--- 8. Issue published evidence
+-- 7. Issue published evidence
 --
--- 一条记录是 Issue 显式持有的一个已发布 Blob 引用：只有执行者最终答复明确引用（summary
--- 正文含规范 kkstudio:/resources/<blobId>）且来源 Run 的 Session 在提交时确实持有该引用的
--- 产物，以及人经 Issue 入口上传的附件，才成为公开证据；其余附件保持私有。主键即“同 Issue
--- 同 Blob 至多一条”的幂等键，重复发布不新增行也不重复 retain。
+-- 一条记录是 Issue 显式持有的一个已发布 Blob 引用：只有执行者最终答复明确引用且来源 Run
+-- 的 Session 在提交时确实持有该引用的产物，以及人经 Issue 入口上传的附件，才成为公开
+-- 证据；其余附件保持私有。主键即“同 Issue 同 Blob 至多一条”的幂等键，重复发布不新增行
+-- 也不重复 retain。
 --
 -- 本表是 Issue 自有的 owner edge，与 Session 无关：删除 Session 不释放这里的引用，只有
--- Issue/Project 深删除才逐行 release。两个 FK 都是 RESTRICT，行必须早于 project_issue_run
+-- Issue/Project 深删除才逐行 release。三个 FK 都是 RESTRICT，行必须早于 project_issue_run
 -- 删除；ref_count 变更完全由应用事务完成，不依赖 cascade 或触发器。
 ------------------------------------------------------------------------------
 create table project_issue_evidence (
-    issue_id   uuid          not null,
-    blob_id    uuid          not null,
-    origin     varchar(16)   not null,
-    run_id     uuid,
-    name       varchar(512),
-    created_at timestamptz(3) not null default clock_timestamp(),
+    issue_id uuid not null,
+    blob_id uuid not null,
+    actor_agent_name varchar(64),
+    run_id uuid,
+    name varchar(512) not null check (btrim(name) <> '' and name = btrim(name)),
+    created_at timestamptz(3) not null default current_timestamp,
     constraint pk_project_issue_evidence primary key (issue_id, blob_id),
     constraint fk_project_issue_evidence_issue foreign key (issue_id)
         references project_issue (id) on delete restrict,
     constraint fk_project_issue_evidence_blob foreign key (blob_id)
         references storage_blob (id) on delete restrict,
+    constraint fk_project_issue_evidence_agent foreign key (actor_agent_name)
+        references agent_definition (name) on delete restrict,
     constraint fk_project_issue_evidence_run foreign key (run_id, issue_id)
         references project_issue_run (id, issue_id) on delete restrict,
-    constraint chk_project_issue_evidence_origin check (origin in ('EXECUTOR', 'HUMAN')),
-    constraint chk_project_issue_evidence_origin_shape check (
-        (origin = 'EXECUTOR' and run_id is not null) or
-        (origin = 'HUMAN' and run_id is null and name is not null)
-    ),
-    constraint chk_project_issue_evidence_name check (
-        name is null or (length(trim(name)) > 0 and name = btrim(name))
-    )
+    constraint ck_project_issue_evidence_author check (run_id is null or actor_agent_name is not null)
 );
 
 create index idx_project_issue_evidence_blob
     on project_issue_evidence (blob_id);
 
 comment on table project_issue_evidence is
-    'Issue 公开证据：Issue 自有 owner edge 持有的已发布 Blob 引用（执行者 final 明确引用或人工附件）';
+    'Explicit published Blob references independent of Session lifetime; application retains/releases once';
 comment on column project_issue_evidence.issue_id is '所属 Issue UUID（复合主键）';
 comment on column project_issue_evidence.blob_id is '已发布 Blob UUID（复合主键，RESTRICT FK，ACTIVE 行）';
-comment on column project_issue_evidence.origin is '发布来源：EXECUTOR（执行者 final 明确引用）或 HUMAN（人工上传）';
+comment on column project_issue_evidence.actor_agent_name is '发布者 Agent 身份（作者归属，RESTRICT FK，可空）';
 comment on column project_issue_evidence.run_id is
-    'EXECUTOR 必填，指向发布该证据的执行 Run（同 Issue 约束）；HUMAN 为空';
+    '来源 Run（同 Issue 复合 FK，可空）；非空时必须同时给出 actor_agent_name';
 comment on column project_issue_evidence.name is
-    '权威展示名（varchar(512)，非空且无首尾空白）：HUMAN 必填且取自上传行；EXECUTOR 为空——final 正文只携带规范 URI，'
-    '不携带可伪造的文件名';
+    '权威展示名（varchar(512)，非空且无首尾空白）：人工上传取自上传行，执行者发布由服务端从规范 URI 派生，不接受客户端可伪造文件名';
 comment on column project_issue_evidence.created_at is '发布时间戳（毫秒精度）';
 
 comment on index idx_project_issue_evidence_blob is '按 blob 反向枚举引用它的 Issue（对账与深删除）';
 
 ------------------------------------------------------------------------------
--- 9. Canvas resource blob FK (must follow the global blob storage section)
+-- 8. Canvas resource blob FK (must follow the global blob storage section)
 ------------------------------------------------------------------------------
 
 alter table canvas_resource

@@ -12,5 +12,34 @@
 
     <artifactId>kk-studio-schema</artifactId>
 
-    <!-- Schema 纯资源模块：唯一 Flyway baseline（db/migration）与 profile seed（db/seed/**）事实源，无 Java 依赖。 -->
+    <!-- Schema 模块：唯一 Flyway baseline（db/migration）与 profile seed（db/seed/**）的事实源，无运行时 Java 依赖；
+         测试范围用 Flyway + Testcontainers 在隔离 PostgreSQL 上验证全新安装基线契约。 -->
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

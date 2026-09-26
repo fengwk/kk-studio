@@ -1,0 +1,429 @@
+# Generated metadata snapshot of the shared baseline tables of
+# schema/src/main/resources/db/migration/V1__schema.sql.
+# Regenerate after an approved baseline change:
+#   mvn -pl schema test -Dkkstudio.schema.snapshot.update=true
+#
+# kind	table	object	definition
+column	agent_definition	config	type=jsonb notnull=t default=<null> generated= collation=-
+column	agent_definition	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_definition	description	type=text notnull=f default=<null> generated= collation="default"
+column	agent_definition	model_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	agent_definition	model_provider_name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_definition	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_definition	system_prompt	type=text notnull=f default=<null> generated= collation="default"
+column	agent_definition	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_definition	variant	type=character varying(64) notnull=f default=<null> generated= collation="default"
+column	agent_definition	version	type=bigint notnull=t default=0 generated= collation=-
+column	agent_model	config	type=jsonb notnull=t default=<null> generated= collation=-
+column	agent_model	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_model	description	type=text notnull=f default=<null> generated= collation="default"
+column	agent_model	model_id	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	agent_model	name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	agent_model	provider_name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_model	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_model	version	type=bigint notnull=t default=0 generated= collation=-
+column	agent_provider	base_url	type=character varying(512) notnull=f default=<null> generated= collation="default"
+column	agent_provider	config	type=jsonb notnull=t default=<null> generated= collation=-
+column	agent_provider	connection_generation_id	type=uuid notnull=t default=<null> generated= collation=-
+column	agent_provider	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_provider	credential	type=character varying(512) notnull=f default=<null> generated= collation="default"
+column	agent_provider	description	type=text notnull=f default=<null> generated= collation="default"
+column	agent_provider	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_provider	provider_type	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_provider	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_provider	version	type=bigint notnull=t default=0 generated= collation=-
+column	chat	agent_name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	chat	archived_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	chat	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	chat	id	type=uuid notnull=t default=<null> generated= collation=-
+column	chat	title	type=character varying(256) notnull=f default=<null> generated= collation="default"
+column	chat	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	chat	version	type=bigint notnull=t default=0 generated= collation=-
+column	chat	yolo_enabled	type=boolean notnull=t default=false generated= collation=-
+column	environment	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	environment	id	type=uuid notnull=t default=<null> generated= collation=-
+column	environment	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	environment	registration_token	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	environment	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	environment	version	type=bigint notnull=t default=0 generated= collation=-
+column	environment_connection	environment_id	type=uuid notnull=t default=<null> generated= collation=-
+column	environment_connection	last_seen_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	environment_connection	lease_token	type=uuid notnull=t default=<null> generated= collation=-
+column	environment_connection	lease_until	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	environment_connection	owner_node_id	type=uuid notnull=t default=<null> generated= collation=-
+column	environment_connection	recent_events	type=jsonb notnull=t default='[]'::jsonb generated= collation=-
+column	environment_connection	runtime_info	type=jsonb notnull=f default=<null> generated= collation=-
+column	environment_connection	skill_state	type=jsonb notnull=t default='[]'::jsonb generated= collation=-
+column	environment_connection	status	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	harness_entry	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_entry	entry_type	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	harness_entry	id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_entry	parent_entry_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_entry	payload	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_entry	provider_replay_state	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_entry	session_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	attempt	type=integer notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	error	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_model_invocation	failed_attempts	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	provider_replay_state	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_model_invocation	request_head_entry_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	request_spec	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	result	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_model_invocation	result_entry_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_model_invocation	status	type=character varying(16) notnull=t default=<null> generated= collation="default"
+column	harness_model_invocation	stream_checkpoint	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_model_invocation	thread_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	turn_start_entry_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_session	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_session	id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_session	name	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	harness_thread	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_thread	creation_request_hash	type=character(64) notnull=t default=<null> generated= collation="default"
+column	harness_thread	head_entry_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread	id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread	name	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	harness_thread	next_command_sequence	type=bigint notnull=t default=<null> generated= collation=-
+column	harness_thread	session_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_thread	version	type=bigint notnull=t default=<null> generated= collation=-
+column	harness_thread	yolo_enabled	type=boolean notnull=t default=<null> generated= collation=-
+column	harness_thread_command	applied_turn_start_entry_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_thread_command	cancelled_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	harness_thread_command	command_type	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	harness_thread_command	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_thread_command	idempotency_key	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_thread_command	payload	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_thread_command	request_hash	type=character(64) notnull=t default=<null> generated= collation="default"
+column	harness_thread_command	sequence	type=bigint notnull=t default=<null> generated= collation=-
+column	harness_thread_command	stop_request_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_thread_command	thread_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	approval	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_tool_invocation	assistant_entry_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	attempt	type=integer notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	binding	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_tool_invocation	call	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	call_index	type=integer notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	effects	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	error	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_tool_invocation	id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	input_receipt	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_tool_invocation	model_invocation_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_tool_invocation	result	type=jsonb notnull=f default=<null> generated= collation=-
+column	harness_tool_invocation	status	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	harness_tool_invocation	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_work	available_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_work	lease_token	type=character varying(128) notnull=f default=<null> generated= collation="default"
+column	harness_work	lease_until	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	harness_work	required_environment_id	type=uuid notnull=f default=<null> generated= collation=-
+column	harness_work	target_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_work	target_type	type=character varying(16) notnull=t default=<null> generated= collation="default"
+column	harness_work	wake_version	type=bigint notnull=t default=<null> generated= collation=-
+column	mcp_server	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	mcp_server	discovery_status	type=character varying(16) notnull=t default='UNVERIFIED'::character varying generated= collation="default"
+column	mcp_server	enabled	type=boolean notnull=t default=true generated= collation=-
+column	mcp_server	headers	type=jsonb notnull=t default='{}'::jsonb generated= collation=-
+column	mcp_server	name	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	mcp_server	timeout_millis	type=bigint notnull=t default=<null> generated= collation=-
+column	mcp_server	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	mcp_server	url	type=character varying(2048) notnull=t default=<null> generated= collation="default"
+column	mcp_server	version	type=bigint notnull=t default=0 generated= collation=-
+column	mcp_tool	description	type=text notnull=t default=<null> generated= collation="default"
+column	mcp_tool	input_schema	type=jsonb notnull=t default=<null> generated= collation=-
+column	mcp_tool	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	mcp_tool	server_name	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	mcp_tool	source_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	plugin_credential	create_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	plugin_credential	encrypted_payload	type=bytea notnull=t default=<null> generated= collation=-
+column	plugin_credential	expires_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	plugin_credential	last_refresh_error	type=text notnull=f default=<null> generated= collation="default"
+column	plugin_credential	last_refreshed_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	plugin_credential	next_refresh_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	plugin_credential	plugin_id	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	plugin_credential	refresh_lease_token	type=character varying(128) notnull=f default=<null> generated= collation="default"
+column	plugin_credential	refresh_lease_until	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	plugin_credential	region	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	plugin_credential	status	type=character varying(32) notnull=t default=<null> generated= collation="default"
+column	plugin_credential	update_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	plugin_credential	version	type=bigint notnull=t default=0 generated= collation=-
+column	session_blob_ref	blob_id	type=uuid notnull=t default=<null> generated= collation=-
+column	session_blob_ref	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	session_blob_ref	session_id	type=uuid notnull=t default=<null> generated= collation=-
+column	skill_package	branch	type=character varying(255) notnull=t default=<null> generated= collation="default"
+column	skill_package	create_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	skill_package	current_commit	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	skill_package	description	type=text notnull=f default=<null> generated= collation="default"
+column	skill_package	head_check_error	type=text notnull=f default=<null> generated= collation="default"
+column	skill_package	head_checked_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	skill_package	observed_head_commit	type=character varying(64) notnull=f default=<null> generated= collation="default"
+column	skill_package	package_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	skill_package	repository_url	type=text notnull=t default=<null> generated= collation="default"
+column	skill_package	skills	type=jsonb notnull=t default='[]'::jsonb generated= collation=-
+column	skill_package	update_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	skill_package	version	type=bigint notnull=t default=0 generated= collation=-
+column	storage_blob	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	storage_blob	duration_ms	type=bigint notnull=f default=<null> generated= collation=-
+column	storage_blob	height	type=integer notnull=f default=<null> generated= collation=-
+column	storage_blob	id	type=uuid notnull=t default=<null> generated= collation=-
+column	storage_blob	media_type	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	storage_blob	ref_count	type=bigint notnull=t default=0 generated= collation=-
+column	storage_blob	sha256	type=character(64) notnull=t default=<null> generated= collation="default"
+column	storage_blob	size_bytes	type=bigint notnull=t default=<null> generated= collation=-
+column	storage_blob	state	type=character varying(16) notnull=t default='ACTIVE'::character varying generated= collation="default"
+column	storage_blob	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	storage_blob	width	type=integer notnull=f default=<null> generated= collation=-
+column	storage_upload	blob_id	type=uuid notnull=f default=<null> generated= collation=-
+column	storage_upload	candidate_blob_id	type=uuid notnull=t default=<null> generated= collation=-
+column	storage_upload	cleanup_requested_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	storage_upload	cleanup_token	type=character varying(128) notnull=f default=<null> generated= collation="default"
+column	storage_upload	cleanup_until	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	storage_upload	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	storage_upload	declared_media_type	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	storage_upload	declared_sha256	type=character(64) notnull=t default=<null> generated= collation="default"
+column	storage_upload	declared_size	type=bigint notnull=t default=<null> generated= collation=-
+column	storage_upload	expires_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	storage_upload	filename	type=character varying(512) notnull=t default=<null> generated= collation="default"
+column	storage_upload	id	type=uuid notnull=t default=<null> generated= collation=-
+column	system_setting	config	type=jsonb notnull=t default=<null> generated= collation=-
+column	system_setting	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	system_setting	id	type=bigint notnull=t default=<null> generated= collation=-
+column	system_setting	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	system_setting	version	type=bigint notnull=t default=0 generated= collation=-
+constraint	agent_definition	agent_definition_pkey	PRIMARY KEY (name)
+constraint	agent_definition	ck_agent_definition_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
+constraint	agent_definition	ck_agent_definition_version_nonneg	CHECK ((version >= 0))
+constraint	agent_definition	fk_agent_definition_model	FOREIGN KEY (model_provider_name, model_name) REFERENCES agent_model(provider_name, name)
+constraint	agent_model	ck_agent_model_model_id	CHECK ((((model_id)::text !~ '^[[:space:]]'::text) AND ((model_id)::text !~ '[[:space:]]$'::text) AND (char_length((model_id)::text) > 0)))
+constraint	agent_model	ck_agent_model_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0)))
+constraint	agent_model	ck_agent_model_version_nonneg	CHECK ((version >= 0))
+constraint	agent_model	fk_agent_model_provider	FOREIGN KEY (provider_name) REFERENCES agent_provider(name)
+constraint	agent_model	pk_agent_model	PRIMARY KEY (provider_name, name)
+constraint	agent_provider	agent_provider_pkey	PRIMARY KEY (name)
+constraint	agent_provider	ck_agent_provider_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
+constraint	agent_provider	ck_agent_provider_provider_type	CHECK (((provider_type)::text = ANY ((ARRAY['openai'::character varying, 'openai_response'::character varying, 'anthropic'::character varying, 'google'::character varying])::text[])))
+constraint	agent_provider	ck_agent_provider_version_nonneg	CHECK ((version >= 0))
+constraint	chat	chat_pkey	PRIMARY KEY (id)
+constraint	chat	ck_chat_agent_name	CHECK ((((agent_name)::text !~ '^[[:space:]]'::text) AND ((agent_name)::text !~ '[[:space:]]$'::text) AND (char_length((agent_name)::text) > 0) AND (POSITION(('/'::text) IN (agent_name)) = 0)))
+constraint	chat	ck_chat_version_nonneg	CHECK ((version >= 0))
+constraint	environment	ck_environment_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
+constraint	environment	ck_environment_registration_token	CHECK (((btrim((registration_token)::text) <> ''::text) AND (char_length((registration_token)::text) <= 128) AND ((registration_token)::text = btrim((registration_token)::text))))
+constraint	environment	ck_environment_version_nonneg	CHECK ((version >= 0))
+constraint	environment	environment_pkey	PRIMARY KEY (id)
+constraint	environment	uk_environment_name	UNIQUE (name)
+constraint	environment	uk_environment_registration_token	UNIQUE (registration_token)
+constraint	environment_connection	ck_environment_connection_lease	CHECK ((lease_until > last_seen_at))
+constraint	environment_connection	ck_environment_connection_ready_runtime_info	CHECK ((((status)::text <> 'READY'::text) OR ((runtime_info IS NOT NULL) AND (jsonb_typeof(runtime_info) = 'object'::text))))
+constraint	environment_connection	ck_environment_connection_recent_events	CHECK ((jsonb_typeof(recent_events) = 'array'::text))
+constraint	environment_connection	ck_environment_connection_runtime_info	CHECK (((runtime_info IS NULL) OR (jsonb_typeof(runtime_info) = 'object'::text)))
+constraint	environment_connection	ck_environment_connection_skill_state	CHECK ((jsonb_typeof(skill_state) = 'array'::text))
+constraint	environment_connection	ck_environment_connection_status	CHECK (((status)::text = ANY ((ARRAY['CONNECTING'::character varying, 'READY'::character varying])::text[])))
+constraint	environment_connection	environment_connection_pkey	PRIMARY KEY (environment_id)
+constraint	environment_connection	fk_environment_connection_environment	FOREIGN KEY (environment_id) REFERENCES environment(id) ON DELETE CASCADE
+constraint	harness_entry	ck_harness_entry_parent_not_self	CHECK (((parent_entry_id IS NULL) OR (parent_entry_id <> id)))
+constraint	harness_entry	ck_harness_entry_parent_shape	CHECK (((((entry_type)::text = 'ROOT'::text) AND (parent_entry_id IS NULL)) OR (((entry_type)::text <> 'ROOT'::text) AND (parent_entry_id IS NOT NULL))))
+constraint	harness_entry	ck_harness_entry_provider_replay_state	CHECK (((provider_replay_state IS NULL) OR ((jsonb_typeof(provider_replay_state) = 'object'::text) AND ((entry_type)::text = 'MESSAGE'::text) AND (((payload -> 'message'::text) ->> 'role'::text) = 'ASSISTANT'::text))))
+constraint	harness_entry	ck_harness_entry_type	CHECK (((entry_type)::text = ANY ((ARRAY['ROOT'::character varying, 'TURN_START'::character varying, 'MESSAGE'::character varying, 'CUSTOM'::character varying, 'MODEL_ATTEMPT_FAILURE'::character varying, 'CUSTOM_MESSAGE'::character varying, 'ASSISTANT_ERROR'::character varying, 'ASSISTANT_ABORTED'::character varying, 'COMPACTION'::character varying, 'TURN_END'::character varying])::text[])))
+constraint	harness_entry	fk_harness_entry_parent	FOREIGN KEY (session_id, parent_entry_id) REFERENCES harness_entry(session_id, id)
+constraint	harness_entry	fk_harness_entry_session	FOREIGN KEY (session_id) REFERENCES harness_session(id)
+constraint	harness_entry	harness_entry_payload_check	CHECK ((jsonb_typeof(payload) = 'object'::text))
+constraint	harness_entry	harness_entry_pkey	PRIMARY KEY (id)
+constraint	harness_entry	uk_harness_entry_session_id	UNIQUE (session_id, id)
+constraint	harness_model_invocation	ck_harness_model_invocation_provider_replay_state	CHECK (((provider_replay_state IS NULL) OR ((jsonb_typeof(provider_replay_state) = 'object'::text) AND ((status)::text = 'SUCCEEDED'::text) AND (result IS NOT NULL) AND (result_entry_id IS NULL))))
+constraint	harness_model_invocation	ck_harness_model_invocation_status	CHECK (((status)::text = ANY ((ARRAY['READY'::character varying, 'DISPATCHING'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'CANCELLED'::character varying, 'UNKNOWN'::character varying])::text[])))
+constraint	harness_model_invocation	ck_harness_model_invocation_terminal_facts	CHECK (((result IS NULL) OR (error IS NULL)))
+constraint	harness_model_invocation	ck_harness_model_invocation_time_order	CHECK ((updated_at >= created_at))
+constraint	harness_model_invocation	fk_harness_model_invocation_request_head	FOREIGN KEY (request_head_entry_id) REFERENCES harness_entry(id)
+constraint	harness_model_invocation	fk_harness_model_invocation_result	FOREIGN KEY (result_entry_id) REFERENCES harness_entry(id)
+constraint	harness_model_invocation	fk_harness_model_invocation_thread	FOREIGN KEY (thread_id) REFERENCES harness_thread(id)
+constraint	harness_model_invocation	fk_harness_model_invocation_turn_start	FOREIGN KEY (turn_start_entry_id) REFERENCES harness_entry(id)
+constraint	harness_model_invocation	harness_model_invocation_attempt_check	CHECK ((attempt >= 0))
+constraint	harness_model_invocation	harness_model_invocation_error_check	CHECK (((error IS NULL) OR (jsonb_typeof(error) = 'object'::text)))
+constraint	harness_model_invocation	harness_model_invocation_failed_attempts_check	CHECK ((jsonb_typeof(failed_attempts) = 'array'::text))
+constraint	harness_model_invocation	harness_model_invocation_pkey	PRIMARY KEY (id)
+constraint	harness_model_invocation	harness_model_invocation_request_spec_check	CHECK ((jsonb_typeof(request_spec) = 'object'::text))
+constraint	harness_model_invocation	harness_model_invocation_result_check	CHECK (((result IS NULL) OR (jsonb_typeof(result) = 'object'::text)))
+constraint	harness_model_invocation	harness_model_invocation_stream_checkpoint_check	CHECK (((stream_checkpoint IS NULL) OR (jsonb_typeof(stream_checkpoint) = 'object'::text)))
+constraint	harness_model_invocation	uk_harness_model_invocation_turn	UNIQUE (thread_id, turn_start_entry_id)
+constraint	harness_session	ck_harness_session_name	CHECK ((btrim((name)::text) <> ''::text))
+constraint	harness_session	harness_session_pkey	PRIMARY KEY (id)
+constraint	harness_thread	ck_harness_thread_creation_request_hash	CHECK ((creation_request_hash ~ '^[0-9a-f]{64}$'::text))
+constraint	harness_thread	ck_harness_thread_name	CHECK ((btrim((name)::text) <> ''::text))
+constraint	harness_thread	ck_harness_thread_time_order	CHECK ((updated_at >= created_at))
+constraint	harness_thread	fk_harness_thread_head	FOREIGN KEY (session_id, head_entry_id) REFERENCES harness_entry(session_id, id)
+constraint	harness_thread	fk_harness_thread_session	FOREIGN KEY (session_id) REFERENCES harness_session(id)
+constraint	harness_thread	harness_thread_next_command_sequence_check	CHECK ((next_command_sequence >= 1))
+constraint	harness_thread	harness_thread_pkey	PRIMARY KEY (id)
+constraint	harness_thread	harness_thread_version_check	CHECK ((version >= 0))
+constraint	harness_thread	uk_harness_thread_session	UNIQUE (session_id, id)
+constraint	harness_thread_command	ck_harness_thread_command_cancel_pair	CHECK ((((stop_request_id IS NULL) AND (cancelled_at IS NULL)) OR ((stop_request_id IS NOT NULL) AND (cancelled_at IS NOT NULL))))
+constraint	harness_thread_command	ck_harness_thread_command_cancel_time	CHECK (((cancelled_at IS NULL) OR (cancelled_at >= created_at)))
+constraint	harness_thread_command	ck_harness_thread_command_request_hash	CHECK ((request_hash ~ '^[0-9a-f]{64}$'::text))
+constraint	harness_thread_command	ck_harness_thread_command_terminal	CHECK (((applied_turn_start_entry_id IS NULL) OR (cancelled_at IS NULL)))
+constraint	harness_thread_command	ck_harness_thread_command_type	CHECK (((command_type)::text = ANY ((ARRAY['USER_MESSAGE'::character varying, 'GOAL'::character varying, 'CUSTOM_MESSAGE'::character varying, 'SET_AGENT'::character varying, 'SET_MODEL'::character varying, 'SET_ENVIRONMENT'::character varying])::text[])))
+constraint	harness_thread_command	fk_harness_thread_command_applied	FOREIGN KEY (applied_turn_start_entry_id) REFERENCES harness_entry(id)
+constraint	harness_thread_command	fk_harness_thread_command_thread	FOREIGN KEY (thread_id) REFERENCES harness_thread(id)
+constraint	harness_thread_command	harness_thread_command_payload_check	CHECK ((jsonb_typeof(payload) = 'object'::text))
+constraint	harness_thread_command	harness_thread_command_pkey	PRIMARY KEY (thread_id, sequence)
+constraint	harness_thread_command	harness_thread_command_sequence_check	CHECK ((sequence > 0))
+constraint	harness_thread_command	uk_harness_thread_command_idempotency	UNIQUE (thread_id, idempotency_key)
+constraint	harness_tool_invocation	ck_harness_tool_input_receipt	CHECK (((input_receipt IS NULL) OR (((status)::text = 'SUCCEEDED'::text) AND (result IS NOT NULL) AND (jsonb_typeof(input_receipt) = 'object'::text) AND (COALESCE(jsonb_typeof((input_receipt -> 'submissionId'::text)), ''::text) = 'string'::text) AND (COALESCE(btrim((input_receipt ->> 'submissionId'::text)), ''::text) <> ''::text) AND (COALESCE(jsonb_typeof((input_receipt -> 'actor'::text)), ''::text) = 'string'::text) AND (COALESCE(btrim((input_receipt ->> 'actor'::text)), ''::text) <> ''::text) AND (COALESCE(jsonb_typeof((input_receipt -> 'acceptedAt'::text)), ''::text) = 'string'::text) AND (COALESCE(btrim((input_receipt ->> 'acceptedAt'::text)), ''::text) <> ''::text))))
+constraint	harness_tool_invocation	ck_harness_tool_invocation_effects_status	CHECK ((((status)::text = 'SUCCEEDED'::text) OR (effects = '{"version": 1, "customEntries": []}'::jsonb)))
+constraint	harness_tool_invocation	ck_harness_tool_invocation_status	CHECK (((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying, 'READY'::character varying, 'DISPATCHING'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'CANCELLED'::character varying, 'UNKNOWN'::character varying])::text[])))
+constraint	harness_tool_invocation	ck_harness_tool_invocation_terminal_facts	CHECK (((result IS NULL) OR (error IS NULL)))
+constraint	harness_tool_invocation	ck_harness_tool_invocation_time_order	CHECK ((updated_at >= created_at))
+constraint	harness_tool_invocation	ck_harness_tool_waiting_input	CHECK ((((status)::text <> 'WAITING_INPUT'::text) OR ((binding IS NOT NULL) AND (result IS NULL) AND (error IS NULL))))
+constraint	harness_tool_invocation	fk_harness_tool_invocation_assistant	FOREIGN KEY (assistant_entry_id) REFERENCES harness_entry(id)
+constraint	harness_tool_invocation	fk_harness_tool_invocation_model	FOREIGN KEY (model_invocation_id) REFERENCES harness_model_invocation(id)
+constraint	harness_tool_invocation	harness_tool_invocation_approval_check	CHECK (((approval IS NULL) OR (jsonb_typeof(approval) = 'object'::text)))
+constraint	harness_tool_invocation	harness_tool_invocation_attempt_check	CHECK ((attempt >= 0))
+constraint	harness_tool_invocation	harness_tool_invocation_binding_check	CHECK (((binding IS NULL) OR (jsonb_typeof(binding) = 'object'::text)))
+constraint	harness_tool_invocation	harness_tool_invocation_call_check	CHECK ((jsonb_typeof(call) = 'object'::text))
+constraint	harness_tool_invocation	harness_tool_invocation_call_index_check	CHECK ((call_index >= 0))
+constraint	harness_tool_invocation	harness_tool_invocation_effects_check	CHECK ((jsonb_typeof(effects) = 'object'::text))
+constraint	harness_tool_invocation	harness_tool_invocation_error_check	CHECK (((error IS NULL) OR (jsonb_typeof(error) = 'object'::text)))
+constraint	harness_tool_invocation	harness_tool_invocation_pkey	PRIMARY KEY (id)
+constraint	harness_tool_invocation	harness_tool_invocation_result_check	CHECK (((result IS NULL) OR (jsonb_typeof(result) = 'object'::text)))
+constraint	harness_tool_invocation	uk_harness_tool_invocation_call_index	UNIQUE (assistant_entry_id, call_index)
+constraint	harness_work	ck_harness_work_lease_pair	CHECK (((lease_token IS NULL) = (lease_until IS NULL)))
+constraint	harness_work	ck_harness_work_lease_token	CHECK (((lease_token IS NULL) OR ((length((lease_token)::text) > 0) AND (btrim((lease_token)::text) = (lease_token)::text))))
+constraint	harness_work	ck_harness_work_required_environment	CHECK (((required_environment_id IS NULL) OR ((target_type)::text = 'TOOL'::text)))
+constraint	harness_work	ck_harness_work_target_type	CHECK (((target_type)::text = ANY ((ARRAY['THREAD'::character varying, 'MODEL'::character varying, 'TOOL'::character varying])::text[])))
+constraint	harness_work	fk_harness_work_environment	FOREIGN KEY (required_environment_id) REFERENCES environment(id) ON DELETE RESTRICT
+constraint	harness_work	harness_work_pkey	PRIMARY KEY (target_type, target_id)
+constraint	harness_work	harness_work_wake_version_check	CHECK ((wake_version > 0))
+constraint	mcp_server	ck_mcp_server_discovery_status	CHECK (((discovery_status)::text = ANY ((ARRAY['UNVERIFIED'::character varying, 'AVAILABLE'::character varying, 'FAILED'::character varying])::text[])))
+constraint	mcp_server	ck_mcp_server_headers_object	CHECK ((jsonb_typeof(headers) = 'object'::text))
+constraint	mcp_server	ck_mcp_server_name	CHECK (((name)::text ~ '^[a-z][a-z0-9_]*$'::text))
+constraint	mcp_server	ck_mcp_server_time_order	CHECK ((updated_at >= created_at))
+constraint	mcp_server	ck_mcp_server_timeout_positive	CHECK ((timeout_millis > 0))
+constraint	mcp_server	ck_mcp_server_url_nonblank	CHECK ((btrim((url)::text) <> ''::text))
+constraint	mcp_server	ck_mcp_server_version_nonneg	CHECK ((version >= 0))
+constraint	mcp_server	mcp_server_pkey	PRIMARY KEY (name)
+constraint	mcp_tool	ck_mcp_tool_description_nonblank	CHECK ((btrim(description) <> ''::text))
+constraint	mcp_tool	ck_mcp_tool_input_schema_object	CHECK ((jsonb_typeof(input_schema) = 'object'::text))
+constraint	mcp_tool	ck_mcp_tool_name	CHECK (((name)::text ~ '[A-Za-z][A-Za-z0-9_-]*'::text))
+constraint	mcp_tool	ck_mcp_tool_source_name	CHECK ((char_length((source_name)::text) > 0))
+constraint	mcp_tool	fk_mcp_tool_server	FOREIGN KEY (server_name) REFERENCES mcp_server(name) ON DELETE CASCADE
+constraint	mcp_tool	mcp_tool_pkey	PRIMARY KEY (name)
+constraint	plugin_credential	ck_plugin_credential_encrypted_payload	CHECK ((octet_length(encrypted_payload) > 0))
+constraint	plugin_credential	ck_plugin_credential_last_refresh_error	CHECK (((last_refresh_error IS NULL) OR ((last_refresh_error = btrim(last_refresh_error)) AND (char_length(last_refresh_error) > 0) AND (octet_length(last_refresh_error) <= 4096))))
+constraint	plugin_credential	ck_plugin_credential_plugin_id	CHECK (((plugin_id)::text ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'::text))
+constraint	plugin_credential	ck_plugin_credential_refresh_lease	CHECK ((((refresh_lease_token IS NULL) = (refresh_lease_until IS NULL)) AND ((refresh_lease_token IS NULL) OR (((refresh_lease_token)::text = btrim((refresh_lease_token)::text)) AND (char_length((refresh_lease_token)::text) > 0)))))
+constraint	plugin_credential	ck_plugin_credential_region	CHECK ((((region)::text = btrim((region)::text)) AND (char_length((region)::text) > 0)))
+constraint	plugin_credential	ck_plugin_credential_status	CHECK (((status)::text = ANY ((ARRAY['CONNECTED'::character varying, 'REFRESH_FAILED'::character varying, 'REFRESH_UNCERTAIN'::character varying, 'REAUTH_REQUIRED'::character varying])::text[])))
+constraint	plugin_credential	ck_plugin_credential_time_order	CHECK ((update_time >= create_time))
+constraint	plugin_credential	ck_plugin_credential_version	CHECK ((version >= 0))
+constraint	plugin_credential	pk_plugin_credential	PRIMARY KEY (plugin_id)
+constraint	session_blob_ref	fk_session_blob_ref_blob	FOREIGN KEY (blob_id) REFERENCES storage_blob(id) ON DELETE RESTRICT
+constraint	session_blob_ref	fk_session_blob_ref_session	FOREIGN KEY (session_id) REFERENCES harness_session(id) ON DELETE RESTRICT
+constraint	session_blob_ref	pk_session_blob_ref	PRIMARY KEY (session_id, blob_id)
+constraint	skill_package	ck_skill_package_branch	CHECK ((((branch)::text = btrim((branch)::text)) AND (char_length((branch)::text) > 0) AND ((branch)::text !~ '[[:cntrl:]]'::text)))
+constraint	skill_package	ck_skill_package_current_commit	CHECK (((current_commit)::text ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'::text))
+constraint	skill_package	ck_skill_package_description	CHECK (((description IS NULL) OR ((description = btrim(description)) AND (char_length(description) > 0))))
+constraint	skill_package	ck_skill_package_head_check_error	CHECK (((head_check_error IS NULL) OR ((head_check_error = btrim(head_check_error)) AND (char_length(head_check_error) > 0) AND (octet_length(head_check_error) <= 4096))))
+constraint	skill_package	ck_skill_package_name	CHECK ((((package_name)::text = btrim((package_name)::text)) AND (char_length((package_name)::text) > 0) AND ((package_name)::text !~ '[[:cntrl:]]'::text) AND (POSITION((':'::text) IN (package_name)) = 0) AND (POSITION(('/'::text) IN (package_name)) = 0) AND (POSITION(('@'::text) IN (package_name)) = 0) AND (POSITION(('\'::text) IN (package_name)) = 0)))
+constraint	skill_package	ck_skill_package_observed_head_commit	CHECK (((observed_head_commit IS NULL) OR ((observed_head_commit)::text ~ '^([0-9a-f]{40}|[0-9a-f]{64})$'::text)))
+constraint	skill_package	ck_skill_package_repository_url	CHECK (((repository_url = btrim(repository_url)) AND (repository_url ~ '^[a-z][a-z0-9+.-]*://[^[:space:]]+$'::text) AND (char_length(repository_url) <= 2048) AND (repository_url !~ '[[:cntrl:]]'::text) AND (repository_url !~ '://[^/[:space:]]*@'::text)))
+constraint	skill_package	ck_skill_package_skills	CHECK ((jsonb_typeof(skills) = 'array'::text))
+constraint	skill_package	ck_skill_package_time_order	CHECK ((update_time >= create_time))
+constraint	skill_package	ck_skill_package_version	CHECK ((version >= 0))
+constraint	skill_package	pk_skill_package	PRIMARY KEY (package_name)
+constraint	storage_blob	ck_storage_blob_dimensions_pair	CHECK (((width IS NULL) = (height IS NULL)))
+constraint	storage_blob	ck_storage_blob_dimensions_positive	CHECK (((width IS NULL) OR ((width > 0) AND (height > 0))))
+constraint	storage_blob	ck_storage_blob_duration_positive	CHECK (((duration_ms IS NULL) OR (duration_ms > 0)))
+constraint	storage_blob	ck_storage_blob_media_type_nonblank	CHECK ((btrim((media_type)::text) <> ''::text))
+constraint	storage_blob	ck_storage_blob_sha256	CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text))
+constraint	storage_blob	ck_storage_blob_size_nonneg	CHECK ((size_bytes >= 0))
+constraint	storage_blob	ck_storage_blob_state_ref_count	CHECK (((((state)::text = 'ACTIVE'::text) AND (ref_count > 0)) OR (((state)::text = 'DELETING'::text) AND (ref_count = 0))))
+constraint	storage_blob	storage_blob_pkey	PRIMARY KEY (id)
+constraint	storage_upload	ck_storage_upload_cleanup_pair	CHECK (((cleanup_token IS NULL) = (cleanup_until IS NULL)))
+constraint	storage_upload	ck_storage_upload_cleanup_token	CHECK (((cleanup_token IS NULL) OR ((btrim((cleanup_token)::text) <> ''::text) AND ((cleanup_token)::text = btrim((cleanup_token)::text)) AND (char_length((cleanup_token)::text) <= 128))))
+constraint	storage_upload	ck_storage_upload_expiry	CHECK ((expires_at > created_at))
+constraint	storage_upload	ck_storage_upload_filename_nonblank	CHECK ((btrim((filename)::text) <> ''::text))
+constraint	storage_upload	ck_storage_upload_media_type_nonblank	CHECK ((btrim((declared_media_type)::text) <> ''::text))
+constraint	storage_upload	ck_storage_upload_sha256	CHECK ((declared_sha256 ~ '^[0-9a-f]{64}$'::text))
+constraint	storage_upload	ck_storage_upload_size_nonneg	CHECK ((declared_size >= 0))
+constraint	storage_upload	fk_storage_upload_blob	FOREIGN KEY (blob_id) REFERENCES storage_blob(id) ON DELETE RESTRICT
+constraint	storage_upload	storage_upload_pkey	PRIMARY KEY (id)
+constraint	storage_upload	uk_storage_upload_candidate	UNIQUE (candidate_blob_id)
+constraint	system_setting	ck_system_setting_config_object	CHECK ((jsonb_typeof(config) = 'object'::text))
+constraint	system_setting	ck_system_setting_id	CHECK ((id = 1))
+constraint	system_setting	ck_system_setting_version_nonneg	CHECK ((version >= 0))
+constraint	system_setting	system_setting_pkey	PRIMARY KEY (id)
+index	agent_definition	agent_definition_pkey	CREATE UNIQUE INDEX agent_definition_pkey ON public.agent_definition USING btree (name)
+index	agent_definition	idx_agent_definition_model	CREATE INDEX idx_agent_definition_model ON public.agent_definition USING btree (model_provider_name, model_name)
+index	agent_model	pk_agent_model	CREATE UNIQUE INDEX pk_agent_model ON public.agent_model USING btree (provider_name, name)
+index	agent_provider	agent_provider_pkey	CREATE UNIQUE INDEX agent_provider_pkey ON public.agent_provider USING btree (name)
+index	chat	chat_pkey	CREATE UNIQUE INDEX chat_pkey ON public.chat USING btree (id)
+index	chat	idx_chat_archived	CREATE INDEX idx_chat_archived ON public.chat USING btree (archived_at, updated_at, id)
+index	chat	idx_chat_modified	CREATE INDEX idx_chat_modified ON public.chat USING btree (updated_at, created_at)
+index	environment	environment_pkey	CREATE UNIQUE INDEX environment_pkey ON public.environment USING btree (id)
+index	environment	idx_environment_updated	CREATE INDEX idx_environment_updated ON public.environment USING btree (updated_at, id)
+index	environment	uk_environment_name	CREATE UNIQUE INDEX uk_environment_name ON public.environment USING btree (name)
+index	environment	uk_environment_registration_token	CREATE UNIQUE INDEX uk_environment_registration_token ON public.environment USING btree (registration_token)
+index	environment_connection	environment_connection_pkey	CREATE UNIQUE INDEX environment_connection_pkey ON public.environment_connection USING btree (environment_id)
+index	environment_connection	idx_environment_connection_lease_until	CREATE INDEX idx_environment_connection_lease_until ON public.environment_connection USING btree (lease_until)
+index	environment_connection	idx_environment_connection_owner	CREATE INDEX idx_environment_connection_owner ON public.environment_connection USING btree (owner_node_id)
+index	harness_entry	harness_entry_pkey	CREATE UNIQUE INDEX harness_entry_pkey ON public.harness_entry USING btree (id)
+index	harness_entry	idx_harness_entry_parent	CREATE INDEX idx_harness_entry_parent ON public.harness_entry USING btree (session_id, parent_entry_id)
+index	harness_entry	uk_harness_entry_session_id	CREATE UNIQUE INDEX uk_harness_entry_session_id ON public.harness_entry USING btree (session_id, id)
+index	harness_entry	uk_harness_entry_single_root	CREATE UNIQUE INDEX uk_harness_entry_single_root ON public.harness_entry USING btree (session_id) WHERE ((entry_type)::text = 'ROOT'::text)
+index	harness_model_invocation	harness_model_invocation_pkey	CREATE UNIQUE INDEX harness_model_invocation_pkey ON public.harness_model_invocation USING btree (id)
+index	harness_model_invocation	uk_harness_model_invocation_result	CREATE UNIQUE INDEX uk_harness_model_invocation_result ON public.harness_model_invocation USING btree (result_entry_id) WHERE (result_entry_id IS NOT NULL)
+index	harness_model_invocation	uk_harness_model_invocation_turn	CREATE UNIQUE INDEX uk_harness_model_invocation_turn ON public.harness_model_invocation USING btree (thread_id, turn_start_entry_id)
+index	harness_session	harness_session_pkey	CREATE UNIQUE INDEX harness_session_pkey ON public.harness_session USING btree (id)
+index	harness_thread	harness_thread_pkey	CREATE UNIQUE INDEX harness_thread_pkey ON public.harness_thread USING btree (id)
+index	harness_thread	idx_harness_thread_session	CREATE INDEX idx_harness_thread_session ON public.harness_thread USING btree (session_id, created_at, id)
+index	harness_thread	uk_harness_thread_session	CREATE UNIQUE INDEX uk_harness_thread_session ON public.harness_thread USING btree (session_id, id)
+index	harness_thread_command	harness_thread_command_pkey	CREATE UNIQUE INDEX harness_thread_command_pkey ON public.harness_thread_command USING btree (thread_id, sequence)
+index	harness_thread_command	idx_harness_thread_command_queued	CREATE INDEX idx_harness_thread_command_queued ON public.harness_thread_command USING btree (thread_id, sequence) WHERE ((applied_turn_start_entry_id IS NULL) AND (cancelled_at IS NULL))
+index	harness_thread_command	idx_harness_thread_command_stop_request	CREATE INDEX idx_harness_thread_command_stop_request ON public.harness_thread_command USING btree (thread_id, stop_request_id, sequence) WHERE (stop_request_id IS NOT NULL)
+index	harness_thread_command	uk_harness_thread_command_idempotency	CREATE UNIQUE INDEX uk_harness_thread_command_idempotency ON public.harness_thread_command USING btree (thread_id, idempotency_key)
+index	harness_tool_invocation	harness_tool_invocation_pkey	CREATE UNIQUE INDEX harness_tool_invocation_pkey ON public.harness_tool_invocation USING btree (id)
+index	harness_tool_invocation	idx_harness_tool_invocation_model_nonterminal	CREATE INDEX idx_harness_tool_invocation_model_nonterminal ON public.harness_tool_invocation USING btree (model_invocation_id) WHERE ((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying, 'READY'::character varying, 'DISPATCHING'::character varying, 'RUNNING'::character varying])::text[]))
+index	harness_tool_invocation	idx_harness_tool_invocation_pending	CREATE INDEX idx_harness_tool_invocation_pending ON public.harness_tool_invocation USING btree (created_at, id) WHERE ((status)::text = ANY ((ARRAY['WAITING_APPROVAL'::character varying, 'WAITING_INPUT'::character varying])::text[]))
+index	harness_tool_invocation	uk_harness_tool_invocation_call_index	CREATE UNIQUE INDEX uk_harness_tool_invocation_call_index ON public.harness_tool_invocation USING btree (assistant_entry_id, call_index)
+index	harness_work	harness_work_pkey	CREATE UNIQUE INDEX harness_work_pkey ON public.harness_work USING btree (target_type, target_id)
+index	harness_work	idx_harness_work_available	CREATE INDEX idx_harness_work_available ON public.harness_work USING btree (available_at, target_type, target_id)
+index	harness_work	idx_harness_work_lease_until	CREATE INDEX idx_harness_work_lease_until ON public.harness_work USING btree (lease_until, target_type, target_id) WHERE (lease_until IS NOT NULL)
+index	mcp_server	mcp_server_pkey	CREATE UNIQUE INDEX mcp_server_pkey ON public.mcp_server USING btree (name)
+index	mcp_tool	mcp_tool_pkey	CREATE UNIQUE INDEX mcp_tool_pkey ON public.mcp_tool USING btree (name)
+index	mcp_tool	uk_mcp_tool_server_source_name	CREATE UNIQUE INDEX uk_mcp_tool_server_source_name ON public.mcp_tool USING btree (server_name, source_name)
+index	plugin_credential	idx_plugin_credential_refresh_due	CREATE INDEX idx_plugin_credential_refresh_due ON public.plugin_credential USING btree (next_refresh_at)
+index	plugin_credential	pk_plugin_credential	CREATE UNIQUE INDEX pk_plugin_credential ON public.plugin_credential USING btree (plugin_id)
+index	session_blob_ref	idx_session_blob_ref_blob	CREATE INDEX idx_session_blob_ref_blob ON public.session_blob_ref USING btree (blob_id, session_id)
+index	session_blob_ref	pk_session_blob_ref	CREATE UNIQUE INDEX pk_session_blob_ref ON public.session_blob_ref USING btree (session_id, blob_id)
+index	skill_package	pk_skill_package	CREATE UNIQUE INDEX pk_skill_package ON public.skill_package USING btree (package_name)
+index	storage_blob	storage_blob_pkey	CREATE UNIQUE INDEX storage_blob_pkey ON public.storage_blob USING btree (id)
+index	storage_blob	uk_storage_blob_active_hash	CREATE UNIQUE INDEX uk_storage_blob_active_hash ON public.storage_blob USING btree (sha256, size_bytes) WHERE ((state)::text = 'ACTIVE'::text)
+index	storage_upload	idx_storage_upload_cleanup_claim	CREATE INDEX idx_storage_upload_cleanup_claim ON public.storage_upload USING btree (cleanup_requested_at, expires_at, cleanup_until, id)
+index	storage_upload	storage_upload_pkey	CREATE UNIQUE INDEX storage_upload_pkey ON public.storage_upload USING btree (id)
+index	storage_upload	uk_storage_upload_candidate	CREATE UNIQUE INDEX uk_storage_upload_candidate ON public.storage_upload USING btree (candidate_blob_id)
+index	system_setting	system_setting_pkey	CREATE UNIQUE INDEX system_setting_pkey ON public.system_setting USING btree (id)
+table	agent_definition		preserved
+table	agent_model		preserved
+table	agent_provider		preserved
+table	chat		preserved
+table	environment		preserved
+table	environment_connection		preserved
+table	harness_entry		preserved
+table	harness_model_invocation		preserved
+table	harness_session		preserved
+table	harness_thread		preserved
+table	harness_thread_command		preserved
+table	harness_tool_invocation		preserved
+table	harness_work		preserved
+table	mcp_server		preserved
+table	mcp_tool		preserved
+table	plugin_credential		preserved
+table	session_blob_ref		preserved
+table	skill_package		preserved
+table	storage_blob		preserved
+table	storage_upload		preserved
+table	system_setting		preserved
+trigger	harness_thread	trg_harness_thread_version_notify	CREATE TRIGGER trg_harness_thread_version_notify AFTER INSERT OR UPDATE OF version ON public.harness_thread FOR EACH ROW EXECUTE FUNCTION harness_thread_version_notify() enabled=O
+trigger	skill_package	trg_skill_package_changed	CREATE TRIGGER trg_skill_package_changed AFTER INSERT OR DELETE OR UPDATE ON public.skill_package FOR EACH ROW EXECUTE FUNCTION skill_package_changed_notify() enabled=O
+trigger	system_setting	trg_system_setting_version_notify	CREATE TRIGGER trg_system_setting_version_notify AFTER INSERT OR UPDATE OF version ON public.system_setting FOR EACH ROW EXECUTE FUNCTION system_setting_version_notify() enabled=O
