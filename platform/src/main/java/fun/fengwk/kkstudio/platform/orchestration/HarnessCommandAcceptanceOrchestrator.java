@@ -13,17 +13,10 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -39,10 +32,7 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
-import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -75,7 +65,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final StorageUploadService uploadService;
   private final SessionBlobRefManager refManager;
-  private final StorageBlobManager blobManager;
+  private final UserMessageContentPreparer contentPreparer;
 
   public HarnessCommandAcceptanceOrchestrator(
       ChatSessionRepository chatSessionRepository,
@@ -108,7 +98,11 @@ public class HarnessCommandAcceptanceOrchestrator {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
-    this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
+    this.contentPreparer =
+        new UserMessageContentPreparer(
+            this.refManager,
+            Objects.requireNonNull(blobManager, "blobManager"),
+            this::consumeAttachment);
   }
 
   /** 接受 owner 的一次命令批：授权 + 归属/附件物化 + Runtime 入队在同一事务内原子完成。 */
@@ -143,6 +137,20 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
+   * owner 授权（请求预览用）：与 {@link #accept} 共用同一份归属判定，仅完成 KEY SHARE 归属锁与 relation 校验，不插入任何归属、 不物化附件、不调用
+   * Runtime，也不产生任何写入。因此预览不可能绕过跨 owner 检查，也不可能顺带获得消费权限。
+   *
+   * <p>事务必须是读写事务：归属判定对 owner 行取 {@code SELECT ... FOR KEY SHARE}（与 accept 同一把锁），而 PostgreSQL 不允许在
+   * read-only 事务中执行该语句。事务本身仍然只读语义——本方法没有任何 INSERT/UPDATE/DELETE。
+   */
+  @Transactional
+  public void authorizeThread(OwnerRef owner, UUID threadId) {
+    Objects.requireNonNull(owner, "owner");
+    Objects.requireNonNull(threadId, "threadId");
+    requireThreadOwner(owner, threadId);
+  }
+
+  /**
    * 调用 Runtime 前完成 owner 授权：NEW_SESSION 对新 Session 只要求 owner 存在，但对已有 Session（包括 Runtime 精确
    * replay）要求目标 Session 已由该 owner 持有；NEW_THREAD/THREAD 始终要求目标 Session 已由该 owner 持有。
    */
@@ -167,11 +175,16 @@ public class HarnessCommandAcceptanceOrchestrator {
         lockOwnerForKeyShare(owner);
         requireOwnedSession(owner, newThread.sessionId());
       }
-      case AcceptCommandsTarget.Thread thread -> {
-        lockOwnerForKeyShare(owner);
-        requireOwnedSession(owner, findSessionId(thread.threadId()));
-      }
+      case AcceptCommandsTarget.Thread thread -> requireThreadOwner(owner, thread.threadId());
     }
+  }
+
+  /**
+   * THREAD 目标授权：KEY SHARE 锁 owner 行，并要求该 Thread 的 Session 已由该 owner 的 session_owner relation 持有。
+   */
+  private void requireThreadOwner(OwnerRef owner, UUID threadId) {
+    lockOwnerForKeyShare(owner);
+    requireOwnedSession(owner, findSessionId(threadId));
   }
 
   /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
@@ -294,32 +307,12 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * 准备 USER_MESSAGE 内容：瞬时 ATTACHMENT(uploadId) 物化为 durable RESOURCE，已有 RESOURCE 校验 Session
-   * ownership；保持 idempotencyKey/requestHash 不变。
+   * ownership；保持 idempotencyKey/requestHash 不变。转换核心与只读请求预览共用 {@link UserMessageContentPreparer}，两者仅
+   * READY upload 的取得方式不同。
    */
   private List<NewThreadCommand> prepareUserContents(
       UUID sessionId, List<NewThreadCommand> commands) {
-    List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
-    for (NewThreadCommand command : commands) {
-      if (!(command.payload() instanceof UserMessageCommandPayload user)) {
-        prepared.add(command);
-        continue;
-      }
-      AgentMessage message = user.message();
-      List<AgentMessageContent> contents = new ArrayList<>(message.contents().size());
-      for (AgentMessageContent content : message.contents()) {
-        if (content instanceof AttachmentMessageContent attachment) {
-          contents.add(consumeAttachment(sessionId, attachment));
-        } else if (content instanceof ResourceMessageContent resource) {
-          contents.add(requireOwnedResource(sessionId, resource));
-        } else {
-          contents.add(content);
-        }
-      }
-      prepared.add(
-          command.withPayload(
-              new UserMessageCommandPayload(new AgentMessage(AgentMessageRole.USER, contents))));
-    }
-    return List.copyOf(prepared);
+    return contentPreparer.prepare(sessionId, commands);
   }
 
   /**
@@ -327,9 +320,8 @@ public class HarnessCommandAcceptanceOrchestrator {
    * ref（retain 先于 release）、标记已消费上传 cleanup（release 其引用）。全部在同一外事务内，失败整体回滚；S3 清理由提交后的 Storage
    * Maintenance 完成。
    */
-  private ResourceMessageContent consumeAttachment(
-      UUID sessionId, AttachmentMessageContent attachment) {
-    UUID uploadId = attachment.uploadId();
+  private UserMessageContentPreparer.ReadyAttachment consumeAttachment(
+      UUID sessionId, UUID uploadId) {
     StorageUploadService.ReadyUpload ready;
     try {
       ready = uploadService.lockReady(uploadId);
@@ -338,43 +330,7 @@ public class HarnessCommandAcceptanceOrchestrator {
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
-    return ResourceMessageContent.media(
-        ready.blobId(),
-        ready.filename(),
-        null,
-        imageTierForBlob(ready.blobId(), attachment.imageTier()));
-  }
-
-  /** RESOURCE 只复用当前 Session 已持有的 durable ref，不新增 retain，也不信任跨 Session blob id。 */
-  private ResourceMessageContent requireOwnedResource(
-      UUID sessionId, ResourceMessageContent resource) {
-    if (!refManager.contains(sessionId, resource.blobId())) {
-      throw new IllegalArgumentException("Resource is not owned by the current session");
-    }
-    if (resource.imageTier() == null) {
-      return resource;
-    }
-    ImageInputTier imageTier = imageTierForBlob(resource.blobId(), resource.imageTier());
-    if (imageTier == resource.imageTier()) {
-      return resource;
-    }
-    return ResourceMessageContent.media(
-        resource.blobId(), resource.name(), resource.preview(), imageTier);
-  }
-
-  /**
-   * 只有图片媒体真正使用档位：wire 上的档位对 ATTACHMENT/RESOURCE 缺省即 720P，非图片媒体在这里收敛为 null，绝不持久化 无意义的档位（音频、视频、PDF
-   * 与外部化文本都不携带档位）。
-   */
-  private ImageInputTier imageTierForBlob(UUID blobId, ImageInputTier requested) {
-    StorageBlob blob = blobManager.getBlob(blobId);
-    if (blob == null
-        || blob.getState() != StorageBlobState.ACTIVE
-        || blob.getMediaType() == null
-        || !blob.getMediaType().startsWith("image/")) {
-      return null;
-    }
-    return requested == null ? ImageInputTier.P720 : requested;
+    return new UserMessageContentPreparer.ReadyAttachment(ready.blobId(), ready.filename());
   }
 
   private HarnessRuntime requireRuntime() {

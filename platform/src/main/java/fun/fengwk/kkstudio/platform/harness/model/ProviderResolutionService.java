@@ -31,14 +31,17 @@ public interface ProviderResolutionService {
     private final ProviderRequest effectiveRequest;
     private final ModelCallTimeoutPolicy timeoutPolicy;
     private final Function<ModelCallTimeoutPolicy, ModelProvider> providerOpener;
+    private final Function<ProviderRequest, byte[]> requestBodyEncoder;
 
     ResolvedExecution(
         ProviderRequest effectiveRequest,
         ModelCallTimeoutPolicy timeoutPolicy,
-        Function<ModelCallTimeoutPolicy, ModelProvider> providerOpener) {
+        Function<ModelCallTimeoutPolicy, ModelProvider> providerOpener,
+        Function<ProviderRequest, byte[]> requestBodyEncoder) {
       this.effectiveRequest = Objects.requireNonNull(effectiveRequest, "effectiveRequest");
       this.timeoutPolicy = Objects.requireNonNull(timeoutPolicy, "timeoutPolicy");
       this.providerOpener = Objects.requireNonNull(providerOpener, "providerOpener");
+      this.requestBodyEncoder = Objects.requireNonNull(requestBodyEncoder, "requestBodyEncoder");
     }
 
     /** 最终有效请求：transport 必须使用它，而不是持久化的原 request。 */
@@ -48,6 +51,20 @@ public interface ProviderResolutionService {
 
     public ModelCallTimeoutPolicy timeoutPolicy() {
       return timeoutPolicy;
+    }
+
+    /**
+     * 无网络地把本次解析的最终有效请求编码为 transport 将发送的最终 UTF-8 JSON body：复用与 {@link #openProvider} 同一 adapter、同一
+     * connection configuration 与同一 descriptor 语义（含 connection generation 派生的 replay
+     * affinity）。本入口不解析 endpoint、不创建 {@link ModelProvider}、不触发 transport、不生成任何认证 Header。
+     *
+     * <p>adapter 未实现请求体预览时原样抛出 {@link UnsupportedOperationException}，调用方必须显式拒绝而不是把请求当作可预览。
+     * 编码失败（例如超限或非法请求）原样抛出 {@link
+     * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException}。
+     */
+    public byte[] encodeRequestBody() {
+      return Objects.requireNonNull(
+          requestBodyEncoder.apply(effectiveRequest), "request body encoder returned null");
     }
 
     ModelProvider openProvider(ModelCallTimeoutPolicy effectiveTimeoutPolicy) {
