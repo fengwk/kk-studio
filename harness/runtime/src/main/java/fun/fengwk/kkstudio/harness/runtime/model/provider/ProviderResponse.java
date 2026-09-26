@@ -18,10 +18,11 @@ import java.util.Set;
  * Provider 流完成时提供的完整响应快照。
  *
  * <p>{@code stopReason} 是规范化生成结束原因（{@link GenerationStopReason}），与 tool calls 正交：{@code COMPLETE}
- * 可以有或没有 calls，{@code LENGTH} 可以有或没有已观测 calls，{@code FILTERED} 的 calls 必须为空。{@code usage} 是
- * Provider 归一化后的实际 token 用量，{@code cost} 是基于本次生效价格计算的非空成本快照。 {@code requestId}、{@code serviceTier}
- * 由 Provider 报告，可为空。{@code rawUsageJson} 是 Provider usage 段的原始 JSON 序列化（必须是合法 JSON object 或
- * array，null 规范化为 {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
+ * 可以有或没有 calls，{@code LENGTH} 可以有或没有已观测 calls，{@code FILTERED} 的 calls 与 diagnostics 必须为空， {@code
+ * CONTINUE} 的 calls 与 diagnostics 同样必须为空（协议要求续写时不得同时表达工具意图）。{@code usage} 是 Provider 归一化后的实际 token
+ * 用量，{@code cost} 是基于本次生效价格计算的非空成本快照。 {@code requestId}、{@code serviceTier} 由 Provider
+ * 报告，可为空。{@code rawUsageJson} 是 Provider usage 段的原始 JSON 序列化（必须是合法 JSON object 或 array，null 规范化为
+ * {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
  */
 public record ProviderResponse(
     String text,
@@ -55,7 +56,7 @@ public record ProviderResponse(
     rawUsageJson = normalizeRawUsageJson(rawUsageJson);
     toolCallDiagnostics =
         toolCallDiagnostics == null ? List.of() : List.copyOf(toolCallDiagnostics);
-    validateDiagnostics(toolCalls, toolCallDiagnostics, stopReason);
+    validateToolOutcomes(toolCalls, toolCallDiagnostics, stopReason);
   }
 
   public ProviderResponse(
@@ -122,13 +123,23 @@ public record ProviderResponse(
     return value;
   }
 
-  private static void validateDiagnostics(
+  private static void validateToolOutcomes(
       List<ProviderToolCall> toolCalls,
       List<ProviderToolCallDiagnostic> diagnostics,
       GenerationStopReason stopReason) {
     if (stopReason == GenerationStopReason.FILTERED && !diagnostics.isEmpty()) {
       throw new IllegalArgumentException(
           "FILTERED responses must not contain tool call diagnostics");
+    }
+    // CONTINUE 是纯协议续写终止态：既不能表达已观测工具意图，也不能表达被丢弃的工具意图。
+    if (stopReason == GenerationStopReason.CONTINUE) {
+      if (!toolCalls.isEmpty()) {
+        throw new IllegalArgumentException("CONTINUE responses must not contain tool calls");
+      }
+      if (!diagnostics.isEmpty()) {
+        throw new IllegalArgumentException(
+            "CONTINUE responses must not contain tool call diagnostics");
+      }
     }
     int totalOutcomes = toolCalls.size() + diagnostics.size();
     Set<Integer> seenIndices = new HashSet<>();

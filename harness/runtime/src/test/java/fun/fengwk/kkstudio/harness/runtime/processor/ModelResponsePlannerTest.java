@@ -267,6 +267,16 @@ class ModelResponsePlannerTest {
     assertEquals(TurnEndReason.CONTENT_FILTERED, failed.reason());
   }
 
+  /** Provider 协议续写终止态：CONTINUE 无 tool intent，直接规划为 Continue（不进入任何 tool 决策）。 */
+  @Test
+  void continueWithoutToolIntentPlansContinuation() {
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(GenerationStopReason.CONTINUE, List.of()), bindings(toolBinding("bash")));
+
+    assertSame(ModelResponsePlan.Continue.class, plan.getClass());
+  }
+
   @Test
   void readySlotRequiresBindingAndForbidsError() {
     ToolCall call = new ToolCall("call-1", "bash", "{}");

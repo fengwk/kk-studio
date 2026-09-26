@@ -596,7 +596,7 @@ const CORE_STATE_ENUMS = [
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/GenerationStopReason.java',
     enumName: 'GenerationStopReason',
-    constants: ['COMPLETE', 'LENGTH', 'FILTERED'],
+    constants: ['COMPLETE', 'LENGTH', 'FILTERED', 'CONTINUE'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderErrorKind.java',
