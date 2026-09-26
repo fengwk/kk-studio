@@ -63,11 +63,17 @@ export function useBoundThreadPanelViews(
           bodyRef={eventsBodyRef}
           initialScrollTop={initialEventsScrollTop}
           debug={debug}
+          debugSelection={debugSelection}
           onSelectInspector={(selection) => {
             if (selection != null) {
               selectEvent(null)
             }
             setDebugSelection(selection)
+          }}
+          selectedRecord={selectedRecord}
+          onCloseDetail={() => {
+            selectEvent(null)
+            setDebugSelection(null)
           }}
         />
       ) : undefined,

@@ -1,28 +1,58 @@
+import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 'react'
 import { X } from 'lucide-react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { useI18n } from '@/shared/i18n'
 
 /**
- * 只读 Event detail widget：展示在 ThreadWidgetStack 的 Composer 上方（TaskStatus
- * 之前）。不是 InteractionPanel：不隐藏 Composer、不抢焦点、无 backdrop、无
- * auto focus、无 Copy；展示结构化 details 与原始 payload JSON（pre 内滚动）。
+ * 只读 Event 详情视图：位于 Debug 视图详情列。
+ * 展示选中事件的结构化详情字段与原始 payload JSON，由详情列单列整体纵向滚动。
  */
 export function ThreadEventDetail({
   record,
   onClose,
+  closeButtonRef,
 }: {
   record: ThreadEventRecord
   onClose: () => void
+  closeButtonRef?: Ref<HTMLButtonElement>
 }) {
   const { t } = useI18n()
+  const containerRef = useRef<HTMLElement>(null)
+  const internalCloseBtnRef = useRef<HTMLButtonElement>(null)
+  const resolvedCloseBtnRef = (closeButtonRef as RefObject<HTMLButtonElement | null>) ?? internalCloseBtnRef
+
+  useEffect(() => {
+    const btn = resolvedCloseBtnRef.current
+    if (btn) {
+      btn.focus({ preventScroll: true })
+    } else {
+      containerRef.current?.focus({ preventScroll: true })
+    }
+  }, [resolvedCloseBtnRef])
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onClose()
+    }
+  }
+
   return (
     <section
+      ref={containerRef}
+      tabIndex={-1}
       className="thread-event-detail"
       aria-label={t('ai.runtime.event.detailTitle')}
+      onKeyDown={handleKeyDown}
     >
       <header className="thread-event-detail-header">
         <h3>{record.title}</h3>
         <button
+          ref={resolvedCloseBtnRef}
           type="button"
           className="thread-interaction-close"
           aria-label={t('ai.runtime.event.closeDetail')}
