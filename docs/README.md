@@ -31,6 +31,7 @@
 | [Harness Tool](modules/harness-tool.md) | Tool 的身份、定义、调用、校验和结果采用什么统一契约？ |
 | [Harness Contributor API](modules/harness-contributor-api.md) | Builtin、构建期 Plugin 与 Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
 | [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
+| [内置工具与异步委派](modules/builtin-tools-design.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
 | [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
 | [Harness MCP](modules/harness-mcp.md) | 无状态 MCP client 如何处理总预算、取消与结果映射？ |
 
