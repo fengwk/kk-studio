@@ -71,19 +71,13 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
 
   const usage = input.branchUsage ?? EMPTY_USAGE
 
-  // 1. 环境 (已在上面加入)
-
-  // 2. 上下文：使用最新成功模型调用的已知上下文输入估计，非 sum
+  // 上下文只使用最新调用的输入估计；缺失时不能用分支累计量替代。
   const contextWindow = positiveFinite(input.contextWindow)
+  const usedContext = usage.contextInputTokens
+  const hasContext = usedContext != null && Number.isFinite(usedContext) && usedContext >= 0
   if (contextWindow != null) {
-    const usedContext =
-      usage.contextInputTokens != null
-        ? usage.contextInputTokens
-        : (usage.input + usage.cacheRead + usage.cacheWrite > 0
-          ? usage.input + usage.cacheRead + usage.cacheWrite
-          : 0)
     const text = translate('ai.runtime.status.contextText', {
-      used: formatCompactNumber(usedContext),
+      used: hasContext ? formatCompactNumber(usedContext) : '—',
       total: formatCompactNumber(contextWindow),
     })
     segments.push({
@@ -91,7 +85,7 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
       className: 'thread-status-context',
       text,
       title: translate('ai.runtime.status.contextTitle', {
-        used: String(usedContext),
+        used: hasContext ? String(usedContext) : '—',
         total: String(contextWindow),
       }),
     })
