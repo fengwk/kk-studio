@@ -46,9 +46,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 测试意图：验证 provider 原生 assistant message 的累积与 replay 保真——delta 的字符串/对象/标量按规则合并，官方非规范化字段（audio、
- * function_call、未来字段）进入 replay 并可经次轮编码器原样回放，chunk 级 transport metadata 与 n&gt;1 的其他 choice 不混入， 而
- * known 字段与 durable 不一致时仍然失败；native-only 字段在 affinity/hash 失配时必须 fail closed。
+ * 测试意图：验证 provider 原生 assistant message 的累积与 replay 保真——delta 的字符串/对象/标量按规则合并，audio 仅回放 id，
+ * function_call、未来字段可经次轮编码器原样回放，chunk 级 transport metadata 与 n&gt;1 的其他 choice 不混入， 而 known 字段与
+ * durable 不一致时仍然失败；native-only 字段在 affinity/hash 失配时必须 fail closed。
  */
 class OpenAiChatNativeReplayTest {
 
@@ -107,7 +107,7 @@ class OpenAiChatNativeReplayTest {
   }
 
   @Test
-  @DisplayName("audio / function_call / 未来字段无损进入 replay 并可在次轮原样回放")
+  @DisplayName("audio 仅回放 id；function_call / 未来字段可在次轮原样回放")
   void replaysProviderNativeAssistantFieldsThroughNextTurn() throws Exception {
     ProviderMessage turn1User =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Say hi")));
@@ -133,6 +133,7 @@ class OpenAiChatNativeReplayTest {
               "role": "assistant",
               "content": "Hello ",
               "audio": {"id": "audio_1", "data": "AAA", "transcript": "Hello "},
+              "annotations": [{"type": "url_citation", "url": "https://example.com"}],
               "function_call": {"name": "legacy_lookup", "arguments": "{\\"q\\":"},
               "vendor_future_field": {"trace_id": "t-1", "attempt": 1}
             },
@@ -166,10 +167,8 @@ class OpenAiChatNativeReplayTest {
     JsonNode payload = completion.replayState().payload();
     // 字符串增量追加、object 递归合并、标量覆盖
     assertEquals("Hello world", payload.path("content").asText());
-    assertEquals("audio_1", payload.path("audio").path("id").asText());
-    assertEquals("AAAAAABBB", payload.path("audio").path("data").asText());
-    assertEquals("Hello world", payload.path("audio").path("transcript").asText());
-    assertEquals(1758889999L, payload.path("audio").path("expires_at").asLong());
+    assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), payload.path("audio"));
+    assertFalse(payload.has("annotations"));
     assertEquals("legacy_lookup", payload.path("function_call").path("name").asText());
     assertEquals("{\"q\":\"hi\"}", payload.path("function_call").path("arguments").asText());
     assertEquals("t-1", payload.path("vendor_future_field").path("trace_id").asText());
@@ -200,10 +199,214 @@ class OpenAiChatNativeReplayTest {
     JsonNode wireAsst = wireRoot.path("messages").get(2);
     assertEquals("assistant", wireAsst.path("role").asText());
     assertEquals("Hello world", wireAsst.path("content").asText());
-    assertEquals("audio_1", wireAsst.path("audio").path("id").asText());
-    assertEquals("AAAAAABBB", wireAsst.path("audio").path("data").asText());
+    assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), wireAsst.path("audio"));
+    assertFalse(wireAsst.has("annotations"));
     assertEquals("legacy_lookup", wireAsst.path("function_call").path("name").asText());
     assertEquals("t-1", wireAsst.path("vendor_future_field").path("trace_id").asText());
+  }
+
+  /** 测试意图：缺失有效 audio id 的上游响应不能冻结；持久化后篡改为响应 audio 或 annotations 不能进入下一轮请求。 */
+  @Test
+  void rejectsMalformedAudioAndResponseOnlyReplayFields() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash =
+        encoder
+            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
+            .sourcePrefixHash();
+    for (String audio : List.of("{}", "{\"id\":\"  \"}", "\"audio_1\"")) {
+      OpenAiChatStreamAccumulator accumulator =
+          new OpenAiChatStreamAccumulator(
+              request(user), descriptor, OpenAiChatConfiguration.defaults(), hash, bridge);
+      accumulator.handleData(
+          "{\"choices\":[{\"delta\":{\"audio\":" + audio + "},\"finish_reason\":\"stop\"}]}");
+      accumulator.handleData("[DONE]");
+      ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    }
+    for (String added :
+        List.of(
+            "\"audio\":{\"id\":\"audio_1\",\"data\":\"AAA\"}",
+            "\"audio\":{\"data\":\"AAA\"}",
+            "\"audio\":null",
+            "\"annotations\":[]",
+            "\"annotations\":null")) {
+      ObjectNode payload =
+          (ObjectNode) MAPPER.readTree("{\"role\":\"assistant\",\"content\":\"Hi\"}");
+      ObjectNode extra = (ObjectNode) MAPPER.readTree("{" + added + "}");
+      extra.fields().forEachRemaining(field -> payload.set(field.getKey(), field.getValue()));
+      ProviderMessage assistant =
+          assistant(
+              List.of(new ProviderTextBlock("Hi")),
+              new ProviderReplayState(
+                  ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), hash, payload));
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(user, assistant), descriptor, OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    }
+  }
+
+  /** 测试意图：custom-only 调用始终保持 raw/native-only，既不变成可执行 function，也不丢失次轮 wire。 */
+  @Test
+  void preservesCustomOnlyCallWithoutNormalizingIt() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash =
+        encoder
+            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
+            .sourcePrefixHash();
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), hash, bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"custom_1","type":"custom",
+        "custom":{"name":"code","input":"print(1)"}}]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(List.of(), completion.response().toolCalls());
+    JsonNode nativeCall = completion.replayState().payload().path("tool_calls").get(0);
+    assertEquals("custom_1", nativeCall.path("id").asText());
+    assertEquals("print(1)", nativeCall.path("custom").path("input").asText());
+    assertFalse(nativeCall.has("index"));
+    JsonNode wire =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        user,
+                        assistant(List.of(new ProviderTextBlock("")), completion.replayState())),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertEquals(nativeCall, wire.path("messages").get(2).path("tool_calls").get(0));
+    assertNativeOnlyReplayRejected(
+        user,
+        List.of(new ProviderTextBlock("")),
+        (ObjectNode) completion.replayState().payload(),
+        modelAffinity(),
+        "0".repeat(64));
+  }
+
+  /** 测试意图：混合调用保留原始顺序及 function 扩展成员，覆盖规范化字段并剔除所有 stream index。 */
+  @Test
+  void preservesFunctionExtrasAndCustomCallInOriginalOrder() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    String hash =
+        encoder
+            .encode(request(user), descriptor, OpenAiChatConfiguration.defaults())
+            .sourcePrefixHash();
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), hash, bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":4,"id":"custom_1","type":"custom","custom":{"input":"x"}},
+        {"index":7,"id":"fn_1","type":"function","future":"retained",
+        "function":{"name":"lookup","arguments":"{","futureFn":{"value":1}}}
+        ]},"finish_reason":null}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":7,
+        "function":{"arguments":"\\"q\\":1}"}}]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("{\"q\":1}", completion.response().toolCalls().get(0).argumentsJson());
+    JsonNode calls = completion.replayState().payload().path("tool_calls");
+    assertEquals(2, calls.size());
+    assertEquals("custom", calls.get(0).path("type").asText());
+    assertEquals("fn_1", calls.get(1).path("id").asText());
+    assertEquals("retained", calls.get(1).path("future").asText());
+    assertEquals(1, calls.get(1).path("function").path("futureFn").path("value").asInt());
+    assertEquals("{\"q\":1}", calls.get(1).path("function").path("arguments").asText());
+    assertFalse(calls.get(0).has("index"));
+    assertFalse(calls.get(1).has("index"));
+    ProviderMessage assistant =
+        assistant(
+            List.of(new ProviderToolCallBlock(completion.response().toolCalls().get(0))),
+            completion.replayState());
+    JsonNode wire =
+        MAPPER.readTree(
+            encoder
+                .encode(request(user, assistant), descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertEquals(calls, wire.path("messages").get(2).path("tool_calls"));
+
+    ObjectNode tampered = completion.replayState().payload().deepCopy();
+    ((ObjectNode) tampered.path("tool_calls").get(1)).put("index", 7);
+    ProviderReplayState badIndex =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), hash, tampered);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        user,
+                        assistant(
+                            List.of(
+                                new ProviderToolCallBlock(
+                                    completion.response().toolCalls().get(0))),
+                            badIndex)),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+  }
+
+  /** 测试意图：原生快照未包含已规范化 function 时，冻结仍追加标准调用而不丢失 durable 意图。 */
+  @Test
+  void appendsCanonicalFunctionCallWhenNativeEntryIsMissing() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), "0".repeat(64), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fn_1","type":"function",
+        "function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+        """);
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"tool_calls\":[]},\"finish_reason\":\"tool_calls\"}]}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals(
+        MAPPER.readTree(
+            "{\"id\":\"fn_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}"),
+        completion.replayState().payload().path("tool_calls").get(0));
+  }
+
+  /** 测试意图：废弃的 finish_reason=function_call 仍被显式拒绝，不因保留原生 function_call 字段而开放执行。 */
+  @Test
+  void rejectsDeprecatedFunctionCallFinishReason() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            descriptor,
+            OpenAiChatConfiguration.defaults(),
+            "0".repeat(64),
+            bridge);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                accumulator.handleData(
+                    "{\"choices\":[{\"delta\":{\"function_call\":{\"name\":\"old\"}},"
+                        + "\"finish_reason\":\"function_call\"}]}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
   }
 
   @Test

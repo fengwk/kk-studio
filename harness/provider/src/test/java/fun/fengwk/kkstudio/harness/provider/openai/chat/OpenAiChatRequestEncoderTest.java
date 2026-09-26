@@ -627,7 +627,7 @@ class OpenAiChatRequestEncoderTest {
     // 2. 同 format 且 payload 携带 provider 原生未知字段：不在白名单内的合法 assistant 字段必须原样透传
     ObjectNode extendedPayload = validPayload.deepCopy();
     extendedPayload.put("vendor_future_field", "kept");
-    extendedPayload.putObject("audio").put("id", "audio_1").put("transcript", "spoken");
+    extendedPayload.putObject("audio").put("id", "audio_1");
     ProviderReplayState extendedReplayState =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
@@ -658,7 +658,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode extendedAsst = extendedRoot.path("messages").get(2);
     assertEquals("Why did chicken cross road?", extendedAsst.path("content").asText());
     assertEquals("kept", extendedAsst.path("vendor_future_field").asText());
-    assertEquals("audio_1", extendedAsst.path("audio").path("id").asText());
+    assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), extendedAsst.path("audio"));
 
     // 2b. 同 format 但 payload 的 known 字段形态损坏（content 非文本）必须抛出 ProviderException 拒绝
     ObjectNode illegalPayload = MAPPER.createObjectNode();

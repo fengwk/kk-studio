@@ -102,6 +102,7 @@ final class GeminiStreamAccumulator {
 
   private ModelUsage latestUsage = null;
   private String rawUsageJson = "{}";
+  private String serviceTier = null;
 
   GeminiStreamAccumulator(
       ProviderRequest request,
@@ -140,7 +141,10 @@ final class GeminiStreamAccumulator {
     }
 
     // 处理 usageMetadata
-    if (root.has("usageMetadata") && root.get("usageMetadata").isObject()) {
+    if (root.has("usageMetadata")) {
+      if (!root.get("usageMetadata").isObject()) {
+        throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid usageMetadata");
+      }
       updateUsage(root.get("usageMetadata"));
     }
 
@@ -155,39 +159,39 @@ final class GeminiStreamAccumulator {
   }
 
   private void updateUsage(JsonNode usageNode) {
-    int promptTokens = usageNode.path("promptTokenCount").asInt(0);
-    int candidatesTokens = usageNode.path("candidatesTokenCount").asInt(0);
-    int totalTokens = usageNode.path("totalTokenCount").asInt(0);
-    int cachedTokens = usageNode.path("cachedContentTokenCount").asInt(0);
-    int thoughtsTokens = usageNode.path("thoughtsTokenCount").asInt(0);
-
-    long cached = Math.max(0L, cachedTokens);
-    long ordinaryInput = Math.max(0L, (long) promptTokens - cached);
-    long output = Math.max(0L, candidatesTokens);
-    long reasoning = Math.max(0L, thoughtsTokens);
-    long providerTotal = Math.max(0L, totalTokens);
+    long promptTokens = optionalTokenCount(usageNode, "promptTokenCount");
+    long output = optionalTokenCount(usageNode, "candidatesTokenCount");
+    long providerTotal = optionalTokenCount(usageNode, "totalTokenCount");
+    long cached = optionalTokenCount(usageNode, "cachedContentTokenCount");
+    long reasoning = optionalTokenCount(usageNode, "thoughtsTokenCount");
+    long ordinaryInput = promptTokens >= cached ? promptTokens - cached : 0L;
+    String tier = null;
+    if (usageNode.has("serviceTier")) {
+      JsonNode value = usageNode.get("serviceTier");
+      if (!value.isTextual() || value.textValue().isBlank()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
+      }
+      tier = value.textValue();
+    }
 
     this.latestUsage =
         new ModelUsage(ordinaryInput, output, cached, 0L, 0L, reasoning, providerTotal);
 
-    // 白名单 rawUsageJson
-    ObjectNode whiteNode = NODES.objectNode();
-    if (usageNode.has("promptTokenCount")) {
-      whiteNode.put("promptTokenCount", promptTokens);
+    this.serviceTier = tier;
+    this.rawUsageJson = usageNode.toString();
+  }
+
+  private static long optionalTokenCount(JsonNode usageNode, String field) {
+    JsonNode value = usageNode.get(field);
+    if (value == null) {
+      return 0L;
     }
-    if (usageNode.has("candidatesTokenCount")) {
-      whiteNode.put("candidatesTokenCount", candidatesTokens);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0L) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
     }
-    if (usageNode.has("totalTokenCount")) {
-      whiteNode.put("totalTokenCount", totalTokens);
-    }
-    if (usageNode.has("cachedContentTokenCount")) {
-      whiteNode.put("cachedContentTokenCount", cachedTokens);
-    }
-    if (usageNode.has("thoughtsTokenCount")) {
-      whiteNode.put("thoughtsTokenCount", thoughtsTokens);
-    }
-    this.rawUsageJson = whiteNode.toString();
+    return value.longValue();
   }
 
   private void processCandidate(JsonNode candidate) {
@@ -523,7 +527,7 @@ final class GeminiStreamAccumulator {
             usage,
             cost,
             null,
-            null,
+            this.serviceTier,
             this.rawUsageJson);
 
     ProviderReplayState replayState = null;

@@ -495,7 +495,7 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
   }
 
-  /** 验证 usageMetadata 规范化映射到 ModelUsage，互斥非负，rawUsageJson 仅白名单。 */
+  /** 验证 usageMetadata 规范化映射到 ModelUsage，互斥非负，rawUsageJson 无损保留全部字段。 */
   @Test
   void normalizesUsageMetadata_promptOrdinaryAndCached_mutuallyExclusive() throws Exception {
     GeminiStreamAccumulator accumulator =
@@ -517,7 +517,10 @@ class GeminiStreamAccumulatorTest {
             "cachedContentTokenCount": 80,
             "candidatesTokenCount": 25,
             "thoughtsTokenCount": 10,
-            "totalTokenCount": 125
+            "totalTokenCount": 125,
+            "serviceTier": "priority",
+            "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 100}],
+            "futureUsage": {"nested": [1, true]}
           }
         }
         """;
@@ -534,14 +537,106 @@ class GeminiStreamAccumulatorTest {
     assertEquals(10L, usage.reasoningTokens());
     assertEquals(125L, usage.providerTotalTokens());
 
-    // 检查 rawUsageJson 仅保留官方白名单字段
+    // 未知字段与 token detail 数组必须无损保留，不只是一份已知计数白名单。
     assertNotNull(response.rawUsageJson());
     JsonNode raw = MAPPER.readTree(response.rawUsageJson());
-    assertEquals(100, raw.get("promptTokenCount").asInt());
-    assertEquals(80, raw.get("cachedContentTokenCount").asInt());
-    assertEquals(25, raw.get("candidatesTokenCount").asInt());
-    assertEquals(10, raw.get("thoughtsTokenCount").asInt());
-    assertEquals(125, raw.get("totalTokenCount").asInt());
+    assertEquals(MAPPER.readTree(chunk).get("usageMetadata"), raw);
+    assertEquals("priority", response.serviceTier());
+  }
+
+  /** 测试意图：全部已知计数均使用 long，且仅最新 usage 快照决定 normalized/raw/serviceTier。 */
+  @Test
+  void retainsLatestLargeUsageSnapshot() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "message", "{\"usageMetadata\":{\"promptTokenCount\":1,\"serviceTier\":\"old\"}}");
+    String latest =
+        """
+        {"promptTokenCount":4000000000,"cachedContentTokenCount":3000000000,
+        "candidatesTokenCount":3500000000,"thoughtsTokenCount":3200000000,
+        "totalTokenCount":7500000000,"serviceTier":"flex",
+        "candidatesTokensDetails":[{"modality":"TEXT","tokenCount":3500000000}],
+        "unknown":{"flag":true}}
+        """;
+    accumulator.handleEvent(
+        "message",
+        "{\"usageMetadata\":" + latest + ",\"candidates\":[{\"finishReason\":\"STOP\"}]}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(1_000_000_000L, response.usage().inputTokens());
+    assertEquals(3_000_000_000L, response.usage().cacheReadTokens());
+    assertEquals(3_500_000_000L, response.usage().outputTokens());
+    assertEquals(3_200_000_000L, response.usage().reasoningTokens());
+    assertEquals(7_500_000_000L, response.usage().providerTotalTokens());
+    assertEquals("flex", response.serviceTier());
+    assertEquals(MAPPER.readTree(latest), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  /** 测试意图：坏类型、负数、超出 long 上限及无效 serviceTier 都不能经宽松 asInt 转换进入 usage。 */
+  @Test
+  void rejectsMalformedKnownUsageValues() {
+    for (String value : List.of("null", "\"bad\"", "[]")) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + value + "}"));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    }
+    for (String field :
+        List.of(
+            "promptTokenCount",
+            "cachedContentTokenCount",
+            "candidatesTokenCount",
+            "thoughtsTokenCount",
+            "totalTokenCount")) {
+      for (String value : List.of("null", "\"1\"", "1.5", "true", "-1", "9223372036854775808")) {
+        GeminiStreamAccumulator accumulator =
+            new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+        ProviderException error =
+            assertThrows(
+                ProviderException.class,
+                () ->
+                    accumulator.handleEvent(
+                        "message", "{\"usageMetadata\":{\"" + field + "\":" + value + "}}"));
+        assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+      }
+    }
+    for (String value : List.of("null", "\"  \"", "7", "false", "{}")) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  accumulator.handleEvent(
+                      "message", "{\"usageMetadata\":{\"serviceTier\":" + value + "}}"));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    }
+  }
+
+  /** 测试意图：usageMetadata 缺失计数时归零，cached 超过 prompt 时普通输入归零，未出现 tier 不继承旧值。 */
+  @Test
+  void defaultsMissingUsageFieldsAndClampsCachedInput() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, "0".repeat(64), bridge);
+    accumulator.handleEvent(
+        "message", "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10}}");
+    accumulator.handleEvent(
+        "message",
+        "{\"usageMetadata\":{\"cachedContentTokenCount\":3},"
+            + "\"candidates\":[{\"finishReason\":\"STOP\"}]}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(0L, response.usage().inputTokens());
+    assertEquals(3L, response.usage().cacheReadTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().reasoningTokens());
+    assertEquals(0L, response.usage().providerTotalTokens());
+    assertNull(response.serviceTier());
+    assertEquals(
+        MAPPER.readTree("{\"cachedContentTokenCount\":3}"),
+        MAPPER.readTree(response.rawUsageJson()));
   }
 
   /** 意图：验证显式合法的空对象参数 {} 正确保留在 toolCalls 与 replayState 中，不发生异常。 */
