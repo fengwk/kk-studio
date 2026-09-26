@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -156,6 +158,60 @@ class HistoryEntryPayloadJsonCodecTest {
             + "\"decodeDurationMillis\":1234},\"toolResultMetadata\":null}",
         CODEC.encode(timed));
     assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
+  }
+
+  /** 测试意图：人工输入回执随结果迁入 Entry 元数据后必须可无损往返，并作为 runtime 元数据显式编码（不写进业务 details）。 */
+  @Test
+  void roundTripsAnsweredToolResultReceiptInsideMetadata() {
+    ToolResultMetadata metadata =
+        new ToolResultMetadata(
+            new UUID(0L, 7L),
+            "call-1",
+            0,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            new ToolInputReceipt(
+                new UUID(0L, 21L), "alice", Instant.parse("2026-09-27T00:00:00Z")));
+    MessagePayload payload =
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.TOOL,
+                List.of(
+                    new ToolResultMessageContent(
+                        "call-1",
+                        "ask_user",
+                        "ask_user",
+                        List.of(new TextMessageContent("{\"answers\":[[\"a\"]]}")),
+                        false,
+                        "{\"answers\":[[\"a\"]]}"))),
+            null,
+            metadata);
+
+    String encoded = CODEC.encode(payload);
+
+    assertTrue(
+        encoded.contains(
+            "\"inputReceipt\":{\"submissionId\":\"00000000-0000-0000-0000-000000000015\""));
+    assertEquals(payload, CODEC.decode(EntryType.MESSAGE, encoded));
+    // 没有回执的元数据仍然编码为显式 null，并保持往返。
+    MessagePayload withoutReceipt =
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.TOOL,
+                List.of(
+                    new ToolResultMessageContent(
+                        "call-1",
+                        "bash",
+                        "bash",
+                        List.of(new TextMessageContent("ok")),
+                        false,
+                        "{}"))),
+            null,
+            new ToolResultMetadata(
+                new UUID(0L, 7L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
+    assertEquals(withoutReceipt, CODEC.decode(EntryType.MESSAGE, CODEC.encode(withoutReceipt)));
+    assertTrue(CODEC.encode(withoutReceipt).contains("\"inputReceipt\":null"));
   }
 
   /** 意图：decodeDurationMillis 的严格边界——非负整数与显式 null 合法，负值、非整数、非数字类型与未知字段一律拒绝。 */

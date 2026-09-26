@@ -1189,10 +1189,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           """
           insert into harness_tool_invocation (
               id, model_invocation_id, assistant_entry_id, call_index, call, binding, status, attempt,
-              approval, result, effects, error, created_at, updated_at
+              approval, result, effects, error, created_at, updated_at, input_receipt
           ) values (
               ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb),
-              cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, ?
+              cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb)
           )
           """,
           invocation.id(),
@@ -1208,7 +1208,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           encodeToolEffects(invocation),
           encodeToolError(invocation),
           PostgresqlHarnessRows.timestamp(invocation.createdAt()),
-          PostgresqlHarnessRows.timestamp(invocation.updatedAt()));
+          PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
+          encodeToolInputReceipt(invocation));
       lockTool(invocation);
     }
   }
@@ -1245,7 +1246,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                   result = cast(? as jsonb),
                   effects = cast(? as jsonb),
                   error = cast(? as jsonb),
-                  updated_at = ?
+                  updated_at = ?,
+                  input_receipt = cast(? as jsonb)
               where id = ?
               """,
               invocation.status().name(),
@@ -1255,6 +1257,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               encodeToolEffects(invocation),
               encodeToolError(invocation),
               PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
+              encodeToolInputReceipt(invocation),
               invocation.id());
       requireSingleUpdate(updated, "tool invocation", invocation.id());
     }
@@ -2134,6 +2137,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   private static String encodeToolEffects(ToolInvocation invocation) {
     return PostgresqlHarnessRows.TOOL_EFFECTS.encode(invocation.effects());
+  }
+
+  private static String encodeToolInputReceipt(ToolInvocation invocation) {
+    return invocation.inputReceipt() == null
+        ? null
+        : PostgresqlHarnessRows.TOOL_INPUT_RECEIPTS.encode(invocation.inputReceipt());
   }
 
   private static String encodeToolError(ToolInvocation invocation) {

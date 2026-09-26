@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
@@ -492,6 +494,51 @@ class HistoryPayloadMapperTest {
     assertTrue(result.error());
     assertEquals(
         "unknown tool: undeclared", ((TextMessageContent) result.contents().get(0)).text());
+  }
+
+  /** 已接受回答的结果：Invocation 行在物化后被物理删除，因此 durable 回执必须随结果迁入 Entry 元数据。 */
+  @Test
+  void answeredToolResultMigratesItsReceiptIntoMetadata() {
+    ToolInputReceipt receipt =
+        new ToolInputReceipt(new UUID(0L, 21L), "alice", Instant.parse("2026-09-27T00:00:00Z"));
+    ToolInvocation answered =
+        new ToolInvocation(
+            id(1L),
+            id(1L),
+            id(7L),
+            0,
+            call(),
+            binding(),
+            ToolInvocationStatus.SUCCEEDED,
+            0,
+            null,
+            new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"),
+            ToolEffectBatch.EMPTY,
+            null,
+            NOW,
+            NOW,
+            receipt);
+
+    MessagePayload payload = MAPPER.toolResultPayload(answered);
+
+    assertEquals(receipt, payload.toolResultMetadata().inputReceipt());
+    assertEquals(ToolResultStatus.SUCCEEDED, payload.toolResultMetadata().status());
+    // 回执不进入业务 details：detailsJson 仍是结果自身的载荷。
+    assertEquals(
+        "{}", ((ToolResultMessageContent) payload.message().contents().get(0)).detailsJson());
+    // 普通执行成功与 synthetic 结果都不携带回执。
+    assertNull(
+        MAPPER
+            .toolResultPayload(
+                succeededInvocation(new ToolResult("call-1", List.of(), false, "{}")))
+            .toolResultMetadata()
+            .inputReceipt());
+    assertNull(
+        MAPPER
+            .syntheticHistoryCutToolResult(
+                id(7L), 0, new ToolCallMessageContent("call-1", "bash", "bash", "{}", null, null))
+            .toolResultMetadata()
+            .inputReceipt());
   }
 
   private static ToolInvocation succeededInvocation(ToolResult result) {

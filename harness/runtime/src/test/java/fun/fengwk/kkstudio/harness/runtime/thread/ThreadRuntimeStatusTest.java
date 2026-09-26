@@ -49,6 +49,9 @@ class ThreadRuntimeStatusTest {
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.WAITING_APPROVAL)));
     assertEquals(
+        ThreadRuntimeStatus.TOOL_WAITING_INPUT,
+        ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.WAITING_INPUT)));
+    assertEquals(
         ThreadRuntimeStatus.TOOL_RUNNING,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.RUNNING)));
     assertEquals(
@@ -81,6 +84,21 @@ class ThreadRuntimeStatusTest {
         ThreadRuntimeStatus.TOOL_DISPATCHING,
         ThreadRuntimeStatus.from(
             toolActive(ToolInvocationStatus.READY, ToolInvocationStatus.DISPATCHING)));
+    // 审批优先于等待回答，等待回答优先于运行。
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
+        ThreadRuntimeStatus.from(
+            toolActive(
+                ToolInvocationStatus.RUNNING,
+                ToolInvocationStatus.WAITING_INPUT,
+                ToolInvocationStatus.WAITING_APPROVAL)));
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_WAITING_INPUT,
+        ThreadRuntimeStatus.from(
+            toolActive(
+                ToolInvocationStatus.READY,
+                ToolInvocationStatus.RUNNING,
+                ToolInvocationStatus.WAITING_INPUT)));
   }
 
   @Test

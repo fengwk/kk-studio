@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -64,7 +65,17 @@ public final class HistoryEntryPayloadJsonCodec {
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
   private static final Set<String> TOOL_RESULT_METADATA_FIELDS =
-      orderedSet("assistantEntryId", "toolCallId", "callIndex", "status", "synthetic", "reason");
+      orderedSet(
+          "assistantEntryId",
+          "toolCallId",
+          "callIndex",
+          "status",
+          "synthetic",
+          "reason",
+          "inputReceipt");
+
+  private static final ToolInputReceiptJsonCodec INPUT_RECEIPT_CODEC =
+      new ToolInputReceiptJsonCodec();
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -296,6 +307,11 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.put("reason", metadata.reason().name());
     }
+    if (metadata.inputReceipt() == null) {
+      node.putNull("inputReceipt");
+    } else {
+      node.set("inputReceipt", INPUT_RECEIPT_CODEC.encodeNode(metadata.inputReceipt()));
+    }
     return node;
   }
 
@@ -522,7 +538,10 @@ public final class HistoryEntryPayloadJsonCodec {
             "toolResultMetadata.status"),
         HistoryValueCodecs.requiredBoolean(node, "synthetic", "toolResultMetadata"),
         HistoryValueCodecs.nullableEnum(
-            ToolResultReason.class, node, "reason", "toolResultMetadata.reason"));
+            ToolResultReason.class, node, "reason", "toolResultMetadata.reason"),
+        node.get("inputReceipt") == null || node.get("inputReceipt").isNull()
+            ? null
+            : INPUT_RECEIPT_CODEC.decodeNode(node.get("inputReceipt")));
   }
 
   // ---------- 通用工具方法 ----------

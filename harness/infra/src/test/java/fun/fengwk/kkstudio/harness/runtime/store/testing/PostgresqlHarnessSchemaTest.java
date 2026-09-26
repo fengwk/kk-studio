@@ -108,6 +108,7 @@ class PostgresqlHarnessSchemaTest {
             "harness_tool_invocation.call",
             "harness_tool_invocation.effects",
             "harness_tool_invocation.error",
+            "harness_tool_invocation.input_receipt",
             "harness_tool_invocation.result"),
         jsonbColumns);
   }
@@ -132,6 +133,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_command_stop_request",
             "idx_harness_thread_session",
             "idx_harness_tool_invocation_model_nonterminal",
+            "idx_harness_tool_invocation_pending",
             "idx_harness_work_available",
             "idx_harness_work_lease_until",
             "uk_harness_entry_session_id",
@@ -139,6 +141,7 @@ class PostgresqlHarnessSchemaTest {
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
             "uk_harness_thread_command_idempotency",
+            "uk_harness_thread_session",
             "uk_harness_tool_invocation_call_index"),
         indexes);
 
@@ -156,14 +159,238 @@ class PostgresqlHarnessSchemaTest {
     // Stop 幂等键索引必须按 stop_request_id 聚合并只覆盖非 null 行。
     assertTrue(stopRequest.contains("(thread_id, stop_request_id, sequence)"));
     assertTrue(stopRequest.contains("WHERE (stop_request_id IS NOT NULL)"));
-    // 未收尾 ToolInvocation 的按 ModelInvocation 查找路径必须只覆盖四个非终态，且按 model_invocation_id 建键。
+    // 未收尾 ToolInvocation 的按 ModelInvocation 查找路径必须只覆盖全部非终态（含人工输入等待），且按 model_invocation_id 建键。
     assertTrue(toolNonterminal.contains("(model_invocation_id)"));
-    for (String nonterminal : List.of("WAITING_APPROVAL", "READY", "DISPATCHING", "RUNNING")) {
+    for (String nonterminal :
+        List.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "DISPATCHING", "RUNNING")) {
       assertTrue(toolNonterminal.contains("'" + nonterminal + "'"));
     }
     for (String terminal : List.of("SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN")) {
       assertFalse(toolNonterminal.contains("'" + terminal + "'"));
     }
+    // 等待人工输入/审批的待处理分页必须按 (created_at, id) 稳定排序，且只覆盖两种等待状态。
+    String pending = indexDefinition("idx_harness_tool_invocation_pending");
+    assertTrue(pending.contains("(created_at, id)"));
+    assertTrue(pending.contains("'WAITING_APPROVAL'"));
+    assertTrue(pending.contains("'WAITING_INPUT'"));
+    for (String nonWaiting : List.of("'READY'", "'DISPATCHING'", "'RUNNING'")) {
+      assertFalse(pending.contains(nonWaiting));
+    }
+  }
+
+  /**
+   * 测试意图：真实 PostgreSQL 约束 ck_harness_tool_waiting_input / ck_harness_tool_input_receipt 物理门禁验证。
+   *
+   * <p>台账层的安全边界：等待人工输入必须有 binding 且无 result/error；回答回执只能与 SUCCEEDED + result 同存，且必须是携带非空
+   * submissionId/actor/acceptedAt 的 JSON object。问答与审批互不代替在物理层表现为回执与 approval 是两列。
+   */
+  @Test
+  void harnessToolInputReceiptConstraintCouplesReceiptToAnsweredSuccessOnly() {
+    UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000030");
+    UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000031");
+    UUID turnStartEntryId = UUID.fromString("00000000-0000-0000-0000-000000000032");
+    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000033");
+    UUID assistantEntryId = UUID.fromString("00000000-0000-0000-0000-000000000034");
+    UUID modelId = UUID.fromString("00000000-0000-0000-0000-000000000035");
+    jdbc.update(
+        "insert into harness_session (id, name, created_at) values (?, 'session-demo', statement_timestamp())",
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb, statement_timestamp())",
+        rootEntryId,
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'TURN_START', '{\"reason\":\"INPUT\"}'::jsonb, statement_timestamp())",
+        turnStartEntryId,
+        sessionId,
+        rootEntryId);
+    jdbc.update(
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', false, 1, 0, statement_timestamp(), statement_timestamp())",
+        threadId,
+        sessionId,
+        turnStartEntryId);
+    jdbc.update(
+        "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
+            + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '{}'::jsonb, 'READY', 0, null, null, null, '[]'::jsonb, statement_timestamp(), statement_timestamp())",
+        modelId,
+        threadId,
+        turnStartEntryId,
+        turnStartEntryId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload, created_at)"
+            + " values (?, ?, ?, 'MESSAGE', '{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[]}}'::jsonb, statement_timestamp())",
+        assistantEntryId,
+        sessionId,
+        turnStartEntryId);
+
+    String bindingJson = "{\"descriptor\":{\"name\":\"ask_user\"}}";
+    String callJson = "{\"id\":\"call-1\",\"toolName\":\"ask_user\",\"argumentsJson\":\"{}\"}";
+    String resultJson =
+        "{\"toolCallId\":\"call-1\",\"contents\":[],\"error\":false,\"detailsJson\":\"{}\"}";
+    String receiptJson =
+        "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"alice\","
+            + "\"acceptedAt\":\"2026-09-27T00:00:00Z\"}";
+
+    // 1. WAITING_INPUT 必须携带 binding（ck_harness_tool_waiting_input）
+    DataIntegrityViolationException exNoBinding =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                insertToolInvocation(
+                    UUID.randomUUID(),
+                    0,
+                    modelId,
+                    assistantEntryId,
+                    callJson,
+                    null,
+                    "WAITING_INPUT",
+                    null,
+                    null,
+                    null),
+            "WAITING_INPUT without binding must be rejected");
+    assertTrue(
+        exNoBinding.getMessage().contains("ck_harness_tool_waiting_input"),
+        "expected violation of ck_harness_tool_waiting_input but got: " + exNoBinding.getMessage());
+    // 2. WAITING_INPUT 不得携带 result（等待尚未产生业务结果）
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                0,
+                modelId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "WAITING_INPUT",
+                resultJson,
+                null,
+                null),
+        "WAITING_INPUT with result must be rejected");
+    // 3. 正向：可回答的等待形状
+    assertDoesNotThrow(
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                0,
+                modelId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "WAITING_INPUT",
+                null,
+                null,
+                null));
+    // 4. 回执不得出现在非 SUCCEEDED 行（ck_harness_tool_input_receipt）
+    DataIntegrityViolationException exReadyReceipt =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                insertToolInvocation(
+                    UUID.randomUUID(),
+                    1,
+                    modelId,
+                    assistantEntryId,
+                    callJson,
+                    bindingJson,
+                    "READY",
+                    null,
+                    null,
+                    receiptJson),
+            "a receipt on READY must be rejected");
+    assertTrue(
+        exReadyReceipt.getMessage().contains("ck_harness_tool_input_receipt"),
+        "expected violation of ck_harness_tool_input_receipt but got: "
+            + exReadyReceipt.getMessage());
+    // 5. SUCCEEDED 缺 result 时不得携带回执
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                1,
+                modelId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "SUCCEEDED",
+                null,
+                null,
+                receiptJson),
+        "SUCCEEDED without result must be rejected");
+    // 6. 回执字段必须齐备且非空白
+    for (String incomplete :
+        List.of(
+            "{\"actor\":\"alice\",\"acceptedAt\":\"2026-09-27T00:00:00Z\"}",
+            "{\"submissionId\":\"   \",\"actor\":\"alice\",\"acceptedAt\":\"2026-09-27T00:00:00Z\"}",
+            "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"\","
+                + "\"acceptedAt\":\"2026-09-27T00:00:00Z\"}",
+            "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"alice\"}",
+            "[\"not_an_object\"]")) {
+      assertThrows(
+          DataIntegrityViolationException.class,
+          () ->
+              insertToolInvocation(
+                  UUID.randomUUID(),
+                  1,
+                  modelId,
+                  assistantEntryId,
+                  callJson,
+                  bindingJson,
+                  "SUCCEEDED",
+                  resultJson,
+                  null,
+                  incomplete),
+          "incomplete receipt must be rejected: " + incomplete);
+    }
+    // 7. 正向：已回答成功的形状（结果 + 回执同存，无 approval）
+    assertDoesNotThrow(
+        () ->
+            insertToolInvocation(
+                UUID.randomUUID(),
+                1,
+                modelId,
+                assistantEntryId,
+                callJson,
+                bindingJson,
+                "SUCCEEDED",
+                resultJson,
+                null,
+                receiptJson));
+  }
+
+  private void insertToolInvocation(
+      UUID id,
+      int callIndex,
+      UUID modelId,
+      UUID assistantEntryId,
+      String callJson,
+      String bindingJson,
+      String status,
+      String resultJson,
+      String approvalJson,
+      String receiptJson) {
+    jdbc.update(
+        "insert into harness_tool_invocation (id, model_invocation_id, assistant_entry_id, call_index, call, binding,"
+            + " status, attempt, approval, result, effects, error, created_at, updated_at, input_receipt)"
+            + " values (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
+            // 非 SUCCEEDED 行的 effects 必须是空批（ck_harness_tool_invocation_effects_status）。
+            + " '{\"version\":1,\"customEntries\":[]}'::jsonb, null,"
+            + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
+        id,
+        modelId,
+        assistantEntryId,
+        callIndex,
+        callJson,
+        bindingJson,
+        status,
+        approvalJson,
+        resultJson,
+        receiptJson);
   }
 
   private String indexDefinition(String indexName) {

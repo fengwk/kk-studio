@@ -46,6 +46,12 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     APPROVAL_NOT_APPLICABLE,
     /** Approval 已被决策，且请求未重放已存储的决策。 */
     APPROVAL_DECISION_MISMATCH,
+    /** 人工输入目标缺失、不属于请求 thread 或当前不处于等待输入状态。 */
+    INPUT_SUBMISSION_NOT_APPLICABLE,
+    /** 人工输入提交不满足冻结问卷（覆盖、单选/多选、自定义回答或长度）。 */
+    INPUT_SUBMISSION_INVALID,
+    /** 人工输入目标已被其他提交接受，或相同提交身份的答案与已接受事实不一致。 */
+    INPUT_SUBMISSION_MISMATCH,
     /** Thread 当前不满足手动压缩的可用性条件。 */
     MANUAL_COMPACTION_UNAVAILABLE
   }
