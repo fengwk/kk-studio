@@ -7,8 +7,7 @@ import java.util.UUID;
 public interface ChatSessionRepository {
 
   /**
-   * 插入归属边（{@code created_at} 由数据库默认填充）；Session 已由任一产品 owner 持有时抛 {@code
-   * DataIntegrityViolationException}。
+   * 插入归属边（{@code created_at} 由数据库默认填充）；Session 已被任何一方持有时抛 {@code DataIntegrityViolationException}。
    */
   boolean insert(UUID sessionId, UUID chatId);
 
