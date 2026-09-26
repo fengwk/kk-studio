@@ -906,4 +906,63 @@ describe('ThreadComposer attachment pills', () => {
       { type: 'ATTACHMENT', uploadId: expect.any(String) },
     ])
   })
+
+  it('previews interleaved parts with ready uploads without consuming draft or clearing uploads', async () => {
+    const { service } = fakeStorage()
+    let previewedPayload: ComposerPart[] = []
+    const onPreview = vi.fn((payload: ComposerPart[]) => {
+      previewedPayload = payload
+    })
+    const onSubmit = vi.fn()
+
+    function Controlled() {
+      const [parts, setParts] = useState<ComposerPart[]>([])
+      return (
+        <div>
+          <ThreadComposer
+            parts={parts}
+            pending={false}
+            disabled={false}
+            onPartsChange={setParts}
+            onSubmit={onSubmit}
+            onPreview={onPreview}
+            onCommand={vi.fn()}
+            storageService={service}
+            hashFile={hashFile}
+          />
+          <pre data-testid="parts">{JSON.stringify(parts)}</pre>
+        </div>
+      )
+    }
+
+    render(<Controlled />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await typeInEditor(editor, 'first part ')
+    await pasteFiles(editor, fileOf('interleaved.png', 'image/png'))
+    await waitForIdleUploads()
+    await typeInEditor(editor, ' second part')
+
+    const previewBtn = screen.getByRole('button', { name: '预览请求' })
+    expect(previewBtn).not.toBeDisabled()
+    fireEvent.click(previewBtn)
+
+    expect(onPreview).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+    // Server upload handle is resolved in previewed payload
+    expect(previewedPayload).toHaveLength(3)
+    expect(previewedPayload[0]).toMatchObject({ type: 'text', text: 'first part ' })
+    expect(previewedPayload[1]).toMatchObject({
+      type: 'attachment',
+      filename: 'interleaved.png',
+      uploadId: 'up-1',
+    })
+    expect(previewedPayload[2]).toMatchObject({ type: 'text', text: ' second part' })
+
+    // Editor still retains the draft parts and upload pills
+    const remainingParts = JSON.parse(screen.getByTestId('parts').textContent ?? '[]')
+    expect(remainingParts).toHaveLength(3)
+    expect(remainingParts[0].text).toBe('first part ')
+    expect(remainingParts[1].filename).toBe('interleaved.png')
+    expect(remainingParts[2].text).toBe(' second part')
+  })
 })

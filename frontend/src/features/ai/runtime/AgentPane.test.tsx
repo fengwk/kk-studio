@@ -22,6 +22,7 @@ import type {
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
+  ProviderRequestPreviewDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
@@ -72,6 +73,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     decideApproval: vi.fn(),
     renameSession: vi.fn(),
     renameThread: vi.fn(),
+    previewProviderRequest: vi.fn(),
   },
 }))
 
@@ -1652,5 +1654,171 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     })
     expect(unboundResult.current.boundEnvironment).toBeNull()
     expect(unboundResult.current.environmentReady).toBeUndefined()
+  })
+
+  describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
+    it('hides preview button for new session draft target, shows for bound thread', async () => {
+      // 1. NEW_SESSION_DRAFT target: preview button is not rendered
+      const { unmount } = renderPane({ type: 'CHAT', id: CHAT_ID })
+      await screen.findByLabelText('给 AI 发送消息')
+      expect(screen.queryByRole('button', { name: '预览请求' })).not.toBeInTheDocument()
+      unmount()
+
+      // 2. BOUND_THREAD target: preview button is rendered beside send
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      renderPane({ type: 'CHAT', id: CHAT_ID })
+      await screen.findByLabelText('给 AI 发送消息')
+      expect(screen.getByRole('button', { name: '预览请求' })).toBeInTheDocument()
+    })
+
+    it('constructs request matching submit payload, sends to preview endpoint, and switches to debug inspector', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce({
+        kind: 'DRAFT_REQUEST_PREVIEW',
+        providerType: 'OPENAI',
+        modelName: 'MiniMax',
+        bodyByteSize: 120,
+        bodyJson: '{"messages":[{"role":"user","content":"preview test message"}]}',
+        sourceHeadEntryId: 'head-1',
+        generatedAt: '2026-09-27T05:00:00Z',
+        snapshotNotice: 'Draft preview snapshot',
+      })
+
+      renderPane({ type: 'CHAT', id: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.type(composer, 'preview test message')
+
+      const previewBtn = screen.getByRole('button', { name: '预览请求' })
+      expect(previewBtn).not.toBeDisabled()
+      await user.click(previewBtn)
+
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      const [threadId, request] = vi.mocked(harnessService.previewProviderRequest).mock.calls[0]!
+      expect(threadId).toBe(THREAD_ID)
+      expect(request.target).toMatchObject({
+        type: 'THREAD',
+        threadId: THREAD_ID,
+      })
+      expect(request.owner).toEqual({ type: 'CHAT', id: CHAT_ID })
+      expect(request.commands).toHaveLength(1)
+      expect(request.commands[0]).toMatchObject({
+        type: 'USER_MESSAGE',
+        contents: [{ type: 'TEXT', text: 'preview test message' }],
+      })
+
+      // Switched to debug mode with preview inspector displayed
+      expect(await screen.findByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
+      expect(screen.getByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
+      expect(screen.getByText('点击快照')).toBeInTheDocument()
+      expect(screen.getByTestId('preview-request-body')).toHaveTextContent('preview test message')
+
+      // Draft in composer is preserved (not blanked)
+      expect(composer).toHaveTextContent('preview test message')
+    })
+
+    it('handles 409 conflict failure by displaying error banner and keeping draft intact', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      vi.mocked(harnessService.previewProviderRequest).mockRejectedValueOnce(
+        new ApiError('Thread is not idle or ready', 409),
+      )
+
+      renderPane({ type: 'CHAT', id: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.type(composer, 'draft to keep')
+
+      const previewBtn = screen.getByRole('button', { name: '预览请求' })
+      await user.click(previewBtn)
+
+      await waitFor(() => expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1))
+      // Error banner is rendered
+      expect(await screen.findByRole('alert')).toHaveTextContent('Thread is not idle or ready')
+      // Draft remains intact
+      expect(composer).toHaveTextContent('draft to keep')
+    })
+
+    it('guards against stale preview when draft is edited while request is in flight', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+
+      let resolvePreview!: (value: ProviderRequestPreviewDTO) => void
+      const previewPromise = new Promise<ProviderRequestPreviewDTO>((resolve) => {
+        resolvePreview = resolve
+      })
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValueOnce(previewPromise)
+
+      renderPane({ type: 'CHAT', id: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.type(composer, 'initial text')
+
+      const previewBtn = screen.getByRole('button', { name: '预览请求' })
+      await user.click(previewBtn)
+
+      // In flight: user types more text, changing draft
+      await user.type(composer, ' edited')
+
+      // Resolve the in-flight preview
+      await act(async () => {
+        resolvePreview({
+          kind: 'DRAFT_REQUEST_PREVIEW',
+          providerType: 'OPENAI',
+          modelName: 'MiniMax',
+          bodyByteSize: 100,
+          bodyJson: '{"messages":[{"role":"user","content":"initial text"}]}',
+          sourceHeadEntryId: 'head-1',
+          generatedAt: '2026-09-27T05:00:00Z',
+        })
+      })
+
+      // Inspector did NOT display the stale preview
+      expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
+      expect(composer).toHaveTextContent('initial text edited')
+    })
+
+    it('guards against stale error when target changes or unmounts while request is in flight', async () => {
+      // 测试意图：验证当预览请求在传输过程中目标已切换或卸载时，错误回调通过 targetRef 和 isMountedRef
+      // 准确判断过期，不会泄漏旧错误的 alert。
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+
+      let rejectPreview!: (reason: unknown) => void
+      const previewPromise = new Promise<ProviderRequestPreviewDTO>((_, reject) => {
+        rejectPreview = reject
+      })
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValueOnce(previewPromise)
+
+      const { unmount } = renderPane({ type: 'CHAT', id: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.type(composer, 'will error later')
+
+      const previewBtn = screen.getByRole('button', { name: '预览请求' })
+      await user.click(previewBtn)
+
+      // 切换/卸载目标
+      unmount()
+
+      // 请求失败返回
+      await act(async () => {
+        rejectPreview(new ApiError('preview failed after target change', 400))
+      })
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
   })
 })

@@ -701,5 +701,54 @@ describe('ThreadEventView', () => {
       // 切回 zh-CN
       setLocale('zh-CN')
     })
+
+    it('displays provider request preview in wide 3rd column and automatically activates detail tab in narrow mode', async () => {
+      // 测试意图：验证当 debugSelection 传入 preview 类型时，宽模式在第三列详情区展示请求预览与代码块；
+      // 在窄屏模式下自动切换 activeTab 至「详情」tabpanel。
+      const mockPreview = {
+        kind: 'DRAFT_REQUEST_PREVIEW' as const,
+        providerType: 'OPENAI',
+        modelName: 'MiniMax',
+        bodyByteSize: 88,
+        bodyJson: '{"prompt":"hello responsive preview"}',
+        sourceHeadEntryId: null,
+        generatedAt: '2026-09-27T06:00:00Z',
+      }
+
+      function PreviewResponsiveHarness() {
+        const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
+        return (
+          <div>
+            <div data-testid="controls">
+              <button type="button" onClick={() => triggerResize(800)}>Trigger Narrow</button>
+              <button type="button" onClick={() => triggerResize(1400)}>Trigger Wide</button>
+              <button type="button" onClick={() => setDebugSelection({ type: 'preview', preview: mockPreview })}>
+                Set Preview
+              </button>
+            </div>
+            <ThreadEventView
+              events={[record('e1')]}
+              selectedEventId={null}
+              onSelectedEventIdChange={vi.fn()}
+              debugSelection={debugSelection}
+              onSelectInspector={setDebugSelection}
+            />
+          </div>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(<PreviewResponsiveHarness />)
+
+      // 宽模式下设置 preview
+      await user.click(screen.getByRole('button', { name: 'Set Preview' }))
+      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
+      expect(screen.getByTestId('preview-request-body')).toHaveTextContent('hello responsive preview')
+
+      // 切到窄模式：自动切到详情页签
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+      expect(screen.getByRole('tab', { name: '详情', selected: true })).toBeInTheDocument()
+      expect(screen.getByTestId('preview-request-body')).toBeInTheDocument()
+    })
   })
 })
