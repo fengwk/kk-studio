@@ -272,7 +272,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 由 flag 组合和 case 的 `requires` 共同决定。
 
 Project/Issue 的设置、七态流转与 Activity 分页属于默认 L1 的 `project.issue_lifecycle`；
-Goal 工具目录与 Branch 设置命令也由 L1 覆盖。真实 Agent 的 Issue 接受、审查打回与
+Goal 工具目录、Branch 设置命令以及草稿请求预览的拒绝与零写入边界也由 L1 覆盖；
+预览的 Provider wire body 与附件等价性由本地数据库/S3 集成测试覆盖。真实 Agent 的 Issue 接受、审查打回与
 Goal 进度链路不能仅靠 API 契约断言，需另行在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。

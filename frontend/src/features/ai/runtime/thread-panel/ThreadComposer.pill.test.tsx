@@ -910,8 +910,10 @@ describe('ThreadComposer attachment pills', () => {
   it('previews interleaved parts with ready uploads without consuming draft or clearing uploads', async () => {
     const { service } = fakeStorage()
     let previewedPayload: ComposerPart[] = []
-    const onPreview = vi.fn((payload: ComposerPart[]) => {
+    let localDraft: ComposerPart[] = []
+    const onPreview = vi.fn((payload: ComposerPart[], local: ComposerPart[]) => {
       previewedPayload = payload
+      localDraft = local
     })
     const onSubmit = vi.fn()
 
@@ -957,6 +959,9 @@ describe('ThreadComposer attachment pills', () => {
       uploadId: 'up-1',
     })
     expect(previewedPayload[2]).toMatchObject({ type: 'text', text: ' second part' })
+    expect(localDraft[1]).toMatchObject({ type: 'attachment', filename: 'interleaved.png' })
+    expect((localDraft[1] as Extract<ComposerPart, { type: 'attachment' }>).uploadId)
+      .not.toBe('up-1')
 
     // Editor still retains the draft parts and upload pills
     const remainingParts = JSON.parse(screen.getByTestId('parts').textContent ?? '[]')

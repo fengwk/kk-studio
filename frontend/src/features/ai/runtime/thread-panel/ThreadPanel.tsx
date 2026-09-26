@@ -66,7 +66,7 @@ export interface ThreadPanelComposerInput {
   interactionPanel?: ReactNode
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
-  onPreview?: (payload: ComposerPart[]) => void
+  onPreview?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   previewLoading?: boolean
   previewDisabled?: boolean
 }

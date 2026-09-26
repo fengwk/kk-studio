@@ -11,7 +11,7 @@ import {
   useAgentPaneController,
 } from '@/features/ai/runtime/useAgentPaneController'
 import type { BranchDraft } from '@/features/ai/chat/branch-draft'
-import { createTextPart } from '@/features/ai/composer/composer-parts'
+import { createAttachmentPart, createTextPart } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { listCanvasSessions } from '@/shared/api/studio-service'
@@ -1657,6 +1657,43 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
   })
 
   describe('previewProviderRequest in AgentPane / useAgentPaneController', () => {
+    it('keeps a ready attachment preview when server uploadId differs from the local draft id', async () => {
+      // 预览的发送载荷使用服务端 uploadId，但回包过期检查必须比较未清空的本地草稿 localId。
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:probe`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      vi.mocked(harnessService.previewProviderRequest).mockResolvedValueOnce({
+        kind: 'DRAFT_REQUEST_PREVIEW',
+        providerType: 'OPENAI_CHAT',
+        modelName: 'MiniMax',
+        bodyByteSize: 23,
+        bodyJson: '{"content":"image"}',
+        sourceHeadEntryId: 'head-1',
+        generatedAt: '2026-09-27T05:00:00Z',
+      })
+      const { result } = renderController()
+      await waitFor(() => expect(result.current.composer.previewDisabled).toBe(false))
+      const text = createTextPart('look')
+      const local = createAttachmentPart('local-image-id', 'image.png')
+      act(() => result.current.composer.onPartsChange([text, local]))
+      const resolved = { ...local, uploadId: '11111111-2222-4333-8444-555555555556' }
+
+      await act(async () => {
+        await result.current.composer.onPreview?.([text, resolved], [text, local])
+      })
+      expect(vi.mocked(harnessService.previewProviderRequest).mock.calls[0]?.[1].commands.at(-1))
+        .toMatchObject({
+          type: 'USER_MESSAGE',
+          contents: [
+            { type: 'TEXT', text: 'look' },
+            { type: 'ATTACHMENT', uploadId: resolved.uploadId },
+          ],
+        })
+      expect(result.current.boundViews.debugSelection).toMatchObject({ type: 'preview' })
+      expect(result.current.composer.parts).toEqual([text, local])
+    })
+
     it('hides preview button for new session draft target, shows for bound thread', async () => {
       // 1. NEW_SESSION_DRAFT target: preview button is not rendered
       const { unmount } = renderPane({ type: 'CHAT', id: CHAT_ID })
@@ -1786,6 +1823,29 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       // Inspector did NOT display the stale preview
       expect(screen.queryByRole('heading', { level: 3, name: '请求预览' })).not.toBeInTheDocument()
       expect(composer).toHaveTextContent('initial text edited')
+    })
+
+    it('does not display a stale 409 after the draft changes', async () => {
+      // 草稿变化后的冲突只对应旧请求，不能覆盖当前草稿的错误提示。
+      const user = userEvent.setup()
+      localStorage.setItem(
+        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+        JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+      )
+      let rejectPreview!: (reason: unknown) => void
+      vi.mocked(harnessService.previewProviderRequest).mockReturnValueOnce(
+        new Promise<ProviderRequestPreviewDTO>((_, reject) => { rejectPreview = reject }),
+      )
+      renderPane({ type: 'CHAT', id: CHAT_ID })
+      const composer = await screen.findByLabelText('给 AI 发送消息')
+      await user.type(composer, 'before')
+      const preview = screen.getByRole('button', { name: '预览请求' })
+      await user.click(preview)
+      expect(harnessService.previewProviderRequest).toHaveBeenCalledTimes(1)
+      await user.type(composer, ' after')
+      await act(async () => rejectPreview(new ApiError('obsolete conflict', 409)))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(composer).toHaveTextContent('before after')
     })
 
     it('guards against stale error when target changes or unmounts while request is in flight', async () => {
