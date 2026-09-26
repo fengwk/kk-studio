@@ -191,6 +191,34 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Reasoning Effort 2')).toHaveValue('')
   })
 
+  it('allows editing protocolOptions on variants and keeps it available when reasoning is toggled off', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+
+    const protocolInput = screen.getByLabelText('Protocol Options 1')
+    expect(protocolInput).toBeInTheDocument()
+    expect(protocolInput).toHaveValue('')
+
+    fireEvent.change(protocolInput, { target: { value: '{\n  "temperature": 0.5\n}' } })
+    expect(protocolInput).toHaveValue('{\n  "temperature": 0.5\n}')
+
+    // 禁用 Reasoning
+    await user.click(screen.getByLabelText('Reasoning'))
+    expect(screen.queryByLabelText('Reasoning Effort 1')).not.toBeInTheDocument()
+
+    // protocolOptions 依然可用且保留已编辑的值
+    expect(screen.getByLabelText('Protocol Options 1')).toBeInTheDocument()
+    expect(screen.getByLabelText('Protocol Options 1')).toHaveValue('{\n  "temperature": 0.5\n}')
+
+    // 可以在 Reasoning 禁用时新增 variant 并编辑其 protocolOptions
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    const protocolInput2 = screen.getByLabelText('Protocol Options 2')
+    expect(protocolInput2).toBeInTheDocument()
+    expect(protocolInput2).toHaveValue('')
+    fireEvent.change(protocolInput2, { target: { value: '{\n  "top_p": 0.9\n}' } })
+    expect(protocolInput2).toHaveValue('{\n  "top_p": 0.9\n}')
+  })
+
   it('sanitizes integer limits and decimal pricing while editing', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)

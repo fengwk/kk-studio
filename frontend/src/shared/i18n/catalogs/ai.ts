@@ -433,6 +433,22 @@ export const aiCatalog = {
     'en-US': 'Reasoning Effort',
     'zh-CN': 'Reasoning Effort',
   },
+  'ai.catalog.form.protocolOptions': {
+    'en-US': 'Protocol Options',
+    'zh-CN': '原生协议选项',
+  },
+  'ai.catalog.form.protocolOptionsAria': {
+    'en-US': 'Protocol Options',
+    'zh-CN': 'Protocol Options',
+  },
+  'ai.catalog.form.protocolOptionsPlaceholder': {
+    'en-US': '{\n  "temperature": 0.7\n}',
+    'zh-CN': '{\n  "temperature": 0.7\n}',
+  },
+  'ai.catalog.form.protocolOptionsHint': {
+    'en-US': 'Optional JSON object for provider-native request options; leave blank if unused.',
+    'zh-CN': '可留空；必须为严格 JSON 对象，用于厂商原生请求选项。',
+  },
   'ai.catalog.form.useModelDefault': {
     'en-US': '(Use model default)',
     'zh-CN': '（使用模型默认）',
@@ -507,8 +523,9 @@ export const aiCatalog = {
     'zh-CN': 'offline',
   },
   'ai.catalog.form.variantHint': {
-    'en-US': 'A Variant carries only reasoning effort; IDs must be unique, and Default Variant must point to one of them.',
-    'zh-CN': 'Variant 只承载思考强度；id 唯一，Default Variant 必须指向其中一项。',
+    'en-US':
+      'A Variant carries reasoning effort and protocol options; IDs must be unique, and Default Variant must point to one of them.',
+    'zh-CN': 'Variant 承载思考强度与原生协议选项；id 唯一，Default Variant 必须指向其中一项。',
   },
   'ai.catalog.form.reasoningHint': {
     'en-US':
@@ -600,6 +617,22 @@ export const aiCatalog = {
   'ai.catalog.validation.variantDuplicate': {
     'en-US': 'Variant IDs must be unique',
     'zh-CN': 'Variant ID 不能重复',
+  },
+  'ai.catalog.validation.protocolOptionsInvalidJson': {
+    'en-US': 'Variant "{{ id }}" protocolOptions must be valid JSON',
+    'zh-CN': 'Variant "{{ id }}" 的 protocolOptions 必须是有效的 JSON',
+  },
+  'ai.catalog.validation.protocolOptionsNotObject': {
+    'en-US': 'Variant "{{ id }}" protocolOptions must be a JSON object',
+    'zh-CN': 'Variant "{{ id }}" 的 protocolOptions 必须是 JSON 对象',
+  },
+  'ai.catalog.validation.protocolOptionsInvalidJsonSimple': {
+    'en-US': 'protocolOptions must be valid JSON',
+    'zh-CN': 'protocolOptions 必须是有效的 JSON',
+  },
+  'ai.catalog.validation.protocolOptionsNotObjectSimple': {
+    'en-US': 'protocolOptions must be a JSON object',
+    'zh-CN': 'protocolOptions 必须是 JSON 对象',
   },
   'ai.catalog.validation.defaultVariant': {
     'en-US': 'Select a valid default Variant',

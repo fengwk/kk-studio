@@ -5,6 +5,7 @@ import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import {
   validateResourceDraft,
 } from '@/features/ai/catalog/ai-resource-form-validation'
+import { setLocale } from '@/shared/i18n'
 
 const EMPTY_AGENT_DRAFT = {
   name: '',
@@ -172,5 +173,119 @@ describe('ai-resource-form-validation', () => {
     expect(toUserFacingErrorMessage(new Error('unsupported provider type wire value: OPENAI'))).toMatch(
       /Provider Type/,
     )
+  })
+
+  describe('protocolOptions form validation', () => {
+    it('accepts valid protocolOptions JSON object on create', () => {
+      const result = validateResourceDraft(
+        { kind: 'model', mode: 'create' },
+        {
+          providerDraft: providerDraft(),
+          modelDraft: draft({
+            variants: [
+              {
+                draftId: 'v1',
+                id: 'medium',
+                reasoningEffort: '',
+                protocolOptions: '{\n  "temperature": 0.7\n}',
+              },
+            ],
+          }),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(result.ok).toBe(true)
+      expect(result.fields).toEqual({})
+    })
+
+    it('rejects invalid protocolOptions JSON and surfaces localized variant-specific error', () => {
+      setLocale('zh-CN')
+      const result = validateResourceDraft(
+        { kind: 'model', mode: 'create' },
+        {
+          providerDraft: providerDraft(),
+          modelDraft: draft({
+            defaultVariant: 'fast',
+            variants: [
+              {
+                draftId: 'v1',
+                id: 'fast',
+                reasoningEffort: '',
+                protocolOptions: '{ not valid json }',
+              },
+            ],
+          }),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('Variant "fast"')
+      expect(result.message).toContain('protocolOptions 必须是有效的 JSON')
+      expect(result.fields.variants).toBe(result.message)
+    })
+
+    it('rejects non-object root (array/scalar/null) with localized variant-specific error', () => {
+      setLocale('zh-CN')
+      const result = validateResourceDraft(
+        { kind: 'model', mode: 'create' },
+        {
+          providerDraft: providerDraft(),
+          modelDraft: draft({
+            defaultVariant: 'fast',
+            variants: [
+              {
+                draftId: 'v1',
+                id: 'fast',
+                reasoningEffort: '',
+                protocolOptions: '[1, 2, 3]',
+              },
+            ],
+          }),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('Variant "fast"')
+      expect(result.message).toContain('protocolOptions 必须是 JSON 对象')
+      expect(result.fields.variants).toBe(result.message)
+    })
+
+    it('validates protocolOptions even when model reasoning is disabled', () => {
+      setLocale('zh-CN')
+      const result = validateResourceDraft(
+        { kind: 'model', mode: 'create' },
+        {
+          providerDraft: providerDraft(),
+          modelDraft: draft({
+            reasoning: false,
+            defaultVariant: 'standard',
+            variants: [
+              {
+                draftId: 'v1',
+                id: 'standard',
+                reasoningEffort: '',
+                protocolOptions: 'null',
+              },
+            ],
+          }),
+          agentDraft: { ...EMPTY_AGENT_DRAFT },
+        },
+      )
+      expect(result.ok).toBe(false)
+      expect(result.message).toContain('Variant "standard"')
+      expect(result.message).toContain('protocolOptions 必须是 JSON 对象')
+      expect(result.fields.variants).toBe(result.message)
+    })
+
+    it('supports English locale for protocolOptions validation error messages', () => {
+      setLocale('en-US')
+      expect(
+        toUserFacingErrorMessage(new Error('variant fast protocolOptions must be valid JSON')),
+      ).toBe('Variant "fast" protocolOptions must be valid JSON')
+      expect(
+        toUserFacingErrorMessage(new Error('variant fast protocolOptions must be a JSON object')),
+      ).toBe('Variant "fast" protocolOptions must be a JSON object')
+      setLocale('zh-CN')
+    })
   })
 })

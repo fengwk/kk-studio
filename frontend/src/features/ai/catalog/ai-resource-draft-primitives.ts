@@ -12,6 +12,7 @@ export function newVariantDraft(input?: Partial<Omit<VariantDraft, 'draftId'>>):
     draftId: nextDraftId('variant'),
     id: input?.id ?? 'medium',
     reasoningEffort: input?.reasoningEffort ?? '',
+    protocolOptions: input?.protocolOptions ?? '',
   }
 }
 
