@@ -70,11 +70,6 @@ export function useBoundThreadPanelViews(
             }
             setDebugSelection(selection)
           }}
-          selectedRecord={selectedRecord}
-          onCloseDetail={() => {
-            selectEvent(null)
-            setDebugSelection(null)
-          }}
         />
       ) : undefined,
   }

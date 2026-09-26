@@ -18,22 +18,18 @@ import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-t
 import { useChatTranscriptAutoScroll } from '@/features/ai/runtime/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
 
+function pad(value: number): string {
+  return value.toString().padStart(2, '0')
+}
+
 function formatRowTime(value: ThreadEventRecord['createdAt']): string {
-  let date: Date | null = null
-  if (typeof value === 'string') {
-    const parsed = new Date(value)
-    if (!Number.isNaN(parsed.getTime())) {
-      date = parsed
-    }
-  } else if (typeof value === 'number') {
-    date = new Date(value)
-  } else if (Array.isArray(value) && typeof value[0] === 'number') {
-    date = new Date(value[0])
+  if (value == null || Array.isArray(value)) {
+    return '--:--:--'
   }
-  if (date == null || Number.isNaN(date.getTime())) {
-    return ''
+  const date = value instanceof Date ? value : new Date(value as string | number)
+  if (Number.isNaN(date.getTime())) {
+    return '--:--:--'
   }
-  const pad = (part: number) => String(part).padStart(2, '0')
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
@@ -50,8 +46,6 @@ export interface ThreadEventViewProps {
   debug?: ThreadModelRequestDebugData | null
   debugSelection?: DebugInspectorSelection | null
   onSelectInspector?: (selection: DebugInspectorSelection | null) => void
-  selectedRecord?: ThreadEventRecord | null
-  onCloseDetail?: () => void
 }
 
 /**
@@ -59,7 +53,7 @@ export interface ThreadEventViewProps {
  *
  * - 宽面板 (container >= 1100px)：三等宽列（请求预览 / 事件列表 / 详情），各自唯一纵向滚动，外框无滚动；
  * - 窄面板 (container < 1100px)：单区填满，通过带有 roving tabIndex 的 Tab 导航（请求预览 / 事件 / 详情）切换；
- * - 点击事件 / 工具 / skill / request 自动切换到详情并安全转移焦点；关闭详情返回来源页签并恢复可见焦点；
+ * - 点击事件 / 工具 / skill / request 自动切换到详情；关闭详情安全返回来源页签并恢复可见焦点；
  * - 所有 ID 均基于 useId 作用域，防止在多 pane split 时冲突。
  */
 export function ThreadEventView({
@@ -70,9 +64,7 @@ export function ThreadEventView({
   bodyRef: bodyRefProp,
   debug,
   debugSelection = null,
-  onSelectInspector = () => {},
-  selectedRecord: selectedRecordProp,
-  onCloseDetail,
+  onSelectInspector,
 }: ThreadEventViewProps) {
   const { t } = useI18n()
   const baseId = useId()
@@ -87,7 +79,6 @@ export function ThreadEventView({
   )
   const lastFocusedTriggerRef = useRef<HTMLElement | null>(null)
   const detailCloseBtnRef = useRef<HTMLButtonElement>(null)
-  const detailSectionRef = useRef<HTMLDivElement>(null)
   const tabButtonRefs = useRef<Record<DebugViewTab, HTMLButtonElement | null>>({
     preview: null,
     events: null,
@@ -130,22 +121,18 @@ export function ThreadEventView({
   )
 
   const selectedRecord = useMemo(() => {
-    if (selectedRecordProp !== undefined) {
-      return selectedRecordProp
-    }
     if (selectedEventId == null) {
       return null
     }
     return events.find((e) => e.id === selectedEventId) ?? null
-  }, [events, selectedEventId, selectedRecordProp])
+  }, [events, selectedEventId])
 
   useChatTranscriptAutoScroll(bodyRef, events.length, events.length, initialScrollTop)
 
+  // 仅在初始挂载时赋予事件列表初始焦点（避免在 wide 模式下抢走 Inspector 或 Tab 的焦点）
   useEffect(() => {
-    if (layoutMode === 'wide' || activeTab === 'events') {
-      bodyRef.current?.focus({ preventScroll: true })
-    }
-  }, [bodyRef, layoutMode, activeTab])
+    bodyRef.current?.focus({ preventScroll: true })
+  }, [bodyRef])
 
   useEffect(() => {
     if (selectedEventId == null || lastScrolledIdRef.current === selectedEventId) {
@@ -193,33 +180,36 @@ export function ThreadEventView({
 
   function handleCloseDetail() {
     if (debugSelection != null) {
-      onSelectInspector(null)
+      onSelectInspector?.(null)
     }
     if (selectedEventId != null) {
       onSelectedEventIdChange(null)
     }
-    onCloseDetail?.()
     const nextTab = lastDetailSourceRef.current === 'preview' ? 'preview' : 'events'
     setActiveTab(nextTab)
 
     // 恢复可见焦点到触发元素
     requestAnimationFrame(() => {
-      const trigger = lastFocusedTriggerRef.current
-      if (trigger && document.body.contains(trigger)) {
-        trigger.focus({ preventScroll: true })
-      } else if (nextTab === 'events') {
-        bodyRef.current?.focus({ preventScroll: true })
+      if (nextTab === 'preview') {
+        const trigger = lastFocusedTriggerRef.current
+        if (trigger && document.body.contains(trigger)) {
+          trigger.focus({ preventScroll: true })
+          return
+        }
       }
+      // 默认（以及来自事件时）让 listbox 获得焦点，绝不尝试 focus 没有 tabIndex 的 option div
+      bodyRef.current?.focus({ preventScroll: true })
     })
   }
 
-  function handleSelectEvent(id: string, element: HTMLElement) {
-    lastFocusedTriggerRef.current = element
+  function handleSelectEvent(id: string) {
     lastDetailSourceRef.current = 'events'
     setActiveTab('detail')
-    if (onSelectInspector) {
-      onSelectInspector(null)
+    if (layoutMode === 'wide') {
+      // wide 模式下保持 listbox 获焦，便于后续连续按 Arrow 导航
+      bodyRef.current?.focus({ preventScroll: true })
     }
+    onSelectInspector?.(null)
     onSelectedEventIdChange(id)
   }
 
@@ -233,7 +223,7 @@ export function ThreadEventView({
       setActiveTab('detail')
       onSelectedEventIdChange(null)
     }
-    onSelectInspector(selection)
+    onSelectInspector?.(selection)
   }
 
   // Roving TabIndex 键盘导航: ArrowLeft, ArrowRight, Home, End
@@ -262,15 +252,17 @@ export function ThreadEventView({
     }
   }
 
-  // 详情区域内局部 Esc 处理
-  function handleDetailContainerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  // Pane 容器级局部 Escape 拦截，防止逃逸污染其他 Pane 或底层窗口
+  function handleContainerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {
       return
     }
     if (event.key === 'Escape') {
-      event.preventDefault()
-      event.stopPropagation()
-      handleCloseDetail()
+      if (selectedEventId != null || debugSelection != null) {
+        event.preventDefault()
+        event.stopPropagation()
+        handleCloseDetail()
+      }
     }
   }
 
@@ -282,6 +274,7 @@ export function ThreadEventView({
       className="thread-events-shell"
       data-layout={layoutMode}
       data-active-tab={activeTab}
+      onKeyDown={handleContainerKeyDown}
     >
       {/* 窄面板下的 WAI-ARIA Tab 导航；宽面板不渲染 tablist */}
       {!isWide ? (
@@ -398,7 +391,7 @@ export function ThreadEventView({
                   role="option"
                   aria-selected={selected}
                   className={`thread-event kind-${event.kind} status-${event.status} ${selected ? 'active' : ''}`}
-                  onClick={(e) => handleSelectEvent(event.id, e.currentTarget)}
+                  onClick={() => handleSelectEvent(event.id)}
                 >
                   <span className="thread-event-time" data-event-time>
                     {formatRowTime(event.createdAt)}
@@ -416,14 +409,12 @@ export function ThreadEventView({
 
         {/* 区域 3：详情 */}
         <section
-          ref={detailSectionRef}
           id={`${baseId}-panel-detail`}
           role={!isWide ? 'tabpanel' : undefined}
           aria-labelledby={!isWide ? `${baseId}-tab-detail` : undefined}
           aria-label={isWide ? t('ai.runtime.debug.tabDetail') : undefined}
           tabIndex={-1}
           className="thread-debug-col thread-debug-col-detail"
-          onKeyDown={handleDetailContainerKeyDown}
         >
           {debugSelection && debug ? (
             <ThreadDebugInspector
@@ -431,12 +422,14 @@ export function ThreadEventView({
               debug={debug}
               onClose={handleCloseDetail}
               closeButtonRef={detailCloseBtnRef}
+              autoFocusCloseButton={!isWide}
             />
           ) : selectedRecord ? (
             <ThreadEventDetail
               record={selectedRecord}
               onClose={handleCloseDetail}
               closeButtonRef={detailCloseBtnRef}
+              autoFocusCloseButton={!isWide}
             />
           ) : (
             <div className="thread-debug-placeholder" data-testid="thread-debug-placeholder">
