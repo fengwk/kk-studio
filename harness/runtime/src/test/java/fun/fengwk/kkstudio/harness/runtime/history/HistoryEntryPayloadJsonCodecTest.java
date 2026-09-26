@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -122,6 +123,100 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(root, CODEC.decode(EntryType.ROOT, CODEC.encode(root)));
     assertEquals(subagentRoot, CODEC.decode(EntryType.ROOT, CODEC.encode(subagentRoot)));
     assertEquals(completedEnd, CODEC.decode(EntryType.TURN_END, CODEC.encode(completedEnd)));
+  }
+
+  /**
+   * 意图：ASSISTANT metadata 的流式生成计时可选可空——带计时精确往返（canonical 字段序），旧历史缺失该字段仍可解码为 null，且重编码与旧 JSON
+   * 逐字一致（不引入版本别名）。
+   */
+  @Test
+  void roundTripsAssistantMetadataStreamTimingAndAcceptsLegacyShape() {
+    String legacy =
+        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
+            + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
+            + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
+            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
+            + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\",\"cacheRead\":\"0\","
+            + "\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"2\"}},"
+            + "\"toolResultMetadata\":null}";
+    MessagePayload legacyPayload = (MessagePayload) CODEC.decode(EntryType.MESSAGE, legacy);
+    assertNull(legacyPayload.assistantMetadata().decodeDurationMillis());
+    assertEquals(legacy, CODEC.encode(legacyPayload));
+
+    MessagePayload timed =
+        new MessagePayload(
+            assistant("answer"), metadata(GenerationStopReason.COMPLETE, 1234L), null);
+    assertEquals(
+        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
+            + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
+            + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
+            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
+            + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\",\"cacheRead\":\"0\","
+            + "\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"2\"},"
+            + "\"decodeDurationMillis\":1234},\"toolResultMetadata\":null}",
+        CODEC.encode(timed));
+    assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
+  }
+
+  /** 意图：decodeDurationMillis 的严格边界——非负整数与显式 null 合法，负值、非整数、非数字类型与未知字段一律拒绝。 */
+  @Test
+  void rejectsAssistantMetadataDecodeDurationViolations() {
+    String prefix =
+        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]},"
+            + "\"assistantMetadata\":";
+    String suffix = ",\"toolResultMetadata\":null}";
+    String base =
+        "{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,\"outputTokens\":1,"
+            + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteLongTokens\":0,"
+            + "\"reasoningTokens\":0,\"providerTotalTokens\":2},"
+            + "\"cost\":{\"currency\":\"USD\",\"input\":\"1\",\"output\":\"1\",\"cacheRead\":\"0\","
+            + "\"cacheWrite\":\"0\",\"cacheWriteLong\":\"0\",\"reasoning\":\"0\",\"total\":\"2\"}";
+
+    assertEquals(
+        0L,
+        ((MessagePayload)
+                CODEC.decode(
+                    EntryType.MESSAGE, prefix + base + ",\"decodeDurationMillis\":0}" + suffix))
+            .assistantMetadata()
+            .decodeDurationMillis());
+    assertNull(
+        ((MessagePayload)
+                CODEC.decode(
+                    EntryType.MESSAGE, prefix + base + ",\"decodeDurationMillis\":null}" + suffix))
+            .assistantMetadata()
+            .decodeDurationMillis());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE, prefix + base + ",\"decodeDurationMillis\":-1}" + suffix));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE, prefix + base + ",\"decodeDurationMillis\":1.5}" + suffix));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE, prefix + base + ",\"decodeDurationMillis\":\"12\"}" + suffix));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE, prefix + base + ",\"decodeDurationMillis\":true}" + suffix));
+    // 可选字段不放松未知字段拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.decode(EntryType.MESSAGE, prefix + base + ",\"extra\":1}" + suffix));
+    // 超出 long 范围的整数同样被拒绝（不静默截断）。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE,
+                prefix + base + ",\"decodeDurationMillis\":9223372036854775808}" + suffix));
   }
 
   @Test
@@ -835,6 +930,13 @@ class HistoryEntryPayloadJsonCodecTest {
             BigDecimal.ZERO,
             BigDecimal.valueOf(2));
     return new AssistantMessageMetadata(reason, usage, cost);
+  }
+
+  private static AssistantMessageMetadata metadata(
+      GenerationStopReason reason, Long decodeDurationMillis) {
+    AssistantMessageMetadata base = metadata(reason);
+    return new AssistantMessageMetadata(
+        base.stopReason(), base.usage(), base.cost(), decodeDurationMillis);
   }
 
   private static BranchSettings settings() {

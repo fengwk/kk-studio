@@ -37,9 +37,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 
 /**
  * 一次 claim 的进程内 Model execution：Gateway Listener 回调门控缓冲、所有权围栏与 lease heartbeat。
@@ -69,6 +71,10 @@ final class ModelExecution implements ModelGateway.Listener {
   private final ScheduledExecutorService scheduler;
   private final Executor flushExecutor;
   private final Consumer<ModelExecution> ownerRelease;
+  private final LongSupplier nanoTime;
+
+  /** 首个非空输出 delta 的回调观察时刻（单调纳秒）；null 表示尚未观察到任何模型输出。 */
+  private final AtomicReference<Long> firstOutputNanos = new AtomicReference<>();
 
   private final AtomicBoolean terminal = new AtomicBoolean();
   private final AtomicBoolean abandoned = new AtomicBoolean();
@@ -106,6 +112,39 @@ final class ModelExecution implements ModelGateway.Listener {
       Executor heartbeatWorker,
       Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease) {
+    this(
+        store,
+        realtimeEventSink,
+        claim,
+        threadId,
+        attempt,
+        compaction,
+        bindings,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        flushExecutor,
+        ownerRelease,
+        System::nanoTime);
+  }
+
+  /** 完整构造器：{@code nanoTime} 是采集流式生成计时的单调时间源，生产默认 {@link System#nanoTime}，测试可注入可控来源。 */
+  ModelExecution(
+      HarnessStore store,
+      RealtimeEventSink realtimeEventSink,
+      ClaimedWork claim,
+      UUID threadId,
+      int attempt,
+      boolean compaction,
+      List<ToolBinding> bindings,
+      ModelProcessorConfig config,
+      Clock clock,
+      ScheduledExecutorService scheduler,
+      Executor heartbeatWorker,
+      Executor flushExecutor,
+      Consumer<ModelExecution> ownerRelease,
+      LongSupplier nanoTime) {
     this.store = Objects.requireNonNull(store, "store");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.claim = Objects.requireNonNull(claim, "claim");
@@ -127,6 +166,7 @@ final class ModelExecution implements ModelGateway.Listener {
             this.clock,
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
+    this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
   }
 
   UUID invocationId() {
@@ -320,7 +360,11 @@ final class ModelExecution implements ModelGateway.Listener {
     if (terminal.get() || abandoned.get()) {
       return;
     }
-    deliver(new Pending(PendingKind.EVENT, event, null, null));
+    if (isModelOutputDelta(event) && firstOutputNanos.get() == null) {
+      // 在回调入口采样首非空输出的观察时刻：与 drain/持久化等待无关，随后才排队缓冲。
+      firstOutputNanos.compareAndSet(null, nanoTime.getAsLong());
+    }
+    deliver(new Pending(PendingKind.EVENT, event, null, null, 0L));
   }
 
   @Override
@@ -328,7 +372,8 @@ final class ModelExecution implements ModelGateway.Listener {
     if (abandoned.get() || !terminal.compareAndSet(false, true)) {
       return;
     }
-    deliver(new Pending(PendingKind.SUCCEEDED, null, completion, null));
+    // 在回调入口采样成功观察时刻作为计时的右端点：随信号携带，之后的持久化/发布等待不计入。
+    deliver(new Pending(PendingKind.SUCCEEDED, null, completion, null, nanoTime.getAsLong()));
   }
 
   @Override
@@ -336,7 +381,7 @@ final class ModelExecution implements ModelGateway.Listener {
     if (abandoned.get() || !terminal.compareAndSet(false, true)) {
       return;
     }
-    deliver(new Pending(PendingKind.FAILED, null, null, error));
+    deliver(new Pending(PendingKind.FAILED, null, null, error, 0L));
   }
 
   @Override
@@ -344,7 +389,7 @@ final class ModelExecution implements ModelGateway.Listener {
     if (abandoned.get() || !terminal.compareAndSet(false, true)) {
       return;
     }
-    deliver(new Pending(PendingKind.UNKNOWN, null, null, error));
+    deliver(new Pending(PendingKind.UNKNOWN, null, null, error, 0L));
   }
 
   /**
@@ -466,7 +511,7 @@ final class ModelExecution implements ModelGateway.Listener {
   private Applied processSignal(Pending signal) {
     return switch (signal.kind()) {
       case EVENT -> processEvent(signal.event());
-      case SUCCEEDED -> processSucceeded(signal.completion());
+      case SUCCEEDED -> processSucceeded(signal.completion(), signal.successNanos());
       case FAILED -> processFailed(signal.error());
       case UNKNOWN -> processUnknown(signal.error());
     };
@@ -539,7 +584,7 @@ final class ModelExecution implements ModelGateway.Listener {
     return Applied.PROGRESSED;
   }
 
-  private Applied processSucceeded(ProviderCompletion completion) {
+  private Applied processSucceeded(ProviderCompletion completion, long successNanos) {
     // Renderer 属于可插拔 Tool 代码；即使目录与实现都应为内存纯函数，也不能在 execution
     // monitor 内调用。terminal CAS 与 drainLock 已阻止后续 Provider 信号，渲染期间若丢失
     // lease，abandon 可立即取得 monitor，随后下方围栏会拒绝提交。
@@ -556,7 +601,7 @@ final class ModelExecution implements ModelGateway.Listener {
       if (abandoned.get()) {
         return Applied.LOST;
       }
-      applied = finishSuccessLocked(durableCompletion, publishes);
+      applied = finishSuccessLocked(durableCompletion, successNanos, publishes);
     }
     if (applied == Applied.LOST) {
       return Applied.LOST;
@@ -782,9 +827,12 @@ final class ModelExecution implements ModelGateway.Listener {
     return Applied.PROGRESSED;
   }
 
-  private Applied finishSuccessLocked(ProviderCompletion completion, List<Publish> publishes) {
+  private Applied finishSuccessLocked(
+      ProviderCompletion completion, long successNanos, List<Publish> publishes) {
     cancelBatchTimerLocked();
     ProviderResponse response = completion.response();
+    // 仅在成功终态冻结 Harness 观测的生成计时；失败/重试/UNKNOWN/abandon 绝不虚构时长。
+    Long decodeDurationMillis = decodeDurationMillis(successNanos);
     if (response != null && response.stopReason() == GenerationStopReason.FILTERED) {
       ProviderResponse validatedResponse;
       try {
@@ -799,7 +847,9 @@ final class ModelExecution implements ModelGateway.Listener {
                 ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
             publishes);
       }
-      boolean committed = safeTerminal(() -> commitSuccess(validatedResponse, null, null));
+      ProviderResponse durableResponse =
+          validatedResponse.withDecodeDurationMillis(decodeDurationMillis);
+      boolean committed = safeTerminal(() -> commitSuccess(durableResponse, null, null));
       if (!committed) {
         return Applied.LOST;
       }
@@ -852,9 +902,10 @@ final class ModelExecution implements ModelGateway.Listener {
     }
     final ProviderReplayState replayStateToCommit = replayState;
 
+    ProviderResponse durableResponse =
+        validatedResponse.withDecodeDurationMillis(decodeDurationMillis);
     boolean committed =
-        safeTerminal(
-            () -> commitSuccess(validatedResponse, checkpointToCommit, replayStateToCommit));
+        safeTerminal(() -> commitSuccess(durableResponse, checkpointToCommit, replayStateToCommit));
     if (!committed) {
       return Applied.LOST;
     }
@@ -1226,6 +1277,37 @@ final class ModelExecution implements ModelGateway.Listener {
     return false;
   }
 
+  /**
+   * 是否为可计入生成计时的模型输出 delta：非空 text / thinking，或携带 name / 非空 argumentsJson 的 tool call delta（其中单纯
+   * id-only 的 fragment 不算模型输出）。{@link ProviderStreamEvent.ToolCallDelta} 已保证 name 非 blank，因此非 null
+   * 即代表模型输出了工具名。
+   */
+  private static boolean isModelOutputDelta(ProviderStreamEvent event) {
+    if (event instanceof ProviderStreamEvent.TextDelta delta) {
+      return !delta.text().isEmpty();
+    }
+    if (event instanceof ProviderStreamEvent.ThinkingDelta delta) {
+      return !delta.text().isEmpty();
+    }
+    if (event instanceof ProviderStreamEvent.ToolCallDelta delta) {
+      return delta.name() != null
+          || (delta.argumentsJson() != null && !delta.argumentsJson().isEmpty());
+    }
+    return false;
+  }
+
+  /**
+   * 本 attempt 的流式生成计时：首个非空输出 delta 的观察时刻到成功回调观察时刻；任一端点缺失（无输出、abandon / failed / UNKNOWN 未成功）时返回
+   * null，绝不虚构时长。两个端点都在回调入口采样，之后的 drain / 持久化等待不计入；若回调竞态或异常时间源使 窗口为负，收敛为 0。
+   */
+  private Long decodeDurationMillis(long successNanos) {
+    Long startNanos = firstOutputNanos.get();
+    if (startNanos == null) {
+      return null;
+    }
+    return TimeUnit.NANOSECONDS.toMillis(Math.max(0L, successNanos - startNanos));
+  }
+
   /** 内部批次持久化或内部不变量检查失败：代表基础设施异常，绝不伪装为 Provider 错误。 */
   private static final class BatchInfrastructureException extends RuntimeException {
     private BatchInfrastructureException(String message, Throwable cause) {
@@ -1277,11 +1359,13 @@ final class ModelExecution implements ModelGateway.Listener {
     UNKNOWN
   }
 
+  /** 一次回调信号；{@code successNanos} 仅对 SUCCEEDED 有意义（成功回调的单调纳秒观察时刻）。 */
   private record Pending(
       PendingKind kind,
       ProviderStreamEvent event,
       ProviderCompletion completion,
-      ModelInvocationError error) {}
+      ModelInvocationError error,
+      long successNanos) {}
 
   private record Publish(ProviderStreamEvent event, long sequence) {}
 

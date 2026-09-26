@@ -35,6 +35,10 @@ final class HistoryValueCodecs {
   private static final Set<String> MODEL_SELECTION_FIELDS =
       orderedSet("providerName", "modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage", "cost");
+
+  /** 可选的 assistantMetadata 字段：缺失或 null 表示无可信流计时（含旧历史记录）。 */
+  private static final Set<String> METADATA_OPTIONAL_FIELDS = orderedSet("decodeDurationMillis");
+
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
           "inputTokens",
@@ -172,12 +176,15 @@ final class HistoryValueCodecs {
     costNode.put("cacheWriteLong", cost.cacheWriteLong().toPlainString());
     costNode.put("reasoning", cost.reasoning().toPlainString());
     costNode.put("total", cost.total().toPlainString());
+    if (metadata.decodeDurationMillis() != null) {
+      node.put("decodeDurationMillis", metadata.decodeDurationMillis());
+    }
     return node;
   }
 
   static AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
     ObjectNode node = requireObject(value, "assistantMetadata");
-    requireExactFields(node, METADATA_FIELDS, "assistantMetadata");
+    requireFields(node, METADATA_FIELDS, METADATA_OPTIONAL_FIELDS, "assistantMetadata");
     GenerationStopReason stopReason =
         readEnum(
             GenerationStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
@@ -204,7 +211,9 @@ final class HistoryValueCodecs {
             requiredDecimal(costNode, "cacheWriteLong", "assistantMetadata.cost"),
             requiredDecimal(costNode, "reasoning", "assistantMetadata.cost"),
             requiredDecimal(costNode, "total", "assistantMetadata.cost"));
-    return new AssistantMessageMetadata(stopReason, usage, cost);
+    Long decodeDurationMillis =
+        nullableNonNegativeLong(node, "decodeDurationMillis", "assistantMetadata");
+    return new AssistantMessageMetadata(stopReason, usage, cost, decodeDurationMillis);
   }
 
   // ---------- 通用 JSON 工具方法 ----------
@@ -259,6 +268,19 @@ final class HistoryValueCodecs {
     JsonNode value = node.get(field);
     if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
       throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.longValue();
+  }
+
+  /** 可空非负整数：缺失或 null 归一化为 null；其他类型或负值一律拒绝。 */
+  static Long nullableNonNegativeLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a non-negative integer or null");
     }
     return value.longValue();
   }
@@ -386,6 +408,29 @@ final class HistoryValueCodecs {
     if (!actual.equals(expected)) {
       throw new IllegalArgumentException(
           context + " unexpected fields: " + actual + " (expected " + expected + ")");
+    }
+  }
+
+  /**
+   * 严格字段集合校验：{@code required} 必须全部存在，且实际字段不得超出 {@code required} 与 {@code optional}
+   * 的并集；未知字段、缺失必填字段一律拒绝。
+   */
+  static void requireFields(
+      ObjectNode node, Set<String> required, Set<String> optional, String context) {
+    Set<String> actual = new LinkedHashSet<>();
+    node.fieldNames().forEachRemaining(actual::add);
+    Set<String> allowed = new LinkedHashSet<>(required);
+    allowed.addAll(optional);
+    if (!actual.containsAll(required) || !allowed.containsAll(actual)) {
+      throw new IllegalArgumentException(
+          context
+              + " unexpected fields: "
+              + actual
+              + " (expected "
+              + required
+              + ", optional "
+              + optional
+              + ")");
     }
   }
 
