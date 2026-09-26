@@ -34,7 +34,8 @@ describe('ThreadComposer /goal interactions', () => {
     )
 
     // Option for goal command is visible in slash palette
-    const goalOption = screen.getByRole('option', { name: /^goal/ })
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    const goalOption = await screen.findByRole('option', { name: /^goal/ })
     expect(goalOption).toBeInTheDocument()
 
     // Clicking the goal command palette option

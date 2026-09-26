@@ -10,6 +10,7 @@ import {
   createTextPart,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
+import type { ThreadComposerSettingsInput } from '@/features/ai/runtime/thread-panel/ThreadComposerControls'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 
 function ControlledComposer({
@@ -19,6 +20,7 @@ function ControlledComposer({
   historicalUserMessages = [],
   queuedUserMessages = [],
   focusOnEscape = false,
+  settings,
 }: {
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
@@ -26,6 +28,7 @@ function ControlledComposer({
   historicalUserMessages?: readonly string[]
   queuedUserMessages?: readonly string[]
   focusOnEscape?: boolean
+  settings?: ThreadComposerSettingsInput
 }) {
   const [parts, setParts] = useState(initial)
   return (
@@ -39,12 +42,13 @@ function ControlledComposer({
       historicalUserMessages={historicalUserMessages}
       queuedUserMessages={queuedUserMessages}
       focusOnEscape={focusOnEscape}
+      settings={settings}
     />
   )
 }
 
 describe('ThreadComposer interactions', () => {
-  // Esc 只影响可见提示；不完整命令不能因提示隐藏而被发送或模糊执行。
+  // Esc 切换焦点并保留草稿；blur 收起后隐藏状态不执行命令也不发送普通消息；再次 Esc 聚焦后自动重开菜单。
   it('preserves slash text across repeated Escape and reopens after editing', async () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
@@ -52,20 +56,32 @@ describe('ThreadComposer interactions', () => {
     render(<ControlledComposer focusOnEscape onSubmit={onSubmit} onCommand={onCommand} />)
     const editor = screen.getByLabelText('给 AI 发送消息')
     await user.type(editor, '/de')
-    await user.keyboard('{Escape}{Escape}{Enter}')
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+
+    // 第 1 次 Esc：聚焦时 blur 并收起菜单，保留草稿 /de
+    await user.keyboard('{Escape}')
     expect(editor).toHaveTextContent('/de')
+    expect(editor).not.toHaveFocus()
     expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
+
+    // 失焦状态下按 Enter：无隐藏命令执行，也不发送普通消息
+    await user.keyboard('{Enter}')
     expect(onSubmit).not.toHaveBeenCalled()
     expect(onCommand).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: '打开命令表' }))
-    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
     expect(editor).toHaveTextContent('/de')
-    await user.keyboard('bug')
+
+    // 第 2 次 Esc：未聚焦时通过 focusOnEscape 重新聚焦 editor，/de 自动重开菜单
+    await user.keyboard('{Escape}')
+    expect(editor).toHaveFocus()
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
-    await user.keyboard('{Escape}{Enter}')
+    expect(editor).toHaveTextContent('/de')
+
+    // 继续输入补全并执行可见选项
+    await user.keyboard('bug')
+    expect(editor).toHaveTextContent('/debug')
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    await user.keyboard('{Enter}')
     expect(onCommand).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 'debug' }))
     expect(onSubmit).not.toHaveBeenCalled()
     expect(editor).toBeEmptyDOMElement()
@@ -476,6 +492,83 @@ describe('ThreadComposer interactions', () => {
     expect(screen.getByLabelText('给 AI 发送消息')).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '打开命令表' })).toBeDisabled()
+  })
+
+  it('handles true sequential Escape shortcuts with control menu priority: 1st closes control menu, 2nd blurs composer, 3rd refocuses editor via focusOnEscape', async () => {
+    const user = userEvent.setup()
+    const dummySettings: ThreadComposerSettingsInput = {
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      models: [{ providerName: 'minimax', name: 'MiniMax', config: { defaultVariant: 'default', variants: [{ id: 'default' }] } }],
+      yoloEnabled: false,
+      environmentName: null,
+      environments: [],
+      onModelChange: vi.fn(),
+      onYoloChange: vi.fn(),
+      onEnvironmentChange: vi.fn(),
+    }
+    render(<ControlledComposer focusOnEscape settings={dummySettings} onSubmit={vi.fn()} onCommand={vi.fn()} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+
+    // 聚焦输入 /th
+    await user.type(editor, '/th')
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+
+    // 打开权限菜单（上层 control menu）
+    await user.click(screen.getByRole('button', { name: '权限模式' }))
+    expect(await screen.findByRole('listbox', { name: '权限选项' })).toBeInTheDocument()
+
+    // 真正连续快捷键 1：Esc 关闭权限菜单，优先消费 Esc，保持 editor 聚焦并呈现 /th 命令表
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox', { name: '权限选项' })).not.toBeInTheDocument()
+    expect(editor).toHaveFocus()
+    expect(screen.getByLabelText('命令表')).toBeInTheDocument()
+
+    // 真正连续快捷键 2：Esc 此时聚焦且无上层菜单，blur 整个 composer 并收起
+    await user.keyboard('{Escape}')
+    expect(editor).not.toHaveFocus()
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+    expect(editor).toHaveTextContent('/th')
+
+    // 真正连续快捷键 3：Esc 未聚焦时全局 focusOnEscape 恢复焦点，并因 /th 自动重开命令表
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(editor).toHaveFocus())
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    expect(editor).toHaveTextContent('/th')
+  })
+
+  it('switches focus via Tab within composer region without closing the command palette', async () => {
+    const user = userEvent.setup()
+    render(<ControlledComposer onSubmit={vi.fn()} onCommand={vi.fn()} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.type(editor, '/th')
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+
+    // Tab 移动焦点到 + 按钮（仍在区域内）
+    await user.tab()
+    expect(screen.getByRole('button', { name: '打开命令表' })).toHaveFocus()
+    // 菜单依然保持打开！
+    expect(screen.getByLabelText('命令表')).toBeInTheDocument()
+  })
+
+  it('toggles focus on Escape for plain text and preserves text content without opening menu', async () => {
+    const user = userEvent.setup()
+    render(<ControlledComposer focusOnEscape onSubmit={vi.fn()} onCommand={vi.fn()} />)
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.type(editor, 'ordinary text')
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+    expect(editor).toHaveFocus()
+
+    // 聚焦时 Esc：blur 失焦，普通文本保留
+    await user.keyboard('{Escape}')
+    expect(editor).not.toHaveFocus()
+    expect(editor).toHaveTextContent('ordinary text')
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
+
+    // 未聚焦时 Esc：focus 聚焦，文本保留，仍无菜单
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(editor).toHaveFocus())
+    expect(editor).toHaveTextContent('ordinary text')
+    expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
   })
 })
 

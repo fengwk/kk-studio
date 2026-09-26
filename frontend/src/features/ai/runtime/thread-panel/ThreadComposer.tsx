@@ -138,6 +138,7 @@ export function ThreadComposer({
   settings?: ThreadComposerSettingsInput
 }) {
   const { t } = useI18n()
+  const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isComposingRef = useRef(false)
@@ -184,12 +185,7 @@ export function ThreadComposer({
   })
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false)
-  const [slashDismissed, setSlashDismissed] = useState(false)
   const [controlMenu, setControlMenu] = useState<ThreadComposerControlMenu>(null)
-  const draftKey = partsKey(parts)
-  useEffect(() => {
-    setSlashDismissed(false)
-  }, [draftKey])
 
   /** 从当前 DOM 提取 parts 并回传（输入/粘贴/删除后统一入口）。 */
   const syncFromDom = useCallback((force = false) => {
@@ -287,40 +283,62 @@ export function ThreadComposer({
   const isGoalWithObjective = isGoalCommand && goalCommandInfo.objective != null
   const slashQuery = isGoalWithObjective ? null : slashQueryOf(parts)
   const slashMode = slashQuery != null
-  const paletteMode = plusMenuOpen ? 'menu' : slashMode && !slashDismissed ? 'slash' : null
-  const paletteOpen = paletteMode != null
-  const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
-  const filteredCommands = useFilteredThreadCommands(query, commands)
+
   const [activeIndex, setActiveIndex] = useState(0)
   const draftIsEmpty = parts.every(
     (part) => part.type === 'text' && part.text.trim() === '',
   )
+
+  // 关闭覆盖层只改变显隐；若 control menu 优先处理则返回 true 避免外部继续 blur。
+  const closeOverlay = useCallback((): boolean => {
+    if (controlMenu != null) {
+      setControlMenu(null)
+      return true
+    }
+    setPlusMenuOpen(false)
+    return false
+  }, [controlMenu])
+
+  const handleLeaveRegion = useCallback(() => {
+    setPlusMenuOpen(false)
+    setControlMenu(null)
+  }, [])
+
+  // 组合焦点状态机：定时重试/覆盖层关闭后恢复/active 恢复/Escape/pending
+  // 完成后自动聚焦/卸载清理。
+  const {
+    isFocused,
+    focusComposer,
+    blurComposer,
+    handleKeyDown: handleRegionKeyDown,
+  } = useComposerFocus({
+    editorRef,
+    containerRef,
+    disabled,
+    active,
+    focusOnEscape,
+    pending,
+    closeOverlay,
+    onLeaveRegion: handleLeaveRegion,
+  })
+
+  const paletteMode =
+    active && !disabled && isFocused
+      ? plusMenuOpen
+        ? 'menu'
+        : slashMode
+          ? 'slash'
+          : null
+      : null
+  const paletteOpen = paletteMode != null
+  const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
+  const filteredCommands = useFilteredThreadCommands(query, commands)
 
   // 进行中的 HTTP 变更不能阻塞连续提交；附件未全部 ready 时也不能发送。
   const canSend = useMemo(
     () => !disabled && !slashMode && (isGoalCommand || canSubmitParts(parts, uploads)),
     [disabled, isGoalCommand, parts, slashMode, uploads],
   )
-
-  // 关闭覆盖层只改变显隐；slash 草稿及其命令语义保留到编辑或执行。
-  const closeOverlay = useCallback(() => {
-    setSlashDismissed(true)
-    setPlusMenuOpen(false)
-    if (controlMenu != null) {
-      setControlMenu(null)
-    }
-  }, [controlMenu])
-
-  // 组合焦点状态机：定时重试/覆盖层关闭后恢复/active 恢复/Escape/pending
-  // 完成后自动聚焦/卸载清理。
-  const { focusComposer } = useComposerFocus({
-    editorRef,
-    disabled,
-    active,
-    focusOnEscape,
-    pending,
-    closeOverlay,
-  })
 
   // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。
   const { commit } = useComposerSubmissionSettle({
@@ -585,12 +603,6 @@ export function ThreadComposer({
         return
       }
     }
-    if (event.key === 'Escape' && paletteOpen) {
-      event.preventDefault()
-      event.stopPropagation()
-      closeCommandPalette()
-      return
-    }
     if (paletteOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
       event.preventDefault()
       event.stopPropagation()
@@ -633,14 +645,6 @@ export function ThreadComposer({
         return
       }
       event.preventDefault()
-      if (slashMode) {
-        // 提示隐藏后仅执行完整命令，不能沿用不可见的模糊匹配选择或发送普通消息。
-        const command = commands.find((item) => item.id === slashQuery?.trim().toLowerCase())
-        if (command && !command.disabled) {
-          handleSelect(command)
-        }
-        return
-      }
       handleSubmit()
       focusComposer()
     }
@@ -724,7 +728,13 @@ export function ThreadComposer({
   }
 
   return (
-    <div className="thread-composer" hidden={!active} aria-hidden={!active}>
+    <div
+      ref={containerRef}
+      className="thread-composer"
+      hidden={!active}
+      aria-hidden={!active}
+      onKeyDown={handleRegionKeyDown}
+    >
       {toast ? (
         <div
           className="composer-toast"
@@ -794,7 +804,11 @@ export function ThreadComposer({
             }}
             onClick={() => {
               if (paletteOpen) {
-                closeCommandPalette()
+                if (slashMode) {
+                  blurComposer()
+                } else {
+                  closeCommandPalette()
+                }
                 return
               }
               setControlMenu(null)

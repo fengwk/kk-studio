@@ -601,8 +601,8 @@ describe('ThreadComposer edge interactions', () => {
       />,
     )
     const editor = editorOf()
-    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.click(editor)
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.keyboard('{Enter}')
 
     // 无 settings 时 /models 只清空 slash 草稿，不触发 onCommand。
