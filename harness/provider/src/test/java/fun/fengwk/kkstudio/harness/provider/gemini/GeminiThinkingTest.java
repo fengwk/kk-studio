@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.gemini;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -249,6 +250,236 @@ class GeminiThinkingTest {
     assertFalse(
         parts.get(1).has("thoughtSignature"),
         "Second parallel tool call must not fabricate thoughtSignature");
+  }
+
+  /** 意图：空文本签名 part 是合法的原生事实（思考结束标记），必须在原位置原样保留，既不被相邻 part 吸收也不重复保留。 */
+  @Test
+  void retainsEmptyTextSignedPartInPlaceWithoutMerging() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think", "thought": true, "thoughtSignature": "sig_1" },
+              { "text": "", "thought": true, "thoughtSignature": "sig_empty" }
+            ] }
+          }]
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think", "thought": true, "thoughtSignature": "sig_1" },
+              { "text": "", "thought": true, "thoughtSignature": "sig_empty" },
+              { "text": "answer" }
+            ] },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("think", completion.response().thinking());
+    assertEquals("answer", completion.response().text());
+
+    List<String> thinkingDeltas =
+        emittedEvents.stream()
+            .filter(e -> e instanceof ProviderStreamEvent.ThinkingDelta)
+            .map(e -> ((ProviderStreamEvent.ThinkingDelta) e).text())
+            .toList();
+    assertEquals(List.of("think"), thinkingDeltas, "空文本签名 part 绝不产生重复思考增量");
+
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(3, parts.size());
+    assertEquals("think", parts.get(0).path("text").asText());
+    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asText());
+    assertTrue(parts.get(1).has("text"));
+    assertEquals("", parts.get(1).path("text").asText());
+    assertEquals("sig_empty", parts.get(1).path("thoughtSignature").asText());
+    assertEquals("answer", parts.get(2).path("text").asText());
+  }
+
+  /**
+   * 意图：多个带 thoughtSignature 的 part 必须各自保留为独立原生 part，签名精确、顺序不变、绝不伪造或跨 part 迁移； 同一快照重复发送的同一签名 part
+   * 按原始 JSON 相等去重，不重复计入 thinking。
+   */
+  @Test
+  void keepsDistinctSignedPartsAsSeparateVerbatimReplayParts() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think A", "thought": true, "thoughtSignature": "sig_a" }
+            ] }
+          }]
+        }
+        """);
+    // 快照重复发送：第一个签名 part 与后续分片完全一致时不得重复保留
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think A", "thought": true, "thoughtSignature": "sig_a" },
+              { "text": " think B", "thought": true, "thoughtSignature": "sig_b" },
+              { "text": "answer" }
+            ] },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("think A think B", completion.response().thinking(), "重复快照绝不被重复计入 thinking");
+    assertEquals("answer", completion.response().text());
+
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(3, parts.size(), "两个签名 part 与文本 part 必须各自保留");
+    assertEquals("think A", parts.get(0).path("text").asText());
+    assertEquals("sig_a", parts.get(0).path("thoughtSignature").asText());
+    assertTrue(parts.get(0).path("thought").asBoolean());
+    assertEquals(" think B", parts.get(1).path("text").asText());
+    assertEquals("sig_b", parts.get(1).path("thoughtSignature").asText());
+    assertEquals("answer", parts.get(2).path("text").asText());
+    assertFalse(parts.get(2).has("thoughtSignature"), "文本 part 绝不伪造签名");
+  }
+
+  /** 意图：两个带不同签名的累积形态无法证明是同一 part，绝不合并、绝不覆盖签名；两份原生事实按原顺序各自保留。 */
+  @Test
+  void neverOverwritesSignatureAcrossDistinctCumulativeSignedParts() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think", "thought": true, "thoughtSignature": "sig_1" }
+            ] }
+          }]
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think more", "thought": true, "thoughtSignature": "sig_2" }
+            ] },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(2, parts.size(), "带不同签名的累积形态绝不合并成单个 part");
+    assertEquals("think", parts.get(0).path("text").asText());
+    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asText(), "本地签名绝不被上游覆盖");
+    assertEquals("think more", parts.get(1).path("text").asText());
+    assertEquals("sig_2", parts.get(1).path("thoughtSignature").asText());
+  }
+
+  /**
+   * 意图：累积器冻结的原生 replay 必须真的可回放——签名与未知 union 成员原样上线，durable text/thinking 校验通过，
+   * 而不是交付一个只能在结构上自洽、下一轮却会被拒绝的 payload。
+   */
+  @Test
+  void replaysAccumulatorFrozenSignedAndUnknownPartsOnNextTurn() throws Exception {
+    GeminiRequestEncoder encoder = new GeminiRequestEncoder();
+    ModelVariant variant = new ModelVariant("default");
+    ProviderRequest firstTurn =
+        new ProviderRequest(
+            request.model(),
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1")))),
+            List.of(),
+            ProviderCacheControl.none());
+    String prefixHash = encoder.encode(firstTurn, descriptor).sourcePrefixHash();
+
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(request, descriptor, prefixHash, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [
+              { "text": "think", "thought": true, "thoughtSignature": "sig_stream" },
+              { "text": "answer", "futurePartField": { "trace": "t-1" } },
+              { "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
+            ] },
+            "finishReason": "STOP"
+          }]
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    ProviderResponse response = completion.response();
+    assertEquals("think", response.thinking());
+    assertEquals("answer", response.text());
+    assertNotNull(completion.replayState());
+
+    ProviderRequest secondTurn =
+        new ProviderRequest(
+            request.model(),
+            variant,
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1"))),
+                new ProviderMessage(
+                    ProviderMessageRole.ASSISTANT,
+                    List.of(
+                        new ProviderThinkingBlock(response.thinking()),
+                        new ProviderTextBlock(response.text())),
+                    completion.replayState()),
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 2")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    JsonNode secondTurnJson =
+        MAPPER.readTree(encoder.encode(secondTurn, descriptor).bodyUtf8Bytes());
+    ArrayNode modelParts = (ArrayNode) secondTurnJson.get("contents").get(1).get("parts");
+    assertEquals(3, modelParts.size());
+    assertEquals("sig_stream", modelParts.get(0).get("thoughtSignature").asText());
+    assertTrue(modelParts.get(0).get("thought").asBoolean());
+    assertEquals("t-1", modelParts.get(1).path("futurePartField").path("trace").asText());
+    assertEquals("QQ==", modelParts.get(2).path("inlineData").path("data").asText());
   }
 
   /** 验证多轮对话中，包含 thoughtSignature 的 ReplayState 经过编码器完整发送回服务端。 */

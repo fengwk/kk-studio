@@ -814,9 +814,13 @@ class GeminiStreamAccumulatorTest {
     assertFalse(parts.get(1).has("text"), "unknown part must not be rewritten as empty text");
   }
 
-  /** 意图：增量片段中的未知字段按可预测通用规则合并（字符串追加、数组追加、对象递归、其余覆盖）。 */
+  /**
+   * 意图：带未知字段的 part 是完整原生边界，绝不按字符串拼接/数组追加/对象递归合并成虚构的单个 part。
+   *
+   * <p>每个 chunk 的 part 各自原样保留（未知字段值与形状都不被改写），文本仍按 part 顺序确定性累积，durable 文本不丢不重。
+   */
   @Test
-  void mergesUnknownPartFieldsIncrementally() throws Exception {
+  void preservesUnknownPartFieldsVerbatimWithoutSpeculativeMerging() throws Exception {
     GeminiStreamAccumulator accumulator =
         new GeminiStreamAccumulator(
             request,
@@ -865,20 +869,170 @@ class GeminiStreamAccumulatorTest {
     assertEquals("Hello world!", completion.response().text());
 
     JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(1, parts.size());
-    JsonNode part = parts.get(0);
-    assertEquals("Hello world!", part.path("text").asText());
-    assertEquals("ab", part.path("futureString").asText());
-    assertEquals(2, part.path("futureArray").size());
-    assertEquals(1, part.path("futureArray").get(0).path("a").asInt());
-    assertEquals(2, part.path("futureArray").get(1).path("b").asInt());
-    assertEquals(1, part.path("futureObject").path("nested").path("x").asInt());
-    assertEquals(2, part.path("futureObject").path("nested").path("y").asInt());
-    assertEquals(3, part.path("futureObject").path("z").asInt());
-    assertEquals(2, part.path("futureScalar").asInt());
+    assertEquals(3, parts.size(), "每个带未知字段的 part 都必须保留自己的原生边界");
+
+    JsonNode first = parts.get(0);
+    assertEquals("Hello", first.path("text").asText());
+    assertEquals("a", first.path("futureString").asText());
+    assertEquals(1, first.path("futureArray").size());
+    assertEquals(1, first.path("futureArray").get(0).path("a").asInt());
+    assertEquals(1, first.path("futureObject").path("nested").path("x").asInt());
+    assertEquals(1, first.path("futureScalar").asInt());
+
+    JsonNode second = parts.get(1);
+    assertEquals(" world", second.path("text").asText());
+    assertEquals("b", second.path("futureString").asText(), "未知字符串字段绝不被跨 chunk 拼接");
+    assertEquals(1, second.path("futureArray").size(), "未知数组字段绝不被跨 chunk 追加");
+    assertEquals(2, second.path("futureArray").get(0).path("b").asInt());
+    assertEquals(2, second.path("futureObject").path("nested").path("y").asInt());
+    assertEquals(3, second.path("futureObject").path("z").asInt());
+    assertEquals(2, second.path("futureScalar").asInt());
+
+    assertEquals("!", parts.get(2).path("text").asText());
   }
 
-  /** 意图：cumulative snapshot 中未知字段整体替换；snapshot 追加的新未知 Part 同样原样保留。 */
+  /**
+   * 意图：未知 union 成员（inlineData / toolResponse）绝不与相邻 part 递归合并成单个合成对象；同一快照重复发送时按原始 JSON 相等去重， 新出现的未知
+   * part 按原顺序原样追加，functionCall 边界与未知 part 互不干扰。
+   */
+  @Test
+  void keepsUnknownUnionPartsAsVerbatimBoundaries() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    String textAndUnknown =
+        """
+        {"candidates": [{"content": {"role": "model", "parts": [
+          { "text": "answer", "futurePartField": { "trace": "t-1" } },
+          { "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
+        ]}}]}
+        """;
+    accumulator.handleEvent("message", textAndUnknown);
+    // 同一快照重复发送：完全一致的原生 part 不得重复保留
+    accumulator.handleEvent("message", textAndUnknown);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates": [{"content": {"role": "model", "parts": [
+          { "text": "answer", "futurePartField": { "trace": "t-1" } },
+          { "inlineData": { "mimeType": "image/png", "data": "QQ==" } },
+          { "toolResponse": { "name": "lookup", "response": { "k": "v" } } },
+          { "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
+        ]}, "finishReason": "STOP"}]}
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("answer", completion.response().text(), "重复快照绝不被重复计入文本");
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("fn", completion.response().toolCalls().get(0).name());
+
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(4, parts.size(), "未知 union 成员与 functionCall 必须各自保留为独立 part");
+    assertEquals("t-1", parts.get(0).path("futurePartField").path("trace").asText());
+    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asText());
+    assertFalse(parts.get(1).has("text"), "未知 part 绝不被补成空 text");
+    assertEquals("v", parts.get(2).path("toolResponse").path("response").path("k").asText());
+    assertFalse(parts.get(2).has("text"), "未知 union 成员绝不与相邻文本 part 合并");
+    assertEquals("fn", parts.get(3).path("functionCall").path("name").asText());
+  }
+
+  /**
+   * 意图：part 同时声明 text 与 functionCall（同一 data oneof 冲突）时无法写入合法 replay，显式不冻结 replay；
+   * 文本与工具调用仍完整交付，绝不静默丢弃其中任何一方。
+   */
+  @Test
+  void skipsReplayFreezingWhenTextAndFunctionCallConflictInOnePart() throws Exception {
+    GeminiStreamAccumulator accumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates": [{"content": {"role": "model", "parts": [
+          { "text": "partial ", "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
+        ]}, "finishReason": "STOP"}]}
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals("partial ", completion.response().text());
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("fn", completion.response().toolCalls().get(0).name());
+    assertNull(completion.replayState(), "无法保真的 union 冲突必须显式不冻结 replay");
+  }
+
+  /**
+   * 意图：text / thought / thoughtSignature 是文本累积与签名回放直接依赖的已知字段，类型不合法时明确 INVALID_RESPONSE 且不泄露
+   * payload； 空白签名与 null 值不承载语义，按不存在处理并保持 part 其它原生事实。
+   */
+  @Test
+  void rejectsMalformedKnownPartFieldsAndIgnoresValuelessKnownFields() throws Exception {
+    List<String> malformedParts =
+        List.of(
+            "{ \"text\": 123 }",
+            "{ \"text\": \"think\", \"thought\": \"yes\" }",
+            "{ \"text\": \"think\", \"thoughtSignature\": 999 }");
+    for (String part : malformedParts) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(
+              request,
+              descriptor,
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              bridge);
+      String chunk =
+          "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [" + part + "]}}]}";
+
+      ProviderException ex =
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+      assertFalse(ex.getMessage().contains("think"), "exception must not leak part payload");
+    }
+
+    GeminiStreamAccumulator valuelessKnownFieldAccumulator =
+        new GeminiStreamAccumulator(
+            request,
+            descriptor,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            bridge);
+    String valuelessFieldParts =
+        """
+        {"candidates": [{"content": {"role": "model", "parts": [
+          { "text": "answer", "thoughtSignature": "   " },
+          { "text": null, "thoughtSignature": null, "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
+        ]}}]}
+        """;
+    valuelessKnownFieldAccumulator.handleEvent("message", valuelessFieldParts);
+    // 同一快照重复发送：即使存在空白签名 / null 已知字段，也必须按可证明重复去重，绝不重复计入文本
+    valuelessKnownFieldAccumulator.handleEvent("message", valuelessFieldParts);
+    valuelessKnownFieldAccumulator.handleEvent(
+        "message",
+        """
+        {"candidates": [{"content": {"role": "model", "parts": [
+          { "text": "answer", "thoughtSignature": "   " },
+          { "text": null, "thoughtSignature": null, "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
+        ]}, "finishReason": "STOP"}]}
+        """);
+    ProviderCompletion completion = valuelessKnownFieldAccumulator.finish();
+
+    assertEquals("answer", completion.response().text());
+    JsonNode parts = completion.replayState().payload().get("parts");
+    assertEquals(2, parts.size());
+    assertEquals("answer", parts.get(0).path("text").asText());
+    assertFalse(parts.get(0).has("thoughtSignature"), "空白签名无法写入合法 replay，按不存在处理");
+    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asText());
+    assertFalse(parts.get(1).has("text"), "null text 无法写入合法 replay，且不承载语义");
+    assertFalse(parts.get(1).has("thoughtSignature"));
+  }
+
+  /** 意图：同一 slot 的文本 part 在形状为超集且文本严格扩展时按完整累积形态整体替换（未知字段整体替换而非逐字段合并）， 形状不同的新 part 依旧按原顺序原样追加。 */
   @Test
   void replacesUnknownPartFieldsOnCumulativeSnapshot() throws Exception {
     GeminiStreamAccumulator accumulator =
