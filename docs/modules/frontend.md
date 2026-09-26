@@ -168,26 +168,28 @@ durable Entry 投影为恰好一条记录，把 active model/tool invocation 和
 
 ### Thread Debug
 
-`/debug` 与 Conversation 互斥使用主区域，采用容器驱动的响应式 3 区布局（请求预览、事件列表、详情检查区）。根据容器实际可用宽度自适应切换：
+`/debug` 与 Conversation 互斥使用主区域，包含请求预览、事件列表、详情三个区域。
+布局按 Pane 实际宽度切换，而不是按整个浏览器窗口判断：
 
-- **宽面板（宽度 ≥ 1100px）**：三等宽列（`repeat(3, minmax(0, 1fr))`）横向并排铺满，外层容器整体 `overflow: hidden`。列 1（Request Preview）、列 2（Event List）与列 3（Detail Inspector）各自作为唯一的纵向滚动所有者，彻底消灭嵌套纵向滚动与局部视口陷阱；未选中任何事件或检查项时，第 3 列渲染优雅的占位提示。
-- **窄面板（宽度 < 1100px）**：自适应切换为单列全宽视图，顶部提供「请求预览 / 事件 / 详情」选项卡导航。在预览区点击 Tool/Skill/Request，或在事件列表点击事件项时，自动切换至详情页签并将焦点引导至详情关闭按钮；关闭详情（通过点击关闭按钮或按 `Escape` 键）后自动回退至触发源视图，并将焦点恢复至触发元素，避免丢失键盘焦点。
-- **作用域隔离与无障碍规范**：多 Pane 分屏并排时，所有 tab、tabpanel、事件列表行 ID 以及 `aria-activedescendant` 均基于 `useId()` 实现作用域隔离，杜绝全局 DOM ID 冲突；窄屏模式遵循 WAI-ARIA 规范实现 Roving `tabIndex` 键盘循环（`ArrowLeft`/`ArrowRight`/`Home`/`End`）；宽屏模式自动抑制 `role="tablist"`，详情与检查项的 `Escape` 监听严格收敛在局部容器内部，不影响其他 Pane 或主界面的键盘事件。
+- **宽面板（≥ 1100px）**：三列等宽，各列独立纵向滚动，外框不滚动。
+  未选中事件或检查项时，详情列显示选择提示。
+- **窄面板（< 1100px）**：通过「请求预览 / 事件 / 详情」页签切换，
+  当前区域占满可用空间。选择事件、Tool、Skill 或 Request 后进入详情；
+  关闭详情返回来源区域，焦点回到事件列表或预览中的触发按钮。
+- 页签支持左右箭头、Home、End；宽屏事件列表保留上下箭头导航。
+  多 Pane 的 DOM ID 按实例隔离，详情内 Escape 仅关闭当前 Pane 的详情。
 
 ```text
-宽面板布局 (>= 1100px):
-┌───────────────────────────────┬───────────────────────────────┬───────────────────────────────┐
-│ 列 1: NEXT REQUEST PREVIEW   │ 列 2: EVENTS                  │ 列 3: DETAIL INSPECTOR        │
-│ ┌─ System Prompt (独立单滚动) │ ┌─ Event 1 (10:00:01)         │ ┌─ INSPECTOR / Event Detail   │
-│ │ ...                         │ │  Event 2 (10:00:05)         │ │  Structured Rows / Payload  │
-│ ├─ TOOLS (横向滚动 Rail)      │ │  ...                        │ │  (独立单纵向滚动)           │
-│ ├─ SKILLS (横向滚动 Rail)     │ │                             │ │                             │
-│ └─ Meta Info                  │ └─ (独立单纵向滚动)           │ └─ (无选中时显示占位态)       │
-└───────────────────────────────┴───────────────────────────────┴───────────────────────────────┘
++----------------------+----------------------+----------------------+
+| NEXT REQUEST PREVIEW | EVENTS               | DETAIL               |
+| System Prompt        | Entry / Invocation   | Metadata             |
+| Tools / Skills       | ...                  | JSON / Tool / Skill  |
+| Subagents / Cache    |                      | ...                  |
++----------------------+----------------------+----------------------+
 ```
 
-System Prompt 保留独立的文本折行与纵向滚动；Tools 与 Skills 各固定一行、不换行，超宽时横向
-滚动。Tools 先列最终发给模型的定义，再以灰色、虚线和 `⊘` 列出因未选择 Environment
+System Prompt 自然折行，Tools 与 Skills 自动换行，统一随预览列滚动，不创建内部纵向
+滚动区。Tools 先列最终发给模型的定义，再以灰色、虚线和 `⊘` 列出因未选择 Environment
 被过滤的 Agent 候选；`P`、`P+E`、`E` 分别表示 `NONE`、`OPTIONAL`、`REQUIRED`。
 点击任一 Tool 或 Skill 在第 3 列（窄屏下自动切换到详情选项卡）展示：Tool
 展示完整 description、input schema、EnvironmentSupport、Contributor、发送/过滤状态；
