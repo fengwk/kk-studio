@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -287,6 +288,60 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+  }
+
+  /**
+   * 测试意图：usage 快照中的官方未知字段（server_tool_use 等）必须原样保留在 rawUsageJson 中，normalized 计数仍严格解析并 覆盖同名键；usage
+   * 提供的 service_tier 归一化到 ProviderResponse.serviceTier。
+   */
+  @Test
+  void preservesUnknownUsageFieldsAndParsesServiceTier() throws Exception {
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_usage\",\"usage\":{\"input_tokens\":10,\"service_tier\":\"standard\",\"server_tool_use\":{\"web_search_requests\":3},\"future_counter\":7}}}");
+    accumulator.handleEvent(
+        "content_block_start",
+        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"ok\"}}");
+    accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
+    // 增量快照按顶层字段合并：service_tier 被覆盖，未知字段继续保留
+    accumulator.handleEvent(
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5,\"service_tier\":\"priority\"}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals("priority", response.serviceTier());
+    assertEquals(10, response.usage().inputTokens());
+    assertEquals(5, response.usage().outputTokens());
+
+    JsonNode rawUsage = new ObjectMapper().readTree(response.rawUsageJson());
+    assertEquals(10, rawUsage.path("input_tokens").asInt());
+    assertEquals(5, rawUsage.path("output_tokens").asInt());
+    assertEquals("priority", rawUsage.path("service_tier").asText());
+    assertEquals(3, rawUsage.path("server_tool_use").path("web_search_requests").asInt());
+    assertEquals(7, rawUsage.path("future_counter").asInt());
+    // normalized cache 明细照旧补齐
+    assertTrue(rawUsage.path("cache_creation").has("ephemeral_5m_input_tokens"));
+  }
+
+  /** 测试意图：usage.service_tier 类型非法时显式失败，而不是静默忽略未知形态。 */
+  @Test
+  void rejectsNonTextualServiceTier() {
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, VALID_PREFIX_HASH, bridge);
+
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                accumulator.handleEvent(
+                    "message_start",
+                    "{\"type\":\"message_start\",\"message\":{\"usage\":{\"service_tier\":1}}}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("usage service_tier must be a non-blank string", ex.getMessage());
   }
 
   @Test

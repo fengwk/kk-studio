@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.provider.anthropic;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -230,6 +231,44 @@ class AnthropicProtocolEventTest {
 
     callback.onEvent(new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
     assertEquals(2, handler.protocolEvents.size());
+  }
+
+  /** 测试意图：未知 block 的不可组装 delta 必须先完成该帧的原生协议回调，再以 INVALID_RESPONSE 终止；绝不静默吞帧或猜测性合并。 */
+  @Test
+  void emitsProtocolEventBeforeExplicitFailureForUnassemblableDelta() {
+    RecordingHandler handler = new RecordingHandler();
+    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
+    stream(handler, callbackRef);
+    HttpSseCallback callback = callbackRef.get();
+
+    callback.onEvent(
+        new ServerSentEvent(
+            "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}"));
+    callback.onEvent(
+        new ServerSentEvent(
+            "content_block_start",
+            "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"web_search\"}}"));
+    callback.onEvent(
+        new ServerSentEvent(
+            "content_block_delta",
+            "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"unknown_delta\",\"probe\":\"raw-marker\"}}"));
+
+    assertEquals(
+        List.of(
+            "protocol:message_start",
+            "protocol:content_block_start",
+            "protocol:content_block_delta",
+            "error"),
+        handler.ordered);
+    assertNotNull(handler.error.get());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, handler.error.get().kind());
+    assertTrue(
+        handler.error.get().getMessage().contains("unsupported delta type for native block"));
+    assertNull(handler.completion.get());
+
+    // terminal 之后不再派发原生回调
+    callback.onEvent(new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
+    assertEquals(3, handler.protocolEvents.size());
   }
 
   /** 测试意图：cancel 之后不得再派发任何原生或 normalized 回调。 */

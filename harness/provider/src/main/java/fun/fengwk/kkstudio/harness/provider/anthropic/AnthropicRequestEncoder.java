@@ -49,6 +49,14 @@ import java.util.Set;
  * （{@code model}/{@code max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code
  * cache_control}） 冲突显式失败，{@code tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；prefix hash、cache
  * marker 与请求体大小均基于最终合并结果。
+ *
+ * <p>{@code anthropic-beta} 能力是「配置列表 + 运行时强制能力」的有序并集：配置的 {@code anthropicBetaFeatures} 原样在前，BUDGET
+ * 思考实际启用时追加 {@code interleaved-thinking-2025-05-14}，并集为空则不发送该头。
+ *
+ * <p>assistant replay 的已知 block 只校验 durable 语义所必需的字段，其余官方字段（如 text block 的 {@code
+ * citations}）原样回放；native-only block（未知类型、{@code redacted_thinking}、{@code compaction}）无法用 durable
+ * 语义表达，因此 affinity/prefix hash 失配时 fail closed 而非降级丢弃。payload 以 {@code compaction} block 开头时代表历史已被
+ * 摘要，编码器先按原 durable 前缀完成校验，再清空已编码消息使该消息成为首条消息。
  */
 final class AnthropicRequestEncoder {
 
@@ -63,10 +71,6 @@ final class AnthropicRequestEncoder {
   private static final Set<String> ALLOWED_IMAGE_TYPES =
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
   private static final Set<String> ALLOWED_DOCUMENT_TYPES = Set.of("application/pdf");
-
-  /** durable replay 具备严格 shape 与 durable 一致性校验的已知 block 类型；其余合法 provider block 以 opaque 形态透传。 */
-  private static final Set<String> KNOWN_REPLAY_CONTENT_TYPES =
-      Set.of("text", "thinking", "redacted_thinking", "tool_use");
 
   /**
    * 运行时独占的顶层请求事实：{@code cache_control} 表示 prompt cache 的运行时所有权（标记由本编码器写入
@@ -117,6 +121,9 @@ final class AnthropicRequestEncoder {
     boolean requiresInterleavedThinkingBeta =
         applyReasoningParameters(root, request, config, maxTokens);
 
+    // beta 能力并集依赖推理参数结论：配置顺序在前，运行时强制的 interleaved thinking 追加在后
+    List<String> betaFeatures = resolveBetaFeatures(config, requiresInterleavedThinkingBeta);
+
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
     // 系统指令是请求唯一的顶层 system；编码为单块数组以便 SYSTEM breakpoint 仍可打标。
@@ -132,9 +139,14 @@ final class AnthropicRequestEncoder {
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
         String currentPrefixHash =
             AnthropicPrefixHasher.calculateHash(unmarkedSystemArray, toolsArray, wireMessagesArray);
-        ObjectNode assistantWireMessage =
+        EncodedAssistantMessage assistant =
             encodeAssistantMessage(msg, descriptor, request.model().modelId(), currentPrefixHash);
-        wireMessagesArray.add(assistantWireMessage);
+        // compaction 回放代表已经摘要完成的历史：前缀校验必须基于「原 durable 前缀」完成，
+        // 校验通过后再清空已编码消息，使 compaction assistant message 成为首条消息、被摘要历史整体省略。
+        if (assistant.resetsHistory()) {
+          wireMessagesArray.removeAll();
+        }
+        wireMessagesArray.add(assistant.node());
       } else if (msg.role() == ProviderMessageRole.USER) {
         wireMessagesArray.add(encodeUserMessage(msg));
       } else if (msg.role() == ProviderMessageRole.TOOL) {
@@ -172,8 +184,20 @@ final class AnthropicRequestEncoder {
           "request body exceeds " + MAX_REQUEST_BODY_BYTES + " bytes limit");
     }
 
-    return new AnthropicEncodedRequest(
-        utf8Bytes, frozenSourcePrefixHash, requiresInterleavedThinkingBeta);
+    return new AnthropicEncodedRequest(utf8Bytes, frozenSourcePrefixHash, betaFeatures);
+  }
+
+  /** 求出本条请求实际发送的有序 beta 能力标识：配置列表原样在前，运行时强制的 interleaved thinking 仅在 BUDGET 思考实际启用时追加在后，已配置则不重复。 */
+  private static List<String> resolveBetaFeatures(
+      AnthropicConfiguration config, boolean requiresInterleavedThinkingBeta) {
+    List<String> configured = config.anthropicBetaFeatures();
+    if (!requiresInterleavedThinkingBeta
+        || configured.contains(AnthropicConfiguration.INTERLEAVED_THINKING_BETA)) {
+      return configured;
+    }
+    List<String> union = new ArrayList<>(configured);
+    union.add(AnthropicConfiguration.INTERLEAVED_THINKING_BETA);
+    return List.copyOf(union);
   }
 
   private static void validateCacheControl(ProviderCacheControl cacheControl) {
@@ -455,7 +479,7 @@ final class AnthropicRequestEncoder {
         ProviderErrorKind.INVALID_REQUEST, "unsupported content block inside tool_result");
   }
 
-  private static ObjectNode encodeAssistantMessage(
+  private static EncodedAssistantMessage encodeAssistantMessage(
       ProviderMessage message,
       ProviderDescriptor descriptor,
       String requestedModel,
@@ -463,14 +487,20 @@ final class AnthropicRequestEncoder {
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "assistant");
 
-    ProviderReplayState replayState = message.replayState();
-    if (canReplay(replayState, descriptor, requestedModel, currentPrefixHash, message.contents())) {
+    ReplayDecision replay =
+        evaluateReplay(
+            message.replayState(),
+            descriptor,
+            requestedModel,
+            currentPrefixHash,
+            message.contents());
+    if (replay.replayable()) {
       ArrayNode replayedBlocks = NODES.arrayNode();
-      for (JsonNode blockNode : replayState.payload().path("content")) {
+      for (JsonNode blockNode : replay.content()) {
         replayedBlocks.add(blockNode.deepCopy());
       }
       msgNode.set("content", replayedBlocks);
-      return msgNode;
+      return new EncodedAssistantMessage(msgNode, replay.startsHistory());
     }
 
     // Semantic fallback
@@ -478,20 +508,17 @@ final class AnthropicRequestEncoder {
     for (ProviderContentBlock block : message.contents()) {
       contents.add(encodeAssistantFallbackBlock(block));
     }
-    return msgNode;
+    return new EncodedAssistantMessage(msgNode, false);
   }
 
-  private static boolean canReplay(
+  private static ReplayDecision evaluateReplay(
       ProviderReplayState replayState,
       ProviderDescriptor descriptor,
       String requestedModel,
       String currentPrefixHash,
       List<ProviderContentBlock> durableContents) {
-    if (replayState == null) {
-      return false;
-    }
-    if (replayState.format() != ProviderReplayFormat.ANTHROPIC_MESSAGES) {
-      return false;
+    if (replayState == null || replayState.format() != ProviderReplayFormat.ANTHROPIC_MESSAGES) {
+      return ReplayDecision.FALLBACK;
     }
 
     // 1. 同 format replay 无论 affinity/hash 是否匹配，必须先严格校验 shape/已知 block/durable 一致性；未知合法 block opaque
@@ -509,23 +536,32 @@ final class AnthropicRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload");
     }
     ArrayNode contentArray = (ArrayNode) payload.get("content");
-    validatePayloadAgainstDurable(contentArray, durableContents);
+    ReplayPayloadFacts facts = validatePayloadAgainstDurable(contentArray, durableContents);
 
-    // 2. 校验通过后，再判断 affinity 与 prefix hash；失配时安全 fallback
-    if (!replayState.affinity().equals(descriptor.affinity(requestedModel))) {
-      return false;
+    // 2. 校验通过后，再判断 affinity 与 prefix hash；已知语义可无损降级时 fallback
+    boolean affinityMatches = replayState.affinity().equals(descriptor.affinity(requestedModel));
+    boolean prefixHashMatches = replayState.sourcePrefixHash().equals(currentPrefixHash);
+    if (!affinityMatches || !prefixHashMatches) {
+      if (facts.nativeOnly()) {
+        // native-only block 无法用 durable 语义表达：失配时只能 fail closed，绝不静默丢弃这些 block
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "native replay blocks require matching affinity and source prefix hash");
+      }
+      return ReplayDecision.FALLBACK;
     }
-    if (!replayState.sourcePrefixHash().equals(currentPrefixHash)) {
-      return false;
-    }
-    return true;
+    return new ReplayDecision(true, contentArray, facts.startsHistory());
   }
 
-  private static void validatePayloadAgainstDurable(
+  private static ReplayPayloadFacts validatePayloadAgainstDurable(
       ArrayNode contentArray, List<ProviderContentBlock> durableContents) {
     StringBuilder payloadText = new StringBuilder();
     StringBuilder payloadThinking = new StringBuilder();
     List<ProviderToolCall> payloadCalls = new ArrayList<>();
+
+    boolean nativeOnly = false;
+    int compactionIndex = -1;
+    int blockIndex = 0;
 
     for (JsonNode item : contentArray) {
       if (!item.isObject() || !item.has("type") || !item.get("type").isTextual()) {
@@ -533,25 +569,21 @@ final class AnthropicRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
       }
       String type = item.get("type").textValue();
-      if (!KNOWN_REPLAY_CONTENT_TYPES.contains(type)) {
-        // 未知但合法的 provider block：opaque 透传，不参与 durable 一致性比对，也绝不伪装成已知 type
-        if (type.isBlank()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
-        }
-        continue;
+      if (type.isBlank()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
       }
       switch (type) {
         case "text" -> {
-          if (item.size() != 2 || !item.has("text") || !item.get("text").isTextual()) {
+          if (!item.has("text") || !item.get("text").isTextual()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
           }
+          validateCitations(item.get("citations"));
           payloadText.append(item.get("text").textValue());
         }
         case "thinking" -> {
-          if (item.size() != 3
-              || !item.has("thinking")
+          if (!item.has("thinking")
               || !item.get("thinking").isTextual()
               || !item.has("signature")
               || !item.get("signature").isTextual()
@@ -562,18 +594,18 @@ final class AnthropicRequestEncoder {
           payloadThinking.append(item.get("thinking").textValue());
         }
         case "redacted_thinking" -> {
-          if (item.size() != 2
-              || !item.has("data")
+          if (!item.has("data")
               || !item.get("data").isTextual()
               || item.get("data").textValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid redacted_thinking block in replay payload");
           }
+          // 密文无法用 durable 语义表达：只允许原位回放，失配时必须 fail closed
+          nativeOnly = true;
         }
         case "tool_use" -> {
-          if (item.size() != 4
-              || !item.has("id")
+          if (!item.has("id")
               || !item.get("id").isTextual()
               || item.get("id").textValue().isBlank()
               || !item.has("name")
@@ -590,9 +622,27 @@ final class AnthropicRequestEncoder {
                   item.get("name").textValue(),
                   item.get("input").toString()));
         }
-        default -> throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "unsupported replay block type: " + type);
+        case "compaction" -> {
+          if (compactionIndex >= 0) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST, "duplicate compaction block in replay payload");
+          }
+          // 摘要块必须整体位于消息首部，代表此前历史已被压缩
+          compactionIndex = blockIndex;
+          nativeOnly = true;
+        }
+        default -> {
+          // 未知但合法的 provider block：opaque 透传，不参与 durable 一致性比对，也绝不伪装成已知 type
+          nativeOnly = true;
+        }
       }
+      blockIndex++;
+    }
+
+    if (compactionIndex > 0) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "compaction block must be the first content block of the replay message");
     }
 
     // 与 durable contents 比对
@@ -646,6 +696,25 @@ final class AnthropicRequestEncoder {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
             "replay payload tool call arguments do not match durable content");
+      }
+    }
+
+    return new ReplayPayloadFacts(nativeOnly, compactionIndex == 0);
+  }
+
+  /** citations 是官方可扩展结构：只校验容器与元素形状，不做字段白名单。 */
+  private static void validateCitations(JsonNode citationsNode) {
+    if (citationsNode == null || citationsNode.isNull()) {
+      return;
+    }
+    if (!citationsNode.isArray()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
+    }
+    for (JsonNode citation : citationsNode) {
+      if (!citation.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
       }
     }
   }
@@ -812,4 +881,16 @@ final class AnthropicRequestEncoder {
     }
     return null;
   }
+
+  /** 编码完成的 assistant wire 消息；{@code resetsHistory} 表示该消息的 replay 代表已摘要历史，必须省略此前的 wire messages。 */
+  private record EncodedAssistantMessage(ObjectNode node, boolean resetsHistory) {}
+
+  /** replay 判定结果；{@code startsHistory} 为真当且仅当 payload 以 compaction block 开头。 */
+  private record ReplayDecision(boolean replayable, ArrayNode content, boolean startsHistory) {
+
+    static final ReplayDecision FALLBACK = new ReplayDecision(false, null, false);
+  }
+
+  /** payload 语义事实：是否为 durable 无法表达的 native-only block，以及是否以 compaction block 开头。 */
+  private record ReplayPayloadFacts(boolean nativeOnly, boolean startsHistory) {}
 }

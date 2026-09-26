@@ -393,6 +393,98 @@ class AnthropicMessagesWireTest {
     assertEquals("low", bodyJson.path("output_config").path("effort").asText());
   }
 
+  /** 验证配置的 beta 能力在单个 anthropic-beta 头内按声明顺序以逗号连接发送。 */
+  @Test
+  void should_send_configured_beta_features_in_one_ordered_header() throws Exception {
+    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
+    CountDownLatch serverLatch = new CountDownLatch(1);
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          recorded.set(recordExchange(exchange));
+          serverLatch.countDown();
+          respondSseText(exchange, "msg_configured_beta_1", "ok");
+        });
+
+    AnthropicProviderAdapter configuredAdapter =
+        new AnthropicProviderAdapter(
+            transport,
+            TEST_API_KEY,
+            "{\"anthropicBetaFeatures\":[\"prompt-caching-2024-07-31\",\"context-1m-2025-08-07\"]}");
+    ProviderDescriptor descriptor = createDescriptor(null);
+    AnthropicModelProvider provider = (AnthropicModelProvider) configuredAdapter.create(descriptor);
+
+    AnthropicEncodedRequest encoded =
+        new AnthropicRequestEncoder(configuredAdapter.configuration())
+            .encode(
+                createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("test")), null, null),
+                descriptor);
+    assertEquals(
+        List.of("prompt-caching-2024-07-31", "context-1m-2025-08-07"), encoded.betaFeatures());
+
+    RecordingStreamHandler handler = new RecordingStreamHandler();
+    provider.stream(
+        createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("test")), null, null),
+        handler);
+
+    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
+    RecordedRequest req = recorded.get();
+    assertNotNull(req);
+    assertEquals(
+        "prompt-caching-2024-07-31,context-1m-2025-08-07", req.firstHeader("anthropic-beta"));
+  }
+
+  /**
+   * 验证配置能力与运行时强制的 interleaved thinking 合并为单个 anthropic-beta 头：配置顺序在前，强制能力追加在后且与已配置值 去重，不产生重复头字段。
+   */
+  @Test
+  void should_send_configured_and_implicit_beta_features_deduped_in_one_header() throws Exception {
+    AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
+    CountDownLatch serverLatch = new CountDownLatch(1);
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          recorded.set(recordExchange(exchange));
+          serverLatch.countDown();
+          respondSseText(exchange, "msg_union_beta_1", "ok");
+        });
+
+    AnthropicProviderAdapter budgetAdapter =
+        new AnthropicProviderAdapter(
+            transport,
+            TEST_API_KEY,
+            "{\"anthropicThinkingMode\":\"BUDGET\",\"anthropicBetaFeatures\":[\"interleaved-thinking-2025-05-14\",\"prompt-caching-2024-07-31\"]}");
+    ProviderDescriptor descriptor = createDescriptor(null);
+    AnthropicModelProvider provider = (AnthropicModelProvider) budgetAdapter.create(descriptor);
+
+    ProviderRequest request =
+        new ProviderRequest(
+            createReasoningModelDescriptor("MiniMax-M3"),
+            new ModelVariant("budget-v", "low"),
+            4096,
+            "Test system instruction.",
+            List.of(userTextMsg("test")),
+            List.of(),
+            ProviderCacheControl.none());
+
+    RecordingStreamHandler handler = new RecordingStreamHandler();
+    provider.stream(request, handler);
+
+    assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
+    RecordedRequest req = recorded.get();
+    assertNotNull(req);
+    assertEquals(
+        "interleaved-thinking-2025-05-14,prompt-caching-2024-07-31",
+        req.firstHeader("anthropic-beta"),
+        "configured order wins and the runtime-required beta must not be duplicated");
+    assertEquals(1, req.headers.get("anthropic-beta").size(), "exactly one anthropic-beta header");
+
+    // 其余保护头照常发送
+    assertEquals(TEST_API_KEY, req.firstHeader("x-api-key"));
+    assertEquals("Bearer " + TEST_API_KEY, req.firstHeader("Authorization"));
+    assertEquals("2023-06-01", req.firstHeader("anthropic-version"));
+  }
+
   /**
    * 验证即使配置为 BUDGET 模式，当推理显式关闭（reasoningEffort 为 off）时，线缆请求不发送 anthropic-beta 且发送
    * thinking:{type:"disabled"}。
@@ -644,7 +736,7 @@ class AnthropicMessagesWireTest {
     assertEquals("adaptive", root.path("thinking").path("type").asText());
     assertEquals("summarized", root.path("thinking").path("display").asText());
     assertEquals("low", root.path("output_config").path("effort").asText());
-    assertFalse(encoded.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), encoded.betaFeatures());
   }
 
   /** 验证通用请求参数中的 outputTokens 能够正常透传至线缆。 */

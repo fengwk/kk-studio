@@ -533,7 +533,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("adaptive", root.path("thinking").path("type").asText());
     assertEquals("summarized", root.path("thinking").path("display").asText());
     assertEquals("high", root.path("output_config").path("effort").asText());
-    assertFalse(encoded.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), encoded.betaFeatures());
   }
 
   @Test
@@ -580,7 +580,7 @@ class AnthropicRequestEncoderTest {
       assertFalse(
           root.has("output_config"),
           "BUDGET mode must omit output_config, but was: " + root.path("output_config"));
-      assertTrue(encoded.requiresInterleavedThinkingBeta());
+      assertEquals(List.of("interleaved-thinking-2025-05-14"), encoded.betaFeatures());
     }
   }
 
@@ -723,7 +723,7 @@ class AnthropicRequestEncoderTest {
     JsonNode root1 = MAPPER.readTree(enc1.bodyUtf8Bytes());
     assertFalse(root1.has("thinking"));
     assertFalse(root1.has("output_config"));
-    assertFalse(enc1.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), enc1.betaFeatures());
 
     // 2. model.reasoning = true 但 variant.reasoningEffort = null
     ModelDescriptor reasoningModel =
@@ -749,7 +749,7 @@ class AnthropicRequestEncoderTest {
     JsonNode root2 = MAPPER.readTree(enc2.bodyUtf8Bytes());
     assertFalse(root2.has("thinking"));
     assertFalse(root2.has("output_config"));
-    assertFalse(enc2.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), enc2.betaFeatures());
 
     // 3. model.reasoning = false 且 variant.reasoningEffort = null
     ProviderRequest req3 =
@@ -765,7 +765,7 @@ class AnthropicRequestEncoderTest {
     JsonNode root3 = MAPPER.readTree(enc3.bodyUtf8Bytes());
     assertFalse(root3.has("thinking"));
     assertFalse(root3.has("output_config"));
-    assertFalse(enc3.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), enc3.betaFeatures());
 
     // 4. model.reasoning = true 且 variant.reasoningEffort = "off" -> 显式关闭
     ProviderRequest req4 =
@@ -783,7 +783,7 @@ class AnthropicRequestEncoderTest {
     assertFalse(root4.path("thinking").has("budget_tokens"));
     assertFalse(
         root4.has("output_config"), "BUDGET mode with effort='off' must omit output_config");
-    assertFalse(enc4.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), enc4.betaFeatures());
   }
 
   @Test
@@ -817,7 +817,7 @@ class AnthropicRequestEncoderTest {
     assertFalse(rootOff.path("thinking").has("budget_tokens"));
     assertFalse(
         rootOff.has("output_config"), "ADAPTIVE mode with effort='off' must omit output_config");
-    assertFalse(encOff.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), encOff.betaFeatures());
   }
 
   @Test
@@ -852,7 +852,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("high", root.path("output_config").path("effort").asText());
     assertEquals(512, root.path("max_tokens").asInt());
     assertFalse(root.path("thinking").has("budget_tokens"));
-    assertFalse(encoded.requiresInterleavedThinkingBeta());
+    assertEquals(List.of(), encoded.betaFeatures());
   }
 
   @Test
