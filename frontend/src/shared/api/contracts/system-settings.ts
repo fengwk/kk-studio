@@ -25,7 +25,6 @@ export interface SystemSettingsToolDTO {
   modelGatewayBusyRetryMillis: DecimalLong
   toolGatewayBusyRetryMillis: DecimalLong
   toolGatewayOverloadRetryMillis: DecimalLong
-  skillLoadTimeoutMillis: DecimalLong
 }
 
 export type RetryBackoffStrategy = 'FIXED' | 'EXPONENTIAL'
