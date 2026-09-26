@@ -484,14 +484,6 @@ export const settingsCatalog = {
     'en-US': 'Delay in milliseconds before retrying when the tool gateway encounters system overload.',
     'zh-CN': '工具网关在系统过载时的重试等待毫秒数。',
   },
-  'settings.field.tool.skillLoadTimeoutMillis': {
-    'en-US': 'Skill load timeout (ms)',
-    'zh-CN': '技能加载超时（毫秒）',
-  },
-  'settings.field.tool.skillLoadTimeoutMillis.hint': {
-    'en-US': 'Timeout in milliseconds when loading external skill definitions and scripts. Times out if loading takes longer.',
-    'zh-CN': '加载外部 Skill 技能定义与脚本时的超时毫秒数。超时后本次技能加载将判定为失败。',
-  },
   'settings.modelSelection.none': {
     'en-US': 'None',
     'zh-CN': '不使用回退',

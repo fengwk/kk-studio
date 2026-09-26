@@ -25,7 +25,6 @@ export interface SystemSettingsToolDraft {
   modelGatewayBusyRetryMillis: DraftNumericField
   toolGatewayBusyRetryMillis: DraftNumericField
   toolGatewayOverloadRetryMillis: DraftNumericField
-  skillLoadTimeoutMillis: DraftNumericField
 }
 
 export interface SystemSettingsAiRuntimeDraft {
@@ -177,7 +176,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       modelGatewayBusyRetryMillis: dto.tool.modelGatewayBusyRetryMillis,
       toolGatewayBusyRetryMillis: dto.tool.toolGatewayBusyRetryMillis,
       toolGatewayOverloadRetryMillis: dto.tool.toolGatewayOverloadRetryMillis,
-      skillLoadTimeoutMillis: dto.tool.skillLoadTimeoutMillis,
     },
     aiRuntime: aiRuntimeToDraft(dto.aiRuntime),
     environment: {
@@ -331,7 +329,6 @@ export function assembleSettingsUpdate(
       toolGatewayOverloadRetryMillis: requiredLong(
         draft.tool.toolGatewayOverloadRetryMillis,
       ),
-      skillLoadTimeoutMillis: requiredLong(draft.tool.skillLoadTimeoutMillis),
     },
     aiRuntime: {
       retryMaxRetries: requiredInt(draft.aiRuntime.retryMaxRetries),
