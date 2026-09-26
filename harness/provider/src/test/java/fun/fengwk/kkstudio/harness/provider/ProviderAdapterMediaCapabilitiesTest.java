@@ -14,7 +14,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatConfiguration;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
@@ -26,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilit
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.http.HttpClient;
-import java.util.EnumSet;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -87,14 +85,17 @@ class ProviderAdapterMediaCapabilitiesTest {
     }
   }
 
-  /** 四个协议在缺省连接配置下的权威矩阵；Chat 的矩阵由 openAiChatMediaTypes 派生，单独在下方覆盖。 */
+  /** 四个协议在缺省连接配置下的权威 schema 能力矩阵。 */
   private static Stream<Arguments> capabilityMatrix() {
     return Stream.of(
         Arguments.of(
             new CapabilityExpectation(
                 "openai-chat-tool-results-are-text-only",
                 transport -> new OpenAiChatProviderAdapter(transport, "key"),
-                Set.of(),
+                Set.of(
+                    ModelInputModality.IMAGE,
+                    ModelInputModality.AUDIO,
+                    ModelInputModality.DOCUMENT),
                 Set.of())),
         Arguments.of(
             new CapabilityExpectation(
@@ -152,57 +153,6 @@ class ProviderAdapterMediaCapabilitiesTest {
     // 音频与视频永不作为工具结果声明：四个协议的工具结果位置都不承载这两种模态
     assertFalse(adapter.mediaCapabilities().supports(ModelInputModality.AUDIO, true));
     assertFalse(adapter.mediaCapabilities().supports(ModelInputModality.VIDEO, true));
-  }
-
-  @Test
-  void openAiChatCapabilitiesDeriveFromConfiguredMediaTypes() {
-    // 未配置任何媒体类型：默认即为无能力（不因代码默认全开而漂移）
-    OpenAiChatProviderAdapter defaultAdapter = new OpenAiChatProviderAdapter(transport, "key");
-    assertMatrix(defaultAdapter.mediaCapabilities(), Set.of(), Set.of());
-    assertEquals(ProviderMediaCapabilities.NONE.userModalities(), Set.of());
-
-    // IMAGE/AUDIO/PDF 配置映射为 IMAGE/AUDIO/DOCUMENT；工具结果永远为空
-    OpenAiChatConfiguration allMedia =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            EnumSet.of(
-                OpenAiChatConfiguration.MediaType.IMAGE,
-                OpenAiChatConfiguration.MediaType.AUDIO,
-                OpenAiChatConfiguration.MediaType.PDF),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
-    OpenAiChatProviderAdapter allAdapter =
-        new OpenAiChatProviderAdapter(transport, "key", allMedia);
-    assertMatrix(
-        allAdapter.mediaCapabilities(),
-        Set.of(ModelInputModality.IMAGE, ModelInputModality.AUDIO, ModelInputModality.DOCUMENT),
-        Set.of());
-    // VIDEO 永不声明：编码器对该模态直接拒绝
-    assertFalse(allAdapter.mediaCapabilities().supports(ModelInputModality.VIDEO, false));
-
-    // 仅 IMAGE 的配置只声明 IMAGE
-    OpenAiChatConfiguration imageOnly =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            EnumSet.of(OpenAiChatConfiguration.MediaType.IMAGE),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
-    assertMatrix(
-        new OpenAiChatProviderAdapter(transport, "key", imageOnly).mediaCapabilities(),
-        Set.of(ModelInputModality.IMAGE),
-        Set.of());
-
-    // PDF 单独映射为 DOCUMENT（不产生 PDF 模态）
-    OpenAiChatConfiguration pdfOnly =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            EnumSet.of(OpenAiChatConfiguration.MediaType.PDF),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
-    assertMatrix(
-        new OpenAiChatProviderAdapter(transport, "key", pdfOnly).mediaCapabilities(),
-        Set.of(ModelInputModality.DOCUMENT),
-        Set.of());
   }
 
   /** 未显式声明能力的 adapter 必须落到 NONE；未声明的 adapter 只能退化到资源文本回退。 */

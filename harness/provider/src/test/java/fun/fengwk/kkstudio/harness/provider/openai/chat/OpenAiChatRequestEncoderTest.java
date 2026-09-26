@@ -134,8 +134,7 @@ class OpenAiChatRequestEncoderTest {
   @DisplayName("通过配置覆盖 openAiChatIncludeUsage 为 false")
   void testDisableIncludeUsage() throws Exception {
     OpenAiChatConfiguration config =
-        new OpenAiChatConfiguration(
-            false, true, Set.of(), OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(false, true, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest request =
@@ -426,8 +425,8 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("媒体能力控制：未配置媒体时拒绝，配置后编码")
-  void testMediaEncodingAndPermissions() throws Exception {
+  @DisplayName("按 Chat Completions 原生 schema 编码用户媒体")
+  void testMediaEncoding() throws Exception {
     ProviderMessage userImg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -442,20 +441,9 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
 
-    // 1. 未配置 IMAGE，拒绝
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqImg, descriptor, OpenAiChatConfiguration.defaults()));
-
-    // 2. 配置 IMAGE，允许
-    OpenAiChatConfiguration configImg =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            Set.of(OpenAiChatConfiguration.MediaType.IMAGE),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     JsonNode rootImg =
-        MAPPER.readTree(encoder.encode(reqImg, descriptor, configImg).bodyUtf8Bytes());
+        MAPPER.readTree(
+            encoder.encode(reqImg, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     ArrayNode parts = (ArrayNode) rootImg.path("messages").get(1).path("content");
     assertEquals("image_url", parts.get(0).path("type").asText());
     assertEquals("https://example.com/a.jpg", parts.get(0).path("image_url").path("url").asText());
@@ -476,7 +464,10 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootImgBase64 =
-        MAPPER.readTree(encoder.encode(reqImgBase64, descriptor, configImg).bodyUtf8Bytes());
+        MAPPER.readTree(
+            encoder
+                .encode(reqImgBase64, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
     ArrayNode imgBase64Parts = (ArrayNode) rootImgBase64.path("messages").get(1).path("content");
     assertEquals("image_url", imgBase64Parts.get(0).path("type").asText());
     assertEquals(base64Png, imgBase64Parts.get(0).path("image_url").path("url").asText());
@@ -496,14 +487,9 @@ class OpenAiChatRequestEncoderTest {
             List.of(userAudioUrl),
             List.of(),
             ProviderCacheControl.none());
-    OpenAiChatConfiguration configAudio =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            Set.of(OpenAiChatConfiguration.MediaType.AUDIO),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     assertThrows(
-        ProviderException.class, () -> encoder.encode(reqAudioUrl, descriptor, configAudio));
+        ProviderException.class,
+        () -> encoder.encode(reqAudioUrl, descriptor, OpenAiChatConfiguration.defaults()));
 
     // 4. 音频处理：base64 允许编码为 input_audio
     ProviderMessage userAudioBase64 =
@@ -520,13 +506,16 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootAudio =
-        MAPPER.readTree(encoder.encode(reqAudioBase64, descriptor, configAudio).bodyUtf8Bytes());
+        MAPPER.readTree(
+            encoder
+                .encode(reqAudioBase64, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
     ArrayNode audioParts = (ArrayNode) rootAudio.path("messages").get(1).path("content");
     assertEquals("input_audio", audioParts.get(0).path("type").asText());
     assertEquals("UklGRg==", audioParts.get(0).path("input_audio").path("data").asText());
     assertEquals("wav", audioParts.get(0).path("input_audio").path("format").asText());
 
-    // 5. PDF 编码与未配置拒绝
+    // 5. PDF 编码
     ProviderMessage userPdf =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -542,18 +531,9 @@ class OpenAiChatRequestEncoderTest {
             List.of(userPdf),
             List.of(),
             ProviderCacheControl.none());
-    assertThrows(
-        ProviderException.class,
-        () -> encoder.encode(reqPdf, descriptor, OpenAiChatConfiguration.defaults()));
-
-    OpenAiChatConfiguration configPdf =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            Set.of(OpenAiChatConfiguration.MediaType.PDF),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     JsonNode rootPdf =
-        MAPPER.readTree(encoder.encode(reqPdf, descriptor, configPdf).bodyUtf8Bytes());
+        MAPPER.readTree(
+            encoder.encode(reqPdf, descriptor, OpenAiChatConfiguration.defaults()).bodyUtf8Bytes());
     ArrayNode pdfParts = (ArrayNode) rootPdf.path("messages").get(1).path("content");
     assertEquals("file", pdfParts.get(0).path("type").asText());
     assertEquals(
@@ -793,8 +773,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 1. AUTOMATIC: 不发 hint
     OpenAiChatConfiguration configAuto =
-        new OpenAiChatConfiguration(
-            true, true, Set.of(), OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, true, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     ProviderRequest reqAuto =
         new ProviderRequest(
             modelDesc,
@@ -811,8 +790,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 2. LEGACY: 非 NONE 发 key + retention
     OpenAiChatConfiguration configLegacy =
-        new OpenAiChatConfiguration(
-            true, true, Set.of(), OpenAiChatConfiguration.PromptCacheMode.LEGACY);
+        new OpenAiChatConfiguration(true, true, OpenAiChatConfiguration.PromptCacheMode.LEGACY);
     ProviderCacheControl cacheControlLegacy =
         ProviderCacheControl.affinity(PromptCacheRetention.SHORT, "my-key-legacy");
     ProviderRequest reqLegacy =
@@ -832,7 +810,7 @@ class OpenAiChatRequestEncoderTest {
     // 3. GPT_5_6_EXPLICIT: 始终发 options；非 NONE 打 SYSTEM/CONVERSATION breakpoints
     OpenAiChatConfiguration configGpt =
         new OpenAiChatConfiguration(
-            true, true, Set.of(), OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
+            true, true, OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
     ProviderCacheControl cacheControlGpt =
         ProviderCacheControl.breakpoints(
             PromptCacheRetention.SHORT,
@@ -968,11 +946,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 4. 不支持的音频格式抛异常
     OpenAiChatConfiguration audioConfig =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            Set.of(OpenAiChatConfiguration.MediaType.AUDIO),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, true, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     ProviderMessage audioFlac =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1239,11 +1213,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 3. MP3 音频格式识别
     OpenAiChatConfiguration audioConfig =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            Set.of(OpenAiChatConfiguration.MediaType.AUDIO),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, true, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     ProviderMessage mp3Msg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1272,11 +1242,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 4. PDF 非法 mediaType
     OpenAiChatConfiguration pdfConfig =
-        new OpenAiChatConfiguration(
-            true,
-            true,
-            Set.of(OpenAiChatConfiguration.MediaType.PDF),
-            OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
+        new OpenAiChatConfiguration(true, true, OpenAiChatConfiguration.PromptCacheMode.AUTOMATIC);
     ProviderMessage badDocMsg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1324,7 +1290,7 @@ class OpenAiChatRequestEncoderTest {
     // 6. 最后一条消息是纯 tool_calls 的 assistant 消息并在上面打 conversation breakpoint
     OpenAiChatConfiguration configGpt =
         new OpenAiChatConfiguration(
-            true, true, Set.of(), OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
+            true, true, OpenAiChatConfiguration.PromptCacheMode.GPT_5_6_EXPLICIT);
     ProviderCacheControl cacheControlGpt =
         ProviderCacheControl.breakpoints(
             PromptCacheRetention.SHORT,

@@ -119,7 +119,8 @@ class OpenAiChatSecurityAndArchitectureTest {
     ProviderException ex =
         assertThrows(
             ProviderException.class,
-            () -> OpenAiChatConfiguration.parse("{\"openAiChatMediaTypes\":[\"SECRET_INVALID\"]}"));
+            () -> OpenAiChatConfiguration.parse("{\"openAiPromptCacheMode\":\"SECRET_INVALID\"}"));
     assertNotNull(ex.getMessage());
+    assertFalse(ex.getMessage().contains("SECRET_INVALID"));
   }
 }

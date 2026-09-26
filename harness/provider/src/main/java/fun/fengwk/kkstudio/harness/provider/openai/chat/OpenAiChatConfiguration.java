@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 
-import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Objects;
 import java.util.Set;
@@ -33,16 +32,9 @@ public final class OpenAiChatConfiguration {
 
   public static final String FIELD_INCLUDE_USAGE = "openAiChatIncludeUsage";
   public static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
-  public static final String FIELD_MEDIA_TYPES = "openAiChatMediaTypes";
   public static final String FIELD_PROMPT_CACHE_MODE = "openAiPromptCacheMode";
   public static final String FIELD_THINKING_FORMAT = "openAiChatThinkingFormat";
   public static final String FIELD_OPENAI_CHAT_THINKING_FORMAT = FIELD_THINKING_FORMAT;
-
-  public enum MediaType {
-    IMAGE,
-    AUDIO,
-    PDF
-  }
 
   public enum PromptCacheMode {
     AUTOMATIC,
@@ -57,37 +49,28 @@ public final class OpenAiChatConfiguration {
 
   private final boolean includeUsage;
   private final boolean requireDone;
-  private final Set<MediaType> mediaTypes;
   private final PromptCacheMode promptCacheMode;
   private final ThinkingFormat thinkingFormat;
 
   public OpenAiChatConfiguration(
-      boolean includeUsage,
-      boolean requireDone,
-      Set<MediaType> mediaTypes,
-      PromptCacheMode promptCacheMode) {
-    this(includeUsage, requireDone, mediaTypes, promptCacheMode, ThinkingFormat.STANDARD);
+      boolean includeUsage, boolean requireDone, PromptCacheMode promptCacheMode) {
+    this(includeUsage, requireDone, promptCacheMode, ThinkingFormat.STANDARD);
   }
 
   public OpenAiChatConfiguration(
       boolean includeUsage,
       boolean requireDone,
-      Set<MediaType> mediaTypes,
       PromptCacheMode promptCacheMode,
       ThinkingFormat thinkingFormat) {
     this.includeUsage = includeUsage;
     this.requireDone = requireDone;
-    this.mediaTypes =
-        mediaTypes == null || mediaTypes.isEmpty()
-            ? Collections.emptySet()
-            : Collections.unmodifiableSet(EnumSet.copyOf(mediaTypes));
     this.promptCacheMode = promptCacheMode == null ? PromptCacheMode.AUTOMATIC : promptCacheMode;
     this.thinkingFormat = thinkingFormat == null ? ThinkingFormat.STANDARD : thinkingFormat;
   }
 
   public static OpenAiChatConfiguration defaults() {
     return new OpenAiChatConfiguration(
-        true, true, Collections.emptySet(), PromptCacheMode.AUTOMATIC, ThinkingFormat.STANDARD);
+        true, true, PromptCacheMode.AUTOMATIC, ThinkingFormat.STANDARD);
   }
 
   public static OpenAiChatConfiguration parse(String configJson) {
@@ -128,30 +111,6 @@ public final class OpenAiChatConfiguration {
       requireDone = node.booleanValue();
     }
 
-    Set<MediaType> mediaTypes = EnumSet.noneOf(MediaType.class);
-    if (root.has(FIELD_MEDIA_TYPES)) {
-      JsonNode node = root.get(FIELD_MEDIA_TYPES);
-      if (!node.isArray()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "field " + FIELD_MEDIA_TYPES + " must be an array of strings");
-      }
-      for (JsonNode item : node) {
-        if (!item.isTextual()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "items in " + FIELD_MEDIA_TYPES + " must be strings");
-        }
-        String text = item.textValue().trim();
-        try {
-          mediaTypes.add(MediaType.valueOf(text));
-        } catch (IllegalArgumentException ex) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "unsupported media type in " + FIELD_MEDIA_TYPES);
-        }
-      }
-    }
-
     PromptCacheMode cacheMode = PromptCacheMode.AUTOMATIC;
     if (root.has(FIELD_PROMPT_CACHE_MODE)) {
       JsonNode node = root.get(FIELD_PROMPT_CACHE_MODE);
@@ -188,8 +147,7 @@ public final class OpenAiChatConfiguration {
       }
     }
 
-    return new OpenAiChatConfiguration(
-        includeUsage, requireDone, mediaTypes, cacheMode, thinkingFormat);
+    return new OpenAiChatConfiguration(includeUsage, requireDone, cacheMode, thinkingFormat);
   }
 
   public boolean includeUsage() {
@@ -198,10 +156,6 @@ public final class OpenAiChatConfiguration {
 
   public boolean requireDone() {
     return requireDone;
-  }
-
-  public Set<MediaType> mediaTypes() {
-    return mediaTypes;
   }
 
   public PromptCacheMode promptCacheMode() {
@@ -237,14 +191,13 @@ public final class OpenAiChatConfiguration {
     }
     return includeUsage == that.includeUsage
         && requireDone == that.requireDone
-        && Objects.equals(mediaTypes, that.mediaTypes)
         && promptCacheMode == that.promptCacheMode
         && thinkingFormat == that.thinkingFormat;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(includeUsage, requireDone, mediaTypes, promptCacheMode, thinkingFormat);
+    return Objects.hash(includeUsage, requireDone, promptCacheMode, thinkingFormat);
   }
 
   @Override
