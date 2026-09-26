@@ -500,12 +500,17 @@ start_all() {
   # 之前显式回到仓库根目录，日志才落在 $REPO_ROOT/logs。
   cd "$REPO_ROOT"
   step "Starting backend on $BACKEND_URL"
+  sh "$SCRIPT_HOME/lib/extract-convention4j-agent.sh" \
+    "$java_home/bin/jar" "$BACKEND_JAR" \
+    "$WORK_DIR/convention4j-agent/convention4j-agent.jar"
   read -r -a java_opts <<< "${JAVA_OPTS:-}"
   local -a test_env_unsets=()
   mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   run_backend_detached "$BACKEND_LOG" env \
     "${test_env_unsets[@]}" \
-    "$java_home/bin/java" "${java_opts[@]}" -jar "$BACKEND_JAR" \
+    "$java_home/bin/java" \
+    "-javaagent:$WORK_DIR/convention4j-agent/convention4j-agent.jar" \
+    "${java_opts[@]}" -jar "$BACKEND_JAR" \
     --spring.profiles.active="$SPRING_PROFILE" \
     --server.address="$BACKEND_HOST" \
     --server.port="$BACKEND_PORT"

@@ -17,7 +17,12 @@
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
 test -f web/target/kk-studio-web-1.0.0.jar
-"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-1.0.0.jar
+sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
+  web/target/kk-studio-web-1.0.0.jar \
+  web/target/convention4j-agent/convention4j-agent.jar
+"$JAVA_HOME_21/bin/java" \
+  -javaagent:web/target/convention4j-agent/convention4j-agent.jar \
+  -jar web/target/kk-studio-web-1.0.0.jar
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -56,12 +61,14 @@ App 镜像由 [deploy/local/Dockerfile](../../deploy/local/Dockerfile) 构建，
 | builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven/npm cache，`mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package` |
 | runtime | `eclipse-temurin:21.0.8_9-jre-jammy`，安装 `ffmpeg`/`ffprobe`，清理 apt lists |
 | user | `kkstudio:kkstudio`，uid/gid `10001`，`USER kkstudio` |
-| process | `java -jar /app/app.jar`，`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0` |
+| process | `java -javaagent:/app/convention4j-agent/convention4j-agent.jar -jar /app/app.jar`，`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0` |
 | health | `curl -fsS http://127.0.0.1:8080/actuator/health`，15s interval、5s timeout、60s start period、6 retries |
 
 builder 接受 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、
 `KK_STUDIO_BUILD_NO_PROXY` 和 `KK_STUDIO_MAVEN_BUILD_OPTS`；这些值只用于 build，不复制进
-runtime image。runtime image 不含 Maven、Node 和源码。
+runtime image。构建时从 Fat JAR 提取同版本 `convention4j-agent`，保留 manifest
+`Boot-Class-Path` 要求的版本化文件名并通过稳定别名启动 JVM；它负责线程池中的 TTL/MDC
+上下文透传，不替代跨服务的 Trace 传播。runtime image 不含 Maven、Node 和源码。
 
 App 依赖 PostgreSQL、MinIO 与 `minio-init` healthy 后才启动，启动期严格验证 S3 连接属性并
 探测 bucket 可访问性。Storage 与 Canvas 是常驻服务，没有 disabled 503 状态。用生产 profile
@@ -281,7 +288,7 @@ Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也�
   command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
   mode `600` 的 Maven settings，二者都不进 command line、POM、image 或报告。
-- Plugin credential 主密钥是 Base64 编码的 32-byte 随机值，只通过
+- Plugin credential 主密钥是原始 32-byte 随机值（不是 Base64 文本），只通过
   `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 指向的只读 secret file 注入，不能把密钥正文放进
   environment、Compose 文件、数据库或 image。多 App 节点必须使用同一内容；缺失或错误时
   已保存凭据读取与新认证 fail closed，未连接 Plugin 不阻止 App 启动。
@@ -352,9 +359,16 @@ Flyway owner，也是唯一的 Harness worker，Thread/Model/Tool 的异步执�
 是替换镜像 tag 并重启容器，而不是在容器内改源码，因此容器不挂载源码工作区、Maven/npm cache
 或 `gh` 配置。
 
-`prod` profile 的应用日志写在容器内 `/app/logs/kk-studio-all.log`，不写到 Docker 控制台；
-`docker logs` 中只有 JVM 或启动横幅不代表没有应用错误。排查异步 Work 时用
+`prod` profile 的应用日志写入容器内 `/app/logs/kk-studio-all.log`，不写到 Docker 控制台。
+NAS Compose 将 `/app/logs` 绑定到宿主 `${DOCKER_VOLUMNS_DIR_SSD}/vps-kk-studio/logs`；
+宿主目录首次由 NAS `.vpsrc` 初始化给镜像用户 UID/GID `10001`，目录权限 `0700`。
+首次增加挂载前若要保留旧容器内的日志，应在替换容器之前另行复制；新挂载不会自动迁移旧文件。
+`docker logs` 中只有 JVM 或启动横幅不代表没有应用错误。排查异步 Work 时可用
 `docker exec vps-kk-studio sh -c 'tail -n 100 /app/logs/kk-studio-all.log'` 查看，并在分享前脱敏。
+共享 PostgreSQL 与 S3/MinIO 已在各自容器持久化；App 的媒体转码与上传暂存目录仍是可清理的临时空间，
+不应挂成跨容器重启保留的数据卷。使用加密 Plugin 凭据时另需持久化的主密钥文件，并以只读方式挂入
+容器、设置 `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`；文件内容必须是恰好 32 bytes 的原始 AES-256
+密钥（不是 Base64 文本），由容器用户 UID `10001` 可读，权限不得允许组或其他用户读取。不能用自动创建的空文件或新密钥替代已有密钥。
 
 ### 本机 preview 与 NAS 数据面
 

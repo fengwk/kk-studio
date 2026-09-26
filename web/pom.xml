@@ -62,6 +62,11 @@
             <artifactId>convention4j-spring-boot-starter-web</artifactId>
         </dependency>
         <dependency>
+            <groupId>fun.fengwk.convention4j</groupId>
+            <artifactId>convention4j-agent</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>

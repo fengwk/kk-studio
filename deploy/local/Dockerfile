@@ -7,8 +7,8 @@
 # embeds the React build output into BOOT-INF/classes/static.
 #
 # Runtime: Temurin JRE 21 (Ubuntu 22.04 base) with ffmpeg/ffprobe for media
-# inspection and transformation. Only the Fat JAR and runtime packages ship in
-# the image; no Maven, no Node, no source. Healthcheck uses `curl` (already
+# inspection and transformation. The Fat JAR and its matching convention4j agent
+# ship in the image; no Maven, no Node, no source. Healthcheck uses `curl` (already
 # shipped in the JRE base image) against `/actuator/health`. The JVM runs as a
 # dedicated unprivileged `kkstudio` user.
 
@@ -45,7 +45,9 @@ RUN --mount=type=cache,id=kk-studio-maven,target=/root/.m2/repository,sharing=lo
     no_proxy="${KK_STUDIO_BUILD_NO_PROXY}" \
     MAVEN_OPTS="${MAVEN_OPTS:-} ${KK_STUDIO_MAVEN_BUILD_OPTS}" \
       mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package \
-    && cp web/target/kk-studio-web-*.jar /build/app.jar
+    && cp web/target/kk-studio-web-*.jar /build/app.jar \
+    && sh scripts/dev/lib/extract-convention4j-agent.sh \
+         "$(command -v jar)" /build/app.jar /build/convention4j-agent/convention4j-agent.jar
 
 # ---------- runtime ----------
 FROM eclipse-temurin:21.0.8_9-jre-jammy
@@ -80,6 +82,8 @@ RUN set -eux; \
 WORKDIR /app
 
 COPY --from=builder --chown=kkstudio:kkstudio /build/app.jar /app/app.jar
+COPY --from=builder --chown=kkstudio:kkstudio \
+  /build/convention4j-agent /app/convention4j-agent
 
 USER kkstudio
 
@@ -93,4 +97,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=6 \
 
 # `init: true` in docker-compose adds a tiny init that forwards signals and
 # reaps zombies, so we do not need tini inside the image.
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-javaagent:/app/convention4j-agent/convention4j-agent.jar", "-jar", "/app/app.jar"]
