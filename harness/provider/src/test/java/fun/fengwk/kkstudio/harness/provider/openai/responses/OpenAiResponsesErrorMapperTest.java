@@ -132,6 +132,26 @@ class OpenAiResponsesErrorMapperTest {
     assertEquals(OBJECT_MAPPER.readTree(json4).toString(), ex4.getMessage());
   }
 
+  /** 验证官方 type=error 的顶层 code 决定分类，完整 envelope（含 param 与 sequence_number）不被裁剪。 */
+  @Test
+  void test_mapTopLevelSseErrorEnvelope() throws Exception {
+    String overflow =
+        "{\"type\":\"error\",\"code\":\"context_length_exceeded\",\"message\":\"too long\","
+            + "\"param\":\"input\",\"sequence_number\":12}";
+    ProviderException ex =
+        OpenAiResponsesErrorMapper.mapSseErrorEnvelope(OBJECT_MAPPER.readTree(overflow));
+    assertEquals(ProviderErrorKind.OVERFLOW, ex.kind());
+    assertEquals(OBJECT_MAPPER.readTree(overflow).toString(), ex.getMessage());
+
+    String rateLimit =
+        "{\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"slow down\","
+            + "\"param\":null,\"sequence_number\":13}";
+    ProviderException rateLimitEx =
+        OpenAiResponsesErrorMapper.mapSseErrorEnvelope(OBJECT_MAPPER.readTree(rateLimit));
+    assertEquals(ProviderErrorKind.TRANSIENT, rateLimitEx.kind());
+    assertEquals(OBJECT_MAPPER.readTree(rateLimit).toString(), rateLimitEx.getMessage());
+  }
+
   /** 验证传输层非致命取消与回调异常返回 null 保持静默。 */
   @Test
   void test_nonFatalTransportExceptions() {
