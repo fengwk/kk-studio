@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -22,6 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -1786,5 +1789,195 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ProviderException ex2 = assertThrows(ProviderException.class, accumulator2::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
+  }
+
+  /**
+   * 意图：验证 terminal output 中的未知官方 item（web/file search、code interpreter、image generation、custom tool
+   * call 等）作为不透明事实被完整冻结进 replay，而不是被静默丢弃；已知类型仍按既有归一化处理。
+   */
+  @Test
+  void test_unknownTerminalOutputItemsAreFrozenIntactForReplay() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_opaque\"}}"));
+    String completedEvent =
+        """
+        {
+          "type": "response.completed",
+          "response": {
+            "id": "resp_opaque",
+            "status": "completed",
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+            "output": [
+              {"type": "web_search_call", "id": "ws_1", "status": "completed",
+               "action": {"type": "search", "query": "weather"}},
+              {"type": "message", "role": "assistant",
+               "content": [{"type": "output_text", "text": "sunny"}]},
+              {"type": "image_generation_call", "id": "img_1", "status": "completed",
+               "result": "aGVsbG8="},
+              {"type": "file_search_call", "id": "fs_1", "queries": ["a"]},
+              {"type": "custom_tool_call", "call_id": "ct_1", "name": "my_tool",
+               "input": "{\\"k\\":1}"}
+            ]
+          }
+        }
+        """;
+    accumulator.processEvent(MAPPER.readTree(completedEvent));
+
+    assertEquals("sunny", accumulator.response().text());
+    assertNotNull(accumulator.replayState());
+    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
+    // 顺序与 terminal output 一致：未知 item 原样保留，message 走既有归一化
+    assertEquals(5, replayOutput.size());
+    assertEquals(
+        MAPPER.readTree(
+            "{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\","
+                + "\"action\":{\"type\":\"search\",\"query\":\"weather\"}}"),
+        replayOutput.get(0));
+    assertEquals("message", replayOutput.get(1).path("type").asText());
+    assertEquals("sunny", replayOutput.get(1).path("content").get(0).path("text").asText());
+    assertEquals(
+        MAPPER.readTree(
+            "{\"type\":\"image_generation_call\",\"id\":\"img_1\",\"status\":\"completed\",\"result\":\"aGVsbG8=\"}"),
+        replayOutput.get(2));
+    assertEquals(
+        MAPPER.readTree("{\"type\":\"file_search_call\",\"id\":\"fs_1\",\"queries\":[\"a\"]}"),
+        replayOutput.get(3));
+    assertEquals(
+        MAPPER.readTree(
+            "{\"type\":\"custom_tool_call\",\"call_id\":\"ct_1\",\"name\":\"my_tool\",\"input\":\"{\\\"k\\\":1}\"}"),
+        replayOutput.get(4));
+
+    ProviderReplayState replayState = accumulator.replayState();
+    assertNotNull(replayState);
+    assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, replayState.format());
+  }
+
+  /**
+   * 意图：验证仅通过流式 output_item.done 到达的未知 item 同样进入 replay；而缺少非空白 string type 的碎片
+   * 绝不冻结（冻结它只会让下一轮编码必然失败）。
+   */
+  @Test
+  void test_streamedUnknownItemsFrozenButTypeLessFragmentsAreNot() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_stream_opaque\",\"output\":[]}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"type\":\"code_interpreter_call\",\"id\":\"ci_1\",\"status\":\"completed\",\"code\":\"1+1\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"fragment_1\"}}"));
+    // terminal 省略 output：流式已冻结的 item 仍然有效
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_stream_opaque\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
+
+    assertNotNull(accumulator.replayState());
+    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
+    assertEquals(1, replayOutput.size());
+    assertEquals(
+        MAPPER.readTree(
+            "{\"type\":\"code_interpreter_call\",\"id\":\"ci_1\",\"status\":\"completed\",\"code\":\"1+1\"}"),
+        replayOutput.get(0));
+  }
+
+  /**
+   * 意图：验证未知 item 的 added/done 槽位语义 —— added 先建立事实，done 覆盖同一 output_index 的槽位（不重复、不丢失）， 未收到 done 的
+   * added item 仍然保留。
+   */
+  @Test
+  void test_unknownItemAddedSlotsAreOverriddenByDoneWithoutDuplication() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_slots\",\"output\":[]}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":0,"
+                + "\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"in_progress\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":1,"
+                + "\"item\":{\"type\":\"image_generation_call\",\"id\":\"img_1\",\"status\":\"in_progress\"}}"));
+    // done 提供该 item 的完整事实，必须覆盖 added 占用的槽位而不是追加第二条
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.done\",\"output_index\":0,"
+                + "\"item\":{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\","
+                + "\"action\":{\"type\":\"search\",\"query\":\"weather\"}}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_slots\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
+
+    assertNotNull(accumulator.replayState());
+    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
+    assertEquals(2, replayOutput.size());
+    assertEquals(
+        MAPPER.readTree(
+            "{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"status\":\"completed\","
+                + "\"action\":{\"type\":\"search\",\"query\":\"weather\"}}"),
+        replayOutput.get(0));
+    assertEquals(
+        MAPPER.readTree(
+            "{\"type\":\"image_generation_call\",\"id\":\"img_1\",\"status\":\"in_progress\"}"),
+        replayOutput.get(1));
+  }
+
+  /**
+   * 意图：验证已知 message 的 added（官方形态下 content 为空）不被当作 replay 事实 —— 文本仍由流式 delta 与终态决定， 不会因为一个未完成的 added
+   * 帧而把已有文本从 replay 中挤掉。
+   */
+  @Test
+  void test_knownMessageAddedWithoutDoneKeepsSynthesizedTextReplay() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(
+            createRequest(),
+            createDescriptor(),
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            e -> {});
+
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_msg_added\",\"output\":[]}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_item.added\",\"output_index\":0,"
+                + "\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[]}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"streamed\"}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_msg_added\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}"));
+
+    assertNotNull(accumulator.replayState());
+    ArrayNode replayOutput = (ArrayNode) accumulator.replayState().payload().get("output");
+    assertEquals(1, replayOutput.size());
+    assertEquals("message", replayOutput.get(0).path("type").asText());
+    assertEquals("streamed", replayOutput.get(0).path("content").get(0).path("text").asText());
   }
 }

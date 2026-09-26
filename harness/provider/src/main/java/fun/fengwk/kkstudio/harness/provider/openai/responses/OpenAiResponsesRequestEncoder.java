@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -37,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBloc
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -47,6 +49,10 @@ import java.util.Set;
  *
  * <p>负责将 {@link ProviderRequest} 规范化编码为 OpenAI {@code /responses} 端点的 UTF-8 JSON 请求体， 并计算冻结的
  * sourcePrefixHash。
+ *
+ * <p>请求体以 variant 的厂商原生协议选项为 root：非 runtime 所有权字段无损并入，runtime 所有权字段（{@code model}/{@code
+ * stream}/{@code store}/{@code instructions}/{@code input}/{@code max_output_tokens} 与 prompt cache
+ * 控制字段）由 runtime 唯一决定，冲突一律 {@code INVALID_REQUEST} 且不回显值。
  */
 final class OpenAiResponsesRequestEncoder {
 
@@ -65,8 +71,6 @@ final class OpenAiResponsesRequestEncoder {
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
   private static final String ALLOWED_DOCUMENT_TYPE = "application/pdf";
   private static final Set<String> ALLOWED_PAYLOAD_FIELDS = Set.of("output");
-  private static final Set<String> ALLOWED_REPLAY_ITEM_TYPES =
-      Set.of("message", "reasoning", "function_call");
   private static final Set<String> ALLOWED_MESSAGE_FIELDS =
       Set.of("type", "role", "content", "id", "phase");
   private static final Set<String> ALLOWED_OUTPUT_TEXT_FIELDS = Set.of("type", "text");
@@ -76,6 +80,23 @@ final class OpenAiResponsesRequestEncoder {
   private static final Set<String> ALLOWED_SUMMARY_FIELDS = Set.of("type", "text");
   private static final Set<String> ALLOWED_FUNCTION_CALL_FIELDS =
       Set.of("type", "call_id", "id", "name", "arguments");
+
+  /**
+   * variant 原生选项绝不覆盖的 prompt cache 控制字段：是否下发、下发什么值完全由 runtime 的缓存策略与 affinity identity
+   * 决定，声明它们会让缓存键与冻结前缀哈希脱钩。
+   */
+  private static final Set<String> RUNTIME_OWNED_CACHE_FIELDS =
+      Set.of("prompt_cache_key", "prompt_cache_retention", "prompt_cache_options");
+
+  /**
+   * 与 stateless replay 不变量冲突的有状态字段：{@code previous_response_id}/{@code conversation} 会让服务端自带会话状态，
+   * 与本地 {@code store=false} + 前缀哈希回放相互矛盾，因此存在即明确拒绝，绝不静默改写或丢弃。
+   */
+  private static final Set<String> STATEFUL_FIELD_NAMES =
+      Set.of("previous_response_id", "conversation");
+
+  /** runtime 要求 encrypted reasoning 密文随响应返回时使用的 include 条目。 */
+  private static final String INCLUDE_REASONING_ENCRYPTED_CONTENT = "reasoning.encrypted_content";
 
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
@@ -94,20 +115,15 @@ final class OpenAiResponsesRequestEncoder {
     Objects.requireNonNull(descriptor, "descriptor");
     Objects.requireNonNull(config, "config");
 
-    ObjectNode root = NODES.objectNode();
-    root.put("model", request.model().modelId());
-    root.put("stream", true);
-    root.put("store", false);
-    // 系统指令是本协议唯一的顶层 instructions 字符串，绝不作为 input item 下发。
-    root.put("instructions", request.systemInstruction());
+    // variant 的厂商原生协议选项是请求体 root：官方字段默认无损并入，runtime 所有权字段单独裁决。
+    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    validateNativeOptions(root);
+    applyRuntimeFacts(root, request);
 
     applyOutputBudget(root, request.outputTokens());
     applyReasoningParameters(root, request.variant());
 
-    ArrayNode toolsArray = encodeTools(request.tools());
-    if (toolsArray != null && !toolsArray.isEmpty()) {
-      root.set("tools", toolsArray);
-    }
+    ArrayNode toolsArray = mergeTools(root, encodeTools(request.tools()));
 
     ArrayNode inputItems = NODES.arrayNode();
     List<ObjectNode> conversationContentBlocks = new ArrayList<>();
@@ -122,7 +138,7 @@ final class OpenAiResponsesRequestEncoder {
           inputItems,
           conversationContentBlocks);
     }
-    root.set("input", inputItems);
+    applyRuntimeOwnedField(root, "input", inputItems);
 
     // 计算冻结前缀哈希（在打 cache breakpoint 之前计算）
     String sourcePrefixHash =
@@ -145,32 +161,161 @@ final class OpenAiResponsesRequestEncoder {
     return new OpenAiResponsesEncodedRequest(utf8Bytes, sourcePrefixHash);
   }
 
+  /**
+   * 校验 variant 原生协议选项的顶层结构约束与 runtime 独占字段。
+   *
+   * <p>{@code tools}/{@code include}/{@code reasoning} 的合并策略依赖各自的官方容器类型，因此声明了非该类型的值即本地失败，
+   * 绝不静默改写厂商事实。显式 {@code null} 与缺失不同：它是一次声明，按同样的类型规则判定。
+   */
+  private static void validateNativeOptions(ObjectNode root) {
+    for (String field : STATEFUL_FIELD_NAMES) {
+      if (root.has(field)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions conflicts with the stateless replay invariant: " + field);
+      }
+    }
+    for (String field : RUNTIME_OWNED_CACHE_FIELDS) {
+      if (root.has(field)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions must not declare the runtime-owned prompt cache field: " + field);
+      }
+    }
+    requireNativeArray(root, "tools");
+    requireNativeArray(root, "include");
+    requireNativeObject(root, "reasoning");
+    dedupeInclude(root);
+  }
+
+  private static void requireNativeArray(ObjectNode root, String field) {
+    JsonNode node = root.get(field);
+    if (node != null && !node.isArray()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions field must be a JSON array: " + field);
+    }
+  }
+
+  private static void requireNativeObject(ObjectNode root, String field) {
+    JsonNode node = root.get(field);
+    if (node != null && !node.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions field must be a JSON object: " + field);
+    }
+  }
+
+  /**
+   * 写入 runtime 唯一所有的顶层事实：{@code model}、{@code stream}、{@code store} 与顶层 {@code instructions}。
+   *
+   * <p>系统指令是本协议唯一的顶层 {@code instructions} 字符串，绝不作为 input item 下发。
+   */
+  private static void applyRuntimeFacts(ObjectNode root, ProviderRequest request) {
+    applyRuntimeOwnedField(root, "model", NODES.textNode(request.model().modelId()));
+    applyRuntimeOwnedField(root, "stream", NODES.booleanNode(true));
+    applyRuntimeOwnedField(root, "store", NODES.booleanNode(false));
+    applyRuntimeOwnedField(root, "instructions", NODES.textNode(request.systemInstruction()));
+  }
+
+  /**
+   * runtime 所有权字段：原生选项重复声明同值是无冲突的冗余，冲突值一律 {@code INVALID_REQUEST}；随后 wire 值只由 runtime
+   * 事实决定。异常消息只包含字段名，绝不回显原生值。
+   */
+  private static void applyRuntimeOwnedField(ObjectNode root, String field, JsonNode runtimeValue) {
+    JsonNode nativeValue = root.get(field);
+    if (nativeValue != null && !nativeValue.equals(runtimeValue)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions conflicts with the runtime-owned request field: " + field);
+    }
+    root.set(field, runtimeValue);
+  }
+
   /** 输出预算低于本 Provider 的协议下限 {@code 16} 时明确拒绝；合法预算原样编码，绝不擅自扩大冻结值。 */
   private static void applyOutputBudget(ObjectNode root, int outputTokens) {
     if (outputTokens < OPENAI_RESPONSES_MIN_OUTPUT_TOKENS) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "max_output_tokens must be at least 16");
     }
-    root.put("max_output_tokens", outputTokens);
+    applyRuntimeOwnedField(root, "max_output_tokens", NODES.numberNode(outputTokens));
   }
 
   /**
    * reasoning effort 编码：{@code off} 映射为协议关闭值 {@code none}（仅发送 effort，不带 summary/encrypted content），
    * 其他厂商定义值原样下发并请求摘要；null 不发送推理字段，由服务端默认决定。
+   *
+   * <p>variant 原生 {@code reasoning} object 除 {@code effort}/{@code summary} 外的子字段始终保留：只有原生未声明
+   * {@code summary}（缺失或 {@code null}）时才延续 runtime 的 {@code auto} 默认，只有原生未声明 encrypted content
+   * 时才追加对应 include。原生 {@code effort} 与 runtime 冲突时明确拒绝且不回显值。
    */
   private static void applyReasoningParameters(ObjectNode root, ModelVariant variant) {
     if (variant == null || variant.reasoningEffort() == null) {
       return;
     }
-    ObjectNode reasoning = root.putObject("reasoning");
+    ObjectNode reasoning =
+        root.has("reasoning") ? (ObjectNode) root.get("reasoning") : root.putObject("reasoning");
+    String effort = variant.reasoningOff() ? "none" : variant.reasoningEffort();
+    JsonNode nativeEffort = reasoning.get("effort");
+    if (nativeEffort != null && !nativeEffort.equals(NODES.textNode(effort))) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions conflicts with the runtime-owned request field: reasoning.effort");
+    }
+    reasoning.put("effort", effort);
     if (variant.reasoningOff()) {
-      reasoning.put("effort", "none");
       return;
     }
-    reasoning.put("effort", variant.reasoningEffort());
-    reasoning.put("summary", "auto");
-    ArrayNode include = root.putArray("include");
-    include.add("reasoning.encrypted_content");
+    if (!reasoning.hasNonNull("summary")) {
+      reasoning.put("summary", "auto");
+    }
+    ensureInclude(root, INCLUDE_REASONING_ENCRYPTED_CONTENT);
+  }
+
+  /** include 去重：保留原生条目首次出现的顺序；重复条目没有额外协议语义，去重不改变厂商声明的集合。 */
+  private static void dedupeInclude(ObjectNode root) {
+    if (!root.has("include")) {
+      return;
+    }
+    ArrayNode deduped = NODES.arrayNode();
+    Set<JsonNode> seen = new LinkedHashSet<>();
+    for (JsonNode item : (ArrayNode) root.get("include")) {
+      if (seen.add(item)) {
+        deduped.add(item);
+      }
+    }
+    root.set("include", deduped);
+  }
+
+  /** 只在 runtime 必需条目缺失时追加，绝不覆盖原生 include 的其他条目。 */
+  private static void ensureInclude(ObjectNode root, String entry) {
+    ArrayNode include =
+        root.has("include") ? (ArrayNode) root.get("include") : root.putArray("include");
+    for (JsonNode item : include) {
+      if (item.isTextual() && entry.equals(item.textValue())) {
+        return;
+      }
+    }
+    include.add(entry);
+  }
+
+  /**
+   * tools 合并：原生工具（web/file search、computer、code interpreter、image generation、local shell、MCP、custom
+   * 等）按声明顺序保留，runtime function 工具追加在其后；无任何工具时不发送 {@code tools}。
+   */
+  private static ArrayNode mergeTools(ObjectNode root, ArrayNode runtimeTools) {
+    if (!root.has("tools")) {
+      if (runtimeTools == null || runtimeTools.isEmpty()) {
+        return null;
+      }
+      root.set("tools", runtimeTools);
+      return runtimeTools;
+    }
+    ArrayNode tools = (ArrayNode) root.get("tools");
+    if (runtimeTools != null) {
+      tools.addAll(runtimeTools);
+    }
+    return tools;
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {
@@ -455,11 +600,15 @@ final class OpenAiResponsesRequestEncoder {
   }
 
   /**
-   * 完成 native replay 的结构、白名单与 durable 一致性校验，并返回该 replay 是否可原位回放。
+   * 完成 native replay 的结构校验、已知类型语义校验与 durable 一致性校验，并返回该 replay 是否可原位回放。
    *
    * <p>结构性损坏、与 durable 消息文本/工具调用矛盾、以及“有密文但无摘要”的 opaque reasoning 替换另一段 durable 思考，都属于必须在
    * affinity/前缀校验之前失败的情形。唯一例外是无 {@code encrypted_content} 且没有任何可用摘要文本的空 reasoning
    * 占位符：它是上游“原生推理不可用”的合法形态，本身不是损坏请求；当它无法承载 durable 语义思考时返回 {@code false}，由调用方回退语义编码，而不是让后续轮次永远失败。
+   *
+   * <p>已知 {@code message}/{@code reasoning}/{@code function_call} 继续严格校验 runtime 关心的字段并与 durable
+   * 内容逐项比对； 其余官方 output item（web/file search、code interpreter、image generation、custom tool call
+   * 等）不承载 durable 语义，只要是非空 object 且 {@code type} 为非空白字符串，就作为不透明事实原样透传，绝不静默丢弃。
    */
   private static boolean validateReplayOutputAgainstDurable(
       ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
@@ -482,10 +631,6 @@ final class OpenAiResponsesRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: missing string type");
       }
       String type = item.get("type").textValue();
-      if (!ALLOWED_REPLAY_ITEM_TYPES.contains(type)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "disallowed replay item type in output: " + type);
-      }
       switch (type) {
         case "message" -> {
           validateAllowedFields(item, ALLOWED_MESSAGE_FIELDS, "message item");
@@ -647,8 +792,10 @@ final class OpenAiResponsesRequestEncoder {
           parseJsonObject(args, "function_call arguments must be a JSON object");
           replayToolCalls.add(new ProviderToolCall(callId, name, args));
         }
-        default -> throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "unsupported replay item type: " + type);
+        default -> {
+          // 未知但可信的官方 item：非空 object 与非空白 string type 已校验；它不承载 durable
+          // 语义，因此不参与文本/思考/工具一致性比对，并原样透传供下一轮 stateless replay。
+        }
       }
     }
 

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -19,6 +20,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>bind 与 cancel 线性化，消除竞态与死锁；
  *   <li>cancel 返回后不再调用 handler 任何回调；
  *   <li>complete / error / cancel 严格 terminal-once；
+ *   <li>规范化增量与原生协议帧共用同一派发闸门，二者顺序稳定；
  *   <li>handler 回调内部重入 cancel 线程安全。
  * </ul>
  */
@@ -93,6 +95,25 @@ final class OpenAiResponsesStreamBridge implements ProviderStream {
         return;
       }
       handler.onEvent(event, this);
+    } finally {
+      dispatchLock.unlock();
+    }
+  }
+
+  /**
+   * 派发一条厂商原生协议帧。
+   *
+   * <p>与规范化增量共用同一 {@code dispatchLock}、取消状态与 terminal-once 语义：取消或已终止后不再派发，回调内重入取消线程安全。原生帧是
+   * attempt-only 观测通道，不改变 terminal 状态，也不进入 durable checkpoint。
+   */
+  void emitProtocolEvent(ProviderProtocolEvent event) {
+    Objects.requireNonNull(event, "event");
+    dispatchLock.lock();
+    try {
+      if (this.userCancelled || this.terminal) {
+        return;
+      }
+      handler.onProtocolEvent(event, this);
     } finally {
       dispatchLock.unlock();
     }

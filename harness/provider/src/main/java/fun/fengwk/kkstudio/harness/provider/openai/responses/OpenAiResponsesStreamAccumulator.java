@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -37,7 +38,11 @@ import java.util.function.Consumer;
 /**
  * OpenAI Responses SSE 流式事件状态机与响应累积器。
  *
- * <p>按协议规范解析文本增量、推理增量与工具调用增量，处理 completed/incomplete/failed 事件， 进行细粒度用量归一化与白名单 native replay 组装。
+ * <p>按协议规范解析文本增量、推理增量与工具调用增量，处理 completed/incomplete/failed 事件， 进行细粒度用量归一化与 native replay 组装：已知
+ * message/reasoning/function_call 归一化，其余官方 output item 作为不透明事实保留。
+ *
+ * <p>每条 transport 帧在进入状态机之前先经 {@link OpenAiResponsesStreamBridge#emitProtocolEvent} exactly-once
+ * 上报原生事实；原生帧不进入 durable checkpoint、realtime 增量或任何内容缓冲。
  */
 final class OpenAiResponsesStreamAccumulator {
 
@@ -66,6 +71,9 @@ final class OpenAiResponsesStreamAccumulator {
           "response.failed",
           "response.error");
 
+  /** 无法从 transport 帧还原出官方事件名时使用的兜底原生事件名。 */
+  private static final String UNKNOWN_PROTOCOL_EVENT_TYPE = "openai.response.event";
+
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
   private final String frozenSourcePrefixHash;
@@ -85,6 +93,8 @@ final class OpenAiResponsesStreamAccumulator {
 
   // 终态回放用有序 output items
   private final List<JsonNode> rawOutputItems = new ArrayList<>();
+  // 未知官方 item 在 rawOutputItems 中的槽位：added 先占位，done 覆盖同一槽位，避免重复或丢失
+  private final Map<String, Integer> opaqueItemSlots = new LinkedHashMap<>();
   private boolean explicitTerminalOutputProcessed = false;
 
   // Token 用量
@@ -166,6 +176,9 @@ final class OpenAiResponsesStreamAccumulator {
     if (bridge.isCancelled()) {
       return;
     }
+    // 每条 transport 帧（含 keepalive ping、[DONE] 哨兵与畸形帧）先 exactly-once 上报原生事实，
+    // 再进入规范化状态机；failed/error 因此必然是「先 raw 再异常」。
+    bridge.emitProtocolEvent(protocolEvent(eventName, data));
     if ("ping".equals(eventName)) {
       return;
     }
@@ -180,6 +193,28 @@ final class OpenAiResponsesStreamAccumulator {
     }
 
     processEvent(node);
+  }
+
+  /**
+   * 还原 transport 帧的原生身份：优先 SSE {@code event} 名，其次 payload 的 JSON {@code type}，最后是通用兜底名； {@code
+   * [DONE]} 哨兵归一为 {@code done}。只有帧身份被解释，{@code data} 始终原样透出，绝不重写厂商事实。
+   */
+  private static ProviderProtocolEvent protocolEvent(String eventName, String data) {
+    String payload = data == null ? "" : data;
+    if (eventName != null && !eventName.isBlank()) {
+      return new ProviderProtocolEvent(eventName, payload);
+    }
+    if ("[DONE]".equals(payload.trim())) {
+      return new ProviderProtocolEvent("done", payload);
+    }
+    JsonNode node = tryParseJsonObject(payload);
+    if (node != null) {
+      JsonNode typeNode = node.get("type");
+      if (typeNode != null && typeNode.isTextual() && !typeNode.textValue().isBlank()) {
+        return new ProviderProtocolEvent(typeNode.textValue(), payload);
+      }
+    }
+    return new ProviderProtocolEvent(UNKNOWN_PROTOCOL_EVENT_TYPE, payload);
   }
 
   void processEvent(JsonNode node) {
@@ -260,6 +295,11 @@ final class OpenAiResponsesStreamAccumulator {
       if (callId != null || name != null) {
         bridge.emitEvent(new ProviderStreamEvent.ToolCallDelta(ordinal, callId, name, null));
       }
+      return;
+    }
+    // 已知 message/reasoning 的权威表示来自 delta、done 与 terminal output；未知官方 item 只有这条流式事实来源。
+    if (!isKnownOutputItemType(itemType)) {
+      retainStreamedOpaqueItem(node);
     }
   }
 
@@ -388,16 +428,55 @@ final class OpenAiResponsesStreamAccumulator {
     tool.itemDone = true;
   }
 
+  /**
+   * 记录流式到达的未知官方 item。
+   *
+   * <p>{@code output_item.added} 先建立槽位：未知 item 没有 delta 等其它语义来源，丢掉就再也回不来；随后到达的 {@code
+   * output_item.done} 以更完整的 deepCopy 覆盖同一槽位，成为该 item 的 replay 事实。槽位键优先取 added/done 共享的 {@code
+   * output_index}，其次取 item id；两者都缺失的 done 帧仍然追加，绝不静默丢弃。
+   */
+  private void retainStreamedOpaqueItem(JsonNode node) {
+    JsonNode item = node.get("item");
+    if (item == null || !item.isObject() || !isOpaqueReplayItem(item)) {
+      return;
+    }
+    String key = opaqueItemSlotKey(node, item);
+    Integer slot = key == null ? null : opaqueItemSlots.get(key);
+    if (slot != null) {
+      rawOutputItems.set(slot, item.deepCopy());
+      return;
+    }
+    if (key != null) {
+      opaqueItemSlots.put(key, rawOutputItems.size());
+    }
+    rawOutputItems.add(item.deepCopy());
+  }
+
+  private static String opaqueItemSlotKey(JsonNode node, JsonNode item) {
+    JsonNode outputIndex = node.get("output_index");
+    if (outputIndex != null && outputIndex.isIntegralNumber()) {
+      return "index:" + outputIndex.asInt();
+    }
+    JsonNode id = item.get("id");
+    if (id != null && id.isTextual() && !id.textValue().isBlank()) {
+      return "id:" + id.textValue();
+    }
+    return null;
+  }
+
   private void handleOutputItemDone(JsonNode node) {
     JsonNode item = node.get("item");
     if (item == null || !item.isObject()) {
       return;
     }
     String itemType = item.path("type").asText();
+    if (!isKnownOutputItemType(itemType)) {
+      retainStreamedOpaqueItem(node);
+      return;
+    }
     if ("function_call".equals(itemType)) {
       syncToolFromItem(item);
     }
-
     rawOutputItems.add(item.deepCopy());
   }
 
@@ -519,6 +598,7 @@ final class OpenAiResponsesStreamAccumulator {
         List<JsonNode> priorStreamedItems = new ArrayList<>(rawOutputItems);
         String priorStreamedThinking = thinkingBuffer.toString();
         rawOutputItems.clear();
+        opaqueItemSlots.clear();
         toolsById.clear();
         nextToolOrdinal = 0;
         textBuffer.setLength(0);
@@ -864,7 +944,13 @@ final class OpenAiResponsesStreamAccumulator {
           fc.put("name", name);
           fc.put("arguments", args);
         }
-        default -> {}
+        default -> {
+          // 未知但可信的官方 output item（web_search_call / file_search_call / image_generation_call /
+          // 自定义工具 item 等）：保留为不透明事实供下一轮 stateless replay，绝不再静默丢弃。
+          if (isOpaqueReplayItem(item)) {
+            array.add(item.deepCopy());
+          }
+        }
       }
     }
 
@@ -939,6 +1025,28 @@ final class OpenAiResponsesStreamAccumulator {
         textBuffer.append(block.path("refusal").asText(""));
       }
     }
+  }
+
+  /**
+   * 已知 output item 类型：它们有专门的归一化与 durable 语义校验，不是不透明事实。
+   *
+   * <p>{@code message}/{@code reasoning}/{@code function_call} 的权威表示来自 delta、done 与 terminal
+   * output， 因此不会被 {@code output_item.added} 的早期形态取代；其余官方类型只以不透明事实存在。
+   */
+  private static boolean isKnownOutputItemType(String itemType) {
+    return "message".equals(itemType)
+        || "reasoning".equals(itemType)
+        || "function_call".equals(itemType);
+  }
+
+  /**
+   * 判断未知 type 的 output item 是否可作为不透明事实冻结。
+   *
+   * <p>只有具备非空白字符串 {@code type} 的对象才是可回放的协议 item；冻结缺少 type 的碎片只会让下一轮编码必然失败，因此这类碎片不进入 replay。
+   */
+  private static boolean isOpaqueReplayItem(JsonNode item) {
+    JsonNode typeNode = item.get("type");
+    return typeNode != null && typeNode.isTextual() && !typeNode.textValue().isBlank();
   }
 
   /**
