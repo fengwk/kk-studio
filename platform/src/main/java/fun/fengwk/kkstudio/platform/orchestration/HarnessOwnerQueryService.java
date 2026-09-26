@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.platform.orchestration;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
-import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
@@ -25,9 +23,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
-import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
@@ -42,9 +39,9 @@ import java.util.UUID;
 /**
  * 产品 owner 共用的 Harness Session 查询用例。
  *
- * <p>owner 关系只负责枚举 Session，Session/Thread 的事实统一从 {@link HarnessRuntime} 读取（Session 名称与创建时间来自
- * durable {@code Session}，Thread 名称来自 durable {@code ThreadState}）；不引入 Session title 或 Thread
- * status 的冗余持久化字段。
+ * <p>owner 关系只负责定位 Session：Chat 直接持有 {@code chat_session}；Issue+Agent 先解析稳定 Thread 绑定，再由该 Thread
+ * 解析唯一 Session。Session/Thread 的事实统一从 {@link HarnessRuntime} 读取（Session 名称与创建时间来自 durable {@code
+ * Session}，Thread 名称来自 durable {@code ThreadState}）；不引入 Session title 或 Thread status 的冗余持久化字段。
  */
 @Service
 public class HarnessOwnerQueryService {
@@ -53,31 +50,19 @@ public class HarnessOwnerQueryService {
 
   private final ChatRepository chatRepository;
   private final ChatSessionRepository chatSessionRepository;
-  private final CanvasStore canvasStore;
-  private final CanvasSessionRepository canvasSessionRepository;
-  private final IssueAgentSessionRepository issueAgentSessionRepository;
-  private final IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
+  private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final ObjectProvider<HarnessRuntime> runtimes;
 
   public HarnessOwnerQueryService(
       ChatRepository chatRepository,
       ChatSessionRepository chatSessionRepository,
-      CanvasStore canvasStore,
-      CanvasSessionRepository canvasSessionRepository,
-      IssueAgentSessionRepository issueAgentSessionRepository,
-      IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository,
+      IssueAgentThreadRepository issueAgentThreadRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
-    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
-    this.canvasSessionRepository =
-        Objects.requireNonNull(canvasSessionRepository, "canvasSessionRepository");
-    this.issueAgentSessionRepository =
-        Objects.requireNonNull(issueAgentSessionRepository, "issueAgentSessionRepository");
-    this.issueAgentSessionOwnershipRepository =
-        Objects.requireNonNull(
-            issueAgentSessionOwnershipRepository, "issueAgentSessionOwnershipRepository");
+    this.issueAgentThreadRepository =
+        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
   }
 
@@ -90,34 +75,28 @@ public class HarnessOwnerQueryService {
     return listSessionSummaries(chatSessionRepository.listSessionIds(chatId));
   }
 
-  /** 返回 Canvas owner 的 Session 摘要，关系顺序保持最近归属优先。 */
-  public List<HarnessSessionSummaryDTO> listCanvasSessions(UUID canvasId) {
-    Objects.requireNonNull(canvasId, "canvasId");
-    if (canvasStore.findDocument(canvasId).isEmpty()) {
-      throw new AiResourceNotFoundException("canvas");
-    }
-    return listSessionSummaries(canvasSessionRepository.listSessionIds(canvasId));
-  }
-
-  /** 返回某个 Issue+Agent 稳定归属持有的 Session 摘要。 */
-  public List<HarnessSessionSummaryDTO> listIssueAgentSessions(UUID issueAgentSessionId) {
-    Objects.requireNonNull(issueAgentSessionId, "issueAgentSessionId");
-    IssueAgentSession binding = issueAgentSessionRepository.getById(issueAgentSessionId);
-    if (binding == null) {
-      throw new AiResourceNotFoundException("issue_agent_session");
-    }
-    return listSessionSummaries(
-        issueAgentSessionOwnershipRepository.listSessionIds(issueAgentSessionId));
-  }
-
-  /** 统一按 owner 查询 Session 摘要。 */
+  /** 统一按 owner 查询 Session 摘要；owner 无法定位时确定性拒绝，绝不返回其他归属的 Session。 */
   public List<HarnessSessionSummaryDTO> listSessionsByOwner(OwnerRef owner) {
     Objects.requireNonNull(owner, "owner");
-    return switch (owner.type()) {
-      case CHAT -> listChatSessions(owner.id());
-      case CANVAS -> listCanvasSessions(owner.id());
-      case ISSUE_AGENT_SESSION -> listIssueAgentSessions(owner.id());
+    return switch (owner) {
+      case OwnerRef.Chat chat -> listChatSessions(chat.chatId());
+      case OwnerRef.IssueAgent issueAgent -> listIssueAgentSessions(issueAgent);
     };
+  }
+
+  /**
+   * 返回 Issue+Agent 稳定归属持有的 Session 摘要：绑定必须存在，Session 只能由绑定 Thread 解析。
+   *
+   * <p>绑定缺失或 Thread 不可解析都是确定性失败，不能回退为“空列表”或枚举同 Session 的其他 Thread。
+   */
+  private List<HarnessSessionSummaryDTO> listIssueAgentSessions(OwnerRef.IssueAgent owner) {
+    IssueAgentThread binding =
+        issueAgentThreadRepository.findByIssueIdAndAgentName(owner.issueId(), owner.agentName());
+    if (binding == null) {
+      throw new AiResourceNotFoundException("issue_agent_thread");
+    }
+    UUID sessionId = requireRuntime().getThreadSnapshot(binding.threadId()).thread().sessionId();
+    return listSessionSummaries(List.of(sessionId));
   }
 
   /** 返回一个 Session 的 Thread 摘要，状态与 Model 均从同一 snapshot 派生，名称来自 durable ThreadState。 */
