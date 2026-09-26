@@ -905,5 +905,52 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       await user.click(screen.getByRole('button', { name: '技能 custom-carrier-skill' }))
       expect(screen.getByText('S3_BUCKET')).toBeInTheDocument()
     })
+
+    it('renders provider request preview with metadata, preformatted payload and no authentication credentials', () => {
+      // 测试意图：验证 selection.type === 'preview' 时展示请求预览标题、点击快照标识、Provider/Model/ByteSize/Timestamp 元数据，
+      // 并以可选择预格式化代码块渲染 bodyJson，且绝不暴露任何 Authorization 头或凭据信息。
+      const mockPreview = {
+        kind: 'DRAFT_REQUEST_PREVIEW' as const,
+        providerType: 'OPENAI',
+        modelName: 'gpt-4o',
+        bodyByteSize: 1280,
+        bodyJson: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: 'hello preview' }],
+        }),
+        sourceHeadEntryId: 'entry-head-123',
+        generatedAt: '2026-09-27T05:00:00Z',
+        snapshotNotice: 'Snapshot for draft preview',
+      }
+
+      render(
+        <ThreadDebugInspector
+          selection={{
+            type: 'preview',
+            preview: mockPreview,
+          }}
+          onClose={() => {}}
+        />,
+      )
+
+      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
+      expect(screen.getByText('DRAFT_REQUEST_PREVIEW')).toBeInTheDocument()
+      expect(screen.getByText('点击快照')).toBeInTheDocument()
+      expect(screen.getByText('OPENAI')).toBeInTheDocument()
+      expect(screen.getByText('gpt-4o')).toBeInTheDocument()
+      expect(screen.getByText(/1.3 KB/)).toBeInTheDocument()
+      expect(screen.getByText('2026-09-27T05:00:00Z')).toBeInTheDocument()
+      expect(screen.getByText('entry-head-123')).toBeInTheDocument()
+      expect(screen.getByText('Snapshot for draft preview')).toBeInTheDocument()
+
+      const payload = screen.getByTestId('preview-request-body')
+      expect(payload).toHaveAttribute('tabindex', '0')
+      expect(payload.textContent).toContain('"hello preview"')
+
+      // 验证不泄露任何敏感鉴权元数据
+      expect(screen.queryByText(/Authorization/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Bearer/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/api-key/i)).not.toBeInTheDocument()
+    })
   })
 })

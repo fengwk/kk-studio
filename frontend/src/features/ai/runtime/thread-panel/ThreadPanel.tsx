@@ -66,6 +66,9 @@ export interface ThreadPanelComposerInput {
   interactionPanel?: ReactNode
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
+  onPreview?: (payload: ComposerPart[]) => void
+  previewLoading?: boolean
+  previewDisabled?: boolean
 }
 
 /**
@@ -159,6 +162,9 @@ export function ThreadPanel({ transcript, mainView, composer, activity, slots, h
           historicalUserMessages={historicalUserMessages}
           queuedUserMessages={queuedUserMessages}
           settings={composer.settings}
+          onPreview={composer.onPreview}
+          previewLoading={composer.previewLoading}
+          previewDisabled={composer.previewDisabled}
         />
         {composer.interactionPanel}
         {slots?.footer}

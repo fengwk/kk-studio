@@ -1042,6 +1042,14 @@ export const aiCatalog = {
     'en-US': 'Send message',
     'zh-CN': '发送消息',
   },
+  'ai.runtime.composer.preview': {
+    'en-US': 'Preview request',
+    'zh-CN': '预览请求',
+  },
+  'ai.runtime.composer.previewLoading': {
+    'en-US': 'Generating request preview…',
+    'zh-CN': '正在生成请求预览…',
+  },
   'ai.runtime.composer.openCommands': {
     'en-US': 'Open commands',
     'zh-CN': '打开命令表',
@@ -2085,6 +2093,46 @@ export const aiCatalog = {
   'ai.runtime.debug.noFrozenInvocation': {
     'en-US': 'No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.',
     'zh-CN': '当前无活动的冻结调用请求。仅在活动调用回合中显示规范化请求 JSON。',
+  },
+  'ai.runtime.debug.previewFailed': {
+    'en-US': 'Failed to preview request',
+    'zh-CN': '请求预览失败',
+  },
+  'ai.runtime.debug.inspector.draftPreviewTitle': {
+    'en-US': 'Request Preview',
+    'zh-CN': '请求预览',
+  },
+  'ai.runtime.debug.inspector.clickTimeSnapshot': {
+    'en-US': 'Click-time Snapshot',
+    'zh-CN': '点击快照',
+  },
+  'ai.runtime.debug.inspector.providerType': {
+    'en-US': 'Provider Type',
+    'zh-CN': 'Provider 类型',
+  },
+  'ai.runtime.debug.inspector.modelName': {
+    'en-US': 'Model Name',
+    'zh-CN': '模型名称',
+  },
+  'ai.runtime.debug.inspector.bodyByteSize': {
+    'en-US': 'Payload Size',
+    'zh-CN': '载荷大小',
+  },
+  'ai.runtime.debug.inspector.generatedAt': {
+    'en-US': 'Generated At',
+    'zh-CN': '生成时间',
+  },
+  'ai.runtime.debug.inspector.sourceHeadEntryId': {
+    'en-US': 'Base Entry ID',
+    'zh-CN': '基础 Entry ID',
+  },
+  'ai.runtime.debug.inspector.snapshotNotice': {
+    'en-US': 'Notice',
+    'zh-CN': '快照说明',
+  },
+  'ai.runtime.debug.inspector.requestBodyJson': {
+    'en-US': 'Provider Request Body (JSON)',
+    'zh-CN': 'Provider 请求体 (JSON)',
   },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',

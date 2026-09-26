@@ -3912,6 +3912,49 @@ div.is-error {
   height: 14px;
 }
 
+.thread-dock-preview {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  color: var(--fg-muted);
+  background: transparent;
+}
+
+.thread-dock-preview:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-dock-preview:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-active);
+  border-color: var(--border-hover, var(--border));
+}
+
+.thread-dock-preview svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-dock-preview .preview-icon.spin {
+  animation: thread-preview-spin 700ms linear infinite;
+}
+
+@keyframes thread-preview-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .thread-dock-send {
   display: grid;
   width: 28px;
