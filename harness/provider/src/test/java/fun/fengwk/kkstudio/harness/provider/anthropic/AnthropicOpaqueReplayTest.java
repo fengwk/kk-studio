@@ -32,6 +32,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.io.IOException;
@@ -160,8 +162,80 @@ class AnthropicOpaqueReplayTest {
   }
 
   /**
-   * 测试意图：native-only block 无法用 durable 语义表达，affinity/hash 失配时必须 fail closed；而纯已知
-   * text/thinking/function payload 仍保留既有 semantic fallback 行为。
+   * 测试意图：已知 block 的官方附加字段（citations 等）与 tool_use 的额外成员都无法用 durable 语义等价重建，因此 affinity 或 prefix hash
+   * 失配时必须 fail closed；恰好 {@code type+text} 的 text block 与恰好 {@code type+id+name+input} 的 tool_use
+   * 则仍回退语义编码。
+   */
+  @Test
+  void failsClosedForKnownBlocksWithNativeOnlyMembersOnMismatch() throws IOException {
+    // 1. 带 citations 与额外官方字段的 text block：hash 失配时 fail closed，绝不剥离这些字段
+    ObjectNode citedPayload = NODES.objectNode();
+    citedPayload.put("role", "assistant");
+    ObjectNode citedBlock = citedPayload.putArray("content").addObject();
+    citedBlock.put("type", "text");
+    citedBlock.put("text", "cited answer");
+    citedBlock.putArray("citations").addObject().put("type", "web_search_result_location");
+    ProviderException citedHashMismatch =
+        assertReplayRejected(
+            replayState(citedPayload, FORGED_PREFIX_HASH),
+            List.of(new ProviderTextBlock("cited answer")));
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        citedHashMismatch.getMessage());
+
+    // 2. 同一 payload 的 affinity 失配同样 fail closed
+    ProviderException citedAffinityMismatch =
+        assertReplayRejected(
+            new ProviderReplayState(
+                ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                descriptor.affinity("another-model"),
+                FORGED_PREFIX_HASH,
+                citedPayload),
+            List.of(new ProviderTextBlock("cited answer")));
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        citedAffinityMismatch.getMessage());
+
+    // 3. 带额外成员的 tool_use：prefix hash 失配时 fail closed，绝不丢弃额外成员
+    ObjectNode extraMemberToolPayload = NODES.objectNode();
+    extraMemberToolPayload.put("role", "assistant");
+    ObjectNode extraMemberTool = extraMemberToolPayload.putArray("content").addObject();
+    extraMemberTool.put("type", "tool_use").put("id", "c1").put("name", "calc");
+    extraMemberTool.putObject("input").put("x", 1);
+    extraMemberTool.put("caller", "server");
+    List<ProviderContentBlock> durableToolCall =
+        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "calc", "{\"x\":1}")));
+    ProviderException toolHashMismatch =
+        assertReplayRejected(
+            replayState(extraMemberToolPayload, FORGED_PREFIX_HASH), durableToolCall);
+    assertEquals(
+        "native replay blocks require matching affinity and source prefix hash",
+        toolHashMismatch.getMessage());
+
+    // 4. 恰好 type+id+name+input 的 tool_use 失配时仍回退语义编码（由 durable 重建 wire）
+    ObjectNode minimalToolPayload = NODES.objectNode();
+    minimalToolPayload.put("role", "assistant");
+    ObjectNode minimalTool = minimalToolPayload.putArray("content").addObject();
+    minimalTool.put("type", "tool_use").put("id", "c1").put("name", "calc");
+    minimalTool.putObject("input").put("x", 1);
+    ProviderRequest fallbackRequest =
+        request(
+            List.of(
+                userMsg(),
+                assistantMsg(
+                    durableToolCall, replayState(minimalToolPayload, FORGED_PREFIX_HASH))));
+    JsonNode fallbackContent =
+        wire(encoder.encode(fallbackRequest, descriptor)).path("messages").get(1).path("content");
+    assertEquals(1, fallbackContent.size());
+    assertEquals("tool_use", fallbackContent.get(0).path("type").asText());
+    assertEquals("c1", fallbackContent.get(0).path("id").asText());
+    assertEquals("calc", fallbackContent.get(0).path("name").asText());
+    assertEquals(1, fallbackContent.get(0).path("input").path("x").asInt());
+  }
+
+  /**
+   * 测试意图：native-only block 无法用 durable 语义表达，affinity/hash 失配时必须 fail closed；而纯已知 text payload 仍保留既有
+   * semantic fallback 行为。
    */
   @Test
   void failsClosedForNativeOnlyReplayOnAffinityOrHashMismatch() throws IOException {
