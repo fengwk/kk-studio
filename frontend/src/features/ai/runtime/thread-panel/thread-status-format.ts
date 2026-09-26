@@ -1,3 +1,4 @@
+import { calculateDecodeTokensPerSecond } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/ai/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
@@ -124,13 +125,9 @@ export function buildThreadStatusModel(input: ThreadStatusModelInput): ThreadSta
     })
   }
 
-  // 5. tok/s：有效样本累加，无样本显示 — tok/s
-  if (
-    usage.decodeDurationMillis != null
-    && usage.decodeDurationMillis > 0
-    && usage.decodeTokens != null
-  ) {
-    const speed = Math.round((usage.decodeTokens * 1000) / usage.decodeDurationMillis)
+  // 5. tok/s：复用统一速率计算，无样本显示 — tok/s
+  const speed = calculateDecodeTokensPerSecond(usage)
+  if (speed != null) {
     segments.push({
       key: 'speed',
       className: 'thread-status-speed',

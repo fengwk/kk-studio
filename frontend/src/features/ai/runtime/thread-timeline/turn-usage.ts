@@ -1,3 +1,4 @@
+import { isValidDecodeSample } from '@/features/ai/runtime/thread-timeline/content-utils'
 import type {
   DialogueMessage,
   TurnUsage,
@@ -49,11 +50,7 @@ export function aggregateBranchUsage(
     }
 
     // 测速有效样本：仅有效样本累加分子分母
-    if (
-      usage.decodeDurationMillis != null
-      && usage.decodeDurationMillis > 0
-      && usage.decodeTokens != null
-    ) {
+    if (isValidDecodeSample(usage)) {
       speedTokens += usage.decodeTokens
       speedDuration += usage.decodeDurationMillis
       hasSpeedSample = true
@@ -69,6 +66,5 @@ export function aggregateBranchUsage(
     total.decodeDurationMillis = speedDuration
   }
 
-  total.cost = Number(total.cost.toFixed(6))
   return total
 }
