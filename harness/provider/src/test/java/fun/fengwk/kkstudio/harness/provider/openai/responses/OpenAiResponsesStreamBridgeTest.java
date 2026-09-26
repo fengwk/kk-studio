@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -212,5 +213,43 @@ class OpenAiResponsesStreamBridgeTest {
 
     assertTrue(cancelledInside.get());
     assertTrue(bridge.isCancelled());
+  }
+
+  /** 测试意图：原生协议帧与规范化增量共用同一派发闸门 —— 取消与 terminal 后一律不再派发，重复帧信号不产生额外回调。 */
+  @Test
+  void test_protocolEventSharesDispatchGate() {
+    List<ProviderProtocolEvent> protocolEvents = new ArrayList<>();
+
+    ProviderStreamHandler handler =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+            protocolEvents.add(event);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {}
+        };
+
+    OpenAiResponsesStreamBridge bridge = new OpenAiResponsesStreamBridge(handler);
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("response.created", "{}"));
+    assertEquals(1, protocolEvents.size());
+
+    // terminal-once：complete 之后原生帧不再派发，且原生帧本身不改变 terminal 状态
+    bridge.emitComplete(createDummyCompletion());
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("response.completed", "{}"));
+    assertEquals(1, protocolEvents.size());
+
+    // cancel 之后同样不再派发
+    bridge.cancel();
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("response.error", "{}"));
+    assertEquals(1, protocolEvents.size());
+    assertEquals("{}", protocolEvents.get(0).data());
   }
 }

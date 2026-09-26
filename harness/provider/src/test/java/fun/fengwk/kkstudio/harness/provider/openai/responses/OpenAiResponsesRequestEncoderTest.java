@@ -1733,7 +1733,8 @@ class OpenAiResponsesRequestEncoderTest {
                     OpenAiResponsesConfig.defaultConfig()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exEmptyType.kind());
 
-    // 4. output item 类型不支持
+    // 4. output item 类型未知：未知 item 不承载 durable 语义，因此 durable 文本无从表达时仍然拒绝；
+    // 未知 item 本身的不透明透传由 OpenAiResponsesOpaqueItemReplayTest 专项覆盖。
     ObjectNode unknownTypePayload = MAPPER.createObjectNode();
     unknownTypePayload.putArray("output").addObject().put("type", "unknown_item_type");
     ProviderReplayState unknownTypeReplay =

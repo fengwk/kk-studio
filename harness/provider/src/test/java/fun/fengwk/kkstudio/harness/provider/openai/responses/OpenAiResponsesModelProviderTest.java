@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -77,6 +78,11 @@ class OpenAiResponsesModelProviderTest {
 
   private static final class RecordingHandler implements ProviderStreamHandler {
     final List<ProviderStreamEvent> events = new ArrayList<>();
+    final List<ProviderProtocolEvent> protocolEvents = new ArrayList<>();
+
+    /** 回调到达的全局顺序，用于验证「raw 先于异常」这类跨通道顺序约束。 */
+    final List<String> callbackOrder = new ArrayList<>();
+
     ProviderCompletion completion;
     ProviderException error;
 
@@ -86,13 +92,21 @@ class OpenAiResponsesModelProviderTest {
     }
 
     @Override
+    public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+      protocolEvents.add(event);
+      callbackOrder.add("protocol:" + event.eventType());
+    }
+
+    @Override
     public void onComplete(ProviderCompletion completion, ProviderStream stream) {
       this.completion = completion;
+      callbackOrder.add("complete");
     }
 
     @Override
     public void onError(ProviderException error, ProviderStream stream) {
       this.error = error;
+      callbackOrder.add("error");
     }
   }
 
@@ -257,6 +271,96 @@ class OpenAiResponsesModelProviderTest {
     assertNotNull(handler.completion);
     assertEquals("hello", handler.completion.response().text());
     assertEquals(GenerationStopReason.COMPLETE, handler.completion.response().stopReason());
+  }
+
+  /**
+   * 测试意图：每条 transport 帧在进入规范化状态机之前 exactly-once 上报一条原生协议帧。
+   *
+   * <p>覆盖三层事件名来源（SSE {@code event} 名、payload 的 JSON {@code type}、通用兜底名）、keepalive ping 与 {@code
+   * [DONE]} 哨兵的身份归一，并确认 normalized 增量不受原生通道影响。
+   */
+  @Test
+  void test_rawProtocolFramesEmittedExactlyOnceInOrder() {
+    String created = "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_raw\"}}";
+    String unknownEvent = "{\"type\":\"response.web_search_call.searching\",\"item_id\":\"ws_1\"}";
+    String completed = "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_raw\"}}";
+    JdkHttpSseTransport transport =
+        stubTransport(
+            (req, cb) -> {
+              cb.onOpen(new HttpOpenMetadata(200, Map.of()));
+              cb.onEvent(new ServerSentEvent("response.created", created));
+              cb.onEvent(new ServerSentEvent("response.web_search_call.searching", unknownEvent));
+              cb.onEvent(new ServerSentEvent(null, unknownEvent));
+              cb.onEvent(new ServerSentEvent("ping", ""));
+              cb.onEvent(new ServerSentEvent(null, "[DONE]"));
+              cb.onEvent(new ServerSentEvent(null, "{\"not_an_event\":true}"));
+              cb.onEvent(new ServerSentEvent(null, completed));
+              cb.onComplete();
+            });
+
+    OpenAiResponsesProviderAdapter adapter = new OpenAiResponsesProviderAdapter(transport, "key");
+    ModelProvider provider = adapter.create(createDescriptor());
+    RecordingHandler handler = new RecordingHandler();
+
+    provider.stream(createRequest(), handler);
+
+    // 7 条 transport 帧 -> exactly-once 的 7 条原生帧回调，顺序与事件名解析规则一致
+    assertEquals(
+        List.of(
+            "response.created",
+            "response.web_search_call.searching",
+            "response.web_search_call.searching",
+            "ping",
+            "done",
+            "openai.response.event",
+            "response.completed"),
+        handler.protocolEvents.stream().map(ProviderProtocolEvent::eventType).toList());
+    // payload 原样透出：轻量帧不重写、不截断、不反序列化重建
+    assertEquals(created, handler.protocolEvents.get(0).data());
+    assertEquals(unknownEvent, handler.protocolEvents.get(1).data());
+    assertEquals("", handler.protocolEvents.get(3).data());
+    assertEquals("[DONE]", handler.protocolEvents.get(4).data());
+    assertEquals(completed, handler.protocolEvents.get(6).data());
+    // normalized 行为不回归：completed 仍完成，未识别的官方事件仍不产生规范化增量
+    assertNotNull(handler.completion);
+    assertEquals(GenerationStopReason.COMPLETE, handler.completion.response().stopReason());
+    assertTrue(handler.events.isEmpty());
+  }
+
+  /** 测试意图：failed 帧必须「先 raw 再异常」，错误通道不吞掉同帧的原生事实。 */
+  @Test
+  void test_failedFrameRawCallbackPrecedesError() {
+    String failed =
+        "{\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_error\",\"message\":\"boom\"}}}";
+    JdkHttpSseTransport transport =
+        stubTransport((req, cb) -> cb.onEvent(new ServerSentEvent("response.failed", failed)));
+
+    OpenAiResponsesProviderAdapter adapter = new OpenAiResponsesProviderAdapter(transport, "key");
+    ModelProvider provider = adapter.create(createDescriptor());
+    RecordingHandler handler = new RecordingHandler();
+
+    provider.stream(createRequest(), handler);
+
+    assertEquals(List.of("protocol:response.failed", "error"), handler.callbackOrder);
+    assertEquals(failed, handler.protocolEvents.get(0).data());
+    assertNotNull(handler.error);
+  }
+
+  /** 测试意图：畸形帧同样先 exactly-once 上报原生帧再进入错误通道，原生观测不因解析失败而丢失。 */
+  @Test
+  void test_malformedFrameRawCallbackPrecedesError() {
+    JdkHttpSseTransport transport =
+        stubTransport((req, cb) -> cb.onEvent(new ServerSentEvent(null, "this-is-not-valid-json")));
+
+    OpenAiResponsesProviderAdapter adapter = new OpenAiResponsesProviderAdapter(transport, "key");
+    ModelProvider provider = adapter.create(createDescriptor());
+    RecordingHandler handler = new RecordingHandler();
+
+    provider.stream(createRequest(), handler);
+
+    assertEquals(List.of("protocol:openai.response.event", "error"), handler.callbackOrder);
+    assertEquals("this-is-not-valid-json", handler.protocolEvents.get(0).data());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, handler.error.kind());
   }
 
   /** 验证底座传输层异常被安全映射并投递给 handler 的 onError。 */
