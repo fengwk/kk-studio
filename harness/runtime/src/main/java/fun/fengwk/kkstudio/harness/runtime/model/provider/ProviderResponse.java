@@ -23,6 +23,9 @@ import java.util.Set;
  * 用量，{@code cost} 是基于本次生效价格计算的非空成本快照。 {@code requestId}、{@code serviceTier} 由 Provider
  * 报告，可为空。{@code rawUsageJson} 是 Provider usage 段的原始 JSON 序列化（必须是合法 JSON object 或 array，null 规范化为
  * {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
+ *
+ * <p>{@code decodeDurationMillis} 是 Harness 观测的流式生成计时（首个非空输出 delta 到成功回调观察时间的毫秒数），不是 Provider
+ * 报告的事实：Provider 构造响应时一律为 null，仅 runtime 在成功提交前冻结。null 表示无可信流计时。
  */
 public record ProviderResponse(
     String text,
@@ -34,7 +37,8 @@ public record ProviderResponse(
     String requestId,
     String serviceTier,
     String rawUsageJson,
-    List<ProviderToolCallDiagnostic> toolCallDiagnostics) {
+    List<ProviderToolCallDiagnostic> toolCallDiagnostics,
+    Long decodeDurationMillis) {
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
   private static final String EMPTY_USAGE_JSON = "{}";
@@ -56,7 +60,35 @@ public record ProviderResponse(
     rawUsageJson = normalizeRawUsageJson(rawUsageJson);
     toolCallDiagnostics =
         toolCallDiagnostics == null ? List.of() : List.copyOf(toolCallDiagnostics);
+    if (decodeDurationMillis != null && decodeDurationMillis < 0) {
+      throw new IllegalArgumentException("decodeDurationMillis must be null or non-negative");
+    }
     validateToolOutcomes(toolCalls, toolCallDiagnostics, stopReason);
+  }
+
+  public ProviderResponse(
+      String text,
+      String thinking,
+      List<ProviderToolCall> toolCalls,
+      GenerationStopReason stopReason,
+      ModelUsage usage,
+      ModelCost cost,
+      String requestId,
+      String serviceTier,
+      String rawUsageJson,
+      List<ProviderToolCallDiagnostic> toolCallDiagnostics) {
+    this(
+        text,
+        thinking,
+        toolCalls,
+        stopReason,
+        usage,
+        cost,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics,
+        null);
   }
 
   public ProviderResponse(
@@ -82,7 +114,7 @@ public record ProviderResponse(
         List.of());
   }
 
-  /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/cost）原样保留。 */
+  /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/cost/计时）原样保留。 */
   public ProviderResponse withToolCalls(List<ProviderToolCall> value) {
     return new ProviderResponse(
         text,
@@ -94,7 +126,27 @@ public record ProviderResponse(
         requestId,
         serviceTier,
         rawUsageJson,
-        toolCallDiagnostics);
+        toolCallDiagnostics,
+        decodeDurationMillis);
+  }
+
+  /** 返回以给定 Harness 观测计时替换后的副本；其余事实原样保留（{@code null} 表示无可信流计时）。 */
+  public ProviderResponse withDecodeDurationMillis(Long value) {
+    if (Objects.equals(decodeDurationMillis, value)) {
+      return this;
+    }
+    return new ProviderResponse(
+        text,
+        thinking,
+        toolCalls,
+        stopReason,
+        usage,
+        cost,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics,
+        value);
   }
 
   private static String optionalNonBlank(String value, String name) {

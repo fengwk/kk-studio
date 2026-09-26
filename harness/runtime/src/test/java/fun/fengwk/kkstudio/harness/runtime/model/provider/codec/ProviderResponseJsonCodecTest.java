@@ -68,6 +68,45 @@ class ProviderResponseJsonCodecTest {
     assertEquals(new BigDecimal("0.000911250000"), decoded.cost().total());
   }
 
+  /**
+   * Harness 观测计时是可选严格字段：带计时精确往返（canonical 字段序），旧 durable 行缺失该字段解码为 null 且重编码 与旧 JSON
+   * 逐字一致（不引入版本别名）；负值、非整数与非数字类型在 boundary 拒绝。
+   */
+  @Test
+  void roundTripsOptionalDecodeDurationAndAcceptsLegacyRows() {
+    ProviderResponse timed = canonicalResponse().withDecodeDurationMillis(1500L);
+    ObjectNode expected = canonicalNode();
+    expected.put("decodeDurationMillis", 1500);
+
+    String encoded = codec.encode(timed);
+    assertEquals(expected.toString(), encoded);
+    assertEquals(timed, codec.decode(encoded));
+    assertEquals(1500L, codec.decode(encoded).decodeDurationMillis());
+
+    // 旧行（无该字段）必须可解码且重编码逐字一致：缺失与 null 同义。
+    String legacy = canonicalNode().toString();
+    ProviderResponse decodedLegacy = codec.decode(legacy);
+    assertNull(decodedLegacy.decodeDurationMillis());
+    assertEquals(legacy, codec.encode(decodedLegacy));
+    assertEquals(legacy, codec.encode(decodedLegacy.withDecodeDurationMillis(null)));
+
+    assertRejected(root -> root.put("decodeDurationMillis", -1));
+    assertRejected(root -> root.put("decodeDurationMillis", 1.5));
+    assertRejected(root -> root.put("decodeDurationMillis", "1500"));
+    assertRejected(root -> root.put("decodeDurationMillis", true));
+    // 超出 long 范围的整数同样被拒绝（不静默截断）。
+    assertRejected(
+        root ->
+            root.set(
+                "decodeDurationMillis",
+                NODES.numberNode(BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE))));
+
+    // 显式 null 与缺失同义：契约允许旧行与规范化空值并存。
+    ObjectNode explicitNull = canonicalNode();
+    explicitNull.putNull("decodeDurationMillis");
+    assertNull(codec.decodeNode(explicitNull).decodeDurationMillis());
+  }
+
   /** nullable metadata 同时支持显式 string 形态，raw usage 也可以是 ordered array。 */
   @Test
   void roundTripsStringMetadataAndRawUsageArray() {

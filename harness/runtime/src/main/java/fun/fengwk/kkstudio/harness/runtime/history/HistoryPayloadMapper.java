@@ -100,7 +100,11 @@ public final class HistoryPayloadMapper {
     }
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(response.stopReason(), response.usage(), response.cost()),
+        new AssistantMessageMetadata(
+            response.stopReason(),
+            response.usage(),
+            response.cost(),
+            response.decodeDurationMillis()),
         null);
   }
 

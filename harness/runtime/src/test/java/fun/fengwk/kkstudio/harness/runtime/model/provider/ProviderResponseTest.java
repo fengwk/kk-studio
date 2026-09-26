@@ -135,6 +135,59 @@ class ProviderResponseTest {
         () -> continuation.withToolCalls(List.of(new ProviderToolCall("c1", "tool_a", "{}"))));
   }
 
+  /**
+   * decodeDurationMillis 是 Harness 观测的可空非负计时：Provider 构造与 withToolCalls 默认不引入计时，
+   * withDecodeDurationMillis 只替换计时并保留其余事实，负值被拒绝。
+   */
+  @Test
+  void validatesOptionalDecodeDuration() {
+    ProviderResponse base =
+        new ProviderResponse(
+            "text",
+            "thinking",
+            List.of(),
+            GenerationStopReason.COMPLETE,
+            USAGE,
+            COST,
+            null,
+            null,
+            "{}");
+
+    assertNull(base.decodeDurationMillis());
+    assertEquals(0L, base.withDecodeDurationMillis(0L).decodeDurationMillis());
+
+    ProviderResponse timed = base.withDecodeDurationMillis(1234L);
+    assertEquals(1234L, timed.decodeDurationMillis());
+    assertEquals(base.text(), timed.text());
+    assertEquals(base.thinking(), timed.thinking());
+    assertEquals(base.usage(), timed.usage());
+    assertEquals(base.cost(), timed.cost());
+    assertEquals(timed, timed.withDecodeDurationMillis(1234L));
+    // withToolCalls 是替换副本：必须保留已冻结的计时。
+    assertEquals(
+        1234L,
+        timed
+            .withToolCalls(List.of(new ProviderToolCall("c1", "tool_a", "{}")))
+            .decodeDurationMillis());
+
+    assertThrows(IllegalArgumentException.class, () -> base.withDecodeDurationMillis(-1L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ProviderResponse(
+                "text",
+                "thinking",
+                List.of(),
+                GenerationStopReason.COMPLETE,
+                USAGE,
+                COST,
+                null,
+                null,
+                "{}",
+                List.of(),
+                -5L));
+  }
+
   @Test
   void rejectsOutOfBoundIndex() {
     ProviderToolCall call = new ProviderToolCall("c1", "tool_a", "{}");

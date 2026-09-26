@@ -27,8 +27,9 @@ import java.util.Set;
 /**
  * {@link ProviderResponse} 的严格、确定性 JSON codec。顶层严格字段为 {@code text}、{@code thinking}、{@code
  * toolCalls}、 {@code stopReason}、{@code usage}、{@code cost}、{@code requestId}、{@code
- * serviceTier}、{@code rawUsageJson}、{@code toolCallDiagnostics}；每个嵌套层都要求精确字段集合，并以 {@link
- * IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
+ * serviceTier}、{@code rawUsageJson}、{@code toolCallDiagnostics}，另有可选的 {@code
+ * decodeDurationMillis}（Harness 观测计时；缺失或 null 表示无可信流计时，仅为兼容既有 durable 行而可选）；每个嵌套层都要求精确字段集合，并以
+ * {@link IllegalArgumentException} 拒绝未知/缺失/类型错误的值。
  *
  * <p>{@code rawUsageJson} 原样保留；{@link ModelCost} 中的 {@link BigDecimal} 字段以 {@code toPlainString()}
  * 字符串输出。
@@ -50,6 +51,7 @@ public final class ProviderResponseJsonCodec {
           "serviceTier",
           "rawUsageJson",
           "toolCallDiagnostics");
+  private static final Set<String> RESPONSE_OPTIONAL_FIELDS = orderedSet("decodeDurationMillis");
   private static final Set<String> TOOL_CALL_FIELDS =
       orderedSet("id", "name", "argumentsJson", "historyAction");
   private static final Set<String> DIAGNOSTIC_FIELDS =
@@ -117,6 +119,9 @@ public final class ProviderResponseJsonCodec {
     for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
       diagnostics.add(encodeToolCallDiagnostic(diagnostic));
     }
+    if (response.decodeDurationMillis() != null) {
+      node.put("decodeDurationMillis", response.decodeDurationMillis());
+    }
     return node;
   }
 
@@ -132,7 +137,7 @@ public final class ProviderResponseJsonCodec {
   public ProviderResponse decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
     ObjectNode node = object(value, "response");
-    requireFields(node, RESPONSE_FIELDS, "response");
+    requireFields(node, RESPONSE_FIELDS, RESPONSE_OPTIONAL_FIELDS, "response");
     String text = text(node, "text");
     String thinking = text(node, "thinking");
     ArrayNode toolCalls = array(node.get("toolCalls"), "toolCalls");
@@ -156,6 +161,7 @@ public final class ProviderResponseJsonCodec {
     for (JsonNode item : diagnostics) {
       diagnosticList.add(decodeToolCallDiagnostic(item));
     }
+    Long decodeDurationMillis = optionalNonNegativeLong(node, "decodeDurationMillis");
     return new ProviderResponse(
         text,
         thinking,
@@ -166,7 +172,8 @@ public final class ProviderResponseJsonCodec {
         requestId,
         serviceTier,
         rawUsageJson,
-        diagnosticList);
+        diagnosticList,
+        decodeDurationMillis);
   }
 
   private ObjectNode encodeToolCallDiagnostic(ProviderToolCallDiagnostic diagnostic) {
@@ -371,12 +378,39 @@ public final class ProviderResponseJsonCodec {
     }
   }
 
+  /** 可空非负整数：缺失或 null 归一化为 null；其他类型或负值一律拒绝。 */
+  private static Long optionalNonNegativeLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new IllegalArgumentException(field + " must be a non-negative integer or null");
+    }
+    long parsed = value.longValue();
+    if (parsed < 0) {
+      throw new IllegalArgumentException(field + " must be a non-negative integer or null");
+    }
+    return parsed;
+  }
+
   private static void requireFields(ObjectNode node, Set<String> expected, String name) {
+    requireFields(node, expected, Set.of(), name);
+  }
+
+  /**
+   * 严格字段集合校验：{@code required} 必须全部存在，且实际字段不得超出 {@code required} 与 {@code optional}
+   * 的并集；未知字段、缺失必填字段一律拒绝。
+   */
+  private static void requireFields(
+      ObjectNode node, Set<String> required, Set<String> optional, String name) {
     Set<String> actual = new HashSet<>();
     node.fieldNames().forEachRemaining(actual::add);
-    if (!actual.equals(expected)) {
+    Set<String> allowed = new HashSet<>(required);
+    allowed.addAll(optional);
+    if (!actual.containsAll(required) || !allowed.containsAll(actual)) {
       throw new IllegalArgumentException(
-          "unexpected fields for " + name + ": " + actual + " (expected " + expected + ")");
+          "unexpected fields for " + name + ": " + actual + " (expected " + required + ")");
     }
   }
 
