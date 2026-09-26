@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheBreakpoint;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -43,6 +44,11 @@ import java.util.Set;
  *
  * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Anthropic 规范的 UTF-8 请求 JSON 字节数组， 并提取冻结的
  * sourcePrefixHash。
+ *
+ * <p>请求体以 variant 的 native {@link ProviderProtocolOptionsJson protocolOptions} 为合并起点：运行时所有权字段
+ * （{@code model}/{@code max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code
+ * cache_control}） 冲突显式失败，{@code tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；prefix hash、cache
+ * marker 与请求体大小均基于最终合并结果。
  */
 final class AnthropicRequestEncoder {
 
@@ -57,8 +63,17 @@ final class AnthropicRequestEncoder {
   private static final Set<String> ALLOWED_IMAGE_TYPES =
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
   private static final Set<String> ALLOWED_DOCUMENT_TYPES = Set.of("application/pdf");
-  private static final Set<String> ALLOWED_REPLAY_CONTENT_TYPES =
+
+  /** durable replay 具备严格 shape 与 durable 一致性校验的已知 block 类型；其余合法 provider block 以 opaque 形态透传。 */
+  private static final Set<String> KNOWN_REPLAY_CONTENT_TYPES =
       Set.of("text", "thinking", "redacted_thinking", "tool_use");
+
+  /**
+   * 运行时独占的顶层请求事实：{@code cache_control} 表示 prompt cache 的运行时所有权（标记由本编码器写入
+   * system/tools/messages），native options 一律不得声明，冲突显式失败。
+   */
+  private static final List<String> RUNTIME_OWNED_OPTION_FIELDS =
+      List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
   private static final int MAX_CACHE_BREAKPOINTS = 3;
   private static final int MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
@@ -89,7 +104,10 @@ final class AnthropicRequestEncoder {
 
     validateCacheControl(request.cacheControl());
 
-    ObjectNode root = NODES.objectNode();
+    // native protocolOptions 是合并起点：运行时所有权字段由本编码器写入，其余官方顶层字段原样保留
+    ObjectNode root = ProviderProtocolOptionsJson.copyOfOptions(request.variant());
+    rejectRuntimeOwnedOptions(root);
+
     root.put("model", request.model().modelId());
 
     int maxTokens = request.outputTokens();
@@ -99,7 +117,7 @@ final class AnthropicRequestEncoder {
     boolean requiresInterleavedThinkingBeta =
         applyReasoningParameters(root, request, config, maxTokens);
 
-    ArrayNode toolsArray = encodeTools(request.tools());
+    ArrayNode toolsArray = mergeTools(root, request.tools());
 
     // 系统指令是请求唯一的顶层 system；编码为单块数组以便 SYSTEM breakpoint 仍可打标。
     ArrayNode unmarkedSystemArray = NODES.arrayNode();
@@ -134,7 +152,7 @@ final class AnthropicRequestEncoder {
     // 注入 cache marker（排它于 prefix hash）
     applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, wireMessagesArray);
 
-    if (toolsArray != null && !toolsArray.isEmpty()) {
+    if (!toolsArray.isEmpty()) {
       root.set("tools", toolsArray);
     }
     root.set("system", unmarkedSystemArray);
@@ -171,7 +189,11 @@ final class AnthropicRequestEncoder {
 
   /**
    * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}；ADAPTIVE
-   * 模式原样下发厂商定义值， BUDGET 模式仅将 {@code high/medium/low} 映射为 token 预算；null 不声明推理字段，由服务端默认决定。
+   * 模式原样下发厂商定义值， BUDGET 模式仅将 {@code high/medium/low} 映射为 token 预算；null 不声明推理字段，由服务端默认决定，此时 native
+   * {@code thinking}/{@code output_config} 原样保留。
+   *
+   * <p>一旦 runtime 要写入 {@code thinking}，native {@code thinking} 必须显式拒绝；{@code output_config} 只对
+   * runtime 同样要写的 {@code effort} 子字段拒绝，其余官方子字段无损保留。
    */
   private static boolean applyReasoningParameters(
       ObjectNode root, ProviderRequest request, AnthropicConfiguration config, int maxTokens) {
@@ -179,6 +201,12 @@ final class AnthropicRequestEncoder {
         || request.variant() == null
         || request.variant().reasoningEffort() == null) {
       return false;
+    }
+
+    if (root.has("thinking")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions must not override runtime field: thinking");
     }
 
     if (request.variant().reasoningOff()) {
@@ -196,7 +224,7 @@ final class AnthropicRequestEncoder {
         thinking.put("type", "adaptive");
         thinking.put("display", "summarized");
 
-        ObjectNode outputConfig = root.putObject("output_config");
+        ObjectNode outputConfig = mergeOutputConfig(root);
         outputConfig.put("effort", effort);
         return false;
       }
@@ -216,6 +244,24 @@ final class AnthropicRequestEncoder {
     return false;
   }
 
+  /** 以 native {@code output_config} 为起点合并 runtime effort，保留 format 等其余官方子字段。 */
+  private static ObjectNode mergeOutputConfig(ObjectNode root) {
+    JsonNode nativeOutputConfig = root.get("output_config");
+    if (nativeOutputConfig == null) {
+      return root.putObject("output_config");
+    }
+    if (!nativeOutputConfig.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "protocolOptions output_config must be a JSON object");
+    }
+    if (nativeOutputConfig.has("effort")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions must not override runtime field: output_config.effort");
+    }
+    return (ObjectNode) nativeOutputConfig;
+  }
+
   private static int mapBudgetTokens(String effort) {
     if (effort == null) {
       throw new ProviderException(
@@ -230,31 +276,59 @@ final class AnthropicRequestEncoder {
     };
   }
 
-  private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {
-    if (tools == null || tools.isEmpty()) {
-      return NODES.arrayNode();
-    }
-    ArrayNode array = NODES.arrayNode();
-    for (ProviderToolDefinition tool : tools) {
-      ObjectNode toolNode = array.addObject();
-      toolNode.put("name", tool.name());
-      if (tool.description() != null && !tool.description().isBlank()) {
-        toolNode.put("description", tool.description());
-      }
-      JsonNode schemaNode;
-      try {
-        schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
-      } catch (JsonProcessingException exception) {
+  /** 拒绝 native options 覆盖运行时所有权字段：错误只报字段名，绝不回显 value。 */
+  private static void rejectRuntimeOwnedOptions(ObjectNode options) {
+    for (String field : RUNTIME_OWNED_OPTION_FIELDS) {
+      if (options.has(field)) {
         throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions must not override runtime field: " + field);
       }
-      if (!schemaNode.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "tool input_schema must be a JSON object");
-      }
-      toolNode.set("input_schema", schemaNode);
     }
-    return array;
+  }
+
+  /**
+   * 合并 native tools 与 runtime function tools：先保留 native 条目（server tools 等官方非 function 工具），再追加
+   * runtime 工具；合并结果同时是 prefix hash、cache marker 与请求体大小的依据。
+   */
+  private static ArrayNode mergeTools(ObjectNode root, List<ProviderToolDefinition> runtimeTools) {
+    JsonNode nativeTools = root.get("tools");
+    if (nativeTools != null && !nativeTools.isArray()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "protocolOptions tools must be a JSON array");
+    }
+
+    ArrayNode merged = NODES.arrayNode();
+    if (nativeTools != null) {
+      for (JsonNode nativeTool : nativeTools) {
+        merged.add(nativeTool.deepCopy());
+      }
+    }
+    for (ProviderToolDefinition tool : runtimeTools) {
+      merged.add(encodeTool(tool));
+    }
+    return merged;
+  }
+
+  private static ObjectNode encodeTool(ProviderToolDefinition tool) {
+    ObjectNode toolNode = NODES.objectNode();
+    toolNode.put("name", tool.name());
+    if (tool.description() != null && !tool.description().isBlank()) {
+      toolNode.put("description", tool.description());
+    }
+    JsonNode schemaNode;
+    try {
+      schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
+    } catch (JsonProcessingException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
+    }
+    if (!schemaNode.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "tool input_schema must be a JSON object");
+    }
+    toolNode.set("input_schema", schemaNode);
+    return toolNode;
   }
 
   private static ObjectNode encodeUserMessage(ProviderMessage message) {
@@ -420,7 +494,8 @@ final class AnthropicRequestEncoder {
       return false;
     }
 
-    // 1. 同 format replay 无论 affinity/hash 是否匹配，必须先严格校验 shape/白名单/durable 一致性
+    // 1. 同 format replay 无论 affinity/hash 是否匹配，必须先严格校验 shape/已知 block/durable 一致性；未知合法 block opaque
+    // 透传
     JsonNode payload = replayState.payload();
     if (payload == null
         || !payload.isObject()
@@ -458,9 +533,13 @@ final class AnthropicRequestEncoder {
             ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
       }
       String type = item.get("type").textValue();
-      if (!ALLOWED_REPLAY_CONTENT_TYPES.contains(type)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "disallowed replay content block type: " + type);
+      if (!KNOWN_REPLAY_CONTENT_TYPES.contains(type)) {
+        // 未知但合法的 provider block：opaque 透传，不参与 durable 一致性比对，也绝不伪装成已知 type
+        if (type.isBlank()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
+        }
+        continue;
       }
       switch (type) {
         case "text" -> {

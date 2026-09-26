@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,6 +38,9 @@ import java.util.TreeMap;
  *
  * <p>按原生 index 维护严格 indexed content block 状态机，支持多工具调用交错 delta、连续 toolOrdinal、累计 usage 快照更新、LENGTH
  * 截断诊断与 native replay 隔离。
+ *
+ * <p>已知 block（text/thinking/redacted_thinking/tool_use）保持严格语义校验，其 replay 由 normalized 状态合成；未知但合法的
+ * provider block 不产生 normalized 语义，其 raw block（连同按最小通用 merge 并入的 delta）原样保留在 replay payload 中。
  */
 final class AnthropicStreamAccumulator {
 
@@ -260,7 +264,12 @@ final class AnthropicStreamAccumulator {
             }
           }
         }
-        default -> canReplay = false;
+        default -> {
+          if (canReplay) {
+            // 未知但合法的 provider block：opaque 保留 raw block（delta 已按最小通用 merge 并入）
+            replayBlocks.add(block.rawBlock.deepCopy());
+          }
+        }
       }
     }
 
@@ -437,7 +446,9 @@ final class AnthropicStreamAccumulator {
     }
 
     String type = blockNode.get("type").textValue();
-    WireBlockAccumulator accumulator = new WireBlockAccumulator(type);
+    // raw block 是未知合法 block 的唯一事实源；已知 block 的 replay 仍由 normalized 状态合成
+    WireBlockAccumulator accumulator =
+        new WireBlockAccumulator(type, (ObjectNode) blockNode.deepCopy());
 
     switch (type) {
       case "text" -> {
@@ -620,10 +631,54 @@ final class AnthropicStreamAccumulator {
               new ProviderStreamEvent.ToolCallDelta(block.toolOrdinal, null, null, partialJson));
         }
       }
-      default -> {
-        // 未知或不支持 block 忽略其增量
+      case "redacted_thinking" -> {
+        // 现有语义：redacted_thinking 的 delta 不参与累积
       }
+      default -> mergeOpaqueDelta(block.rawBlock, deltaNode);
     }
+  }
+
+  /**
+   * 未知 content block 的 delta 按最小通用 merge 规则并入 raw block：字符串追加、数组追加、对象递归合并，其余覆盖。
+   *
+   * <p>delta 自身的 {@code type} 只是事件级字段，绝不覆盖 block 的 type。
+   */
+  private static void mergeOpaqueDelta(ObjectNode rawBlock, JsonNode deltaNode) {
+    Iterator<Map.Entry<String, JsonNode>> fields = deltaNode.fields();
+    while (fields.hasNext()) {
+      Map.Entry<String, JsonNode> field = fields.next();
+      if ("type".equals(field.getKey())) {
+        continue;
+      }
+      rawBlock.set(
+          field.getKey(), mergeOpaqueValue(rawBlock.get(field.getKey()), field.getValue()));
+    }
+  }
+
+  private static JsonNode mergeOpaqueValue(JsonNode current, JsonNode incoming) {
+    if (current == null) {
+      return incoming.deepCopy();
+    }
+    if (current.isTextual() && incoming.isTextual()) {
+      return NODES.textNode(current.textValue() + incoming.textValue());
+    }
+    if (current.isArray() && incoming.isArray()) {
+      ArrayNode merged = (ArrayNode) current.deepCopy();
+      for (JsonNode item : incoming) {
+        merged.add(item.deepCopy());
+      }
+      return merged;
+    }
+    if (current.isObject() && incoming.isObject()) {
+      ObjectNode merged = (ObjectNode) current.deepCopy();
+      Iterator<Map.Entry<String, JsonNode>> fields = incoming.fields();
+      while (fields.hasNext()) {
+        Map.Entry<String, JsonNode> field = fields.next();
+        merged.set(field.getKey(), mergeOpaqueValue(merged.get(field.getKey()), field.getValue()));
+      }
+      return merged;
+    }
+    return incoming.deepCopy();
   }
 
   private void handleContentBlockStop(JsonNode root) {
@@ -854,6 +909,10 @@ final class AnthropicStreamAccumulator {
 
   private static final class WireBlockAccumulator {
     final String type;
+
+    /** provider 给出的原始 block：未知 block 的 delta 以最小通用 merge 并入此处，作为 opaque replay 的事实源。 */
+    final ObjectNode rawBlock;
+
     BlockLifecycle state = BlockLifecycle.ACTIVE;
 
     final StringBuilder textBuffer = new StringBuilder();
@@ -868,8 +927,9 @@ final class AnthropicStreamAccumulator {
     boolean initialInputPlaceholder = false;
     boolean initialArgumentsComplete = false;
 
-    WireBlockAccumulator(String type) {
+    WireBlockAccumulator(String type, ObjectNode rawBlock) {
       this.type = type;
+      this.rawBlock = rawBlock;
     }
   }
 }
