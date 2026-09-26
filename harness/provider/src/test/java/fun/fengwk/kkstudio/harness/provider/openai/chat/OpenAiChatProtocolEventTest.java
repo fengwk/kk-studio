@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -134,7 +135,9 @@ class OpenAiChatProtocolEventTest {
             new Frame(
                 null,
                 "{\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,"
-                    + "\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\"},\"finish_reason\":null}]}"),
+                    + "\"delta\":{\"role\":\"assistant\",\"content\":\"Hel\","
+                    + "\"annotations\":[{\"type\":\"url_citation\",\"url\":\"https://example.com\"}]},"
+                    + "\"finish_reason\":null}]}"),
             new Frame(
                 "vendor.custom",
                 "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},"
@@ -180,6 +183,8 @@ class OpenAiChatProtocolEventTest {
     assertNotNull(completionRef.get());
     assertEquals("Hello", completionRef.get().response().text());
     assertEquals(GenerationStopReason.COMPLETE, completionRef.get().response().stopReason());
+    // 响应侧 annotations 仍经 raw 事件原样交付，但绝不写入请求侧 replay。
+    assertFalse(completionRef.get().replayState().payload().has("annotations"));
 
     // 事件名优先级：SSE name > payload object/type > chat.completion.chunk；[DONE] 为 done
     assertEquals(

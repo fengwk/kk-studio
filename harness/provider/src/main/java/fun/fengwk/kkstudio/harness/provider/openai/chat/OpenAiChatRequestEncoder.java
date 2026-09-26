@@ -473,8 +473,8 @@ final class OpenAiChatRequestEncoder {
   /**
    * 从 native replay payload 构造 wire assistant message。
    *
-   * <p>provider 返回的其他合法 assistant 字段（如 {@code audio}、{@code function_call}
-   * 及未识别的未来字段）不在协议白名单内，但属于厂商原生事实，必须原样透传； known 字段为 null 时与语义 fallback 一样省略。
+   * <p>provider 返回的其他合法 assistant 字段（如请求侧仅含 id 的 {@code audio}、{@code function_call}
+   * 及未识别的未来字段）属于厂商原生事实，必须保留；known 字段为 null 时与语义 fallback 一样省略。
    */
   private static ObjectNode buildReplayMessage(JsonNode payload) {
     ObjectNode msgNode = (ObjectNode) payload.deepCopy();
@@ -504,6 +504,22 @@ final class OpenAiChatRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "invalid OpenAI chat assistant replay payload: illegal role");
+    }
+
+    // 响应数据不能作为下一轮的请求字段；audio 只接受请求侧的 id 引用。
+    if (payload.has("annotations")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat assistant replay annotations");
+    }
+    if (payload.has("audio")) {
+      JsonNode audio = payload.get("audio");
+      if (!audio.isObject()
+          || audio.size() != 1
+          || !audio.path("id").isTextual()
+          || audio.path("id").textValue().isBlank()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat assistant replay audio");
+      }
     }
 
     // 顶层 fallback-safe 字段只有 role/content/tool_calls：refusal/reasoning_*/audio/function_call
@@ -574,6 +590,11 @@ final class OpenAiChatRequestEncoder {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid OpenAI chat assistant replay payload: tool call must be a JSON object");
+          }
+          if (callNode.has("index")) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_REQUEST,
+                "invalid OpenAI chat assistant replay tool call index");
           }
           // 恰好 id/type/function{name,arguments} 才是可等价重建的现代 function 调用；额外嵌套字段是原生事实
           boolean reconstructibleCall = true;

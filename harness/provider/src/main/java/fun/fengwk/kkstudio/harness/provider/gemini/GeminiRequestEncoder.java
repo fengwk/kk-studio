@@ -203,8 +203,8 @@ final class GeminiRequestEncoder {
   }
 
   /**
-   * native options 绝不能覆盖 runtime-owned 请求事实：{@code contents} 与 {@code systemInstruction} 出现即冲突，错误消息
-   * 只说明被违反的所有权约束，绝不回显 value。
+   * native options 绝不能覆盖 runtime-owned 请求事实：{@code contents}、{@code systemInstruction} 与 {@code
+   * cachedContent} 出现即冲突，错误消息 只说明被违反的所有权约束，绝不回显 value。
    */
   private static void rejectRuntimeOwnedOptions(ObjectNode root) {
     if (root.has("contents")) {
@@ -216,6 +216,11 @@ final class GeminiRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "Gemini protocol options must not override runtime-owned systemInstruction");
+    }
+    if (root.has("cachedContent")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "Gemini protocol options must not override runtime-owned cachedContent");
     }
   }
 

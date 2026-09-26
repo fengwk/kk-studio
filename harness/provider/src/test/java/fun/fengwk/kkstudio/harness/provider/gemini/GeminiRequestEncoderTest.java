@@ -295,7 +295,6 @@ class GeminiRequestEncoderTest {
         {
           "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"}],
           "toolConfig": {"functionCallingConfig": {"mode": "ANY"}},
-          "cachedContent": "cachedContents/abc",
           "labels": {"team": "ai"},
           "generationConfig": {
             "temperature": 0.4,
@@ -328,7 +327,7 @@ class GeminiRequestEncoderTest {
     JsonNode json = MAPPER.readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes());
 
     // 非 owned 官方顶层字段原样保留
-    assertEquals("cachedContents/abc", json.path("cachedContent").asText());
+    assertFalse(json.has("cachedContent"));
     assertEquals("BLOCK_NONE", json.path("safetySettings").get(0).path("threshold").asText());
     assertEquals(
         "ANY", json.path("toolConfig").path("functionCallingConfig").path("mode").asText());
@@ -458,6 +457,9 @@ class GeminiRequestEncoderTest {
         "{\"contents\":[{\"text\":\"" + secret + "\"}]}", null, secret);
     assertConflictingOptionsRejected(
         "{\"systemInstruction\":{\"text\":\"" + secret + "\"}}", null, secret);
+    // 自动缓存由 runtime 独占，任何 native cachedContent（包括 null）均冲突。
+    assertConflictingOptionsRejected("{\"cachedContent\":\"" + secret + "\"}", null, secret);
+    assertConflictingOptionsRejected("{\"cachedContent\":null}", null, secret);
 
     // 2. maxOutputTokens 始终 runtime-owned
     assertConflictingOptionsRejected(

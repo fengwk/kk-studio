@@ -78,7 +78,7 @@ final class OpenAiChatStreamAccumulator {
    * provider 原生 assistant message：只合并 {@code choices[0].delta}，绝不混入 chunk 级 transport
    * metadata（id、object、usage 等）。
    *
-   * <p>它保留规范化通道之外的官方事实（audio、function_call、未来字段），并在终态作为 replay payload 的基座。
+   * <p>它保留规范化通道之外的官方事实（function_call、未来字段），audio 在冻结时仅保留请求侧 id， 并在终态作为 replay payload 的基座。
    */
   private final ObjectNode nativeAssistantMessage = NODES.objectNode();
 
@@ -204,6 +204,12 @@ final class OpenAiChatStreamAccumulator {
         for (JsonNode tcNode : toolCallsArray) {
           if (tcNode.isObject() && tcNode.has("index") && tcNode.get("index").isInt()) {
             int index = tcNode.get("index").asInt();
+            // Custom/unknown calls remain native-only, not executable function intent.
+            if (!tcNode.path("function").isObject()
+                || (tcNode.path("type").isTextual()
+                    && !"function".equals(tcNode.path("type").textValue()))) {
+              continue;
+            }
             ToolCallBuilder builder =
                 toolCallBuilders.computeIfAbsent(index, i -> new ToolCallBuilder(i));
 
@@ -215,16 +221,14 @@ final class OpenAiChatStreamAccumulator {
 
             String nameDelta = null;
             String argsDelta = null;
-            if (tcNode.has("function") && tcNode.get("function").isObject()) {
-              JsonNode fn = tcNode.get("function");
-              if (fn.has("name") && fn.get("name").isTextual()) {
-                nameDelta = fn.get("name").textValue();
-                builder.appendName(nameDelta);
-              }
-              if (fn.has("arguments") && fn.get("arguments").isTextual()) {
-                argsDelta = fn.get("arguments").textValue();
-                builder.appendArguments(argsDelta);
-              }
+            JsonNode fn = tcNode.get("function");
+            if (fn.has("name") && fn.get("name").isTextual()) {
+              nameDelta = fn.get("name").textValue();
+              builder.appendName(nameDelta);
+            }
+            if (fn.has("arguments") && fn.get("arguments").isTextual()) {
+              argsDelta = fn.get("arguments").textValue();
+              builder.appendArguments(argsDelta);
             }
 
             if (idDelta != null || nameDelta != null || argsDelta != null) {
@@ -469,6 +473,7 @@ final class OpenAiChatStreamAccumulator {
 
     boolean canReplay = (stopReason == GenerationStopReason.COMPLETE);
     List<ProviderToolCall> toolCalls = new ArrayList<>();
+    Map<Integer, ProviderToolCall> completedCalls = new TreeMap<>();
     List<ProviderToolCallDiagnostic> diagnostics = new ArrayList<>();
 
     if (stopReason == GenerationStopReason.FILTERED) {
@@ -495,7 +500,9 @@ final class OpenAiChatStreamAccumulator {
                     "tool call truncated due to max tokens"));
             canReplay = false;
           } else {
-            toolCalls.add(new ProviderToolCall(id, name, args));
+            ProviderToolCall call = new ProviderToolCall(id, name, args);
+            toolCalls.add(call);
+            completedCalls.put(b.index(), call);
           }
         } else {
           // COMPLETE
@@ -503,7 +510,9 @@ final class OpenAiChatStreamAccumulator {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "invalid tool call arguments JSON");
           }
-          toolCalls.add(new ProviderToolCall(id, name, args));
+          ProviderToolCall call = new ProviderToolCall(id, name, args);
+          toolCalls.add(call);
+          completedCalls.put(b.index(), call);
         }
       }
     }
@@ -550,6 +559,21 @@ final class OpenAiChatStreamAccumulator {
       // replay 以 provider 原生 assistant message 为基座保留官方非规范化字段，known 字段再以 durable 事实补齐
       ObjectNode payload = nativeAssistantMessage.deepCopy();
       payload.put("role", "assistant");
+      payload.remove("annotations");
+      JsonNode audio = payload.get("audio");
+      if (audio != null) {
+        if (audio.isNull()) {
+          payload.remove("audio");
+        } else if (!audio.isObject()
+            || !audio.path("id").isTextual()
+            || audio.path("id").textValue().isBlank()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "invalid assistant audio id");
+        } else {
+          payload.putObject("audio").put("id", audio.path("id").textValue());
+        }
+      }
+      JsonNode nativeCalls = payload.get("tool_calls");
       for (String knownField : KNOWN_ASSISTANT_FIELDS) {
         payload.remove(knownField);
       }
@@ -559,13 +583,43 @@ final class OpenAiChatStreamAccumulator {
       if (!refusalBuilder.isEmpty()) {
         payload.put("refusal", refusalBuilder.toString());
       }
-      if (!toolCalls.isEmpty()) {
+      if (nativeCalls != null && nativeCalls.isArray()) {
         ArrayNode tcArr = payload.putArray("tool_calls");
-        for (ProviderToolCall tc : toolCalls) {
-          ObjectNode tcObj = tcArr.addObject();
-          tcObj.put("id", tc.id());
-          tcObj.put("type", "function");
-          ObjectNode fn = tcObj.putObject("function");
+        for (JsonNode nativeCall : nativeCalls) {
+          if (nativeCall.isObject()) {
+            ObjectNode call = (ObjectNode) nativeCall.deepCopy();
+            JsonNode index = call.remove("index");
+            ProviderToolCall normalized =
+                index != null
+                        && index.isInt()
+                        && call.path("function").isObject()
+                        && (!call.path("type").isTextual()
+                            || "function".equals(call.path("type").textValue()))
+                    ? completedCalls.remove(index.intValue())
+                    : null;
+            if (normalized != null) {
+              call.put("id", normalized.id());
+              call.put("type", "function");
+              ObjectNode fn = (ObjectNode) call.get("function");
+              fn.put("name", normalized.name());
+              fn.put("arguments", normalized.argumentsJson());
+            }
+            tcArr.add(call);
+          } else {
+            tcArr.add(nativeCall.deepCopy());
+          }
+        }
+      }
+      if (!completedCalls.isEmpty()) {
+        ArrayNode tcArr = (ArrayNode) payload.get("tool_calls");
+        if (tcArr == null) {
+          tcArr = payload.putArray("tool_calls");
+        }
+        for (ProviderToolCall tc : completedCalls.values()) {
+          ObjectNode call = tcArr.addObject();
+          call.put("id", tc.id());
+          call.put("type", "function");
+          ObjectNode fn = call.putObject("function");
           fn.put("name", tc.name());
           fn.put("arguments", tc.argumentsJson());
         }
