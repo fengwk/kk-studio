@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
@@ -11,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -28,6 +33,15 @@ final class AnthropicModelProvider implements ModelProvider {
   private static final String INTERLEAVED_THINKING_BETA_VALUE = "interleaved-thinking-2025-05-14";
   private static final String API_KEY_HEADER = "x-api-key";
   private static final String AUTHORIZATION_HEADER = "Authorization";
+
+  /** SSE 既无 event name 也无 JSON {@code type} 时使用的稳定事件名。 */
+  private static final String DEFAULT_PROTOCOL_EVENT_TYPE = "anthropic.message.event";
+
+  private static final String DONE_DATA = "[DONE]";
+  private static final String DONE_PROTOCOL_EVENT_TYPE = "done";
+
+  /** 仅用于从原生 payload 推导事件名；payload 本体不落到日志、normalized event 或 ProviderResponse。 */
+  private static final ObjectMapper PROTOCOL_EVENT_MAPPER = new ObjectMapper();
 
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;
@@ -60,6 +74,42 @@ final class AnthropicModelProvider implements ModelProvider {
 
   public ProviderDescriptor descriptor() {
     return descriptor;
+  }
+
+  /** 把一条 transport SSE 帧还原为原生协议事件；payload 原样保留（含 blank 与 {@code [DONE]}）。 */
+  static ProviderProtocolEvent toProtocolEvent(ServerSentEvent event) {
+    Objects.requireNonNull(event, "event");
+    String data = event.data();
+    return new ProviderProtocolEvent(protocolEventType(event.event(), data), data);
+  }
+
+  /** 事件名优先级：非空 SSE event name → {@code [DONE]} 哨兵 → JSON {@code type} → 稳定默认名。 */
+  private static String protocolEventType(String eventName, String data) {
+    if (eventName != null && !eventName.isBlank()) {
+      return eventName;
+    }
+    if (data != null && DONE_DATA.equals(data.trim())) {
+      return DONE_PROTOCOL_EVENT_TYPE;
+    }
+    String jsonType = jsonTypeOf(data);
+    return jsonType != null ? jsonType : DEFAULT_PROTOCOL_EVENT_TYPE;
+  }
+
+  private static String jsonTypeOf(String data) {
+    if (data == null || data.isBlank()) {
+      return null;
+    }
+    JsonNode payload;
+    try {
+      payload = PROTOCOL_EVENT_MAPPER.readTree(data);
+    } catch (JsonProcessingException exception) {
+      return null;
+    }
+    JsonNode typeNode = payload == null ? null : payload.path("type");
+    if (typeNode == null || !typeNode.isTextual() || typeNode.textValue().isBlank()) {
+      return null;
+    }
+    return typeNode.textValue();
   }
 
   AnthropicConfiguration configuration() {
@@ -115,6 +165,8 @@ final class AnthropicModelProvider implements ModelProvider {
 
           @Override
           public void onEvent(ServerSentEvent event) {
+            // 每条 transport SSE 帧先 exactly-once 原生回调，再进入 normalized/error 语义处理
+            bridge.emitProtocolEvent(toProtocolEvent(event));
             try {
               accumulator.handleEvent(event.event(), event.data());
             } catch (ProviderException pe) {

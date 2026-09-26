@@ -120,8 +120,8 @@ class AnthropicStreamingDecoderTest {
   }
 
   /**
-   * 测试意图：上游模型若下发未知类型的 content block（如未来扩展）， 流式解析器不得抛异常炸流，必须平稳忽略该未知 block，保留已知语义内容，并将 replayState 置为
-   * null。
+   * 测试意图：上游模型若下发未知类型的 content block（如未来扩展）， 流式解析器不得抛异常炸流，必须平稳忽略该 block 的 normalized
+   * 语义、保留已知语义内容，并把未知 block 的 raw 形态原样保留在 replayState 中（opaque replay）。
    */
   @Test
   void should_deserialize_content_with_unknown_type() {
@@ -175,8 +175,15 @@ class AnthropicStreamingDecoderTest {
     // 校验已知语义 text 得到保留
     assertEquals("Known text.", response.text());
 
-    // 因包含非白名单原生 block，replayState 必须安全置为 null
-    assertNull(completion.replayState());
+    // 未知但合法的 provider block 必须 opaque 保留在 replay 中，且其 delta 已按最小通用 merge 并入 raw block
+    assertNotNull(completion.replayState());
+    JsonNode replayContent = completion.replayState().payload().path("content");
+    assertEquals(2, replayContent.size());
+    assertEquals("future_audio_block", replayContent.get(0).path("type").asText());
+    assertEquals("flac", replayContent.get(0).path("format").asText());
+    assertEquals("AQID", replayContent.get(0).path("bytes").asText());
+    assertEquals("text", replayContent.get(1).path("type").asText());
+    assertEquals("Known text.", replayContent.get(1).path("text").asText());
 
     // usage 正常合并：Anthropic 无原生 total，providerTotalTokens 为 0，分类求和通过 categorizedTokens() 校验
     ModelUsage usage = response.usage();

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -19,7 +20,8 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>bind 与 cancel 线性化，消除竞态与死锁；
  *   <li>cancel 返回后不再调用 handler 任何回调；
  *   <li>complete / error / cancel 严格 terminal-once；
- *   <li>handler 回调内部重入 cancel 线程安全。
+ *   <li>handler 回调内部重入 cancel 线程安全；
+ *   <li>原生协议事件与 normalized 增量共用同一派发锁，terminal 后同样静默。
  * </ul>
  */
 final class AnthropicStreamBridge implements ProviderStream {
@@ -93,6 +95,25 @@ final class AnthropicStreamBridge implements ProviderStream {
         return;
       }
       handler.onEvent(event, this);
+    } finally {
+      dispatchLock.unlock();
+    }
+  }
+
+  /**
+   * 派发一条厂商原生协议事件。
+   *
+   * <p>与 {@link #emitEvent(ProviderStreamEvent)} 同锁、同 cancel 与 terminal 语义：同一 attempt 内至多一次，cancel
+   * 或 terminal 之后不再回调，且永远先于该帧的 normalized 回调与 error。
+   */
+  void emitProtocolEvent(ProviderProtocolEvent event) {
+    Objects.requireNonNull(event, "event");
+    dispatchLock.lock();
+    try {
+      if (this.userCancelled || this.terminal) {
+        return;
+      }
+      handler.onProtocolEvent(event, this);
     } finally {
       dispatchLock.unlock();
     }
