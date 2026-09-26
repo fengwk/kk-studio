@@ -218,10 +218,14 @@ Turn 开始/结束时刷新。
 
 ## 变更提交与上传
 
-Composer 的命令提示显隐与 slash 命令语义独立：Escape 只关闭菜单并保留文本、附件，
-连续按键不清空草稿。编辑草稿后恢复自动提示，`+` 可主动打开命令表。提示隐藏时，
-Enter 仅执行完整且可用的命令，不使用不可见的模糊匹配选项；未完成或不可用的命令
-不会作为普通消息发送。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
+Composer 命令提示由区域焦点驱动，显隐规则为 `active && !disabled && isFocused && (plusMenuOpen || slashMode)`。
+Composer 区域包含编辑器、命令菜单、底栏 controls 与附件栏，区域内部移焦（如 Tab 或点击菜单项）
+不关闭菜单以避免点击丢失；离开区域收起菜单并清空 `plusMenuOpen`，完整保留草稿 parts（如 `/th`）。
+上层 control menu、Modal、Lightbox 优先处理 Escape；区域聚焦时 Escape 执行 blur 并收起菜单；
+未聚焦时当前 active pane 通过 `focusOnEscape` 聚焦编辑器，保留的 slash 文本自动重开菜单。
+普通文本同样支持 Escape blur/focus 切换。`+` 按钮支持无 slash 打开，失焦后再聚焦普通文本不重开；
+关闭 slash 提示时主动 blur 避免立即再开。菜单可见时 Enter 执行可见选项；收起状态下不执行隐藏命令，
+且 `canSend` 阻止 slash 发送普通消息。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
 
 Chat Pane 有两个正交维度。布局是 `single`、`split-2`、`split-3`、`grid-4`、
 `grid-6`、`grid-8`，按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；target 三态是：

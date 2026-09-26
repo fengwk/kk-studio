@@ -224,7 +224,8 @@ describe('ThreadComposer and commands', () => {
     expect(input).toHaveAttribute('hidden')
     expect(input).toHaveClass('composer-file-input-hidden')
     const click = vi.spyOn(input!, 'click').mockImplementation(() => undefined)
-    await user.click(screen.getByRole('option', { name: /^upload/ }))
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
+    await user.click(await screen.findByRole('option', { name: /^upload/ }))
     expect(click).toHaveBeenCalledOnce()
     click.mockRestore()
   })
@@ -400,6 +401,7 @@ describe('ThreadComposer and commands', () => {
         }}
       />,
     )
+    await user.click(screen.getByLabelText('给 AI 发送消息'))
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: /^models/ }))
     expect(screen.getByRole('searchbox', { name: '搜索模型' })).toHaveFocus()
