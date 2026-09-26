@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
@@ -93,6 +94,25 @@ final class OpenAiChatStreamBridge implements ProviderStream {
         return;
       }
       handler.onEvent(event, this);
+    } finally {
+      dispatchLock.unlock();
+    }
+  }
+
+  /**
+   * 派发一条厂商原生协议事件。
+   *
+   * <p>与规范化增量共用同一把 dispatchLock 与同一个 terminal/cancel 闸门：cancel 或终态之后不再派发，因此每条 transport 帧的 native
+   * 回调与它派生的 normalized 增量保持「raw 先于 normalized」且各自至多一次。
+   */
+  void emitProtocolEvent(ProviderProtocolEvent event) {
+    Objects.requireNonNull(event, "event");
+    dispatchLock.lock();
+    try {
+      if (this.userCancelled || this.terminal) {
+        return;
+      }
+      handler.onProtocolEvent(event, this);
     } finally {
       dispatchLock.unlock();
     }

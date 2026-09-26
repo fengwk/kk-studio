@@ -624,11 +624,46 @@ class OpenAiChatRequestEncoderTest {
     assertEquals("Why did chicken cross road?", replayedAsst.path("content").asText());
     assertEquals("A classic joke is appropriate.", replayedAsst.path("reasoning_content").asText());
 
-    // 2. 同 format 但 payload 非法（包含未知字段），必须抛出 ProviderException 拒绝
+    // 2. 同 format 且 payload 携带 provider 原生未知字段：不在白名单内的合法 assistant 字段必须原样透传
+    ObjectNode extendedPayload = validPayload.deepCopy();
+    extendedPayload.put("vendor_future_field", "kept");
+    extendedPayload.putObject("audio").put("id", "audio_1").put("transcript", "spoken");
+    ProviderReplayState extendedReplayState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT,
+            descriptor.affinity("gpt-4o"),
+            turn1Encoded.sourcePrefixHash(),
+            extendedPayload);
+    ProviderMessage extendedAsstMsg =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(
+                new ProviderThinkingBlock("A classic joke is appropriate."),
+                new ProviderTextBlock("Why did chicken cross road?")),
+            extendedReplayState);
+    ProviderRequest extendedReq =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg1, extendedAsstMsg, userMsg2),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode extendedRoot =
+        MAPPER.readTree(
+            encoder
+                .encode(extendedReq, descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    JsonNode extendedAsst = extendedRoot.path("messages").get(2);
+    assertEquals("Why did chicken cross road?", extendedAsst.path("content").asText());
+    assertEquals("kept", extendedAsst.path("vendor_future_field").asText());
+    assertEquals("audio_1", extendedAsst.path("audio").path("id").asText());
+
+    // 2b. 同 format 但 payload 的 known 字段形态损坏（content 非文本）必须抛出 ProviderException 拒绝
     ObjectNode illegalPayload = MAPPER.createObjectNode();
     illegalPayload.put("role", "assistant");
-    illegalPayload.put("content", "Why did chicken cross road?");
-    illegalPayload.put("unknown_forbidden_field", "evil");
+    illegalPayload.put("content", 42);
     ProviderReplayState illegalReplayState =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
@@ -1453,10 +1488,10 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("同 format payload 即使 affinity/hash 失配也必须先严格校验 shape、白名单和 durable 一致性")
+  @DisplayName("同 format payload 即使 affinity/hash 失配也必须先严格校验 shape 与 durable 一致性")
   void testReplayValidationBeforeAffinityOrHashCheck() throws Exception {
     // 测试意图：验证同 OPENAI_CHAT format 时，即使 affinity 或 sourcePrefixHash 失配，
-    // 也必须先严格校验 payload 的 shape、白名单与 durable 一致性，损坏时必须抛出 INVALID_REQUEST，严禁静默 fallback。
+    // 也必须先严格校验 payload 的 shape 与 durable 一致性，损坏时必须抛出 INVALID_REQUEST，严禁静默 fallback。
     ProviderMessage user1 =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
     String mismatchedHash = "f".repeat(64);
@@ -1489,36 +1524,38 @@ class OpenAiChatRequestEncoderTest {
             () -> encoder.encode(reqBadRole, descriptor, OpenAiChatConfiguration.defaults()));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exRole.kind());
 
-    // 2. hash 不匹配且包含未知字段 -> 必须抛出 INVALID_REQUEST
-    ObjectNode unknownFieldPayload = MAPPER.createObjectNode();
-    unknownFieldPayload.put("role", "assistant");
-    unknownFieldPayload.put("content", "text");
-    unknownFieldPayload.put("illegal_field", "value");
-    ProviderReplayState unknownFieldState =
+    // 2. hash 不匹配且 known 字段 content 形态非法（非文本）-> 必须抛出 INVALID_REQUEST
+    // 未知字段本身允许透传，但 known 字段的 shape 校验绝不因此放宽
+    ObjectNode illegalContentPayload = MAPPER.createObjectNode();
+    illegalContentPayload.put("role", "assistant");
+    illegalContentPayload.put("content", 123);
+    illegalContentPayload.put("vendor_future_field", "value");
+    ProviderReplayState illegalContentState =
         new ProviderReplayState(
             ProviderReplayFormat.OPENAI_CHAT,
             descriptor.affinity("gpt-4o"),
             mismatchedHash,
-            unknownFieldPayload);
-    ProviderMessage unknownFieldMsg =
+            illegalContentPayload);
+    ProviderMessage illegalContentMsg =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
             List.of(new ProviderTextBlock("text")),
-            unknownFieldState);
-    ProviderRequest reqUnknownField =
+            illegalContentState);
+    ProviderRequest reqIllegalContent =
         new ProviderRequest(
             modelDesc,
             defaultVariant,
             1024,
             "Test system instruction.",
-            List.of(user1, unknownFieldMsg),
+            List.of(user1, illegalContentMsg),
             List.of(),
             ProviderCacheControl.none());
-    ProviderException exField =
+    ProviderException exContent =
         assertThrows(
             ProviderException.class,
-            () -> encoder.encode(reqUnknownField, descriptor, OpenAiChatConfiguration.defaults()));
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, exField.kind());
+            () ->
+                encoder.encode(reqIllegalContent, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exContent.kind());
 
     // 3. hash 不匹配且 reasoning_content 与 durable ProviderThinkingBlock 不一致 -> 必须抛出 INVALID_REQUEST
     ObjectNode mismatchThinkingPayload = MAPPER.createObjectNode();

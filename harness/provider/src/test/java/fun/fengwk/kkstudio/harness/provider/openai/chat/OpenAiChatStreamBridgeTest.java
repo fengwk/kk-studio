@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
@@ -121,5 +122,58 @@ class OpenAiChatStreamBridgeTest {
     bridge.emitEvent(new ProviderStreamEvent.TextDelta("test"));
     bridge.emitError(new ProviderException(ProviderErrorKind.TRANSIENT, "error"));
     assertFalse(handlerCalled.get());
+  }
+
+  @Test
+  @DisplayName("native 协议事件与 normalized 增量共用 cancel/terminal 闸门")
+  void protocolEventSharesCancelAndTerminalGating() {
+    AtomicInteger protocolEventCount = new AtomicInteger();
+    ProviderStreamHandler handler =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+
+          @Override
+          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+            protocolEventCount.incrementAndGet();
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+
+          @Override
+          public void onError(ProviderException error, ProviderStream stream) {}
+        };
+
+    OpenAiChatStreamBridge bridge = new OpenAiChatStreamBridge(handler);
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("chat.completion.chunk", "{\"id\":\"c\"}"));
+    assertEquals(1, protocolEventCount.get());
+
+    ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+    ModelCost cost =
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO);
+    ProviderResponse response =
+        new ProviderResponse(
+            "hi", "", List.of(), GenerationStopReason.COMPLETE, usage, cost, "id", null, "{}");
+    bridge.emitComplete(new ProviderCompletion(response, null));
+
+    // 终态之后不再派发 native 事件
+    bridge.emitProtocolEvent(new ProviderProtocolEvent("chat.completion.chunk", "{\"id\":\"c\"}"));
+    assertEquals(1, protocolEventCount.get());
+
+    // cancel 之后不再派发 native 事件
+    OpenAiChatStreamBridge cancelledBridge = new OpenAiChatStreamBridge(handler);
+    cancelledBridge.cancel();
+    cancelledBridge.emitProtocolEvent(
+        new ProviderProtocolEvent("chat.completion.chunk", "{\"id\":\"c\"}"));
+    assertEquals(1, protocolEventCount.get());
   }
 }
