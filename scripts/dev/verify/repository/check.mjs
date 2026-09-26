@@ -57,6 +57,7 @@ const moduleDocuments = [
 const documentPaths = [
   'docs/README.md',
   'docs/system-design.md',
+  'docs/canvas-project.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
   'docs/operations/development-and-testing.md',
@@ -251,7 +252,7 @@ function looksLikeCheckablePath(value) {
 }
 
 function checkFixedLayout() {
-  const expected = new Set(documentPaths)
+  const expected = new Set([...documentPaths, 'docs/canvas-project.sql'])
   const expectedDirectories = new Set(['docs', 'docs/modules', 'docs/operations'])
   const actual = new Set(
     walkFiles(docsRoot).map((absolutePath) => relativeFromRoot(absolutePath)),
