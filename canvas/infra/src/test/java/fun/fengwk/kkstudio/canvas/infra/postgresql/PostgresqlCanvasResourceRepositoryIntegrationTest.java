@@ -2,98 +2,99 @@ package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
-import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** {@link PostgresqlCanvasResourceRepository} 扩展 owner/text API 的真实 PostgreSQL 契约。 */
+/** {@code canvas_resource} 在真实 PostgreSQL 上的不可变内容与 owner 槽位契约。 */
 class PostgresqlCanvasResourceRepositoryIntegrationTest extends PostgresCanvasInfraTestSupport {
-
-  private static final Instant CREATED_AT = Instant.parse("2026-01-02T03:04:05.123Z");
 
   @Autowired private CanvasResourceRepository resources;
 
-  /**
-   * 直接验证 add-if-absent、owner 双向查询、detach/attach 条件更新、文本更新与三种删除；每个 boolean/count 都必须来自实际 SQL 受影响行数。
-   */
+  /** owner 槽位是唯一的：插入、读取、按节点排序、挂接与解除都围绕 {@code (canvas, owner, index)} 展开，重复槽位必须被数据库拒绝。 */
   @Test
-  void resourceOwnerAndTextLifecycle() {
+  void ownerSlotsAreUniqueAndSorted() {
     UUID canvasId = addDocument();
-    NodeRecord firstNode = addNode(canvasId, false);
-    NodeRecord secondNode = addNode(canvasId, false);
-    CanvasResource first = textResource(canvasId, firstNode.id(), 0, "first");
-    CanvasResource second = textResource(canvasId, firstNode.id(), 1, "second");
-    CanvasResource orphan = textResource(canvasId, null, null, "orphan");
+    NodeFixture node = addTextNode(canvasId, "first");
+    CanvasResource first = resources.findByOwnerNode(canvasId, node.nodeId).get(0);
+    CanvasResource detached =
+        new CanvasResource(
+            UUID.randomUUID(), canvasId, null, null, null, "text", "history", Instant.now());
+    resources.add(detached);
 
-    assertTrue(resources.findById(canvasId, first.id()).isEmpty());
-    resources.add(first);
-    assertTrue(resources.addIfAbsent(second));
-    assertFalse(resources.addIfAbsent(second));
-    resources.add(orphan);
-
-    assertEquals(first, resources.findById(canvasId, first.id()).orElseThrow());
+    assertTrue(resources.attachOwner(canvasId, detached.id(), node.nodeId, 1));
     assertEquals(
-        first,
-        transactions.execute(
-            status -> resources.findByIdForUpdate(canvasId, first.id()).orElseThrow()));
-    assertEquals(
-        Boolean.TRUE,
-        transactions.execute(
-            status -> resources.findByIdForUpdate(canvasId, UUID.randomUUID()).isEmpty()));
-    assertEquals(
-        List.of(first.id(), second.id(), orphan.id()).stream().sorted().toList(),
-        resources.findByCanvasId(canvasId).stream().map(CanvasResource::id).sorted().toList());
-    assertEquals(List.of(first, second), resources.findByOwnerNode(canvasId, firstNode.id()));
-    assertEquals(List.of(first, second), resources.findByOwnerNodeId(firstNode.id()));
-    assertTrue(resources.findByOwnerNode(canvasId, secondNode.id()).isEmpty());
+        List.of(first.id(), detached.id()),
+        resources.findByOwnerNode(canvasId, node.nodeId).stream().map(CanvasResource::id).toList());
+    assertThrows(
+        DataAccessException.class,
+        () ->
+            resources.add(
+                new CanvasResource(
+                    UUID.randomUUID(),
+                    canvasId,
+                    node.nodeId,
+                    1,
+                    null,
+                    "text",
+                    "conflict",
+                    Instant.now())));
 
-    assertFalse(resources.detachOwner(canvasId, first.id(), secondNode.id()));
-    assertTrue(resources.detachOwner(canvasId, first.id(), firstNode.id()));
-    assertFalse(resources.detachOwner(canvasId, first.id(), firstNode.id()));
-    CanvasResource detached = resources.findById(canvasId, first.id()).orElseThrow();
-    assertEquals(null, detached.ownerNodeId());
-    assertEquals(null, detached.resourceIndex());
-
-    assertTrue(resources.attachOwner(canvasId, first.id(), secondNode.id(), 0));
-    assertFalse(resources.attachOwner(canvasId, first.id(), firstNode.id(), 0));
-    assertTrue(resources.updateTextContent(canvasId, secondNode.id(), "updated text"));
-    assertFalse(resources.updateTextContent(canvasId, UUID.randomUUID(), "missing"));
-    assertEquals(
-        "updated text", resources.findById(canvasId, first.id()).orElseThrow().textContent());
-
-    assertTrue(resources.delete(canvasId, first.id()));
-    assertFalse(resources.delete(canvasId, first.id()));
-    assertEquals(1, resources.deleteByOwnerNode(canvasId, firstNode.id()));
-    assertEquals(0, resources.deleteByOwnerNode(canvasId, firstNode.id()));
-
-    CanvasResource ownedAgain = textResource(canvasId, secondNode.id(), 0, "owned-again");
-    CanvasResource orphanAgain = textResource(canvasId, null, null, "orphan-again");
-    resources.add(ownedAgain);
-    resources.add(orphanAgain);
-    assertEquals(3, resources.deleteByCanvas(canvasId));
-    assertEquals(0, resources.deleteByCanvas(canvasId));
-    assertTrue(resources.findByCanvasId(canvasId).isEmpty());
+    assertTrue(resources.detachOwner(canvasId, detached.id(), node.nodeId));
+    assertFalse(resources.detachOwner(canvasId, detached.id(), node.nodeId));
+    // owner 组合外键保证资源不可能挂到不存在的节点上，而不是静默失败。
+    assertThrows(
+        DataAccessException.class,
+        () -> resources.attachOwner(canvasId, detached.id(), UUID.randomUUID(), 0));
   }
 
-  private static CanvasResource textResource(
-      UUID canvasId, UUID ownerNodeId, Integer resourceIndex, String name) {
-    return new CanvasResource(
-        UUID.randomUUID(),
-        canvasId,
-        ownerNodeId,
-        resourceIndex,
-        null,
-        name,
-        name + " content",
-        CREATED_AT);
+  /** 行内容不可变：同一 canvas 内按 id 读取，跨 canvas 读取必须为空；内容形状由列约束兜底。 */
+  @Test
+  void contentShapeAndCanvasScopedLookup() {
+    UUID canvasId = addDocument();
+    NodeFixture node = addTextNode(canvasId, "body");
+    CanvasResource resource = resources.findByOwnerNode(canvasId, node.nodeId).get(0);
+
+    assertEquals(resource, resources.findById(canvasId, resource.id()).orElseThrow());
+    assertEquals(resource, resources.findByIdForUpdate(canvasId, resource.id()).orElseThrow());
+    assertEquals(List.of(resource), resources.findByCanvasId(canvasId));
+    assertTrue(resources.findById(UUID.randomUUID(), resource.id()).isEmpty());
+    assertFalse(resources.addIfAbsent(resource));
+    // 内容列约束由领域校验先兜住：blob 与文本必须恰好一个存在。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new CanvasResource(
+                UUID.randomUUID(), canvasId, null, null, null, "text", null, Instant.now()));
+  }
+
+  /** 删除按资源、节点与画布三种粒度收敛，且不越出 canvas 作用域。 */
+  @Test
+  void deleteIsScopedToResourceNodeAndCanvas() {
+    UUID canvasId = addDocument();
+    NodeFixture node = addTextNode(canvasId, "body");
+    CanvasResource resource = resources.findByOwnerNode(canvasId, node.nodeId).get(0);
+
+    assertFalse(resources.delete(UUID.randomUUID(), resource.id()));
+    assertTrue(resources.delete(canvasId, resource.id()));
+    assertTrue(resources.findByCanvasId(canvasId).isEmpty());
+
+    CanvasResource kept =
+        new CanvasResource(
+            UUID.randomUUID(), canvasId, null, null, null, "text", "kept", Instant.now());
+    resources.add(kept);
+    assertEquals(0, resources.deleteByOwnerNode(canvasId, node.nodeId));
+    assertEquals(1, resources.deleteByCanvas(canvasId));
+    assertTrue(resources.findByCanvasId(canvasId).isEmpty());
   }
 }

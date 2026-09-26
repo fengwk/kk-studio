@@ -63,6 +63,16 @@ public interface CanvasFunctionResourcePinMapper extends BaseMapper {
 
   @Select(
       """
+      select canvas_id, node_id, request_id, role, resource_id
+      from canvas_function_resource_pin
+      where canvas_id = #{canvasId}
+      order by node_id, request_id, role, resource_id
+      """)
+  @ResultMap("canvasFunctionResourcePinMap")
+  List<CanvasFunctionResourcePinDO> findByCanvas(@Param("canvasId") UUID canvasId);
+
+  @Select(
+      """
       select count(1)
       from canvas_function_resource_pin
       where canvas_id = #{canvasId} and resource_id = #{resourceId}

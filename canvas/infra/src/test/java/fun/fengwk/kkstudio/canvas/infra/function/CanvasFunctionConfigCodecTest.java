@@ -22,8 +22,7 @@ import java.util.UUID;
 /** Function config strict wire、canonical prompt 与 descriptor 参数验证。 */
 class CanvasFunctionConfigCodecTest {
 
-  private static final UUID REFERENCE_NODE =
-      UUID.fromString("00000000-0000-0000-0000-00000000000a");
+  private static final UUID SOURCE_NODE = UUID.fromString("00000000-0000-0000-0000-00000000000a");
 
   private final CanvasFunctionConfigCodec codec = new CanvasFunctionConfigCodec(new ObjectMapper());
 
@@ -38,8 +37,8 @@ class CanvasFunctionConfigCodecTest {
                 {"type":"TEXT","text":"hello"},
                 {"type":"TEXT","text":""},
                 {"type":"TEXT","text":" world"},
-                {"type":"REFERENCE","nodeId":"00000000-0000-0000-0000-00000000000a","index":0},
-                {"type":"REFERENCE","nodeId":"00000000-0000-0000-0000-00000000000a","index":0}
+                {"type":"resource","nodeId":"00000000-0000-0000-0000-00000000000a","index":0},
+                {"type":"resource","nodeId":"00000000-0000-0000-0000-00000000000a","index":0}
               ]},
               "parameters":{}
             }
@@ -49,15 +48,15 @@ class CanvasFunctionConfigCodecTest {
     assertEquals(
         List.of(
             new TextSegment("hello world"),
-            new ReferenceSegment(REFERENCE_NODE, 0),
-            new ReferenceSegment(REFERENCE_NODE, 0)),
+            new ReferenceSegment(SOURCE_NODE, 0),
+            new ReferenceSegment(SOURCE_NODE, 0)),
         config.segments());
-    assertEquals(List.of(new ReferenceSegment(REFERENCE_NODE, 0)), codec.uniqueReferences(config));
+    assertEquals(List.of(new ReferenceSegment(SOURCE_NODE, 0)), codec.uniqueReferences(config));
     assertEquals(Map.of("ratio", "AUTO", "duration", 5), config.parameters());
     assertEquals(config, codec.decode(codec.encode(config), model()));
   }
 
-  /** 所有对象层拒绝未知/null/错误类型/重复字段，REFERENCE id/index 保持 canonical。 */
+  /** 所有对象层拒绝未知/null/错误类型/重复字段，resource id/index 保持 canonical。 */
   @Test
   void rejectsNonStrictShapes() {
     assertInvalid(
@@ -70,12 +69,12 @@ class CanvasFunctionConfigCodecTest {
         """);
     assertInvalid(
         """
-        {"prompt":{"segments":[{"type":"REFERENCE","nodeId":"01","index":0},
+        {"prompt":{"segments":[{"type":"resource","nodeId":"01","index":0},
                                {"type":"TEXT","text":"x"}]},"parameters":{}}
         """);
     assertInvalid(
         """
-        {"prompt":{"segments":[{"type":"REFERENCE","nodeId":"1","index":-1},
+        {"prompt":{"segments":[{"type":"resource","nodeId":"1","index":-1},
                                {"type":"TEXT","text":"x"}]},"parameters":{}}
         """);
     assertInvalid(
@@ -95,7 +94,7 @@ class CanvasFunctionConfigCodecTest {
         """);
     assertInvalid(
         """
-        {"prompt":{"segments":[{"type":"REFERENCE","nodeId":"1","index":0}]},"parameters":{}}
+        {"prompt":{"segments":[{"type":"resource","nodeId":"1","index":0}]},"parameters":{}}
         """);
     assertInvalid(
         """

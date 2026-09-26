@@ -78,7 +78,7 @@ public final class CanvasFunctionConfigCodec implements CanvasFunctionConfigCode
           item.put("text", text.text());
         }
         case ReferenceSegment reference -> {
-          item.put("type", "REFERENCE");
+          item.put("type", "resource");
           item.put("nodeId", reference.nodeId().toString());
           item.put("index", reference.index());
         }
@@ -131,8 +131,8 @@ public final class CanvasFunctionConfigCodec implements CanvasFunctionConfigCode
       }
       switch (typeValue.textValue()) {
         case "TEXT" -> decodeText(segment, index, canonical, visibleText);
-        case "REFERENCE" -> canonical.add(decodeReference(segment, index));
-        default -> throw invalid("prompt.segments[" + index + "].type must be TEXT or REFERENCE");
+        case "resource" -> canonical.add(decodeReference(segment, index));
+        default -> throw invalid("prompt.segments[" + index + "].type must be TEXT or resource");
       }
     }
     if (visibleText.toString().isBlank()) {

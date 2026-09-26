@@ -14,6 +14,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunction;
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasResource;
+import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
@@ -24,13 +28,15 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
  * Canvas Infra 真实 PostgreSQL 测试基座。
  *
  * <p>沿用仓库既有模式：进程级 {@code postgres:17-alpine} Testcontainer、权威 schema 模块中的 Flyway baseline，以及每个测试前
- * drop/recreate public schema。Docker 不可用时测试直接失败，不以 mock 或跳过掩盖适配器问题。
+ * drop/recreate public schema。baseline 之后由 {@link CanvasTargetSchemaFixture} 重建 canvas
+ * 目标表，使适配器始终面对目标模型。 Docker 不可用时测试直接失败，不以 mock 或跳过掩盖适配器问题。
  */
 @SpringBootTest(classes = CanvasInfraTestApplication.class)
 public abstract class PostgresCanvasInfraTestSupport {
@@ -55,6 +61,7 @@ public abstract class PostgresCanvasInfraTestSupport {
   @Autowired protected JdbcTemplate jdbc;
   @Autowired protected TransactionTemplate transactions;
   @Autowired protected CanvasStore canvasStore;
+  @Autowired protected CanvasResourceRepository resourceRepository;
   @MockitoBean private CanvasFunctionDispatcher dispatcher;
 
   @DynamicPropertySource
@@ -80,19 +87,48 @@ public abstract class PostgresCanvasInfraTestSupport {
     return canvasId;
   }
 
+  /** 只插入节点行，用于不需要资源行的场景（Run claim 等）。 */
   protected NodeRecord addNode(UUID canvasId, boolean function) {
-    UUID nodeId = UUID.randomUUID();
     NodeRecord node =
-        new NodeRecord(
-            nodeId,
-            canvasId,
-            "node-" + nodeId,
-            new CanvasTransform(10, 20, 300, 200),
-            null,
-            function ? "test-model" : null,
-            function ? "{\"prompt\":{\"segments\":[]},\"parameters\":{}}" : null);
+        newNode(canvasId)
+            .record(
+                function
+                    ? new CanvasFunction("video.generate", CanvasJson.parseObject("{}"))
+                    : null);
     canvasStore.addNode(node);
     return node;
+  }
+
+  /** 普通资源节点：一个文本资源占据 index 0，节点行与资源行同时落库。 */
+  protected NodeFixture addTextNode(UUID canvasId, String text) {
+    NodeFixture fixture = newNode(canvasId);
+    canvasStore.addNode(fixture.record(null));
+    fixture.resourceId = UUID.randomUUID();
+    resourceRepository.add(fixture.textResource(0, text));
+    return fixture;
+  }
+
+  /** Function 节点：携带 {@code {name,args}} 配置；输出资源在成功物化前不存在。 */
+  protected NodeFixture addFunctionNode(UUID canvasId, String functionName) {
+    NodeFixture fixture = newNode(canvasId);
+    canvasStore.addNode(
+        fixture.record(new CanvasFunction(functionName, CanvasJson.parseObject("{}"))));
+    return fixture;
+  }
+
+  private static NodeFixture newNode(UUID canvasId) {
+    UUID nodeId = UUID.randomUUID();
+    return new NodeFixture(
+        nodeId, canvasId, "node-" + nodeId, new CanvasTransform(10, 20, 300, 200));
+  }
+
+  /**
+   * 直接插入 Run 行时使用的最小合法 state_json。
+   *
+   * <p>state_json 的 stage 是持久化事实的一部分，测试夹具不能写入无法被 codec 读回的行。
+   */
+  protected static String minimalRunState(String stage) {
+    return "{\"stage\":\"" + stage + "\"}";
   }
 
   protected static Connection newConnection() throws SQLException {
@@ -107,12 +143,53 @@ public abstract class PostgresCanvasInfraTestSupport {
     }
   }
 
-  private static void migrateDatabase(Connection connection) {
+  private static void migrateDatabase(Connection connection) throws SQLException {
     Flyway.configure()
         .dataSource(new SingleConnectionDataSource(connection, true))
         .locations("classpath:db/migration")
         .validateMigrationNaming(true)
         .load()
         .migrate();
+    CanvasTargetSchemaFixture.apply(connection);
+  }
+
+  /** 节点夹具：保持节点行、资源行与领域投影一致，便于测试直接表达目标模型。 */
+  protected static final class NodeFixture {
+
+    protected final UUID nodeId;
+    protected final UUID canvasId;
+    protected final String name;
+    protected final CanvasTransform transform;
+    protected UUID groupId;
+
+    /** index 0 的文本资源 id；{@link #addTextNode} 之后可用。 */
+    protected UUID resourceId;
+
+    private NodeFixture(UUID nodeId, UUID canvasId, String name, CanvasTransform transform) {
+      this.nodeId = nodeId;
+      this.canvasId = canvasId;
+      this.name = name;
+      this.transform = transform;
+    }
+
+    protected NodeRecord record(CanvasFunction function) {
+      return new NodeRecord(nodeId, canvasId, name, transform, groupId, function);
+    }
+
+    /** 同一节点的另一种分组归属形态，用于验证节点行全量写入。 */
+    protected NodeRecord record(UUID groupId, CanvasFunction function) {
+      return new NodeRecord(nodeId, canvasId, name, transform, groupId, function);
+    }
+
+    /** 同一节点的改名形态，用于验证兼容折叠唯一键冲突。 */
+    protected NodeRecord renamed(String newName, CanvasFunction function) {
+      return new NodeRecord(nodeId, canvasId, newName, transform, groupId, function);
+    }
+
+    /** 资源 id 由夹具分配：index 0 复用 {@link #resourceId}，其余位置为新行。 */
+    protected CanvasResource textResource(int index, String text) {
+      UUID id = index == 0 && resourceId != null ? resourceId : UUID.randomUUID();
+      return new CanvasResource(id, canvasId, nodeId, index, null, "text", text, Instant.now());
+    }
   }
 }

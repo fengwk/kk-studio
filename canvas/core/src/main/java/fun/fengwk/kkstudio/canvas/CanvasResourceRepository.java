@@ -8,7 +8,8 @@ import java.util.UUID;
  * Immutable Canvas Resource 的持久化端口。
  *
  * <p>Storage 拥有 Blob，本端口只负责 Canvas Resource 行本身；内容访问一律通过资源上的 {@code blobId} 交给全局 Storage。
- * 资源直接属于节点（{@code ownerNodeId + resourceIndex}），节点/画布删除时按 owned 集合显式清理。
+ * 资源直接属于节点（{@code ownerNodeId + resourceIndex}）；解除挂接但保留行是历史资源与 pin 保活的形式，行删除与 Blob 引用释放由 {@link
+ * CanvasResourceLifecycle} 负责。
  */
 public interface CanvasResourceRepository {
 
@@ -24,13 +25,9 @@ public interface CanvasResourceRepository {
 
   List<CanvasResource> findByOwnerNode(UUID canvasId, UUID nodeId);
 
-  List<CanvasResource> findByOwnerNodeId(UUID nodeId);
-
   boolean detachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId);
 
   boolean attachOwner(UUID canvasId, UUID resourceId, UUID ownerNodeId, int resourceIndex);
-
-  boolean updateTextContent(UUID canvasId, UUID nodeId, String textContent);
 
   boolean delete(UUID canvasId, UUID resourceId);
 

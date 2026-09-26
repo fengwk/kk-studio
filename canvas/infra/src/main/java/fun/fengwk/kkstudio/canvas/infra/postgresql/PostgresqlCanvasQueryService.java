@@ -3,28 +3,35 @@ package fun.fengwk.kkstudio.canvas.infra.postgresql;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
-import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasGroup;
-import fun.fengwk.kkstudio.canvas.CanvasLink;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
+import fun.fengwk.kkstudio.canvas.CanvasReference;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
+import fun.fengwk.kkstudio.canvas.CanvasResourceReference;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Canvas document/graph 的一致性读投影。 */
+/**
+ * Canvas document/graph 的一致性读投影。
+ *
+ * <p>连线不落库：快照中的 {@link CanvasReference} 由各节点 args 的严格引用形状投影而来，即使插件未安装也能展示已有连线。 读取期间 document 或 Run
+ * 发生变化时重读，避免返回跨越并发提交的混合状态。
+ */
 @Repository
 public class PostgresqlCanvasQueryService implements CanvasQueryService {
 
@@ -68,6 +75,9 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
     UUID canvasId = document.id();
     Map<UUID, List<CanvasResource>> resourcesByNode = new HashMap<>();
     for (CanvasResource resource : resourceRepository.findByCanvasId(canvasId)) {
+      if (resource.ownerNodeId() == null) {
+        continue;
+      }
       resourcesByNode
           .computeIfAbsent(resource.ownerNodeId(), ignored -> new ArrayList<>())
           .add(resource);
@@ -77,7 +87,11 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
       runsByNode.put(run.nodeId(), run);
     }
     List<CanvasResourceNode> nodes = new ArrayList<>();
+    LinkedHashSet<CanvasReference> references = new LinkedHashSet<>();
     for (NodeRecord node : canvasStore.listNodes(canvasId)) {
+      List<CanvasResource> resources =
+          new ArrayList<>(resourcesByNode.getOrDefault(node.id(), List.of()));
+      resources.sort(Comparator.comparingInt(CanvasResource::resourceIndex));
       nodes.add(
           new CanvasResourceNode(
               node.id(),
@@ -85,14 +99,19 @@ public class PostgresqlCanvasQueryService implements CanvasQueryService {
               node.name(),
               node.transform(),
               node.groupId(),
-              resourcesByNode.getOrDefault(node.id(), List.of()),
-              node.modelKey() == null
-                  ? null
-                  : new CanvasFunction(node.modelKey(), node.functionConfigJson()),
+              resources,
+              node.function(),
               runsByNode.get(node.id())));
+      if (node.function() != null) {
+        for (CanvasResourceReference reference : node.function().references()) {
+          if (!reference.nodeId().equals(node.id())) {
+            references.add(
+                new CanvasReference(canvasId, reference.nodeId(), node.id(), reference.index()));
+          }
+        }
+      }
     }
     List<CanvasGroup> groups = canvasStore.listGroups(canvasId);
-    List<CanvasLink> links = canvasStore.listLinks(canvasId);
-    return new CanvasSnapshot(document, nodes, groups, links);
+    return new CanvasSnapshot(document, nodes, groups, List.copyOf(references));
   }
 }

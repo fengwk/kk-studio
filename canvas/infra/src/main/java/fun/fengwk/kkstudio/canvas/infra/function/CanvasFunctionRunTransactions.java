@@ -99,7 +99,7 @@ public class CanvasFunctionRunTransactions {
         canvasStore
             .lockNode(canvasId, nodeId)
             .orElseThrow(() -> notFound("Canvas Function node not found"));
-    if (node.modelKey() == null) {
+    if (node.function() == null) {
       throw new IllegalArgumentException("node must be a Canvas Function");
     }
     CanvasFunctionRun existing = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
@@ -112,11 +112,11 @@ public class CanvasFunctionRunTransactions {
       throw conflict("another requestId is already active for this node");
     }
 
-    CanvasFunctionCatalog.RegisteredModel registered = catalog.require(node.modelKey());
+    CanvasFunctionCatalog.RegisteredModel registered = catalog.require(node.function().name());
     registered.requireAvailable();
     CanvasFunctionAdapter adapter = registered.adapter();
     CanvasFunctionModel model = registered.model();
-    CanvasFunctionConfig config = configCodec.decode(node.functionConfigJson(), model);
+    CanvasFunctionConfig config = configCodec.decode(node.function().argsJson(), model);
     List<CanvasFunctionFrozenReference> manifest =
         freezeManifest(canvasId, nodeId, config, model.referencePolicy());
     UUID targetResourceId = UUID.randomUUID();
@@ -153,7 +153,6 @@ public class CanvasFunctionRunTransactions {
     if (existing != null) {
       resourceLifecycle.releaseRunPins(canvasId, nodeId, existing.requestId());
     }
-    refRepository.addAll(pins(canvasId, nodeId, ready.requestId(), manifest, targetResourceId));
     boolean created;
     if (existing == null) {
       runRepository.insertReady(ready);
@@ -163,6 +162,9 @@ public class CanvasFunctionRunTransactions {
     } else {
       throw conflict("terminal FunctionRun was replaced concurrently");
     }
+    // pin 引用真实 Run 行，必须在其之后写入，才能由 fk_canvas_pin_run 保证 pin 不会脱离 Run 存活。
+    // 这里只 pin 已存在的输入资源：预分配的输出目标此时还没有 Resource 行，OUTPUT pin 由物化事务与 Resource 同事务写入。
+    refRepository.addAll(inputPins(canvasId, nodeId, ready.requestId(), manifest));
     bumpVersion(document);
     return new CanvasFunctionStartResult(ready, created);
   }
@@ -196,8 +198,9 @@ public class CanvasFunctionRunTransactions {
     if (!runRepository.cancelActive(terminal)) {
       throw conflict("FunctionRun changed while cancelling");
     }
-    resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
+    // 先释放 pin（含物化后的 OUTPUT pin）再回收无 owner 目标行，满足 pin→resource 的删除限制。
     resourceLifecycle.releaseRunPins(canvasId, nodeId, current.requestId());
+    resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
     bumpVersion(document);
     return terminal;
   }
@@ -226,7 +229,7 @@ public class CanvasFunctionRunTransactions {
       throw new CanvasFunctionInternalCancellation("Canvas document disappeared during checkpoint");
     }
     NodeRecord node = canvasStore.lockNode(canvasId, nodeId).orElse(null);
-    if (node == null || node.modelKey() == null) {
+    if (node == null || node.function() == null) {
       throw new CanvasFunctionInternalCancellation(
           "Canvas Function node disappeared during checkpoint");
     }
@@ -279,7 +282,7 @@ public class CanvasFunctionRunTransactions {
     }
     CanvasDocument document = requireDocumentForUpdate(frozen.canvasId());
     NodeRecord node = canvasStore.lockNode(frozen.canvasId(), frozen.nodeId()).orElse(null);
-    if (node == null || node.modelKey() == null) {
+    if (node == null || node.function() == null) {
       return false;
     }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(frozen.nodeId()).orElse(null);
@@ -326,7 +329,7 @@ public class CanvasFunctionRunTransactions {
     CanvasFunctionFrozenRun observedFrozen = decode(observed);
     CanvasDocument document = requireDocumentForUpdate(observedFrozen.canvasId());
     NodeRecord node = canvasStore.lockNode(observedFrozen.canvasId(), nodeId).orElse(null);
-    if (node == null || node.modelKey() == null) {
+    if (node == null || node.function() == null) {
       return false;
     }
     CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
@@ -339,8 +342,8 @@ public class CanvasFunctionRunTransactions {
     if (!runRepository.transitionTerminal(terminal, leaseToken)) {
       throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
     }
-    resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
     resourceLifecycle.releaseRunPins(frozen.canvasId(), frozen.nodeId(), frozen.requestId());
+    resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
     bumpVersion(document);
     return true;
   }
@@ -355,9 +358,6 @@ public class CanvasFunctionRunTransactions {
     for (ReferenceSegment reference : configCodec.uniqueReferences(config)) {
       if (canvasStore.findNode(canvasId, reference.nodeId()).isEmpty()) {
         throw new IllegalArgumentException("referenced source node must belong to the same canvas");
-      }
-      if (!canvasStore.linkExists(canvasId, reference.nodeId(), targetNodeId)) {
-        throw new IllegalArgumentException("referenced source node must have a Link to target");
       }
       List<CanvasResource> resources =
           resourceRepository.findByOwnerNode(canvasId, reference.nodeId());
@@ -410,13 +410,9 @@ public class CanvasFunctionRunTransactions {
     }
   }
 
-  private List<CanvasFunctionResourcePin> pins(
-      UUID canvasId,
-      UUID nodeId,
-      UUID requestId,
-      List<CanvasFunctionFrozenReference> manifest,
-      UUID targetResourceId) {
-    List<CanvasFunctionResourcePin> refs = new ArrayList<>(manifest.size() + 1);
+  private List<CanvasFunctionResourcePin> inputPins(
+      UUID canvasId, UUID nodeId, UUID requestId, List<CanvasFunctionFrozenReference> manifest) {
+    List<CanvasFunctionResourcePin> refs = new ArrayList<>(manifest.size());
     for (CanvasFunctionFrozenReference reference : manifest) {
       refs.add(
           new CanvasFunctionResourcePin(
@@ -426,18 +422,14 @@ public class CanvasFunctionRunTransactions {
               reference.resourceId(),
               CanvasFunctionResourcePin.Role.INPUT));
     }
-    refs.add(
-        new CanvasFunctionResourcePin(
-            canvasId, nodeId, requestId, targetResourceId, CanvasFunctionResourcePin.Role.OUTPUT));
     return List.copyOf(refs);
   }
 
-  /** 在已持有文档行锁的事务内执行版本 CAS，失败视为持久化不变量破坏。 */
+  /** 在已持有文档行锁的事务内推进同步位置，失败视为持久化不变量破坏。 */
   private void bumpVersion(CanvasDocument document) {
-    long baseVersion = document.version();
-    long newVersion = baseVersion + 1L;
-    if (!canvasStore.advanceDocumentVersion(document.id(), baseVersion, newVersion)) {
-      throw new IllegalStateException("canvas document version CAS failed under row lock");
+    if (!canvasStore.advanceRevision(
+        document.id(), document.revision(), document.revision() + 1L)) {
+      throw new IllegalStateException("canvas revision CAS failed under row lock");
     }
   }
 

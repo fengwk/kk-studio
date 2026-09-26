@@ -10,7 +10,7 @@ import java.util.UUID;
 public class CanvasDocumentDO {
   private UUID id;
   private String title;
-  private Long version;
+  private Long revision;
   private OffsetDateTime createdAt;
   private OffsetDateTime updatedAt;
 }
