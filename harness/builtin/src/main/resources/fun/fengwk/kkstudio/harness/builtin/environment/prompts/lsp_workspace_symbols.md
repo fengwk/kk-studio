@@ -6,8 +6,9 @@ Usage:
 - Prefer this when you already know or strongly suspect the symbol name.
 - For broad repository source search, prefer `grep` because it is simpler and usually faster.
 - If workspace symbol search is unavailable for the selected server, the tool call returns a clear error; use `grep` or `find` instead.
-- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
+- `workdir` is optional. Prefer an absolute `path` and omit it.
+- Provide `workdir` only when `path` is relative: it must be an expanded absolute directory on the target daemon's file system, and no call inherits a previous directory, session default, environment root, cwd, or home directory.
 
 Examples:
-- `lsp_workspace_symbols({ path: "src/main/java/com/acme/App.java", workdir: "/srv/project/services/java", query: "UserService", limit: 20 })`
+- `lsp_workspace_symbols({ path: "/srv/project/services/java/src/main/java/com/acme/App.java", query: "UserService", limit: 20 })`
 - `lsp_workspace_symbols({ path: "src/example.ts", workdir: "C:/src/project", query: "createDemoDirectory" })`

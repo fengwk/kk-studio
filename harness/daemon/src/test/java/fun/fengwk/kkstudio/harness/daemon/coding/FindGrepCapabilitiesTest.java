@@ -49,7 +49,7 @@ class FindGrepCapabilitiesTest {
   }
 
   private CodingToolsConfig config() {
-    return TestCodingConfig.withBridge(workdir);
+    return TestCodingConfig.withLsp(workdir);
   }
 
   private EnvironmentCapabilityResult invoke(EnvironmentCapability capability, String argumentsJson)
@@ -443,9 +443,9 @@ class FindGrepCapabilitiesTest {
     assertEquals("No matches found", text(gitRes));
   }
 
-  /** 验证 GrepCapability 在遍历目录时自动跳过二进制文件与大于 64MiB 的大文件。 */
+  /** 验证 GrepCapability 在遍历目录时按二进制语义静默跳过二进制文件（单文件二进制才是明确错误）。 */
   @Test
-  void grepDirectorySearchSkipsBinaryAndLargeFiles() throws Exception {
+  void grepDirectorySearchSkipsBinaryFiles() throws Exception {
     Files.writeString(workdir.resolve("valid.txt"), "target needle\n");
     Files.write(workdir.resolve("binary.bin"), new byte[] {0, 1, 2, 3});
 
@@ -458,6 +458,7 @@ class FindGrepCapabilitiesTest {
     String out = text(res);
     assertTrue(out.contains("valid.txt:1:target needle"));
     assertFalse(out.contains("binary.bin"));
+    assertFalse(out.contains("could not be searched"), "二进制是刻意跳过，不应报告为未搜索");
   }
 
   /** 验证 GrepCapability 的 early-stop 机制。 */
@@ -585,7 +586,7 @@ class FindGrepCapabilitiesTest {
     assertEquals("No files found matching pattern", text(res));
   }
 
-  /** 验证 SearchFiles 在子目录遍历中提前停止并退出父目录遍历。 */
+  /** 验证 {@link SearchFiles} 在子目录遍历中提前停止并退出父目录遍历（忽略规则从检索起点自身祖先链解析，不再需要 workdir 基线）。 */
   @Test
   void searchFilesEarlyStopsInsideSubdirectory() throws Exception {
     Path nested = Files.createDirectories(workdir.resolve("nested/sub"));
@@ -594,6 +595,7 @@ class FindGrepCapabilitiesTest {
 
     SearchControl control =
         new SearchControl(Duration.ofSeconds(5), () -> false, "find", System::nanoTime);
-    SearchFiles.walk(workdir, workdir.resolve("nested"), control, file -> false);
+    SearchFiles.Report report = SearchFiles.walk(workdir.resolve("nested"), control, file -> false);
+    assertTrue(report.unreadable().isEmpty(), "提前终止不应把正常目录记为不可读");
   }
 }

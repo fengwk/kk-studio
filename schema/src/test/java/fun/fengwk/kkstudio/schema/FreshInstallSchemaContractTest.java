@@ -80,6 +80,7 @@ class FreshInstallSchemaContractTest {
           "harness_entry",
           "harness_model_invocation",
           "harness_session",
+          "harness_subagent_task",
           "harness_thread",
           "harness_thread_command",
           "harness_tool_invocation",

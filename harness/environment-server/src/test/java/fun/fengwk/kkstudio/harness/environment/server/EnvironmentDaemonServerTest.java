@@ -698,6 +698,55 @@ class EnvironmentDaemonServerTest {
         channel.messageTypes());
   }
 
+  /** 文件/LSP 能力的路径约定必须穿透发送前门禁，不能只在 Daemon 直调用时成立。 */
+  @Test
+  void forwardsAbsolutePathsWithoutWorkdirForEveryPathCapability() {
+    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
+      if (!descriptor.inputSchema().properties().containsKey("path")) {
+        continue;
+      }
+      Fixture fixture = new Fixture();
+      FakeChannel channel = fixture.connectReady("path-" + descriptor.id().value());
+      String fields =
+          switch (descriptor.id().value()) {
+            case "fs.write" -> ",\"content\":\"text\"";
+            case "fs.edit" -> ",\"old_string\":\"old\",\"new_string\":\"new\"";
+            case "fs.find", "fs.grep" -> ",\"pattern\":\"text\"";
+            case "lsp.goto-definition" -> ",\"line\":1";
+            case "lsp.workspace-symbols" -> ",\"query\":\"Symbol\"";
+            case "lsp.java-decompile" -> ",\"target\":\"jdt://contents/library/Foo.class\"";
+            default -> "";
+          };
+      for (String rejected :
+          List.of(
+              "{\"path\":\"src/App.java\"" + fields + "}",
+              "{\"path\":\"/srv/repo/App.java\",\"workdir\":\"relative\"" + fields + "}")) {
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                fixture.server.invoke(
+                    ENVIRONMENT_ID,
+                    new EnvironmentCapabilityExecutionRequest(
+                        descriptor,
+                        new EnvironmentCapabilityCall(CALL_ONE.toString(), rejected),
+                        Duration.ofSeconds(5)),
+                    new RecordingListener()),
+            descriptor.id().value());
+      }
+      assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes());
+      fixture.server.invoke(
+          ENVIRONMENT_ID,
+          new EnvironmentCapabilityExecutionRequest(
+              descriptor,
+              new EnvironmentCapabilityCall(
+                  CALL_ONE.toString(), "{\"path\":\"/srv/repo/App.java\"" + fields + "}"),
+              Duration.ofSeconds(5)),
+          new RecordingListener());
+      assertEquals(
+          List.of(DaemonMessageType.WELCOME, DaemonMessageType.INVOKE), channel.messageTypes());
+    }
+  }
+
   /** 测试意图：并发 HELLO 抢占同一环境时只有一个连接获得 WELCOME，另一个以 RETRY_LATER 关闭。 */
   @Test
   void concurrentHelloForActiveRouteIsRejectedWithRetryLater() {

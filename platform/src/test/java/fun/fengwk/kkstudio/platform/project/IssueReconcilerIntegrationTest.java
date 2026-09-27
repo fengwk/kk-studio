@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskMessages.Outcome;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -38,6 +39,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskDraft;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskStatus;
+import fun.fengwk.kkstudio.platform.harness.task.repo.SubagentTaskRepository;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
@@ -72,6 +76,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   @Autowired private IssueWorkStore issueWorkStore;
   @Autowired private IssueTransitionService issueTransitionService;
   @Autowired private HarnessRuntime harnessRuntime;
+  @Autowired private SubagentTaskRepository subagentTaskRepository;
 
   private final Map<UUID, EntryPayload> customPayloads = new ConcurrentHashMap<>();
 
@@ -91,6 +96,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             threadId);
     UUID headEntryId = (UUID) row.get("head_entry_id");
     ThreadState thread = mock(ThreadState.class);
+    when(thread.id()).thenReturn(threadId);
     when(thread.sessionId()).thenReturn((UUID) row.get("session_id"));
     when(thread.headEntryId()).thenReturn(headEntryId);
     when(thread.nextCommandSequence())
@@ -752,6 +758,56 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             run.getId()));
     assertEquals(
         1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+  }
+
+  /** 测试意图：父 Thread 已静止且已有产出，持久 OPEN/SETTLED 委派仍阻止 Run 收尾；交付后才允许收尾。 */
+  @Test
+  void pendingDelegatedTaskDefersRunCompletionUntilDelivery() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("委派未交付延后", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID newHead = appendHistoryEntry(run.getThreadId());
+    UUID invocationId = UUID.randomUUID();
+    assertTrue(
+        subagentTaskRepository.insert(
+            new SubagentTaskDraft(
+                invocationId,
+                run.getThreadId(),
+                run.getThreadId(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                newHead,
+                agent,
+                "delegated work",
+                10,
+                SubagentTaskStatus.OPEN,
+                0L)));
+
+    assertEquals(
+        IssueReconcileOutcome.DEFERRED_PROCESSING, reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where id = ? and status = 'RUNNING'",
+            run.getId()));
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+
+    assertTrue(
+        subagentTaskRepository.settleResult(invocationId, Outcome.COMPLETED, "done", null, null));
+    assertEquals(
+        IssueReconcileOutcome.DEFERRED_PROCESSING, reconciler.reconcile(claimWork(issue.getId())));
+    assertTrue(subagentTaskRepository.markDelivered(invocationId));
+    assertEquals(
+        IssueReconcileOutcome.RUN_COMPLETED, reconciler.reconcile(claimWork(issue.getId())));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_run where id = ? and status = 'COMPLETED' and"
+                + " end_entry_id = ?",
+            run.getId(),
+            newHead));
   }
 
   /** 测试意图：存在入队命令时，reconcile 判定为在途执行尚未静止，返回 DEFERRED_PROCESSING 延后重检。 */

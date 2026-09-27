@@ -7,11 +7,11 @@
     },
     "path": {
       "type": "string",
-      "description": "Directory to search in. Required. Use '.' for the current working directory. There is no implicit default — the model must always state the search root."
+      "description": "Directory to search in. Required. There is no implicit default — the model must always state the search root. A relative value (for example '.') resolves against `workdir`; an absolute value needs no `workdir`."
     },
     "workdir": {
       "type": "string",
-      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Optional absolute directory on the target daemon's file system used to resolve a relative `path`. Required when `path` is relative; an absolute `path` may omit it, and then results are absolute paths. It is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "limit": {
       "type": "integer",
@@ -24,8 +24,7 @@
   },
   "required": [
     "pattern",
-    "path",
-    "workdir"
+    "path"
   ],
   "additionalProperties": false
 }

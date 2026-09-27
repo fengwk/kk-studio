@@ -7,11 +7,11 @@
     },
     "path": {
       "type": "string",
-      "description": "Directory or file path to search."
+      "description": "Directory or file path to search. A relative value resolves against `workdir`; an absolute value needs no `workdir`."
     },
     "workdir": {
       "type": "string",
-      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Optional absolute directory on the target daemon's file system used to resolve a relative `path`. Required when `path` is relative; an absolute `path` may omit it, and then results are absolute paths. It is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "include": {
       "type": "string",
@@ -27,7 +27,7 @@
     },
     "multiline": {
       "type": "boolean",
-      "description": "Allow matches to span multiple lines by enabling ripgrep --multiline. Defaults to false."
+      "description": "Allow a match to span multiple lines. Defaults to false."
     },
     "limit": {
       "type": "integer",
@@ -40,8 +40,7 @@
   },
   "required": [
     "pattern",
-    "path",
-    "workdir"
+    "path"
   ],
   "additionalProperties": false
 }

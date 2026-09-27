@@ -192,8 +192,25 @@ public final class OutputSpool implements AutoCloseable {
    * @param error 是否为错误退出
    */
   public EnvironmentCapabilityResult finish(boolean error) {
+    return finish(error, "");
+  }
+
+  /**
+   * 构造终态结果，并在返回文本末尾追加一条不进入捕获计数的终结说明。
+   *
+   * <p>调用方用它报告进程级收尾事实（退出码、超时、取消）：说明只出现在返回给调用方的文本里，不写入已发布的 durable 全文，也不计入 {@code totalBytes}/{@code
+   * totalLines}，因此「捕获总量」始终忠实描述进程自己的输出。
+   *
+   * @param error 是否为错误退出
+   * @param terminalNote 终结说明；空白表示不追加
+   */
+  public EnvironmentCapabilityResult finish(boolean error, String terminalNote) {
+    String note = terminalNote == null ? "" : terminalNote;
     if (!spilled) {
       String text = new String(memoryBuffer.toByteArray(), StandardCharsets.UTF_8);
+      if (!note.isEmpty()) {
+        text = text.isEmpty() || text.endsWith("\n") ? text + note : text + "\n" + note;
+      }
       if (error) {
         return new EnvironmentCapabilityResult(
             callId, List.of(new TextResultContent(text)), true, "{}");
@@ -203,6 +220,9 @@ public final class OutputSpool implements AutoCloseable {
 
     Path published = completeAndPublish();
     String preview = buildPreviewText(published);
+    if (!note.isEmpty()) {
+      preview = preview + "\n" + note;
+    }
     String detailsJson = buildDetailsJson(published);
     return new EnvironmentCapabilityResult(
         callId, List.of(new TextResultContent(preview)), error, detailsJson);

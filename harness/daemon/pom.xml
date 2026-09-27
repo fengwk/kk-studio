@@ -13,6 +13,11 @@
 
     <artifactId>kk-studio-harness-daemon</artifactId>
 
+    <properties>
+        <!-- 标准 Java LSP 客户端（JSON-RPC 分帧与协议模型）。 -->
+        <lsp4j.version>1.0.0</lsp4j.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
@@ -34,6 +39,17 @@
             <groupId>com.google.re2j</groupId>
             <artifactId>re2j</artifactId>
             <version>1.8</version>
+        </dependency>
+        <!-- 标准 Java LSP 客户端：JSON-RPC 分帧、协议模型与请求分发。 -->
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j</artifactId>
+            <version>${lsp4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j.jsonrpc</artifactId>
+            <version>${lsp4j.version}</version>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>

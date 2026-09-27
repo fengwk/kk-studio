@@ -1,6 +1,6 @@
 Run build, test, git, package-manager, move/copy, and external CLI commands.
 
-Shell: ${shell}
+Shell: the target daemon runs each command with its configured shell executable (default `bash`) in login-command mode (`bash -lc <command>`); the shell is host-configured and is not selectable per call.
 
 Usage:
 - Use `bash` for commands, not as the default way to read, search, or edit repository files.

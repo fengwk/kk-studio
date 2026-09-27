@@ -15,7 +15,7 @@ import java.util.stream.Stream;
  *
  * <ul>
  *   <li>Model/Tool 网关使用底层无界虚拟线程，但由显式 ConcurrencyAdmission 提供运行时准入限制；
- *   <li>Subagent 执行使用固定容量零队列 executor，受部署级并发配置严格约束。
+ *   <li>异步 task 不再使用逐任务阻塞线程：并发额度来自持久未结清记录。
  * </ul>
  */
 class HarnessExecutionAdmissionArchitectureTest {
@@ -31,21 +31,11 @@ class HarnessExecutionAdmissionArchitectureTest {
         Files.readString(
             root.resolve(
                 "platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/HarnessToolGatewayConfiguration.java"));
-    String runtime =
-        Files.readString(
-            root.resolve(
-                "platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/BuiltinHarnessContributorConfiguration.java"));
-
     assertTrue(
         model.contains("ConcurrencyAdmission"), "Model executor must have explicit admission");
     assertTrue(model.contains("modelExecutionAdmission"), "Model admission bean must be wired");
     assertTrue(tool.contains("ConcurrencyAdmission"), "Tool executor must have explicit admission");
     assertTrue(tool.contains("toolExecutionAdmission"), "Tool admission bean must be wired");
-    assertTrue(runtime.contains("new ThreadPoolExecutor"), "Subagent must use a fixed executor");
-    assertTrue(runtime.contains("new SynchronousQueue"), "Subagent executor must have zero queue");
-    assertTrue(
-        runtime.contains("properties.getSubagent()"), "Subagent capacity must be deployment-bound");
-    assertTrue(runtime.contains("new ThreadPoolExecutor.AbortPolicy"));
   }
 
   @Test

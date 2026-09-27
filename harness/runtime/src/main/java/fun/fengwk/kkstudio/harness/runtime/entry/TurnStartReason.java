@@ -9,5 +9,12 @@ public enum TurnStartReason {
   CONTINUATION,
 
   /** 自动对话压缩 Turn，消费零排队命令且仅承载压缩模型调用。 */
-  COMPACTION
+  COMPACTION,
+
+  /**
+   * 显式停止屏障 Turn，由 StopControl 在唯一的 Stop 事务内完整写入：唯一一条 {@code ASSISTANT_ERROR}(CANCELLED) 取消屏障 +
+   * {@code STOPPED} 且带 {@code closeRequestId} 的 TURN_END。它不消费任何 Command、从不调度模型，也不计入模型工作轮数；它的 {@code
+   * ownerThreadId} 是执行停止的 Thread，因此停止边界属于该 Thread 自己。
+   */
+  STOP
 }

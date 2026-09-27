@@ -80,6 +80,24 @@ column	harness_model_invocation	updated_at	type=timestamp(3) with time zone notn
 column	harness_session	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_session	id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_session	name	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	harness_subagent_task	agent	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	harness_subagent_task	child_session_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	child_thread_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	error	type=text notnull=f default=<null> generated= collation="default"
+column	harness_subagent_task	invocation_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	max_turns	type=integer notnull=f default=<null> generated= collation=-
+column	harness_subagent_task	outcome	type=character varying(16) notnull=f default=<null> generated= collation="default"
+column	harness_subagent_task	parent_thread_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	partial_result	type=text notnull=f default=<null> generated= collation="default"
+column	harness_subagent_task	prompt	type=text notnull=t default=<null> generated= collation="default"
+column	harness_subagent_task	reminder_turn	type=bigint notnull=t default=0 generated= collation=-
+column	harness_subagent_task	report	type=text notnull=f default=<null> generated= collation="default"
+column	harness_subagent_task	root_thread_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	settled_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
+column	harness_subagent_task	source_head_entry_id	type=uuid notnull=t default=<null> generated= collation=-
+column	harness_subagent_task	status	type=character varying(16) notnull=t default=<null> generated= collation="default"
+column	harness_subagent_task	updated_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_thread	creation_request_hash	type=character(64) notnull=t default=<null> generated= collation="default"
 column	harness_thread	head_entry_id	type=uuid notnull=t default=<null> generated= collation=-
@@ -249,6 +267,16 @@ constraint	harness_model_invocation	harness_model_invocation_stream_checkpoint_c
 constraint	harness_model_invocation	uk_harness_model_invocation_turn	UNIQUE (thread_id, turn_start_entry_id)
 constraint	harness_session	ck_harness_session_name	CHECK ((btrim((name)::text) <> ''::text))
 constraint	harness_session	harness_session_pkey	PRIMARY KEY (id)
+constraint	harness_subagent_task	ck_harness_subagent_task_agent	CHECK ((btrim((agent)::text) <> ''::text))
+constraint	harness_subagent_task	ck_harness_subagent_task_max_turns	CHECK (((max_turns IS NULL) OR (max_turns > 0)))
+constraint	harness_subagent_task	ck_harness_subagent_task_outcome	CHECK (((outcome IS NULL) OR ((outcome)::text = ANY ((ARRAY['COMPLETED'::character varying, 'ERROR'::character varying, 'CANCELLED'::character varying])::text[]))))
+constraint	harness_subagent_task	ck_harness_subagent_task_prompt	CHECK ((btrim(prompt) <> ''::text))
+constraint	harness_subagent_task	ck_harness_subagent_task_reminder_turn	CHECK ((reminder_turn >= 0))
+constraint	harness_subagent_task	ck_harness_subagent_task_state_shape	CHECK (((((status)::text = 'OPEN'::text) AND (outcome IS NULL) AND (settled_at IS NULL)) OR (((status)::text <> 'OPEN'::text) AND (outcome IS NOT NULL) AND (settled_at IS NOT NULL))))
+constraint	harness_subagent_task	ck_harness_subagent_task_status	CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'SETTLED'::character varying, 'DELIVERED'::character varying])::text[])))
+constraint	harness_subagent_task	ck_harness_subagent_task_time_order	CHECK (((updated_at >= created_at) AND ((settled_at IS NULL) OR (settled_at >= created_at))))
+constraint	harness_subagent_task	fk_harness_subagent_task_parent_thread	FOREIGN KEY (parent_thread_id) REFERENCES harness_thread(id) ON DELETE CASCADE
+constraint	harness_subagent_task	harness_subagent_task_pkey	PRIMARY KEY (invocation_id)
 constraint	harness_thread	ck_harness_thread_creation_request_hash	CHECK ((creation_request_hash ~ '^[0-9a-f]{64}$'::text))
 constraint	harness_thread	ck_harness_thread_name	CHECK ((btrim((name)::text) <> ''::text))
 constraint	harness_thread	ck_harness_thread_time_order	CHECK ((updated_at >= created_at))
@@ -375,6 +403,12 @@ index	harness_model_invocation	harness_model_invocation_pkey	CREATE UNIQUE INDEX
 index	harness_model_invocation	uk_harness_model_invocation_result	CREATE UNIQUE INDEX uk_harness_model_invocation_result ON public.harness_model_invocation USING btree (result_entry_id) WHERE (result_entry_id IS NOT NULL)
 index	harness_model_invocation	uk_harness_model_invocation_turn	CREATE UNIQUE INDEX uk_harness_model_invocation_turn ON public.harness_model_invocation USING btree (thread_id, turn_start_entry_id)
 index	harness_session	harness_session_pkey	CREATE UNIQUE INDEX harness_session_pkey ON public.harness_session USING btree (id)
+index	harness_subagent_task	harness_subagent_task_pkey	CREATE UNIQUE INDEX harness_subagent_task_pkey ON public.harness_subagent_task USING btree (invocation_id)
+index	harness_subagent_task	idx_harness_subagent_task_parent	CREATE INDEX idx_harness_subagent_task_parent ON public.harness_subagent_task USING btree (parent_thread_id)
+index	harness_subagent_task	idx_harness_subagent_task_parent_open	CREATE INDEX idx_harness_subagent_task_parent_open ON public.harness_subagent_task USING btree (parent_thread_id) WHERE ((status)::text = 'OPEN'::text)
+index	harness_subagent_task	idx_harness_subagent_task_root_open	CREATE INDEX idx_harness_subagent_task_root_open ON public.harness_subagent_task USING btree (root_thread_id) WHERE ((status)::text = 'OPEN'::text)
+index	harness_subagent_task	idx_harness_subagent_task_undelivered_scan	CREATE INDEX idx_harness_subagent_task_undelivered_scan ON public.harness_subagent_task USING btree (created_at, invocation_id) WHERE ((status)::text <> 'DELIVERED'::text)
+index	harness_subagent_task	uk_harness_subagent_task_child_open	CREATE UNIQUE INDEX uk_harness_subagent_task_child_open ON public.harness_subagent_task USING btree (child_thread_id) WHERE ((status)::text = 'OPEN'::text)
 index	harness_thread	harness_thread_pkey	CREATE UNIQUE INDEX harness_thread_pkey ON public.harness_thread USING btree (id)
 index	harness_thread	idx_harness_thread_session	CREATE INDEX idx_harness_thread_session ON public.harness_thread USING btree (session_id, created_at, id)
 index	harness_thread	uk_harness_thread_session	CREATE UNIQUE INDEX uk_harness_thread_session ON public.harness_thread USING btree (session_id, id)
@@ -412,6 +446,7 @@ table	environment_connection		preserved
 table	harness_entry		preserved
 table	harness_model_invocation		preserved
 table	harness_session		preserved
+table	harness_subagent_task		preserved
 table	harness_thread		preserved
 table	harness_thread_command		preserved
 table	harness_tool_invocation		preserved

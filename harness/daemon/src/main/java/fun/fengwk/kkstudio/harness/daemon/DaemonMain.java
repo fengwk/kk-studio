@@ -30,9 +30,9 @@ public final class DaemonMain {
 
       Local executables:
         --bash-executable <path>         bash executable for process.exec (default: bash)
-        --lsp-bridge-command <command>   LSP bridge command (default: disabled when omitted)
-        --javap-executable <path>        javap executable for class decompilation
-                                         (default: javap)
+        --lsp-config <path>              Absolute JSON file declaring the pre-installed
+                                         language servers (command, extensions, project
+                                         root markers); omitted means no LSP server
 
       Information:
         --help, -h                       Print this help and exit
@@ -47,7 +47,7 @@ public final class DaemonMain {
    * 使用 CLI 参数启动带本地 coding capabilities 的 Daemon。
    *
    * <p>权威参数：{@code --registration-token-file}、可选且唯一 {@code --note}、可选 {@code --data-dir}
-   * 与三个可选的本地执行程序参数；连接参数见 {@link DaemonConfig#fromArgs(String[])}。HELLO 携带从 {@code
+   * 与两个可选的本地执行程序参数；连接参数见 {@link DaemonConfig#fromArgs(String[])}。HELLO 携带从 {@code
    * --registration-token-file} 按需读取的凭证；若注册凭证被拒绝， 握手以终态错误结束，daemon 停止重连并以非零状态退出。
    *
    * <p>数据目录在启动期以 owner-only 权限创建并持有 {@code daemon.lock}：同一目录上的第二个 Daemon
@@ -65,10 +65,7 @@ public final class DaemonMain {
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(daemonConfig.dataDir())) {
       CodingToolsConfig toolsConfig =
           CodingToolsConfig.fromCli(
-              dataDirectory.resources(),
-              daemonConfig.bashExecutable(),
-              daemonConfig.lspBridgeCommand(),
-              daemonConfig.javapExecutable());
+              dataDirectory.resources(), daemonConfig.bashExecutable(), daemonConfig.lsp());
       DaemonRuntime runtime = DaemonRuntime.create(daemonConfig, toolsConfig, dataDirectory);
       Runtime.getRuntime().addShutdownHook(new Thread(runtime::close, "daemon-shutdown"));
       runtime.start();

@@ -68,11 +68,11 @@ erDiagram
 | Chat | `chat`、`chat_session` |
 | Canvas | `canvas_document`、`canvas_group`、`canvas_node`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
 | Project / Issue | `project`、`project_issue`、`project_issue_agent_thread`、`project_issue_stage_budget`、`project_issue_run`、`project_issue_activity`、`project_issue_work`、`project_issue_evidence` |
-| Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
+| Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work`、`harness_subagent_task` |
 | Global Storage | `storage_blob`、`storage_upload`、`session_blob_ref` |
 | Settings | 单行 `system_setting(id = 1)` |
 
-`harness_` 前缀只属于 Harness 执行协议的七张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的 37 张业务表集合与这份清单完全相等，多一张少一张都失败）。
+`harness_` 前缀覆盖 Harness 执行与异步委派的八张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的 38 张业务及基础设施表集合与这份清单完全相等，多一张少一张都失败）。
 
 ## 关键表与约束
 
@@ -213,8 +213,8 @@ Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` P
 
 测试入口：
 
-- [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 37 张业务表、快照一致性、旧对象清除与 135+ 条 SQL 探针。
-- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 37 张业务表集合精确相等、Harness 七表限定、列契约、jsonb/timestamptz 用法、无 sequence、6 个 NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
+- [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 38 张业务及基础设施表、快照一致性、旧对象清除与 135+ 条 SQL 探针。
+- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 38 张表集合精确相等、Harness 八表限定、列契约、jsonb/timestamptz 用法、无 sequence、NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
 - [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog、Canvas、Project/Issue、Chat、Environment 的 check 约束触发路径、提交后 NOTIFY payload 与 RESTRICT 删除语义。
 - [`PostgresqlStorageSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlStorageSchemaTest.java)：blob 与 upload 的非法事实、state/ref_count 不变量、ACTIVE 去重范围、FK 不级联。
 - [`PostgresqlSchemaSeedTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaSeedTest.java)：三份 seed 的幂等性、V1 默认 settings 解码、e2e seed 无凭据。

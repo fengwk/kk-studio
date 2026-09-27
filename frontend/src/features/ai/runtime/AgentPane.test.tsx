@@ -566,6 +566,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
+      processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: 'thread preview',
     }])
@@ -699,6 +700,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'MODEL_STREAMING' as const,
+      processing: true,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })
@@ -928,6 +930,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
+      processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })).toMatchObject({
@@ -1259,6 +1262,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
+      processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     }])
@@ -1959,6 +1963,264 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       })
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+  })
+
+  describe('null owner and new owner union access control barriers', () => {
+    it('defaults to bound thread target without crashing on null owner and keeps read-only state', () => {
+      // 测试意图：当 owner 未传时，不调用 ownerIdentity/访问 owner.type，避免崩溃；
+      // 目标默认为只读已知 Thread，composer 处于禁用状态。
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const { result } = renderHook(
+        () =>
+          useAgentPaneController({
+            paneId: THREAD_ID,
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>
+          ),
+        },
+      )
+
+      expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+      expect(result.current.composer.disabled).toBe(true)
+      expect(result.current.composer.onPreview).toBeUndefined()
+      expect(result.current.composer.settings).toBeUndefined()
+    })
+
+    it('enforces read-only controls on null owner: composer disabled, no preview, no settings', () => {
+      // 测试意图：null owner 必须处于只读受控状态，禁用 composer，不可预览，不暴露模型配置。
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const { result } = renderHook(
+        () =>
+          useAgentPaneController({
+            paneId: THREAD_ID,
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>
+          ),
+        },
+      )
+
+      expect(result.current.composer.disabled).toBe(true)
+      expect(result.current.composer.onPreview).toBeUndefined()
+      expect(result.current.composer.settings).toBeUndefined()
+    })
+
+    it('blocks all write and navigation attempts under null owner: onSubmit, submitGoal, selectAgent, branching and rename', async () => {
+      // 测试意图：绕开 UI 直接调用 controller 方法时，null owner 严禁任何写请求与分叉，绝不发起 batch。
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const { result } = renderHook(
+        () =>
+          useAgentPaneController({
+            paneId: THREAD_ID,
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>
+          ),
+        },
+      )
+
+      // 1. 发送消息尝试
+      act(() => {
+        result.current.composer.onSubmit([createTextPart('blocked message')])
+      })
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+
+      // 2. 提交 Goal 尝试
+      act(() => {
+        result.current.submitGoal('blocked goal')
+      })
+      expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+
+      // 3. 切换 Agent 尝试
+      act(() => {
+        result.current.selectAgent('assistant')
+      })
+      expect(result.current.error).toBe('当前受控模式不支持切换 Agent')
+
+      // 4. 分支切换与导航尝试
+      act(() => {
+        result.current.selectEntry({
+          entryId: 'e-1',
+          sessionId: 's-1',
+          parentEntryId: null,
+          entryType: 'MESSAGE',
+          payloadJson: '{}',
+          createTime: null,
+        })
+      })
+      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+
+      act(() => {
+        result.current.selectSession({
+          sessionId: 's-1',
+          name: 'Session 1',
+          createdAt: null,
+          lastActivityAt: null,
+          firstMessagePreview: null,
+          threadCount: 1,
+        })
+      })
+      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+
+      act(() => {
+        result.current.selectThread({
+          threadId: 't-2',
+          sessionId: 's-1',
+          name: 'Thread 2',
+          status: 'IDLE',
+          createdAt: null,
+          updatedAt: null,
+          headMessagePreview: null,
+        })
+      })
+      expect(result.current.error).toBe('当前受控模式不支持分支切换或分叉')
+
+      // 5. 目标切换与重命名尝试
+      expect(result.current.target.kind).toBe('BOUND_THREAD')
+      await act(async () => {
+        await result.current.submitRename('renamed-attempt')
+      })
+      expect(harnessService.renameThread).not.toHaveBeenCalled()
+    })
+
+    it('allows debug and shortcuts commands under null owner while blocking mutating commands', () => {
+      // 测试意图：null owner 保持界面历史与 debug/shortcuts 可用，但拦截 new、yolo 等写操作。
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const { result } = renderHook(
+        () =>
+          useAgentPaneController({
+            paneId: THREAD_ID,
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        {
+          wrapper: ({ children }) => (
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>
+          ),
+        },
+      )
+
+      // debug 切换正常可用
+      expect(result.current.boundViews.mode).toBe('conversation')
+      act(() => {
+        result.current.composer.onCommand(testCommand('debug'))
+      })
+      expect(result.current.boundViews.mode).toBe('debug')
+
+      // shortcuts 正常可用
+      act(() => {
+        result.current.composer.onCommand(testCommand('shortcuts'))
+      })
+      expect(result.current.interaction).toBe('shortcuts')
+
+      // new 命令被拦截，target 不变
+      act(() => {
+        result.current.composer.onCommand(testCommand('new'))
+      })
+      expect(result.current.target).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+
+      // yolo 命令被拦截，不改变状态且不调用服务端
+      act(() => {
+        result.current.composer.onCommand(testCommand('yolo'))
+      })
+      expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
+    })
+
+    it('renders AgentPane safely without owner: rename button is disabled and header renders title', async () => {
+      // 测试意图：AgentPane 接收 undefined owner 时，标题重命名按钮自动禁用，避免无保护访问 owner.type 崩溃。
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      render(
+        <QueryClientProvider client={client}>
+          <AgentPane
+            paneId={THREAD_ID}
+            agents={agents}
+            environments={[]}
+            initialTarget={{ kind: 'BOUND_THREAD', threadId: THREAD_ID }}
+            capabilities={{ readOnly: true }}
+            focused
+          />
+        </QueryClientProvider>,
+      )
+
+      await screen.findByRole('heading', { level: 2, name: 'thread-name' })
+      const renameButton = screen.getByRole('button', { name: '重命名' })
+      expect(renameButton).toBeDisabled()
+    })
+
+    it('distinguishes CHAT, ISSUE_AGENT, and null owner barrier behaviors', async () => {
+      // 测试意图：矩阵级门禁验证——CHAT 开放 preview 与 settings，ISSUE_AGENT 限制通用发送与预览，NULL 完全只读。
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+      // 1. CHAT owner (等待快照加载以就绪 draft)
+      const { result: chatResult } = renderHook(
+        () =>
+          useAgentPaneController({
+            owner: { type: 'CHAT', chatId: CHAT_ID },
+            paneId: 'p-chat',
+            initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
+      )
+      await waitFor(() => expect(chatResult.current.activeDraft).not.toBeNull())
+      expect(chatResult.current.composer.onPreview).toBeDefined()
+      expect(chatResult.current.composer.settings).toBeDefined()
+
+      // 2. ISSUE_AGENT owner
+      const { result: issueResult } = renderHook(
+        () =>
+          useAgentPaneController({
+            owner: { type: 'ISSUE_AGENT', issueId: 'issue-99', agentName: 'coder' },
+            paneId: 'p-issue',
+            initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
+      )
+      expect(issueResult.current.composer.onPreview).toBeUndefined()
+      expect(issueResult.current.composer.settings).toBeUndefined()
+
+      // 3. NULL owner
+      const { result: nullResult } = renderHook(
+        () =>
+          useAgentPaneController({
+            paneId: 'p-null',
+            initialTarget: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+            agents,
+            environments: [],
+            defaults: {},
+            focused: false,
+          }),
+        { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
+      )
+      expect(nullResult.current.composer.disabled).toBe(true)
+      expect(nullResult.current.composer.onPreview).toBeUndefined()
+      expect(nullResult.current.composer.settings).toBeUndefined()
     })
   })
 })

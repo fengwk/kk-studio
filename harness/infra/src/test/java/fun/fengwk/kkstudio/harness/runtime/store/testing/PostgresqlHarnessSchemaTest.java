@@ -16,12 +16,18 @@ import java.util.UUID;
 
 class PostgresqlHarnessSchemaTest {
 
-  /** Harness runtime 协议恰好七张表；业务表不使用 harness_ 前缀，因此 {@code harness_%} 全量查询结果必须精确等于该七表。 */
+  /**
+   * Harness runtime 协议恰好八张表；业务表不使用 harness_ 前缀，因此 {@code harness_%} 全量查询结果必须精确等于该八表。
+   *
+   * <p>{@code harness_subagent_task} 是异步 task 委派的持久事实（接受、终态与父通知状态由 runtime store 事务驱动）， 因此同样属于
+   * runtime 协议空间。
+   */
   private static final List<String> RUNTIME_TABLES =
       List.of(
           "harness_entry",
           "harness_model_invocation",
           "harness_session",
+          "harness_subagent_task",
           "harness_thread",
           "harness_thread_command",
           "harness_tool_invocation",
@@ -36,7 +42,7 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void schemaContainsExactlyTheSevenHarnessTables() {
+  void schemaContainsExactlyTheEightHarnessTables() {
     // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间。
     List<String> tables =
         jdbc.queryForList(
@@ -80,7 +86,7 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void everyStructuredDurablePayloadUsesJsonb() {
-    // 只统计七张 runtime 表的 jsonb 列：session_blob_ref 无结构化载荷，不应出现。
+    // 只统计 runtime 协议表的 jsonb 列：session_blob_ref 无结构化载荷，不应出现。
     List<String> jsonbColumns =
         jdbc.queryForList(
             """
@@ -129,6 +135,10 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "idx_harness_entry_parent",
+            "idx_harness_subagent_task_parent",
+            "idx_harness_subagent_task_parent_open",
+            "idx_harness_subagent_task_root_open",
+            "idx_harness_subagent_task_undelivered_scan",
             "idx_harness_thread_command_queued",
             "idx_harness_thread_command_stop_request",
             "idx_harness_thread_session",
@@ -140,6 +150,7 @@ class PostgresqlHarnessSchemaTest {
             "uk_harness_entry_single_root",
             "uk_harness_model_invocation_result",
             "uk_harness_model_invocation_turn",
+            "uk_harness_subagent_task_child_open",
             "uk_harness_thread_command_idempotency",
             "uk_harness_thread_session",
             "uk_harness_tool_invocation_call_index"),

@@ -30,9 +30,9 @@ capabilityId / capabilityVersion / inputSchema / defaultTimeout
 | `process.exec` | 5 分钟 | 必填 | `bash` |
 | `fs.grep` | 1 分钟 | 必填 | `grep` |
 | `fs.find` | 1 分钟 | 必填 | `find` |
-| `lsp.goto-definition` | 2 分钟 | 必填 | `lsp_goto_definition` |
-| `lsp.workspace-symbols` | 2 分钟 | 必填 | `lsp_workspace_symbols` |
-| `lsp.java-decompile` | 2 分钟 | 必填 | `lsp_java_decompile` |
+| `lsp.goto-definition` | 2 分钟 | 相对 path 时需要 | `lsp_goto_definition` |
+| `lsp.workspace-symbols` | 2 分钟 | 相对 path 时需要 | `lsp_workspace_symbols` |
+| `lsp.java-decompile` | 2 分钟 | 相对 path 或 target 时需要 | `lsp_java_decompile` |
 | `skill.sync` | 5 分钟 | 无 | 内部控制面 |
 
 `skill.sync` 只由 Platform 调用，其余 9 项由 Contributor 映射为模型工具；底层 catalog
@@ -43,9 +43,11 @@ capabilityId / capabilityVersion / inputSchema / defaultTimeout
 capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityId.java)
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
-各能力的 arguments schema 是冻结的 classpath 资源。`fs.read` 只在 path 相对时要求
-`workdir`，绝对 path 可直接执行；其余模型可见能力要求每次显式提供绝对 `workdir`；
-`skill.sync` 不接受 workdir。
+各能力的 arguments schema 是冻结的 classpath 资源。`fs.read` 与三个 `lsp.*` 能力只在给出的
+path 相对时要求 `workdir`（`lsp.java-decompile` 对相对 `target` 同样如此），绝对 path 可直接执行；
+`fs.write`、`fs.edit`、`process.exec`、`fs.grep`、`fs.find` 要求每次显式提供绝对 `workdir`；
+`skill.sync` 不接受 workdir。提供 `workdir` 时它仍必须是目标 Daemon 文件系统上的绝对现存目录，
+绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
 能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据相同的能力标识与版本注册本地实现。能力标识未知或版本不匹配都是确定性的协议错误，没有回退路径。
 
@@ -80,6 +82,17 @@ EnvironmentCapabilityExecutionHandle invoke(
 | [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) | 请求可能已被远端接收且可能已产生副作用，调用方必须停止自动重放 |
 
 拿到执行句柄后，事件严格遵循 `PROGRESS* -> exactly one terminal`：远端 `FAILED` 与 `CANCELLED` 分别转换为 [`EnvironmentCapabilityFailedException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityFailedException.java) 与 [`EnvironmentCapabilityCancelledException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCancelledException.java) 交给监听器。终态产生后到达的事件一律丢弃，取消指令直接透传给底层句柄。
+
+[`EnvironmentCapabilityExecutionHandle`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionHandle.java) 是执行收尾的窄契约：
+
+```java
+void cancel();
+boolean isCancelled();
+default void terminate(EnvironmentCapabilityTerminationCause cause) { cancel(); }
+default Duration terminationGrace() { return Duration.ZERO; }
+```
+
+`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。`terminationGrace()` 默认 `ZERO`（收尾立即由调用方裁决）；返回正数的能力承诺在该预算内自行提交终态，使 Daemon 能把终态提交让给它以携带失败日志，预算到期仍由调用方兜底收敛，见 [Harness Daemon 的超时与取消收尾](harness-daemon.md#超时与取消收尾)。
 
 能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8）。错误结果可以只带文本，也可以带稳定错误码，目前唯一冻结的码是 `RESOURCE_CHANGED`（见 [`EnvironmentCapabilityResultCodes`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResultCodes.java)），用于精确 revision 已不可用的场景；码值形如 `[A-Z][A-Z0-9_]*`。
 

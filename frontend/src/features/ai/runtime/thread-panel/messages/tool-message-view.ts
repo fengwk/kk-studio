@@ -2,7 +2,6 @@ import {
   formatToolCallLinePreview,
   formatToolCallSummary,
   formatToolResultPreview,
-  shouldSuppressTransientToolResult,
   type ToolCallSummary,
 } from '@/features/ai/runtime/thread-panel/messages/tool-display'
 import {
@@ -139,21 +138,12 @@ function shouldRenderResult(
   if (customRenderer && !hasDurableResult) {
     return false
   }
-  const hasPartial = Boolean(context.partial?.trim())
   const text = currentToolResultText(context)
   const attachments = context.partialAttachments?.length
     ? context.partialAttachments
     : context.attachments
   if (hasToolResultError(context) || attachments.length > 0) {
     return true
-  }
-  if (
-    !customRenderer
-    && !hasDurableResult
-    && hasPartial
-    && shouldSuppressTransientToolResult(context.toolName, text)
-  ) {
-    return false
   }
   if (expanded) {
     return hasDurableResult || text.trim().length > 0

@@ -38,7 +38,7 @@ export function AgentPane({
   onSubmitInstruction,
   onStop,
 }: {
-  owner: AgentRuntimeOwnerDTO
+  owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
   environments?: EnvironmentCardDTO[]
@@ -91,7 +91,6 @@ export function AgentPane({
         composer={{ ...pane.composer, interactionPanel }}
         activity={{
           working: pane.controller.working,
-          onDecideTaskApproval: pane.onDecideTaskApproval,
           actionError: pane.error,
           onDismissActionError,
         }}
@@ -172,7 +171,7 @@ export function AgentPane({
           className="agent-pane-thread-rename"
           aria-label={t('ai.runtime.rename.titleAria')}
           title={t('ai.runtime.rename.titleAria')}
-          disabled={owner.type === 'ISSUE_AGENT' || name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
+          disabled={!owner || owner.type === 'ISSUE_AGENT' || name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
           onClick={() => {
             if (name != null && pane.target.kind === 'BOUND_THREAD') {
               pane.renameThread(pane.target.threadId, name)

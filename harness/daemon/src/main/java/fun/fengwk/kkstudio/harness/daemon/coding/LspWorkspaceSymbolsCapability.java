@@ -10,27 +10,31 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
-/** 通过可选的本机 LSP bridge 搜索 workspace symbols。 */
+/**
+ * 通过 Daemon 管理的 LSP 客户端搜索 workspace symbols。 绝对 {@code path} 不需要 workdir；只有相对 {@code path}
+ * 必须由本次调用显式给出绝对 workdir。
+ */
 public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapability {
 
   private static final int DEFAULT_LIMIT = 50;
   private static final int MAX_LIMIT = 500;
 
-  private final LspBridge bridge;
+  private final LspService lsp;
 
-  public LspWorkspaceSymbolsCapability(CodingToolsConfig config, ExecutorService executor) {
+  public LspWorkspaceSymbolsCapability(
+      CodingToolsConfig config, LspService lsp, ExecutorService executor) {
     super(
         config,
         executor,
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS));
-    this.bridge = new LspBridge(config);
+    this.lsp = lsp;
   }
 
   @Override
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    Path workdir = optionalWorkdir(args);
     Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     String query = string(args, "query");
     if (query.isBlank()) {
@@ -43,12 +47,7 @@ public final class LspWorkspaceSymbolsCapability extends AbstractCodingCapabilit
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
-    if (!bridge.bridgeAvailable()) {
-      throw new IllegalStateException(LspBridge.UNAVAILABLE_MESSAGE);
-    }
     return success(
-        request.call().id(),
-        bridge.workspaceSymbols(
-            workdir, path, query, limit, request.timeout(), execution::isCancelled));
+        request.call().id(), lsp.workspaceSymbols(path, query, limit, request.timeout()));
   }
 }

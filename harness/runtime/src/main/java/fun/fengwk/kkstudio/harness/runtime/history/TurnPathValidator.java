@@ -25,14 +25,17 @@ import java.util.UUID;
  * USER/CUSTOM；CONTINUATION turn 偿还上一 TURN_END 的 continueModel obligation，不消费 USER/CUSTOM（配置
  * Commands 只体现在 TURN_START.settings），可零 input 直接产生 Assistant 结果；COMPACTION turn 消费零 Command、绝不出现
  * USER/CUSTOM MESSAGE，成功结果只能是 COMPACTION payload （普通 turn 绝不包含它），失败/停止可复用 ASSISTANT_ERROR /
- * ASSISTANT_ABORTED barrier 且无需 USER input； Assistant 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR /
- * ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带
- * ToolCall 的 ASSISTANT MESSAGE，且必须是 callIndex 0 开始的严格前缀（callIndex 连续、toolCallId/toolName
- * 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome
- * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap、complete
- * OVERFLOW recovery 与 active continuation 前的 complete THRESHOLD compaction 必须 {@code
- * continueModel=true}，其它 compaction 必须 false；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop
- * barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase关闭）。路径可以在任意 prefix 截断。
+ * ASSISTANT_ABORTED barrier 且无需 USER input；STOP turn 是显式停止的持久屏障（不是模型工作轮），只允许唯一一条
+ * ASSISTANT_ERROR(CANCELLED) 取消屏障及其后 {@code continueModel=false}、{@code closeRequestId} 非 null 的
+ * STOPPED TURN_END，绝不出现 USER/CUSTOM MESSAGE、真实 Assistant 结果、Tool 结果、ModelAttemptFailure 或
+ * COMPACTION 载荷； Assistant 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR / ASSISTANT_ABORTED /
+ * COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带 ToolCall 的 ASSISTANT
+ * MESSAGE，且必须是 callIndex 0 开始的严格前缀（callIndex 连续、toolCallId/toolName 匹配、assistantEntryId 等于该
+ * Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome 校验前置条件（COMPLETED 必须已有
+ * ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap、complete OVERFLOW recovery 与
+ * active continuation 前的 complete THRESHOLD compaction 必须 {@code continueModel=true}，其它 compaction
+ * 必须 false；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop barrier/Assistant 且 ToolResult
+ * 完整；CANCELLED 可在任意 open phase关闭）。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
 
@@ -80,6 +83,10 @@ final class TurnPathValidator {
     if (openTurnStart == null) {
       throw new IllegalArgumentException(
           entry.payload().type() + " entry must be inside an open TURN_START");
+    }
+    if (openReason == TurnStartReason.STOP) {
+      visitStopTurn(entry, payload);
+      return;
     }
     if (payload instanceof ModelAttemptFailurePayload failure) {
       if (openReason == TurnStartReason.COMPACTION) {
@@ -252,6 +259,65 @@ final class TurnPathValidator {
     assistantSeen = true;
     assistantResultEntry = entry;
     requireInput("an assistant result");
+  }
+
+  /**
+   * STOP turn 的严格形状：显式停止的持久屏障，不是模型工作轮。
+   *
+   * <p>只允许唯一一条 ASSISTANT_ERROR(CANCELLED) 取消屏障，及其后 {@code continueModel=false}、{@code
+   * closeRequestId} 非 null 的 STOPPED TURN_END；USER/CUSTOM MESSAGE、真实 Assistant 结果、Tool 结果、
+   * ModelAttemptFailure、ASSISTANT_ABORTED、COMPACTION 载荷与其它 outcome（含 COMPLETED/FAILED）一律拒绝。 既有的
+   * INPUT/CONTINUATION/COMPACTION 约束不因 STOP 而放宽。
+   */
+  private void visitStopTurn(Entry entry, EntryPayload payload) {
+    // 不校验 provider replay state：Entry 不变式只允许它出现在 ASSISTANT MESSAGE 上，而本 turn 拒绝一切
+    // ASSISTANT MESSAGE，因此 STOP turn 在结构上不可能携带 replay state。
+    if (payload instanceof TurnEndPayload end) {
+      if (!end.turnStartEntryId().equals(openTurnStart.id())) {
+        throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
+      }
+      if (end.outcome() != TurnEndOutcome.STOPPED
+          || end.continueModel()
+          || end.closeRequestId() == null) {
+        throw new IllegalArgumentException(
+            "STOP turns require a STOPPED outcome with continueModel=false and a closeRequestId");
+      }
+      if (!(assistantResultEntry != null
+          && assistantResultEntry.payload() instanceof AssistantErrorPayload barrier)) {
+        throw new IllegalArgumentException(
+            "stopped turns require a stop barrier or assistant result");
+      }
+      requireCancelBarrier(barrier);
+      requireCompleteToolResults("stopped");
+      // 显式停止后没有待偿还的模型义务。
+      pendingContinuationOwnerThreadId = null;
+      openTurnStart = null;
+      openOwnerThreadId = null;
+      return;
+    }
+    if (payload instanceof AssistantErrorPayload barrier) {
+      if (assistantSeen) {
+        throw new IllegalArgumentException("assistant result must not repeat");
+      }
+      requireCancelBarrier(barrier);
+      assistantSeen = true;
+      assistantResultEntry = entry;
+      return;
+    }
+    throw new IllegalArgumentException(
+        "STOP turns may only contain one ASSISTANT_ERROR cancel barrier and their STOPPED TURN_END, not "
+            + payload.type());
+  }
+
+  /** STOP barrier 必须是稳定 CANCELLED code；其它 error code 属于模型失败，不属于显式停止。 */
+  private static void requireCancelBarrier(AssistantErrorPayload barrier) {
+    if (!AssistantError.CANCELLED_CODE.equals(barrier.error().code())) {
+      throw new IllegalArgumentException(
+          "STOP barrier error code must be "
+              + AssistantError.CANCELLED_CODE
+              + " but was "
+              + barrier.error().code());
+    }
   }
 
   private void requireInput(String context) {

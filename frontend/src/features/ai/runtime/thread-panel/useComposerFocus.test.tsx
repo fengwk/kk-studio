@@ -410,4 +410,101 @@ describe('useComposerFocus', () => {
     await Promise.resolve()
     expect(onLeaveRegion).not.toHaveBeenCalled()
   })
+
+  // 测试意图：排队的恢复不能覆盖用户明确转移到区域外控件的焦点。
+  it('cancels scheduled focus when the user focuses an outside control', async () => {
+    vi.useFakeTimers()
+    try {
+      const onLeaveRegion = vi.fn()
+      render(<Harness onLeaveRegion={onLeaveRegion} />)
+      screen.getByLabelText('给 AI 发送消息').focus()
+      fireEvent.click(screen.getByRole('button', { name: 'focus composer' }))
+      const outside = screen.getByRole('button', { name: 'outside' })
+      outside.focus()
+      await Promise.resolve()
+      vi.advanceTimersByTime(16)
+      expect(outside).toHaveFocus()
+      expect(onLeaveRegion).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 测试意图：验证浏览器中 DOM 节点移除（如菜单切换、选项卸载）时派发的 focusout（relatedTarget 为 null 且 activeElement 回退到 body）
+  // 不会误判定为用户主动离开 Composer 区域，不会错误触发 onLeaveRegion，也不会清除正在排队的聚焦定时器。
+  it('distinguishes disconnected node focusout from true external blur and preserves scheduled focus', async () => {
+    vi.useFakeTimers()
+    try {
+      const onLeaveRegion = vi.fn()
+      render(
+        <Harness
+          onLeaveRegion={onLeaveRegion}
+          renderChild={() => <button type="button" data-testid="temp-option">Temporary Option</button>}
+        />,
+      )
+      const editor = screen.getByLabelText('给 AI 发送消息')
+      const option = screen.getByTestId('temp-option')
+
+      // 子节点聚焦
+      option.focus()
+      expect(document.activeElement).toBe(option)
+
+      // 通过外层 Harness 触发 focusComposer
+      fireEvent.click(screen.getByRole('button', { name: 'focus composer' }))
+
+      // 模拟选项被从 DOM 移除并派发 focusout（relatedTarget: null，activeElement 回退为 body）
+      const focusOutEvent = new FocusEvent('focusout', {
+        bubbles: true,
+        cancelable: true,
+        relatedTarget: null,
+      })
+      option.dispatchEvent(focusOutEvent)
+      option.remove()
+      expect(option.isConnected).toBe(false)
+
+      // 执行微任务队列
+      await Promise.resolve()
+
+      // 微任务不应调用 onLeaveRegion，排队中的聚焦定时器必须保留
+      expect(onLeaveRegion).not.toHaveBeenCalled()
+
+      // 推进宏任务，Composer 成功获得焦点
+      vi.advanceTimersByTime(16)
+      expect(document.activeElement).toBe(editor)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // 测试意图：验证当 active 处于 false 期间（例如 interactionPanel 打开），节点失焦不会冲刷 restoreFocus 意图；
+  // 重新切回 active=true 时能够基于最新的 active 状态恢复焦点，不受旧闭包捕获的影响。
+  it('preserves restoreFocus when inactive and safely focuses upon reactivation', async () => {
+    vi.useFakeTimers()
+    try {
+      const onLeaveRegion = vi.fn()
+      const { rerender } = render(<Harness active onLeaveRegion={onLeaveRegion} />)
+      const editor = screen.getByLabelText('给 AI 发送消息')
+
+      // 切换为 inactive（由 interactionPanel 接管）
+      rerender(<Harness active={false} onLeaveRegion={onLeaveRegion} />)
+
+      // 模拟 inactive 导致的 focusout，relatedTarget 为 null
+      const focusOutEvent = new FocusEvent('focusout', {
+        bubbles: true,
+        cancelable: true,
+        relatedTarget: null,
+      })
+      editor.dispatchEvent(focusOutEvent)
+      await Promise.resolve()
+
+      // 重新切回 active=true，应自动恢复焦点
+      rerender(<Harness active onLeaveRegion={onLeaveRegion} />)
+      expect(vi.getTimerCount()).toBe(1)
+      vi.advanceTimersByTime(0)
+
+      expect(document.activeElement).toBe(editor)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

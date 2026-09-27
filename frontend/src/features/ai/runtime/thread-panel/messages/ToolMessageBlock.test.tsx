@@ -771,30 +771,6 @@ describe('ToolMessageBlock', () => {
     expect(screen.queryByText('streaming answer')).not.toBeInTheDocument()
   })
 
-  it('does not expose raw task.status heartbeats when the task renderer is unavailable', () => {
-    const { container } = render(
-      <ToolMessageBlock
-        message={message({
-          phase: 'call',
-          toolName: 'task',
-          rendererKey: 'task',
-          status: 'streaming',
-          arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
-          partial:
-            '{"kind":"task.status","subagentType":"explorer","state":"running_model"}',
-        })}
-      />,
-    )
-
-    expect(container.querySelector('.thread-tool-header')).toHaveAttribute(
-      'title',
-      'task explorer',
-    )
-    expect(screen.queryByRole('button', { name: '展开工具预览' })).not.toBeInTheDocument()
-    expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
-    expect(document.querySelector('.thread-tool-result-body')).not.toBeInTheDocument()
-  })
-
   it('overlays partial text over durable result text', () => {
     const { container } = render(
       <ToolMessageBlock

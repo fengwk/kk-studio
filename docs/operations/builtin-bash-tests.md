@@ -1,0 +1,251 @@
+# 内置 Bash 测试映射
+
+这份文档回答两个问题：`bash` 工具的行为在 kk-studio 里由哪些自动化测试承接，以及 pi-base 的
+bash 测试用例逐条对应到哪里、哪一条有意不迁移。
+
+事实源是仓库里的测试代码本身；本文只记录映射关系与已验证的边界，不重复测试断言内容。
+
+## 先建立心智模型：三层拆分
+
+pi-base 的 bash 测试集中在单个工具的进程执行、输出裁剪与 TUI 渲染上；kk-studio 把同一批行为拆到三个层次，
+每层有独立的终态与错误语义，因此一个 pi-base 测试文件会映射到多个 Java 测试类：
+
+| 层次 | 代码 | 负责的事实 | 主要测试类 |
+| --- | --- | --- | --- |
+| 命令执行与捕获 | [`BashCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapability.java)、[`ProcessTree`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessTree.java) | 合并 stdout/stderr、按阈值落盘、超时/取消/退出三种收尾、进程树终止 | `BashCapabilityTest`、`ProcessTreeTest`、`OutputSpoolTest`、`TextOutputStoreTest` |
+| 输出裁剪与发布 | [`OutputSpool`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpool.java)、[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java) | 内联/落盘阈值、精确字节与行计数、有界预览、中转文件发布 | `OutputSpoolTest`、`TextOutputStoreTest` |
+| 协议与终态仲裁 | [`DaemonRuntime`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntime.java) | 超时/取消裁决、终态唯一性、重放、收尾窗口（携带已捕获输出） | `DaemonRuntimeTest` |
+| 模型可见契约 | [`bash.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/environment/prompts/bash.md)、`process.exec` schema | 工具提示词、workdir 必填、超时解析 | `BuiltinHarnessContributorTest`、`CodingCapabilitiesTest` |
+
+pi-base 里属于 TUI 渲染、工具集管理与终端交互的用例在 kk-studio 没有对应层（kk-studio 的渲染与工具选择由
+Backend/Frontend 承担），下表中标记为「不迁移」。
+
+## 运行方式
+
+从仓库根目录执行，用 JDK 21：
+
+```bash
+# bash 内核：进程执行、终止、输出裁剪
+env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/daemon -am test \
+  -Dtest='BashCapabilityTest,ProcessTreeTest,OutputSpoolTest,TextOutputStoreTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+# 协议与终态仲裁（含超时/取消收尾窗口）
+env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/daemon -am test \
+  -Dtest='DaemonRuntimeTest' -Dsurefire.failIfNoSpecifiedTests=false
+
+# 模型可见契约（bash 提示词、workdir、超时）
+env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/builtin -am test \
+  -Dtest='BuiltinHarnessContributorTest' -Dsurefire.failIfNoSpecifiedTests=false
+
+# 权限面分析（命令分段、候选与 unsupported 原因）
+env JAVA_HOME=$JAVA_HOME_21 mvn -o -pl harness/runtime -am test \
+  -Dtest='BashSurfaceAnalyzerTest,BashSurfaceAnalyzerCoverageTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+`bash` 的端到端运行路径（真实 Daemon + Platform 调用）由 E2E 矩阵的 L1 API 用例覆盖，入口见
+[开发与测试](development-and-testing.md)。
+
+## tests/bash-operations.test.ts（7 例）
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `captures stdout and stderr while returning the shell exit code` | `BashCapabilityTest.exitOutcomesCarryAuthoritativeExitCode` | kk-studio 用 `redirectErrorStream` 合并两路到同一捕获流，因此不存在单独的 stderr 通道；退出码仍是权威事实 |
+| `reports signal terminations as 128 + signal number`（POSIX） | 不迁移 | 有意差异：kk-studio 不用 `128+N` 合成退出码，而是用 `detailsJson.process.outcome` 的 `EXITED`/`TIMED_OUT`/`CANCELLED` 显式表达去向，被杀进程不报告 `exitCode` |
+| `rejects with a timeout marker when the shell exceeds the requested timeout` | `BashCapabilityTest.timeoutKeepsCapturedOutputWithoutLeavingStagingResidue`、`DaemonRuntimeTest.timeoutHandoffDeliversCapturedOutputInFailedTerminal` | 超时同时是能力内的进程收尾与运行时侧的 `FAILED` 终态 |
+| `rejects timer-overflow timeouts before launching a shell` | `DaemonRuntimeTest.acceptsMaximumWireTimeoutWithoutOverflowingScheduler`、`usesWireTimeoutVerbatimWithoutDescriptorFallback`、`zeroTimeoutMeansNoDeadlineAndIsNotAnImmediateTimeout` | `deadlineNanos` 溢出收敛为「实际上无 deadline」，绝不退化成立即超时 |
+| `rejects when the caller aborts a running shell command` | `BashCapabilityTest.cancellationKeepsCapturedOutputAndIsIdempotent`、`DaemonRuntimeTest.cancelHandoffDeliversCapturedOutputInCancelledTerminal` | 取消同样保留已捕获输出，且只回调一次 |
+| `does not launch a shell when the caller is already aborted` | `BashCapabilityTest.preCancelledCallDoesNotStartShellOrTouchStore`、`preTimedOutCallDoesNotStartShellOrTouchStore` | 取消与超时在启动前就已生效时不启动 shell、不创建任何本地文件，也不产生命令副作用；协议层另有 `DaemonRuntimeTest` 拦截陈旧调用 |
+| `writes commands to stdin when the shell configuration requires stdin transport` | 不迁移 | kk-studio 只以 `bash -lc <command>` 传递命令，`CodingToolsConfig` 没有 stdin 传输模式；能力不写 stdin，只立即关闭写端，该语义由 `BashCapabilityTest.closesStdinSoCommandsWaitingForEofFinishNaturally` 覆盖 |
+
+## tests/process-termination.test.ts（4 例）
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `lets child processes handle SIGTERM before a force kill` | `ProcessTreeTest.terminatesGracefullyBeforeForcing` | 先 `destroy()`，命中不了再强制 |
+| `sends SIGTERM once, force-kills later, and cleanup cancels pending force kill` | `ProcessTreeTest.repeatedTerminationOfExitedAndNullHandlesIsNoOp`、`concurrentTerminationIsIdempotentAndConverges` | 幂等由 `ProcessTree` 的快照与终态收敛保证：重复终止、并发终止与 `null` 句柄都是空操作 |
+| `keeps process-tree escalation armed after the leader exits`（POSIX） | `ProcessTreeTest.forceConvergesDescendantsThatOutliveTheirLeader`、`terminatesDescendantsThatIgnoreSoftTermination` | kk-studio 在发信号前先快照后代：leader 退出后 `descendants()` 无法再发现孤儿，因此快照是升级到强制的唯一依据 |
+| `does not signal a child that already exited` | `ProcessTreeTest.doesNotSignalAlreadyExitedProcess`、`repeatedTerminationOfExitedAndNullHandlesIsNoOp`、`BashCapabilityTest.startFailureIsReportedWithoutStagingResidue` | 真实已退出进程与进程探针都验证「不发温和信号、不发强制信号」；无进程（`process == null`）同样收敛为空操作 |
+
+## tests/process-termination-windows.test.ts（2 例）
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `keeps Windows process-tree escalation armed after the leader exits` | 部分迁移：`ProcessTreeTest.forceConvergesDescendantsThatOutliveTheirLeader`、`concurrentTerminationIsIdempotentAndConverges`（跨平台执行） | 差异：kk-studio 不调用 `taskkill /T`，而是对预快照的整棵进程树逐个 `destroyForcibly()`；**Windows 上的这条路径没有本机验证证据**，见「已知缺口」 |
+| `falls back to SIGKILL for single-process force termination` | `ProcessTreeTest.terminatesGracefullyBeforeForcing`、`BashCapabilityTest.timeoutTerminatesWholeProcessTree` | 单进程与整树的强制收敛共用同一实现，平台差异只在 `ProcessHandle` 的能力上 |
+
+## tests/bash-renderer-behavior.test.ts（5 例）
+
+这 5 例断言的是 TUI 渲染层的呈现细节（渲染器选择、计时文案、折叠与展开提示）。kk-studio 的渲染由
+Frontend 承担，daemon 只交付终态结果文本，因此逐条不迁移；其中与内核相关的部分（终态说明、有界预览）
+由下表右列的内核测试承接，不用 Java 断言伪造渲染文案。
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `renders concise calls without default workdir noise and with timeout` | 不迁移 | 调用行渲染属于 TUI；workdir 在 kk-studio 是每次调用必填参数，没有「默认 workdir」需要隐藏 |
+| `falls back to the pi-base renderer when an injected builtin renderer throws` | 不迁移 | 渲染器回退链是 TUI 装配；daemon 侧没有渲染器注入点 |
+| `shows elapsed timing in partial renders and final timing in completed renders` | 不迁移（内核事实：`BashCapabilityTest.timeoutTerminatesWholeProcessTree` 只证明 live partial 与带终态说明的终态结果存在） | 计时文案本身由 Frontend 生成：能力不产出「已耗时/总耗时」这类呈现文本 |
+| `shows a bounded error tail when successful Bash previews are disabled` | 不迁移（承接内核事实：`OutputSpoolTest.previewIsBoundedAndMarksTheOmittedMiddle`） | 折叠行数策略属于 TUI；「有界预览 + 省略说明」的内核事实由 `OutputSpool` 测试承接 |
+| `does not offer expansion when a disabled Bash preview shows the complete error` | 不迁移 | 展开提示是否出现是渲染决策，不是结果内容 |
+
+## tests/tool-output.test.ts（18 例）
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `returns small text output unchanged` | `OutputSpoolTest.staysInlineUnderLimitsAndPreservesErrorFlag` | 阈值内不落盘、不改写正文 |
+| `leaves non-text outputs unchanged` | 不迁移 | `OutputSpool` 只承载文本；二进制/资源内容由各自 capability 的结果形状保证，不流经 bash 捕获路径 |
+| `truncates large text output, preserves attachments, and writes the full output` | `OutputSpoolTest.spillsOnByteThresholdAndPublishesTextResultContentWithPath`、`spillsOnLineThresholdAndKeepsLocalFullText`、`closeRemovesUnpublishedStagingFileOnly` | 「附件保留」不迁移：kk-studio 的截断只发生在单一合并文本流上 |
+| `recreates private storage if its cached directory is removed externally` | 不迁移（已知差异） | `TextOutputStore` 在构造期创建并收紧权限的私有目录；目录被外部删除时 kk-studio 降级为有界预览，不自我修复。降级路径由 `OutputSpoolTest.localStorageFailureDegradesToBoundedPreviewWithoutThrowing` 覆盖 |
+| `keeps a bounded preview when temporary full-output storage is unavailable` | `OutputSpoolTest.localStorageFailureDegradesToBoundedPreviewWithoutThrowing`、`storageFailureLeavesNoResidualFilesAndNeverThrows`、`publishFailureDegradesToPreviewAndRemovesStagingFile`、`publishFailurePreviewStillReportsCaptureTruncation` | 中转文件创建失败与 durable 发布失败都返回无路径的有界预览，绝不因此让调用失败，也不残留中转文件 |
+| `retries private directory creation after a transient failure in the same TMPDIR` | 不迁移（已知差异） | 单次调用内不重试：捕获失败即降级为预览，下一次调用重新构造存储 |
+| `preserves original item order when truncation happens in a later text block` | 不迁移 | 没有多段 content 的顺序模型；bash 只产生一条合并文本 |
+| `respects already-truncated upstream output without writing pi-base-truncation files` | `OutputSpoolTest.spillsOnByteThresholdAndPublishesTextResultContentWithPath` | 差异：kk-studio 没有「上游已截断」概念，落盘与内联预览由同一套阈值一次性决定，不存在二次截断 |
+| `preserves upstream bash truncation fields so renderer warnings stay accurate` | `BashCapabilityTest.timeoutPublishesSpilledOutputAndKeepsCountsFaithful`、`OutputSpoolTest.captureBudgetStopsFileCaptureWithoutFailingTheCall` | 机器可判定事实改为 `detailsJson.textOutput`（`path`/`captureTruncated`/`totalBytes`/`totalLines`）；渲染层告警不迁移 |
+| `recognizes structured bash truncation for an oversized single-line preview` | `OutputSpoolTest.previewIsBoundedAndMarksTheOmittedMiddle`、`handlesSingleByteAndBoundsChecks`、`previewCutsAtCharacterBoundaryWithoutReplacementCharacters` | 单行超长的有界预览与 UTF-8 边界 |
+| `counts CR-only output toward the final line limit` | `OutputSpoolTest.lineCountingMatchesTextStreamsForCrLfAndCrlf`、`countsPhysicalLinesAccurately` | 行计数与 Java 文本流一致 |
+| `marks already-truncated long-line output even when below pi-base size limits` | 不迁移 | 无渲染层推断 |
+| `reapplies the final limit to oversized upstream-truncated previews` | `OutputSpoolTest.previewIsBoundedAndMarksTheOmittedMiddle` | 预览始终受内联预算约束，但不存在「对已截断预览再截断」的两段式流程 |
+| `recognizes grep's native truncation metadata as upstream truncation` | 不迁移到 bash | grep 自己的截断语义由 `FindGrepCapabilitiesTest.grepMatchCenteredExcerptForLongLines`、`grepSpoolsLargeResultsToBoundedTextResultWithPath` 承接 |
+| `respects find's own truncation metadata instead of truncating the truncated preview again` | 不迁移到 bash | 由 `FindGrepCapabilitiesTest.findSpoolsLargeResultsToBoundedTextResultWithPath` 承接 |
+| `does not infer read/grep truncation from ordinary content without explicit metadata` | 不迁移 | kk-studio 不按文本字面量推断截断，因此没有对应实现 |
+| `does not treat ordinary text as upstream truncation just because it mentions generic limit words` | 不迁移 | 同上 |
+| `tool_result truncation applies to tools outside pi-base registrations` | 不迁移 | pi-base 的 `tool_result` 全局钩子层在 kk-studio 不存在：截断由每个 capability 自己决定 |
+
+## tests/bash-index.test.ts（28 例）
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `describes shell selection and host shell startup options` | `BuiltinHarnessContributorTest.bashPromptDescribesConfiguredShellWithoutTemplatePlaceholders` | 提示词必须说明 shell 由宿主配置、不可按调用选择；per-platform shell 标签与 rc 前缀不迁移 |
+| `maps timeout_seconds to builtin bash timeout` | `DaemonRuntimeTest.usesWireTimeoutVerbatimWithoutDescriptorFallback` | platform 解析后的有效超时随 INVOKE 原样传给能力 |
+| `applies the default bash timeout when timeout_seconds is omitted` | `DaemonRuntimeTest.explicitTimeoutMayExceedDescriptorDefault`、`BuiltinHarnessContributorTest.catalogFreezesExactInventoryOf12ToolsAndAssociatedCapabilities` | 默认超时来自 capability descriptor，并由 contributor 目录测试冻结 |
+| `defaults bash workdir to the current cwd` | `DaemonRuntimeTest.omittedWorkdirIsRejectedWithoutDefaultFallback`、`rejectsUnknownWorkspacePathFieldInV1InvokePayloadBeforeSideEffects` | 有意的语义差异：kk-studio 要求每次调用显式提供 `workdir`，缺省即拒绝，绝不回落到某个隐式目录 |
+| `surfaces bash execution errors` | `BashCapabilityTest.startFailureIsReportedWithoutStagingResidue`、`DaemonRuntimeTest.convertsToolErrorsAndMismatchedResultsToFailedTerminal` | shell 无法启动与结果编码失败都收敛为明确失败终态 |
+| `executes through the default builtin bash tool` | E2E 矩阵（L1 API） | 单测层不重复真实 shell 的端到端路径 |
+| `executes through the default builtin bash tool in an explicit workdir` | E2E 矩阵（L1 API）、`DaemonRuntimeTest.rejectsUnknownWorkspacePathFieldInV1InvokePayloadBeforeSideEffects` | workdir 契约由 schema 与预检共同保证 |
+| `truncates huge bash output and saves the full output to a temp file` | `BashCapabilityTest.timeoutPublishesSpilledOutputAndKeepsCountsFaithful`、`OutputSpoolTest.spillsOnLineThresholdAndKeepsLocalFullText` | 超阈值即发布 durable 全文，并在内联结果里给出路径 |
+| `uses the built-in bash result renderer when available` | 不迁移 | TUI 渲染层 |
+| `uses the pi-base bash result renderer when collapsed result lines are configured` | 不迁移 | TUI 渲染层 |
+| `adds a leading blank line to bash result text` | 不迁移 | TUI 渲染层 |
+| `adds a leading blank line to collapsed bash result text` | 不迁移 | TUI 渲染层 |
+| `tracks bash execution timing state from renderCall` | 不迁移 | TUI 渲染层 |
+| `shows 20 trailing lines in collapsed bash results` | `OutputSpoolTest.previewIsBoundedAndMarksTheOmittedMiddle`（仅承接「保留尾部」内核） | 折叠行数配置不迁移 |
+| `supports zero-line collapsed bash previews when configured` | 不迁移 | TUI 渲染层 |
+| `renders built-in bash truncation metadata without duplicating the upstream footer` | 不迁移 | TUI 渲染层 |
+| `renders byte-limit bash truncation warnings` | `OutputSpoolTest.captureBudgetStopsFileCaptureWithoutFailingTheCall` | 只承接机器可判定事实 `captureTruncated`；告警文案不迁移 |
+| `starts and clears bash elapsed-time refresh intervals` | 不迁移 | TUI 计时刷新 |
+| `repairs lost isError flags in tool_result handlers` | `BashCapabilityTest.exitOutcomesCarryAuthoritativeExitCode` | 非零退出在能力层就标记 `error=true`，因此不需要按文本特征事后修补 |
+| `enables the default base tool set and create_goal without injecting an empty base guide` | 不迁移 | 工具集装配属于 Contributor/Branch settings 层，由 `BuiltinHarnessContributorTest` 冻结目录 |
+| `preserves an explicit active tool set` | 不迁移 | Branch settings 层 |
+| `removes retired task from explicit active tool sets` | 不迁移 | Branch settings 层 |
+| `falls back to the default tool set and create_goal when only retired task was active` | 不迁移 | Branch settings 层 |
+| `removes built-in tools from explicit active tool sets` | 不迁移 | Branch settings 层 |
+| `removes built-ins before cleaning the automatic task tool` | 不迁移 | Branch settings 层 |
+| `leaves no active tools when only a built-in tool was explicitly active` | 不迁移 | Branch settings 层 |
+| `preserves tools supplied by other extensions, including built-in name overrides` | 不迁移 | Branch settings 层 |
+| `syncs LSP after successful write` | 不迁移到 bash | LSP 同步由 edit capability 承担，不属于 bash 映射 |
+| `isolates LSP server config across two project settings` | 不迁移到 bash | LSP 配置隔离由 LSP capability 承担 |
+
+## tests/bash-command-analyzer.test.ts（25 例）
+
+pi-base 的这份用例不启动 shell，只断言命令文本的静态分析结果。kk-studio 把同一职责放在权限核心
+[`BashSurfaceAnalyzer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/BashSurfaceAnalyzer.java)：
+[`PermissionEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluator.java)
+先对带文本 `command` 字段的调用做 `analyze`，再用每个静态段的 `buildCandidates` 结果匹配 wildcard 规则，因此命令文本的
+错误分段会直接变成权限误判。
+
+对应关系：pi-base 的 `kind: "supported" / "unsupported"` 与 `reason` 对应 Java 的 `Analysis.supported()` /
+`reason()` / `segments()`；pi-base 测试里的 `segments()` helper 对应测试基座中的 `staticSegments()`（先要求
+`supported`，再比较静态段）。`unsupported` 在权限层的语义——只有完整命令被明确的 `DENY` 规则命中才拒绝，否则一律
+`ASK`，绝不猜测内部命令——由 `BashSurfaceAnalyzerTest.unsupportedIsDeniedOnlyByCompleteCommandMatch`、
+`combinesCompositeSegmentActions`、`appliesCommandSurfaceAnalysisWheneverCommandFieldIsTextual`、
+`handlesMalformedSurfaceConservatively` 守住，本节不重复。
+
+25 例全部适用：静态面分析只依赖命令文本，不涉及 shell、终端与渲染，没有因产品协议差异需要改写的用例。下表左列沿用
+pi-base 用例名，右列是承接它的 Java 用例（`Analyzer` 即 `BashSurfaceAnalyzerTest`，`Coverage` 即
+`BashSurfaceAnalyzerCoverageTest`），标注「补」的断言是按同一语义补上的漏测。
+
+最近一次 `mvn -o -pl harness/runtime -am test`（1574 个用例，0 失败）下 `BashSurfaceAnalyzer` 的 JaCoCo 行覆盖为
+454/464 = 97.8%，分支覆盖 209/270 = 77.4%；未覆盖的 10 行集中在无法由命令文本稳定触发的防御性分支（空段提前返回、
+若干转义回退与注释内的 heredoc 消费）。
+
+| pi-base 用例 | kk-studio 承接 | 说明 |
+| --- | --- | --- |
+| `keeps simple commands as one static surface segment` | `Coverage.keepsPlainCommandsAsSingleStaticSegment`（补） | 没有控制运算符的命令就是一个静态段，`reason` 为空 |
+| `splits top-level command chains and pipelines` | `Coverage.handlesGroupingAndOperatorVariants`（补 `\|\|`、`;`、`\|&` 断言） | `&&`/`\|\|`/`;` 与 `\|`/`\|&` 都在顶层拆分 |
+| `splits background command separators without splitting fd redirections` | `Coverage.handlesGroupingAndOperatorVariants`（补 `2>&1` 断言）、`Analyzer.splitsOnlyStaticTopLevelSegments` | `&>`、`>\|`、`2>&1` 是重定向而不是后台分隔符 |
+| `does not split separators inside single or double quotes` | `Analyzer.splitsOnlyStaticTopLevelSegments`（补双引号断言） | 单引号与双引号内的 `&&`、`;`、`\|` 都是数据 |
+| `does not split escaped separators` | `Analyzer.splitsOnlyStaticTopLevelSegments`（补反斜杠转义断言） | 反斜杠转义的 `;` / `\|` / `&&` 都不分段 |
+| `marks command substitutions as unsupported instead of trusting their static wrapper` | `Coverage.reportsMalformedSyntaxReasons`、`Coverage.reportsReasonForWrapperAndSubstitutionSurfaces` | 原因固定为 `command_substitution`，段为空，绝不把外层命令当成执行面 |
+| `keeps quoted or escaped command-substitution markers literal` | `Coverage.keepsQuotedAndEscapedMarkersLiteral`（补）、`Analyzer.unsupportedIsDeniedOnlyByCompleteCommandMatch` | 单引号内容、`\$`、转义反引号与 `$((` 算术展开都保持 literal |
+| `marks process substitutions as unsupported but preserves literal markers` | `Coverage.reportsReasonForWrapperAndSubstitutionSurfaces`（补）、`Coverage.keepsQuotedAndEscapedMarkersLiteral`（补）、`Coverage.reportsMalformedSyntaxReasons` | 原因固定为 `process_substitution`；`'<(...)'`、`"<(...)"`、`\<(` 是字面量 |
+| `marks compound shell syntax unsupported instead of trusting its outer segment` | `Coverage.reportsReasonForCompoundDynamicAndRedirectionSurfaces`（补原因断言）、`Coverage.handlesGroupingAndOperatorVariants`、`Coverage.detectsDynamicExecutableForms` | 子 shell、brace group、函数、控制流与 `!` 统一归为 `compound_shell_syntax` |
+| `does not split separators inside double-bracket tests` | `Coverage.keepsDoubleBracketTestsAndWordHashesLiteral`（补）、`Coverage.handlesGroupingAndOperatorVariants` | `[[ ... ]]` 内的 `&&`/`\|\|` 与带引号的分隔符都不分段 |
+| `ignores comments and treats non-comment hashes as ordinary characters` | `Coverage.keepsDoubleBracketTestsAndWordHashesLiteral`（补）、`Analyzer.splitsOnlyStaticTopLevelSegments` | 行内注释被丢弃，`foo#bar` 里的 `#` 是普通字符 |
+| `handles line continuations and CRLF newlines` | `Coverage.normalizesContinuationsAndCrlfBeforeSegmenting`（补）、`Coverage.tokenizesQuotedEscapedNestedAndCommentedInput` | 归一化先于分段：反斜杠换行与 `\r\n` 都不产生伪命令段 |
+| `keeps heredoc bodies with the command that owns them` | `Coverage.keepsHeredocBodiesWithTheirOwningSegment`（补）、`Coverage.handlesHeredocDelimiterVariants` | 正文跟随拥有它的命令段，跨管道、`&&` 与多 delimiter 都不外泄成独立段 |
+| `rejects command substitution in expanding heredocs but preserves quoted delimiters` | `Coverage.handlesHeredocDelimiterVariants`（补段与算术展开断言） | 只有可展开 delimiter 才把命令替换当动态内容；quoted/escaped delimiter 的正文是字面量 |
+| `rejects nested command substitutions before interpreting their inner comments` | `Coverage.reportsReasonForWrapperAndSubstitutionSurfaces`（补） | 替换内部的注释不能恢复静态允许，原因与空段按替换归类 |
+| `reports unterminated heredocs instead of treating the body as commands` | `Coverage.keepsHeredocBodiesWithTheirOwningSegment`（补段断言）、`Coverage.handlesHeredocDelimiterVariants` | 原因固定为 `unterminated_heredoc`，未闭合正文不被当成命令 |
+| `marks executable names with runtime expansion as unsupported` | `Coverage.reportsReasonForCompoundDynamicAndRedirectionSurfaces`（补原因断言）、`Coverage.detectsDynamicExecutableForms`、`Coverage.keepsQuotedAndEscapedMarkersLiteral` | 赋值前缀、拼接与引号包裹的展开都归为 `dynamic_command_name`；静态引号是字面量 |
+| `marks redirections attached to or preceding the executable as unsupported` | `Coverage.reportsReasonForCompoundDynamicAndRedirectionSurfaces`（补原因断言）、`Coverage.detectsDynamicExecutableForms`、`Coverage.keepsQuotedAndEscapedMarkersLiteral` | 可执行位置前后的重定向归为 `command_redirection`，引号或转义的重定向符号是字面量 |
+| `marks shells, launchers, eval, and source wrappers as unsupported` | `Coverage.reportsReasonForWrapperAndSubstitutionSurfaces`（补原因与混淆可执行名断言）、`Coverage.detectsDynamicExecutableForms`、`Coverage.keepsQuotedAndEscapedMarkersLiteral` | shell、`b'a'sh`、`/bin/b"a"sh`、`env`/`command`/`exec`/`nohup`、`eval`/`source`/`.` 都归为 `dynamic_shell_wrapper`，引号内的包装器字样仍是字面量 |
+| `reports unsupported malformed surface syntax instead of guessing` | `Coverage.reportsMalformedSyntaxReasons`（补空段断言）、`Analyzer.handlesMalformedSurfaceConservatively` | 未闭合引号/括号与多余右括号给出具体原因，且不产生静态段 |
+| `tokenizes quoted and nested surface words without expanding them` | `Coverage.tokenizesQuotedEscapedNestedAndCommentedInput`（补） | tokenizer 保留引号与嵌套括号，不做任何展开 |
+| `builds prefix candidates for ordinary commands` | `Coverage.buildsStableCandidateListsWithoutExpandingRuntimeContent`（补精确列表） | 候选按「整段 + 逐层前缀」稳定排序，规则匹配不依赖顺序 |
+| `builds executable candidates after environment assignment prefixes` | `Analyzer.buildsAssignmentAndStaticExecutableCandidates`（补多 token quoted assignment 断言） | 赋值前缀保留，同时给出剥离赋值后的 executable 候选 |
+| `adds normalized executable candidates for static quoting, escaping, and paths` | `Analyzer.buildsAssignmentAndStaticExecutableCandidates`（补 `rm -rf tmp` 断言） | 静态 quoting、escaping 与绝对路径都归一化到 basename 候选 |
+| `keeps direct candidate generation lexical without expanding runtime content` | `Coverage.buildsStableCandidateListsWithoutExpandingRuntimeContent`（补） | 候选只来自静态字面量，包装器参数与替换内容都进不了候选 |
+
+## kk-studio 侧新增的测试
+
+以下行为在 pi-base 没有对应用例，但同样是 bash 契约的一部分：
+
+| 测试 | 覆盖的事实 |
+| --- | --- |
+| `DaemonRuntimeTest.timeoutHandoffDeliversCapturedOutputInFailedTerminal` | 超时终态仍是 `FAILED`，且正文携带能力已捕获的输出 |
+| `DaemonRuntimeTest.cancelHandoffDeliversCapturedOutputInCancelledTerminal` | 取消终态仍是 `CANCELLED`，`reason` 携带已捕获输出，绝不报告为 `COMPLETED` |
+| `DaemonRuntimeTest.handoffFallbackConvergesWithoutCapabilityCompletion` | 能力未在收尾预算内提交终态时由运行时兜底收敛，迟到回调被终态仲裁拦截 |
+| `DaemonRuntimeTest.handoffDropsCapabilityTextBeyondWireLimit` | 超过 16 MiB 载荷上限的能力输出被整体丢弃，终态仍然有界送达 |
+| `DaemonRuntimeTest.handoffKeepsRuntimeVerdictWhenCapabilityFailsInsideWindow` | 收尾窗口内能力失败时同时保留裁决原因与能力失败说明 |
+| `DaemonRuntimeTest.handoffCommitsImmediatelyWhenFallbackCannotBeScheduled` | 调度器已停机时立即以自己的终态收敛，不把调用悬在收尾窗口里 |
+| `DaemonRuntimeTest.shutdownDuringHandoffStillConvergesTerminal` | 收尾窗口内的停机立即收敛，关闭不等待能力配合 |
+| `BashCapabilityTest.runtimeTimeoutTerminationReportsTimedOutOutcome` | 运行时的超时收尾不会被报告成取消 |
+| `BashCapabilityTest.runtimeCancelTerminationReportsCancelledOutcome` | 运行时的取消收尾按取消语义产出说明 |
+| `BashCapabilityTest.preCancelledCallDoesNotStartShellOrTouchStore` | 启动前已取消的调用不启动 shell、不创建中转/durable 文件，也不留下命令副作用 |
+| `BashCapabilityTest.preTimedOutCallDoesNotStartShellOrTouchStore` | 启动前已超时的调用共享同一条 fail-closed 检查，且终态仍是超时而非取消 |
+| `BashCapabilityTest.closesStdinSoCommandsWaitingForEofFinishNaturally` | 命令以参数传入、不读 stdin：等待 EOF 的命令自然退出，而不是阻塞到超时 |
+| `BashCapabilityTest.keepsPayloadBeyondPipeBufferComplete` | 超过管道缓冲与内联阈值的大输出完整捕获并发布全文，字节与行计数忠实 |
+| `BashCapabilityTest.mergedStreamsBeyondPipeBufferCompleteWithoutDeadlock` | 合并流两路同时写满管道缓冲时仍必须完成，不能互相等待 |
+| `BashCapabilityTest.timeoutTerminatesWholeProcessTree` | 超时收尾终止整棵进程树（含后台后代），收尾后不得继续写入 |
+| `BashCapabilityTest.cancellationTerminatesWholeProcessTree` | 取消收尾同样终止整棵进程树，且不把 kill 退出码当成命令事实 |
+| `BashCapabilityTest.rejectedTimeoutSchedulingConvergesBeforeTerminalCallback` | 超时调度被拒（运行时已停机）时，整棵进程树（主进程与后台子进程）在终态通知时已经不存活 |
+| `BashCapabilityTest.listenerFailureConvergesAndKeepsCapturedOutput` | 监听器抛错时提交唯一失败终态、发布已捕获输出，且整棵进程树在终态通知前收敛（读端直到收敛后才关闭，后台后代不会因 SIGPIPE 提前脱离可达范围） |
+| `BashCapabilityTest.timeoutPublishesSpilledOutputAndKeepsCountsFaithful` | 终态说明不进入 durable 全文，也不计入 `totalBytes`/`totalLines` |
+| `OutputSpoolTest.captureBudgetStopsFileCaptureWithoutFailingTheCall` | 达捕获预算只停止文件捕获并继续计数，绝不终止进程 |
+| `BuiltinHarnessContributorTest.bashPromptDescribesConfiguredShellWithoutTemplatePlaceholders` | 环境工具提示词不做模板渲染，不得残留占位符 |
+| `OutputSpoolTest.publishFailureDegradesToPreviewAndRemovesStagingFile` | durable 发布失败降级为无路径预览，`captureFailed` 为真且不残留中转文件 |
+| `OutputSpoolTest.publishFailurePreviewStillReportsCaptureTruncation` | 捕获截断与发布失败同时发生时，预览同时报告两种降级并保留终态说明 |
+| `OutputSpoolTest.finishAppendsTerminalNoteOnlyWhenProvided` | 终态说明只在提供时追加，且内联正文不以换行结尾时说明自成一行 |
+| `ProcessTreeTest.doesNotSignalAlreadyExitedProcess` | 已退出进程不收到任何终止信号（对应 pi-base 的同名用例） |
+| `ProcessTreeTest.stillTerminatesRootWhenDescendantEnumerationFails` | 后代枚举失败仍收敛主进程 |
+| `ProcessTreeTest.reportsNotAliveWhenDescendantQueryFails` | 存活判断在查询失败时按不可判定处理，不泄漏异常 |
+| `ProcessTreeTest.fallsBackToDirectForceKillWhenHandleIsUnsupported` | 平台不支持转换进程句柄时退化为直接强制终止 |
+| `ProcessTreeTest.convergesWhenTerminationSignalIsRejected` | 终止信号被平台拒绝时不抛出，仍进入强制阶段 |
+| `ProcessTreeTest.convergesWhenLivenessQueryFails` | 存活查询失败的成员不阻止其它成员收敛 |
+| `ProcessTreeTest.reportsLiveProcessAndConvergesAfterTermination` | 真实进程的存活判定与终止后收敛 |
+
+## 已知缺口与平台限制
+
+- **Windows 进程树终止没有本机验证证据。** `ProcessTree` 用 `ProcessHandle.destroy()/destroyForcibly()`
+  对预快照的整棵进程树收敛，而不是 `taskkill /T`；相关测试在 Linux/macOS 上运行。在 Windows 上运行的验证
+  结论需要在这些平台上重新执行本页的 daemon 测试后才能给出。
+- **进程组语义差异。** pi-base 在 POSIX 上用 `kill(-pid, …)` 打整个进程组，kk-studio 逐进程快照并终止，
+  因此覆盖「leader 退出后仍能升级」的方式不同。
+- **本地存储自愈与重试不迁移。** 私有目录被外部删除或本地存储暂时不可用时，kk-studio 只降级为有界预览，
+  在下一次调用重建存储；输出内容与失败终态都不受影响。
+- **渲染层（折叠行、行首空行、计时刷新、截断告警文案）在 kk-studio 没有对应实现**，因此这些用例以「不迁移」
+  记录，而不是以 Java 断言伪造覆盖。
+- **I/O 失败分支未覆盖。** `OutputSpool` 中「文件通道 flush/close/写入抛 IOException」的分支
+  （`closeFileStreams` 与 `captureBytes` 的 catch）需要注入可失败的 `FileChannel`，当前没有确定性构造手段，
+  因此保持未覆盖；同一降级语义已由「中转文件创建失败」与「durable 发布失败」两条路径覆盖。

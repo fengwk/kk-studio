@@ -24,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
@@ -72,7 +73,8 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
             runtime,
             mock(ModelRequestDebugService.class),
             projectThreadOwnerResolver,
-            mock(InteractionService.class));
+            mock(InteractionService.class),
+            mock(SubagentTaskActivity.class));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(

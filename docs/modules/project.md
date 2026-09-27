@@ -35,6 +35,7 @@ PostgreSQL 持久化与 REST 调度都在模块内，经
 | [`EvidenceBlobPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/EvidenceBlobPort.java) | 锁定并消费一次已 READY 上传、对 Blob 引用做 retain/release、判定 Blob 是否仍可引用 | 必须加入调用方已有事务；失败不得吞成「不可用」 |
 | [`HarnessCommandAcceptancePort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/HarnessCommandAcceptancePort.java) | 以 `Issue + Agent` owner 接受 Harness 命令并返回 root entry | 与调用方写入同一事务 |
 | [`AgentBranchSettingsPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/AgentBranchSettingsPort.java) | 按宿主 Agent/Model catalog 物化分支设置 | 只读 |
+| [`DelegatedWorkActivityPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/DelegatedWorkActivityPort.java) | 查询 Thread 委派子树是否仍有未交付工作；OPEN 或 SETTLED 时禁止 Run 提前收尾 | 加入协调器已有事务读取 |
 | [`IssueAgentSessionDeletionPort`](../../project/src/main/java/fun/fengwk/kkstudio/project/port/IssueAgentSessionDeletionPort.java) | 深删除该 `Issue + Agent` 名下的 Harness Session 与 Blob 引用 | 在调用方锁序内，逐 owner 调用 |
 
 端口只表达契约，不表达平台类型：宿主把平台异常收敛为 Project 错误（例如「上传不存在」译为

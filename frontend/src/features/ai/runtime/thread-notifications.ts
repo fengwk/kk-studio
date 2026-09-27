@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { createTaskLevelStateMap } from '@/features/ai/runtime/task-status'
 import type {
   DialogueMessage,
   ToolDialogueMessage,
@@ -36,9 +35,9 @@ export async function requestBrowserNotificationPermission(): Promise<BrowserNot
   }
 }
 
-/** 汇总父 Thread 与 task.status relay 的所有当前待决审批，身份包含目标 Thread。 */
+/** 汇总当前 Thread 的所有待决工具审批。 */
 export function collectPendingPermissions(
-  parentThreadId: string,
+  threadId: string,
   messages: readonly DialogueMessage[],
 ): PendingPermission[] {
   const permissions = new Map<string, PendingPermission>()
@@ -46,20 +45,7 @@ export function collectPendingPermissions(
     if (message.role !== 'tool') {
       continue
     }
-    collectParentPermission(permissions, parentThreadId, message)
-  }
-  const levels = createTaskLevelStateMap(messages)
-  for (const statuses of levels.values()) {
-    for (const status of statuses) {
-      for (const approval of status.approvals) {
-        const key = `${status.threadId}:${approval.invocationId}`
-        permissions.set(key, {
-          key,
-          toolName: approval.toolName,
-          reason: approval.reason,
-        })
-      }
-    }
+    collectParentPermission(permissions, threadId, message)
   }
   return [...permissions.values()]
 }

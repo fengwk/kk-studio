@@ -7,17 +7,16 @@
     },
     "workdir": {
       "type": "string",
-      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Optional absolute directory used to resolve a relative path. It is never inherited from another call, a session default, cwd, or home directory. Omit it for an absolute path; a relative path without an explicit workdir is rejected. Provide an expanded absolute path (no '~' or environment-variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "content": {
       "type": "string",
-      "description": "Complete file content."
+      "description": "Complete file content, written exactly as provided: line endings are not rewritten, and an existing file's encoding and BOM are preserved."
     }
   },
   "required": [
     "path",
-    "content",
-    "workdir"
+    "content"
   ],
   "additionalProperties": false
 }

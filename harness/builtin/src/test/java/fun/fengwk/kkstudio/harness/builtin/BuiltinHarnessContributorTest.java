@@ -426,6 +426,27 @@ class BuiltinHarnessContributorTest {
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }
 
+  /**
+   * bash 提示词必须描述宿主配置的 shell（{@code bash -lc <command>}），不得残留未渲染的模板占位符。
+   *
+   * <p>回归点：{@code bash.md} 曾经携带 ${shell} 占位符，而环境工具提示词是原样加载的，占位符会以字面量进入模型指令。
+   */
+  @Test
+  void bashPromptDescribesConfiguredShellWithoutTemplatePlaceholders() {
+    HarnessCatalog catalog =
+        HarnessCatalog.from(
+            List.of(
+                new BuiltinHarnessContributor(
+                    stubReadTool(), stubTool("task", ToolRequirements.none()))));
+
+    String description =
+        catalog.findTool("bash").orElseThrow().definition().descriptor().description();
+
+    assertFalse(description.contains("${"), "环境工具提示词不做模板渲染，不得残留占位符：" + description);
+    assertTrue(description.contains("bash -lc <command>"), description);
+    assertTrue(description.contains("configured shell"), description);
+  }
+
   private static ReadTool stubReadTool() {
     return new ReadTool((request, listener) -> null);
   }

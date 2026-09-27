@@ -10,6 +10,9 @@ import java.util.Objects;
  */
 public record AssistantError(String code, String message) {
 
+  /** Stop 写入取消屏障时使用的稳定 error code。 */
+  public static final String CANCELLED_CODE = "CANCELLED";
+
   private static final int CODE_MAX_LENGTH = 64;
   private static final int MESSAGE_MAX_LENGTH = 2048;
 

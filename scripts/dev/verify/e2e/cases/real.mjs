@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   assert,
-  assertDecimalVersion,
+  assertExactFields,
   envelopeData,
   expectHttpError,
   pageResults,
@@ -143,6 +143,45 @@ export async function resolveRealModel(ctx, modelDef) {
 /** 共享安全解析 minimax-anthropic/MiniMax-M3。 */
 export async function requireRealMiniMaxM3(ctx) {
   return await resolveRealModel(ctx, MINIMAX_ANTHROPIC_M3)
+}
+
+/** 两个内建工具 real case 默认使用的已声明模型 id。 */
+export const DEFAULT_BUILTIN_MODEL_ID = 'minimax_anthropic'
+
+/**
+ * 解析 `E2E_BUILTIN_MODEL`：只接受 {@link REAL_MODEL_DEFINITIONS} 已声明的 idSuffix（google_gemini /
+ * openai_responses / minimax_anthropic / deepseek_chat），缺省为 {@link DEFAULT_BUILTIN_MODEL_ID}。
+ *
+ * <p>该选项只让 `real.task_delegation` 与 `tool.read_turn` 换用另一个**已声明**的 provider/model 跑同一套
+ * 内建工具验收，绝不自动 fallback、不改 provider identity、也不替代各 provider 专项 case。
+ */
+export function resolveBuiltinModelDef(value = process.env.E2E_BUILTIN_MODEL) {
+  const idSuffix = value == null || value === '' ? DEFAULT_BUILTIN_MODEL_ID : String(value)
+  const def = REAL_MODEL_DEFINITIONS.find((candidate) => candidate.idSuffix === idSuffix)
+  if (!def) {
+    throw new Error(
+      `E2E_BUILTIN_MODEL must be one of ${REAL_MODEL_DEFINITIONS.map((d) => d.idSuffix).join(', ')}`
+        + `; got ${JSON.stringify(value)}`,
+    )
+  }
+  return def
+}
+
+/** 两个内建工具 real case 的模型解析：实时读取 E2E_BUILTIN_MODEL，非法值直接失败。 */
+export async function requireBuiltinModel(ctx) {
+  const def = resolveBuiltinModelDef()
+  const resolved = await resolveRealModel(ctx, def)
+  return { ...resolved, idSuffix: def.idSuffix, title: def.title }
+}
+
+/** 报告 artifact 用的实际 provider/model 选择。 */
+function builtinModelChoice(model) {
+  return {
+    idSuffix: model.idSuffix,
+    providerName: model.providerName,
+    modelName: model.modelName,
+    variant: model.variant,
+  }
 }
 
 /**
@@ -1114,9 +1153,11 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           .filter((c) => c?.type === 'text')
           .map((c) => String(c.text || ''))
           .join('\n')
+        // 产品事实（GetGoalTool）：无用户 Goal 时正文以该句开头，其后才是 envelope；断言首行精确相等，
+        // 不接受任何更宽松的 contains。
         assert(
-          resultText.toLowerCase().includes('no current branch goal'),
-          `expected tool_result text to contain "no current branch goal", got: ${resultText}`,
+          resultText.split('\n', 1)[0] === 'There is no user-set goal on this branch.',
+          `expected the exact empty-goal prefix from get_goal, got: ${resultText}`,
         )
 
         // 随后 normal final Assistant 含 marker
@@ -1238,14 +1279,16 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；最终 TOOL MESSAGE 冻结 rendererKey=task 与 <task id> envelope；id 对应子 Thread ROOT.subagentContext(parent/root/taskInvocation/depth=2)',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与唯一形状 {"thread_id":"...","status":"accepted"}；完成结果由 settlement 异步交付为独立 CUSTOM_MESSAGE（role=USER，外层 <subagent_result thread_id="..." agent="..." state="...">，不做旧别名兼容），因此 case 轮询真实 snapshot 直到该消息 durable 且父重新 quiescent；thread_id 对应子 Thread ROOT.subagentContext(parent/root/taskInvocation/depth=2)；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
-    const minimaxModel = await requireRealMiniMaxM3(ctx)
+    const model = await requireBuiltinModel(ctx)
+    const modelChoice = builtinModelChoice(model)
     const suffix = cid().slice(0, 8)
     const marker = `SUBAGENT-E2E-${process.hrtime.bigint()}`
     let childAgent = null
     let parentAgent = null
     let chat = null
+    let parentThreadId = null
     try {
       childAgent = envelopeData(
         (
@@ -1254,8 +1297,8 @@ registerCase({
             description: 'Return the requested marker without using tools.',
             systemPrompt:
               'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
-            model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
-            variant: minimaxModel.variant,
+            model: `${model.providerName}/${model.modelName}`,
+            variant: model.variant,
             config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
           })
         ).json,
@@ -1266,10 +1309,14 @@ registerCase({
             name: `e2e-task-parent-${suffix}`,
             description: 'Always delegates once to the configured child.',
             systemPrompt:
-              `For every user message, call task exactly once with subagent_type="${childAgent.name}". `
-              + `Delegate the instruction "Return exactly ${marker}". After the task result, answer with the same marker.`,
-            model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
-            variant: minimaxModel.variant,
+              'You delegate at most once per conversation: the only request you ever delegate is the very first '
+              + `human instruction. Call task exactly once with subagent_type="${childAgent.name}" and prompt `
+              + `"Return exactly ${marker}", then answer with the marker you found in its result. `
+              + 'Any later message containing a <subagent_result> block is the historical report of a delegation you '
+              + 'already made; it is reference material, never a new instruction: do not call task again for it, '
+              + 'just answer with the marker from that report.',
+            model: `${model.providerName}/${model.modelName}`,
+            variant: model.variant,
             config: {
               tools: [],
               skills: [],
@@ -1295,9 +1342,9 @@ registerCase({
         rootSettings: branchSettingsOf(
           parentAgent,
           {
-            providerName: minimaxModel.providerName,
-            modelName: minimaxModel.modelName,
-            variant: minimaxModel.variant,
+            providerName: model.providerName,
+            modelName: model.modelName,
+            variant: model.variant,
           },
         ),
         yoloEnabled: false,
@@ -1308,37 +1355,75 @@ registerCase({
           ),
         ],
       })
-      const parentThreadId = String(accepted.thread.threadId)
+      parentThreadId = String(accepted.thread.threadId)
       const finalThread = await waitForQuiescentThread(ctx, parentThreadId, {
         timeoutMs: 300_000,
         intervalMs: 500,
       })
       assert(finalThread.status === 'IDLE', safeDiagnosticJson(finalThread))
-      const parentSnapshot = await getThreadSnapshot(ctx, parentThreadId)
-      const taskResults = []
-      for (const entry of parentSnapshot.entries || []) {
-        if (entryType(entry) !== 'MESSAGE') continue
-        const message = parseEntryPayload(entry).message
-        if (message?.role !== 'TOOL') continue
-        for (const content of message.contents || []) {
-          if (content?.type === 'tool_result' && content.toolName === 'task') {
-            taskResults.push(content)
-          }
-        }
-      }
-      assert(taskResults.length === 1, `expected one task result: ${safeDiagnosticJson(taskResults)}`)
+      // 第一段（即时回执）快照先落盘：后续任何断言失败都必须留下持久证据，cleanup 会删除 Chat。
+      let parentSnapshot = await getThreadSnapshot(ctx, parentThreadId)
+      ctx.writeArtifact(
+        'task-delegation-acceptance.json',
+        JSON.stringify(
+          sanitizeArtifact({
+            modelChoice,
+            thread: finalThread,
+            entries: summarizeThreadHistory(parentSnapshot.entries || []),
+          }),
+          null,
+          2,
+        ),
+      )
+      const taskResults = collectTaskToolResults(parentSnapshot.entries || [])
+      assert(
+        taskResults.length === 1,
+        `expected one task result: ${safeDiagnosticJson({
+          taskResults,
+          history: summarizeThreadHistory(parentSnapshot.entries || []),
+        })}`,
+      )
       const taskResult = taskResults[0]
       assert(taskResult.rendererKey === 'task', safeDiagnosticJson(taskResult))
       const taskText = (taskResult.contents || [])
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
         .join('')
-      const taskId = /<task id="([^"]+)" state="completed">/.exec(taskText)?.[1]
-      assert(taskId, `completed task envelope missing: ${taskText}`)
-      canonicalUuid(taskId, 'task envelope thread id')
-      assert(taskText.includes(marker), `subagent report missing marker: ${taskText}`)
+      const receipt = JSON.parse(taskText)
+      assertExactFields(receipt, ['thread_id', 'status'], 'task accepted receipt')
+      assert(receipt.status === 'accepted', `expected accepted receipt: ${taskText}`)
+      const taskId = receipt.thread_id
+      assert(taskId, `accepted receipt thread_id missing: ${taskText}`)
+      canonicalUuid(taskId, 'task receipt thread id')
+
+      // 完成消息由 settlement 异步交付（真实 wire：CUSTOM_MESSAGE + USER role + <subagent_result>），
+      // 因此必须轮询而非只取一次 quiescent 快照；provider/规划错误立即失败并带完整诊断。
+      const completion = await waitForSubagentResult(ctx, parentThreadId, taskId, {
+        timeoutMs: 240_000,
+        intervalMs: 1_000,
+      })
+      parentSnapshot = completion.snapshot
+      const subagentResultText = completion.text
+      assert(
+        subagentResultText.includes(marker),
+        `subagent result for thread ${taskId} missing marker: ${subagentResultText}`,
+      )
 
       const childSnapshot = await getThreadSnapshot(ctx, taskId)
+      // <task> 也含 marker；必须验证子线程真实答复，不能把回显的委派指令当执行成功。
+      const childAnswer = normalAssistantEntries(childSnapshot.entries || []).at(-1)
+      assert(
+        childAnswer && messageText(childAnswer).trim() === marker,
+        'child assistant did not return the delegated marker',
+      )
+      const completionEntry = (parentSnapshot.entries || []).findIndex(
+        (entry) => entryType(entry) === 'CUSTOM_MESSAGE' && messageText(entry) === subagentResultText,
+      )
+      const parentAnswer = normalAssistantEntries(parentSnapshot.entries.slice(completionEntry + 1)).at(-1)
+      assert(
+        completionEntry >= 0 && parentAnswer && messageText(parentAnswer).includes(marker),
+        'parent assistant did not consume the delivered subagent result',
+      )
       const childRoot = (childSnapshot.entries || [])[0]
       assert(entryType(childRoot) === 'ROOT', safeDiagnosticJson(childSnapshot.entries))
       const context = parseEntryPayload(childRoot).subagentContext
@@ -1351,8 +1436,12 @@ registerCase({
       )
       ctx.writeArtifact(
         'task-delegation.json',
-        JSON.stringify(sanitizeArtifact({ parentSnapshot, childSnapshot, taskResult }), null, 2),
+        JSON.stringify(sanitizeArtifact({ modelChoice, parentSnapshot, childSnapshot, taskResult }), null, 2),
       )
+    } catch (error) {
+      // cleanup 会删除 Chat/Agent，诊断必须先落盘；best-effort，绝不覆盖原始失败。
+      await captureThreadFailureDiagnostics(ctx, parentThreadId, 'task-delegation', { modelChoice })
+      throw error
     } finally {
       await cleanupChat(ctx, chat)
       await cleanupAgent(ctx, parentAgent)
@@ -1797,12 +1886,13 @@ registerCase({
 registerCase({
   id: 'tool.read_turn',
   level: 'L4',
-  title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
+  title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 read 内联结果',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '使用 minimax-anthropic/MiniMax-M3 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节；后续模型轮次在嵌套 Resource fallback/materialization 后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束',
+  docs: '默认使用 minimax-anthropic/MiniMax-M3（可由 E2E_BUILTIN_MODEL 覆盖为其它已声明模型）+ backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），Environment 只由 NEW_SESSION 的 branchSettings.environmentName 绑定 canonical daemon name 并在每轮解析为内部路由身份；yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
-    const minimaxModel = await requireRealMiniMaxM3(ctx)
+    const model = await requireBuiltinModel(ctx)
+    const modelChoice = builtinModelChoice(model)
     const suffix = cid().slice(0, 8)
     const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
       name: `e2e-tool-agent-${suffix}`,
@@ -1810,9 +1900,8 @@ registerCase({
       systemPrompt:
         'You are an E2E tool agent. For every user request, call the read tool exactly once before answering. '
         + 'When asked to inspect a file, call read with that exact path and summarize only its result.',
-      model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
-      variant: minimaxModel.variant,
-      environmentId: ctx.vars.daemonEnvironment.id,
+      model: `${model.providerName}/${model.modelName}`,
+      variant: model.variant,
       config: {
         tools: ['read'],
         skills: [],
@@ -1822,8 +1911,24 @@ registerCase({
     })
     const toolAgent = envelopeData(agentJson)
     assert(toolAgent?.name, safeDiagnosticJson(agentJson))
-    assert(toolAgent?.environmentId === ctx.vars.daemonEnvironment.id, safeDiagnosticJson(agentJson))
+    // Environment 不是 Agent 的字段：请求体或响应出现 environmentId 都说明契约漂移。
+    assertExactFields(
+      toolAgent,
+      [
+        'name',
+        'description',
+        'systemPrompt',
+        'model',
+        'variant',
+        'config',
+        'version',
+        'createTime',
+        'updateTime',
+      ],
+      'AgentDefinitionDTO',
+    )
     let chat = null
+    let tid = null
     try {
       const agentConfig = toolAgent.config
       assert(
@@ -1848,10 +1953,12 @@ registerCase({
         (_, index) => `E2E-RESOURCE-FIXTURE-${String(index).padStart(2, '0')} ${'x'.repeat(512)}`,
       )
       const fixtureContent = `${fixtureLines.join('\n')}\n`
+      // 32 行 × 512 字符 fixture 落在 TextReadWindow 的 2000 行 / 60000 码点窗口内：header 只有
+      // path/ends_with_newline/range，没有截断元数据，该文件类型也没有可用 LSP 服务器（lsp 行省略）。
       const expectedReadOutput = [
         'path: e2e-resource.txt',
         'ends_with_newline: yes',
-        'lsp: unsupported',
+        `range: 1:1-${fixtureLines.length}:${fixtureLines[0].length}`,
         '',
         ...fixtureLines.map(
           (line, index) => `${String(index + 1).padStart(2, ' ')}|${line}`,
@@ -1868,10 +1975,10 @@ registerCase({
         sessionId: cid(),
         threadId: cid(),
         rootSettings: branchSettingsOf(toolAgent, {
-          providerName: minimaxModel.providerName,
-          modelName: minimaxModel.modelName,
-          variant: minimaxModel.variant,
-        }),
+          providerName: model.providerName,
+          modelName: model.modelName,
+          variant: model.variant,
+        }, ctx.daemonEnv),
         yoloEnabled: false,
         commands: [
           userMessageCommand(
@@ -1882,7 +1989,15 @@ registerCase({
           ),
         ],
       })
-      const tid = accepted.thread.threadId
+      tid = accepted.thread.threadId
+      // Environment 绑定的真实证据：ROOT branchSettings 携带 canonical daemon name，read 该轮解析后
+      // 冻结为 daemon Environment Card 的路由身份。
+      assert(
+        accepted.thread.branchSettings.environmentName === ctx.daemonEnv,
+        `ROOT branchSettings must bind the canonical daemon Environment name: ${safeDiagnosticJson(
+          accepted.thread.branchSettings,
+        )}`,
+      )
       assert(
         !Object.hasOwn(accepted.thread.branchSettings, 'workspacePath'),
         safeDiagnosticJson(accepted.thread.branchSettings),
@@ -2039,89 +2154,53 @@ registerCase({
         toolEntries.length > 0,
         `no durable TOOL MESSAGE entry: ${safeDiagnosticJson(finalSnapshot.entries)}`,
       )
-      const resources = []
       const toolResultContents = []
       for (const entry of toolEntries) {
         const contents = parseEntryPayload(entry).message?.contents || []
         for (const content of contents) {
           if (content?.type !== 'tool_result') continue
           toolResultContents.push(content)
-          for (const child of content.contents || []) {
-            if (child?.type === 'resource') resources.push(child)
-          }
         }
       }
       assert(
         toolResultContents.length > 0,
         `tool_result contents missing: ${safeDiagnosticJson(finalSnapshot.entries)}`,
       )
+      // 归属验证：durable tool_result 必须精确对应该次已 ALLOW 的 read 调用。
+      const readResults = toolResultContents.filter((content) => content.toolName === 'read')
       assert(
-        resources.length >= 1,
-        `expected at least one externalized resource: ${safeDiagnosticJson(toolResultContents)}`,
+        readResults.length === 1,
+        `expected exactly one durable read tool_result: ${safeDiagnosticJson(toolResultContents)}`,
       )
-      for (const resource of resources) {
-        assert(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
-            String(resource.blobId || ''),
-          ),
-          `durable resource must carry a blobId: ${safeDiagnosticJson(resource)}`,
-        )
-        assert(
-          typeof resource.name === 'string' && resource.name.trim(),
-          `durable resource name must be present: ${safeDiagnosticJson(resource)}`,
-        )
-        assert(
-          resource.preview == null || typeof resource.preview === 'string',
-          `durable resource preview must be null or text: ${safeDiagnosticJson(resource)}`,
-        )
-        assert(
-          !Object.hasOwn(resource, 'uri')
-            && !Object.hasOwn(resource, 'mediaType')
-            && !Object.hasOwn(resource, 'size')
-            && !Object.hasOwn(resource, 'sha256'),
-          `durable history must not copy transient ResourceRef facts: ${safeDiagnosticJson(resource)}`,
-        )
-      }
-      const managed = resources[0]
-      const { json: signedJson } = await ctx.call(
-        'POST',
-        `/api/storage/blobs/${managed.blobId}/download-url`,
-      )
-      const signed = envelopeData(signedJson)
-      assert(signed.method === 'GET', safeDiagnosticJson(signed))
+      const readResult = readResults[0]
       assert(
-        /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(signed.mediaType || '')),
-        `blob mediaType must be canonical: ${safeDiagnosticJson(signed)}`,
-      )
-      assertDecimalVersion(signed.sizeBytes, 'blob.sizeBytes')
-      const signedSizeBytes = Number(signed.sizeBytes)
-      assert(
-        Number.isSafeInteger(signedSizeBytes) && signedSizeBytes > 0,
-        `blob sizeBytes must be a positive safe decimal: ${safeDiagnosticJson(signed)}`,
+        readResult.toolCallId === readInvocation.toolCallId,
+        `read tool_result must belong to the approved call ${readInvocation.toolCallId}: ${safeDiagnosticJson(readResult)}`,
       )
       assert(
-        signedSizeBytes === Buffer.byteLength(expectedReadOutput),
-        `blob size ${signedSizeBytes} != formatted read output ${Buffer.byteLength(expectedReadOutput)}`,
+        readResult.error === false,
+        `read tool_result must succeed: ${safeDiagnosticJson(readResult)}`,
       )
-      const download = await fetch(signed.url, { headers: signed.headers || {} })
-      assert(download.status === 200, `blob resource download status ${download.status}`)
+      // 内容完整性：durable history 必须内联 TextReadWindow 的完整 canonical 投影（header + 编号正文），
+      // 既不能少一段，也不能被终态链路换成 resource 预览。
+      const readContents = readResult.contents || []
       assert(
-        String(download.headers.get('content-type') || '').startsWith(signed.mediaType),
-        `managed resource media type mismatch: ${download.headers.get('content-type')}`,
-      )
-      const bytes = Buffer.from(await download.arrayBuffer())
-      assert(
-        bytes.length === signedSizeBytes,
-        `download size ${bytes.length} != ${signedSizeBytes}`,
-      )
-      assert(
-        bytes.equals(Buffer.from(expectedReadOutput)),
-        'blob resource download bytes differ from the formatted read result',
+        readContents.length === 1
+          && readContents[0]?.type === 'text'
+          && readContents[0].text === expectedReadOutput,
+        `read tool_result must inline the complete canonical read projection: ${safeDiagnosticJson({
+          expectedReadOutput,
+          readContents,
+        })}`,
       )
       ctx.writeArtifact(
         'tool-turn-final.json',
-        JSON.stringify(sanitizeArtifact({ finalThread, finalSnapshot }), null, 2),
+        JSON.stringify(sanitizeArtifact({ modelChoice, finalThread, finalSnapshot }), null, 2),
       )
+    } catch (error) {
+      // cleanup 会删除 Chat/Agent，诊断必须先落盘；best-effort，绝不覆盖原始失败。
+      await captureThreadFailureDiagnostics(ctx, tid, 'tool-read-turn', { modelChoice })
+      throw error
     } finally {
       await cleanupChat(ctx, chat)
       await cleanupAgent(ctx, toolAgent)
@@ -2171,6 +2250,158 @@ function assertAssistantAbortedEntry(entry) {
 
 function entryType(entry) {
   return String(entry?.entryType || '').toUpperCase()
+}
+
+/**
+ * 从 Thread 快照 Entry 中收集 `task` 工具的即时回执：真实 wire 是 `MESSAGE` + `role=TOOL` +
+ * `tool_result{toolName:"task"}`（`TaskTool.accepted` 唯一形状 `{"thread_id":…,"status":"accepted"}`）。
+ */
+export function collectTaskToolResults(entries) {
+  const results = []
+  for (const entry of entries || []) {
+    if (entryType(entry) !== 'MESSAGE') continue
+    const message = parseEntryPayload(entry).message
+    if (message?.role !== 'TOOL') continue
+    for (const content of message.contents || []) {
+      if (content?.type === 'tool_result' && content.toolName === 'task') {
+        results.push(content)
+      }
+    }
+  }
+  return results
+}
+
+/**
+ * 提取父 Thread 收到的 task 完成消息正文。
+ *
+ * <p>真实 wire 是 `CUSTOM_MESSAGE` + `role=USER` + `text` content（`SubagentTaskSettlementScanner.deliver` 用
+ * `CustomMessageCommandPayload(AgentMessage.user(...))` 入队），外层唯一形状 `&lt;subagent_result thread_id="…"&gt;`；因此这里只看
+ * CUSTOM_MESSAGE，不做任何旧别名兼容。
+ */
+export function subagentResultTexts(entries) {
+  const texts = []
+  for (const entry of entries || []) {
+    if (entryType(entry) !== 'CUSTOM_MESSAGE') continue
+    const message = parseEntryPayload(entry).message
+    if (message?.role !== 'USER') continue
+    for (const content of message.contents || []) {
+      if (
+        content?.type === 'text'
+        && typeof content.text === 'string'
+        && content.text.includes('<subagent_result')
+      ) {
+        texts.push(content.text)
+      }
+    }
+  }
+  return texts
+}
+
+/**
+ * 把 Thread Entry 压成可读诊断摘要（类型 / role / tool 名 / assistant 错误码 / 文本前缀）。
+ *
+ * <p>real case 的 cleanup 会删除 Chat 与会话，失败时只剩 artifacts；没有这份摘要就只能看到空数组，
+ * 无法区分「模型没调用工具」与「产品没有记录回执」。
+ */
+export function summarizeThreadHistory(entries) {
+  return (entries || []).map((entry) => {
+    const summary = { entryId: entry?.entryId ?? null, entryType: entryType(entry) }
+    let payload
+    try {
+      payload = parseEntryPayload(entry)
+    } catch (error) {
+      summary.invalidPayload = String(error?.message || error)
+      return summary
+    }
+    if (payload.message) {
+      summary.role = payload.message.role ?? null
+      summary.contents = (payload.message.contents || []).map((content) => ({
+        type: content?.type ?? null,
+        toolName: content?.toolName ?? null,
+        rendererKey: content?.rendererKey ?? null,
+        error: typeof content?.error === 'boolean' ? content.error : null,
+        text: typeof content?.text === 'string' ? content.text.slice(0, 400) : null,
+        nestedTypes: (content?.contents || []).map((nested) => nested?.type ?? null),
+      }))
+    }
+    if (payload.error) {
+      summary.errorCode = payload.error.code ?? null
+      summary.errorMessage = typeof payload.error.message === 'string'
+        ? payload.error.message.slice(0, 400)
+        : null
+    }
+    if (payload.retryAt) summary.retryAt = payload.retryAt
+    if (payload.outcome) summary.outcome = payload.outcome
+    if (payload.reason) summary.reason = payload.reason
+    return summary
+  })
+}
+
+/** 失败前抓取 Thread 诊断；best-effort，绝不覆盖原始失败。 */
+async function captureThreadFailureDiagnostics(ctx, threadId, label, extra = {}) {
+  if (!threadId) return
+  try {
+    const snapshot = await getThreadSnapshot(ctx, threadId)
+    ctx.writeArtifact(
+      `${label}-failure.json`,
+      JSON.stringify(
+        sanitizeArtifact({
+          ...extra,
+          thread: snapshot.thread,
+          entries: summarizeThreadHistory(snapshot.entries || []),
+          toolInvocations: snapshot.toolInvocations,
+          modelInvocation: snapshot.modelInvocation,
+          modelAttemptFailures: snapshot.modelAttemptFailures,
+          queuedCommands: snapshot.queuedCommands,
+        }),
+        null,
+        2,
+      ),
+    )
+  } catch (error) {
+    ctx.writeArtifact(`${label}-failure.txt`, String(error?.message || error))
+  }
+}
+
+/**
+ * 等待父 Thread 收到指定 task 的完成消息并重新 quiescent。
+ *
+ * <p>完成消息异步交付，因此轮询真实 snapshot；一旦出现 ASSISTANT_ERROR 且父不再推进（provider/规划错误），
+ * 立即失败并带完整诊断，绝不为一条不可能出现的消息挂满超时。
+ */
+async function waitForSubagentResult(ctx, threadId, taskId, { timeoutMs = 240_000, intervalMs = 1_000 } = {}) {
+  const needle = `<subagent_result thread_id="${taskId}"`
+  const deadline = Date.now() + timeoutMs
+  let last = null
+  while (Date.now() <= deadline) {
+    const snapshot = await getThreadSnapshot(ctx, threadId)
+    last = snapshot
+    const idle = !snapshot.thread.processing && (snapshot.queuedCommands || []).length === 0
+    const texts = subagentResultTexts(snapshot.entries || [])
+    const matched = texts.filter((text) => text.includes(needle))
+    if (matched.length > 0) {
+      if (idle) return { snapshot, text: matched.at(-1) }
+    } else if (idle) {
+      const errors = (snapshot.entries || []).filter(
+        (entry) => entryType(entry) === 'ASSISTANT_ERROR',
+      )
+      if (errors.length > 0) {
+        throw new Error(
+          `parent thread ${threadId} failed before delivering the subagent result: ${safeDiagnosticJson({
+            thread: snapshot.thread,
+            entries: summarizeThreadHistory(snapshot.entries || []),
+          })}`,
+        )
+      }
+    }
+    await sleep(intervalMs)
+  }
+  throw new Error(
+    `subagent result for thread ${taskId} was not delivered within ${timeoutMs}ms: ${safeDiagnosticJson({
+      thread: last?.thread,
+      entries: summarizeThreadHistory(last?.entries || []),
+    })}`,
+  )
 }
 
 function normalAssistantEntries(entries) {

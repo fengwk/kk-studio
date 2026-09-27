@@ -30,30 +30,7 @@ function toolMessage(
 }
 
 describe('collectPendingPermissions', () => {
-  it('combines parent approvals and child task relay approvals with target-thread identity', () => {
-    const taskStatus = JSON.stringify({
-      kind: 'task.status',
-      threadId: '2',
-      subagentType: 'coder',
-      state: 'waiting_approval',
-      depth: 2,
-      turns: 1,
-      toolCalls: 1,
-      lastActivity: 'running bash',
-      approvals: [{ invocationId: '10', toolName: 'write', reason: 'changes a file' }],
-      descendants: [
-        {
-          threadId: '3',
-          subagentType: 'helper',
-          state: 'waiting_approval',
-          depth: 3,
-          turns: 1,
-          toolCalls: 1,
-          lastActivity: 'running bash',
-          approvals: [{ invocationId: '11', toolName: 'bash', reason: 'nested command' }],
-        },
-      ],
-    })
+  it('collects pending permissions for the current thread', () => {
     expect(
       collectPendingPermissions('1', [
         toolMessage({
@@ -64,29 +41,12 @@ describe('collectPendingPermissions', () => {
             reason: 'runs a command',
           },
         }),
-        toolMessage({
-          id: 'task-call',
-          toolName: 'task',
-          rendererKey: 'task',
-          invocationId: '20',
-          partial: taskStatus,
-        }),
       ]),
     ).toEqual([
       {
         key: '1:10',
         toolName: 'bash',
         reason: 'runs a command',
-      },
-      {
-        key: '2:10',
-        toolName: 'write',
-        reason: 'changes a file',
-      },
-      {
-        key: '3:11',
-        toolName: 'bash',
-        reason: 'nested command',
       },
     ])
   })

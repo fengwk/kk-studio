@@ -85,11 +85,12 @@ class StopRecordsTest {
 
   @Test
   void stopResultValidShapesRoundTrip() {
-    StopResult idle = new StopResult(false, THREAD, null, 0, List.of());
-    assertFalse(idle.replayed());
-    assertEquals(THREAD, idle.thread());
-    assertNull(idle.stoppedTurnEndEntryId());
-    assertEquals(0, idle.cancelledCommandCount());
+    // turnEnd 为 null 只描述 legacy queued-only receipt 的形状：显式 Stop（含 idle）现在都写停止边界。
+    StopResult queuedOnlyReceipt = new StopResult(false, THREAD, null, 0, List.of());
+    assertFalse(queuedOnlyReceipt.replayed());
+    assertEquals(THREAD, queuedOnlyReceipt.thread());
+    assertNull(queuedOnlyReceipt.stoppedTurnEndEntryId());
+    assertEquals(0, queuedOnlyReceipt.cancelledCommandCount());
 
     StopResult stopped = new StopResult(false, THREAD, id(3L), 2, List.of());
     assertFalse(stopped.replayed());
@@ -105,13 +106,14 @@ class StopRecordsTest {
 
   @Test
   void stopCommitRejectsInvalidLocalCancellationMetadata() {
-    StopResult idle = new StopResult(false, THREAD, null, 0, List.of());
+    StopResult queuedOnlyReceipt = new StopResult(false, THREAD, null, 0, List.of());
     // Model 与 Tool 执行不能同时取消。
     assertThrows(
         IllegalArgumentException.class,
-        () -> new StopControl.Commit(idle, id(1L), List.of(id(2L))));
+        () -> new StopControl.Commit(queuedOnlyReceipt, id(1L), List.of(id(2L))));
     assertThrows(NullPointerException.class, () -> new StopControl.Commit(null, null, List.of()));
-    assertThrows(NullPointerException.class, () -> new StopControl.Commit(idle, null, null));
+    assertThrows(
+        NullPointerException.class, () -> new StopControl.Commit(queuedOnlyReceipt, null, null));
   }
 
   /** stopRequestId 作为 closeRequestId 原样持久化到 STOPPED TURN_END，并端到端贯穿一次真实 Stop 事务。 */
