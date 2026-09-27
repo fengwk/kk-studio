@@ -574,7 +574,7 @@ class PostgresqlHarnessSchemaTest {
 
   @Test
   void harnessThreadStatusAndParentConstraintsEnforceLifecycleAndNoSelfParent() {
-    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 harness_thread 的生命周期状态（IDLE/ACTIVE/STOPPED）、
+    // 测试意图：真实 PostgreSQL CHECK 与 FK 约束验证 harness_thread 的生命周期状态（IDLE/ACTIVE/WAITING_CHILDREN）、
     // 不可自引用父关系（ck_harness_thread_parent_not_self）以及父 Thread 外键约束（fk_harness_thread_parent）。
     UUID sessionId = UUID.fromString("00000000-0000-0000-0000-000000000030");
     UUID rootEntryId = UUID.fromString("00000000-0000-0000-0000-000000000031");
@@ -650,7 +650,7 @@ class PostgresqlHarnessSchemaTest {
         () ->
             jdbc.update(
                 "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled, status, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', false, 'STOPPED', 1, 0, statement_timestamp(), statement_timestamp())",
+                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', false, 'WAITING_CHILDREN', 1, 0, statement_timestamp(), statement_timestamp())",
                 childThreadId,
                 sessionId,
                 parentThreadId,

@@ -14,6 +14,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -168,6 +170,15 @@ public final class HarnessRuntime {
     return store.transaction(tx -> tx.findJoin(invocationId));
   }
 
+  /** 从已匹配的固定结果 head 和原始源 command 投影回执，不读取子线程当前 head。 */
+  public Optional<ThreadJoinReceipt> projectJoinReceipt(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    return store.transaction(
+        tx ->
+            tx.findJoin(invocationId)
+                .flatMap(join -> ThreadJoinProjector.INSTANCE.project(tx, join)));
+  }
+
   /** 当前不可变执行关系的 head-to-root 祖先链。 */
   public List<UUID> findAncestorChain(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
@@ -238,6 +249,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread =
               tx.lockThread(command.threadId())
                   .orElseThrow(
@@ -264,6 +276,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread =
               tx.lockThread(command.threadId())
                   .orElseThrow(
@@ -332,6 +345,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread = tx.lockThread(command.threadId()).orElse(null);
           if (thread == null) {
             throw approvalNotApplicable("thread " + command.threadId() + " does not exist");
@@ -375,6 +389,7 @@ public final class HarnessRuntime {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
+          ThreadTreeLocks.lockForThread(tx, threadId);
           ThreadState thread =
               tx.lockThread(threadId)
                   .orElseThrow(

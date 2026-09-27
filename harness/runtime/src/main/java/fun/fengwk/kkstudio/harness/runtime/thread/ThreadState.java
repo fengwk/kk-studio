@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  * 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
  * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。 {@code
- * status} 维护递归生命周期（IDLE/ACTIVE/STOPPED），由状态转换推进。
+ * status} 维护递归生命周期（IDLE/ACTIVE/WAITING_CHILDREN），由状态转换推进。
  *
  * <p>{@code creationRequestHash} 是 NEW_SESSION / NEW_THREAD 的初始创建请求指纹：64 位小写 SHA-256
  * 身份键，只作持久化身份键，不对产品 DTO 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在
@@ -70,61 +70,6 @@ public record ThreadState(
     if (updatedAt.isBefore(createdAt)) {
       throw new IllegalArgumentException("updatedAt must not precede createdAt");
     }
-  }
-
-  /**
-   * 构造初始 ThreadState：以规范生命周期状态 {@code status} 初始化，{@code nextCommandSequence} 初始为 1， {@code
-   * version} 初始为 0，{@code createdAt} 与 {@code updatedAt} 统一设为 {@code now}。
-   */
-  public ThreadState(
-      UUID id,
-      UUID sessionId,
-      UUID parentThreadId,
-      UUID headEntryId,
-      String creationRequestHash,
-      String name,
-      boolean yoloEnabled,
-      ThreadLifecycleStatus status,
-      Instant now) {
-    this(
-        id,
-        sessionId,
-        parentThreadId,
-        headEntryId,
-        creationRequestHash,
-        name,
-        yoloEnabled,
-        status,
-        1L,
-        0L,
-        now,
-        now);
-  }
-
-  /**
-   * 创建初始 ThreadState：以规范生命周期状态 {@code status} 初始化，{@code nextCommandSequence} 初始为 1， {@code
-   * version} 初始为 0，{@code createdAt} 与 {@code updatedAt} 统一设为 {@code now}。
-   */
-  public static ThreadState initial(
-      UUID id,
-      UUID sessionId,
-      UUID parentThreadId,
-      UUID headEntryId,
-      String creationRequestHash,
-      String name,
-      boolean yoloEnabled,
-      ThreadLifecycleStatus status,
-      Instant now) {
-    return new ThreadState(
-        id,
-        sessionId,
-        parentThreadId,
-        headEntryId,
-        creationRequestHash,
-        name,
-        yoloEnabled,
-        status,
-        now);
   }
 
   /**

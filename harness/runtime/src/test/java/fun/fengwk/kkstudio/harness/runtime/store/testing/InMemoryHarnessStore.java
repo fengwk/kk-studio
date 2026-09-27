@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -281,6 +282,18 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     private void requireCanLockRank(LockRank rank) {
       if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
+        if (rank == LockRank.COMMAND) {
+          if (highestLockRank.ordinal() < LockRank.WORK.ordinal()) {
+            // Parent delivery commands can be enqueued during Model/Tool turn closure before WORK
+            return;
+          }
+          if (highestLockRank == LockRank.WORK && !lockedTrees.isEmpty()) {
+            // Parent delivery commands can be enqueued during Stop post-processing when active
+            // parent
+            // delivery occurs after Work fencing, provided the tree lock is held.
+            return;
+          }
+        }
         throw new IllegalStateException(
             "lock order violation: cannot acquire " + rank + " after " + highestLockRank);
       }
@@ -357,12 +370,27 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       requireCanLock(key);
       if (highestWorkTarget != null && WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
+        if (target.type() == WorkTargetType.THREAD
+            && !lockedTrees.isEmpty()
+            && locked.contains(LockKey.thread(target.id()))
+            && isInLockedTree(target.id())) {
+          return;
+        }
         throw new IllegalStateException(
             "work locks must be acquired by ascending (type, id): "
                 + highestWorkTarget
                 + " before "
                 + target);
       }
+    }
+
+    private boolean isInLockedTree(UUID threadId) {
+      if (lockedTrees.isEmpty()) {
+        return false;
+      }
+      List<UUID> chain = findAncestorChain(threadId);
+      UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
+      return lockedTrees.contains(root);
     }
 
     private void requireCanClaimWork() {
@@ -573,9 +601,23 @@ public final class InMemoryHarnessStore implements HarnessStore {
         throw new IllegalArgumentException(
             "parent thread " + thread.parentThreadId() + " does not exist");
       }
-      requireCanLockThread(thread.id());
+      boolean joinedChild =
+          thread.parentThreadId() != null
+              && !lockedTrees.isEmpty()
+              && locked.contains(LockKey.thread(thread.parentThreadId()));
+      if (!joinedChild) {
+        requireCanLockThread(thread.id());
+      }
       state.threads.put(thread.id(), thread);
-      recordThreadLock(thread.id());
+      if (joinedChild) {
+        locked.add(LockKey.thread(thread.id()));
+        if (highestThreadId == null
+            || UuidOrder.COMPARATOR.compare(thread.id(), highestThreadId) > 0) {
+          highestThreadId = thread.id();
+        }
+      } else {
+        recordThreadLock(thread.id());
+      }
     }
 
     /** Thread 的 head Entry 必须属于 Thread 持久化的 Session（Session -&gt; head 同一 Session 约束）。 */
@@ -770,20 +812,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public int countUnmatchedJoinsByParent(UUID parentThreadId) {
+    public int countActiveChildren(UUID parentThreadId) {
       checkOpen();
       Objects.requireNonNull(parentThreadId, "parentThreadId");
       return (int)
-          state.joins.values().stream()
+          state.threads.values().stream()
               .filter(
-                  join ->
-                      parentThreadId.equals(join.parentThreadId())
-                          && join.matchedIdleVersion() == null)
+                  thread ->
+                      parentThreadId.equals(thread.parentThreadId())
+                          && thread.status() != ThreadLifecycleStatus.IDLE)
               .count();
     }
 
     @Override
-    public int countUnmatchedJoinsInTree(UUID rootThreadId) {
+    public int countActiveThreadsInTree(UUID rootThreadId) {
       checkOpen();
       Objects.requireNonNull(rootThreadId, "rootThreadId");
       if (!state.threads.containsKey(rootThreadId)) {
@@ -793,6 +835,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       List<UUID> frontier = new ArrayList<>();
       frontier.add(rootThreadId);
       treeThreadIds.add(rootThreadId);
+      int activeCount = 0;
       while (!frontier.isEmpty()) {
         List<UUID> nextFrontier = new ArrayList<>();
         for (UUID parentId : frontier) {
@@ -801,19 +844,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
               if (!treeThreadIds.add(thread.id())) {
                 throw new IllegalStateException("thread parent cycle at " + thread.id());
               }
+              if (thread.status() != ThreadLifecycleStatus.IDLE) {
+                activeCount++;
+              }
               nextFrontier.add(thread.id());
             }
           }
         }
         frontier = nextFrontier;
       }
-      return (int)
-          state.joins.values().stream()
-              .filter(
-                  join ->
-                      treeThreadIds.contains(join.childThreadId())
-                          && join.matchedIdleVersion() == null)
-              .count();
+      return activeCount;
     }
 
     @Override
@@ -854,6 +894,22 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
       requireLocked(LockKey.thread(childThreadId));
+      if (!isInLockedTree(childThreadId)) {
+        throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
+      }
+      List<ThreadJoin> childJoins =
+          state.joins.values().stream()
+              .filter(j -> j.childThreadId().equals(childThreadId))
+              .toList();
+      for (ThreadJoin join : childJoins) {
+        if (!join.matched()) {
+          throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
+        }
+        if (join.parentThreadId() != null && join.deliveryCommandSequence() == null) {
+          throw new IllegalArgumentException(
+              "cannot delete join pending delivery " + join.invocationId());
+        }
+      }
       int count = 0;
       var it = state.joins.entrySet().iterator();
       while (it.hasNext()) {
@@ -955,6 +1011,14 @@ public final class InMemoryHarnessStore implements HarnessStore {
         }
         // 锁序 Thread -> commands：enqueue 必须先锁定目标 Thread。
         requireLocked(LockKey.thread(command.threadId()));
+        if (highestLockRank == LockRank.WORK) {
+          if (lockedTrees.isEmpty() || !isInLockedTree(command.threadId())) {
+            throw new IllegalStateException(
+                "command on thread "
+                    + command.threadId()
+                    + " after WORK requires held tree lock on the same tree");
+          }
+        }
         requireUniqueCommandKey(command);
       }
       if (!copied.isEmpty()) {
@@ -1513,6 +1577,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       for (UUID threadId : copied) {
         requireLocked(LockKey.thread(threadId));
+        if (!isInLockedTree(threadId)) {
+          throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+        }
         if (!state.threads.containsKey(threadId)) {
           throw new IllegalArgumentException("thread " + threadId + " does not exist");
         }
@@ -1523,6 +1590,18 @@ public final class InMemoryHarnessStore implements HarnessStore {
             || (join.parentThreadId() != null && threadIdSet.contains(join.parentThreadId()))) {
           throw new IllegalArgumentException(
               "cannot delete thread referenced by join " + join.invocationId());
+        }
+      }
+      for (UUID threadId : copied) {
+        for (ThreadState thread : state.threads.values()) {
+          if (threadId.equals(thread.parentThreadId()) && !threadIdSet.contains(thread.id())) {
+            throw new IllegalArgumentException(
+                "cannot delete parent thread "
+                    + threadId
+                    + " while child thread "
+                    + thread.id()
+                    + " still exists");
+          }
         }
       }
 

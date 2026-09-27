@@ -100,6 +100,7 @@ abstract class HarnessStoreDeletionContract {
     int deleted =
         store.transaction(
             tx -> {
+              tx.lockTree(baseline.threadId());
               tx.lockThread(baseline.threadId()).orElseThrow();
               return tx.deleteThreads(List.of(baseline.threadId()));
             });
