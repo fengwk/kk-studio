@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.platform.harness.oneshot.OneShotTicket;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -137,7 +138,8 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   @Test
   void executesAllStagesAndMaterializesOnlyTarget() {
     RecordingContext context = new RecordingContext();
-    when(oneShot.submit(anyString(), anyString(), any(), any())).thenReturn(THREAD_ID);
+    when(oneShot.submit(anyString(), anyString(), any(), any()))
+        .thenReturn(OneShotTicket.forThread(THREAD_ID));
     when(oneShot.await(any(), any(), any())).thenReturn("enhanced prompt");
     when(comfy.upload(anyString(), anyString(), anyLong(), any(), any()))
         .thenReturn(new H3UploadedFile("11.png", "kk-studio/7", "input"));
@@ -186,7 +188,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                       mock(HarnessStore.Transaction.class),
                       new Session(SESSION_ID, "h3", Instant.EPOCH),
                       List.of(command)));
-              return THREAD_ID;
+              return OneShotTicket.forThread(THREAD_ID);
             });
     when(oneShot.await(any(), any(), any()))
         .thenThrow(new IllegalStateException("stop after preflight"));

@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -100,6 +101,10 @@ class SessionDeletionOrchestratorTest {
             });
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
     when(canvasStore.lockDocument(CANVAS_ID)).thenReturn(Optional.of(mock(CanvasDocument.class)));
+    when(transaction.findAncestorChain(THREAD_1)).thenReturn(List.of(THREAD_1));
+    when(transaction.findAncestorChain(THREAD_2)).thenReturn(List.of(THREAD_2));
+    when(transaction.listChildren(THREAD_1)).thenReturn(List.of());
+    when(transaction.listChildren(THREAD_2)).thenReturn(List.of());
 
     agentSessionBinding =
         IssueAgentSession.builder()
@@ -160,12 +165,18 @@ class SessionDeletionOrchestratorTest {
     service.deleteSessionsByOwner(CHAT_OWNER);
 
     InOrder storeOrder = inOrder(transaction);
+    storeOrder.verify(transaction).listThreadsBySession(SESSION_1);
+    storeOrder.verify(transaction).listThreadsBySession(SESSION_2);
+    storeOrder.verify(transaction).lockTree(THREAD_1);
+    storeOrder.verify(transaction).lockTree(THREAD_2);
     storeOrder.verify(transaction).lockSessionForUpdate(SESSION_1);
     storeOrder.verify(transaction).lockSessionForUpdate(SESSION_2);
     storeOrder.verify(transaction).listThreadsBySession(SESSION_1);
     storeOrder.verify(transaction).listThreadsBySession(SESSION_2);
     storeOrder.verify(transaction).lockThread(THREAD_1);
     storeOrder.verify(transaction).lockThread(THREAD_2);
+    storeOrder.verify(transaction).deleteJoinsByChild(THREAD_1);
+    storeOrder.verify(transaction).deleteJoinsByChild(THREAD_2);
     storeOrder.verify(transaction).deleteThreads(List.of(THREAD_1, THREAD_2));
     storeOrder.verify(transaction).deleteEntries(SESSION_1);
     storeOrder.verify(transaction).deleteSession(SESSION_1);
@@ -323,6 +334,31 @@ class SessionDeletionOrchestratorTest {
   }
 
   @Test
+  void ownerDeletionIncludesTaskChildrenBeforeJoinAndHistoryDeletion() {
+    // 测试意图：跨 Session 的 task 子树随 owner 一起清理；不能单删父并留下一份悬挂 receipt。
+    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
+    when(transaction.lockSessionForUpdate(SESSION_1))
+        .thenReturn(Optional.of(new Session(SESSION_1, "session-1", NOW)));
+    when(transaction.lockSessionForUpdate(SESSION_2))
+        .thenReturn(Optional.of(new Session(SESSION_2, "child-session", NOW)));
+    ThreadState parent = thread(THREAD_1, SESSION_1);
+    ThreadState child = mock(ThreadState.class);
+    when(child.id()).thenReturn(THREAD_2);
+    when(child.sessionId()).thenReturn(SESSION_2);
+    when(child.parentThreadId()).thenReturn(THREAD_1);
+    when(transaction.listThreadsBySession(SESSION_1)).thenReturn(List.of(parent));
+    when(transaction.listThreadsBySession(SESSION_2)).thenReturn(List.of(child));
+    when(transaction.listChildren(THREAD_1)).thenReturn(List.of(child));
+    when(transaction.lockThread(THREAD_1)).thenReturn(Optional.of(parent));
+    when(transaction.lockThread(THREAD_2)).thenReturn(Optional.of(child));
+    when(transaction.deleteThreads(List.of(THREAD_1, THREAD_2))).thenReturn(2);
+
+    service.deleteSessionsByOwner(CHAT_OWNER);
+    verify(transaction).deleteJoinsByChild(THREAD_2);
+    verify(transaction).deleteSession(SESSION_2);
+  }
+
+  @Test
   void rejectsNullDependenciesInConstructor() {
     // 验证 SessionBlobRefManager 等强依赖不可为 null。
     assertThrows(
@@ -363,7 +399,18 @@ class SessionDeletionOrchestratorTest {
 
   private static ThreadState thread(UUID threadId, UUID sessionId) {
     return new ThreadState(
-        threadId, sessionId, id(100), "0".repeat(64), "thread", false, 1, 0, NOW, NOW);
+        threadId,
+        sessionId,
+        null,
+        id(100),
+        "0".repeat(64),
+        "thread",
+        false,
+        ThreadLifecycleStatus.IDLE,
+        1,
+        0,
+        NOW,
+        NOW);
   }
 
   private static UUID id(long value) {

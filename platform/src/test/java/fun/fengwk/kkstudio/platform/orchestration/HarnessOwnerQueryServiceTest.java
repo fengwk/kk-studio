@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -35,12 +34,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
@@ -73,7 +72,6 @@ class HarnessOwnerQueryServiceTest {
   private IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
-  private SubagentTaskActivity subagentTaskActivity;
   private HarnessOwnerQueryService service;
 
   @BeforeEach
@@ -88,7 +86,6 @@ class HarnessOwnerQueryServiceTest {
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    subagentTaskActivity = mock(SubagentTaskActivity.class);
     service =
         new HarnessOwnerQueryService(
             chatRepository,
@@ -97,8 +94,7 @@ class HarnessOwnerQueryServiceTest {
             canvasSessionRepository,
             issueAgentSessionRepository,
             issueAgentSessionOwnershipRepository,
-            runtimes,
-            subagentTaskActivity);
+            runtimes);
   }
 
   @Test
@@ -343,11 +339,7 @@ class HarnessOwnerQueryServiceTest {
     assertEquals("IDLE", idle.getStatus());
     assertFalse(idle.isProcessing());
 
-    when(subagentTaskActivity.hasPendingDelegatedWork(threadId)).thenReturn(true);
-    HarnessThreadSummaryDTO waiting = service.listThreadSummaries(sessionId).getFirst();
-    // status 只描述该 Thread 自身执行，聚合结果只体现在 processing 上。
-    assertEquals("IDLE", waiting.getStatus());
-    assertTrue(waiting.isProcessing());
+    // 未交付的 join 不再单独决定 processing；递归生命周期由 ThreadState 负责。
   }
 
   @Test
@@ -409,10 +401,12 @@ class HarnessOwnerQueryServiceTest {
     return new ThreadState(
         threadId,
         sessionId,
+        null,
         headEntryId,
         "0".repeat(64),
         "thread",
         false,
+        ThreadLifecycleStatus.IDLE,
         1L,
         0L,
         createdAt,
