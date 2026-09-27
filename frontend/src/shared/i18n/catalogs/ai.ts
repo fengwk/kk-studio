@@ -2714,4 +2714,100 @@ export const aiCatalog = {
     'en-US': 'Bound Environment',
     'zh-CN': '绑定环境',
   },
+  'ai.nav.interactions': {
+    'en-US': 'Pending',
+    'zh-CN': '待处理',
+  },
+  'ai.nav.interactionsAria': {
+    'en-US': 'Pending Interactions',
+    'zh-CN': '待处理事项',
+  },
+  'ai.interaction.pendingTitle': {
+    'en-US': 'Pending Interactions',
+    'zh-CN': '待处理事项',
+  },
+  'ai.interaction.empty': {
+    'en-US': 'No pending interactions',
+    'zh-CN': '暂无待处理项',
+  },
+  'ai.interaction.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'ai.interaction.loadMore': {
+    'en-US': 'Load More',
+    'zh-CN': '加载更多',
+  },
+  'ai.interaction.sourceChat': {
+    'en-US': 'Chat',
+    'zh-CN': '对话',
+  },
+  'ai.interaction.sourceIssue': {
+    'en-US': 'Issue Agent',
+    'zh-CN': '需求 Agent',
+  },
+  'ai.interaction.submit': {
+    'en-US': 'Submit Answers',
+    'zh-CN': '提交回答',
+  },
+  'ai.interaction.submitting': {
+    'en-US': 'Submitting...',
+    'zh-CN': '正在提交...',
+  },
+  'ai.interaction.decline': {
+    'en-US': 'Decline',
+    'zh-CN': '拒绝回答',
+  },
+  'ai.interaction.declined': {
+    'en-US': 'Declined by user',
+    'zh-CN': '已拒绝回答',
+  },
+  'ai.interaction.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
+  },
+  'ai.interaction.customInputPlaceholder': {
+    'en-US': 'Enter custom answer',
+    'zh-CN': '输入自定义回答',
+  },
+  'ai.interaction.recommended': {
+    'en-US': 'Recommended',
+    'zh-CN': '推荐',
+  },
+  'ai.interaction.singleChoice': {
+    'en-US': 'Single choice',
+    'zh-CN': '单选',
+  },
+  'ai.interaction.multipleChoice': {
+    'en-US': 'Multiple choice',
+    'zh-CN': '多选',
+  },
+  'ai.interaction.nonRecoverable': {
+    'en-US': 'Conflict or cancelled, non-recoverable. Please refresh.',
+    'zh-CN': '操作冲突或已取消，不可恢复，请刷新查看最新状态。',
+  },
+  'ai.interaction.allow': {
+    'en-US': 'Allow',
+    'zh-CN': '放行',
+  },
+  'ai.interaction.deny': {
+    'en-US': 'Deny',
+    'zh-CN': '拒绝',
+  },
+  'ai.interaction.approvalTitle': {
+    'en-US': 'Permission Approval',
+    'zh-CN': '权限审批',
+  },
+  'ai.interaction.approvalReason': {
+    'en-US': 'Reason',
+    'zh-CN': '审批原因',
+  },
+  'ai.interaction.waitingInput': {
+    'en-US': 'Waiting for Input',
+    'zh-CN': '等待输入',
+  },
+  'ai.interaction.waitingApproval': {
+    'en-US': 'Waiting for Approval',
+    'zh-CN': '等待审批',
+  },
 } satisfies LocaleCatalog

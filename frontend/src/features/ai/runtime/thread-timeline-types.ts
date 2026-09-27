@@ -128,6 +128,8 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   partial?: string
   /** 持有此次调用持久状态（approval/partial）的 ToolInvocation id。 */
   invocationId?: string
+  /** 该 Tool 归属的 Thread id（用于提交问卷回答与审批决策）。 */
+  threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
 }

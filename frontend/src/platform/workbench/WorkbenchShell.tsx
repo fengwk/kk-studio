@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link, Navigate, Route, Routes } from 'react-router'
 import type { PageContribution } from '@/platform/extensions/types'
 import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
@@ -47,10 +48,16 @@ function StudioRoutes() {
   )
 }
 
-export function WorkbenchShell({ navItems }: { navItems?: readonly PrimaryNavItem[] } = {}) {
+export function WorkbenchShell({
+  navItems,
+  children,
+}: {
+  navItems?: readonly PrimaryNavItem[]
+  children?: ReactNode
+} = {}) {
   return (
     <AppShell navItems={navItems}>
-      <StudioRoutes />
+      {children ?? <StudioRoutes />}
     </AppShell>
   )
 }

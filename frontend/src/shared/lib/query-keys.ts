@@ -72,4 +72,10 @@ export const queryKeys = {
     issues: (projectId: string) => ['projects', 'issue', projectId] as const,
     issue: (projectId: string, issueId: string) => ['projects', 'issue', projectId, issueId] as const,
   },
+  interactions: {
+    all: ['interactions'] as const,
+    list: (cursor?: string | null, limit?: number) =>
+      ['interactions', 'list', cursor ?? null, limit ?? 50] as const,
+    count: ['interactions', 'count'] as const,
+  },
 }
