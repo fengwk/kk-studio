@@ -12,15 +12,17 @@ public final class CodingCapabilities {
 
   private CodingCapabilities() {}
 
-  /** 注册文件、进程、三个 LSP 基线 capability 以及 skill.sync 能力。 */
+  /** 注册文件、进程、三个 LSP capability 以及 skill.sync 能力。 */
   public static void registerAll(
       DaemonCapabilityRegistry registry,
       CodingToolsConfig config,
+      LspService lspService,
       SkillPackageInstaller skillInstaller,
       ExecutorService executor,
       ScheduledExecutorService scheduler) {
     Objects.requireNonNull(registry, "registry");
     Objects.requireNonNull(config, "config");
+    Objects.requireNonNull(lspService, "lspService");
     Objects.requireNonNull(skillInstaller, "skillInstaller");
     Objects.requireNonNull(executor, "executor");
     Objects.requireNonNull(scheduler, "scheduler");
@@ -30,9 +32,9 @@ public final class CodingCapabilities {
     registry.register(new BashCapability(config, executor, scheduler));
     registry.register(new GrepCapability(config, executor));
     registry.register(new FindCapability(config, executor));
-    registry.register(new LspGotoDefinitionCapability(config, executor));
-    registry.register(new LspWorkspaceSymbolsCapability(config, executor));
-    registry.register(new LspJavaDecompileCapability(config, executor));
+    registry.register(new LspGotoDefinitionCapability(config, lspService, executor));
+    registry.register(new LspWorkspaceSymbolsCapability(config, lspService, executor));
+    registry.register(new LspJavaDecompileCapability(config, lspService, executor));
     registry.register(new SkillSyncCapability(config, skillInstaller, executor));
   }
 }

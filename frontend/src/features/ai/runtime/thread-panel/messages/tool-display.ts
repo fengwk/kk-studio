@@ -143,25 +143,6 @@ export function formatToolResultPreview(
   }
 }
 
-/** task.status 是传输心跳，由 task renderer 消费；默认文本 renderer 不直接泄漏 JSON。 */
-export function shouldSuppressTransientToolResult(
-  toolName: string,
-  text: string,
-): boolean {
-  if (toolName.trim().toLowerCase() !== 'task') {
-    return false
-  }
-  try {
-    const value: unknown = JSON.parse(text)
-    return value != null
-      && typeof value === 'object'
-      && !Array.isArray(value)
-      && (value as Record<string, unknown>).kind === 'task.status'
-  } catch {
-    return false
-  }
-}
-
 function formatBoundedPreview(
   body: string,
   details: string[],
@@ -293,8 +274,8 @@ function formatKnownToolDetail(
         return null
       }
       return withOptions(subagentType, [
-        ['session_id', values.session_id],
-        ['maxTurns', values.maxTurns],
+        ['thread_id', values.thread_id],
+        ['max_turns', values.max_turns],
       ])
     }
     default:

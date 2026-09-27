@@ -4,8 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import okhttp3.OkHttpClient;
 
+import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingCapabilities;
 import fun.fengwk.kkstudio.harness.daemon.coding.CodingToolsConfig;
+import fun.fengwk.kkstudio.harness.daemon.coding.LspService;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
@@ -27,6 +31,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec;
@@ -59,9 +64,12 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /**
  * Environment Daemon 的连接、协议和本地 Environment Capability 执行基座。
@@ -93,6 +101,11 @@ public final class DaemonRuntime implements AutoCloseable {
   private final DaemonInvocationJournal journal;
   private final ScheduledExecutorService scheduler;
   private final ExecutorService taskExecutor;
+  private final ExecutorService lspExecutor;
+
+  /** capability 持有的进程内资源（当前是 LSP 客户端池）；由本运行时负责在 shutdown 时关闭。 */
+  private final AutoCloseable capabilityResources;
+
   private final DaemonEnvironmentInfo environmentInfo;
   private final DaemonEnvelopeCodec envelopeCodec = new DaemonEnvelopeCodec();
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
@@ -124,8 +137,8 @@ public final class DaemonRuntime implements AutoCloseable {
   private Duration nextReconnectDelay;
 
   /**
-   * 创建完整生产运行时。scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由 runtime
-   * 独占生命周期；任一步构造失败都会释放 transport 和已创建的执行资源。
+   * 创建完整生产运行时。LSP 服务、scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由
+   * runtime 独占生命周期；任一步构造失败都会释放 transport、LSP 客户端和已创建的执行资源。
    */
   public static DaemonRuntime create(
       DaemonConfig config, CodingToolsConfig toolsConfig, DaemonDataDirectory dataDirectory) {
@@ -134,9 +147,12 @@ public final class DaemonRuntime implements AutoCloseable {
     SkillPackageInstaller skillInstaller = SkillPackageInstaller.open(dataDirectory);
     return create(
         config,
-        (registry, executor, scheduler) ->
-            CodingCapabilities.registerAll(
-                registry, toolsConfig, skillInstaller, executor, scheduler));
+        (registry, executor, scheduler, lspExecutor) -> {
+          LspService lspService = LspService.create(toolsConfig.lsp(), lspExecutor, scheduler);
+          CodingCapabilities.registerAll(
+              registry, toolsConfig, lspService, skillInstaller, executor, scheduler);
+          return lspService;
+        });
   }
 
   static DaemonRuntime create(DaemonConfig config, CapabilityRegistrar registrar) {
@@ -144,13 +160,17 @@ public final class DaemonRuntime implements AutoCloseable {
     Objects.requireNonNull(registrar, "registrar");
     ScheduledThreadPoolExecutor scheduler = newScheduler();
     ExecutorService taskExecutor = null;
+    ExecutorService lspExecutor = null;
     DaemonTransport transport = null;
+    AutoCloseable capabilityResources = null;
     boolean completed = false;
     try {
       taskExecutor = newTaskExecutor();
+      lspExecutor = newLspExecutor();
       transport = new OkHttpWebSocketTransport(config.gatewayUri());
       DaemonCapabilityRegistry capabilityRegistry = new DaemonCapabilityRegistry();
-      registrar.register(capabilityRegistry, taskExecutor, scheduler);
+      capabilityResources =
+          registrar.register(capabilityRegistry, taskExecutor, scheduler, lspExecutor);
       DaemonRuntime runtime =
           new DaemonRuntime(
               config,
@@ -159,13 +179,16 @@ public final class DaemonRuntime implements AutoCloseable {
               new InMemoryDaemonInvocationJournal(),
               scheduler,
               taskExecutor,
+              lspExecutor,
+              capabilityResources,
               true);
       completed = true;
       return runtime;
     } finally {
       if (!completed) {
+        closeQuietly(capabilityResources);
         closeQuietly(transport);
-        shutdownExecutors(scheduler, taskExecutor);
+        shutdownExecutors(scheduler, taskExecutor, lspExecutor);
       }
     }
   }
@@ -178,7 +201,8 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor) {
-    this(config, transport, capabilityRegistry, journal, scheduler, taskExecutor, false);
+    this(
+        config, transport, capabilityRegistry, journal, scheduler, taskExecutor, null, null, false);
   }
 
   private DaemonRuntime(
@@ -188,6 +212,8 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonInvocationJournal journal,
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
+      ExecutorService lspExecutor,
+      AutoCloseable capabilityResources,
       boolean requireFixedCapabilityCatalog) {
     this.config = Objects.requireNonNull(config, "config");
     this.boundEnvironmentId = new AtomicReference<>();
@@ -196,6 +222,8 @@ public final class DaemonRuntime implements AutoCloseable {
     this.journal = Objects.requireNonNull(journal, "journal");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.taskExecutor = Objects.requireNonNull(taskExecutor, "taskExecutor");
+    this.lspExecutor = lspExecutor;
+    this.capabilityResources = capabilityResources;
     this.resourceHttpClient =
         new OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
@@ -261,6 +289,21 @@ public final class DaemonRuntime implements AutoCloseable {
 
   private static ExecutorService newTaskExecutor() {
     return Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("daemon-task-", 0).factory());
+  }
+
+  /**
+   * LSP 客户端 stdio 的阻塞 I/O 执行器。
+   *
+   * <p>进程管道读取会占用虚拟线程的调度载体，因此这里刻意使用平台线程；线程数跟随 LSP 客户端数量，空闲线程自行回收。
+   */
+  private static ExecutorService newLspExecutor() {
+    AtomicInteger counter = new AtomicInteger();
+    return Executors.newCachedThreadPool(
+        runnable -> {
+          Thread thread = new Thread(runnable, "daemon-lsp-" + counter.incrementAndGet());
+          thread.setDaemon(true);
+          return thread;
+        });
   }
 
   /** 启动连接生命周期并立即尝试建立 WebSocket。重复调用无副作用。 */
@@ -665,7 +708,7 @@ public final class DaemonRuntime implements AutoCloseable {
       terminal(
           envelope.invocationId(),
           new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
-          false);
+          null);
     }
   }
 
@@ -681,7 +724,7 @@ public final class DaemonRuntime implements AutoCloseable {
     terminal(
         envelope.invocationId(),
         new DaemonTerminalMessage(DaemonMessageType.CANCELLED, "{\"reason\":\"cancelled\"}"),
-        true);
+        EnvironmentCapabilityTerminationCause.CANCELLED);
   }
 
   private void replay(DaemonInvocationJournalEntry entry, String invocationId) {
@@ -697,23 +740,93 @@ public final class DaemonRuntime implements AutoCloseable {
    * 原子终态仲裁与结果派发。
    *
    * <p>存在 {@link RunningInvocation} 时，正常完成、执行失败、调度器超时、主动取消与停机先通过 {@link
-   * RunningInvocation#claimTerminal(boolean)} 仲裁本地执行资源；预检失败等尚未建立本地执行的路径直接进入 journal。两类路径最终都以 {@link
+   * RunningInvocation#claimTerminal(EnvironmentCapabilityTerminationCause, DaemonTerminalMessage,
+   * Runnable)} 仲裁本地执行资源；预检失败等尚未建立本地执行的路径直接进入 journal。两类路径最终都以 {@link
    * DaemonInvocationJournal#complete(String, DaemonTerminalMessage)} 的 RUNNING 到终态原子跃迁作为唯一提交点；
    * 只有提交成功者发送终态报文。
+   *
+   * <p>{@code cause} 非空表示这是运行时基于 deadline 或调用方取消做出的裁决。能力若声明了 {@link
+   * EnvironmentCapabilityExecutionHandle#terminationGrace()}，运行时把终态提交让给它：由能力携带已捕获输出、在同一终态类型下收尾 （见
+   * {@link RunningInvocation#resolveHandoff}）；预算到期仍未收尾时由运行时兜底提交，因此终态既不会因能力不配合而丢失，也不会无限延迟。
    */
-  private void terminal(String invocationId, DaemonTerminalMessage message, boolean cancelHandle) {
+  private void terminal(
+      String invocationId,
+      DaemonTerminalMessage message,
+      EnvironmentCapabilityTerminationCause cause) {
     RunningInvocation invocation = running.get(invocationId);
-    if (invocation != null && !invocation.claimTerminal(cancelHandle)) {
+    if (invocation != null
+        && !invocation.claimTerminal(
+            scheduler, cause, message, () -> commitTerminal(invocationId, invocation, message))) {
       return;
     }
-    if (journal.complete(invocationId, message)) {
-      if (invocation == null) {
-        running.remove(invocationId);
-      } else {
-        running.remove(invocationId, invocation);
-      }
-      send(message.messageType(), invocationId, message.payloadJson());
+    commitTerminal(invocationId, invocation, message);
+  }
+
+  /** 单点提交终态：journal 的 RUNNING 到终态跃迁是唯一仲裁点，只有跃迁成功者发送终态报文。 */
+  private void commitTerminal(
+      String invocationId, RunningInvocation invocation, DaemonTerminalMessage message) {
+    if (!journal.complete(invocationId, message)) {
+      return;
     }
+    if (invocation == null) {
+      running.remove(invocationId);
+    } else {
+      running.remove(invocationId, invocation);
+    }
+    send(message.messageType(), invocationId, message.payloadJson());
+  }
+
+  /**
+   * 用能力收尾事实替换运行时终态的正文，同时保留运行时的终态类型。
+   *
+   * <p>终态类型表达裁决原因（超时仍是 {@code FAILED}、取消仍是 {@code CANCELLED}，平台据此走既有的失败/取消收敛路径），正文表达本地事实。
+   * 这样已捕获输出无需协议变更即可到达调用方，也绝不会把一次取消报告成 {@code COMPLETED}。
+   *
+   * <p>注入的正文只来自能力结果的文本内容，与同一次调用原本会返回的工具结果正文完全一致：二进制/资源/JSON 内容不进入终态说明，因此不会出现 durable 日志之外的原始字节。超过单条
+   * wire 文本上限的正文被整体丢弃（只保留运行时自己的裁决原因），绝不截断成半个字符，也绝不因此丢终态。
+   */
+  private DaemonTerminalMessage withCapabilityText(
+      DaemonTerminalMessage base, String capabilityText) {
+    String field = base.messageType() == DaemonMessageType.CANCELLED ? "reason" : "message";
+    String baseText = payloadText(base.payloadJson(), field);
+    String text =
+        capabilityText == null
+                || capabilityText.isBlank()
+                || ResourceRef.utf8LengthUpTo(
+                        capabilityText,
+                        "capabilityText",
+                        DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES)
+                    > DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES
+            ? baseText
+            : baseText + "\n" + capabilityText;
+    ObjectNode payload = envelopeCodec.createPayload();
+    payload.put(field, text);
+    return new DaemonTerminalMessage(base.messageType(), payload.toString());
+  }
+
+  private String payloadText(String payloadJson, String field) {
+    try {
+      JsonNode payload = envelopeCodec.readJson(payloadJson);
+      JsonNode value = payload.isObject() ? payload.get(field) : null;
+      return value == null || !value.isTextual() ? "" : value.textValue();
+    } catch (RuntimeException error) {
+      // 运行时自己的终态正文必定可解析；解析失败时退化为只携带能力文本，绝不因此丢终态。
+      return "";
+    }
+  }
+
+  /** 汇总能力结果中模型可见的文本正文；非文本内容不进入终态说明。 */
+  private static String capturedText(EnvironmentCapabilityResult result) {
+    StringBuilder text = new StringBuilder();
+    for (ResultContent content : result.contents()) {
+      if (content instanceof TextResultContent textContent) {
+        if (text.length() > 0) {
+          text.append('\n');
+        }
+        text.append(textContent.text());
+      }
+    }
+    return text.toString();
   }
 
   private static long deadlineNanos(Duration timeout) {
@@ -750,7 +863,7 @@ public final class DaemonRuntime implements AutoCloseable {
                           "{\"message\":\"capability execution timed out after "
                               + timeout.toMillis()
                               + "ms\"}"),
-                      true),
+                      EnvironmentCapabilityTerminationCause.TIMED_OUT),
               timeout.toMillis(),
               TimeUnit.MILLISECONDS);
       invocation.setDeadline(deadline);
@@ -760,7 +873,7 @@ public final class DaemonRuntime implements AutoCloseable {
           new DaemonTerminalMessage(
               DaemonMessageType.FAILED,
               "{\"message\":\"cannot schedule capability timeout: " + error.getMessage() + "\"}"),
-          true);
+          EnvironmentCapabilityTerminationCause.CANCELLED);
     }
   }
 
@@ -880,14 +993,16 @@ public final class DaemonRuntime implements AutoCloseable {
           .values()
           .forEach(
               invocation -> {
-                invocation.cancel();
+                invocation.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
                 journal.complete(
                     invocation.invocationId(),
                     new DaemonTerminalMessage(
                         DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
               });
       running.clear();
-      shutdownExecutors(scheduler, taskExecutor);
+      // LSP 等 capability 资源在 transport 与任务收敛之后、执行资源关闭之前收尾。
+      closeQuietly(capabilityResources);
+      shutdownExecutors(scheduler, taskExecutor, lspExecutor);
     } finally {
       termination.countDown();
     }
@@ -899,11 +1014,22 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   private static void shutdownExecutors(
-      ScheduledExecutorService scheduler, ExecutorService taskExecutor) {
+      ScheduledExecutorService scheduler,
+      ExecutorService taskExecutor,
+      ExecutorService lspExecutor) {
     if (taskExecutor != null) {
       taskExecutor.shutdownNow();
       try {
         taskExecutor.awaitTermination(
+            EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+      }
+    }
+    if (lspExecutor != null) {
+      lspExecutor.shutdownNow();
+      try {
+        lspExecutor.awaitTermination(
             EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
       } catch (InterruptedException error) {
         Thread.currentThread().interrupt();
@@ -930,10 +1056,19 @@ public final class DaemonRuntime implements AutoCloseable {
 
   @FunctionalInterface
   interface CapabilityRegistrar {
-    void register(
+
+    /**
+     * 注册 capability，并返回需要与 runtime 同生命周期的进程内资源（例如 LSP 客户端池）。
+     *
+     * @param taskExecutor 通用任务执行器（虚拟线程）
+     * @param lspExecutor LSP 客户端阻塞 I/O 使用的平台线程执行器
+     * @return 由 runtime 关闭的资源；没有则为 {@code null}
+     */
+    AutoCloseable register(
         DaemonCapabilityRegistry registry,
         ExecutorService taskExecutor,
-        ScheduledExecutorService scheduler);
+        ScheduledExecutorService scheduler,
+        ExecutorService lspExecutor);
   }
 
   private static final class ActiveConnection {
@@ -988,15 +1123,27 @@ public final class DaemonRuntime implements AutoCloseable {
         new AtomicReference<>();
     private final AtomicReference<ScheduledFuture<?>> deadline = new AtomicReference<>();
 
+    /** 已发出的收尾请求原因；句柄尚未建立时据此在 {@link #setHandle} 中补发。 */
+    private final AtomicReference<EnvironmentCapabilityTerminationCause> terminationCause =
+        new AtomicReference<>();
+
     /**
      * 终态仲裁与资源上传控制帧出站的互斥门。
      *
      * <p>服务端只接受活动调用的上传控制帧，因此「检查调用仍活动 + 发送控制帧」必须与终态抢占互斥：控制帧要么完整发生在终态之前，要么确定不发送；终态绝不 会被之后的控制帧越过。
+     *
+     * <p>该门同时保护延迟终态窗口的开启与解析：运行时裁决与能力收尾对「谁是终态提交者」只能有一个结论，且窗口必须在请求能力收尾之前开启，否则与收尾竞态的能力终态会因窗口未开启而被丢弃。
      */
     private final Object terminalGate = new Object();
 
     /** 本次调用的绝对超时时刻；用于让终态编码阶段的上传不超过调用预算。 */
     private volatile long deadlineNanos = Long.MAX_VALUE;
+
+    /** 非空表示延迟终态窗口已开启：终态改由能力收尾或兜底定时器提交。 */
+    private DaemonTerminalMessage handoff;
+
+    /** 延迟终态窗口的兜底定时器：到期后由运行时提交 {@link #handoff}。 */
+    private volatile ScheduledFuture<?> handoffFallback;
 
     private RunningInvocation(String invocationId) {
       this.invocationId = invocationId;
@@ -1019,23 +1166,91 @@ public final class DaemonRuntime implements AutoCloseable {
     }
 
     /**
-     * 尝试原子抢占终态仲裁权（terminal-once 互斥点）。
+     * 尝试原子抢占终态仲裁权（terminal-once 互斥点），并决定终态由谁提交。
      *
      * <p>抢占与资源上传控制帧出站共享 {@link #terminalGate}：终态一旦被抢占，该调用之后的控制帧一律确定不发送；已在临界区内入队的控制帧必然排在终态报文 之前。
      *
-     * @param cancelHandle 是否在抢占成功后同时取消底层执行句柄
-     * @return 若当前线程首次将 terminal 标记置为 true 返回 true，否则返回 false（表明已有其它终态路径抢占）
+     * <p>抢占成功且能力声明了收尾预算时，本方法在临界区内开启延迟终态窗口并向能力发出带原因的收尾请求：窗口先于请求开启，因此能力收尾提交的终态一定 能接管提交权。窗口到期仍未收尾时由
+     * {@code fallback} 提交运行时自己的终态。
+     *
+     * @param cause 非空表示运行时基于 deadline 或取消裁决，需要请求底层能力收尾；null 表示无需请求能力
+     * @param message 运行时自己的终态，同时是延迟终态窗口到期后的兜底终态
+     * @param fallback 延迟终态窗口到期后提交兜底终态的动作
+     * @return true 表示调用方必须立即提交 {@code message}；false 表示已有终态抢先，或终态已交由延迟窗口提交
      */
-    private boolean claimTerminal(boolean cancelHandle) {
+    private boolean claimTerminal(
+        ScheduledExecutorService scheduler,
+        EnvironmentCapabilityTerminationCause cause,
+        DaemonTerminalMessage message,
+        Runnable fallback) {
+      boolean deferred;
       synchronized (terminalGate) {
         if (!terminal.compareAndSet(false, true)) {
           return false;
         }
+        deferred = openHandoff(scheduler, message, fallback);
       }
       cancelDeadline();
-      if (cancelHandle) {
-        cancel();
+      if (cause != null) {
+        terminate(cause);
       }
+      return !deferred;
+    }
+
+    /**
+     * 在终态互斥门内开启延迟终态窗口。
+     *
+     * <p>只在能力明确声明正预算时开启：普通能力立即由运行时收敛，不引入任何等待。兜底定时器登记失败（scheduler 已停机）时不开启窗口，
+     * 由运行时立即收敛自己的终态，绝不让终态因调度器不可用而悬挂。
+     *
+     * @return true 表示窗口已开启，终态提交权已让给能力收尾或兜底定时器
+     */
+    private boolean openHandoff(
+        ScheduledExecutorService scheduler, DaemonTerminalMessage message, Runnable fallback) {
+      EnvironmentCapabilityExecutionHandle current = handle.get();
+      if (current == null) {
+        return false;
+      }
+      Duration grace = current.terminationGrace();
+      if (grace == null || grace.isZero() || grace.isNegative()) {
+        return false;
+      }
+      handoff = message;
+      try {
+        handoffFallback =
+            scheduler.schedule(fallback, Math.max(0L, grace.toMillis()), TimeUnit.MILLISECONDS);
+      } catch (RejectedExecutionException error) {
+        handoff = null;
+        return false;
+      }
+      return true;
+    }
+
+    /**
+     * 能力在收尾预算内提交终态：用能力事实构造的终态接管提交权。
+     *
+     * <p>只在延迟终态窗口内生效；窗口不存在（或已被兜底定时器收口）时返回 false，调用方按正常终态路径处理。
+     *
+     * @param capabilityTerminal 以窗口内运行时的裁决终态为输入构造最终终态报文
+     * @return true 表示终态已由本方法提交
+     */
+    private boolean resolveHandoff(
+        UnaryOperator<DaemonTerminalMessage> capabilityTerminal,
+        Consumer<DaemonTerminalMessage> committer) {
+      DaemonTerminalMessage resolved;
+      synchronized (terminalGate) {
+        if (handoff == null) {
+          return false;
+        }
+        resolved = capabilityTerminal.apply(handoff);
+        handoff = null;
+        ScheduledFuture<?> fallback = handoffFallback;
+        handoffFallback = null;
+        if (fallback != null) {
+          fallback.cancel(false);
+        }
+      }
+      committer.accept(resolved);
       return true;
     }
 
@@ -1060,8 +1275,9 @@ public final class DaemonRuntime implements AutoCloseable {
 
     private void setHandle(EnvironmentCapabilityExecutionHandle handle) {
       this.handle.set(handle);
-      if (cancelled.get()) {
-        handle.cancel();
+      EnvironmentCapabilityTerminationCause pending = terminationCause.get();
+      if (pending != null) {
+        handle.terminate(pending);
       }
     }
 
@@ -1069,11 +1285,13 @@ public final class DaemonRuntime implements AutoCloseable {
       this.deadline.set(deadline);
     }
 
-    private void cancel() {
+    /** 请求底层能力以明确原因收尾；原因在句柄尚未建立时被记住，句柄建立后立即补发。 */
+    private void terminate(EnvironmentCapabilityTerminationCause cause) {
       if (cancelled.compareAndSet(false, true)) {
+        terminationCause.set(cause);
         EnvironmentCapabilityExecutionHandle current = handle.get();
         if (current != null) {
-          current.cancel();
+          current.terminate(cause);
         }
       }
     }
@@ -1092,7 +1310,7 @@ public final class DaemonRuntime implements AutoCloseable {
         invocationId,
         new DaemonTerminalMessage(
             DaemonMessageType.FAILED, errorPayload(new IllegalStateException(message, error))),
-        false);
+        null);
   }
 
   /**
@@ -1172,7 +1390,7 @@ public final class DaemonRuntime implements AutoCloseable {
             new DaemonTerminalMessage(
                 DaemonMessageType.FAILED,
                 "{\"message\":\"capability partial callId does not match invocationId\"}"),
-            true);
+            EnvironmentCapabilityTerminationCause.CANCELLED);
         return;
       }
       try {
@@ -1191,17 +1409,21 @@ public final class DaemonRuntime implements AutoCloseable {
             new DaemonTerminalMessage(
                 DaemonMessageType.FAILED,
                 "{\"message\":\"capability result callId does not match invocationId\"}"),
-            false);
+            null);
         return;
       }
       try {
         String payloadJson =
             resultCodec.encodeCompleted(
                 result, maxResourceBytes.get(), resourceUploader(invocation));
-        terminal(
-            invocation.invocationId(),
-            new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payloadJson),
-            false);
+        DaemonTerminalMessage completed =
+            new DaemonTerminalMessage(DaemonMessageType.COMPLETED, payloadJson);
+        // 处于超时/取消的延迟终态窗口时，用已捕获输出在同一裁决类型下收尾；否则按正常终态路径提交。
+        if (!invocation.resolveHandoff(
+            runtime -> withCapabilityText(runtime, capturedText(result)),
+            resolved -> commitTerminal(invocation.invocationId(), invocation, resolved))) {
+          terminal(invocation.invocationId(), completed, null);
+        }
       } catch (RuntimeException error) {
         failResultEncoding(invocation.invocationId(), error, "complete");
       }
@@ -1209,10 +1431,13 @@ public final class DaemonRuntime implements AutoCloseable {
 
     @Override
     public void onError(Throwable error) {
-      terminal(
-          invocation.invocationId(),
-          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error)),
-          false);
+      DaemonTerminalMessage failed =
+          new DaemonTerminalMessage(DaemonMessageType.FAILED, errorPayload(error));
+      if (!invocation.resolveHandoff(
+          runtime -> withCapabilityText(runtime, safeFailureMessage(error)),
+          resolved -> commitTerminal(invocation.invocationId(), invocation, resolved))) {
+        terminal(invocation.invocationId(), failed, null);
+      }
     }
   }
 }

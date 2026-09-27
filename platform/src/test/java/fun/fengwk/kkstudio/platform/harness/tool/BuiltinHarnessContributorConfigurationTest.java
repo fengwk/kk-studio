@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -28,16 +26,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 验证 {@link BuiltinHarnessContributorConfiguration#subagentConfigProvider} 把 {@code
- * SystemSettings.AiRuntime} 的五个 subagent 字段完整映射为 {@link SubagentConfig}，以及 executor 与 Contributor
- * 装配。
+ * SystemSettings.AiRuntime} 的五个 subagent 字段完整映射为 {@link SubagentConfig}，以及 Contributor 装配。
  */
 class BuiltinHarnessContributorConfigurationTest {
 
@@ -71,55 +63,16 @@ class BuiltinHarnessContributorConfigurationTest {
   }
 
   @Test
-  void subagentExecutorUsesFixedVirtualThreadsAndZeroQueue() throws Exception {
-    HarnessExecutionAdmissionProperties properties = new HarnessExecutionAdmissionProperties();
-    properties.setSubagent(2);
-    ExecutorService executor =
-        new BuiltinHarnessContributorConfiguration().subagentTaskExecutor(properties);
-    ThreadPoolExecutor pool = assertInstanceOf(ThreadPoolExecutor.class, executor);
-    CountDownLatch entered = new CountDownLatch(2);
-    CountDownLatch release = new CountDownLatch(1);
-    try {
-      assertEquals(2, pool.getCorePoolSize());
-      assertEquals(2, pool.getMaximumPoolSize());
-      assertEquals(0, pool.getQueue().remainingCapacity());
-
-      for (int i = 0; i < 2; i++) {
-        executor.execute(
-            () -> {
-              assertTrue(Thread.currentThread().isVirtual());
-              entered.countDown();
-              try {
-                release.await();
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-              }
-            });
-      }
-      assertTrue(entered.await(5, TimeUnit.SECONDS));
-      // 固定 N + SynchronousQueue：第 N+1 个 Task 在创建 child 前确定性拒绝。
-      assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {}));
-    } finally {
-      release.countDown();
-      executor.close();
-    }
-  }
-
-  @Test
   void executionAdmissionPropertiesRejectNonPositiveValues() {
     HarnessExecutionAdmissionProperties properties = new HarnessExecutionAdmissionProperties();
     assertEquals(16, properties.getModel());
     assertEquals(64, properties.getTool());
-    assertEquals(10, properties.getSubagent());
     properties.setModel(3);
     properties.setTool(4);
-    properties.setSubagent(5);
     assertEquals(3, properties.getModel());
     assertEquals(4, properties.getTool());
-    assertEquals(5, properties.getSubagent());
     assertThrows(IllegalArgumentException.class, () -> properties.setModel(0));
     assertThrows(IllegalArgumentException.class, () -> properties.setTool(-1));
-    assertThrows(IllegalArgumentException.class, () -> properties.setSubagent(0));
   }
 
   @Test

@@ -14,6 +14,7 @@ Harness 的每个边界都要回答同几个问题：这段 prompt 模板变量�
 | `fun.fengwk.kkstudio.harness.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
 | `fun.fengwk.kkstudio.harness.common.skill` | Skill package/name、Git commit、描述与稳定逻辑路径的 canonical 文本规则 | 只定义跨层共享的纯文本约束；Catalog、Git I/O 与 Daemon 安装由外层承接 |
+| `fun.fengwk.kkstudio.harness.common.text` | 字符流文本窗口核心：分页投影、正文码点预算、行/列 `long` 计数与截断元数据 | 只做 JDK 字符流的窗口投影与 BOM 邻接策略；编码嗅探、输入流打开、超时与异常映射由调用方适配 |
 
 ## Prompt 模板
 

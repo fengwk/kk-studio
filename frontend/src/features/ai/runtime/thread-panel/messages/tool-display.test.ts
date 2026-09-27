@@ -3,7 +3,6 @@ import {
   formatToolCallLinePreview,
   formatToolCallSummary,
   formatToolResultPreview,
-  shouldSuppressTransientToolResult,
 } from '@/features/ai/runtime/thread-panel/messages/tool-display'
 
 describe('tool display', () => {
@@ -33,10 +32,10 @@ describe('tool display', () => {
     })).text).toBe('bash npm test in /srv/project/frontend [timeout_seconds=30]')
     expect(formatToolCallSummary('task', JSON.stringify({
       subagent_type: 'explorer',
-      session_id: 'child-1',
-      maxTurns: 12,
+      thread_id: 'child-1',
+      max_turns: 12,
       prompt: 'inspect the repository',
-    })).text).toBe('task explorer [session_id=child-1 maxTurns=12]')
+    })).text).toBe('task explorer [thread_id=child-1 max_turns=12]')
     expect(formatToolCallSummary('lsp_goto_definition', JSON.stringify({
       path: 'src/App.java',
       workdir: '/srv/project',
@@ -122,15 +121,6 @@ describe('tool display', () => {
     expect(preview.text.endsWith('...')).toBe(true)
     expect(preview.maxLines).toBe(6)
     expect(preview.truncated).toBe(true)
-  })
-
-  it('suppresses only valid task.status transport heartbeats', () => {
-    expect(shouldSuppressTransientToolResult(
-      'task',
-      '{"kind":"task.status"}',
-    )).toBe(true)
-    expect(shouldSuppressTransientToolResult('task', '{"kind":"other"}')).toBe(false)
-    expect(shouldSuppressTransientToolResult('bash', '{"kind":"task.status"}')).toBe(false)
   })
 
   it('formats write/edit summaries with option flags and workdir suffixes', () => {
@@ -261,11 +251,5 @@ describe('tool display', () => {
       maxLines: 0,
       truncated: false,
     })
-  })
-
-  it('suppresses task arrays and malformed JSON instead of treating them as heartbeats', () => {
-    expect(shouldSuppressTransientToolResult('task', '[{"kind":"task.status"}]')).toBe(false)
-    expect(shouldSuppressTransientToolResult('task', 'not-json')).toBe(false)
-    expect(shouldSuppressTransientToolResult('task', 'null')).toBe(false)
   })
 })

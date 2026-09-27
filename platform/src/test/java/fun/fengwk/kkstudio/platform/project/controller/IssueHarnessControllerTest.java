@@ -58,6 +58,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -93,6 +94,7 @@ class IssueHarnessControllerTest {
   private HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private HarnessRuntime harnessRuntime;
   private ObjectProvider<HarnessRuntime> harnessRuntimes;
+  private SubagentTaskActivity subagentTaskActivity;
   private IssueHarnessController controller;
 
   @BeforeEach
@@ -103,9 +105,14 @@ class IssueHarnessControllerTest {
     harnessRuntime = mock(HarnessRuntime.class);
     harnessRuntimes = mock(ObjectProvider.class);
     when(harnessRuntimes.getIfAvailable()).thenReturn(harnessRuntime);
+    subagentTaskActivity = mock(SubagentTaskActivity.class);
     controller =
         new IssueHarnessController(
-            issueAgentSessionRepository, bootstrapService, acceptanceOrchestrator, harnessRuntimes);
+            issueAgentSessionRepository,
+            bootstrapService,
+            acceptanceOrchestrator,
+            harnessRuntimes,
+            subagentTaskActivity);
   }
 
   @AfterEach
@@ -421,6 +428,25 @@ class IssueHarnessControllerTest {
     Inspection inspection = controller.inspect(issue, run);
     assertEquals(InspectionStatus.QUIESCENT, inspection.status());
     assertEquals(snapshot, inspection.requireQuiescentSnapshot());
+  }
+
+  @Test
+  void pendingDelegatedWorkKeepsBranchProcessingAndUnsettled() {
+    // 测试意图：父 Thread 自身静止但子树仍有未交付委派时，reconcile 必须判定为 PROCESSING 并拒绝复用该 Branch：
+    // 否则 Issue 会在子结果回来、父恢复执行之前就推进到下一阶段，或者把输入排到尚未收尾的 Branch 上。
+    Issue issue = issue();
+    IssueRun run = run(IssueRunRole.EXECUTOR);
+    IssueAgentSession agentSession = boundSession(issue, run);
+    // 快照的 Thread 身份必须与归属关系一致：判定用的 thread id 就是 snapshot.thread().id()。
+    ThreadState threadState =
+        thread(agentSession.getThreadId(), agentSession.getSessionId(), false, NOW);
+
+    ThreadSnapshot idle = baseSnapshot(threadState);
+    when(harnessRuntime.getThreadSnapshot(agentSession.getThreadId())).thenReturn(idle);
+    when(subagentTaskActivity.hasPendingDelegatedWork(agentSession.getThreadId())).thenReturn(true);
+
+    assertEquals(InspectionStatus.PROCESSING, controller.inspect(issue, run).status());
+    assertUnsettledBootstrapRejected(project(), issue, run);
   }
 
   @Test

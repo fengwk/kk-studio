@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -37,7 +38,8 @@ import java.util.regex.Pattern;
  *
  * <ul>
  *   <li>按原始 content 顺序用两个换行（{@code \n\n}）拼接所有 Text/Json 内容，形成唯一 canonical textual projection；
- *   <li>若 projection 同时满足内联阈值（&le; 50 KiB 且 &le; 2000 物理行），原样内联保留；
+ *   <li>若 projection 同时满足内联阈值（默认 &le; 50 KiB 且 &le; 2000 物理行；可信内置 {@code read} 身份为 &le; 320 KiB 且
+ *       &le; 2020 物理行），原样内联保留；
  *   <li>任一阈值超出时，将完整 projection 存为一个 managed Resource，删除所有原 Text/Json 内容， 并在第一个原文本位置插入携带小 raw
  *       preview（&le; 2 KiB 且 &le; 20 行）和 {@link TextArtifactMetadata} 的 {@link
  *       ResourceResultContent}，其余非文本 Resource 顺序保持不变；
@@ -55,6 +57,19 @@ public final class ToolResultFinalizer {
 
   /** terminal textual projection 的完整内联物理行数上限（2000 行）。 */
   public static final int INLINE_MAX_LINES = 2000;
+
+  /**
+   * 可信内置 {@code read} 身份的文本投影内联 UTF-8 字节上限（320 KiB）。
+   *
+   * <p>{@code read} 契约自身已把正文限制在 2000 行、60000 个 Unicode code point 以内（不计行号、元数据与行分隔符），最坏 4 字节 code
+   * point 正文为 240000 字节，加上 2000 行行号前缀与 header/footer 仍在 320 KiB 内，因此该窗口不需要二次外化。 该上限只对可信内置 {@code
+   * read} 身份生效：工具身份就是模型可见 name，跨源/同源同名在 {@code CompositeRuntimeToolCatalog} 中 fail-closed， 任意 MCP
+   * 同名工具无法借 {@code read} 名放宽预算。
+   */
+  public static final int READ_INLINE_MAX_UTF8_BYTES = 320 * 1024;
+
+  /** 可信内置 {@code read} 身份的文本投影内联物理行数上限（2000 行正文加 header/footer 余量）。 */
+  public static final int READ_INLINE_MAX_LINES = 2020;
 
   /** 大输出 raw preview 的 UTF-8 字节上限（2 KiB）。 */
   public static final int TRUNCATED_PREVIEW_MAX_UTF8_BYTES = 2 * 1024;
@@ -278,7 +293,8 @@ public final class ToolResultFinalizer {
       totalTextBytes = utf8Len;
       totalTextLines = countPhysicalLines(joinedText);
 
-      if (totalTextBytes > INLINE_MAX_UTF8_BYTES || totalTextLines > INLINE_MAX_LINES) {
+      if (totalTextBytes > inlineMaxUtf8Bytes(toolName)
+          || totalTextLines > inlineMaxLines(toolName)) {
         externalizeText = true;
         boolean singleJson = textPieces.size() == 1 && textPieces.get(0).isJson();
         String mediaType = singleJson ? "application/json" : "text/plain";
@@ -365,6 +381,21 @@ public final class ToolResultFinalizer {
     }
 
     return new Plan(items);
+  }
+
+  /**
+   * 返回该工具身份适用的文本投影内联 UTF-8 字节上限。
+   *
+   * <p>只有可信内置 {@link ReadTool#NAME read} 身份使用 {@link #READ_INLINE_MAX_UTF8_BYTES}；其他工具保持 {@link
+   * #INLINE_MAX_UTF8_BYTES}。工具身份就是模型可见 name，同名冲突在运行时目录 fail-closed，因此该名称只能解析到内置 read。
+   */
+  private static int inlineMaxUtf8Bytes(String toolName) {
+    return ReadTool.NAME.equals(toolName) ? READ_INLINE_MAX_UTF8_BYTES : INLINE_MAX_UTF8_BYTES;
+  }
+
+  /** 返回该工具身份适用的文本投影内联物理行数上限；只有可信内置 {@code read} 身份使用加宽上限。 */
+  private static int inlineMaxLines(String toolName) {
+    return ReadTool.NAME.equals(toolName) ? READ_INLINE_MAX_LINES : INLINE_MAX_LINES;
   }
 
   /** 严格计算物理行数：空文本为 0；否则为 LF 数量加上未以 LF 结尾时的最后一行。 */

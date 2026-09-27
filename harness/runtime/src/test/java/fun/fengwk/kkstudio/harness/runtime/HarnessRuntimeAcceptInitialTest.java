@@ -15,9 +15,16 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -539,6 +546,95 @@ class HarnessRuntimeAcceptInitialTest {
                     List.of(userMessageCommand(TestIds.id(1), "hello"))),
                 AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
+  }
+
+  /**
+   * 未闭合 STOP Turn 是原子控制屏障：fork（NEW_THREAD）到它内部的任何 prefix 都必须原子拒绝，且不留 Thread / Command / Work 残留。
+   */
+  @Test
+  void entryRejectsStartEntryInsideAnUnclosedStopTurnWithoutCreatingThread() {
+    HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    for (UUID startEntryId : seedStopTurn(baseline, false)) {
+      IllegalArgumentException error =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  runtime.acceptCommands(
+                      entry(
+                          baseline.sessionId(),
+                          startEntryId,
+                          List.of(userMessageCommand(TestIds.id(1), "hello"))),
+                      AcceptancePreflight.IDENTITY));
+      assertEquals(
+          "start entry " + startEntryId + " is inside an unclosed STOP turn", error.getMessage());
+      assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(203)).isEmpty()));
+      assertTrue(
+          store.<Boolean>transaction(tx -> tx.loadCommandsByThread(TestIds.id(203)).isEmpty()));
+      assertTrue(
+          store.<Boolean>transaction(
+              tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, TestIds.id(203))).isEmpty()));
+    }
+  }
+
+  /** 正常关闭的 STOPPED 边界不是未闭合屏障：fork 到该边界照常成立，新 Thread head 直接指向它。 */
+  @Test
+  void entryForksAtAClosedStopBoundary() {
+    HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
+    UUID boundary = seedStopTurn(baseline, true).getLast();
+
+    AcceptedCommands result =
+        runtime.acceptCommands(
+            entry(
+                baseline.sessionId(),
+                boundary,
+                List.of(userMessageCommand(TestIds.id(1), "hello"))),
+            AcceptancePreflight.IDENTITY);
+
+    assertFalse(result.replayed());
+    ThreadState thread = store.transaction(tx -> tx.findThread(TestIds.id(203)).orElseThrow());
+    assertEquals(boundary, thread.headEntryId());
+    assertEquals(1L, thread.version());
+  }
+
+  /** 在既有 Session 内直接写入一个 STOP barrier Turn（{@code closed=false} 时停在未闭合 prefix）。 */
+  private List<UUID> seedStopTurn(HarnessRuntimeTestSupport.Baseline baseline, boolean closed) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  baseline.sessionId(),
+                  baseline.rootEntryId(),
+                  new TurnStartPayload(TurnStartReason.STOP, settings(), baseline.threadId()),
+                  T0));
+          UUID barrierId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  barrierId,
+                  baseline.sessionId(),
+                  turnStartId,
+                  new AssistantErrorPayload(
+                      new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"), null),
+                  T0));
+          if (!closed) {
+            return List.of(turnStartId, barrierId);
+          }
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  baseline.sessionId(),
+                  barrierId,
+                  new TurnEndPayload(
+                      turnStartId,
+                      TurnEndOutcome.STOPPED,
+                      false,
+                      TurnEndReason.USER_STOP,
+                      TestIds.id(9)),
+                  T0));
+          return List.of(turnStartId, barrierId, turnEndId);
+        });
   }
 
   private void assertPreflightContractViolation(

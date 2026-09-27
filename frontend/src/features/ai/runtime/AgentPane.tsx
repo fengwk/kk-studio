@@ -34,7 +34,7 @@ export function AgentPane({
   initialTarget,
   capabilities,
 }: {
-  owner: AgentRuntimeOwnerDTO
+  owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
   environments?: EnvironmentCardDTO[]
@@ -83,7 +83,6 @@ export function AgentPane({
         composer={{ ...pane.composer, interactionPanel }}
         activity={{
           working: pane.controller.working,
-          onDecideTaskApproval: pane.onDecideTaskApproval,
           actionError: pane.error,
           onDismissActionError,
         }}

@@ -3,11 +3,11 @@
   "properties": {
     "path": {
       "type": "string",
-      "description": "Existing source file path supported by an LSP server. This path is also used to infer the workspace root."
+      "description": "Existing source file path supported by an LSP server. This path is also used to infer the workspace root. Absolute paths need no `workdir`; a relative path requires one."
     },
     "workdir": {
       "type": "string",
-      "description": "Absolute directory on the target daemon's file system that this call runs in. Required on every call; it is never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
+      "description": "Optional absolute directory on the target daemon's file system, used only to resolve a relative `path`. Required when `path` is relative; never inherited from a previous call, a session default, or the environment root. Provide an expanded absolute path (no '~', no environment variable placeholders); Windows targets use a drive-rooted or UNC path."
     },
     "line": {
       "type": "integer",
@@ -20,8 +20,7 @@
   },
   "required": [
     "path",
-    "line",
-    "workdir"
+    "line"
   ],
   "additionalProperties": false
 }

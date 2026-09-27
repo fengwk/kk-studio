@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -82,18 +83,22 @@ class IssueHarnessController {
   private final ProjectHarnessSessionBootstrapService bootstrapService;
   private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private final ObjectProvider<HarnessRuntime> harnessRuntimes;
+  private final SubagentTaskActivity subagentTaskActivity;
 
   IssueHarnessController(
       IssueAgentSessionRepository issueAgentSessionRepository,
       ProjectHarnessSessionBootstrapService bootstrapService,
       HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
-      ObjectProvider<HarnessRuntime> harnessRuntimes) {
+      ObjectProvider<HarnessRuntime> harnessRuntimes,
+      SubagentTaskActivity subagentTaskActivity) {
     this.issueAgentSessionRepository =
         Objects.requireNonNull(issueAgentSessionRepository, "issueAgentSessionRepository");
     this.bootstrapService = Objects.requireNonNull(bootstrapService, "bootstrapService");
     this.acceptanceOrchestrator =
         Objects.requireNonNull(acceptanceOrchestrator, "acceptanceOrchestrator");
     this.harnessRuntimes = Objects.requireNonNull(harnessRuntimes, "harnessRuntimes");
+    this.subagentTaskActivity =
+        Objects.requireNonNull(subagentTaskActivity, "subagentTaskActivity");
   }
 
   void bootstrap(Project project, Issue issue, IssueRun run) {
@@ -452,6 +457,11 @@ class IssueHarnessController {
     return false;
   }
 
+  /**
+   * 该 Thread 是否仍在处理：本 Thread 本身（含未消费命令）在跑，或其委派子树仍有未交付委派。
+   *
+   * <p>异步委派把父的 turn 与子的执行分开：父在等待子结果时自身已静止，但本次工作并未结束，因此向外必须仍呈现处理中，否则 Issue 推进会误判静止并复用未收尾的 Branch。
+   */
   private boolean isProcessing(ThreadSnapshot snapshot) {
     if (!snapshot.queuedCommands().isEmpty()) {
       return true;
@@ -459,7 +469,8 @@ class IssueHarnessController {
     ThreadContext context =
         CONTEXT_CLASSIFIER.classify(
             snapshot.thread(), snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
-    return ThreadRuntimeStatus.from(context).isProcessing();
+    return ThreadRuntimeStatus.from(context).isProcessing()
+        || subagentTaskActivity.hasPendingDelegatedWork(snapshot.thread().id());
   }
 
   private void bestEffortStop(UUID sessionId) {

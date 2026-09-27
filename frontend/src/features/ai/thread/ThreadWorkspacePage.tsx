@@ -1,0 +1,93 @@
+import { useQuery } from '@tanstack/react-query'
+import { ArrowLeft } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router'
+import { AgentPane } from '@/features/ai/runtime/AgentPane'
+import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
+import { harnessService } from '@/shared/api/harness-service'
+import { queryKeys } from '@/shared/lib/query-keys'
+import { useI18n } from '@/shared/i18n'
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function ThreadWorkspacePage() {
+  const { threadId = '' } = useParams<{ threadId: string }>()
+  const navigate = useNavigate()
+  const { t } = useI18n()
+
+  const isValidUuid = Boolean(threadId) && UUID_PATTERN.test(threadId)
+
+  const threadQuery = useQuery({
+    queryKey: queryKeys.threads.snapshot(threadId),
+    queryFn: () => harnessService.getThreadSnapshot(threadId),
+    enabled: isValidUuid,
+  })
+
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents.list,
+    queryFn: () => agentService.listAgents(),
+  })
+
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments.list,
+    queryFn: () => environmentService.listEnvironments(),
+  })
+
+  if (!isValidUuid) {
+    return (
+      <div className="thread-state danger">
+        {t('ai.thread.invalidId')}
+        <button type="button" onClick={() => navigate('/chats')}>
+          {t('ai.chat.backToList')}
+        </button>
+      </div>
+    )
+  }
+
+  if (threadQuery.isLoading) {
+    return <div className="thread-state">{t('ai.chat.loading')}</div>
+  }
+
+  if (threadQuery.isError || !threadQuery.data) {
+    return (
+      <div className="thread-state danger">
+        {t('ai.thread.loadFailed')}
+        <button type="button" onClick={() => navigate('/chats')}>
+          {t('ai.chat.backToList')}
+        </button>
+      </div>
+    )
+  }
+
+  const thread = threadQuery.data.thread
+  const title = thread.name || thread.threadId
+
+  return (
+    <section className="chat-workspace screen active">
+      <header className="chat-workspace-header">
+        <div className="chat-workspace-title">
+          <Link
+            className="sidebar-icon-btn"
+            to="/chats"
+            title={t('ai.chat.backToChatList')}
+            aria-label={t('ai.chat.backToChatList')}
+          >
+            <ArrowLeft aria-hidden="true" />
+          </Link>
+          <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
+          <h1>{title}</h1>
+        </div>
+      </header>
+      <div className="chat-pane-grid layout-single">
+        <AgentPane
+          paneId={`thread-${threadId}`}
+          agents={agentsQuery.data?.results ?? []}
+          environments={environmentsQuery.data ?? []}
+          initialTarget={{ kind: 'BOUND_THREAD', threadId }}
+          capabilities={{ readOnly: true, allowNewSession: false }}
+          focused
+        />
+      </div>
+    </section>
+  )
+}

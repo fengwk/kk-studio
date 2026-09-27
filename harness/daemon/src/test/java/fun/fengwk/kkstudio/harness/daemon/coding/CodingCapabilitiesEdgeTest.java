@@ -3,11 +3,9 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
@@ -32,7 +30,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,8 +43,19 @@ class CodingCapabilitiesEdgeTest {
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
+  /** LSP capability 的测试门面：本类只验证参数与接线，因此不配置任何服务器。 */
+  private final ExecutorService lspDispatch = Executors.newCachedThreadPool();
+
+  private final ScheduledExecutorService lspScheduler =
+      Executors.newSingleThreadScheduledExecutor();
+  private final LspService lspService =
+      LspService.create(LspDiscovery.empty(), lspDispatch, lspScheduler);
+
   @AfterEach
   void closeExecutors() {
+    lspService.close();
+    lspScheduler.shutdownNow();
+    lspDispatch.shutdownNow();
     scheduler.shutdownNow();
     executor.shutdownNow();
   }
@@ -282,6 +290,7 @@ class CodingCapabilitiesEdgeTest {
       "kkstudio.daemon.max-resource-bytes",
       "kkstudio.daemon.bash",
       "kkstudio.daemon.lsp-bridge-command",
+      "kkstudio.daemon.lsp-config",
       "kkstudio.daemon.javap"
     };
     String[] previous = new String[removed.length];
@@ -292,13 +301,11 @@ class CodingCapabilitiesEdgeTest {
     try {
       Path resources = Files.createDirectories(workspaceRoot.resolve("data/resources"));
       CodingToolsConfig config =
-          CodingToolsConfig.fromCli(
-              resources, "/usr/bin/bash", "bridge --stdio", "/opt/jdk/bin/javap");
+          CodingToolsConfig.fromCli(resources, "/usr/bin/bash", TestCodingConfig.testLsp());
 
       // 唯一权威来源是 CLI：被删除的属性不得改写任何取值。
       assertEquals("/usr/bin/bash", config.bashExecutable());
-      assertEquals("bridge --stdio", config.lspBridgeCommand());
-      assertEquals("/opt/jdk/bin/javap", config.javapExecutable());
+      assertEquals("test-ls", config.lsp().servers().getFirst().id());
       // 输出布局完全由数据目录决定；本地不再有二进制 resource 导出根。
       assertEquals(resources.resolve("text"), config.textOutputStore().textDirectory());
       assertEquals(resources.resolve("staging"), config.textOutputStore().stagingDirectory());
@@ -313,21 +320,19 @@ class CodingCapabilitiesEdgeTest {
     }
   }
 
-  /** 三个本地执行程序参数的默认值与显式覆盖：空白回退默认，显式取值原样保留。 */
+  /** 本地执行程序参数的默认值与显式覆盖：空白回退默认，显式取值原样保留，未配置时没有 LSP 服务器。 */
   @Test
   void cliConfigurationResolvesLocalExecutableDefaults() throws Exception {
     Path resources = Files.createDirectories(workspaceRoot.resolve("data/resources"));
 
-    CodingToolsConfig defaults = CodingToolsConfig.fromCli(resources, "  ", null, " ");
+    CodingToolsConfig defaults = CodingToolsConfig.fromCli(resources, "  ", LspDiscovery.empty());
     assertEquals(CodingToolsConfig.DEFAULT_BASH_EXECUTABLE, defaults.bashExecutable());
-    assertEquals(CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE, defaults.javapExecutable());
-    assertNull(defaults.lspBridgeCommand(), "空白 bridge 命令表示禁用");
+    assertTrue(defaults.lsp().servers().isEmpty(), "未提供 --lsp-config 时没有 LSP 服务器");
 
     CodingToolsConfig explicit =
-        CodingToolsConfig.fromCli(resources, "custom-bash", "", "custom-javap");
+        CodingToolsConfig.fromCli(resources, "custom-bash", LspDiscovery.empty());
     assertEquals("custom-bash", explicit.bashExecutable());
-    assertEquals("custom-javap", explicit.javapExecutable());
-    assertNull(explicit.lspBridgeCommand());
+    assertTrue(explicit.lsp().servers().isEmpty());
   }
 
   /** 无效配置必须在构造期 fail closed：非正阈值不允许进入运行期。 */
@@ -442,28 +447,13 @@ class CodingCapabilitiesEdgeTest {
   }
 
   @Test
-  void lspRelativizesLocalPathsAndFileUrisRelativeToWorkdir() {
-    Path workdir = workspaceRoot.resolve("project");
-    String textWithAbs = workdir.toString().replace('\\', '/') + "/src/Main.java:10:5: sample";
-    assertEquals("src/Main.java:10:5: sample", LspBridge.relativizeLspText(textWithAbs, workdir));
-
-    String textWithUri = "file://" + workdir.toString().replace('\\', '/') + "/src/Main.java:10:5";
-    assertEquals("src/Main.java:10:5", LspBridge.relativizeLspText(textWithUri, workdir));
-
-    String external = "/var/other/path/File.java:1:1";
-    assertEquals(external, LspBridge.relativizeLspText(external, workdir));
-
-    assertEquals("", LspBridge.relativizeLspText("", workdir));
-    assertEquals(null, LspBridge.relativizeLspText(null, workdir));
-  }
-
-  @Test
   void lspCapabilitiesRequireValidAbsoluteWorkdirAndFile() throws Exception {
     CodingToolsConfig config = config();
     Files.createDirectories(workspaceRoot.resolve("src"));
     Files.writeString(workspaceRoot.resolve("src/App.java"), "class App {}");
 
-    LspGotoDefinitionCapability gotoDef = new LspGotoDefinitionCapability(config, executor);
+    LspGotoDefinitionCapability gotoDef =
+        new LspGotoDefinitionCapability(config, lspService, executor);
     EnvironmentCapabilityResult relWorkdir =
         invoke(gotoDef, "{\"path\":\"src/App.java\",\"line\":1,\"workdir\":\"relative/dir\"}");
     assertTrue(relWorkdir.error());
@@ -478,7 +468,8 @@ class CodingCapabilitiesEdgeTest {
     assertTrue(missingFile.error());
     assertTrue(text(missingFile).contains("path does not exist"));
 
-    LspWorkspaceSymbolsCapability wsSymbols = new LspWorkspaceSymbolsCapability(config, executor);
+    LspWorkspaceSymbolsCapability wsSymbols =
+        new LspWorkspaceSymbolsCapability(config, lspService, executor);
     EnvironmentCapabilityResult blankQuery =
         invoke(
             wsSymbols,
@@ -488,7 +479,8 @@ class CodingCapabilitiesEdgeTest {
     assertTrue(blankQuery.error());
     assertTrue(text(blankQuery).contains("query must not be blank"));
 
-    LspJavaDecompileCapability decompile = new LspJavaDecompileCapability(config, executor);
+    LspJavaDecompileCapability decompile =
+        new LspJavaDecompileCapability(config, lspService, executor);
     EnvironmentCapabilityResult blankTarget =
         invoke(
             decompile,
@@ -557,13 +549,14 @@ class CodingCapabilitiesEdgeTest {
   }
 
   @Test
-  void lspCapabilitiesReportUnavailableWhenBridgeNotConfigured() throws Exception {
-    CodingToolsConfig noBridgeConfig = TestCodingConfig.withoutBridge(workspaceRoot);
+  void lspCapabilitiesReportUnavailableWhenNotConfigured() throws Exception {
+    CodingToolsConfig withoutLsp = TestCodingConfig.withoutLsp(workspaceRoot);
 
     Files.createDirectories(workspaceRoot.resolve("src"));
     Files.writeString(workspaceRoot.resolve("src/App.java"), "class App {}");
 
-    LspGotoDefinitionCapability gotoDef = new LspGotoDefinitionCapability(noBridgeConfig, executor);
+    LspGotoDefinitionCapability gotoDef =
+        new LspGotoDefinitionCapability(withoutLsp, lspService, executor);
     EnvironmentCapabilityResult defRes =
         invoke(
             gotoDef,
@@ -571,10 +564,10 @@ class CodingCapabilitiesEdgeTest {
                 + json(workspaceRoot.toString())
                 + "}");
     assertTrue(defRes.error());
-    assertTrue(text(defRes).contains("LSP bridge is unavailable"));
+    assertTrue(text(defRes).contains("No LSP server configured"));
 
     LspWorkspaceSymbolsCapability wsSymbols =
-        new LspWorkspaceSymbolsCapability(noBridgeConfig, executor);
+        new LspWorkspaceSymbolsCapability(withoutLsp, lspService, executor);
     EnvironmentCapabilityResult wsRes =
         invoke(
             wsSymbols,
@@ -582,118 +575,7 @@ class CodingCapabilitiesEdgeTest {
                 + json(workspaceRoot.toString())
                 + "}");
     assertTrue(wsRes.error());
-    assertTrue(text(wsRes).contains("LSP bridge is unavailable"));
-  }
-
-  @Test
-  void lspBridgeClassTargetResolutionAndJavap() throws Exception {
-    assertNull(LspBridge.resolveClassTarget(null, null));
-    assertNull(LspBridge.resolveClassTarget("   ", null));
-
-    var jdt = LspBridge.resolveClassTarget("jdt://contents/pkg/MyClass.class?option=1", null);
-    assertNotNull(jdt);
-    assertEquals("MyClass", jdt.className());
-
-    var jdtWithPrefix =
-        LspBridge.resolveClassTarget(
-            "MyClass (Class) - jdt://contents/java.base/" + "java/lang/String.class", null);
-    assertNotNull(jdtWithPrefix);
-    assertEquals("java." + "lang.String", jdtWithPrefix.className());
-
-    var classToken = LspBridge.resolveClassTarget("foo/bar/Baz.class", null);
-    assertNotNull(classToken);
-    assertEquals("foo." + "bar.Baz", classToken.className());
-
-    var simple = LspBridge.resolveClassTarget("com." + "example.Item", null);
-    assertNotNull(simple);
-    assertEquals("com." + "example.Item", simple.className());
-
-    var paren = LspBridge.resolveClassTarget("String (Class) - not a jdt", null);
-    assertNotNull(paren);
-    assertEquals("java." + "lang.String", paren.className());
-
-    var parenCustom = LspBridge.resolveClassTarget("com." + "foo.Bar (Class) - test", null);
-    assertNotNull(parenCustom);
-    assertEquals("com." + "foo.Bar", parenCustom.className());
-
-    Path fakeClass = workspaceRoot.resolve("LocalClass.class");
-    Files.write(fakeClass, new byte[] {0});
-    var fromFile = LspBridge.resolveClassTarget("LocalClass.class", fakeClass);
-    assertNotNull(fromFile);
-    assertEquals("LocalClass", fromFile.className());
-
-    LspBridge bridge = new LspBridge(null, "javap");
-    // javap 回退路径同样受调用方有效超时与取消信号约束。
-    String decompiled =
-        bridge.javaDecompile(
-            workspaceRoot,
-            file("src/App.java"),
-            "java." + "lang.Object",
-            Duration.ofSeconds(30),
-            () -> false);
-    assertNotNull(decompiled);
-    assertTrue(
-        decompiled.contains("class java." + "lang.Object")
-            || decompiled.contains("java/lang/Object"));
-  }
-
-  @Test
-  void lspBridgeInvocationAndCapabilityExecution() throws Exception {
-    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
-    Path bridge = workspaceRoot.resolve("test-bridge.sh");
-    Files.writeString(
-        bridge,
-        """
-        #!/bin/sh
-        read line
-        op=$(echo "$line" | grep -o '"op":"[^"]*"' | cut -d'"' -f4)
-        if [ "$op" = "goto_definition" ]; then
-          printf '{"ok":true,"text":"%s/src/App.java:10:5"}' "$PWD"
-        elif [ "$op" = "workspace_symbols" ]; then
-          printf '{"ok":true,"text":"App %s/src/App.java:1"}' "$PWD"
-        elif [ "$op" = "java_decompile" ]; then
-          printf '{"ok":true,"text":"decompiled content"}'
-        else
-          printf '{"ok":false,"error":"unknown op"}'
-        fi
-        """);
-    assertTrue(bridge.toFile().setExecutable(true));
-
-    CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(workspaceRoot, 2000, 50 * 1024, bridge.toString());
-
-    Files.createDirectories(workspaceRoot.resolve("src"));
-    Files.writeString(workspaceRoot.resolve("src/App.java"), "class App {}");
-
-    LspGotoDefinitionCapability gotoDef = new LspGotoDefinitionCapability(config, executor);
-    EnvironmentCapabilityResult defRes =
-        invoke(
-            gotoDef,
-            "{\"path\":\"src/App.java\",\"line\":1,\"character\":0,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
-    assertFalse(defRes.error());
-    assertEquals("src/App.java:10:5", text(defRes));
-
-    LspWorkspaceSymbolsCapability wsSymbols = new LspWorkspaceSymbolsCapability(config, executor);
-    EnvironmentCapabilityResult wsRes =
-        invoke(
-            wsSymbols,
-            "{\"path\":\"src/App.java\",\"query\":\"App\",\"limit\":10,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
-    assertFalse(wsRes.error());
-    assertEquals("App src/App.java:1", text(wsRes));
-
-    LspJavaDecompileCapability decompile = new LspJavaDecompileCapability(config, executor);
-    EnvironmentCapabilityResult decRes =
-        invoke(
-            decompile,
-            "{\"path\":\"src/App.java\",\"target\":\"App (Class)\",\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
-    assertFalse(decRes.error());
-    assertEquals("decompiled content", text(decRes));
+    assertTrue(text(wsRes).contains("No LSP server configured"));
   }
 
   private Path file(String relative) {

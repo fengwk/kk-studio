@@ -64,6 +64,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_model_invocation",
           "harness_tool_invocation",
           "harness_work",
+          "harness_subagent_task",
           "project",
           "project_issue",
           "project_issue_dependency",
@@ -89,7 +90,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_tool_invocation",
           "harness_work");
 
-  /** 所有允许使用 harness_ 前缀的基础设施表。 */
+  /** 所有允许使用 harness_ 前缀的基础设施表：执行协议七表 + 异步委派记录表。 */
   private static final Set<String> HARNESS_PREFIXED_TABLES =
       Set.of(
           "harness_session",
@@ -98,7 +99,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_thread_command",
           "harness_model_invocation",
           "harness_tool_invocation",
-          "harness_work");
+          "harness_work",
+          "harness_subagent_task");
 
   /** Canvas 与 Chat/Comfy 一样完全 UUID：所有持久化实体 id 由应用侧生成，schema 不提供任何序列。 */
   private static final Set<String> CANVAS_UUID_ID_TABLES =
@@ -1330,6 +1332,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "uk_environment_name",
             "uk_environment_registration_token",
             "uk_harness_entry_session_id",
+            "uk_harness_subagent_task_child_open",
             "uk_harness_entry_single_root",
             "uk_harness_thread_command_idempotency",
             "uk_harness_model_invocation_turn",

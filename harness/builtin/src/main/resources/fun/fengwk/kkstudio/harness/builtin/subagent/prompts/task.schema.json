@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "description": "Delegate a self-contained task to a subagent that runs autonomously in an isolated session and returns a single final report.",
+  "description": "Delegate a self-contained task to a subagent that runs autonomously in an isolated session and reports back later.",
   "properties": {
     "subagent_type": {
       "type": "string",
@@ -8,15 +8,15 @@
     },
     "prompt": {
       "type": "string",
-      "description": "Complete, self-contained instructions for a new task, or updated direction and context for a resumed task. Include the objective, relevant scope, constraints, expected deliverable, output format, and verification instructions when applicable."
+      "description": "Complete, self-contained instructions for a new task, or updated direction and context for a continued task. Include the objective, relevant scope, constraints, expected deliverable, output format, and verification instructions when applicable."
     },
-    "maxTurns": {
+    "max_turns": {
       "type": "integer",
-      "description": "Positive integer interaction-turn budget for this invocation. Defaults to the current subagent policy when omitted. If the child is unfinished when the budget is reached, it returns a phase report; use a smaller value when early path verification or frequent parent-child interaction is needed."
+      "description": "Positive integer interaction-turn budget for this invocation. Defaults to the current subagent policy when omitted. An unfinished child is reminded to return a phase report when the budget is reached; use a smaller value when early path verification or frequent parent-child interaction is needed."
     },
-    "session_id": {
+    "thread_id": {
       "type": "string",
-      "description": "Identifier of a previous subagent session to resume, using the `<task id=\"...\">` value returned by an earlier task call."
+      "description": "Identifier of a previously accepted subagent thread to continue, using the `thread_id` returned by an earlier task receipt or completion message."
     }
   },
   "required": ["subagent_type", "prompt"],

@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
@@ -58,6 +59,7 @@ public class HarnessOwnerQueryService {
   private final IssueAgentSessionRepository issueAgentSessionRepository;
   private final IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private final ObjectProvider<HarnessRuntime> runtimes;
+  private final SubagentTaskActivity subagentTaskActivity;
 
   public HarnessOwnerQueryService(
       ChatRepository chatRepository,
@@ -66,7 +68,8 @@ public class HarnessOwnerQueryService {
       CanvasSessionRepository canvasSessionRepository,
       IssueAgentSessionRepository issueAgentSessionRepository,
       IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository,
-      ObjectProvider<HarnessRuntime> runtimes) {
+      ObjectProvider<HarnessRuntime> runtimes,
+      SubagentTaskActivity subagentTaskActivity) {
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
@@ -79,6 +82,8 @@ public class HarnessOwnerQueryService {
         Objects.requireNonNull(
             issueAgentSessionOwnershipRepository, "issueAgentSessionOwnershipRepository");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
+    this.subagentTaskActivity =
+        Objects.requireNonNull(subagentTaskActivity, "subagentTaskActivity");
   }
 
   /** 返回 Chat owner 的 Session 摘要，关系顺序保持最近归属优先。 */
@@ -175,7 +180,7 @@ public class HarnessOwnerQueryService {
     return dto;
   }
 
-  private static HarnessThreadSummaryDTO toThreadSummary(ThreadSnapshot snapshot) {
+  private HarnessThreadSummaryDTO toThreadSummary(ThreadSnapshot snapshot) {
     ThreadState thread = snapshot.thread();
     ThreadContext context =
         CONTEXT_CLASSIFIER.classify(
@@ -185,7 +190,11 @@ public class HarnessOwnerQueryService {
     dto.setName(thread.name());
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
-    dto.setStatus(ThreadRuntimeStatus.from(context).name());
+    ThreadRuntimeStatus status = ThreadRuntimeStatus.from(context);
+    dto.setStatus(status.name());
+    // 委派子树仍有未交付委派时父 Thread 自身静止但工作未结束，owner 视图也必须反映处理中。
+    dto.setProcessing(
+        status.isProcessing() || subagentTaskActivity.hasPendingDelegatedWork(thread.id()));
     var selection = snapshot.entryPath().baseSettings().model();
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
     model.setProviderName(selection.providerName());

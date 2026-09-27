@@ -18,9 +18,9 @@ import java.util.stream.Stream;
  * daemon 模块的轻量架构守卫。
  *
  * <p>Daemon 的 main 源码只允许依赖 JDK、Jackson、OkHttp（{@code okhttp3}/{@code okio}）、JGit（{@code
- * org.eclipse.jgit.*}）、{@code com.google.re2j}、{@code harness.common}、{@code harness.environment}
- * 以及本模块自身包。 严禁直接依赖 {@code harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及
- * Provider SDK 和 LangChain4j。
+ * org.eclipse.jgit.*}）、LSP4J（{@code org.eclipse.lsp4j.*}，标准 LSP 客户端库）、{@code
+ * com.google.re2j}、{@code harness.common}、{@code harness.environment} 以及本模块自身包。 严禁直接依赖 {@code
+ * harness.tool}、runtime/platform/web、Spring/MyBatis/servlet/Redis 以及 Provider SDK 和 LangChain4j。
  */
 class DaemonModuleArchitectureTest {
 
@@ -202,7 +202,8 @@ class DaemonModuleArchitectureTest {
         || imported.startsWith("fun.fengwk.kkstudio.harness.environment.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.daemon.")
         || imported.startsWith("fun.fengwk.kkstudio.harness.mcp.")
-        || imported.startsWith("org.eclipse.jgit.");
+        || imported.startsWith("org.eclipse.jgit.")
+        || imported.startsWith("org.eclipse.lsp4j.");
   }
 
   private static String normalizeImport(String importLine) {

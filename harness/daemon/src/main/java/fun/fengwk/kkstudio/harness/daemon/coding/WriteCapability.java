@@ -7,16 +7,22 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** 在本次调用显式 workdir 下按意图创建或替换单个文本文件。 */
+/**
+ * 在本次调用声明的 workdir 下按意图创建或完整覆盖单个文本文件。
+ *
+ * <p>{@code path} 为绝对路径时无需 {@code workdir}；为相对路径时必须提供本次调用的显式绝对 {@code workdir}，否则在执行前拒绝且不回退到
+ * cwd、HOME 或任何会话默认目录。workdir 只用于解析路径，不是文件系统沙箱。
+ *
+ * <p>调用给出的 content 就是写入内容本身：不做换行风格改写，也不会为了沿用既有行尾而变换用户内容。目标已存在且为普通文本文件时，按既有约定无损保留它的 编码与
+ * BOM，无法在该编码下无损表示的内容则拒绝写入。目录、设备、FIFO 等非普通文件在任何 I/O 之前拒绝。
+ */
 public final class WriteCapability extends AbstractCodingCapability {
 
   public WriteCapability(CodingToolsConfig config, ExecutorService executor) {
@@ -30,67 +36,38 @@ public final class WriteCapability extends AbstractCodingCapability {
     JsonNode args = arguments(request);
     String rawPath = string(args, "path");
     String content = string(args, "content");
-    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    String rawWorkdir = optionalString(args, "workdir");
+    Path workdir = rawWorkdir == null ? null : EnvironmentPaths.workdir(rawWorkdir);
     Path path = EnvironmentPaths.writable(rawPath, workdir);
     String displayPath = EnvironmentPaths.displayPath(path, workdir, rawPath);
 
     ReentrantLock lock = FileMutations.lock(path);
     try {
-      if (execution.isCancelled()) {
-        throw new InterruptedException();
-      }
+      // 取消只在提交前生效：一旦提交成立，本方法只返回成功终态。
+      requireNotCancelled(execution);
 
       boolean existed = Files.exists(path);
-      if (existed && Files.isDirectory(path)) {
-        throw new IllegalArgumentException("path is a directory: " + displayPath);
-      }
-
-      TextFileCodec.Decoded existing = null;
+      Charset charset = StandardCharsets.UTF_8;
+      int bomLength = 0;
       if (existed) {
-        byte[] existingBytes = Files.readAllBytes(path);
-        existing = TextFileCodec.decode(existingBytes);
-      }
-
-      String adaptedContent = content;
-      var targetCharset = StandardCharsets.UTF_8;
-      int targetBomLength = 0;
-
-      if (existing != null) {
-        targetCharset = existing.charset();
-        targetBomLength = existing.bomLength();
-        String lineEnding = detectLineEnding(existing.text());
-        if ("\r\n".equals(lineEnding)) {
-          adaptedContent = content.replace("\r\n", "\n").replace('\r', '\n').replace("\n", "\r\n");
-        } else if ("\r".equals(lineEnding)) {
-          adaptedContent = content.replace("\r\n", "\n").replace('\r', '\n').replace('\n', '\r');
+        if (Files.isDirectory(path)) {
+          throw new IllegalArgumentException("path is a directory: " + displayPath);
         }
-      }
-
-      byte[] encoded = TextFileCodec.encode(adaptedContent, targetCharset, targetBomLength);
-
-      Path parent = Objects.requireNonNull(path.getParent(), "writable path must have a parent");
-      Files.createDirectories(parent);
-
-      if (execution.isCancelled()) {
-        throw new InterruptedException();
-      }
-
-      Path tempFile = Files.createTempFile(parent, ".kk-write-", ".tmp");
-      try {
-        Files.write(tempFile, encoded);
-        try {
-          Files.move(
-              tempFile, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
-          Files.move(tempFile, path, StandardCopyOption.REPLACE_EXISTING);
+        if (!Files.isRegularFile(path)) {
+          throw new IllegalArgumentException("path is not a regular file: " + displayPath);
         }
-      } finally {
-        Files.deleteIfExists(tempFile);
+        TextFileCodec.Decoded existing = TextFileCodec.decode(Files.readAllBytes(path));
+        charset = existing.charset();
+        bomLength = existing.bomLength();
+      } else if (Files.isSymbolicLink(path)) {
+        // 悬空符号链接不是待创建的新文件：替换它会静默丢掉链接本身。
+        throw new IllegalArgumentException("path is a symbolic link: " + displayPath);
       }
 
-      if (!Files.isRegularFile(path)) {
-        throw new IllegalStateException("target path is not a regular file: " + displayPath);
-      }
+      byte[] encoded = TextFileCodec.encode(content, charset, bomLength);
+
+      requireNotCancelled(execution);
+      TextFileCommit.commit(path, encoded);
 
       return success(
           request.call().id(),
@@ -100,24 +77,9 @@ public final class WriteCapability extends AbstractCodingCapability {
     }
   }
 
-  static String detectLineEnding(String text) {
-    if (text == null) {
-      return "\n";
+  private static void requireNotCancelled(Execution execution) throws InterruptedException {
+    if (execution.isCancelled()) {
+      throw new InterruptedException();
     }
-    boolean hasCrlf = text.contains("\r\n");
-    String withoutCrlf = text.replace("\r\n", "");
-    boolean hasCr = withoutCrlf.contains("\r");
-    boolean hasLf = withoutCrlf.contains("\n");
-    int styles = (hasCrlf ? 1 : 0) + (hasCr ? 1 : 0) + (hasLf ? 1 : 0);
-    if (styles > 1) {
-      return "mixed";
-    }
-    if (hasCrlf) {
-      return "\r\n";
-    }
-    if (hasCr) {
-      return "\r";
-    }
-    return "\n";
   }
 }

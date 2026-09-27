@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
+import fun.fengwk.kkstudio.harness.daemon.coding.LspDiscovery;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 
@@ -12,9 +13,11 @@ import java.util.Objects;
  * Daemon 独立进程的连接与本地执行配置。
  *
  * <p>连接、身份、说明、本地执行程序与数据目录的唯一配置来源是 CLI：{@code --registration-token-file}、gateway 连接参数、可选且唯一 {@code
- * --note}、可选 {@code --data-dir} 与三个可选的本地执行程序 {@code --bash-executable}、{@code
- * --lsp-bridge-command}、 {@code --javap-executable}。已删除的 {@code --tool-timeout} 作为未知参数 fail
- * closed：执行超时只由 Tool definition 默认值与调用显式值决定。
+ * --note}、可选 {@code --data-dir}、可选 {@code --bash-executable} 与可选 {@code --lsp-config}。已删除的 {@code
+ * --tool-timeout} 作为未知参数 fail closed：执行超时只由 Tool definition 默认值与调用显式值决定。
+ *
+ * <p>{@code --lsp-config} 指向一个绝对路径的 JSON 文件，声明预先安装在本机的外部语言服务器（命令、扩展名与项目根标记）。配置在解析 CLI
+ * 时一次性读出并校验：文件缺失、结构非法或取值越界都使启动失败，不做兼容回退，也不自动安装服务器。
  *
  * <p>{@code --registration-token-file} 指向 owner-only 普通文件：凭证文本只存在于该文件，进程参数、环境变量与日志都不携带它；本 record
  * 只保存路径，因此 {@code equals}/{@code hashCode}/{@code toString} 不会扩散凭证。已删除的 {@code
@@ -34,14 +37,10 @@ public record DaemonConfig(
     String note,
     Path dataDir,
     String bashExecutable,
-    String lspBridgeCommand,
-    String javapExecutable) {
+    LspDiscovery lsp) {
 
   /** 未显式配置时的 bash 可执行文件。 */
   public static final String DEFAULT_BASH_EXECUTABLE = "bash";
-
-  /** 未显式配置时的 javap 可执行文件。 */
-  public static final String DEFAULT_JAVAP_EXECUTABLE = "javap";
 
   public DaemonConfig {
     gatewayUri = Objects.requireNonNull(gatewayUri, "gatewayUri");
@@ -58,11 +57,10 @@ public record DaemonConfig(
     note = note == null ? null : DaemonEnvironmentInfo.validateNote(note);
     dataDir = requireAbsoluteDirectory(dataDir);
     bashExecutable = blankToDefault(bashExecutable, DEFAULT_BASH_EXECUTABLE, "bashExecutable");
-    lspBridgeCommand = blankToNull(lspBridgeCommand);
-    javapExecutable = blankToDefault(javapExecutable, DEFAULT_JAVAP_EXECUTABLE, "javapExecutable");
+    lsp = Objects.requireNonNull(lsp, "lsp");
   }
 
-  /** 便捷构造器：本地执行程序使用默认值，LSP bridge 处于禁用状态。 */
+  /** 便捷构造器：本地执行程序使用默认值，未配置任何 LSP 服务器。 */
   public DaemonConfig(
       URI gatewayUri,
       Path registrationTokenFile,
@@ -80,8 +78,7 @@ public record DaemonConfig(
         note,
         dataDir,
         DEFAULT_BASH_EXECUTABLE,
-        null,
-        DEFAULT_JAVAP_EXECUTABLE);
+        LspDiscovery.empty());
   }
 
   /** 解析 CLI 参数。{@code --data-dir} 可省略并回退到 {@link #defaultDataDir()}；任何未声明参数都失败。 */
@@ -95,8 +92,7 @@ public record DaemonConfig(
     String note = null;
     String dataDir = null;
     String bashExecutable = null;
-    String lspBridgeCommand = null;
-    String javapExecutable = null;
+    String lspConfig = null;
 
     for (int index = 0; index < args.length; index++) {
       String arg = args[index];
@@ -113,8 +109,12 @@ public record DaemonConfig(
         case "--reconnect-initial" -> reconnectInitial = requireArgValue(args, ++index, arg);
         case "--reconnect-max" -> reconnectMax = requireArgValue(args, ++index, arg);
         case "--bash-executable" -> bashExecutable = requireArgValue(args, ++index, arg);
-        case "--lsp-bridge-command" -> lspBridgeCommand = requireArgValue(args, ++index, arg);
-        case "--javap-executable" -> javapExecutable = requireArgValue(args, ++index, arg);
+        case "--lsp-config" -> {
+          if (lspConfig != null) {
+            throw new IllegalArgumentException("--lsp-config may only be specified once");
+          }
+          lspConfig = requireArgValue(args, ++index, arg);
+        }
         case "--note" -> {
           if (note != null) {
             throw new IllegalArgumentException("--note may only be specified once");
@@ -140,8 +140,7 @@ public record DaemonConfig(
         note,
         dataDir == null ? defaultDataDir() : Path.of(dataDir),
         bashExecutable,
-        lspBridgeCommand,
-        javapExecutable);
+        lspConfig == null ? LspDiscovery.empty() : LspDiscovery.read(Path.of(lspConfig)));
   }
 
   /** 默认数据目录：启动用户 HOME 下的 {@code .kk-studio}。 */

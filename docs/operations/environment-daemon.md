@@ -31,10 +31,9 @@ systemd 等价的守护、停止超时与日志语义。macOS 的 LaunchAgent �
 
 - 目标主机的源码 checkout（`git clone` 后在该目录执行脚本），脚本自行解析仓库根：优先
   `KK_STUDIO_REPO_ROOT`，否则从脚本位置向上寻找 worktree 根。
-- JDK 21：home 内 `bin/java -version` 报告 21，且必须提供可执行的 `bin/javac`（构建需要）与
-  `bin/javap`（未显式给出 javap 选项时）。默认按 `JAVA_HOME_21` → `JAVA_HOME` → `PATH` 顺序解析
-  绝对路径，也可通过 `--java-home` / `-JavaHome` 显式指定；环境变量提供的路径同样必须是绝对路径且
-  不含控制字符。
+- JDK 21：home 内 `bin/java -version` 报告 21，且必须提供可执行的 `bin/javac`（构建需要）。默认按
+  `JAVA_HOME_21` → `JAVA_HOME` → `PATH` 顺序解析绝对路径，也可通过 `--java-home` / `-JavaHome`
+  显式指定；环境变量提供的路径同样必须是绝对路径且不含控制字符。
 - 构建工具：Unix 上 PATH 要有 `mvn`，Windows 上要有 `mvn.cmd`，用于从当前源码 checkout 构建
   shaded JAR。
 - Studio 中已存在目标 Environment，可打开 Environment 页面并复制 registration token。
@@ -245,8 +244,8 @@ Set-Location kk-studio
 
 1. 预检宿主与工具链：`$env:OS` 必须是 `Windows_NT`，ScheduledTasks 命令必须齐全，并解析当前用户
    SID、用户 profile 与 `%LOCALAPPDATA%`；缺少任一命令或路径立即失败。
-2. 校验 gateway URI、token 文件 ACL、数据目录、JDK 21、`bash.exe` 与 `javap.exe`，并检查已存在任务的
-   所有权标记。
+2. 校验 gateway URI、token 文件 ACL、数据目录、JDK 21、`bash.exe` 与 `--lsp-config` 指向的配置文件，
+   并检查已存在任务的所有权标记。
 3. 构建并校验产物，然后把 JAR 暂存到 `%LOCALAPPDATA%\kk-studio\daemon` 下的临时文件。
 4. 任务定义：
    - 动作直接执行 `java.exe`（绝对路径，无 wrapper、无重定向、不经过 cmd.exe 或 PowerShell runner），
@@ -276,13 +275,50 @@ Task Scheduler 不捕获 Daemon 的 stdout/stderr：Windows 上没有 journal，
 | `--data-dir` | `-DataDir` | `$HOME/.kk-studio`（Windows 为 `%USERPROFILE%\.kk-studio`） | 指定本地数据目录绝对路径 |
 | `--note` | `-Note` | 无 | 单行可信备注文本（不超过 512 字符，两端无空格），进入受信任模型 SYSTEM Prompt。只能由可信操作者设置，禁止包含凭证或秘密 |
 | `--bash-executable` | `-BashExecutable` | 自动解析 | `process.exec` 使用的 bash 可执行文件路径；Windows 默认解析 PATH 上的 `bash.exe` |
-| `--lsp-bridge-command` | `-LspBridgeCommand` | 缺省禁用 | LSP bridge 命令；未提供时禁用 LSP 查询能力 |
-| `--javap-executable` | `-JavapExecutable` | `<选中 JDK>/bin/javap`（Windows 为 `bin\javap.exe`） | 用于 class 反编译回退的 javap 路径 |
+| `--lsp-config` | `-LspConfig` | 缺省禁用 | LSP 配置文件的绝对路径；文件声明预先安装在目标主机的外部语言服务器（命令、扩展名与项目根标记），未提供时禁用 LSP 查询能力 |
 
 `upgrade`、`status`、`uninstall` 不接受任何安装参数；Windows 只把显式给出的 `-Note`、
-`-LspBridgeCommand` 等写进任务定义。Unix 的 `install --help` 只在它是 `install` 的完整参数列表时打印
+`-LspConfig` 等写进任务定义。Unix 的 `install --help` 只在它是 `install` 的完整参数列表时打印
 用法；Windows 的 `-Help`（`install -Help` 也接受）不与任何安装参数混用。其它组合按未知选项失败，
 避免帮助掩盖无效命令。
+
+### LSP 配置文件（`--lsp-config`）
+
+`--lsp-config` 只接受绝对路径。安装脚本只校验它是存在且可读的普通文件、再把该路径透传给 Daemon，
+不解析、不复制、不打印它的内容；Daemon 在解析 CLI 时一次性读出并校验，文件缺失、结构非法、取值越界
+或没有声明任何服务器都使启动失败，不做兼容回退，也不安装服务器。
+
+```json
+{
+  "servers": {
+    "typescript": {
+      "command": ["typescript-language-server", "--stdio"],
+      "extensions": [".ts", ".tsx"],
+      "rootMarkers": ["tsconfig.json"],
+      "firstMatchMarkers": ["package.json"]
+    },
+    "jdtls": {
+      "command": ["/opt/jdtls/bin/jdtls"],
+      "extensions": [".java"],
+      "rootMarkers": ["pom.xml", "build.gradle"],
+      "firstMatchMarkers": ["build.xml"]
+    }
+  }
+}
+```
+
+- `command` 是可执行文件与参数的完整命令，必须能在目标主机上直接执行；语言服务器需要预先安装，
+  Daemon 不做安装、升级或版本管理。
+- `extensions` 决定哪些文件由该服务器处理，必须是带前导点的后缀，比较时大小写不敏感。
+- `rootMarkers` 与 `firstMatchMarkers` 是项目根标记：文件所在目录到宿主根之间最靠上的
+  `rootMarkers` 命中优先，其次是最靠近文件的 `firstMatchMarkers` 命中，都没有才回退到文件所在目录。
+  `.git`（目录或文件）是扫描上界，标记查找不会越过它，因此嵌套 worktree 不会复用主仓的构建标记。
+- 服务器进程的工作目录就是发现到的项目根；`workdir` 只用于解析调用里的相对路径。
+- `jdtls` 由可执行文件基名识别，并额外获得 `java/classFileContents`：`jdt://` 目标直接取源码；
+  非 jdtls 服务器上的 `jdt://` 目标明确失败。
+
+改动配置后重新执行 `./scripts/daemon/install.sh install` 让服务定义带上新的路径；前台调试时直接给
+Daemon 传同一个选项即可。
 
 ## 查看状态与日志（status）
 
@@ -514,8 +550,7 @@ checkout 脚本管理（Unix 用 `scripts/daemon/install.sh`，Windows 用 `scri
 | `--note` | 否 | 无 | 进入 READY 的可信备注，单行且不超过 512 字符，用于模型 SYSTEM Prompt |
 | `--data-dir` | 否 | `~/.kk-studio` | 本地数据目录，显式给出时必须绝对 |
 | `--bash-executable` | 否 | `bash` | `process.exec` 使用的 shell 路径 |
-| `--lsp-bridge-command` | 否 | 缺省禁用 | LSP bridge 命令，未配置时相关能力返回不可用 |
-| `--javap-executable` | 否 | `javap` | class 反编译程序路径 |
+| `--lsp-config` | 否 | 缺省禁用 | LSP 配置文件的绝对路径，未配置时 LSP 相关能力返回不可用 |
 | `--help`、`-h` | 否 | — | 作为唯一参数时打印用法并退出 |
 | `--version` | 否 | — | 作为唯一参数时打印版本并退出 |
 

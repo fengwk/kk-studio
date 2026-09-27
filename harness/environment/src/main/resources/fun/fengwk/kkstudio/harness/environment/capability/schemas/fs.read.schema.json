@@ -11,15 +11,15 @@
     },
     "offset": {
       "type": "integer",
-      "description": "Positive integer 1-based line offset for text reads. Defaults to 1."
+      "description": "Positive integer 1-based line offset for text reads. Defaults to 1. An offset past the last line is an empty range, not an error."
     },
     "limit": {
       "type": "integer",
-      "description": "Positive integer maximum number of text lines to return. Defaults to 200 and must not exceed 2000. When column_offset is specified, limit defaults to 1 and must equal 1."
+      "description": "Positive integer maximum number of text lines to return. Defaults to 2000 and must not exceed 2000. The returned body is additionally bounded to 60000 Unicode code points."
     },
     "column_offset": {
       "type": "integer",
-      "description": "Optional positive integer 1-based offset in Unicode code points within the selected text line. Text files only. When specified, limit defaults to 1 and must equal 1."
+      "description": "Optional positive integer 1-based offset in Unicode code points within the first returned line. Text files only; it does not constrain limit and does not apply to later lines."
     }
   },
   "required": [

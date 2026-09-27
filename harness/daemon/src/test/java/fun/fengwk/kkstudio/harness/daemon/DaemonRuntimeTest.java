@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
@@ -293,7 +294,10 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
-                (registry, executor, scheduler) -> registry.register(new TestCapability())));
+                (registry, executor, scheduler, lspExecutor) -> {
+                  registry.register(new TestCapability());
+                  return null;
+                }));
   }
 
   /** 生产工厂必须在同一装配点创建资源、注入完整固定 capability 目录，并把生命周期移交给可关闭 runtime。 */
@@ -308,7 +312,7 @@ class DaemonRuntimeTest {
             Duration.ofSeconds(1),
             null,
             dataDir());
-    CodingToolsConfig toolsConfig = TestCodingConfig.withBridge(WORKSPACE_ROOT);
+    CodingToolsConfig toolsConfig = TestCodingConfig.withLsp(WORKSPACE_ROOT);
 
     try (DaemonDataDirectory dataDirectory = DaemonDataDirectory.open(config.dataDir())) {
       runtime = DaemonRuntime.create(config, toolsConfig, dataDirectory);
@@ -339,7 +343,7 @@ class DaemonRuntimeTest {
         () ->
             DaemonRuntime.create(
                 config,
-                (registry, executor, scheduler) -> {
+                (registry, executor, scheduler, lspExecutor) -> {
                   executorRef.set(executor);
                   schedulerRef.set(scheduler);
                   throw new IllegalStateException("registration failed");
@@ -520,7 +524,7 @@ class DaemonRuntimeTest {
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
       registry.register(
           new ReadCapability(
-              TestCodingConfig.withBridge(root), Executors.newVirtualThreadPerTaskExecutor()));
+              TestCodingConfig.withLsp(root), Executors.newVirtualThreadPerTaskExecutor()));
       runtime = runtime(transport, registry);
 
       runtime.start();
@@ -781,6 +785,223 @@ class DaemonRuntimeTest {
     assertFalse(transport.hasMessages());
   }
 
+  /**
+   * 超时裁决把终态提交让给声明收尾预算的能力：终态类型仍是 FAILED，正文携带已捕获输出。
+   *
+   * <p>这是从 DaemonRuntime 入口出发的证据：所谓「保留失败日志」必须体现为调用方收到的终态报文里能看到输出，而不只是 capability 内部状态。
+   */
+  @Test
+  void timeoutHandoffDeliversCapturedOutputInFailedTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(2));
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-timeout", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertTrue(terminal.get(0).payloadJson().contains("captured output"));
+    assertEquals(EnvironmentCapabilityTerminationCause.TIMED_OUT, tool.terminateCause());
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("handoff-timeout").orElseThrow().state());
+    assertFalse(transport.hasMessages());
+  }
+
+  /**
+   * 取消裁决同样把终态提交让给能力：终态类型仍是 CANCELLED，reason 携带已捕获输出。
+   *
+   * <p>取消绝不能因为携带了能力结果而被报告成 COMPLETED：平台侧的取消事实必须保持独立。
+   */
+  @Test
+  void cancelHandoffDeliversCapturedOutputInCancelledTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(2));
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-cancel", "handoff", "1.0.0", 60_000));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+    transport.receive(cancel("handoff-cancel"));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, CANCELLED);
+    assertTrue(terminal.get(0).payloadJson().contains("cancelled"));
+    assertTrue(terminal.get(0).payloadJson().contains("captured output"));
+    assertEquals(EnvironmentCapabilityTerminationCause.CANCELLED, tool.terminateCause());
+    assertEquals(
+        DaemonInvocationState.CANCELLED, journal.find("handoff-cancel").orElseThrow().state());
+    assertFalse(transport.hasMessages());
+  }
+
+  /**
+   * 能力在收尾预算内未提交终态时由运行时兜底收敛：终态有界到达，其后的迟到完成不得再产生报文。
+   *
+   * <p>兜底路径保证延迟终态不会退化成无界等待，也不会让迟到回调覆盖已经提交的终态。
+   */
+  @Test
+  void handoffFallbackConvergesWithoutCapabilityCompletion() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofMillis(50));
+    tool.neverComplete();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-fallback", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertFalse(terminal.get(0).payloadJson().contains("captured output"));
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("handoff-fallback").orElseThrow().state());
+
+    // 兜底收敛之后才到达的能力终态必须被终态仲裁拦截。
+    tool.complete();
+    assertFalse(transport.hasMessages());
+  }
+
+  /**
+   * 能力输出超过 wire 载荷上限时整体放弃注入：终态仍然有界送达，绝不截断成半个字符或突破 16 MiB 帧上限。
+   *
+   * <p>延迟终态路径不经过 {@link DaemonCapabilityResultCodec} 的载荷预检，因此这一层保护必须由运行时自己给出。
+   */
+  @Test
+  void handoffDropsCapabilityTextBeyondWireLimit() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(2));
+    tool.oversizedCapturedText();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-oversized", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertTrue(terminal.get(0).payloadJson().length() < 1024, "超限正文必须被整体丢弃而不是截断后注入");
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("handoff-oversized").orElseThrow().state());
+  }
+
+  /**
+   * 收尾窗口内能力自身失败时，能力失败事实接管终态正文，但仍保留运行时的裁决类型与原因。
+   *
+   * <p>调用方必须同时看到「为什么被收敛」（超时）与「能力为何没能给出结果」（发布失败），不能只看到其中一半。
+   */
+  @Test
+  void handoffKeepsRuntimeVerdictWhenCapabilityFailsInsideWindow() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(2));
+    tool.failOnTerminate();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-error", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertTrue(terminal.get(0).payloadJson().contains("cannot publish captured output"));
+    assertEquals(DaemonInvocationState.FAILED, journal.find("handoff-error").orElseThrow().state());
+    assertFalse(transport.hasMessages());
+  }
+
+  /**
+   * 兜底定时器无法登记（scheduler 已停机）时运行时必须立即以自己的终态收敛，绝不把调用悬在收尾窗口里。
+   *
+   * <p>能力声明的收尾预算是 60s，而调用方必须在测试等待窗口内收到 FAILED：唯一能满足的原因是运行时没有等到预算到期。
+   */
+  @Test
+  void handoffCommitsImmediatelyWhenFallbackCannotBeScheduled() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(60));
+    tool.neverComplete();
+    SwitchableRejectingScheduler scheduler = new SwitchableRejectingScheduler();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, scheduler, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-unschedulable", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+    scheduler.rejectScheduling();
+
+    List<DaemonEnvelope> terminal = transport.takeMessages(1);
+    assertMessageTypes(terminal, DaemonMessageType.FAILED);
+    assertTrue(terminal.get(0).payloadJson().contains("timed out"));
+    assertEquals(
+        DaemonInvocationState.FAILED, journal.find("handoff-unschedulable").orElseThrow().state());
+  }
+
+  /** 收尾窗口内发生的停机必须立即收敛终态：关闭不等待能力配合，也不会悬挂。 */
+  @Test
+  void shutdownDuringHandoffStillConvergesTerminal() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    HandoffCapability tool = new HandoffCapability(Duration.ofSeconds(30));
+    tool.neverComplete();
+    InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    runtime = runtime(transport, tool, journal);
+
+    runtime.start();
+    transport.awaitConnections(1);
+    completeHandshake();
+    transport.takeMessages(2);
+    transport.receive(invoke("handoff-shutdown", "handoff", "1.0.0", 30));
+
+    assertMessageTypes(transport.takeMessages(1), STARTED);
+    assertTrue(transport.takeMessages(1).get(0).payloadJson().contains("live output"));
+    long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    while (tool.terminateCause() == null && System.nanoTime() < deadline) {
+      Thread.sleep(5);
+    }
+    assertEquals(EnvironmentCapabilityTerminationCause.TIMED_OUT, tool.terminateCause());
+
+    runtime.close();
+
+    assertEquals(
+        DaemonInvocationState.CANCELLED, journal.find("handoff-shutdown").orElseThrow().state());
+  }
+
   /** v4 最大毫秒 timeout 仍必须先发送 STARTED；测试显式 CANCEL 收敛，不能等待不可达的 deadline。 */
   @Test
   void acceptsMaximumWireTimeoutWithoutOverflowingScheduler() throws InterruptedException {
@@ -828,7 +1049,7 @@ class DaemonRuntimeTest {
       assertTrue(blockerStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
       FakeTransport transport = new FakeTransport();
       DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-      registry.register(new WriteCapability(TestCodingConfig.withBridge(root), taskExecutor));
+      registry.register(new WriteCapability(TestCodingConfig.withLsp(root), taskExecutor));
       runtime =
           new DaemonRuntime(
               new DaemonConfig(
@@ -2048,6 +2269,30 @@ class DaemonRuntimeTest {
         Executors.newVirtualThreadPerTaskExecutor());
   }
 
+  private DaemonRuntime runtime(
+      FakeTransport transport,
+      EnvironmentCapability capability,
+      ScheduledExecutorService scheduler,
+      InMemoryDaemonInvocationJournal journal) {
+    handshakeTransport = transport;
+    DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+    registry.register(capability);
+    return new DaemonRuntime(
+        new DaemonConfig(
+            URI.create("ws://localhost/gateway"),
+            registrationTokenFile(),
+            Duration.ofMinutes(1),
+            Duration.ZERO,
+            Duration.ofSeconds(1),
+            null,
+            dataDir()),
+        transport,
+        registry,
+        journal,
+        scheduler,
+        Executors.newVirtualThreadPerTaskExecutor());
+  }
+
   private void deleteRecursively(Path root) throws Exception {
     if (root == null || !Files.exists(root)) {
       return;
@@ -2489,6 +2734,28 @@ class DaemonRuntimeTest {
     }
   }
 
+  /** 可切换为「登记定时任务即拒绝」的 scheduler：用于验证兜底定时器登记失败时终态仍然收敛。 */
+  private static final class SwitchableRejectingScheduler extends ScheduledThreadPoolExecutor {
+
+    private final AtomicBoolean reject = new AtomicBoolean();
+
+    private SwitchableRejectingScheduler() {
+      super(1);
+    }
+
+    private void rejectScheduling() {
+      reject.set(true);
+    }
+
+    @Override
+    public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+      if (reject.get()) {
+        throw new RejectedExecutionException("scheduling rejected");
+      }
+      return super.schedule(command, delay, unit);
+    }
+  }
+
   private static final class ReconnectRejectingScheduler extends ScheduledThreadPoolExecutor {
 
     private ReconnectRejectingScheduler() {
@@ -2498,6 +2765,118 @@ class DaemonRuntimeTest {
     @Override
     public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
       throw new RejectedExecutionException("reconnect scheduling rejected");
+    }
+  }
+
+  /**
+   * 声明收尾预算的测试能力：execute 即暴露 live partial，收尾时提交携带已捕获输出的终态。
+   *
+   * <p>模拟「终止后仍需排空并发布已捕获输出」的能力；{@code neverComplete} 用于验证运行时兜底收敛。
+   */
+  private static final class HandoffCapability implements EnvironmentCapability {
+
+    private final EnvironmentCapabilityDescriptor descriptor =
+        new EnvironmentCapabilityDescriptor(
+            new EnvironmentCapabilityId("handoff"),
+            "1.0.0",
+            new InputSchema("handoff arguments", Map.of(), Set.of(), false),
+            Duration.ofSeconds(10));
+    private final Duration grace;
+    private final HandoffHandle handle = new HandoffHandle();
+    private final AtomicReference<EnvironmentCapabilityTerminationCause> terminateCause =
+        new AtomicReference<>();
+    private final AtomicBoolean completed = new AtomicBoolean();
+    private volatile boolean autoComplete = true;
+    private volatile boolean failOnTerminate;
+    private volatile String captured = "captured output";
+    private volatile EnvironmentCapabilityExecutionListener listener;
+    private volatile EnvironmentCapabilityExecutionRequest request;
+
+    private HandoffCapability(Duration grace) {
+      this.grace = grace;
+    }
+
+    @Override
+    public EnvironmentCapabilityDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
+      this.request = request;
+      this.listener = listener;
+      listener.onPartial(
+          new EnvironmentCapabilityResult(
+              request.call().id(), List.of(new TextResultContent("live output")), false, "{}"));
+      return handle;
+    }
+
+    private EnvironmentCapabilityTerminationCause terminateCause() {
+      return terminateCause.get();
+    }
+
+    private void neverComplete() {
+      autoComplete = false;
+    }
+
+    /** 让能力提交的已捕获输出超过 wire 载荷上限，用于验证运行时不会把它注入终态。 */
+    private void oversizedCapturedText() {
+      captured = "x".repeat(DaemonCapabilityResultCodec.MAX_PAYLOAD_UTF8_BYTES + 1);
+    }
+
+    private void failOnTerminate() {
+      failOnTerminate = true;
+    }
+
+    /** 模拟执行线程在终止后收尾失败（例如中转文件无法发布）。 */
+    private void fail() {
+      if (completed.compareAndSet(false, true)) {
+        listener.onError(new IllegalStateException("cannot publish captured output"));
+      }
+    }
+
+    /** 模拟执行线程在终止后排空并提交已捕获输出。 */
+    private void complete() {
+      if (completed.compareAndSet(false, true)) {
+        listener.onComplete(
+            new EnvironmentCapabilityResult(
+                request.call().id(),
+                List.of(new TextResultContent(captured)),
+                true,
+                "{\"process\":{\"outcome\":\"CANCELLED\"}}"));
+      }
+    }
+
+    private final class HandoffHandle implements EnvironmentCapabilityExecutionHandle {
+
+      @Override
+      public void cancel() {
+        terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+      }
+
+      @Override
+      public boolean isCancelled() {
+        return terminateCause.get() != null;
+      }
+
+      @Override
+      public void terminate(EnvironmentCapabilityTerminationCause cause) {
+        if (!terminateCause.compareAndSet(null, cause) || !autoComplete) {
+          return;
+        }
+        if (failOnTerminate) {
+          fail();
+        } else {
+          complete();
+        }
+      }
+
+      @Override
+      public Duration terminationGrace() {
+        return grace;
+      }
     }
   }
 

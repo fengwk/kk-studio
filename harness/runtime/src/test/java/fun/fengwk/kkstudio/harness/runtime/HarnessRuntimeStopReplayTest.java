@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertIdle;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertReplayed;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assistantEntry;
@@ -25,6 +24,8 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turn
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -160,12 +161,14 @@ class HarnessRuntimeStopReplayTest {
     StopResult owner = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 1));
     assertStopped(owner);
 
-    // sibling 的上下文是 foreign CONTINUATION → IDLE_OR_HISTORICAL：同一 raw id 不 replay、不冲突，Stop 是零
-    // mutation 的 IDLE。
+    // sibling 的上下文是 foreign CONTINUATION → IDLE_OR_HISTORICAL：同一 raw id 不 replay、不冲突；这次 Stop 也不是
+    // 空动作，它在 sibling 上写自己的 STOP barrier Turn（与 owner 的 TURN_END 互不相同）。
     StopResult siblingResult = runtime.stop(new StopCommand(sibling, TestIds.id(1), 0));
-    assertIdle(siblingResult);
+    assertFalse(siblingResult.replayed());
     assertEquals(0, siblingResult.cancelledCommandCount());
-    assertEquals(0L, siblingResult.thread().version());
+    assertEquals(1L, siblingResult.thread().version());
+    assertEquals(siblingResult.stoppedTurnEndEntryId(), siblingResult.thread().headEntryId());
+    assertNotEquals(owner.stoppedTurnEndEntryId(), siblingResult.stoppedTurnEndEntryId());
 
     // owner 自己的 key 仍是精确重放（version 已过期也返回 REPLAYED）。
     StopResult ownerReplay = runtime.stop(new StopCommand(chain.threadId(), TestIds.id(1), 0));
@@ -330,39 +333,75 @@ class HarnessRuntimeStopReplayTest {
   }
 
   @Test
-  void idleRepeatIsIdleNotReplayed() {
+  void repeatedIdleStopWithTheSameKeyReplaysItsOwnStopBarrierTurn() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertIdle(first);
-    // idle Stop 不写 Entry 且没有可取消的 Command，因此同 key 再次请求仍是 IDLE（没有可重放的 receipt）。
+    assertStopped(first);
+    // ROOT + STOP TURN_START + ASSISTANT_ERROR barrier + STOPPED TURN_END。
+    EntryPath firstPath = store.transaction(tx -> tx.loadEntryPath(first.thread().headEntryId()));
+    assertEquals(4, firstPath.entries().size());
+
+    // idle Stop 现在留 durable receipt（STOP barrier Turn），因此同 key 再次请求是精确重放：同一条 TURN_END、不写新 Entry、
+    // 不动 version。
     StopResult second = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertIdle(second);
-    assertEquals(0L, second.thread().version());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(baseline.rootEntryId()));
-    assertEquals(1, path.entries().size());
+    assertReplayed(second);
+    assertEquals(first.stoppedTurnEndEntryId(), second.stoppedTurnEndEntryId());
+    assertEquals(first.thread().version(), second.thread().version());
+    assertEquals(0, second.cancelledCommandCount());
+    assertEquals(
+        4,
+        store.transaction(tx -> tx.loadEntryPath(second.thread().headEntryId())).entries().size());
   }
 
-  /** queued 取消 receipt：未创建 Turn 的 Stop 以 (threadId, stopRequestId) 作幂等键，重试 returns replayed。 */
+  /** live receipt 与取消事实一致：idle Stop 同时取消 queued Command 时，重试必须返回同一条 TURN_END 与同一取消事实。 */
   @Test
-  void idleCommandRetryReplaysTheQueuedOnlyCancelReceipt() {
+  void idleCommandRetryReplaysTheStopBarrierTurnAndCancellationFacts() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     seedQueuedCommand(store, baseline.threadId(), 1L, userMessagePayload("hi"), TestIds.id(1));
     seedThreadWork(store, baseline.threadId());
     StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertIdle(first);
+    assertStopped(first);
     assertEquals(1, first.cancelledCommandCount());
     assertEquals(
         List.of(new CancelledUserMessage(1L, TestIds.id(1), List.of(new TextMessageContent("hi")))),
         first.cancelledUserMessages());
     assertEquals(1L, first.thread().version());
 
-    // 同一网络重试命中 queued-only receipt：返回 replayed，不再做第二次取消。
+    // 同一网络重试命中 live receipt（STOP barrier Turn）：返回 replayed、同一条 TURN_END 与同一取消事实，不再第二次取消。
     StopResult replay = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertReplayed(replay);
-    assertNull(replay.stoppedTurnEndEntryId());
+    assertEquals(first.stoppedTurnEndEntryId(), replay.stoppedTurnEndEntryId());
     assertEquals(1, replay.cancelledCommandCount());
     assertEquals(first.cancelledUserMessages(), replay.cancelledUserMessages());
     assertEquals(1L, replay.thread().version());
+  }
+
+  /**
+   * 旧数据兼容：只有 queued 取消行、没有 STOP barrier Turn 的 receipt（本契约引入之前写入的历史）仍以 {@code (threadId,
+   * stopRequestId)} 作幂等键重放，且不补写 marker。
+   */
+  @Test
+  void foreignOwnedIdleStopReplaysItsQueuedOnlyReceipt() {
+    // open Turn 属于其它 Thread：停止只取消排队 Command、不写停止边界，因此首次与重放都以
+    // (threadId, stopRequestId) 的 queued-only receipt 作为幂等键。
+    HarnessRuntimeTestSupport.TurnBaseline owner = HarnessRuntimeTestSupport.seedOpenTurn(store);
+    UUID sibling = HarnessRuntimeTestSupport.seedThreadAt(store, owner.turnStartEntryId());
+    seedQueuedCommand(store, sibling, 1L, userMessagePayload("hi"), TestIds.id(2));
+    UUID stopRequestId = TestIds.id(1);
+
+    StopResult first = runtime.stop(new StopCommand(sibling, stopRequestId, 0));
+    assertFalse(first.replayed());
+    assertNull(first.stoppedTurnEndEntryId());
+    assertEquals(1, first.cancelledCommandCount());
+    assertEquals(1L, first.thread().version());
+
+    StopResult replay = runtime.stop(new StopCommand(sibling, stopRequestId, 1L));
+    assertReplayed(replay);
+    assertNull(replay.stoppedTurnEndEntryId());
+    assertEquals(1, replay.cancelledCommandCount());
+    // 重放不触碰 version。
+    assertEquals(1L, replay.thread().version());
+    assertEquals(owner.turnStartEntryId(), replay.thread().headEntryId());
   }
 
   @Test

@@ -10,6 +10,7 @@ import {
   ResourceDeleteDialog,
   ResourceEditorDialog,
   SkillPackagesRoute,
+  ThreadWorkspaceRoute,
 } from '@/features/ai/extensions/ai-extension'
 import { TaskToolRendererLazy } from '@/features/ai/extensions/TaskToolRendererLazy'
 import { isTaskToolRendererExpandable } from '@/features/ai/runtime/thread-panel/messages/task-tool-display'
@@ -31,6 +32,14 @@ export const aiExtension: TrustedReactExtension = {
       id: 'ai.chat-workspace',
       path: 'chats/:chatId',
       component: ChatWorkspaceRoute,
+      navGroup: 'ai',
+      workspace: true,
+      priority: 100,
+    },
+    {
+      id: 'ai.thread-workspace',
+      path: 'threads/:threadId',
+      component: ThreadWorkspaceRoute,
       navGroup: 'ai',
       workspace: true,
       priority: 100,

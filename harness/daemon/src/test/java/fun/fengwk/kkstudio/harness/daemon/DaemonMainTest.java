@@ -44,8 +44,7 @@ class DaemonMainTest {
             "--note",
             "--data-dir",
             "--bash-executable",
-            "--lsp-bridge-command",
-            "--javap-executable",
+            "--lsp-config",
             "--version",
           }) {
         assertTrue(usage.contains(option), "usage must document " + option);
@@ -54,7 +53,7 @@ class DaemonMainTest {
           usage.contains("--environment-root"), "usage must not document removed environment root");
       // 默认值也是契约的一部分：操作者必须能从这里读出省略参数时的行为。
       for (String documentedDefault :
-          new String[] {"PT15S", "PT1S", "PT30S", "~/.kk-studio", "bash", "javap"}) {
+          new String[] {"PT15S", "PT1S", "PT30S", "~/.kk-studio", "bash"}) {
         assertTrue(
             usage.contains(documentedDefault), "usage must document default " + documentedDefault);
       }

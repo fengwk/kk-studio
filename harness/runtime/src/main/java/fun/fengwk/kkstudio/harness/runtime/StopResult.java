@@ -11,8 +11,9 @@ import java.util.UUID;
  *
  * <p>{@code replayed=true} 表示重放了一次先前 Stop 的 durable receipt（live receipt：本 Thread 拥有并关闭的 TURN_END 的
  * {@code closeRequestId}；queued-only receipt：本 Thread 上带该 {@code stopRequestId} 的已取消
- * Command），本次调用不写任何 marker、不触碰 version。{@code stoppedTurnEndEntryId} 在停止了一个 live Turn 时非 null；纯
- * queued-only / 未创建 Turn 时（包括 queued-only replay）为 null。{@code thread} 始终是当前 Thread
+ * Command），本次调用不写任何 marker、不触碰 version。{@code stoppedTurnEndEntryId} 在本次 Stop 写下本 Thread 自己的停止边界时非
+ * null ——包括关闭 live Turn 的 TURN_END 与 idle Stop 写入的 STOP barrier Turn 的 TURN_END。open Turn 属于其它
+ * Thread 的共享历史时本 Thread 没有自己的停止边界可写（所有权各自独立），此时该字段为 null。{@code thread} 始终是当前 Thread
  * projection，{@code cancelledUserMessages} 按 sequence 升序返回被取消的真实用户输入（SET_* 与运行时提醒不返回）。
  */
 public record StopResult(

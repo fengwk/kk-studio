@@ -61,66 +61,6 @@ describe('ChatPanel', () => {
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })
 
-  it('always projects active task status through the shared Bound ChatPanel', () => {
-    render(
-      <ChatPanel
-        labels={{}}
-        transcript={{
-          timeline: {
-            messages: [
-              {
-                id: 'task-call',
-                role: 'tool',
-                subjectEntryId: 'e1',
-                createdAt: null,
-                status: 'streaming',
-                phase: 'call',
-                text: '',
-                toolCallId: 'call-task',
-                toolName: 'task',
-                rendererKey: 'task',
-                arguments: '{"subagent_type":"explorer","prompt":"inspect"}',
-                attachments: [],
-                invocationId: 'inv-parent',
-                partial: JSON.stringify({
-                  kind: 'task.status',
-                  threadId: 'child-thread',
-                  subagentType: 'explorer',
-                  state: 'running_model',
-                  depth: 2,
-                  turns: 1,
-                  toolCalls: 0,
-                  lastActivity: 'planning',
-                  approvals: [],
-                  descendants: [],
-                }),
-              },
-            ],
-            queuedMessages: [],
-            hasPendingInputs: false,
-          },
-          bodyRef: createRef<HTMLDivElement>(),
-          loading: false,
-          error: null,
-        }}
-        composer={{
-          parts: [],
-          pending: false,
-          disabled: false,
-          onPartsChange: vi.fn(),
-          onSubmit: vi.fn(),
-          onCommand: vi.fn(),
-        }}
-        activity={{ working: true }}
-      />,
-    )
-
-    expect(screen.getByText('1 个运行中')).toBeInTheDocument()
-    expect(screen.getAllByText('explorer')).toHaveLength(2)
-    expect(screen.getByText('模型运行中')).toBeInTheDocument()
-    expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
-  })
-
   it('keeps working visible while an interaction panel hides Composer, queue, and widgets', () => {
     const { container } = render(
       <ChatPanel

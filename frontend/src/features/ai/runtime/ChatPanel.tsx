@@ -20,10 +20,6 @@ import type {
   ToolDialogueMessage,
   TurnUsage,
 } from '@/features/ai/runtime/thread-timeline-types'
-import {
-  TaskStatusWidget,
-  type TaskApprovalDecision,
-} from '@/features/ai/runtime/thread-panel/TaskStatusWidget'
 
 /** Bound ChatPanel 的只读 Footer facts；缺失字段整段省略。 */
 export interface ChatPanelLabels {
@@ -65,14 +61,8 @@ export type ChatPanelComposerInput = ThreadPanelComposerInput
 /** Composer 上方展示的工作状态、永久 TaskStatus 与可关闭反馈。 */
 export interface ChatPanelActivityInput {
   working: boolean
-  /** 追加到 ThreadWidgetStack.children 的自定义 widget（如子任务状态）。 */
+  /** 追加到 ThreadWidgetStack.children 的自定义 widget。 */
   widgets?: ReactNode
-  /** TaskStatusWidget 的子 Thread 审批转发；所有 Bound ChatPanel 永久挂载该 widget。 */
-  onDecideTaskApproval?: (
-    threadId: string,
-    invocationId: string,
-    decision: TaskApprovalDecision,
-  ) => void
   actionError?: string | null
   onDismissActionError?: () => void
 }
@@ -135,16 +125,7 @@ export function ChatPanel({
   }
   const panelActivity: ThreadPanelActivityInput = {
     working: activity.working,
-    widgets: (
-      <>
-        {activity.widgets}
-        <TaskStatusWidget
-          messages={transcript.timeline.messages}
-          approvalPending={transcript.approvalPending}
-          onDecideApproval={activity.onDecideTaskApproval}
-        />
-      </>
-    ),
+    widgets: activity.widgets,
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,
   }

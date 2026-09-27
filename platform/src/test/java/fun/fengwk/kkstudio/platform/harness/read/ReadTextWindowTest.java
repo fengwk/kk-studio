@@ -8,243 +8,437 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-/** {@link ReadTextWindow} 文本窗口格式化工具的单元测试。 */
+/**
+ * 受管文本读取适配器的契约测试：受管文本与本地 {@code fs.read} 必须同契约，而窗口状态机由共享核心 {@link
+ * fun.fengwk.kkstudio.harness.common.text.TextReadWindow} 提供（其自身行为由 common 侧测试守护）。
+ *
+ * <p>本类覆盖适配器职责：严格 UTF-8 解码、首个字符 BOM 剥离、参数校验、扫描超时/中断与 IO 失败的映射，以及受管入口的端到端窗口结果，包括空范围、 60000
+ * 码点正文预算、截断元数据与“续读位置可无损重构全部源内容”。
+ */
 class ReadTextWindowTest {
 
-  /** 空文件输出 0 行元数据与 [Showing 0 lines of 0.] */
-  @Test
-  void emptyInputFormatsZeroLinesHeader() {
-    byte[] bytes = new byte[0];
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "test.txt");
+  private static final byte[] UTF8_BOM = new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
 
-    String expected =
-        """
-        path: test.txt
-        ends_with_newline: no
-        lsp: unsupported
+  /** 截断输出的续读位置：{@code next: <line>:<column>}。 */
+  private static final Pattern NEXT_PATTERN = Pattern.compile("(?m)^next: (\\d+):(\\d+)$");
 
-        [Showing 0 lines of 0.]""";
-    assertEquals(expected, result);
+  /** 编号正文行：可选左填充数字 + {@code |} + 真实文件内容。 */
+  private static final Pattern BODY_PATTERN = Pattern.compile(" *([0-9]+)\\|(.*)");
+
+  private static String format(
+      String content, Integer offset, Integer limit, Integer columnOffset) {
+    return ReadTextWindow.format(
+        content.getBytes(StandardCharsets.UTF_8), offset, limit, columnOffset, "test.txt");
   }
 
-  /** 正常 LF 分隔的文本能够正确编号输出并展示 header */
+  /** 空资源输出明确空范围；lsp 不可用时整行省略。 */
   @Test
-  void normalTextWithLfLineSeparator() {
-    byte[] bytes = "line1\nline2\n".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "test.txt");
-
-    String expected =
-        """
-        path: test.txt
-        ends_with_newline: yes
-        lsp: unsupported
-
-        1|line1
-        2|line2""";
-    assertEquals(expected, result);
+  void emptyInputReportsEmptyRange() {
+    assertEquals(
+        String.join("\n", "path: test.txt", "ends_with_newline: no", "range: empty"),
+        ReadTextWindow.format(new byte[0], 1, 200, null, "test.txt"));
   }
 
-  /** CRLF 与孤立 CR 均能作为换行符被正确归一化处理 */
+  /** 分页窗口：offset/limit 生效，未到 EOF 时给出 line_limit 截断与下一行位置。 */
   @Test
-  void crlfAndLoneCrNormalizedAsLineSeparators() {
-    byte[] bytes = "a\r\nb\rc".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "test.txt");
+  void offsetAndLimitProduceWindowAndLineLimitTruncation() {
+    String result = format("one\ntwo\nthree\nfour\n", 2, 2, null);
 
-    String expected =
-        """
-        path: test.txt
-        ends_with_newline: no
-        lsp: unsupported
-
-        1|a
-        2|b
-        3|c""";
-    assertEquals(expected, result);
+    assertEquals(
+        String.join(
+            "\n",
+            "path: test.txt",
+            "ends_with_newline: yes",
+            "range: 2:1-3:5",
+            "truncated: yes",
+            "truncation_reason: line_limit",
+            "next: 4:1",
+            "",
+            "2|two",
+            "3|three",
+            "",
+            "[TRUNCATED: More file content remains. Next position: line 4, column 1.]"),
+        result);
   }
 
-  /** 文件末尾带换行时 ends_with_newline 标记为 yes */
+  /** CRLF、孤立 CR 与 LF 都作为行边界归一化，且不丢字符。 */
   @Test
-  void textEndingWithNewlineReportsYes() {
-    byte[] bytes = "hello\n".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "test.txt");
-
-    assertTrue(result.contains("ends_with_newline: yes"));
+  void crlfAndLoneCrAreLineBoundaries() {
+    assertEquals(
+        String.join(
+            "\n",
+            "path: test.txt",
+            "ends_with_newline: no",
+            "range: 1:1-3:1",
+            "",
+            "1|a",
+            "2|b",
+            "3|c"),
+        format("a\r\nb\rc", 1, 200, null));
   }
 
-  /** 文件末尾无换行时 ends_with_newline 标记为 no */
+  /** 起点超过 EOF 时输出明确空范围而不是伪造空正文行。 */
   @Test
-  void textNotEndingWithNewlineReportsNo() {
-    byte[] bytes = "hello".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "test.txt");
-
-    assertTrue(result.contains("ends_with_newline: no"));
+  void offsetBeyondTotalLinesReportsEmptyRange() {
+    String result = format("line1\nline2\n", 5, 200, null);
+    assertEquals(
+        String.join("\n", "path: test.txt", "ends_with_newline: yes", "range: empty"), result);
   }
 
-  /** offset 超过总行数时输出 Showing 0 lines 提示 */
+  /** 单行不再按长度截断：3000 码点整行返回。 */
   @Test
-  void offsetBeyondTotalLinesReportsZeroLines() {
-    byte[] bytes = "line1\nline2\n".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 5, 200, null, "test.txt");
+  void longLineIsNotTruncated() {
+    String longLine = "a".repeat(3000);
+    String result = format(longLine, 1, 200, null);
 
-    assertTrue(result.contains("[Showing 0 lines of 2.]"));
+    assertTrue(result.contains("range: 1:1-1:3000"), result);
+    assertTrue(result.contains("1|" + longLine), result);
+    assertFalse(result.contains("truncated"), result);
   }
 
-  /** 指定 limit 截断时输出下一页继续读取的 footer 提示 */
+  /** column_offset 只作用于起始行片段，且不再要求 limit=1。 */
   @Test
-  void pagingWithLimitAppendsContinuationFooter() {
-    byte[] bytes = "line1\nline2\nline3\n".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 2, null, "test.txt");
+  void columnOffsetSlicesOnlyFirstLineAndKeepsFollowingLines() {
+    String result = format("abcdefghij\nklmnop\n", 1, 200, 4);
 
-    assertTrue(result.contains("[Showing lines 1-2 of 3. Re-run read with offset=3 to continue.]"));
+    assertEquals(
+        String.join(
+            "\n",
+            "path: test.txt",
+            "ends_with_newline: yes",
+            "range: 1:4-2:6",
+            "",
+            "1|defghij",
+            "2|klmnop"),
+        result);
   }
 
-  /** 单行超过 2000 code points 时截断并输出列分页 footer */
+  /** column_offset 超过有效目标行长度时报错；无字符空行的合法端点是第 1 列。 */
   @Test
-  void lineExceedingCodePointsLimitAppendsColumnFooter() {
-    String longLine = "a".repeat(2500);
-    byte[] bytes = longLine.getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "test.txt");
+  void columnOffsetBeyondLineLengthThrowsWhileEmptyLineEndpointIsValid() {
+    PlatformReadException failure =
+        assertThrows(PlatformReadException.class, () -> format("abc", 1, 200, 10));
+    assertTrue(
+        failure.getMessage().contains("column_offset 10 is out of range: line 1 has 3 columns"),
+        failure.getMessage());
+
+    assertEquals(
+        String.join("\n", "path: test.txt", "ends_with_newline: yes", "range: 1:1-1:1", "", "1|"),
+        format("\n", 1, 200, 1));
+  }
+
+  /** 正文预算 60000 码点：行内命中预算时截断并指向第一个未返回字符。 */
+  @Test
+  void characterBudgetCutsMidLineAtSixtyThousandCodePoints() {
+    String result = format("a".repeat(70000), 1, 2000, null);
 
     assertTrue(
-        result.contains(
-            "[Showing columns 1-2000 of 2500 on line 1. Re-run read with offset=1, limit=1, column_offset=2001 to continue.]"));
+        result.startsWith(
+            String.join(
+                "\n",
+                "path: test.txt",
+                "ends_with_newline: no",
+                "range: 1:1-1:60000",
+                "truncated: yes",
+                "truncation_reason: character_limit",
+                "next: 1:60001",
+                "")),
+        result);
+    String bodyLine =
+        result.lines().filter(line -> line.startsWith("1|")).findFirst().orElseThrow();
+    assertEquals(60000, bodyLine.substring(2).length());
   }
 
-  /** 指定 column_offset 时按指定起始列截取行内容 */
+  /** 预算恰好命中 EOF 不算截断。 */
   @Test
-  void columnOffsetSlicesLineRange() {
-    byte[] bytes = "abcdefghij".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 1, 4, "test.txt");
+  void characterBudgetExactlyAtEofIsNotTruncation() {
+    String result = format("a".repeat(60000), 1, 2000, null);
 
-    assertTrue(result.contains("1|defghij"));
-    assertTrue(result.contains("[Showing columns 4-10 of 10 on line 1.]"));
+    assertTrue(
+        result.startsWith("path: test.txt\nends_with_newline: no\nrange: 1:1-1:60000\n"), result);
+    assertFalse(result.contains("truncated"), result);
   }
 
-  /** 指定 column_offset 时 limit 不为 1 抛出异常 */
+  /** 增补平面码点（4 字节 UTF-8）在预算边界按完整码点切断，不留半代理项。 */
   @Test
-  void columnOffsetWithLimitOtherThanOneThrowsException() {
-    byte[] bytes = "abcdefghij".getBytes(StandardCharsets.UTF_8);
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 2, 4, "test.txt"));
+  void supplementaryPlaneCodePointIsNotSplitAtBudgetBoundary() {
+    String result = format("a".repeat(59999) + "🚀" + "b".repeat(5), 1, 2000, null);
+
+    String bodyLine =
+        result.lines().filter(line -> line.startsWith("1|")).findFirst().orElseThrow();
+    String fragment = bodyLine.substring(2);
+    assertEquals(60000, fragment.codePointCount(0, fragment.length()));
+    assertTrue(fragment.endsWith("🚀"), fragment.substring(fragment.length() - 4));
+    assertTrue(result.contains("next: 1:60001"), result);
   }
 
-  /** column_offset 超过单行列宽时输出 0 columns footer */
+  /** 增补平面码点恰好落在解码缓冲区边界时仍是完整码元对，正文与列计数都按码点计算。 */
   @Test
-  void columnOffsetBeyondLineLengthOutputsZeroColumnsFooter() {
-    byte[] bytes = "abc".getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 1, 10, "test.txt");
+  void supplementaryCodePointAtDecodeBufferBoundaryStaysIntact() {
+    String content = "a".repeat(8191) + "🚀" + "tail";
 
-    assertTrue(result.contains("[Showing 0 columns of 3 on line 1.]"));
-    assertFalse(result.contains("1|"));
+    String result = format(content, 1, 2000, null);
+
+    assertTrue(result.contains("range: 1:1-1:8196"), result);
+    String body = result.lines().filter(line -> line.startsWith("1|")).findFirst().orElseThrow();
+    assertEquals(content, body.substring(2));
   }
 
-  /** 包含 UTF-8 BOM 前缀的字节能够正确剥离 BOM 并解码 */
+  /** ends_with_newline 与总行数来自整资源扫描：窗口截断在资源中部时依然准确。 */
   @Test
-  void utf8WithBomStripsBomProperly() {
-    byte[] bom = new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF};
-    byte[] content = "bom-text\n".getBytes(StandardCharsets.UTF_8);
-    byte[] all = new byte[bom.length + content.length];
-    System.arraycopy(bom, 0, all, 0, bom.length);
-    System.arraycopy(content, 0, all, bom.length, content.length);
+  void endsWithNewlineAndTotalsDescribeWholeResource() {
+    String result = format("alpha\nbeta\ngamma", 1, 1, null);
 
-    String result = ReadTextWindow.format(all, 1, 200, null, "test.txt");
-    assertTrue(result.contains("1|bom-text"));
+    assertTrue(result.contains("ends_with_newline: no"), result);
+    assertTrue(result.contains("1|alpha"), result);
+    assertTrue(result.contains("truncation_reason: line_limit"), result);
+    assertTrue(result.contains("next: 2:1"), result);
   }
 
-  /** 包含 NUL 字节的文件判定为二进制并抛出异常 */
+  /**
+   * BOM 只剥离一次，且严格只作用于流的第 1 个字符。
+   *
+   * <p>测试意图：回退保护“首个非普通字符（换行、代理项对、解码块边界）之后出现的 {@code \uFEFF} 被误当作 BOM 吞掉”的缺陷；正文里的 {@code \uFEFF}
+   * 是真实内容，必须逐字符返回。
+   */
   @Test
-  void binaryFileWithNulByteThrowsException() {
-    byte[] bytes = new byte[] {'a', 'b', 0, 'c'};
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 200, null, "test.bin"));
+  void byteOrderMarkIsStrippedOnlyAtTheVeryStart() {
+    assertTrue(
+        ReadTextWindow.format(withLeadingBom("bom-text\n"), 1, 200, null, "test.txt", "unsupported")
+            .contains("range: 1:1-1:8"));
+
+    String afterNewline = format("\n\uFEFFx", 1, 200, null);
+    assertTrue(afterNewline.contains("1|"), afterNewline);
+    assertTrue(afterNewline.contains("2|\uFEFFx"), afterNewline);
+
+    // 代理项对只算一个码点：正文三段 = 😀 + \uFEFF + x。
+    String afterSurrogatePair = format("😀\uFEFFx", 1, 200, null);
+    assertTrue(afterSurrogatePair.contains("1|😀\uFEFFx"), afterSurrogatePair);
+    assertTrue(afterSurrogatePair.contains("range: 1:1-1:3"), afterSurrogatePair);
+
+    String afterDecodeBlock = format("a".repeat(8191) + "\uFEFF" + "x", 1, 2000, null);
+    assertTrue(afterDecodeBlock.contains("\uFEFFx"), afterDecodeBlock);
+    assertTrue(afterDecodeBlock.contains("range: 1:1-1:8193"), afterDecodeBlock);
   }
 
-  /** 非法 UTF-8 编码的字节序列判定为二进制并抛出异常 */
-  @Test
-  void malformedUtf8ThrowsException() {
-    byte[] bytes = new byte[] {(byte) 0xC0, (byte) 0xAF};
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 200, null, "test.bin"));
+  private static byte[] withLeadingBom(String content) {
+    byte[] body = content.getBytes(StandardCharsets.UTF_8);
+    byte[] all = new byte[UTF8_BOM.length + body.length];
+    System.arraycopy(UTF8_BOM, 0, all, 0, UTF8_BOM.length);
+    System.arraycopy(body, 0, all, UTF8_BOM.length, body.length);
+    return all;
   }
 
-  /** 第一行即超过 48 KiB 响应上限时直接抛出异常 */
+  /** NUL 与非法 UTF-8 都判定为二进制并抛出可区分错误。 */
   @Test
-  void firstLineExceedingMaxResponseBytesThrowsException() {
-    // 构造极长行使得单行格式化后的候选字节超过 48 KiB (例如通过超长文件名或路径等放大)
-    String hugePath = "p".repeat(50 * 1024);
-    byte[] bytes = "hello".getBytes(StandardCharsets.UTF_8);
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 200, null, hugePath));
+  void binaryAndMalformedUtf8AreRejected() {
+    assertTrue(
+        assertThrows(
+                PlatformReadException.class,
+                () -> ReadTextWindow.format(new byte[] {'a', 0, 'b'}, 1, 200, null, "test.bin"))
+            .getMessage()
+            .contains("binary"));
+    assertTrue(
+        assertThrows(
+                PlatformReadException.class,
+                () ->
+                    ReadTextWindow.format(
+                        new byte[] {(byte) 0xC0, (byte) 0xAF}, 1, 200, null, "test.bin"))
+            .getMessage()
+            .contains("binary"));
   }
 
-  /** 测试意图：大源文件只保留窗口；扫描到文件尾才能准确返回总行数，不以 8 MiB 拒绝。 */
+  /** 参数非法时抛出确定性错误，不进入内容读取。 */
   @Test
-  void streamsMoreThanEightMiBWithAccurateLineCount() {
-    int bytes = 9 * 1024 * 1024;
-    InputStream generated =
+  void invalidArgumentsAreRejected() {
+    assertThrows(PlatformReadException.class, () -> format("text", 0, 200, null));
+    assertThrows(PlatformReadException.class, () -> format("text", 1, 0, null));
+    assertThrows(PlatformReadException.class, () -> format("text", 1, 2001, null));
+    assertThrows(PlatformReadException.class, () -> format("text", 1, 200, 0));
+  }
+
+  /** lsp 状态是 header 最后一行：可用时输出，{@code unsupported} 时省略。 */
+  @Test
+  void lspStatusIsLastHeaderLineAndOmittedWhenUnsupported() {
+    String supported =
+        ReadTextWindow.format(
+            "class App {}\n".getBytes(StandardCharsets.UTF_8),
+            1,
+            200,
+            null,
+            "app.java",
+            "supported (java)");
+    assertTrue(
+        supported.startsWith(
+            "path: app.java\nends_with_newline: yes\nrange: 1:1-1:12\nlsp: supported (java)\n\n1|class App {}"),
+        supported);
+
+    String unsupported =
+        ReadTextWindow.format(
+            "class App {}\n".getBytes(StandardCharsets.UTF_8),
+            1,
+            200,
+            null,
+            "app.java",
+            "unsupported");
+    assertFalse(unsupported.contains("lsp:"), unsupported);
+  }
+
+  /** 底层 IO 失败映射为受管读取失败，不把半截正文当作结果。 */
+  @Test
+  void streamFailuresAreMappedToPlatformReadException() {
+    InputStream failing =
         new InputStream() {
-          private int index;
+          @Override
+          public int read(byte[] buffer, int offset, int length) throws IOException {
+            throw new IOException("stream closed");
+          }
 
           @Override
-          public int read() {
-            return index++ < bytes ? (index % 100 == 0 ? '\n' : 'a') : -1;
+          public int read() throws IOException {
+            throw new IOException("stream closed");
           }
         };
-    String result = ReadTextWindow.format(generated, 1, 1, null, "huge.txt", "unsupported");
-    assertTrue(result.contains("1|" + "a".repeat(99)));
-    assertTrue(result.contains("of " + ((bytes - 1) / 100 + 1) + "."));
+
+    PlatformReadException failure =
+        assertThrows(
+            PlatformReadException.class,
+            () -> ReadTextWindow.format(failing, 1, 200, null, "test.txt", "unsupported"));
+    assertTrue(failure.getMessage().contains("cannot be read"), failure.getMessage());
   }
 
-  /** 测试意图：严格 UTF-8 解码跨缓冲区仍保留完整 code point 与 CRLF 行语义。 */
+  /** 扫描期间线程被中断时以可区分的错误结束，不返回半截正文。 */
   @Test
-  void streamDecodesCodePointAcrossBufferBoundaries() {
-    String content = "a".repeat(8191) + "😀\r\nnext";
-    String result =
-        ReadTextWindow.format(
-            new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)),
-            1,
-            1,
-            8192,
-            "emoji.txt",
-            "unsupported");
-    assertTrue(result.contains("1|😀"));
-    assertTrue(result.contains("of 8192 on line 1"));
-    assertTrue(result.contains("[Showing 0") == false);
-  }
+  void interruptedScanFailsInsteadOfReturningPartialWindow() {
+    InputStream interrupting =
+        new InputStream() {
+          @Override
+          public int read() {
+            Thread.currentThread().interrupt();
+            return 'a';
+          }
+        };
 
-  /** offset 小于 1 时抛出异常 */
-  @Test
-  void invalidOffsetThrowsException() {
-    byte[] bytes = "text".getBytes(StandardCharsets.UTF_8);
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 0, 200, null, "test.txt"));
-  }
-
-  /** limit 小于 1 或超过 2000 时抛出异常 */
-  @Test
-  void invalidLimitThrowsException() {
-    byte[] bytes = "text".getBytes(StandardCharsets.UTF_8);
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 0, null, "test.txt"));
-    assertThrows(
-        PlatformReadException.class, () -> ReadTextWindow.format(bytes, 1, 2001, null, "test.txt"));
-  }
-
-  /** 多行累加超过 48 KiB 上限时截断并生成分页 footer */
-  @Test
-  void responseBytesLimitTruncatesMultipleLinesWithFooter() {
-    // 构造很多长度适中的行（如每行 500 字符，总共 200 行），累计远超 48 KiB
-    StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < 200; i++) {
-      sb.append("x".repeat(500)).append("\n");
+    try {
+      PlatformReadException failure =
+          assertThrows(
+              PlatformReadException.class,
+              () -> ReadTextWindow.format(interrupting, 1, 200, null, "test.txt", "unsupported"));
+      assertTrue(failure.getMessage().contains("interrupted or timed out"), failure.getMessage());
+    } finally {
+      Thread.interrupted();
     }
-    byte[] bytes = sb.toString().getBytes(StandardCharsets.UTF_8);
-    String result = ReadTextWindow.format(bytes, 1, 200, null, "multi.txt");
+  }
 
-    assertTrue(result.contains("[Showing lines 1-"));
-    assertTrue(result.contains("of 200. Re-run read with offset="));
+  /**
+   * 大流只保留窗口，但总行数来自扫描到 EOF；不再有“资源超过 N MiB 就拒绝”的限制。
+   *
+   * <p>测试意图：证明流式扫描是线性读取（大流不会被整段驻留内存），且行数统计准确。
+   */
+  @Test
+  void largeStreamKeepsWindowWithAccurateLineCount() {
+    int bytes = 9 * 1024 * 1024;
+
+    String head =
+        ReadTextWindow.format(generatedStream(bytes), 1, 1, null, "huge.txt", "unsupported");
+
+    assertTrue(head.contains("range: 1:1-1:99"), head);
+    assertTrue(head.contains("1|" + "a".repeat(99)), head);
+    assertTrue(head.contains("truncated: yes"), head);
+    assertTrue(head.contains("next: 2:1"), head);
+    assertFalse(head.contains("Showing lines"), "旧分页 footer 已移除");
+
+    // 读取统计出的最后一行，证明总行数来自扫描到 EOF；再越过它必须是空范围。
+    long lastLine = ((long) bytes - 1) / 100 + 1;
+    String tail =
+        ReadTextWindow.format(
+            generatedStream(bytes), (int) lastLine, 1, null, "huge.txt", "unsupported");
+    assertTrue(tail.contains("range: " + lastLine + ":1-" + lastLine + ":84"), tail);
+    String beyond =
+        ReadTextWindow.format(
+            generatedStream(bytes), (int) lastLine + 1, 1, null, "huge.txt", "unsupported");
+    assertTrue(beyond.endsWith("range: empty"), beyond);
+  }
+
+  /** 续读位置必须能无损重构全部源内容：按 {@code next} 反复读取，正文片段按行拼接后与源文本逐行一致。 */
+  @Test
+  void successiveReadsReconstructEverySourceCharacter() {
+    String firstLine = "a".repeat(150000);
+    String secondLine = "b".repeat(70000);
+    String thirdLine = "tail";
+    String source = firstLine + "\n" + secondLine + "\n" + thirdLine + "\n";
+
+    Map<Integer, StringBuilder> fragments = new TreeMap<>();
+    int offset = 1;
+    Integer columnOffset = 1;
+    int attempts = 0;
+    while (true) {
+      String output =
+          ReadTextWindow.format(
+              source.getBytes(StandardCharsets.UTF_8), offset, 2000, columnOffset, "test.txt");
+      collectFragments(output, fragments);
+      if (!output.contains("truncated: yes")) {
+        break;
+      }
+      Matcher next = NEXT_PATTERN.matcher(output);
+      assertTrue(next.find(), "截断输出必须给出 next 位置: " + output);
+      offset = Integer.parseInt(next.group(1));
+      columnOffset = Integer.parseInt(next.group(2));
+      attempts++;
+      assertTrue(attempts < 20, "续读次数异常");
+    }
+
+    assertEquals(3, fragments.size());
+    assertEquals(firstLine, fragments.get(1).toString());
+    assertEquals(secondLine, fragments.get(2).toString());
+    assertEquals(thirdLine, fragments.get(3).toString());
+  }
+
+  /** 生成 {@code bytes} 字节的确定性文本流：每 100 字节一个有 99 个 {@code a} 的行。 */
+  private static InputStream generatedStream(int bytes) {
+    return new InputStream() {
+      private int index;
+
+      @Override
+      public int read() {
+        return index++ < bytes ? (index % 100 == 0 ? '\n' : 'a') : -1;
+      }
+    };
+  }
+
+  /** 把一次响应中的所有编号正文行片段按行号累加，用于验证续读不丢字符、不重复。 */
+  private static void collectFragments(String output, Map<Integer, StringBuilder> fragments) {
+    for (String line : output.split("\n", -1)) {
+      Matcher body = BODY_PATTERN.matcher(line);
+      if (body.matches()) {
+        fragments
+            .computeIfAbsent(Integer.parseInt(body.group(1)), key -> new StringBuilder())
+            .append(body.group(2));
+      }
+    }
+  }
+
+  /** 输入流由调用方负责关闭：{@code format} 不能替调用方关闭资源。 */
+  @Test
+  void inputStreamIsNotClosedByFormat() {
+    InputStream stream =
+        new ByteArrayInputStream("content\n".getBytes(StandardCharsets.UTF_8)) {
+          @Override
+          public void close() {
+            throw new AssertionError("format 不得关闭调用方输入流");
+          }
+        };
+
+    assertTrue(
+        ReadTextWindow.format(stream, 1, 200, null, "test.txt", "unsupported")
+            .contains("1|content"));
   }
 }

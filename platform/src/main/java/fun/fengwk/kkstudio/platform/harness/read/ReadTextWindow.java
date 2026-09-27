@@ -1,78 +1,45 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import java.io.BufferedReader;
+import fun.fengwk.kkstudio.harness.common.text.TextReadWindow;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 流式格式化文本窗口；只保留请求范围内每行最多 2000 个 code point。
- *
- * <p>核心规格与约束：
+ * 受管文本读取的薄适配器：严格 UTF-8 解码、首个字符 BOM 剥离、扫描超时与中断映射，其余（分页窗口、正文预算、截断元数据与编号正文）全部交给共享核心 {@link
+ * TextReadWindow}，与本地 {@code fs.read} 共用同一份状态机。
  *
  * <ul>
- *   <li>二进制判定：包含 NUL 字符（{@code \u0000}）或不是合法 UTF-8 编码时，抛出 {@link PlatformReadException}。
- *   <li>行分隔统一按 LF 处理（CRLF 与单独 CR 均记一次换行）；空文件总行数为 0；文件以换行结尾时 {@code ends_with_newline: yes}。
- *   <li>响应 UTF-8 字节上限为 48 KiB（{@link #MAX_RESPONSE_BYTES} = 49,152 字节）；超出时提前截断并输出分页
- *       footer；第一行即超限则直接失败。
- *   <li>单行字符上限为 2000 个 Unicode code point，超长行截断并输出列分页 footer。
- *   <li>{@code offset} 缺省为 1，必须为正整数；{@code limit} 缺省 200，上限 2000；指定 {@code column_offset} 时 {@code
- *       limit} 必须为 1。
+ *   <li>严格 UTF-8 解码：非法字节序列与 NUL 一样按“看似二进制”失败；首个 {@code \uFEFF} 只作为 BOM 剥离一次，正文里后续出现的 {@code \uFEFF}
+ *       必须保留。
+ *   <li>扫描预算 {@link #MAX_SCAN_NANOS} 与线程中断在每块读取前后检查，命中即以 {@link PlatformReadException}
+ *       结束，不返回伪造的空文本。
+ *   <li>底层 IO 失败与内容非法都收敛为 {@link PlatformReadException}；存储截止抛出的 {@code StorageReadTimeoutException}
+ *       等未检查异常原样穿过，保持上层对“超时”与“内容非法”的区分。
+ *   <li>输入流由调用方负责关闭，本适配器只消费。
  * </ul>
  */
 public final class ReadTextWindow {
 
-  /** 缺省返回行数限制。 */
-  public static final int DEFAULT_LIMIT = 200;
-
-  /** 最大返回行数限制。 */
-  public static final int MAX_LIMIT = 2000;
-
-  /** 单行最大展示的 Unicode code point 数量。 */
-  public static final int MAX_LINE_CODE_POINTS = 2000;
-
-  /** 整个格式化响应的 UTF-8 字节数严格上限（48 KiB）。 */
-  public static final int MAX_RESPONSE_BYTES = 48 * 1024;
-
+  /** 单次读取的扫描预算：读取到期或线程被中断都以可区分的失败结束，不返回伪造的空文本。 */
   private static final long MAX_SCAN_NANOS = TimeUnit.SECONDS.toNanos(30);
 
   private ReadTextWindow() {}
 
-  /**
-   * 格式化原始文本字节为有界窗口文本，默认 lsp 状态为 "unsupported"。
-   *
-   * @param bytes 原始文件字节，非空
-   * @param offset 起始行号，缺省为 1，从 1 开始计数
-   * @param limit 最大返回行数，缺省为 200，上限为 2000
-   * @param columnOffset 可选的行内起始 code point 偏移，从 1 开始计数
-   * @param displayPath 用于在 header 中展示的路径或 URI，非空
-   * @return 格式化后的有界文本结果
-   * @throws PlatformReadException 参数不合法、内容超限、看似二进制或首行即超 48 KiB 时抛出
-   */
+  /** 按默认 LSP 状态（{@code unsupported}）格式化原始 UTF-8 字节。 */
   public static String format(
       byte[] bytes, Integer offset, Integer limit, Integer columnOffset, String displayPath) {
     return format(bytes, offset, limit, columnOffset, displayPath, "unsupported");
   }
 
-  /**
-   * 格式化原始文本字节为有界窗口文本。
-   *
-   * @param bytes 原始文件字节，非空
-   * @param offset 起始行号，缺省为 1，从 1 开始计数
-   * @param limit 最大返回行数，缺省为 200，上限为 2000
-   * @param columnOffset 可选的行内起始 code point 偏移，从 1 开始计数
-   * @param displayPath 用于在 header 中展示的路径或 URI，非空
-   * @param lspStatus lsp 状态字符串，非空
-   * @return 格式化后的有界文本结果
-   * @throws PlatformReadException 参数不合法、内容超限、看似二进制或首行即超 48 KiB 时抛出
-   */
+  /** 格式化原始 UTF-8 字节；{@code bytes} 为空数组时表示空资源。 */
   public static String format(
       byte[] bytes,
       Integer offset,
@@ -103,268 +70,45 @@ public final class ReadTextWindow {
     if (columnOffset != null && columnOffset < 1) {
       throw new PlatformReadException("column_offset must be a positive integer");
     }
-
-    int resolvedOffset = offset != null ? offset : 1;
-    int defaultLimit = columnOffset != null ? 1 : DEFAULT_LIMIT;
-    int resolvedLimit = limit != null ? limit : defaultLimit;
-
-    if (columnOffset != null && resolvedLimit != 1) {
-      throw new PlatformReadException("limit must be 1 when column_offset is specified");
-    }
-    if (resolvedLimit < 1 || resolvedLimit > MAX_LIMIT) {
-      throw new PlatformReadException("limit must be between 1 and " + MAX_LIMIT);
+    int resolvedOffset = offset == null ? 1 : offset;
+    int resolvedLimit = limit == null ? TextReadWindow.DEFAULT_LIMIT : limit;
+    if (resolvedLimit < 1 || resolvedLimit > TextReadWindow.MAX_LIMIT) {
+      throw new PlatformReadException(
+          "limit must be a positive integer <= " + TextReadWindow.MAX_LIMIT);
     }
 
-    DecodedText decodedText =
-        decodeStrictUtf8(stream, displayPath, resolvedOffset, resolvedLimit, columnOffset);
-    List<LineData> lines = decodedText.lines();
-    int totalLines = decodedText.totalLines();
-    boolean endsWithNewline = decodedText.endsWithNewline();
-
-    List<String> headers = new ArrayList<>();
-    headers.add("path: " + displayPath);
-    headers.add("ends_with_newline: " + (endsWithNewline ? "yes" : "no"));
-    headers.add("lsp: " + lspStatus);
-    headers.add("");
-
-    if (resolvedOffset > totalLines) {
-      List<String> output = new ArrayList<>(headers);
-      output.add("[Showing 0 lines of " + totalLines + ".]");
-      return String.join("\n", output);
+    long startedAt = System.nanoTime();
+    Runnable checkpoint =
+        () -> {
+          if (Thread.currentThread().isInterrupted()
+              || System.nanoTime() - startedAt > MAX_SCAN_NANOS) {
+            throw new PlatformReadException(
+                "resource read interrupted or timed out: " + displayPath);
+          }
+        };
+    try {
+      return TextReadWindow.read(
+          TextReadWindow.withoutLeadingBom(strictUtf8Reader(stream)),
+          resolvedOffset,
+          resolvedLimit,
+          columnOffset,
+          displayPath,
+          lspStatus,
+          checkpoint);
+    } catch (IOException error) {
+      throw new PlatformReadException(
+          "file appears to be binary or cannot be read: " + displayPath, error);
+    } catch (IllegalArgumentException error) {
+      throw new PlatformReadException(error.getMessage(), error);
     }
-
-    int width = Math.max(1, Integer.toString(Math.max(1, totalLines)).length());
-    int actualEnd = resolvedOffset - 1;
-    int maxWanted = (int) Math.min(totalLines, (long) resolvedOffset + resolvedLimit - 1);
-    List<String> bodyLines = new ArrayList<>();
-    List<String> columnFooters = new ArrayList<>();
-
-    for (int index = resolvedOffset; index <= maxWanted; index++) {
-      LineData line = lines.get(index - resolvedOffset);
-      LineSlice slice = sliceLine(line, index, width, columnOffset);
-
-      List<String> candidateBody = new ArrayList<>(bodyLines);
-      if (slice.formatted() != null) {
-        candidateBody.add(slice.formatted());
-      }
-      List<String> candidateColumnFooters = new ArrayList<>(columnFooters);
-      if (slice.columnFooter() != null) {
-        candidateColumnFooters.add(slice.columnFooter());
-      }
-      List<String> candidateFooters =
-          buildFooters(resolvedOffset, index, totalLines, columnOffset, candidateColumnFooters);
-      int candidateBytes =
-          responseUtf8Bytes(assembleOutput(headers, candidateBody, candidateFooters));
-
-      if (candidateBytes > MAX_RESPONSE_BYTES) {
-        if (index == resolvedOffset) {
-          throw new PlatformReadException(
-              "read response exceeds "
-                  + MAX_RESPONSE_BYTES
-                  + " bytes on first line: "
-                  + candidateBytes
-                  + " bytes");
-        }
-        break;
-      }
-
-      bodyLines = candidateBody;
-      columnFooters = candidateColumnFooters;
-      actualEnd = index;
-    }
-
-    List<String> footers =
-        buildFooters(resolvedOffset, actualEnd, totalLines, columnOffset, columnFooters);
-    return String.join("\n", assembleOutput(headers, bodyLines, footers));
   }
 
-  private static DecodedText decodeStrictUtf8(
-      InputStream stream, String displayPath, int offset, int limit, Integer columnOffset) {
-    var decoder =
+  private static Reader strictUtf8Reader(InputStream stream) {
+    return new InputStreamReader(
+        stream,
         StandardCharsets.UTF_8
             .newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT);
-    BufferedReader reader = new BufferedReader(new InputStreamReader(stream, decoder));
-    List<LineData> window = new ArrayList<>();
-    StringBuilder slice = new StringBuilder();
-    long startedAt = System.nanoTime();
-    int lines = 0;
-    int columns = 0;
-    boolean pendingCr = false;
-    boolean endsWithNewline = false;
-    boolean first = true;
-    int columnStart = columnOffset == null ? 1 : columnOffset;
-    try {
-      int value;
-      while ((value = reader.read()) != -1) {
-        if (Thread.currentThread().isInterrupted()
-            || System.nanoTime() - startedAt > MAX_SCAN_NANOS) {
-          throw new PlatformReadException("resource read interrupted or timed out: " + displayPath);
-        }
-        if (first) {
-          first = false;
-          if (value == '\uFEFF') {
-            continue;
-          }
-        }
-        if (pendingCr) {
-          lines = finishLine(window, slice, lines, columns, offset, limit);
-          columns = 0;
-          pendingCr = false;
-          endsWithNewline = true;
-          if (value == '\n') {
-            continue;
-          }
-        }
-        if (value == '\r') {
-          pendingCr = true;
-          continue;
-        }
-        if (value == '\n') {
-          lines = finishLine(window, slice, lines, columns, offset, limit);
-          columns = 0;
-          endsWithNewline = true;
-          continue;
-        }
-        if (value == 0) {
-          throw new PlatformReadException("file appears to be binary: " + displayPath);
-        }
-        int codePoint = value;
-        if (Character.isHighSurrogate((char) value)) {
-          int low = reader.read();
-          if (low == -1 || !Character.isLowSurrogate((char) low)) {
-            throw new PlatformReadException("file appears to be binary: " + displayPath);
-          }
-          codePoint = Character.toCodePoint((char) value, (char) low);
-        }
-        columns = Math.addExact(columns, 1);
-        endsWithNewline = false;
-        if ((long) lines + 1 >= offset
-            && (long) lines + 1 < (long) offset + limit
-            && columns >= columnStart
-            && (long) columns < (long) columnStart + MAX_LINE_CODE_POINTS) {
-          slice.appendCodePoint(codePoint);
-        }
-      }
-      if (pendingCr) {
-        lines = finishLine(window, slice, lines, columns, offset, limit);
-        endsWithNewline = true;
-      } else if (columns > 0) {
-        lines = finishLine(window, slice, lines, columns, offset, limit);
-      }
-      return new DecodedText(window, lines, endsWithNewline);
-    } catch (IOException e) {
-      throw new PlatformReadException(
-          "file appears to be binary or cannot be read: " + displayPath, e);
-    } catch (ArithmeticException e) {
-      throw new PlatformReadException(
-          "resource text exceeds supported line/column count: " + displayPath, e);
-    }
+            .onUnmappableCharacter(CodingErrorAction.REPORT));
   }
-
-  private static int finishLine(
-      List<LineData> window, StringBuilder slice, int lines, int columns, int offset, int limit) {
-    int next = Math.addExact(lines, 1);
-    if (next >= offset && (long) next < (long) offset + limit) {
-      window.add(new LineData(slice.toString(), columns));
-    }
-    slice.setLength(0);
-    return next;
-  }
-
-  private static LineSlice sliceLine(LineData line, int index, int width, Integer columnOffset) {
-    int totalLineCodePoints = line.codePoints();
-    int colStart = columnOffset != null ? columnOffset : 1;
-    if (colStart > totalLineCodePoints) {
-      if (columnOffset != null) {
-        return new LineSlice(
-            null, "[Showing 0 columns of " + totalLineCodePoints + " on line " + index + ".]");
-      }
-      return new LineSlice(String.format("%" + width + "d|", index), null);
-    }
-    int colEnd = (int) Math.min(totalLineCodePoints, (long) colStart + MAX_LINE_CODE_POINTS - 1);
-    String formatted = String.format("%" + width + "d|%s", index, line.slice());
-
-    String columnFooter;
-    if (colEnd < totalLineCodePoints) {
-      columnFooter =
-          "[Showing columns "
-              + colStart
-              + "-"
-              + colEnd
-              + " of "
-              + totalLineCodePoints
-              + " on line "
-              + index
-              + ". Re-run read with offset="
-              + index
-              + ", limit=1, column_offset="
-              + (colEnd + 1)
-              + " to continue.]";
-    } else if (columnOffset != null) {
-      columnFooter =
-          "[Showing columns "
-              + colStart
-              + "-"
-              + colEnd
-              + " of "
-              + totalLineCodePoints
-              + " on line "
-              + index
-              + ".]";
-    } else {
-      columnFooter = null;
-    }
-    return new LineSlice(formatted, columnFooter);
-  }
-
-  private static List<String> buildFooters(
-      int start, int actualEnd, int totalLines, Integer columnOffset, List<String> columnFooters) {
-    List<String> footers = new ArrayList<>();
-    if (actualEnd < totalLines && start <= totalLines && columnOffset == null) {
-      footers.add(
-          "[Showing lines "
-              + start
-              + "-"
-              + actualEnd
-              + " of "
-              + totalLines
-              + ". Re-run read with offset="
-              + (actualEnd + 1)
-              + " to continue.]");
-    }
-    footers.addAll(columnFooters);
-    return footers;
-  }
-
-  private static List<String> assembleOutput(
-      List<String> headers, List<String> bodyLines, List<String> footers) {
-    List<String> output = new ArrayList<>(headers);
-    output.addAll(bodyLines);
-    if (!footers.isEmpty()) {
-      if (!bodyLines.isEmpty()) {
-        output.add("");
-      }
-      output.addAll(footers);
-    }
-    return output;
-  }
-
-  private static int responseUtf8Bytes(List<String> lines) {
-    if (lines.isEmpty()) {
-      return 0;
-    }
-    int bytes = lines.size() - 1;
-    for (String line : lines) {
-      bytes += line.getBytes(StandardCharsets.UTF_8).length;
-    }
-    return bytes;
-  }
-
-  private record DecodedText(List<LineData> lines, int totalLines, boolean endsWithNewline) {}
-
-  private record LineData(String slice, int codePoints) {}
-
-  private record LineSlice(String formatted, String columnFooter) {}
 }

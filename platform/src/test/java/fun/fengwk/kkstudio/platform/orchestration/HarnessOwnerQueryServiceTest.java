@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -39,6 +40,7 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionOwnershipRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
@@ -71,6 +73,7 @@ class HarnessOwnerQueryServiceTest {
   private IssueAgentSessionOwnershipRepository issueAgentSessionOwnershipRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
+  private SubagentTaskActivity subagentTaskActivity;
   private HarnessOwnerQueryService service;
 
   @BeforeEach
@@ -85,6 +88,7 @@ class HarnessOwnerQueryServiceTest {
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
+    subagentTaskActivity = mock(SubagentTaskActivity.class);
     service =
         new HarnessOwnerQueryService(
             chatRepository,
@@ -93,7 +97,8 @@ class HarnessOwnerQueryServiceTest {
             canvasSessionRepository,
             issueAgentSessionRepository,
             issueAgentSessionOwnershipRepository,
-            runtimes);
+            runtimes,
+            subagentTaskActivity);
   }
 
   @Test
@@ -318,6 +323,31 @@ class HarnessOwnerQueryServiceTest {
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
     assertEquals("latest user", reminderHeadPreview);
     assertFalse(reminderHeadPreview.contains("system-reminder"), reminderHeadPreview);
+  }
+
+  @Test
+  void threadSummaryProcessingAggregatesPendingDelegatedWork() {
+    // 测试意图：Thread 自身静止但子树仍有未交付委派时摘要必须保持 processing：
+    // 否则会话列表会显示"已结束"，用户据此开始下一轮，而异步 task 的结果其实还没回来。
+    UUID sessionId = id(32);
+    UUID threadId = id(33);
+    Entry root = root(sessionId, id(511), T0, ROOT_SETTINGS);
+    ThreadState thread = thread(threadId, sessionId, root.id(), T0, T1);
+    when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
+    when(runtime.getThreadSnapshot(threadId))
+        .thenReturn(
+            new ThreadSnapshot(
+                thread, new EntryPath(List.of(root)), List.of(), null, List.of(), List.of()));
+
+    HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();
+    assertEquals("IDLE", idle.getStatus());
+    assertFalse(idle.isProcessing());
+
+    when(subagentTaskActivity.hasPendingDelegatedWork(threadId)).thenReturn(true);
+    HarnessThreadSummaryDTO waiting = service.listThreadSummaries(sessionId).getFirst();
+    // status 只描述该 Thread 自身执行，聚合结果只体现在 processing 上。
+    assertEquals("IDLE", waiting.getStatus());
+    assertTrue(waiting.isProcessing());
   }
 
   @Test

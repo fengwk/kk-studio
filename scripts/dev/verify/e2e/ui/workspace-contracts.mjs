@@ -1789,7 +1789,7 @@ class TaskHoldingOpenAiMock {
               arguments: JSON.stringify({
                 subagent_type: this.childName,
                 prompt: 'Remain active while the parent UI renders task status.',
-                maxTurns: 20,
+                max_turns: 20,
               }),
             },
           }],

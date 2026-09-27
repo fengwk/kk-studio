@@ -1,6 +1,6 @@
 # 内置工具与异步委派
 
-本文定义内置工具的目标契约，供实现、代码审查和自动化验收使用。环境执行由 Daemon 承担，委派执行复用 Harness；工具描述必须足以让没有历史对话的 Agent 正确使用。
+本文定义内置工具的当前契约，供实现、代码审查和自动化验收使用。环境执行由 Daemon 承担，委派执行复用 Harness；工具描述必须足以让没有历史对话的 Agent 正确使用。先了解[系统设计](../system-design.md)中的 Harness 与 Environment 边界。
 
 ## 环境与路径
 
@@ -51,13 +51,13 @@ bash 是显式 workdir 的单次命令，不管理常驻终端。成功、非零
 
 Java 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。查询前同步文件，处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 后的同步不能使已提交修改失败。保留 definition、workspace symbols 和 JDTLS Java 反编译三种工具；源码正文不得被路径替换污染，不用 javap 字节码冒充源码。
 
-客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
+客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收；同一复用键的新实例只在旧实例停止之后启动；回收与关闭的清理在派发被拒时同步兜底，关闭同时收尾已登记退休的实例，队列不执行也不会留下进程或悬挂的等待者。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
 
 ## 异步 task
 
 task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 表示在原历史上继续，允许切换 Agent，使用目标配置和权限。只允许当前父继续自己的已结清子 Thread。max_turns 是阶段汇报软预算，不伪装成强制执行上限。
 
-持久接受后返回 thread_id 和 accepted，不等待结果。不保留 session_id/maxTurns 别名，不提供同步开关或查询等待工具。即时回执不重复 prompt。
+持久接受后返回唯一 JSON `{"thread_id":"...","status":"accepted"}`，不等待结果。不保留 session_id/maxTurns 别名，不提供同步开关或查询等待工具，也不提供 XML 或其它别名形状。即时回执不重复 prompt；tool_result 的 details 带 `kind=task.accepted` 供 UI 识别，其 thread_id / status 与回执一致，另附会话与幂等元数据。
 
 完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口，不固定裁掉 8000 字符。
 

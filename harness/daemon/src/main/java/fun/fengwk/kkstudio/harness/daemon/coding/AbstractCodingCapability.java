@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
+import java.nio.file.Path;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -81,6 +82,15 @@ abstract class AbstractCodingCapability implements EnvironmentCapability {
   static String optionalString(JsonNode args, String name) {
     JsonNode value = args.get(name);
     return value == null ? null : value.textValue();
+  }
+
+  /**
+   * 解析可选的 workdir：只有调用显式给出时才校验为绝对现存目录，并在路径解析时充当基准；未给出（或为空）时返回 {@code null}， 表示本次调用只接受绝对路径，绝不回退到进程
+   * cwd、HOME 或任何会话默认值。
+   */
+  static Path optionalWorkdir(JsonNode args) {
+    String raw = optionalString(args, "workdir");
+    return raw == null || raw.isBlank() ? null : EnvironmentPaths.workdir(raw);
   }
 
   static int optionalPositiveInt(JsonNode args, String name, int defaultValue, int maximum) {
