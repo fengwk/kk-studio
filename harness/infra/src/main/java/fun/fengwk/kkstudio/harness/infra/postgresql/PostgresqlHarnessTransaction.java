@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -291,6 +292,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   /** 当前事务已成功获取锁的实体资源标识集合，用于支持加锁幂等并防范重入。 */
   private final Set<LockKey> locked = new HashSet<>();
+
+  private final Set<UUID> lockedTrees = new HashSet<>();
 
   /** 记录各 assistantEntryId 下当前已锁定的最高 tool callIndex，防范乱序持锁。 */
   private final Map<UUID, Integer> highestToolCallIndexByAssistant = new HashMap<>();
@@ -651,16 +654,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     update(
         """
         insert into harness_thread (
-            id, session_id, head_entry_id, creation_request_hash, name, yolo_enabled,
-            next_command_sequence, version, created_at, updated_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_enabled,
+            status, next_command_sequence, version, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         thread.id(),
         thread.sessionId(),
+        thread.parentThreadId(),
         thread.headEntryId(),
         thread.creationRequestHash(),
         thread.name(),
         thread.yoloEnabled(),
+        thread.status().name(),
         thread.nextCommandSequence(),
         thread.version(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
@@ -732,6 +737,21 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public List<ThreadState> listChildren(UUID parentThreadId) {
+    checkOpen();
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
+    return queryList(
+        """
+        select *
+        from harness_thread
+        where parent_thread_id = ?
+        order by id
+        """,
+        PostgresqlHarnessRows.THREAD,
+        parentThreadId);
+  }
+
+  @Override
   public void updateThread(ThreadState thread) {
     checkOpen();
     Objects.requireNonNull(thread, "thread");
@@ -749,6 +769,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             set head_entry_id = ?,
                 name = ?,
                 yolo_enabled = ?,
+                status = ?,
                 next_command_sequence = ?,
                 version = ?,
                 updated_at = ?
@@ -757,11 +778,232 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             thread.headEntryId(),
             thread.name(),
             thread.yoloEnabled(),
+            thread.status().name(),
             thread.nextCommandSequence(),
             thread.version(),
             PostgresqlHarnessRows.timestamp(thread.updatedAt()),
             thread.id());
     requireSingleUpdate(updated, "thread", thread.id());
+  }
+
+  @Override
+  public List<UUID> findAncestorChain(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    List<AncestorRow> ancestors =
+        queryList(
+            """
+            with recursive ancestors as (
+                select id, parent_thread_id, 0 as depth
+                from harness_thread where id = ?
+                union all
+                select t.id, t.parent_thread_id, ancestors.depth + 1
+                from harness_thread t join ancestors on t.id = ancestors.parent_thread_id
+            ) cycle id set is_cycle using path
+            select id, parent_thread_id, is_cycle from ancestors order by depth
+            """,
+            (rs, ignored) ->
+                new AncestorRow(
+                    rs.getObject("id", UUID.class),
+                    rs.getObject("parent_thread_id", UUID.class),
+                    rs.getBoolean("is_cycle")),
+            threadId);
+    for (AncestorRow ancestor : ancestors) {
+      if (ancestor.cycle()) {
+        throw new IllegalStateException("thread parent cycle at " + ancestor.id());
+      }
+    }
+    if (!ancestors.isEmpty() && ancestors.get(ancestors.size() - 1).parentId() != null) {
+      throw new IllegalStateException("thread ancestor chain is incomplete");
+    }
+    return ancestors.stream().map(AncestorRow::id).toList();
+  }
+
+  private record AncestorRow(UUID id, UUID parentId, boolean cycle) {}
+
+  @Override
+  public void lockTree(UUID rootThreadId) {
+    checkOpen();
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    if (lockedTrees.contains(rootThreadId)) {
+      return;
+    }
+    if (highestLockRank != null) {
+      throw new IllegalStateException("tree lock must precede business row locks");
+    }
+    if (!lockedTrees.isEmpty()
+        && UuidOrder.COMPARATOR.compare(
+                rootThreadId, lockedTrees.stream().max(UuidOrder.COMPARATOR).orElseThrow())
+            <= 0) {
+      throw new IllegalStateException("tree locks must be acquired in ascending root order");
+    }
+    queryForObject(
+        "select true from pg_advisory_xact_lock(hashtextextended('harness-tree:' || ?::text, 0))",
+        Boolean.class,
+        rootThreadId);
+    List<UUID> chain = findAncestorChain(rootThreadId);
+    if (!chain.isEmpty() && (chain.size() != 1 || !chain.get(0).equals(rootThreadId))) {
+      throw new IllegalStateException("tree root changed while acquiring lock");
+    }
+    lockedTrees.add(rootThreadId);
+  }
+
+  @Override
+  public void insertJoin(ThreadJoin join) {
+    checkOpen();
+    Objects.requireNonNull(join, "join");
+    if (findThread(join.childThreadId()).isEmpty()) {
+      throw new IllegalArgumentException("join child thread does not exist");
+    }
+    if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
+      throw new IllegalArgumentException("new join must be unmatched");
+    }
+    requireLocked(LockKey.thread(join.childThreadId()));
+    update(
+        """
+        insert into harness_thread_join (
+            invocation_id, request_hash, parent_thread_id, child_thread_id,
+            source_command_sequence, after_version, agent, max_turns, reminder_turn,
+            matched_idle_version, result_head_entry_id, delivery_command_sequence, created_at, updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?)
+        """,
+        join.invocationId(),
+        join.requestHash(),
+        join.parentThreadId(),
+        join.childThreadId(),
+        join.sourceCommandSequence(),
+        join.afterVersion(),
+        join.agent(),
+        join.maxTurns(),
+        join.reminderTurn(),
+        PostgresqlHarnessRows.timestamp(join.createdAt()),
+        PostgresqlHarnessRows.timestamp(join.updatedAt()));
+  }
+
+  @Override
+  public Optional<ThreadJoin> findJoin(UUID invocationId) {
+    checkOpen();
+    Objects.requireNonNull(invocationId, "invocationId");
+    return queryOne(
+        "select * from harness_thread_join where invocation_id = ?",
+        PostgresqlHarnessRows.JOIN,
+        invocationId);
+  }
+
+  @Override
+  public List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion) {
+    checkOpen();
+    return queryList(
+        """
+        select * from harness_thread_join
+        where child_thread_id = ? and matched_idle_version is null and after_version < ?
+        order by created_at, invocation_id
+        """,
+        PostgresqlHarnessRows.JOIN,
+        childThreadId,
+        idleVersion);
+  }
+
+  @Override
+  public List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId) {
+    checkOpen();
+    return queryList(
+        """
+        select * from harness_thread_join
+        where parent_thread_id = ? and matched_idle_version is not null
+          and delivery_command_sequence is null
+        order by created_at, invocation_id
+        """,
+        PostgresqlHarnessRows.JOIN,
+        parentThreadId);
+  }
+
+  @Override
+  public int countUnmatchedJoinsByParent(UUID parentThreadId) {
+    checkOpen();
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
+    Integer count =
+        queryForObject(
+            """
+            select count(*)
+            from harness_thread_join
+            where parent_thread_id = ? and matched_idle_version is null
+            """,
+            Integer.class,
+            parentThreadId);
+    return count != null ? count : 0;
+  }
+
+  @Override
+  public int countUnmatchedJoinsInTree(UUID rootThreadId) {
+    checkOpen();
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    TreeCountRow result =
+        queryOne(
+                """
+            with recursive tree as (
+                select id
+                from harness_thread
+                where id = ?
+                union all
+                select t.id
+                from harness_thread t
+                join tree on t.parent_thread_id = tree.id
+            ) cycle id set is_cycle using path
+            select
+                coalesce(bool_or(t.is_cycle), false) as has_cycle,
+                count(j.invocation_id) as unmatched_count
+            from tree t
+            left join harness_thread_join j
+                on j.child_thread_id = t.id and j.matched_idle_version is null
+            """,
+                (rs, ignored) ->
+                    new TreeCountRow(rs.getBoolean("has_cycle"), rs.getInt("unmatched_count")),
+                rootThreadId)
+            .orElse(new TreeCountRow(false, 0));
+    if (result.hasCycle()) {
+      throw new IllegalStateException("thread parent cycle in tree at " + rootThreadId);
+    }
+    return result.unmatchedCount();
+  }
+
+  private record TreeCountRow(boolean hasCycle, int unmatchedCount) {}
+
+  @Override
+  public void updateJoin(ThreadJoin join) {
+    checkOpen();
+    Objects.requireNonNull(join, "join");
+    requireLocked(LockKey.thread(join.childThreadId()));
+    ThreadJoin old =
+        findJoin(join.invocationId())
+            .orElseThrow(
+                () -> new IllegalArgumentException("join not found: " + join.invocationId()));
+    ThreadJoin.validateTransition(old, join);
+    int updated =
+        update(
+            """
+        update harness_thread_join
+        set matched_idle_version = ?, result_head_entry_id = ?,
+            delivery_command_sequence = ?, reminder_turn = ?, updated_at = ?
+        where invocation_id = ? and matched_idle_version is not distinct from ?
+          and delivery_command_sequence is not distinct from ?
+        """,
+            join.matchedIdleVersion(),
+            join.resultHeadEntryId(),
+            join.deliveryCommandSequence(),
+            join.reminderTurn(),
+            PostgresqlHarnessRows.timestamp(join.updatedAt()),
+            join.invocationId(),
+            old.matchedIdleVersion(),
+            old.deliveryCommandSequence());
+    requireSingleUpdate(updated, "join", join.invocationId());
+  }
+
+  @Override
+  public int deleteJoinsByChild(UUID childThreadId) {
+    checkOpen();
+    requireLocked(LockKey.thread(childThreadId));
+    return update("delete from harness_thread_join where child_thread_id = ?", childThreadId);
   }
 
   @Override

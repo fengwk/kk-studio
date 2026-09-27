@@ -95,6 +95,11 @@
                                         <include>fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding</include>
                                         <include>fun/fengwk/kkstudio/harness/runtime/invocation/codec/ToolBindingJsonCodec</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/AcceptCommandsControl</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/join/ThreadJoin</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/join/ThreadJoinRequest</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadLifecycleStatus</include>
+                                        <include>fun/fengwk/kkstudio/harness/runtime/thread/ThreadState</include>
                                     </includes>
                                     <limits>
                                         <limit>

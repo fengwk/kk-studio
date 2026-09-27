@@ -41,9 +41,7 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final Set<String> ROOT_FIELDS = orderedSet("settings", "subagentContext");
-  private static final Set<String> SUBAGENT_CONTEXT_FIELDS =
-      orderedSet("parentThreadId", "rootThreadId", "taskInvocationId", "depth");
+  private static final Set<String> ROOT_FIELDS = orderedSet("settings");
   private static final Set<String> TURN_START_FIELDS =
       orderedSet(
           "reason", "settings", "ownerThreadId", "contextWindow", "maxOutputTokens", "compaction");
@@ -140,20 +138,6 @@ public final class HistoryEntryPayloadJsonCodec {
   private static ObjectNode encodeRoot(RootPayload value) {
     ObjectNode node = NODES.objectNode();
     node.set("settings", HistoryValueCodecs.encodeBranchSettings(value.settings()));
-    if (value.subagentContext() == null) {
-      node.putNull("subagentContext");
-    } else {
-      node.set("subagentContext", encodeSubagentContext(value.subagentContext()));
-    }
-    return node;
-  }
-
-  private static ObjectNode encodeSubagentContext(SubagentContext value) {
-    ObjectNode node = NODES.objectNode();
-    node.put("parentThreadId", value.parentThreadId().toString());
-    node.put("rootThreadId", value.rootThreadId().toString());
-    node.put("taskInvocationId", value.taskInvocationId().toString());
-    node.put("depth", value.depth());
     return node;
   }
 
@@ -305,22 +289,7 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "ROOT");
     HistoryValueCodecs.requireExactFields(node, ROOT_FIELDS, "ROOT");
     return new RootPayload(
-        HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "ROOT.settings"),
-        decodeNullableSubagentContext(node.get("subagentContext")));
-  }
-
-  private static SubagentContext decodeNullableSubagentContext(JsonNode value) {
-    if (value.isNull()) {
-      return null;
-    }
-    String context = "ROOT.subagentContext";
-    ObjectNode node = HistoryValueCodecs.requireObject(value, context);
-    HistoryValueCodecs.requireExactFields(node, SUBAGENT_CONTEXT_FIELDS, context);
-    return new SubagentContext(
-        HistoryValueCodecs.requiredPositiveId(node, "parentThreadId", context),
-        HistoryValueCodecs.requiredPositiveId(node, "rootThreadId", context),
-        HistoryValueCodecs.requiredPositiveId(node, "taskInvocationId", context),
-        HistoryValueCodecs.requiredNonNegativeInt(node, "depth", context));
+        HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "ROOT.settings"));
   }
 
   private static TurnStartPayload decodeTurnStart(JsonNode value) {

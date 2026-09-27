@@ -54,6 +54,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -825,7 +826,18 @@ final class HarnessRuntimeTestSupport {
   static ThreadState thread(
       UUID id, UUID sessionId, UUID headEntryId, String name, boolean yoloEnabled) {
     return new ThreadState(
-        id, sessionId, headEntryId, CREATION_REQUEST_HASH, name, yoloEnabled, 1, 0, T0, T0);
+        id,
+        sessionId,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        name,
+        yoloEnabled,
+        ThreadLifecycleStatus.IDLE,
+        1,
+        0,
+        T0,
+        T0);
   }
 
   static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {

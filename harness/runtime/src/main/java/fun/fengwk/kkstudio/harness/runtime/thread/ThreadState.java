@@ -10,10 +10,14 @@ import java.util.regex.Pattern;
 /**
  * 持久化 Thread 当前状态。
  *
- * <p>持久化 Thread 自身拥有的字段：所属 Session、creation request hash 身份键、head Entry cursor、Thread 显示名称、 Thread
- * YOLO runtime policy、下一条 Command sequence 以及对外可见的 snapshot version。{@code sessionId}、 {@code
- * creationRequestHash} 与 {@code createdAt} 创建后不可变；environment、status、open turn、runnable
- * flag、execution epoch 与 processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
+ * <p>持久化 Thread 自身拥有的字段：所属 Session、不可变父 Thread、creation request hash 身份键、head Entry cursor、 Thread
+ * 显示名称、Thread YOLO runtime policy、递归生命周期状态（{@link ThreadLifecycleStatus}）、下一条 Command sequence
+ * 以及对外可见的 snapshot version。{@code sessionId}、{@code parentThreadId}、{@code creationRequestHash} 与
+ * {@code createdAt} 创建后不可变；environment、open turn、runnable flag、execution epoch 与 processor lease
+ * 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
+ *
+ * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。 {@code
+ * status} 维护递归生命周期（IDLE/ACTIVE/STOPPED），由状态转换推进。
  *
  * <p>{@code creationRequestHash} 是 NEW_SESSION / NEW_THREAD 的初始创建请求指纹：64 位小写 SHA-256
  * 身份键，只作持久化身份键，不对产品 DTO 暴露；{@code headEntryId} 必须属于 {@code sessionId} 的 Session，该约束由 Store 在
@@ -28,10 +32,12 @@ import java.util.regex.Pattern;
 public record ThreadState(
     UUID id,
     UUID sessionId,
+    UUID parentThreadId,
     UUID headEntryId,
     String creationRequestHash,
     String name,
     boolean yoloEnabled,
+    ThreadLifecycleStatus status,
     long nextCommandSequence,
     long version,
     Instant createdAt,
@@ -42,6 +48,9 @@ public record ThreadState(
   public ThreadState {
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(sessionId, "sessionId");
+    if (parentThreadId != null && parentThreadId.equals(id)) {
+      throw new IllegalArgumentException("parentThreadId must not equal id");
+    }
     Objects.requireNonNull(headEntryId, "headEntryId");
     if (creationRequestHash == null
         || !CREATION_REQUEST_HASH_PATTERN.matcher(creationRequestHash).matches()) {
@@ -49,6 +58,7 @@ public record ThreadState(
           "creationRequestHash must be 64 lowercase hexadecimal characters");
     }
     name = Names.normalize(name);
+    Objects.requireNonNull(status, "status");
     if (nextCommandSequence < 1) {
       throw new IllegalArgumentException("nextCommandSequence must start at 1");
     }
@@ -63,9 +73,64 @@ public record ThreadState(
   }
 
   /**
-   * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / creationRequestHash /
-   * createdAt）不可变， {@code headEntryId} / {@code nextCommandSequence} / {@code version} / {@code
-   * updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
+   * 构造初始 ThreadState：以规范生命周期状态 {@code status} 初始化，{@code nextCommandSequence} 初始为 1， {@code
+   * version} 初始为 0，{@code createdAt} 与 {@code updatedAt} 统一设为 {@code now}。
+   */
+  public ThreadState(
+      UUID id,
+      UUID sessionId,
+      UUID parentThreadId,
+      UUID headEntryId,
+      String creationRequestHash,
+      String name,
+      boolean yoloEnabled,
+      ThreadLifecycleStatus status,
+      Instant now) {
+    this(
+        id,
+        sessionId,
+        parentThreadId,
+        headEntryId,
+        creationRequestHash,
+        name,
+        yoloEnabled,
+        status,
+        1L,
+        0L,
+        now,
+        now);
+  }
+
+  /**
+   * 创建初始 ThreadState：以规范生命周期状态 {@code status} 初始化，{@code nextCommandSequence} 初始为 1， {@code
+   * version} 初始为 0，{@code createdAt} 与 {@code updatedAt} 统一设为 {@code now}。
+   */
+  public static ThreadState initial(
+      UUID id,
+      UUID sessionId,
+      UUID parentThreadId,
+      UUID headEntryId,
+      String creationRequestHash,
+      String name,
+      boolean yoloEnabled,
+      ThreadLifecycleStatus status,
+      Instant now) {
+    return new ThreadState(
+        id,
+        sessionId,
+        parentThreadId,
+        headEntryId,
+        creationRequestHash,
+        name,
+        yoloEnabled,
+        status,
+        now);
+  }
+
+  /**
+   * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / parentThreadId /
+   * creationRequestHash / createdAt）不可变， {@code headEntryId} / {@code nextCommandSequence} / {@code
+   * version} / {@code updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");
@@ -78,6 +143,9 @@ public record ThreadState(
     }
     if (!stored.sessionId().equals(next.sessionId())) {
       throw new IllegalArgumentException("thread sessionId must not change");
+    }
+    if (!Objects.equals(stored.parentThreadId(), next.parentThreadId())) {
+      throw new IllegalArgumentException("thread parentThreadId must not change");
     }
     if (!stored.creationRequestHash().equals(next.creationRequestHash())) {
       throw new IllegalArgumentException("thread creationRequestHash must not change");
@@ -109,10 +177,12 @@ public record ThreadState(
         new ThreadState(
             id,
             sessionId,
+            parentThreadId,
             headEntryId,
             creationRequestHash,
             name,
             yoloEnabled,
+            ThreadLifecycleStatus.ACTIVE,
             Math.addExact(nextCommandSequence, (long) count),
             Math.addExact(version, 1L),
             createdAt,
@@ -130,10 +200,12 @@ public record ThreadState(
         new ThreadState(
             id,
             sessionId,
+            parentThreadId,
             headEntryId,
             creationRequestHash,
             name,
             yoloEnabled,
+            status,
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
@@ -151,10 +223,12 @@ public record ThreadState(
         new ThreadState(
             id,
             sessionId,
+            parentThreadId,
             headEntryId,
             creationRequestHash,
             name,
             enabled,
+            status,
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
@@ -172,10 +246,36 @@ public record ThreadState(
         new ThreadState(
             id,
             sessionId,
+            parentThreadId,
             headEntryId,
             creationRequestHash,
             newName,
             yoloEnabled,
+            status,
+            nextCommandSequence,
+            Math.addExact(version, 1L),
+            createdAt,
+            effectiveMutationTime(now));
+    validateTransition(this, next);
+    return next;
+  }
+
+  /**
+   * 变更 Thread 的递归生命周期状态（{@link ThreadLifecycleStatus}）：head / nextCommandSequence / yoloEnabled /
+   * name / parentThreadId 不变，{@code status} 推进为 {@code status} 且 {@code version} 严格 +1。 调用方负责在
+   * version CAS 之前先做「状态相同即 no-op」判断。
+   */
+  public ThreadState changeLifecycleStatus(ThreadLifecycleStatus status, Instant now) {
+    ThreadState next =
+        new ThreadState(
+            id,
+            sessionId,
+            parentThreadId,
+            headEntryId,
+            creationRequestHash,
+            name,
+            yoloEnabled,
+            status,
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
@@ -190,10 +290,12 @@ public record ThreadState(
         new ThreadState(
             id,
             sessionId,
+            parentThreadId,
             headEntryId,
             creationRequestHash,
             name,
             yoloEnabled,
+            status,
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,

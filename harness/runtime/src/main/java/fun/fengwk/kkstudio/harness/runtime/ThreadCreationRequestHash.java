@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.SubagentContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 
 import java.nio.charset.StandardCharsets;
@@ -24,7 +23,7 @@ import java.util.UUID;
 /**
  * 服务端 creation request hash：NEW_SESSION / NEW_THREAD 初始创建请求在持久化 Thread 上的 64 位小写 SHA-256 身份键。
  *
- * <p>哈希覆盖 target 语义、预分配 ID（session/thread/start entry）、NEW_SESSION 的 root settings + subagent +
+ * <p>哈希覆盖 target 语义、预分配 ID（session/thread/start entry）、NEW_SESSION 的 root settings + parent +
  * yolo，以及 ordered {@code (idempotencyKey, requestHash)} 对；同一 raw 请求永远得到同一 hash，不同内容（含 id
  * 或命令顺序变化）得到不同 hash。该 hash 只作持久化身份键，不对产品 DTO 暴露。
  */
@@ -40,13 +39,18 @@ public final class ThreadCreationRequestHash {
       UUID sessionId,
       UUID threadId,
       BranchSettings rootSettings,
-      SubagentContext subagentContext,
+      UUID parentThreadId,
       boolean yoloEnabled,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_SESSION");
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
     envelope.put("threadId", requireId(threadId, "threadId").toString());
-    envelope.set("root", rootNode(rootSettings, subagentContext));
+    envelope.set("root", rootNode(rootSettings));
+    if (parentThreadId == null) {
+      envelope.putNull("parentThreadId");
+    } else {
+      envelope.put("parentThreadId", parentThreadId.toString());
+    }
     envelope.put("yolo", yoloEnabled);
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
@@ -74,10 +78,9 @@ public final class ThreadCreationRequestHash {
     return envelope;
   }
 
-  /** root settings + subagent 完全复用 ROOT Entry 的 canonical codec，保证与 durable 形态一致。 */
-  private static JsonNode rootNode(BranchSettings rootSettings, SubagentContext subagentContext) {
-    RootPayload root =
-        new RootPayload(requireNonNull(rootSettings, "rootSettings"), subagentContext);
+  /** root settings 完全复用 ROOT Entry 的 canonical codec，保证与 durable 形态一致。 */
+  private static JsonNode rootNode(BranchSettings rootSettings) {
+    RootPayload root = new RootPayload(requireNonNull(rootSettings, "rootSettings"));
     String canonical = new HistoryEntryPayloadJsonCodec().encode(root);
     try {
       return MAPPER.readTree(canonical);
