@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -133,7 +134,9 @@ final class HttpSseStreamExecution implements ProviderStream {
     if (!isTerminal()) {
       deadlineFuture =
           scheduler.schedule(
-              this::onDeadline, nextDeadlineDelayNanos(System.nanoTime()), TimeUnit.NANOSECONDS);
+              new DeadlineTask(this),
+              nextDeadlineDelayNanos(System.nanoTime()),
+              TimeUnit.NANOSECONDS);
     }
   }
 
@@ -165,6 +168,24 @@ final class HttpSseStreamExecution implements ProviderStream {
     // Only actual expiry (or a failed reschedule) starts a short-lived cleanup thread.
     // Never enqueue behind blocking I/O on the worker executor or run user callbacks on the timer.
     Thread.ofVirtual().start(work);
+  }
+
+  // Some injected schedulers retain cancelled tasks until their deadline. Do not let a long
+  // cancelled timer retain the entire stream, client, callback and response body.
+  private static final class DeadlineTask implements Runnable {
+    private final WeakReference<HttpSseStreamExecution> execution;
+
+    private DeadlineTask(HttpSseStreamExecution execution) {
+      this.execution = new WeakReference<>(execution);
+    }
+
+    @Override
+    public void run() {
+      HttpSseStreamExecution current = execution.get();
+      if (current != null) {
+        current.onDeadline();
+      }
+    }
   }
 
   boolean isInlineExecutionDetected() {
