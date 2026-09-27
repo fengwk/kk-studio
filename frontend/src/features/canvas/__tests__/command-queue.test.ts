@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { CanvasCommandConflictError, CanvasCommandQueue } from '@/features/canvas/command-queue'
+import type { CanvasPendingOperation } from '@/features/canvas/canvas-operation-storage'
 import type {
+  ApplyCanvasCommandsRequestDTO,
   CanvasNodePatchDTO,
   CanvasPatchDTO,
   CanvasSnapshotDTO,
@@ -202,4 +204,253 @@ describe('CanvasCommandQueue', () => {
     expect(queue.replaceSnapshot(snapshot('9007199254740991'))).toBe(queue.currentSnapshot())
     expect(queue.currentSnapshot().document.revision).toBe(hugeNext)
   })
+
+  it('入队即深拷贝并冻结命令体与 id，之后修改入参不影响已落盘 / 已发送请求', async () => {
+    const store = createFakeOperationStore()
+    const apply = vi.fn(async () => advancePatch(2))
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000f1',
+      operationStore: store.store,
+    })
+
+    const commands = [{ type: 'RENAME_NODE' as const, nodeId: NODE_ID, expectedName: 'a', name: 'original' }]
+    const pending = queue.enqueue(commands)
+    commands[0].name = 'mutated'
+    commands.push({ type: 'DELETE_NODE', nodeId: NODE_ID })
+
+    await pending
+
+    const persisted = store.history[0]
+    expect(persisted?.idempotencyKey).toBe('aaaaaaaa-0000-4000-8000-0000000000f1')
+    expect(persisted?.commands).toEqual([
+      { type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'original' },
+    ])
+    expect(Object.isFrozen(persisted?.commands[0])).toBe(true)
+    expect(persisted?.baselineRevision).toBe('1')
+    expect(apply).toHaveBeenCalledWith(CANVAS_ID, {
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000f1',
+      commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'original' }],
+    }, { signal: undefined })
+  })
+
+  it('发送前必须先完成落盘事务，落盘失败则绝不发送', async () => {
+    let releaseSave!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseSave = resolve
+    })
+    const save = vi.fn(() => gate)
+    const store = {
+      save,
+      remove: vi.fn(async () => undefined),
+      list: vi.fn(async () => []),
+    }
+    const apply = vi.fn(async () => advancePatch(2))
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000f2',
+      operationStore: store,
+    })
+
+    const pending = queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    await Promise.resolve()
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(apply).not.toHaveBeenCalled()
+
+    releaseSave()
+    await pending
+    expect(apply).toHaveBeenCalledTimes(1)
+
+    const failingStore = {
+      save: vi.fn(async () => {
+        throw new Error('disk full')
+      }),
+      remove: vi.fn(async () => undefined),
+      list: vi.fn(async () => []),
+    }
+    const failingApply = vi.fn()
+    const failingQueue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: failingApply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000f3',
+      operationStore: failingStore,
+    })
+
+    await expect(failingQueue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }]))
+      .rejects.toThrow('disk full')
+    expect(failingApply).not.toHaveBeenCalled()
+  })
+
+  it('网络失败保留冻结操作，重载后按原顺序、原 key、原 body 精确重放', async () => {
+    const store = createFakeOperationStore()
+    const failingApply = vi.fn(async () => {
+      throw new ApiError('network down')
+    })
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: failingApply,
+      refetch: vi.fn(),
+      createCommandId: vi.fn()
+        .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-0000000000g1')
+        .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-0000000000g2'),
+      operationStore: store.store,
+    })
+
+    await expect(queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'one' }]))
+      .rejects.toThrow('network down')
+    await expect(queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'two' }]))
+      .rejects.toThrow('network down')
+    expect(store.saved.size).toBe(2)
+
+    // 模拟重载：新的队列实例共享同一持久化 operation store。
+    const replayed: ApplyCanvasCommandsRequestDTO[] = []
+    const recoverApply = vi.fn(async (_canvasId: UUIDString, request: ApplyCanvasCommandsRequestDTO) => {
+      replayed.push(request)
+      return advancePatch(1 + replayed.length)
+    })
+    const reloaded = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply: recoverApply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000g3',
+      operationStore: store.store,
+    })
+
+    const result = await reloaded.recover()
+    expect(result.replayed).toBe(2)
+    expect(result.conflicted).toBe(0)
+    expect(replayed.map((request) => request.idempotencyKey)).toEqual([
+      'aaaaaaaa-0000-4000-8000-0000000000g1',
+      'aaaaaaaa-0000-4000-8000-0000000000g2',
+    ])
+    expect(replayed.map((request) => request.commands)).toEqual([
+      [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'one' }],
+      [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'two' }],
+    ])
+    // 重放成功后清除持久记录，避免重复提交。
+    expect(store.saved.size).toBe(0)
+  })
+
+  it('语义 409 是终态：清除该操作且绝不盲重放', async () => {
+    const store = createFakeOperationStore()
+    const apply = vi.fn(async () => {
+      throw new ApiError('conflict', 409, 'CANVAS_CONFLICT', { conflicts: [] })
+    })
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn().mockResolvedValue(snapshot(9)),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000h1',
+      operationStore: store.store,
+    })
+
+    await expect(queue.enqueue([{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'b' }]))
+      .rejects.toBeInstanceOf(CanvasCommandConflictError)
+    expect(store.saved.size).toBe(0)
+
+    const result = await queue.recover()
+    expect(result.replayed).toBe(0)
+    expect(result.conflicted).toBe(0)
+    expect(apply).toHaveBeenCalledTimes(1)
+  })
+
+  it('5xx 与未知错误视为瞬时失败，保留操作等待重放', async () => {
+    const store = createFakeOperationStore()
+    const apply = vi.fn(async () => {
+      throw new ApiError('server error', 503)
+    })
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000h2',
+      operationStore: store.store,
+    })
+
+    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).rejects.toThrow('server error')
+    expect(store.saved.size).toBe(1)
+    expect(store.store.remove).not.toHaveBeenCalled()
+  })
+
+  it('ACK 只清除与本次 operation 精确匹配的持久记录', async () => {
+    const store = createFakeOperationStore()
+    const apply = vi.fn()
+      .mockResolvedValueOnce(advancePatch(2))
+      .mockRejectedValueOnce(new ApiError('network down'))
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(1),
+      apply,
+      refetch: vi.fn(),
+      createCommandId: vi.fn()
+        .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-0000000000i1')
+        .mockReturnValueOnce('aaaaaaaa-0000-4000-8000-0000000000i2'),
+      operationStore: store.store,
+    })
+
+    await queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).rejects.toThrow('network down')
+
+    // 成功那笔被清除，失败那笔仍在待重放集合中。
+    expect([...store.saved.keys()]).toEqual([
+      expect.stringContaining('aaaaaaaa-0000-4000-8000-0000000000i2'),
+    ])
+  })
+
+  it('revision 缺口必须重取权威快照，绝不用增量 patch 假装完整', async () => {
+    const refetch = vi.fn().mockResolvedValue(snapshot(9))
+    const apply = vi.fn(async () => advancePatch(9))
+    const queue = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(5),
+      apply,
+      refetch,
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000j1',
+      operationStore: noopStore(),
+    })
+
+    await expect(queue.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])).resolves.toMatchObject({
+      document: { revision: '9' },
+    })
+    expect(refetch).toHaveBeenCalledTimes(1)
+
+    // 连续 revision 直接应用增量 patch，无需 refetch。
+    const applyNext = vi.fn(async () => advancePatch(11))
+    const contiguous = new CanvasCommandQueue(CANVAS_ID, {
+      initialSnapshot: snapshot(10),
+      apply: applyNext,
+      refetch: vi.fn(),
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000j2',
+      operationStore: noopStore(),
+    })
+    await contiguous.enqueue([{ type: 'DELETE_NODE', nodeId: NODE_ID }])
+    expect(contiguous.currentSnapshot().document.revision).toBe('11')
+  })
 })
+
+function noopStore() {
+  return {
+    save: vi.fn(async () => undefined),
+    remove: vi.fn(async () => undefined),
+    list: vi.fn(async () => []),
+  }
+}
+
+function createFakeOperationStore() {
+  const saved = new Map<string, CanvasPendingOperation>()
+  const history: CanvasPendingOperation[] = []
+  const store = {
+    save: vi.fn(async (operation: CanvasPendingOperation) => {
+      saved.set(operation.id, operation)
+      history.push(operation)
+    }),
+    remove: vi.fn(async (operationId: string) => {
+      saved.delete(operationId)
+    }),
+    list: vi.fn(async () => [...saved.values()]),
+  }
+  return { saved, history, store }
+}

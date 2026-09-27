@@ -14,7 +14,15 @@ interface MockDatabaseData {
   stores: Map<string, MockStoreData>
 }
 
-export function createMockIDBFactory(options?: { shouldAbortTransaction?: boolean; shouldFailRequest?: boolean }): IDBFactory {
+export function createMockIDBFactory(options?: {
+  shouldAbortTransaction?: boolean
+  shouldFailRequest?: boolean
+  shouldFailOpen?: boolean
+  shouldFailGetAll?: boolean
+  shouldFailDelete?: boolean
+  shouldFailTransaction?: boolean
+  shouldFailTransactionCreate?: boolean
+}): IDBFactory {
   const databases = new Map<string, MockDatabaseData>()
 
   return {
@@ -26,6 +34,16 @@ export function createMockIDBFactory(options?: { shouldAbortTransaction?: boolea
         onerror: null,
         onupgradeneeded: null,
         transaction: null,
+      }
+
+      if (options?.shouldFailOpen) {
+        setTimeout(() => {
+          openReq.error = new Error('Mock open error')
+          if (typeof openReq.onerror === 'function') {
+            ;(openReq.onerror as (e: unknown) => void)({ target: openReq })
+          }
+        }, 0)
+        return openReq as unknown as IDBOpenDBRequest
       }
 
       setTimeout(() => {
@@ -77,6 +95,15 @@ export function createMockIDBFactory(options?: { shouldAbortTransaction?: boolea
           },
           delete: (key: IDBValidKey) => {
             const req: Record<string, unknown> = { onsuccess: null, onerror: null, result: undefined }
+            if (options?.shouldFailDelete) {
+              setTimeout(() => {
+                req.error = new Error('Mock delete error')
+                if (typeof req.onerror === 'function') {
+                  ;(req.onerror as (e: unknown) => void)({ target: req })
+                }
+              }, 0)
+              return req as unknown as IDBRequest
+            }
             txStore?.data.delete(String(key))
             setTimeout(() => {
               if (typeof req.onsuccess === 'function') {
@@ -98,6 +125,15 @@ export function createMockIDBFactory(options?: { shouldAbortTransaction?: boolea
           index: (_indexName: string) => ({
             getAll: (query?: IDBValidKey | IDBKeyRange) => {
               const req: Record<string, unknown> = { onsuccess: null, onerror: null, result: [] }
+              if (options?.shouldFailGetAll) {
+                setTimeout(() => {
+                  req.error = new Error('Mock getAll error')
+                  if (typeof req.onerror === 'function') {
+                    ;(req.onerror as (e: unknown) => void)({ target: req })
+                  }
+                }, 0)
+                return req as unknown as IDBRequest
+              }
               setTimeout(() => {
                 const all = Array.from(txStore?.data.values() ?? [])
                 if (query !== undefined) {
@@ -143,6 +179,13 @@ export function createMockIDBFactory(options?: { shouldAbortTransaction?: boolea
           }
 
           setTimeout(() => {
+            if (options?.shouldFailTransaction) {
+              tx.error = new Error('Mock transaction error')
+              if (typeof tx.onerror === 'function') {
+                ;(tx.onerror as (e: unknown) => void)({ target: tx })
+              }
+              return
+            }
             if (options?.shouldAbortTransaction) {
               tx.error = new Error('Mock transaction abort')
               if (typeof tx.onabort === 'function') {
@@ -173,9 +216,12 @@ export function createMockIDBFactory(options?: { shouldAbortTransaction?: boolea
             dbRecord?.stores.set(storeName, store)
             return createStoreObject(store) as unknown as IDBObjectStore
           },
-          transaction: (storeNames: string | string[], mode?: IDBTransactionMode) => (
-            createTransactionObject(storeNames, mode)
-          ),
+          transaction: (storeNames: string | string[], mode?: IDBTransactionMode) => {
+            if (options?.shouldFailTransactionCreate) {
+              throw new Error('Mock transaction create error')
+            }
+            return createTransactionObject(storeNames, mode)
+          },
         }
 
         openReq.result = db

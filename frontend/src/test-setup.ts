@@ -2,9 +2,23 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach } from 'vitest'
 import { setLocale } from '@/shared/i18n'
+import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
+import { resetDraftStorageFallback } from '@/features/canvas/canvas-draft-storage'
+import { resetCanvasOperationStorage } from '@/features/canvas/canvas-operation-storage'
+import { resetEditingSessionForTests } from '@/features/canvas/canvas-editing-session'
 
 beforeEach(() => {
   localStorage.clear()
+  sessionStorage.clear()
+  // Canvas 本地状态默认按真实可用 IndexedDB 测试；需要验证不可用降级的用例自行移除。
+  Object.defineProperty(window, 'indexedDB', {
+    configurable: true,
+    writable: true,
+    value: createMockIDBFactory(),
+  })
+  resetDraftStorageFallback()
+  resetCanvasOperationStorage()
+  resetEditingSessionForTests()
   setLocale('zh-CN')
 })
 

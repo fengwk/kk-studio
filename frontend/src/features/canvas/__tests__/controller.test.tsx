@@ -4,10 +4,12 @@ import { useState, type PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
+import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
+import { createMockIDBFactory } from './mock-idb'
+import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type {
   ApplyCanvasCommandsRequestDTO,
   CanvasCommandDTO,
-  CanvasFunctionDefinitionDTO,
   CanvasFunctionRunDTO,
   CanvasPatchDTO,
   CanvasResourceKind,
@@ -1311,14 +1313,10 @@ describe('useCanvasController real snapshot runtime', () => {
     vi.mocked(postCanvasCommands).mockRejectedValueOnce(conflictError)
 
     await act(async () => {
-      try {
-        await result.current.saveTextEditor()
-      } catch {
-        // expected conflict
-      }
+      result.current.saveTextEditor()
     })
 
-    expect(result.current.state.conflictMessage).toContain('Canvas changed on the server')
+    await waitFor(() => expect(result.current.state.conflictMessage).toContain('Canvas changed on the server'))
     expect(result.current.state.drafts[NODE_NOTE]?.conflict).toBeDefined()
     expect(result.current.state.drafts[NODE_NOTE]?.conflict?.kind).toBe('STALE_NODE')
 
@@ -1353,12 +1351,10 @@ describe('useCanvasController real snapshot runtime', () => {
     vi.mocked(postCanvasCommands).mockRejectedValueOnce(conflictError)
 
     await act(async () => {
-      try {
-        await result.current.saveTextEditor()
-      } catch {}
+      result.current.saveTextEditor()
     })
 
-    expect(result.current.state.conflictMessage).toBeDefined()
+    await waitFor(() => expect(result.current.state.conflictMessage).toBeDefined())
     expect(result.current.state.drafts[NODE_NOTE]).toBeDefined()
 
     act(() => {
@@ -1367,5 +1363,80 @@ describe('useCanvasController real snapshot runtime', () => {
 
     expect(result.current.state.drafts[NODE_NOTE]).toBeUndefined()
     expect(result.current.state.conflictMessage).toBeNull()
+  })
+
+  it('初始草稿加载与保存 effect 不竞争：重新打开同一画布不会先清掉已落盘草稿', async () => {
+    const seeded: CanvasNodeDraft = {
+      generation: 1,
+      updatedAt: Date.now(),
+      text: { name: 'Note', markdown: 'persisted draft' },
+    }
+    await saveCanvasDraft(CANVAS_ID, NODE_NOTE, seeded)
+
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    await waitFor(() => expect(result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('persisted draft'))
+
+    // 重新打开同一画布：会先把内存草稿重置为空，再异步从 IDB 恢复。
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('persisted draft'))
+
+    // 关键回归：已落盘草稿没有被“空状态 diff”删除。
+    const stored = await loadCanvasDrafts(CANVAS_ID)
+    expect(stored[NODE_NOTE]?.text?.markdown).toBe('persisted draft')
+  })
+
+  it('旧 ACK 只按 operation/generation 清除匹配草稿，不清掉在途期间追加的新输入', async () => {
+    const release = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementationOnce(async (_canvasId, request) => {
+      commands.push(request)
+      return release.promise
+    })
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+
+    act(() => result.current.nodeCallbacks.editTextNode(result.current.snapshot?.nodes[0] as never))
+    act(() => result.current.setTextEditorDraft({ name: 'Note', markdown: 'first' }))
+    act(() => result.current.saveTextEditor())
+    await waitFor(() => expect(commands).toHaveLength(1))
+
+    // 在途请求返回前，用户继续输入：generation 前进。
+    act(() => result.current.setTextEditorDraft({ markdown: 'second' }))
+
+    await act(async () => {
+      release.resolve(diffPatch(snapshot(1)))
+      await release.promise
+    })
+
+    await waitFor(() => expect(result.current.state.drafts[NODE_NOTE]).toBeDefined())
+    // ACK（对应 generation 1）不得清掉 generation 2 的新输入。
+    expect(result.current.state.drafts[NODE_NOTE]?.text?.markdown).toBe('second')
+  })
+
+  it('恢复已落盘草稿时同步还原位置草稿，避免丢失未提交的拖拽', async () => {
+    const seeded: CanvasNodeDraft = {
+      generation: 1,
+      updatedAt: Date.now(),
+      position: { x: 12, y: 34 },
+    }
+    await saveCanvasDraft(CANVAS_ID, NODE_NOTE, seeded)
+
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.state.positionDrafts[NODE_NOTE]).toEqual({ x: 12, y: 34 }))
+  })
+
+  it('本地存储不可用时明确告警：绝不假装已落盘，并暴露 storageError 与提示', async () => {
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      writable: true,
+      value: createMockIDBFactory({ shouldFailOpen: true }),
+    })
+
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+
+    await waitFor(() => expect(result.current.state.storageError).toBeTruthy())
+    expect(result.current.state.toast).toBeTruthy()
   })
 })
