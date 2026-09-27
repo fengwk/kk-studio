@@ -460,6 +460,14 @@ public class StudioIssueController {
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(activity)));
   }
 
+  @GetMapping("/api/issues/{issueId}/evidence")
+  public Result<List<IssueEvidenceDTO>> listEvidence(@PathVariable("issueId") String issueIdStr) {
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    issueService.getIssue(issueId);
+    return Results.ok(
+        issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList());
+  }
+
   @PostMapping("/api/issues/{issueId}/evidence")
   public ResponseEntity<Result<IssueEvidenceDTO>> addEvidence(
       @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
