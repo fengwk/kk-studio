@@ -357,8 +357,9 @@ export async function runComposerMatrix(ui) {
           await composer.press('ArrowUp')
           await expectComposerText(page, '/sto')
           await composer.press('Escape')
-          await expectComposerText(page, '')
-          await expectStorage(page, draftKey, null)
+          await palette.waitFor({ state: 'hidden', timeout: 10_000 })
+          await expectComposerText(page, '/sto')
+          await expectStorage(page, draftKey, '/sto')
 
           await shot(caseArt, 'composer-command-palette-precedence')
           expectNoFatal(pageErrors, consoleErrors)

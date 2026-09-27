@@ -322,6 +322,14 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
 database 中的 `minimax` Responses Provider。
 
+两个内建工具 case `real.task_delegation` 与 `tool.read_turn` 默认使用
+`minimax-anthropic/MiniMax-M3`，可用 `E2E_BUILTIN_MODEL` 显式换用另一个**已声明**模型；取值是
+[real-models](../../scripts/dev/verify/e2e/lib/real-models.mjs) 的 `idSuffix`：
+`google_gemini`、`openai_responses`、`minimax_anthropic`（默认）、`deepseek_chat`。非法取值在 case
+开始前直接失败，不自动 fallback、不改 provider identity，实际选择写入 case artifact。该选项只让这两个
+内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*`、
+`real.reasoning_levels.*`、`real.tool.*` 仍按各自 provider 运行）。
+
 隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
 不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、
 `duration=4`、`submit=0`、`retry=0`，`OPENCLI_HUB_BASE_URL` 没有默认值。完整命令、参数约束与失败
