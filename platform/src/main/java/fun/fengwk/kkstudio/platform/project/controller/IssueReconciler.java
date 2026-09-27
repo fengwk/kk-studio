@@ -10,11 +10,17 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -26,6 +32,7 @@ import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
+import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
@@ -33,8 +40,13 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
+import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -62,12 +74,13 @@ import java.util.UUID;
  * <ul>
  *   <li><b>durable mailbox lease + heartbeat</b>：领取即续租；结束用 claim 完成，仍需重检则归还 lease 并把 {@code due_at}
  *       延后，丢失通知由轮询恢复。
- *   <li><b>安全等待</b>：只有执行完全静止（无 queued command、无模型/工具在途、无 continuation 义务）才置 WAITING 或收尾；问卷出现但在途
- *       执行未停时绝不宣称已暂停。
- *   <li><b>Run 收尾</b>：正常收尾要求 {@code (start,end]} 真实落在该 Thread 的历史路径上；无交接时保持当前阶段，之后的催促按额度新建 Run。
- *   <li><b>失败暂停原子</b>：活动时长耗尽、迟到旧 Run 都通过与 ERROR 暂停门禁同事务的失败收尾收敛，绝不留下半套事实。
- *   <li><b>迟到回调拒绝</b>：Run 冻结的阶段与归属必须仍与当前 Issue 阶段一致，否则只安全收尾而不推进阶段。
- *   <li><b>交接必须无未处理 command/invocation</b>：{@code next_state} 只在静止点提交，未处理输入绝不带进新历史区间。
+ *   <li><b>安全等待</b>：区分真正在途执行与静止等待（问答/审批等待）；只有完全静止且无等待工具才继续推进，静止等待进入 WAITING 并停止活动计时。
+ *   <li><b>预算耗尽安全收尾</b>：活动时长耗尽时先关停派发门禁，在途执行收敛为静止后再安全失败收尾，绝不杀死在途副作用。
+ *   <li><b>BLOCKED 覆盖门禁</b>：业务阻塞与控制暂停一致关闭派发门禁，阻止自动派发与 WAITING 恢复。
+ *   <li><b>指示不丢</b>：交接与正常收尾前必须投递全部定向指示，扫描至事实流尾，普通评论与系统事件不卡游标。
+ *   <li><b>Run 收尾</b>：正常收尾冻结真实历史区间与 final-answer entry，并发布报告证据；无交接时保持当前阶段，之后的催促按额度新建 Run。
+ *   <li><b>迟到回调拒绝</b>：旧 Run 仅在静止点安全收尾，绝不提交旧交接目标推进当前阶段。
+ *   <li><b>确定性调度决策</b>：在写路径前完成归档/门禁/额度/阶段/证据合法性判定，不以全局 try-catch 吞掉数据库或编程异常。
  * </ul>
  */
 @Slf4j
@@ -87,6 +100,9 @@ public class IssueReconciler {
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueRunService issueRunService;
+  private final IssueService issueService;
+  private final IssueEvidenceService issueEvidenceService;
+  private final StorageBlobManager storageBlobManager;
   private final IssueWorkStore issueWorkStore;
   private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private final ObjectProvider<HarnessRuntime> runtimes;
@@ -103,6 +119,9 @@ public class IssueReconciler {
       IssueAgentThreadRepository issueAgentThreadRepository,
       IssueStageBudgetRepository stageBudgetRepository,
       IssueRunService issueRunService,
+      IssueService issueService,
+      IssueEvidenceService issueEvidenceService,
+      StorageBlobManager storageBlobManager,
       IssueWorkStore issueWorkStore,
       HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
       ObjectProvider<HarnessRuntime> runtimes,
@@ -116,6 +135,9 @@ public class IssueReconciler {
         issueAgentThreadRepository,
         stageBudgetRepository,
         issueRunService,
+        issueService,
+        issueEvidenceService,
+        storageBlobManager,
         issueWorkStore,
         acceptanceOrchestrator,
         runtimes,
@@ -132,6 +154,9 @@ public class IssueReconciler {
       IssueAgentThreadRepository issueAgentThreadRepository,
       IssueStageBudgetRepository stageBudgetRepository,
       IssueRunService issueRunService,
+      IssueService issueService,
+      IssueEvidenceService issueEvidenceService,
+      StorageBlobManager storageBlobManager,
       IssueWorkStore issueWorkStore,
       HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
       ObjectProvider<HarnessRuntime> runtimes,
@@ -148,6 +173,10 @@ public class IssueReconciler {
     this.stageBudgetRepository =
         Objects.requireNonNull(stageBudgetRepository, "stageBudgetRepository");
     this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
+    this.issueService = Objects.requireNonNull(issueService, "issueService");
+    this.issueEvidenceService =
+        Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
+    this.storageBlobManager = Objects.requireNonNull(storageBlobManager, "storageBlobManager");
     this.issueWorkStore = Objects.requireNonNull(issueWorkStore, "issueWorkStore");
     this.acceptanceOrchestrator =
         Objects.requireNonNull(acceptanceOrchestrator, "acceptanceOrchestrator");
@@ -170,11 +199,12 @@ public class IssueReconciler {
 
     Project project = locked.project();
     Issue issue = locked.issue();
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
-    if (issue.isArchived()
+    if (project.isArchived()
+        || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
       return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }
+    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
     if (activeRun != null) {
       return reconcileActiveRun(project, issue, activeRun, claim, now);
     }
@@ -185,13 +215,30 @@ public class IssueReconciler {
       Project project, Issue issue, IssueRun run, IssueWorkClaim claim, Instant now) {
     IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(run.getThreadId());
     if (binding == null || !binding.issueId().equals(issue.getId())) {
+      ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
+      if (isProcessing(snapshot)) {
+        return finish(
+            claim,
+            now,
+            true,
+            now.plus(properties.getActiveDelay()),
+            IssueReconcileOutcome.DEFERRED_PROCESSING);
+      }
       // 归属已不存在：Run 无法再被驱动，安全收尾为失败并显式要求人工核查。
       return failRun(
-          run, currentHead(run), STALE_REASON, claim, now, IssueReconcileOutcome.STALE_RUN_CLOSED);
+          run,
+          snapshot.thread().headEntryId(),
+          STALE_REASON,
+          claim,
+          now,
+          IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
     ProjectWorkflowState stage = workflowStage(project, run.getState());
     boolean stageStillOwned =
-        stage != null && stage.enabled() && stage.agent().equals(binding.agentName());
+        stage != null
+            && stage.enabled()
+            && stage.hasAgent()
+            && stage.agent().equals(binding.agentName());
     boolean stateStillCurrent =
         run.getState().equals(issue.getState())
             || (issue.getBlockedFromState() != null
@@ -199,13 +246,32 @@ public class IssueReconciler {
     if (!stageStillOwned || !stateStillCurrent) {
       // 迟到回调：旧 Run 的同名阶段或旧归属不得刷新当前职责，只做安全收尾，绝不提交交接目标。
       ThreadSnapshot staleSnapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
+      if (isProcessing(staleSnapshot)) {
+        return finish(
+            claim,
+            now,
+            true,
+            now.plus(properties.getActiveDelay()),
+            IssueReconcileOutcome.DEFERRED_PROCESSING);
+      }
+      IssueActivity deliverable = nextDeliverableInstruction(run);
+      if (deliverable != null) {
+        deliverInstruction(issue, run, binding, staleSnapshot, deliverable);
+        return finish(claim, now, true, now, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
+      }
       if (hasProgress(run, staleSnapshot)) {
+        UUID finalAnswerId =
+            findFinalAnswerEntryId(
+                staleSnapshot.entryPath(),
+                run.getStartEntryId(),
+                staleSnapshot.thread().headEntryId());
+        publishEvidence(issue, run, binding, staleSnapshot, staleSnapshot.thread().headEntryId());
         issueRunService.completeRun(
             run.getId(),
             run.getVersion(),
             completeKey(run),
             staleSnapshot.thread().headEntryId(),
-            null,
+            finalAnswerId,
             null);
         return finish(
             claim,
@@ -224,7 +290,21 @@ public class IssueReconciler {
     }
 
     ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
-    if (run.getStatus() == IssueRunStatus.RUNNING && !chargeActiveTime(run, now)) {
+    if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
+      if (isProcessing(snapshot)) {
+        if (!issue.isPaused()) {
+          issueService.pauseIssue(
+              issue.getId(), issue.getVersion(), pauseKey(run), PauseReason.ERROR, BUDGET_REASON);
+          issue.setPauseReason(PauseReason.ERROR.name());
+          issue.setPauseDetail(BUDGET_REASON);
+        }
+        return finish(
+            claim,
+            now,
+            true,
+            now.plus(properties.getActiveDelay()),
+            IssueReconcileOutcome.DEFERRED_PROCESSING);
+      }
       return failRun(
           run,
           snapshot.thread().headEntryId(),
@@ -233,7 +313,11 @@ public class IssueReconciler {
           now,
           IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
     }
-    if (!snapshot.queuedCommands().isEmpty() || isProcessing(snapshot)) {
+    if (run.getStatus() == IssueRunStatus.RUNNING) {
+      chargeActiveTime(run, now);
+    }
+
+    if (isProcessing(snapshot)) {
       // 未处理命令或在途调用：不投递、不等待、不收尾。
       return finish(
           claim,
@@ -243,8 +327,11 @@ public class IssueReconciler {
           IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
 
+    boolean gateClosed = issue.isGateClosed();
+    boolean waitingTool = hasWaitingTool(snapshot);
+
     if (run.getStatus() == IssueRunStatus.WAITING) {
-      if (issue.isPaused()) {
+      if (gateClosed || waitingTool) {
         return finish(
             claim,
             now,
@@ -252,7 +339,7 @@ public class IssueReconciler {
             now.plus(properties.getBlockedDelay()),
             IssueReconcileOutcome.WAITING_FOR_GATE);
       }
-      // 最后一次额度被等待消耗时，恢复的是同一 Run：不新建 Run，也不重新扣额度。
+      // 门禁与安全等待均已解除，恢复同一 Run：不新建 Run，也不重新扣额度。
       issueRunService.resumeRun(run.getId(), run.getVersion());
       return finish(
           claim,
@@ -262,8 +349,8 @@ public class IssueReconciler {
           IssueReconcileOutcome.RUN_RESUMED);
     }
 
-    if (issue.isPaused()) {
-      // 门禁关闭：到达安全点后才停止活动计时，保留交接目标等待显式恢复。
+    if (gateClosed || waitingTool) {
+      // 门禁关闭或工具等待：到达安全点后才停止活动计时，保留交接目标等待显式恢复。
       issueRunService.waitRun(run.getId(), run.getVersion());
       return finish(
           claim,
@@ -273,31 +360,39 @@ public class IssueReconciler {
           IssueReconcileOutcome.WAITING_FOR_GATE);
     }
 
-    if (run.getNextState() != null) {
-      // 交接只在完全静止点提交：没有 queued command、没有在途模型/工具调用。
-      issueRunService.completeRun(
-          run.getId(),
-          run.getVersion(),
-          completeKey(run),
-          snapshot.thread().headEntryId(),
-          null,
-          run.getNextState());
-      return finish(claim, now, true, now, IssueReconcileOutcome.RUN_HANDED_OFF);
-    }
-
     IssueActivity deliverable = nextDeliverableInstruction(run);
     if (deliverable != null) {
       deliverInstruction(issue, run, binding, snapshot, deliverable);
       return finish(claim, now, true, now, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
     }
 
-    if (hasProgress(run, snapshot)) {
+    if (run.getNextState() != null) {
+      // 交接只在完全静止点提交：没有 queued command、没有在途模型/工具调用、没有未投递指示。
+      UUID finalAnswerId =
+          findFinalAnswerEntryId(
+              snapshot.entryPath(), run.getStartEntryId(), snapshot.thread().headEntryId());
+      publishEvidence(issue, run, binding, snapshot, snapshot.thread().headEntryId());
       issueRunService.completeRun(
           run.getId(),
           run.getVersion(),
           completeKey(run),
           snapshot.thread().headEntryId(),
-          null,
+          finalAnswerId,
+          run.getNextState());
+      return finish(claim, now, true, now, IssueReconcileOutcome.RUN_HANDED_OFF);
+    }
+
+    if (hasProgress(run, snapshot)) {
+      UUID finalAnswerId =
+          findFinalAnswerEntryId(
+              snapshot.entryPath(), run.getStartEntryId(), snapshot.thread().headEntryId());
+      publishEvidence(issue, run, binding, snapshot, snapshot.thread().headEntryId());
+      issueRunService.completeRun(
+          run.getId(),
+          run.getVersion(),
+          completeKey(run),
+          snapshot.thread().headEntryId(),
+          finalAnswerId,
           null);
       // 保持当前阶段：下一次催促必须重新检查额度后新建 Run。
       return finish(claim, now, true, now, IssueReconcileOutcome.RUN_COMPLETED);
@@ -312,7 +407,12 @@ public class IssueReconciler {
 
   private IssueReconcileOutcome reconcileIdle(
       Project project, Issue issue, IssueWorkClaim claim, Instant now) {
-    if (issue.isPaused()) {
+    if (project.isArchived()
+        || issue.isArchived()
+        || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
+      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+    }
+    if (issue.isGateClosed()) {
       return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE);
     }
     ProjectStateCode state = ProjectStateCode.of(issue.getState());
@@ -338,16 +438,16 @@ public class IssueReconciler {
             IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED);
       }
     }
-    try {
-      issueRunService.acceptRun(issue.getId(), acceptKey(issue));
-    } catch (RuntimeException error) {
-      // 接受期的确定性拒绝（归档、暂停、已有活动 Run、缺 Agent 等）不构成调度失败。
-      log.debug(
-          "Issue run was not accepted; issueId={}, failure={}",
-          issue.getId(),
-          error.getClass().getName());
-      return finish(claim, now, false, now, IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE);
+    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
+    if (activeRun != null) {
+      return finish(
+          claim,
+          now,
+          true,
+          now.plus(properties.getActiveDelay()),
+          IssueReconcileOutcome.DEFERRED_PROCESSING);
     }
+    issueRunService.acceptRun(issue.getId(), acceptKey(issue));
     return finish(
         claim,
         now,
@@ -411,16 +511,22 @@ public class IssueReconciler {
         claim.issueId(), claim.leaseToken(), now, base.plus(properties.getLeaseDuration()));
   }
 
-  /** 扣减本次 Run 的活动执行时长；返回是否仍有可用额度。 */
-  private boolean chargeActiveTime(IssueRun run, Instant now) {
+  /** 判断本次 Run 的活动执行时长是否已耗尽。 */
+  private boolean isBudgetExhausted(IssueRun run, Instant now) {
     if (run.getActiveSince() == null) {
-      return true;
-    }
-    long elapsed = Math.max(0L, Duration.between(run.getActiveSince(), now).toMillis());
-    long remaining = run.getRemainingExecutionMs() - elapsed;
-    if (remaining <= 0) {
       return false;
     }
+    long elapsed = Math.max(0L, Duration.between(run.getActiveSince(), now).toMillis());
+    return run.getRemainingExecutionMs() - elapsed <= 0;
+  }
+
+  /** 扣减本次 Run 的活动执行时长。 */
+  private void chargeActiveTime(IssueRun run, Instant now) {
+    if (run.getActiveSince() == null) {
+      return;
+    }
+    long elapsed = Math.max(0L, Duration.between(run.getActiveSince(), now).toMillis());
+    long remaining = Math.max(0L, run.getRemainingExecutionMs() - elapsed);
     long expectedVersion = run.getVersion();
     run.setRemainingExecutionMs(remaining);
     run.setActiveSince(now);
@@ -428,7 +534,6 @@ public class IssueReconciler {
       throw new IllegalStateException("failed to charge run execution budget");
     }
     run.setVersion(expectedVersion + 1);
-    return true;
   }
 
   private IssueReconcileOutcome failRun(
@@ -445,48 +550,187 @@ public class IssueReconciler {
   }
 
   private boolean hasProgress(IssueRun run, ThreadSnapshot snapshot) {
+    if (snapshot == null || snapshot.entryPath() == null) {
+      return false;
+    }
     EntryPath path = snapshot.entryPath();
     List<UUID> entryIds = path.entries().stream().map(Entry::id).toList();
     int start = entryIds.indexOf(run.getStartEntryId());
     return start >= 0 && entryIds.size() - 1 > start;
   }
 
-  private UUID currentHead(IssueRun run) {
-    return requireRuntime().getThreadSnapshot(run.getThreadId()).thread().headEntryId();
+  /** 从历史区间中查找最后一个可见 ASSISTANT 回答 Entry。 */
+  private static UUID findFinalAnswerEntryId(EntryPath path, UUID startEntryId, UUID endEntryId) {
+    if (path == null || path.entries() == null) {
+      return null;
+    }
+    List<Entry> entries = path.entries();
+    List<UUID> entryIds = entries.stream().map(Entry::id).toList();
+    int start = entryIds.indexOf(startEntryId);
+    int end = entryIds.indexOf(endEntryId);
+    if (start < 0 || end <= start) {
+      return null;
+    }
+    for (int i = end; i > start; i--) {
+      Entry entry = entries.get(i);
+      if (entry != null) {
+        if (entry.payload() instanceof MessagePayload msg
+            && msg.message().role() == AgentMessageRole.ASSISTANT) {
+          return entry.id();
+        }
+        if (entry.payload() instanceof AssistantAbortedPayload aborted
+            && aborted.message().role() == AgentMessageRole.ASSISTANT) {
+          return entry.id();
+        }
+      }
+    }
+    return null;
   }
 
-  /** 分类工具 sibling：存在等待审批/回答的调用也是"静止但未完成"的安全点。 */
+  /** 将历史区间内包含的合法受管 Resource Blob 证据发布到 Issue。 */
+  private void publishEvidence(
+      Issue issue,
+      IssueRun run,
+      IssueAgentThread binding,
+      ThreadSnapshot snapshot,
+      UUID endEntryId) {
+    if (binding == null || snapshot == null || snapshot.entryPath() == null) {
+      return;
+    }
+    EntryPath path = snapshot.entryPath();
+    List<Entry> entries = path.entries();
+    if (entries == null) {
+      return;
+    }
+    List<UUID> entryIds = entries.stream().map(Entry::id).toList();
+    int start = entryIds.indexOf(run.getStartEntryId());
+    int end = entryIds.indexOf(endEntryId);
+    if (start < 0 || end <= start) {
+      return;
+    }
+    for (int i = start + 1; i <= end; i++) {
+      Entry entry = entries.get(i);
+      if (entry != null && entry.payload() instanceof MessagePayload msg) {
+        for (AgentMessageContent content : msg.message().contents()) {
+          if (content instanceof ResourceMessageContent res
+              && isPublishableResource(res, binding)) {
+            issueEvidenceService.publishBlob(
+                issue.getId(), binding.agentName(), run.getId(), res.blobId(), res.name());
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 确定性预校验 Resource 是否属于可发布的合法受管 Blob：非空、显示名合法、Agent 名合法、且 Blob 存在且为 ACTIVE 状态。
+   *
+   * <p>在调用 `@Transactional` 参与方 {@code publishBlob} 之前完成所有前置判定，避免异常逃逸导致共享事务被标记为 rollback-only。
+   */
+  private boolean isPublishableResource(ResourceMessageContent res, IssueAgentThread binding) {
+    if (res == null || res.blobId() == null) {
+      return false;
+    }
+    if (binding == null || binding.agentName() == null || binding.agentName().isBlank()) {
+      return false;
+    }
+    String name = res.name();
+    if (name == null
+        || name.isBlank()
+        || !name.equals(name.strip())
+        || name.codePointCount(0, name.length()) > 512) {
+      return false;
+    }
+    String agentName = binding.agentName();
+    if (agentName.indexOf('/') >= 0
+        || !agentName.equals(agentName.strip())
+        || agentName.codePointCount(0, agentName.length()) > 64) {
+      return false;
+    }
+    StorageBlob blob = storageBlobManager.getBlob(res.blobId());
+    return blob != null && blob.getState() == StorageBlobState.ACTIVE;
+  }
+
+  /** 判断是否存在正在进行中的命令、活跃模型调用或正在执行的工具。 */
   private static boolean isProcessing(ThreadSnapshot snapshot) {
-    if (snapshot.model() != null || !snapshot.toolSiblings().isEmpty()) {
+    if (snapshot == null) {
+      return false;
+    }
+    if (!snapshot.queuedCommands().isEmpty()) {
       return true;
     }
-    Entry head = snapshot.entryPath().head();
-    return head.payload() instanceof TurnEndPayload end && end.continueModel();
+    if (snapshot.model() != null
+        && (snapshot.model().status() == null || !snapshot.model().status().isTerminal())) {
+      return true;
+    }
+    for (ToolInvocation tool : snapshot.toolSiblings()) {
+      ToolInvocationStatus status = tool.status();
+      if (status == null
+          || status == ToolInvocationStatus.READY
+          || status == ToolInvocationStatus.DISPATCHING
+          || status == ToolInvocationStatus.RUNNING) {
+        return true;
+      }
+    }
+    if (snapshot.entryPath() != null) {
+      Entry head = snapshot.entryPath().head();
+      if (head != null && head.payload() instanceof TurnEndPayload end && end.continueModel()) {
+        return true;
+      }
+    }
+    return false;
   }
 
-  /** 读取投递给当前 Run 的下一条 INSTRUCTION：跳过普通评论与系统事件，绝不因它们永久卡住游标。 */
+  /** 判断是否存在处于安全等待点（等待输入或等待审批）的工具调用。 */
+  private static boolean hasWaitingTool(ThreadSnapshot snapshot) {
+    if (snapshot == null) {
+      return false;
+    }
+    for (ToolInvocation tool : snapshot.toolSiblings()) {
+      ToolInvocationStatus status = tool.status();
+      if (status == ToolInvocationStatus.WAITING_APPROVAL
+          || status == ToolInvocationStatus.WAITING_INPUT) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 读取投递给当前 Run 的下一条 INSTRUCTION：跳过普通评论与系统事件，扫描至活动流尾，绝不因它们永久卡住游标。 */
   private IssueActivity nextDeliverableInstruction(IssueRun run) {
-    List<IssueActivity> window =
-        issueActivityRepository.listPage(
-            run.getIssueId(), run.getObservedActivitySequence(), ACTIVITY_SCAN_LIMIT);
-    long maxSeen = run.getObservedActivitySequence();
-    IssueActivity target = null;
-    for (IssueActivity activity : window) {
-      maxSeen = Math.max(maxSeen, activity.getSequence());
-      if (activity.getKind() == IssueActivityKind.INSTRUCTION
-          && run.getId().equals(activity.getRunId())) {
-        target = activity;
+    long cursor = run.getObservedActivitySequence();
+    long maxSeen = cursor;
+    while (true) {
+      List<IssueActivity> window =
+          issueActivityRepository.listPage(run.getIssueId(), cursor, ACTIVITY_SCAN_LIMIT);
+      if (window.isEmpty()) {
+        break;
+      }
+      for (IssueActivity activity : window) {
+        maxSeen = Math.max(maxSeen, activity.getSequence());
+        if (activity.getKind() == IssueActivityKind.INSTRUCTION
+            && run.getId().equals(activity.getRunId())) {
+          if (activity.getSequence() > run.getObservedActivitySequence() + 1) {
+            advanceObservedSequence(run, activity.getSequence() - 1);
+          }
+          return activity;
+        }
+      }
+      cursor = maxSeen;
+      if (window.size() < ACTIVITY_SCAN_LIMIT) {
         break;
       }
     }
-    if (target == null && maxSeen > run.getObservedActivitySequence()) {
-      // 已分类的普通评论与系统事件直接跳过，避免游标被永久卡住。
+    if (maxSeen > run.getObservedActivitySequence()) {
       advanceObservedSequence(run, maxSeen);
     }
-    return target;
+    return null;
   }
 
   private void advanceObservedSequence(IssueRun run, long sequence) {
+    if (sequence <= run.getObservedActivitySequence()) {
+      return;
+    }
     long expectedVersion = run.getVersion();
     run.setObservedActivitySequence(sequence);
     if (!issueRunRepository.updateById(run, expectedVersion)) {
@@ -546,6 +790,10 @@ public class IssueReconciler {
 
   private static String completeKey(IssueRun run) {
     return "reconciler-complete:" + run.getId() + ":" + run.getVersion();
+  }
+
+  private static String pauseKey(IssueRun run) {
+    return "reconciler-pause:" + run.getId() + ":" + run.getVersion();
   }
 
   private static String failKey(IssueRun run, UUID endEntryId) {

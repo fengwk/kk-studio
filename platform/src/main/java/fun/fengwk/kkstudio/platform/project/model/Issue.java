@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -54,5 +56,16 @@ public class Issue {
   /** 是否存在阻止新派发的控制暂停门禁。 */
   public boolean isPaused() {
     return pauseReason != null;
+  }
+
+  /** 是否处于业务阻塞状态。 */
+  public boolean isBlocked() {
+    return ProjectWorkflowReservedState.BLOCKED.code().value().equals(state)
+        || blockedFromState != null;
+  }
+
+  /** 是否存在阻止新派发的控制暂停或业务阻塞门禁。 */
+  public boolean isGateClosed() {
+    return isPaused() || isBlocked();
   }
 }
