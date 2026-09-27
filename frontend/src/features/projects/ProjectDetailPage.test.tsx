@@ -6,6 +6,7 @@ import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
 import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
 import { invalidateProjectQueries } from './projects-invalidation'
+import { queryKeys } from '@/shared/lib/query-keys'
 
 vi.mock('@/shared/app-events', () => ({
   useApplicationEvents: () => ({
@@ -384,7 +385,7 @@ describe('ProjectDetailPage', () => {
       appendIssueActivity: appendMock,
     })
 
-    renderPage(
+    const { queryClient } = renderPage(
       <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
       undefined,
       [`/projects/${projectId}?issue=${mockSnapshot.issues[0].issue.id}&thread=th-valid-101`],
@@ -397,11 +398,21 @@ describe('ProjectDetailPage', () => {
     await waitFor(() => expect(appendMock).toHaveBeenCalledTimes(1))
     const firstRequestKey = appendMock.mock.calls[0][1].requestKey
 
+    // 服务端已提交但响应丢失；失效事件先带来新版本，重试仍必须携带原始完整请求。
+    const detailKey = queryKeys.projects.issue(projectId, mockSnapshot.issues[0].issue.id)
+    await act(async () => {
+      queryClient.setQueryData<IssueDetailDTO>(detailKey, (detail) => detail && ({
+        ...detail,
+        issue: { ...detail.issue, version: '2' },
+      }))
+    })
+
     // 第二次提交（相同内容重试）：必须沿用 firstRequestKey
     fireEvent.click(screen.getByTestId('pane-submit-instruction'))
     await waitFor(() => expect(appendMock).toHaveBeenCalledTimes(2))
     const retryRequestKey = appendMock.mock.calls[1][1].requestKey
     expect(retryRequestKey).toBe(firstRequestKey)
+    expect(appendMock.mock.calls[1]).toEqual(appendMock.mock.calls[0])
 
     // 第三次提交（编辑为不同内容）：必须生成不同的全新 requestKey
     fireEvent.click(screen.getByTestId('pane-submit-instruction-alt'))
