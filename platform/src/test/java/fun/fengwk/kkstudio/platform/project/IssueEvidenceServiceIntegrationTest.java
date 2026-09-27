@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -49,6 +51,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
   @Autowired private IssueEvidenceService issueEvidenceService;
   @Autowired private FakeStorageUploadService fakeStorageUploadService;
   @Autowired private FakeStorageBlobManager fakeStorageBlobManager;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void resetStorageFakes() {
@@ -173,6 +176,75 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, fakeStorageUploadService.lockCount(uploadId));
     assertEquals(1L, fakeStorageUploadService.deleteCount(uploadId));
     assertEquals(1L, fakeStorageBlobManager.retainCount(blobId));
+  }
+
+  /** 重复发布同一 Blob（第二次携带同一 Blob 的新 upload）不重复留痕：证据行与 HUMAN COMMENT 事实都只有一条。 */
+  @Test
+  void publishHumanUploadDuplicateBlobRecordsActivityOnce() {
+    UUID projectId = createProject();
+    Issue issue = createIssue(projectId);
+    UUID uploadId = UUID.randomUUID();
+    UUID secondUploadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    insertStorageBlob(blobId);
+    fakeStorageUploadService.putReady(uploadId, blobId, "evidence.txt");
+    fakeStorageUploadService.putReady(secondUploadId, blobId, "evidence-again.txt");
+
+    IssueEvidence first = issueEvidenceService.publishHumanUpload(issue.getId(), uploadId);
+    IssueEvidence second = issueEvidenceService.publishHumanUpload(issue.getId(), secondUploadId);
+
+    assertEquals(first.getBlobId(), second.getBlobId());
+    assertEquals(1L, fakeStorageBlobManager.retainCount(blobId));
+    assertEquals(1L, fakeStorageUploadService.deleteCount(uploadId));
+    assertEquals(1L, fakeStorageUploadService.deleteCount(secondUploadId));
+    assertEquals(
+        1L, count("select count(*) from project_issue_evidence where issue_id = ?", issue.getId()));
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
+            issue.getId()));
+    assertEquals(
+        "HUMAN",
+        jdbc.queryForObject(
+            "select actor_type from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
+            String.class,
+            issue.getId()));
+  }
+
+  /** 人为事实与证据行同事务：写入后在事务内失败，证据行、HUMAN COMMENT 与事实流游标必须整体回滚。 */
+  @Test
+  void publishHumanUploadRollsBackEvidenceActivityAndCursorTogether() {
+    UUID projectId = createProject();
+    Issue issue = createIssue(projectId);
+    UUID uploadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    insertStorageBlob(blobId);
+    fakeStorageUploadService.putReady(uploadId, blobId, "rollback.png");
+
+    long cursorBefore = nextActivitySequence(issue.getId());
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            new TransactionTemplate(transactionManager)
+                .executeWithoutResult(
+                    status -> {
+                      issueEvidenceService.publishHumanUpload(issue.getId(), uploadId);
+                      throw new IllegalStateException("force rollback");
+                    }));
+
+    assertEquals(
+        0L, count("select count(*) from project_issue_evidence where issue_id = ?", issue.getId()));
+    assertEquals(
+        0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
+    assertEquals(cursorBefore, nextActivitySequence(issue.getId()));
+  }
+
+  private long nextActivitySequence(UUID issueId) {
+    Long value =
+        jdbc.queryForObject(
+            "select next_activity_sequence from project_issue where id = ?", Long.class, issueId);
+    return value != null ? value : -1L;
   }
 
   /** 跨 Issue 引用 Run 被拒绝：发布时指定属于其他 Issue 的 runId 必须抛出校验异常。 */
