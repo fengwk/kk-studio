@@ -22,6 +22,7 @@ class CanvasFunctionFrozenTest {
   private static final UUID REQUEST_ID = new UUID(0L, 30);
   private static final UUID RESOURCE_ID = new UUID(0L, 1);
   private static final UUID BLOB_ID = new UUID(0L, 99);
+  private static final UUID TARGET_ID = new UUID(0L, 100);
 
   @Test
   void frozenReferenceCarriesResourceIdBlobIdAndMediaFacts() {
@@ -167,9 +168,76 @@ class CanvasFunctionFrozenTest {
                 0L));
   }
 
+  /** 冻结计划承载 UUID 身份、提交事实与有界输出计划：槽位顺序、类型必须与定义一致，名称与 Resource ID 不得重复。 */
   @Test
-  void frozenRunCarriesUuidIdentitySubmitFactAndTarget() {
+  void frozenRunCarriesIdentitySubmitFactAndFrozenOutputPlan() {
     CanvasFunctionDefinition definition = CanvasFunctionCatalogTest.function("fake-image");
+    CanvasFunctionFrozenRun run =
+        run(definition, List.of(frozenOutput(0)), CanvasFunctionSubmitState.PENDING);
+    assertEquals(NODE_ID, run.nodeId());
+    assertEquals(REQUEST_ID, run.requestId());
+    assertFalse(run.submitted());
+    assertEquals(List.of(TARGET_ID), run.outputResourceIds());
+    assertEquals(TARGET_ID, run.output(0).resourceId());
+    assertFalse(run.output(0).inlineText());
+    assertTrue(
+        run(definition, List.of(frozenOutput(0)), CanvasFunctionSubmitState.SUBMITTED).submitted());
+
+    assertThrows(
+        NullPointerException.class,
+        () -> run(null, List.of(frozenOutput(0)), CanvasFunctionSubmitState.PENDING));
+    assertThrows(NullPointerException.class, () -> run(definition, List.of(frozenOutput(0)), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> run(definition, List.of(), CanvasFunctionSubmitState.PENDING));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            run(
+                definition,
+                List.of(
+                    new CanvasFunctionFrozenOutput(
+                        TARGET_ID, 1, CanvasResourceKind.IMAGE, "out.png")),
+                CanvasFunctionSubmitState.PENDING));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            run(
+                definition,
+                List.of(
+                    new CanvasFunctionFrozenOutput(
+                        TARGET_ID, 0, CanvasResourceKind.VIDEO, "out.mp4")),
+                CanvasFunctionSubmitState.PENDING));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            run(
+                definition,
+                List.of(
+                    new CanvasFunctionFrozenOutput(TARGET_ID, 0, CanvasResourceKind.IMAGE, " ")),
+                CanvasFunctionSubmitState.PENDING));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            run(
+                definition,
+                List.of(
+                    new CanvasFunctionFrozenOutput(
+                        TARGET_ID, 1, CanvasResourceKind.IMAGE, "out.png")),
+                CanvasFunctionSubmitState.PENDING));
+    assertThrows(
+        NullPointerException.class, () -> run(definition, null, CanvasFunctionSubmitState.PENDING));
+  }
+
+  /** 多输出计划必须唯一命名、唯一预分配 Resource ID，且 INDEX 与声明顺序一致。 */
+  @Test
+  void frozenRunRejectsDuplicateNamesResourceIdsAndOutOfOrderSlots() {
+    CanvasFunctionDefinition definition = multiOutputDefinition();
+    List<CanvasFunctionFrozenOutput> outputs =
+        List.of(
+            new CanvasFunctionFrozenOutput(TARGET_ID, 0, CanvasResourceKind.TEXT, "report.txt"),
+            new CanvasFunctionFrozenOutput(
+                new UUID(0L, 101), 1, CanvasResourceKind.IMAGE, "chart.png"));
     CanvasFunctionFrozenRun run =
         new CanvasFunctionFrozenRun(
             CANVAS_ID,
@@ -179,60 +247,71 @@ class CanvasFunctionFrozenTest {
             definition,
             CanvasJson.parseObject("{}"),
             List.of(),
-            "out",
-            new UUID(0L, 100),
+            outputs,
             CanvasFunctionSubmitState.PENDING,
             "STARTED",
             Map.of());
-    assertEquals(NODE_ID, run.nodeId());
-    assertEquals(REQUEST_ID, run.requestId());
-    assertFalse(run.submitted());
+    assertEquals(List.of(TARGET_ID, new UUID(0L, 101)), run.outputResourceIds());
+    assertTrue(run.output(0).inlineText());
+    assertFalse(run.output(1).inlineText());
+    assertEquals("chart.png", run.output(1).name());
+    assertThrows(IllegalArgumentException.class, () -> run.output(-1));
+    assertThrows(IllegalArgumentException.class, () -> run.output(2));
     assertThrows(
-        NullPointerException.class,
+        IllegalArgumentException.class,
         () ->
-            new CanvasFunctionFrozenRun(
-                null,
-                NODE_ID,
-                "fn",
-                REQUEST_ID,
+            run(
                 definition,
-                CanvasJson.parseObject("{}"),
-                List.of(),
-                "out",
-                new UUID(0L, 100),
-                CanvasFunctionSubmitState.PENDING,
-                "STARTED",
-                Map.of()));
+                List.of(
+                    new CanvasFunctionFrozenOutput(
+                        TARGET_ID, 0, CanvasResourceKind.TEXT, "report.txt"),
+                    new CanvasFunctionFrozenOutput(
+                        new UUID(0L, 101), 1, CanvasResourceKind.IMAGE, "report.txt")),
+                CanvasFunctionSubmitState.PENDING));
     assertThrows(
-        NullPointerException.class,
+        IllegalArgumentException.class,
         () ->
-            new CanvasFunctionFrozenRun(
-                CANVAS_ID,
-                NODE_ID,
-                "fn",
-                REQUEST_ID,
+            run(
                 definition,
-                CanvasJson.parseObject("{}"),
-                List.of(),
-                "out",
-                new UUID(0L, 100),
-                null,
-                "STARTED",
-                Map.of()));
-    assertTrue(
-        new CanvasFunctionFrozenRun(
-                CANVAS_ID,
-                NODE_ID,
-                "fn",
-                REQUEST_ID,
-                definition,
-                CanvasJson.parseObject("{}"),
-                List.of(),
-                "out",
-                new UUID(0L, 100),
-                CanvasFunctionSubmitState.SUBMITTED,
-                "STARTED",
-                Map.of())
-            .submitted());
+                List.of(
+                    new CanvasFunctionFrozenOutput(
+                        TARGET_ID, 0, CanvasResourceKind.TEXT, "report.txt"),
+                    new CanvasFunctionFrozenOutput(
+                        TARGET_ID, 1, CanvasResourceKind.IMAGE, "a.png")),
+                CanvasFunctionSubmitState.PENDING));
+  }
+
+  /** 单一入口：槽位数量必须与定义输出计划逐位对应。 */
+  private static CanvasFunctionFrozenRun run(
+      CanvasFunctionDefinition definition,
+      List<CanvasFunctionFrozenOutput> outputs,
+      CanvasFunctionSubmitState submitState) {
+    return new CanvasFunctionFrozenRun(
+        CANVAS_ID,
+        NODE_ID,
+        "fn",
+        REQUEST_ID,
+        definition,
+        CanvasJson.parseObject("{}"),
+        List.of(),
+        outputs,
+        submitState,
+        "STARTED",
+        Map.of());
+  }
+
+  private static CanvasFunctionFrozenOutput frozenOutput(int index) {
+    return new CanvasFunctionFrozenOutput(TARGET_ID, index, CanvasResourceKind.IMAGE, "out.png");
+  }
+
+  private static CanvasFunctionDefinition multiOutputDefinition() {
+    return new CanvasFunctionDefinition(
+        "fake.report",
+        "report",
+        CanvasFunctionDefinitionTest.schema(),
+        List.of(
+            CanvasFunctionOutputSpec.named(CanvasResourceKind.TEXT, "report.txt"),
+            CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "chart.png")),
+        CanvasFunctionDefinitionTest.policy());
   }
 }

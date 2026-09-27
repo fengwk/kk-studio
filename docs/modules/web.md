@@ -117,7 +117,7 @@ result status 对齐。
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
-| Canvas Function | `/api/canvas-functions`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel`、`/resolve` | 函数目录（name/description/argsSchema/referencePolicy/available）、start（202）/query/cancel 与 UNKNOWN 人工核查解除（`resolution` + 非空 `verification`） |
+| Canvas Function | `/api/canvas-functions`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel`、`/resolve` | 函数目录（name/description/argsSchema/outputs/referencePolicy/available）、start（202）/query/cancel 与 UNKNOWN 人工核查解除（`resolution` + 非空 `verification`） |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
 | Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、YOLO 启动策略与打回阈值配置、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
 | Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities|status|block|recover|dependencies|evidence|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、七态迁移（含人工阻塞与恢复）、Activity 事实流与分页、依赖、人工上传转为公开证据、Run 人工动作与归档；`retry` 对 `UNKNOWN` 的最新 Run 要求 `verification` 人工核对说明 |

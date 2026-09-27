@@ -176,7 +176,7 @@ class CanvasFunctionArgsCodecTest {
               }
             }
             """);
-    return new CanvasFunctionDefinition(
+    return CanvasFunctionDefinition.of(
         "video.generate",
         "Video generator",
         schema,

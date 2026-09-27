@@ -78,9 +78,9 @@ class CanvasFunctionArgsSchemaTest {
           "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
               + "\"properties\":{\"a\":{\"type\":\"array\",\"minItems\":2,\"maxItems\":1,"
               + "\"items\":{\"type\":\"string\"}}}}",
+          tooDeepSchema(),
           "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
-              + "\"properties\":{\"a\":{\"type\":\"array\","
-              + "\"items\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}}",
+              + "\"properties\":{\"a\":{\"type\":\"object\",\"properties\":{}}}}",
           "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
               + "\"properties\":{\"a\":{\"type\":\"string\",\"minItems\":1}}}",
           "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
@@ -254,6 +254,126 @@ class CanvasFunctionArgsSchemaTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> CanvasFunctionArgsSchema.validate(JsonObject.empty()));
+  }
+
+  /** 本轮新增能力：schema 可递归嵌套 object/array，resourceReference 可出现在任意深度，默认值在嵌套层同样补齐。 */
+  @Test
+  void acceptsNestedObjectsArraysAndDeepResourceReferences() {
+    JsonObject schema =
+        schema(
+            """
+            {"type":"object","additionalProperties":false,"required":["shot"],
+             "properties":{
+               "shot":{"type":"object","additionalProperties":false,"required":["camera"],
+                 "properties":{
+                   "camera":{"type":"object","additionalProperties":false,"required":["refs"],
+                     "properties":{
+                       "refs":{"type":"array","minItems":1,"maxItems":2,
+                         "items":{"type":"resourceReference"}},
+                       "zoom":{"type":"number","minimum":0.5,"maximum":2,"default":1}
+                     }
+                   }
+                 }
+               }
+             }
+            }
+            """);
+    assertDoesNotThrow(() -> CanvasFunctionArgsSchema.validate(schema));
+
+    JsonObject normalized =
+        CanvasFunctionArgsSchema.normalize(
+            schema(
+                """
+                {"shot":{"camera":{"refs":[{"type":"resource","nodeId":
+                  "00000000-0000-0000-0000-000000000001","index":0}]}}}
+                """),
+            schema,
+            "args");
+    assertEquals(
+        "{\"shot\":{\"camera\":{\"refs\":[{\"type\":\"resource\","
+            + "\"nodeId\":\"00000000-0000-0000-0000-000000000001\",\"index\":0}],"
+            + "\"zoom\":1}}}",
+        normalized.write());
+  }
+
+  /** 嵌套深度超过 MAX_DEPTH 时注册期即拒绝，避免冻结计划无界增长。 */
+  @Test
+  void rejectsSchemasNestingDeeperThanTheDepthLimit() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CanvasFunctionArgsSchema.validate(schema(tooDeepSchema())));
+    assertDoesNotThrow(() -> CanvasFunctionArgsSchema.validate(schema(atDepthSchema())));
+  }
+
+  /** 嵌套 object 同样必须显式 additionalProperties:false，未知的嵌套字段必须拒绝。 */
+  @Test
+  void rejectsNestedSchemaDriftAndNestedUnknownArgs() {
+    for (String schema :
+        new String[] {
+          "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
+              + "\"properties\":{\"a\":{\"type\":\"object\",\"properties\":{}}}}",
+          "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
+              + "\"properties\":{\"a\":{\"type\":\"object\",\"additionalProperties\":true,"
+              + "\"properties\":{}}}}",
+          "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
+              + "\"properties\":{\"a\":{\"type\":\"array\",\"minItems\":0,"
+              + "\"items\":{\"type\":\"object\"}}}}",
+          "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[],"
+              + "\"properties\":{\"a\":{\"type\":\"object\",\"additionalProperties\":false,"
+              + "\"required\":[\"b\",\"b\"],\"properties\":{\"b\":{\"type\":\"string\"}}}}}",
+        }) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> CanvasFunctionArgsSchema.validate(schema(schema)),
+          schema);
+    }
+
+    JsonObject nested =
+        schema(
+            """
+            {"type":"object","additionalProperties":false,"required":["a"],
+             "properties":{"a":{"type":"object","additionalProperties":false,"required":["b"],
+               "properties":{"b":{"type":"string"}}}}}
+            """);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CanvasFunctionArgsSchema.normalize(
+                schema("{\"a\":{\"b\":\"x\",\"c\":1}}"), nested, "args"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CanvasFunctionArgsSchema.normalize(schema("{\"a\":\"x\"}"), nested, "args"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CanvasFunctionArgsSchema.normalize(schema("{\"a\":{}}"), nested, "args"));
+    assertEquals(
+        "{\"a\":{\"b\":\"x\"}}",
+        CanvasFunctionArgsSchema.normalize(schema("{\"a\":{\"b\":\"x\"}}"), nested, "args")
+            .write());
+  }
+
+  /** 嵌套到深度上限（含）仍然合法。 */
+  private static String atDepthSchema() {
+    return nestedSchema(CanvasFunctionArgsSchema.MAX_DEPTH - 1);
+  }
+
+  /** 嵌套到深度上限之外必须被拒绝。 */
+  private static String tooDeepSchema() {
+    return nestedSchema(CanvasFunctionArgsSchema.MAX_DEPTH + 2);
+  }
+
+  private static String nestedSchema(int nestedObjects) {
+    StringBuilder builder = new StringBuilder();
+    for (int index = 0; index < nestedObjects; index++) {
+      builder.append(
+          "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"n\"],"
+              + "\"properties\":{\"n\":");
+    }
+    builder.append("{\"type\":\"string\"}");
+    for (int index = 0; index < nestedObjects; index++) {
+      builder.append("}}");
+    }
+    return builder.toString();
   }
 
   private static JsonObject schema(String json) {

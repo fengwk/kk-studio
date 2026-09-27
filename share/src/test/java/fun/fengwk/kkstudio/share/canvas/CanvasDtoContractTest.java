@@ -134,11 +134,13 @@ class CanvasDtoContractTest {
             "name", "String",
             "description", "String",
             "argsSchema", "Map",
-            "outputKind", "String",
+            "outputs", "List",
             "referencePolicy", "CanvasFunctionReferencePolicyDTO",
             "available", "Boolean",
             "unavailableReason", "String"),
         componentTypes(CanvasFunctionDefinitionDTO.class));
+    assertEquals(
+        Map.of("kind", "String", "name", "String"), componentTypes(CanvasFunctionOutputDTO.class));
     for (String removed :
         new String[] {"CanvasFunctionModelDTO", "CanvasFunctionParameterDefinitionDTO"}) {
       assertThrows(

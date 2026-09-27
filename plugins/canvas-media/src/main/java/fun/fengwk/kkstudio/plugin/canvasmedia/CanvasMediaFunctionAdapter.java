@@ -77,7 +77,7 @@ public class CanvasMediaFunctionAdapter implements CanvasFunctionAdapter {
       new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of());
 
   private static final CanvasFunctionDefinition IMAGE_CROP_DEFINITION =
-      new CanvasFunctionDefinition(
+      CanvasFunctionDefinition.of(
           FUNCTION_NAME,
           "Crop a rectangular region from an input image",
           ARGS_SCHEMA,
@@ -216,8 +216,8 @@ public class CanvasMediaFunctionAdapter implements CanvasFunctionAdapter {
     }
 
     UUID materializedId =
-        context.materializeTarget(
-            run.targetResourceId(), new ByteArrayInputStream(outputStream.toByteArray()));
+        context.materializeOutput(
+            run.output(0), new ByteArrayInputStream(outputStream.toByteArray()));
     return List.of(materializedId);
   }
 

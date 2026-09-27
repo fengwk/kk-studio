@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.canvas.resource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
@@ -154,8 +155,44 @@ class CanvasBlobResourceMaterializerTest {
     assertThrows(IllegalStateException.class, this::materialize);
   }
 
+  @Test
+  void materializesInlineTextWithoutBlobOrStaging() {
+    CanvasResource resource =
+        materializer.materializeText(
+            canvasId, nodeId, requestId, resourceId, "report.txt", "summary text");
+
+    assertEquals("summary text", resource.textContent());
+    assertTrue(resource.isText());
+    assertEquals("report.txt", resource.name());
+    verify(pinRepository)
+        .addAll(
+            List.of(
+                new CanvasFunctionResourcePin(
+                    canvasId,
+                    nodeId,
+                    requestId,
+                    resourceId,
+                    CanvasFunctionResourcePin.Role.OUTPUT)));
+    verify(uploadService, never()).stage(any(), any(), any(), anyLong());
+    verify(blobManager, never()).retain(any());
+  }
+
+  @Test
+  void existingTextResourceReturnsWithoutInserting() {
+    CanvasResource existing =
+        new CanvasResource(
+            resourceId, canvasId, null, null, null, "report.txt", "cached", Instant.now());
+    when(resourceRepository.findById(canvasId, resourceId)).thenReturn(Optional.of(existing));
+
+    assertSame(
+        existing,
+        materializer.materializeText(
+            canvasId, nodeId, requestId, resourceId, "report.txt", "cached"));
+    verify(resourceRepository, never()).addIfAbsent(any());
+  }
+
   private CanvasResource materialize() {
-    return materializer.materialize(
+    return materializer.materializeBlob(
         canvasId,
         nodeId,
         requestId,

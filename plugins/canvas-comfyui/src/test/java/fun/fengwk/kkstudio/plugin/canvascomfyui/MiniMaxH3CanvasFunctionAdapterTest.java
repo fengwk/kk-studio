@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
@@ -168,8 +169,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
             adapter.functions().get(0),
             initialRun.args(),
             initialRun.manifest(),
-            initialRun.outputName(),
-            TARGET,
+            initialRun.outputs(),
             CanvasFunctionSubmitState.SUBMITTED,
             "COMFY_WAITING",
             submittedState);
@@ -402,8 +402,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         adapter.functions().get(0),
         new JsonObject(argsMap),
         manifest,
-        "result",
-        TARGET,
+        List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.VIDEO, "result.mp4")),
         CanvasFunctionSubmitState.SUBMITTED,
         stage,
         state);
@@ -456,8 +455,8 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     }
 
     @Override
-    public UUID materializeTarget(UUID targetResourceId, InputStream content) {
-      materializedTarget = targetResourceId;
+    public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
+      materializedTarget = output.resourceId();
       try {
         byte[] bytes = content.readAllBytes();
         materializedBytes = new ArrayList<>();
@@ -467,7 +466,12 @@ class MiniMaxH3CanvasFunctionAdapterTest {
       } catch (Exception error) {
         throw new RuntimeException(error);
       }
-      return targetResourceId;
+      return output.resourceId();
+    }
+
+    @Override
+    public UUID materializeTextOutput(CanvasFunctionFrozenOutput output, String text) {
+      throw new UnsupportedOperationException("H3 output is a media slot");
     }
   }
 }

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
@@ -108,26 +109,67 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   }
 
   @Override
-  public UUID materializeTarget(UUID targetResourceId, InputStream content) {
-    CanvasFunctionFrozenRun frozen = current.get();
-    if (!frozen.targetResourceId().equals(targetResourceId)) {
+  public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
+    Objects.requireNonNull(output, "output");
+    Objects.requireNonNull(content, "content");
+    CanvasFunctionFrozenRun frozen = requirePlannedOutput(output);
+    if (output.inlineText()) {
       throw new IllegalArgumentException(
-          "adapter may only materialize the frozen targetResourceId");
+          "TEXT output must be materialized through materializeTextOutput");
     }
     ensureRunning();
     CanvasResource resource =
-        materializer.materialize(
+        materializer.materializeBlob(
             frozen.canvasId(),
             frozen.nodeId(),
             frozen.requestId(),
-            frozen.targetResourceId(),
-            frozen.outputName(),
+            output.resourceId(),
+            output.name(),
             content);
-    if (!resource.id().equals(frozen.targetResourceId())
+    return requireMaterialized(frozen, output, resource);
+  }
+
+  @Override
+  public UUID materializeTextOutput(CanvasFunctionFrozenOutput output, String text) {
+    Objects.requireNonNull(output, "output");
+    if (text == null) {
+      throw new IllegalArgumentException("TEXT output content is required");
+    }
+    CanvasFunctionFrozenRun frozen = requirePlannedOutput(output);
+    if (!output.inlineText()) {
+      throw new IllegalArgumentException(
+          "only a TEXT output slot can be materialized as inline text");
+    }
+    ensureRunning();
+    CanvasResource resource =
+        materializer.materializeText(
+            frozen.canvasId(),
+            frozen.nodeId(),
+            frozen.requestId(),
+            output.resourceId(),
+            output.name(),
+            text);
+    return requireMaterialized(frozen, output, resource);
+  }
+
+  /** adapter 只能物化冻结输出计划内的槽位；id 与 index 必须同时匹配，避免伪造或错位发布。 */
+  private CanvasFunctionFrozenRun requirePlannedOutput(CanvasFunctionFrozenOutput output) {
+    CanvasFunctionFrozenRun frozen = current.get();
+    CanvasFunctionFrozenOutput planned = frozen.output(output.index());
+    if (!planned.equals(output)) {
+      throw new IllegalArgumentException("output slot is not part of the frozen output plan");
+    }
+    return frozen;
+  }
+
+  private static UUID requireMaterialized(
+      CanvasFunctionFrozenRun frozen, CanvasFunctionFrozenOutput output, CanvasResource resource) {
+    if (resource == null
+        || !resource.id().equals(output.resourceId())
         || !resource.canvasId().equals(frozen.canvasId())
         || resource.ownerNodeId() != null
         || resource.resourceIndex() != null) {
-      throw new IllegalStateException("materializer returned a Resource outside the frozen target");
+      throw new IllegalStateException("materializer returned a Resource outside the frozen output");
     }
     return resource.id();
   }
@@ -143,7 +185,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     if (!existing.canvasId().equals(frozen.canvasId())
         || !existing.nodeId().equals(frozen.nodeId())
         || !existing.requestId().equals(frozen.requestId())
-        || !existing.targetResourceId().equals(frozen.targetResourceId())) {
+        || !existing.outputResourceIds().equals(frozen.outputResourceIds())) {
       throw new IllegalArgumentException("context may only be replaced by the same FunctionRun");
     }
     current.set(frozen);

@@ -24,8 +24,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess.BlobFacts;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
@@ -37,9 +39,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -129,7 +133,7 @@ public class CanvasFunctionRunTransactions {
     List<CanvasFunctionFrozenReference> manifest =
         freezeManifest(
             canvasId, nodeId, node.function().name(), args, definition.referencePolicy());
-    UUID targetResourceId = UUID.randomUUID();
+    List<CanvasFunctionFrozenOutput> outputs = freezeOutputs(node.name(), definition);
     CanvasFunctionFrozenRun frozen =
         new CanvasFunctionFrozenRun(
             canvasId,
@@ -139,8 +143,7 @@ public class CanvasFunctionRunTransactions {
             definition,
             args,
             manifest,
-            outputName(node.name(), definition.outputKind()),
-            targetResourceId,
+            outputs,
             CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
@@ -226,7 +229,7 @@ public class CanvasFunctionRunTransactions {
     }
     // 先释放 pin（含物化后的 OUTPUT pin）再回收无 owner 目标行，满足 pin→resource 的删除限制。
     resourceLifecycle.releaseRunPins(canvasId, nodeId, current.requestId());
-    resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
+    resourceLifecycle.discardUnownedTargets(canvasId, frozen.outputResourceIds());
     bumpVersion(document);
     return terminal;
   }
@@ -338,9 +341,9 @@ public class CanvasFunctionRunTransactions {
   public boolean completeSuccess(
       CanvasFunctionFrozenRun frozen, String leaseToken, List<UUID> orderedResourceIds) {
     Objects.requireNonNull(frozen, "frozen");
-    if (!orderedResourceIds.equals(List.of(frozen.targetResourceId()))) {
+    if (!orderedResourceIds.equals(frozen.outputResourceIds())) {
       throw new IllegalArgumentException(
-          "adapter result must equal the preallocated target Resource id");
+          "adapter result must equal the frozen output plan, in order");
     }
     CanvasDocument document = requireDocumentForUpdate(frozen.canvasId());
     NodeRecord node = canvasStore.lockNode(frozen.canvasId(), frozen.nodeId()).orElse(null);
@@ -351,22 +354,11 @@ public class CanvasFunctionRunTransactions {
     if (!matchesClaim(current, frozen.requestId().toString(), leaseToken)) {
       return false;
     }
-    CanvasResource output =
-        resourceRepository.findById(frozen.canvasId(), frozen.targetResourceId()).orElse(null);
-    if (output == null
-        || output.ownerNodeId() != null
-        || output.resourceIndex() != null
-        || output.blobId() == null) {
-      throw new IllegalArgumentException(
-          "adapter result must be materialized as an unowned blob Resource");
+    for (CanvasFunctionFrozenOutput planned : frozen.outputs()) {
+      requireMaterializedOutput(frozen, planned);
     }
-    BlobFacts outputBlob = blobAccess.findFacts(output.blobId()).orElse(null);
-    if (outputBlob == null || kindOf(outputBlob.mediaType()) != frozen.definition().outputKind()) {
-      throw new IllegalArgumentException(
-          "adapter result blob kind must match the frozen Function output kind");
-    }
-    resourceLifecycle.replaceOwnedWithTarget(
-        frozen.canvasId(), frozen.nodeId(), frozen.targetResourceId());
+    resourceLifecycle.replaceOwnedWithTargets(
+        frozen.canvasId(), frozen.nodeId(), orderedResourceIds);
     CanvasFunctionFrozenRun succeeded =
         stateCodec.transition(frozen, frozen.submitState(), "SUCCEEDED", frozen.adapterState());
     CanvasFunctionRun terminal =
@@ -402,7 +394,7 @@ public class CanvasFunctionRunTransactions {
       throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
     }
     resourceLifecycle.releaseRunPins(frozen.canvasId(), frozen.nodeId(), frozen.requestId());
-    resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+    resourceLifecycle.discardUnownedTargets(frozen.canvasId(), frozen.outputResourceIds());
     bumpVersion(document);
     return true;
   }
@@ -473,7 +465,7 @@ public class CanvasFunctionRunTransactions {
       throw conflict("FunctionRun changed while resolving");
     }
     resourceLifecycle.releaseRunPins(frozen.canvasId(), frozen.nodeId(), frozen.requestId());
-    resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+    resourceLifecycle.discardUnownedTargets(frozen.canvasId(), frozen.outputResourceIds());
     bumpVersion(document);
     return terminal;
   }
@@ -708,18 +700,53 @@ public class CanvasFunctionRunTransactions {
         && Objects.equals(run.leaseToken(), leaseToken);
   }
 
-  private static String outputName(String nodeName, CanvasResourceKind outputKind) {
-    String extension =
-        switch (outputKind) {
-          case IMAGE -> ".png";
-          case VIDEO -> ".mp4";
-          case AUDIO, TEXT -> throw new IllegalArgumentException(
-              "unsupported Function output kind");
-        };
-    int maxBaseLength = 256 - extension.length();
-    String base =
-        nodeName.length() <= maxBaseLength ? nodeName : nodeName.substring(0, maxBaseLength);
-    return base + extension;
+  /**
+   * 冻结输出计划：按定义顺序为每个槽位预分配 Resource ID 与资源名。
+   *
+   * <p>计划先落库（stateJson），因此任何 Materialize 都只能写入计划内的槽位；名称为空的槽位由节点名与类型推导，解析后必须互不重名。
+   */
+  private static List<CanvasFunctionFrozenOutput> freezeOutputs(
+      String nodeName, CanvasFunctionDefinition definition) {
+    List<CanvasFunctionOutputSpec> specs = definition.outputs();
+    List<CanvasFunctionFrozenOutput> outputs = new ArrayList<>(specs.size());
+    Set<String> names = new LinkedHashSet<>();
+    for (int index = 0; index < specs.size(); index++) {
+      String name = specs.get(index).resolveName(nodeName);
+      if (!names.add(name)) {
+        throw new IllegalArgumentException(
+            "Function output names must be unique within a run: " + name);
+      }
+      outputs.add(
+          new CanvasFunctionFrozenOutput(UUID.randomUUID(), index, specs.get(index).kind(), name));
+    }
+    return List.copyOf(outputs);
+  }
+
+  /** 成功发布前校验单个槽位已按计划物化：无 owner、内容类型与槽位一致。 */
+  private void requireMaterializedOutput(
+      CanvasFunctionFrozenRun frozen, CanvasFunctionFrozenOutput planned) {
+    CanvasResource output =
+        resourceRepository.findById(frozen.canvasId(), planned.resourceId()).orElse(null);
+    if (output == null || output.ownerNodeId() != null || output.resourceIndex() != null) {
+      throw new IllegalArgumentException(
+          "every frozen output must be materialized as an unowned Resource before publishing");
+    }
+    if (planned.inlineText()) {
+      if (output.blobId() != null || output.textContent() == null) {
+        throw new IllegalArgumentException(
+            "TEXT output slot must be materialized as inline text Resource");
+      }
+      return;
+    }
+    if (output.blobId() == null) {
+      throw new IllegalArgumentException(
+          "media output slot must be materialized as a blob Resource");
+    }
+    BlobFacts outputBlob = blobAccess.findFacts(output.blobId()).orElse(null);
+    if (outputBlob == null || kindOf(outputBlob.mediaType()) != planned.kind()) {
+      throw new IllegalArgumentException(
+          "output blob kind must match the frozen Function output slot kind");
+    }
   }
 
   private static CanvasFunctionRunException notFound(String message) {

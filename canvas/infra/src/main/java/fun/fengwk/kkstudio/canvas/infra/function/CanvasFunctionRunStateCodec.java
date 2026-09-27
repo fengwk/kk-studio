@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
@@ -33,7 +34,7 @@ import java.util.regex.Pattern;
 @Component
 public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunStateCodecPort {
 
-  public static final int VERSION = 3;
+  public static final int VERSION = 4;
   public static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
 
   private static final Pattern STAGE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
@@ -45,12 +46,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           "nodeName",
           "requestId",
           "functionName",
-          "outputKind",
           "args",
           "manifest",
-          "outputName",
-          "targetResourceId",
+          "outputs",
           "submitState");
+  private static final Set<String> OUTPUT_FIELDS = Set.of("resourceId", "index", "kind", "name");
   private static final Set<String> REFERENCE_FIELDS =
       Set.of(
           "sourceNodeId",
@@ -89,7 +89,6 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     plan.put("nodeName", run.nodeName());
     plan.put("requestId", run.requestId().toString());
     plan.put("functionName", run.definition().name());
-    plan.put("outputKind", run.definition().outputKind().name());
     plan.set("args", argsNode(run.args()));
     ArrayNode manifest = plan.putArray("manifest");
     for (CanvasFunctionFrozenReference reference : run.manifest()) {
@@ -106,8 +105,14 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       item.put("height", reference.height());
       item.put("durationMs", reference.durationMs());
     }
-    plan.put("outputName", run.outputName());
-    plan.put("targetResourceId", run.targetResourceId().toString());
+    ArrayNode outputs = plan.putArray("outputs");
+    for (CanvasFunctionFrozenOutput output : run.outputs()) {
+      ObjectNode item = outputs.addObject();
+      item.put("resourceId", output.resourceId().toString());
+      item.put("index", output.index());
+      item.put("kind", output.kind().name());
+      item.put("name", output.name());
+    }
     plan.put("submitState", run.submitState().name());
     root.put("stage", run.stage());
     JsonNode adapterState = mapper.valueToTree(run.adapterState());
@@ -143,10 +148,6 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       if (!definition.name().equals(functionName)) {
         throw invalid("state functionName does not match the registered function");
       }
-      CanvasResourceKind outputKind = enumKind(text(plan, "outputKind"), "outputKind");
-      if (outputKind != definition.outputKind()) {
-        throw invalid("state outputKind does not match the registered function");
-      }
       // args 在 state 里是 JSON object（与 adapterState 一致），复用 Core 的严格解析与上限校验。
       JsonObject args =
           args(object(required(plan, "args"), "state.plan.args").toString(), "state.plan.args");
@@ -168,8 +169,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           definition,
           args,
           decodeManifest(required(plan, "manifest")),
-          text(plan, "outputName"),
-          uuid(plan, "targetResourceId"),
+          decodeOutputs(required(plan, "outputs"), definition),
           submitState,
           stage,
           adapterState);
@@ -218,8 +218,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
         run.definition(),
         run.args(),
         run.manifest(),
-        run.outputName(),
-        run.targetResourceId(),
+        run.outputs(),
         submitState,
         stage,
         adapterState);
@@ -272,6 +271,33 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
               nullablePositiveLong(item, "durationMs")));
     }
     return List.copyOf(manifest);
+  }
+
+  private List<CanvasFunctionFrozenOutput> decodeOutputs(
+      JsonNode value, CanvasFunctionDefinition definition) {
+    if (!(value instanceof ArrayNode array)) {
+      throw invalid("state.plan.outputs must be an array");
+    }
+    if (array.size() != definition.outputs().size()) {
+      throw invalid("state.plan.outputs must match the registered function output plan");
+    }
+    List<CanvasFunctionFrozenOutput> outputs = new ArrayList<>(array.size());
+    for (int index = 0; index < array.size(); index++) {
+      String path = "state.plan.outputs[" + index + "]";
+      ObjectNode item = object(array.get(index), path);
+      requireExactFields(item, OUTPUT_FIELDS, path);
+      CanvasFunctionFrozenOutput output =
+          new CanvasFunctionFrozenOutput(
+              uuid(item, "resourceId"),
+              nonnegativeInt(item, "index"),
+              enumKind(text(item, "kind"), path + ".kind"),
+              text(item, "name"));
+      if (output.index() != index || output.kind() != definition.outputs().get(index).kind()) {
+        throw invalid(path + " does not match the registered function output plan");
+      }
+      outputs.add(output);
+    }
+    return List.copyOf(outputs);
   }
 
   public static void validateStage(String stage) {

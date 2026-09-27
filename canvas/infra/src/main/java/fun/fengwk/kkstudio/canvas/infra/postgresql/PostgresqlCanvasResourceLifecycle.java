@@ -9,6 +9,8 @@ import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -57,16 +59,27 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
   }
 
   @Override
-  public CanvasResource replaceOwnedWithTarget(UUID canvasId, UUID nodeId, UUID targetResourceId) {
-    CanvasResource target =
-        resourceRepository.findByIdForUpdate(canvasId, targetResourceId).orElse(null);
-    if (target == null
-        || target.blobId() == null
-        || target.ownerNodeId() != null
-        || target.resourceIndex() != null) {
-      throw new IllegalArgumentException(
-          "Function target must be an unowned blob Resource in the same canvas");
+  public List<CanvasResource> replaceOwnedWithTargets(
+      UUID canvasId, UUID nodeId, List<UUID> orderedTargetResourceIds) {
+    Objects.requireNonNull(orderedTargetResourceIds, "orderedTargetResourceIds");
+    if (orderedTargetResourceIds.isEmpty()) {
+      throw new IllegalArgumentException("Function output plan must not be empty");
     }
+    Set<UUID> distinct = new LinkedHashSet<>(orderedTargetResourceIds);
+    if (distinct.size() != orderedTargetResourceIds.size() || distinct.contains(null)) {
+      throw new IllegalArgumentException("Function output targets must be distinct Resources");
+    }
+    List<CanvasResource> targets = new ArrayList<>(orderedTargetResourceIds.size());
+    for (UUID targetResourceId : orderedTargetResourceIds) {
+      CanvasResource target =
+          resourceRepository.findByIdForUpdate(canvasId, targetResourceId).orElse(null);
+      if (target == null || target.ownerNodeId() != null || target.resourceIndex() != null) {
+        throw new IllegalArgumentException(
+            "Function target must be an unowned Resource in the same canvas");
+      }
+      targets.add(target);
+    }
+    // 先解除/删除旧 owned 资源，再按计划顺序挂接，避免 (canvas, owner, resource_index) 唯一槽位冲突。
     for (CanvasResource current : resourceRepository.findByOwnerNode(canvasId, nodeId)) {
       if (pinRepository.countByResource(canvasId, current.id()) > 0) {
         if (!resourceRepository.detachOwner(canvasId, current.id(), nodeId)) {
@@ -77,19 +90,30 @@ public class PostgresqlCanvasResourceLifecycle implements CanvasResourceLifecycl
         discardResource(canvasId, current.id());
       }
     }
-    if (!resourceRepository.attachOwner(canvasId, targetResourceId, nodeId, 0)) {
-      throw new IllegalStateException(
-          "attach Function target Resource failed: " + targetResourceId);
+    List<CanvasResource> attached = new ArrayList<>(targets.size());
+    for (int index = 0; index < targets.size(); index++) {
+      UUID targetResourceId = targets.get(index).id();
+      if (!resourceRepository.attachOwner(canvasId, targetResourceId, nodeId, index)) {
+        throw new IllegalStateException(
+            "attach Function target Resource failed: " + targetResourceId);
+      }
+      attached.add(targets.get(index).withSlot(nodeId, index));
     }
-    return target.withSlot(nodeId, 0);
+    return List.copyOf(attached);
   }
 
   @Override
-  public void discardUnownedTarget(UUID canvasId, UUID targetResourceId) {
-    resourceRepository
-        .findByIdForUpdate(canvasId, targetResourceId)
-        .filter(resource -> resource.ownerNodeId() == null)
-        .ifPresent(resource -> discardResource(canvasId, resource.id()));
+  public void discardUnownedTargets(UUID canvasId, Collection<UUID> targetResourceIds) {
+    Objects.requireNonNull(targetResourceIds, "targetResourceIds");
+    for (UUID resourceId : new LinkedHashSet<>(targetResourceIds)) {
+      if (resourceId == null) {
+        continue;
+      }
+      resourceRepository
+          .findByIdForUpdate(canvasId, resourceId)
+          .filter(resource -> resource.ownerNodeId() == null)
+          .ifPresent(resource -> discardResource(canvasId, resource.id()));
+    }
   }
 
   @Override

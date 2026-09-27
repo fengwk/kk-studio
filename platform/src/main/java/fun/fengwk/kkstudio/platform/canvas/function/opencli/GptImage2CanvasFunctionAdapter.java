@@ -70,7 +70,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
           """);
 
   private static final CanvasFunctionDefinition DEFINITION =
-      new CanvasFunctionDefinition(
+      CanvasFunctionDefinition.of(
           FUNCTION_NAME,
           "GPT Image 2",
           ARGS_SCHEMA,
@@ -180,7 +180,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
     context.checkpoint("GPT_IMAGE_MATERIALIZING", state);
     ExecutionResource output = execution.resources().get(0);
     try (HubResourceStream stream = client.openResource(output)) {
-      UUID resourceId = context.materializeTarget(run.targetResourceId(), stream.content());
+      UUID resourceId = context.materializeOutput(run.output(0), stream.content());
       return List.of(resourceId);
     } catch (IOException exception) {
       throw new UncheckedIOException("failed to close GPT Image Hub resource", exception);

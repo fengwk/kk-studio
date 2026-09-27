@@ -16,8 +16,10 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsSchema;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
@@ -59,7 +61,8 @@ class CanvasMediaFunctionAdapterTest {
 
     CanvasFunctionDefinition definition = functions.get(0);
     assertEquals("image.crop", definition.name());
-    assertEquals(CanvasResourceKind.IMAGE, definition.outputKind());
+    assertEquals(
+        List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)), definition.outputs());
     assertNotNull(definition.description());
     assertThat(definition.description()).isNotBlank();
 
@@ -355,7 +358,7 @@ class CanvasMediaFunctionAdapterTest {
         IllegalStateException.class,
         () -> adapter.execute(context, run),
         "context.isRunning() 为 false 时必须抛出 IllegalStateException");
-    assertNull(context.materializedBytes(), "停止运行时不得调用 materializeTarget");
+    assertNull(context.materializedBytes(), "停止运行时不得调用 materializeOutput");
   }
 
   /** 验证当输入流内容无法解码为图像时抛出 IllegalArgumentException。 */
@@ -442,8 +445,13 @@ class CanvasMediaFunctionAdapterTest {
           }
 
           @Override
-          public UUID materializeTarget(UUID targetResourceId, InputStream content) {
-            return targetResourceId;
+          public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
+            return output.resourceId();
+          }
+
+          @Override
+          public UUID materializeTextOutput(CanvasFunctionFrozenOutput output, String text) {
+            throw new UnsupportedOperationException();
           }
         };
 
@@ -544,6 +552,10 @@ class CanvasMediaFunctionAdapterTest {
       JsonObject args, List<CanvasFunctionFrozenReference> manifest, UUID targetResourceId) {
     CanvasMediaFunctionAdapter adapter = new CanvasMediaFunctionAdapter();
     CanvasFunctionDefinition definition = adapter.functions().get(0);
+    List<CanvasFunctionFrozenOutput> outputs =
+        List.of(
+            new CanvasFunctionFrozenOutput(
+                targetResourceId, 0, CanvasResourceKind.IMAGE, "cropped.png"));
     return new CanvasFunctionFrozenRun(
         UUID.randomUUID(),
         UUID.randomUUID(),
@@ -552,11 +564,23 @@ class CanvasMediaFunctionAdapterTest {
         definition,
         args,
         manifest,
-        "cropped.png",
-        targetResourceId,
+        outputs,
         CanvasFunctionSubmitState.SUBMITTED,
         "PENDING",
         Map.of());
+  }
+
+  /** 验证媒体槽位拒绝 materializeTextOutput 调用并抛出 IllegalArgumentException。 */
+  @Test
+  void mediaSlotRejectsMaterializeTextOutput() {
+    FakeExecutionContext context = new FakeExecutionContext();
+    CanvasFunctionFrozenOutput mediaOutput =
+        new CanvasFunctionFrozenOutput(
+            UUID.randomUUID(), 0, CanvasResourceKind.IMAGE, "cropped.png");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> context.materializeTextOutput(mediaOutput, "inline text"),
+        "媒体槽位必须拒绝 materializeTextOutput");
   }
 
   static final class FakeExecutionContext implements CanvasFunctionExecutionContext {
@@ -601,14 +625,24 @@ class CanvasMediaFunctionAdapterTest {
     }
 
     @Override
-    public UUID materializeTarget(UUID targetResourceId, InputStream content) {
+    public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
+      if (output.inlineText()) {
+        throw new IllegalArgumentException(
+            "TEXT output must be materialized through materializeTextOutput");
+      }
       try {
-        this.materializedResourceId = targetResourceId;
+        this.materializedResourceId = output.resourceId();
         this.materializedBytes = content.readAllBytes();
-        return targetResourceId;
+        return output.resourceId();
       } catch (IOException exception) {
         throw new UncheckedIOException(exception);
       }
+    }
+
+    @Override
+    public UUID materializeTextOutput(CanvasFunctionFrozenOutput output, String text) {
+      throw new IllegalArgumentException(
+          "only a TEXT output slot can be materialized as inline text");
     }
 
     List<CheckpointRecord> checkpoints() {

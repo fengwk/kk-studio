@@ -235,10 +235,10 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
     when(frozen.nodeId()).thenReturn(node.id());
     when(frozen.requestId()).thenReturn(requestId);
-    when(frozen.targetResourceId()).thenReturn(targetResourceId);
+    when(frozen.outputResourceIds()).thenReturn(List.of(targetResourceId));
     CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
     CanvasFunctionDefinition definition =
-        new CanvasFunctionDefinition(
+        CanvasFunctionDefinition.of(
             "test.function",
             "Test Function",
             CanvasJson.parseObject(

@@ -90,7 +90,8 @@ Function 整体存入节点的可空 `function` JSON，例：
 ```
 
 模型只是生成函数的参数。裁剪、拼接等函数没有模型参数。函数目录声明参数 Schema、
-输入资源限制与输出限制；不要求全部函数具备 prompt、model 或 provider。
+输入资源限制与有界输出计划（1..8 个槽位，可同时产出内联文本与媒体）；不要求全部函数
+具备 prompt、model 或 provider。
 
 Resource 内容不可变：TEXT 内联 `text_content`，媒体引用 `storage_blob`，两者恰好一个
 非空。类型由文本分支或 Blob 权威 MIME 推导。编辑文字、替换媒体创建新 Resource；

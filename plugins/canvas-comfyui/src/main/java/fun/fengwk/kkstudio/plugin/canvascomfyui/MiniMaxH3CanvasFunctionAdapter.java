@@ -116,7 +116,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
               3));
 
   private static final CanvasFunctionDefinition DEFINITION =
-      new CanvasFunctionDefinition(
+      CanvasFunctionDefinition.of(
           FUNCTION_NAME,
           "MiniMax-H3 Ref2VA",
           ARGS_SCHEMA,
@@ -268,13 +268,14 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
             ratio,
             duration,
             requireNonnegative(state.seed(), "seed"),
-            run.targetResourceId(),
+            run.output(0).resourceId(),
             manifest,
             state.uploads());
     checkpoint(context, COMFY_SUBMITTING, state);
     String promptId;
     try {
-      promptId = comfy.submit(workflow, "kk-studio-" + run.nodeId() + "-" + run.targetResourceId());
+      promptId =
+          comfy.submit(workflow, "kk-studio-" + run.nodeId() + "-" + run.output(0).resourceId());
     } catch (RuntimeException failure) {
       throw new CanvasFunctionUnknownException(
           "H3 ComfyUI submission outcome unknown: " + failure.getMessage());
@@ -291,7 +292,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     String stage = run.stage();
 
     if (COMPLETE.equals(stage)) {
-      return List.of(run.targetResourceId());
+      return run.outputResourceIds();
     }
 
     if (state.promptId() == null) {
@@ -317,14 +318,14 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       ensureRunning(context);
       try (H3ComfyDownload download =
           comfy.download(Objects.requireNonNull(state.output(), "output"))) {
-        context.materializeTarget(run.targetResourceId(), download.content());
+        context.materializeOutput(run.output(0), download.content());
       } catch (IOException error) {
         throw new IllegalStateException("cannot close ComfyUI output stream", error);
       }
       checkpoint(context, COMPLETE, state);
     }
 
-    return List.of(run.targetResourceId());
+    return run.outputResourceIds();
   }
 
   @Override

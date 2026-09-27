@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -15,8 +16,10 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -56,12 +59,12 @@ class H3PromptWorkflowTest {
             NODE,
             "h3",
             REQUEST,
-            mock(CanvasFunctionDefinition.class),
+            videoDefinition(),
             CanvasJson.parseObject(
                 "{\"prompt\":\"Use <Picture 1> then <Video 1>\",\"ratio\":\"16:9\",\"duration\":5}"),
             references,
-            "result",
-            TARGET,
+            List.of(
+                new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.VIDEO, "result.mp4")),
             CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
@@ -149,6 +152,14 @@ class H3PromptWorkflowTest {
         IllegalArgumentException.class, () -> new H3ReferenceManifest.Item(textReference, 0));
     assertThrows(
         IllegalStateException.class, () -> new H3ReferenceManifest.Item(textReference, 1).label());
+  }
+
+  /** prompt/workflow 测试只关心冻结计划形状：单 VIDEO 槽位。 */
+  private static CanvasFunctionDefinition videoDefinition() {
+    CanvasFunctionDefinition definition = mock(CanvasFunctionDefinition.class);
+    when(definition.outputs())
+        .thenReturn(List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.VIDEO)));
+    return definition;
   }
 
   private static int occurrences(String text, String value) {

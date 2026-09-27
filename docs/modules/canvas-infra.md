@@ -34,7 +34,7 @@ lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> Catalog require(name) + requireAvailable；CanvasFunctionArgsCodec 严格解码 args
   -> 冻结 manifest：每个引用节点必须存在、必须有指向本节点的 Link、index 必须在资源范围内且必须是 blob
   -> 校验 frozen blob facts 与 function reference policy
-  -> 预分配 targetResourceId，构造 submitState=PENDING、stage=QUEUED 的 frozen plan
+  -> 冻结输出计划：按 function 的 outputs 逐槽位预分配 resource id，构造 submitState=PENDING、stage=QUEUED 的 frozen plan
   -> adapter.preflight(frozen)
   -> 释放上一个 Run 的 pin，写入 INPUT/OUTPUT pin
   -> 插入 READY Run（已有终态 Run 时用 replaceTerminalWithReady 的 CAS 替换）
@@ -77,12 +77,12 @@ checkpoint 与终态都走 [`CanvasFunctionRunTransactions`](../../canvas/infra/
 
 成功与失败的资源处置不同，这是最容易改错的地方：
 
-- `completeSuccess` 先确认目标资源仍是同画布、无 owner、有 blob 的资源，且媒体类型与冻结 function 的 `outputKind` 匹配，然后由 Resource lifecycle 用 target 替换节点当前 owned 资源（旧资源若仍被其他 Run pin 则只解 owner，否则删行并释放 blob 引用），最后把 Run 置为 `SUCCEEDED` 并释放本次 Run 的全部 pin。
-- `failIfRunning` 与 `cancel` 只丢弃「无 owner 的目标资源」，释放本次 Run 的 pin，Run 进入 `FAILED` / `CANCELLED`。`cancelActive` 的 CAS 只要求 `status in ('READY','RUNNING')`，不需要 lease，因为取消来自客户端而不是 worker。
-- `resolve` 处理人工核对：要求非空 `verification` 说明，通过 `RESUME` 将 Run 还回 `READY`（仅重新轮询任务结果，不 resubmit），或指定 `FAILED` / `CANCELLED` 释放 pin 并丢弃未归属的目标资源。
+- `completeSuccess` 要求输出计划的**每个槽位都已物化**且与槽位一一对应：媒体槽位必须是同画布、无 owner、有 blob 且 MIME 类型与槽位 kind 匹配的资源，`TEXT` 槽位必须已写入 `text_content` 且不持有 blob；槽位缺失或 ID 顺序不等于 `frozen.outputResourceIds()` 时拒绝 success（绝不发布半成品数组）。校验通过后由 Resource lifecycle 用整组输出替换节点当前 owned 资源（旧资源若仍被其他 Run pin 则只解 owner，否则删行并释放 blob 引用），最后把 Run 置为 `SUCCEEDED` 并释放本次 Run 的全部 pin。
+- `failIfRunning` 与 `cancel` 只丢弃「无 owner 的计划输出」（已是该 Run owner 的资源保留），释放本次 Run 的 pin，Run 进入 `FAILED` / `CANCELLED`。`cancelActive` 的 CAS 只要求 `status in ('READY','RUNNING')`，不需要 lease，因为取消来自客户端而不是 worker。
+- `resolve` 处理人工核对：要求非空 `verification` 说明，通过 `RESUME` 将 Run 还回 `READY`（仅重新轮询任务结果，不 resubmit），或指定 `FAILED` / `CANCELLED` 释放 pin 并丢弃未归属的计划输出。`UNKNOWN` 期间 pin 与已物化槽位都保留，因此人工恢复后可以继续补齐缺失槽位。
 - 终态 Run 允许被新的 requestId 取代：`replaceTerminalWithReady` 的 `where status in ('SUCCEEDED','FAILED','CANCELLED')` 保证并发下只有一个新 generation 成功。重复 requestId 则直接返回既有 Run（含终态），不重复推进版本。
 
-pin 由 [`CanvasFunctionResourcePinRepository`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePinRepository.java) 持久化，`INPUT` 每个冻结引用一条、`OUTPUT` 一条；pin 只保护「无 owner 资源不被回收」，绝不参与 `storage_blob.ref_count`。blob 引用的增减属于 Platform 的 Resource lifecycle（见 [Platform](platform.md)）。
+pin 由 [`CanvasFunctionResourcePinRepository`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePinRepository.java) 持久化，`INPUT` 每个冻结引用一条、`OUTPUT` 每个输出槽位一条（成功发布时 `resource_index` 等于槽位 index）；pin 只保护「无 owner 资源不被回收」，绝不参与 `storage_blob.ref_count`。blob 引用的增减属于 Platform 的 Resource lifecycle（见 [Platform](platform.md)）。
 
 ### 部署参数
 
@@ -102,7 +102,8 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - 所有图写入按 document → node → run 的固定顺序加锁；跨 Run、节点、画布的操作在一个事务里完成，异常整体回滚，version、pin、Resource 不出现部分提交。
 - 迟到回调只能收敛为 no-op 或内部取消；新 owner claim 之后，旧 token 的 `checkpoint`/`transitionTerminal` 影响 0 行。
 - 通知是可丢的提示。丢通知、listener 重连、进程重启都由 poll 加 lease 过期恢复；`findSnapshot` 的一致性由重读对比 generation 保证。
-- 成功必须满足「目标资源已物化且媒体类型与冻结 model 输出类型一致」，不满足时拒绝 success 而不是写入半成品输出。
+- 成功必须满足「输出计划的每个槽位都已物化、类型与冻结槽位一致、顺序等于计划顺序」，不满足时拒绝 success 而不是写入半成品输出。
+- 同一槽位重复物化必须幂等：返回既有 Resource 行，不新增行、不重复 pin；部分物化后崩溃（`RUNNING + SUBMITTED`）的 Run 由 lease 过期恢复后只补齐，不重新提交外部任务。
 
 ## 从哪里改
 

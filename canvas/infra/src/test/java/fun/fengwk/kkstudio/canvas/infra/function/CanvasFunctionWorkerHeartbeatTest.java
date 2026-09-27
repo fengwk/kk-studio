@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
@@ -268,7 +269,7 @@ class CanvasFunctionWorkerHeartbeatTest {
     @SuppressWarnings("unchecked")
     private Fixture(CanvasFunctionSubmitState submitState) {
       definition =
-          new CanvasFunctionDefinition(
+          CanvasFunctionDefinition.of(
               "test.function",
               "Test Function",
               CanvasJson.parseObject(
@@ -307,8 +308,9 @@ class CanvasFunctionWorkerHeartbeatTest {
               definition,
               CanvasJson.parseObject("{}"),
               List.of(),
-              "output.png",
-              targetResourceId,
+              List.of(
+                  new CanvasFunctionFrozenOutput(
+                      targetResourceId, 0, CanvasResourceKind.IMAGE, "output.png")),
               submitState,
               "QUEUED",
               Map.of());
@@ -322,8 +324,7 @@ class CanvasFunctionWorkerHeartbeatTest {
               frozen.definition(),
               frozen.args(),
               frozen.manifest(),
-              frozen.outputName(),
-              frozen.targetResourceId(),
+              frozen.outputs(),
               CanvasFunctionSubmitState.SUBMITTING,
               "SUBMITTING",
               Map.of());
@@ -337,8 +338,7 @@ class CanvasFunctionWorkerHeartbeatTest {
               frozen.definition(),
               frozen.args(),
               frozen.manifest(),
-              frozen.outputName(),
-              frozen.targetResourceId(),
+              frozen.outputs(),
               CanvasFunctionSubmitState.SUBMITTED,
               "SUBMITTED",
               Map.of());
