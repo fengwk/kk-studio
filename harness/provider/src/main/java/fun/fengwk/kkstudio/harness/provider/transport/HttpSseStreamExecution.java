@@ -15,7 +15,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -70,10 +69,9 @@ final class HttpSseStreamExecution implements ProviderStream {
   private final Object futureLock = new Object();
   private volatile Thread workerThread;
   private volatile Future<?> workerFuture;
-  private volatile ScheduledFuture<?> watchdogFuture;
+  private ScheduledFuture<?> deadlineFuture;
   private volatile InputStream activeInputStream;
   private ScheduledExecutorService scheduler;
-  private ExecutorService timeoutExecutor;
 
   HttpSseStreamExecution(
       HttpClient httpClient,
@@ -123,10 +121,9 @@ final class HttpSseStreamExecution implements ProviderStream {
     return Math.min(totalRemaining, idleRemaining);
   }
 
-  void scheduleWatchdog(ScheduledExecutorService scheduler, ExecutorService timeoutExecutor) {
+  void scheduleDeadline(ScheduledExecutorService scheduler) {
     synchronized (futureLock) {
       this.scheduler = scheduler;
-      this.timeoutExecutor = timeoutExecutor;
       scheduleNextDeadline();
     }
   }
@@ -134,7 +131,7 @@ final class HttpSseStreamExecution implements ProviderStream {
   // Called with futureLock held. A read only updates lastActivityNano; no per-byte timer churn.
   private void scheduleNextDeadline() {
     if (!isTerminal()) {
-      watchdogFuture =
+      deadlineFuture =
           scheduler.schedule(
               this::onDeadline, nextDeadlineDelayNanos(System.nanoTime()), TimeUnit.NANOSECONDS);
     }
@@ -149,7 +146,7 @@ final class HttpSseStreamExecution implements ProviderStream {
         try {
           scheduleNextDeadline();
         } catch (RejectedExecutionException e) {
-          submitTimeoutWork(
+          runDeadlineCleanup(
               () ->
                   dispatchFailure(
                       new TransportException(
@@ -161,25 +158,13 @@ final class HttpSseStreamExecution implements ProviderStream {
       }
     }
     // Never close a stream, wait for callbackLock, or invoke user code on the shared timer.
-    submitTimeoutWork(this::checkWatchdog);
+    runDeadlineCleanup(this::checkDeadline);
   }
 
-  private void submitTimeoutWork(Runnable work) {
-    Thread timerThread = Thread.currentThread();
-    try {
-      timeoutExecutor.execute(
-          () -> {
-            if (Thread.currentThread() == timerThread) {
-              // A caller-runs executor must not run cleanup or user callbacks on the timer.
-              Thread.ofVirtual().start(work);
-            } else {
-              work.run();
-            }
-          });
-    } catch (RejectedExecutionException e) {
-      // The executor may have shut down after admission. Preserve cleanup without blocking timer.
-      Thread.ofVirtual().start(work);
-    }
+  private void runDeadlineCleanup(Runnable work) {
+    // Only actual expiry (or a failed reschedule) starts a short-lived cleanup thread.
+    // Never enqueue behind blocking I/O on the worker executor or run user callbacks on the timer.
+    Thread.ofVirtual().start(work);
   }
 
   boolean isInlineExecutionDetected() {
@@ -191,15 +176,6 @@ final class HttpSseStreamExecution implements ProviderStream {
       this.workerFuture = workerFuture;
       if (isTerminal()) {
         cancelFutureSafe(workerFuture, true);
-      }
-    }
-  }
-
-  void attachWatchdogFuture(ScheduledFuture<?> watchdogFuture) {
-    synchronized (futureLock) {
-      this.watchdogFuture = watchdogFuture;
-      if (isTerminal()) {
-        cancelFutureSafe(watchdogFuture, false);
       }
     }
   }
@@ -416,7 +392,7 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
   }
 
-  void checkWatchdog() {
+  private void checkDeadline() {
     if (state.get() != STATE_RUNNING && state.get() != STATE_PENDING) {
       return;
     }
@@ -619,7 +595,7 @@ final class HttpSseStreamExecution implements ProviderStream {
   private void closeResources() {
     closeActiveStream();
     synchronized (futureLock) {
-      cancelFutureSafe(watchdogFuture, false);
+      cancelFutureSafe(deadlineFuture, false);
       cancelFutureSafe(workerFuture, true);
     }
   }
