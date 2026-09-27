@@ -10,7 +10,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Objects;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -20,7 +21,8 @@ import java.util.function.Consumer;
  * <p>{@link #offerText(String)} 只在内存中完成有界入队并返回确定性结果：容量/字节预算拒绝为 {@link
  * DaemonOfferResult#BUSY}，围栏已关闭为 {@link DaemonOfferResult#CLOSED}，二者都保证帧未被发送且不改变连接可用性。唯一 sender
  * 虚拟线程按 入队顺序调用 Spring {@link WebSocketSession#sendMessage}；待发预算同时限制帧数与 UTF-8
- * 字节数，并包含当前正在发送的帧。发送异常或超时会先关闭 入队围栏，再在锁外通知 Gateway 收敛连接，最后尽力关闭 WebSocket。
+ * 字节数，并包含当前正在发送的帧。发送异常或超时会先关闭入队围栏，再在锁外通知 Gateway 并尽力关闭 WebSocket； 超时回调仅作状态裁决，实际关闭和通知均从共享 timer
+ * 线程派发出去。
  *
  * <p>{@link #close()} 幂等地清空未发送帧并禁止后续入队；外部 {@code sendMessage}/{@code close} 调用都不持有 sender
  * 状态锁。已经进入底层阻塞调用的单帧由 session close/线程中断终止，后续帧绝不会继续发送。
@@ -32,12 +34,14 @@ final class DaemonOutboundSender implements AutoCloseable {
   private final long maxBytes;
   private final long sendTimeoutMillis;
   private final Consumer<Throwable> failureHandler;
+  private final ScheduledThreadPoolExecutor deadlineTimer;
   private final Object lock = new Object();
   private final ArrayDeque<Frame> queue;
   private final Thread worker;
   private int outstandingFrames;
   private long outstandingBytes;
   private Frame inFlight;
+  private ScheduledFuture<?> deadline;
   private boolean closed;
   private boolean closeAfterFlush;
   private boolean failed;
@@ -48,6 +52,7 @@ final class DaemonOutboundSender implements AutoCloseable {
       int capacity,
       int maxBytes,
       int sendTimeoutMillis,
+      ScheduledThreadPoolExecutor deadlineTimer,
       Consumer<Throwable> failureHandler) {
     Objects.requireNonNull(session, "session");
     if (capacity <= 0) {
@@ -65,6 +70,7 @@ final class DaemonOutboundSender implements AutoCloseable {
     this.capacity = capacity;
     this.maxBytes = maxBytes;
     this.sendTimeoutMillis = sendTimeoutMillis;
+    this.deadlineTimer = Objects.requireNonNull(deadlineTimer, "deadlineTimer");
     this.failureHandler = Objects.requireNonNull(failureHandler, "failureHandler");
     this.queue = new ArrayDeque<>(capacity);
     this.worker =
@@ -115,6 +121,7 @@ final class DaemonOutboundSender implements AutoCloseable {
       outstandingFrames = 0;
       outstandingBytes = 0L;
       inFlight = null;
+      cancelDeadline();
       unreliable = failed;
       lock.notifyAll();
     }
@@ -150,17 +157,28 @@ final class DaemonOutboundSender implements AutoCloseable {
         closeAfterDrain();
         return;
       }
-      CountDownLatch completed = new CountDownLatch(1);
-      Thread.startVirtualThread(() -> enforceTimeout(completed));
       try {
+        synchronized (lock) {
+          if (closed) {
+            return;
+          }
+          deadline =
+              deadlineTimer.schedule(
+                  () -> onDeadline(frame), sendTimeoutMillis, TimeUnit.MILLISECONDS);
+        }
+        if (isClosed()) {
+          return;
+        }
         if (!session.isOpen()) {
           throw new IllegalStateException("daemon WebSocket session is closed");
+        }
+        if (isClosed()) {
+          return;
         }
         session.sendMessage(new TextMessage(frame.text()));
       } catch (Exception error) {
         fail(error);
       } finally {
-        completed.countDown();
         complete(frame);
       }
     }
@@ -192,22 +210,43 @@ final class DaemonOutboundSender implements AutoCloseable {
       if (inFlight != frame) {
         return;
       }
+      cancelDeadline();
       inFlight = null;
       outstandingFrames--;
       outstandingBytes -= frame.bytes();
     }
   }
 
-  private void enforceTimeout(CountDownLatch completed) {
-    try {
-      if (!completed.await(sendTimeoutMillis, TimeUnit.MILLISECONDS)) {
-        fail(
-            new IllegalStateException(
-                "daemon WebSocket send timed out after " + sendTimeoutMillis + "ms"));
-      }
-    } catch (InterruptedException error) {
-      Thread.currentThread().interrupt();
+  private boolean isClosed() {
+    synchronized (lock) {
+      return closed;
     }
+  }
+
+  private void cancelDeadline() {
+    if (deadline != null) {
+      deadline.cancel(false);
+      deadline = null;
+    }
+  }
+
+  private void onDeadline(Frame frame) {
+    IllegalStateException error =
+        new IllegalStateException(
+            "daemon WebSocket send timed out after " + sendTimeoutMillis + "ms");
+    synchronized (lock) {
+      if (closed || inFlight != frame) {
+        return;
+      }
+      fenceFailure();
+    }
+    // 定时器仅作状态裁决；用户回调、transport close 和 worker 中断均在独立线程执行。
+    Thread.startVirtualThread(
+        () -> {
+          requestTransportClose(CloseStatus.SESSION_NOT_RELIABLE);
+          worker.interrupt();
+          finishFailure(error);
+        });
   }
 
   private void closeAfterDrain() {
@@ -224,22 +263,27 @@ final class DaemonOutboundSender implements AutoCloseable {
   }
 
   private void fail(Throwable error) {
-    boolean notify;
     synchronized (lock) {
-      notify = !closed;
-      if (notify) {
-        failed = true;
-        closed = true;
-        queue.clear();
-        outstandingFrames = 0;
-        outstandingBytes = 0L;
-        inFlight = null;
-        lock.notifyAll();
+      if (closed) {
+        return;
       }
+      fenceFailure();
     }
-    if (!notify) {
-      return;
-    }
+    finishFailure(error);
+  }
+
+  private void fenceFailure() {
+    failed = true;
+    closed = true;
+    queue.clear();
+    outstandingFrames = 0;
+    outstandingBytes = 0L;
+    inFlight = null;
+    cancelDeadline();
+    lock.notifyAll();
+  }
+
+  private void finishFailure(Throwable error) {
     try {
       failureHandler.accept(error);
     } catch (RuntimeException ignored) {
