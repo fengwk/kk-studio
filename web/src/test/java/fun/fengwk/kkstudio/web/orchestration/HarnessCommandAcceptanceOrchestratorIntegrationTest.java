@@ -11,8 +11,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
-import fun.fengwk.kkstudio.canvas.CanvasSessionRepository;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -33,7 +31,6 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.ChatService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
@@ -50,7 +47,7 @@ import java.util.UUID;
  * HarnessCommandAcceptanceOrchestrator 在 web 组合根的真实 PostgreSQL 回归。
  *
  * <p>测试意图是证明 owner 关系、Session/ROOT/Thread/Command/Work 共享同一事务；失败时预先写入的所有 Harness 行与 relation
- * 行必须一起回滚，且 Chat/Canvas 归属互斥不依赖应用层竞态。
+ * 行必须一起回滚，且 owner 归属互斥不依赖应用层竞态。
  */
 @Import(WebStorageS3TestConfiguration.class)
 @TestPropertySource(
@@ -65,11 +62,9 @@ import java.util.UUID;
 class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private ChatService chatService;
-  @Autowired private CanvasCommandService canvasCommandService;
   @Autowired private HarnessCommandAcceptanceOrchestrator acceptanceService;
   @Autowired private HarnessRuntime harnessRuntime;
   @Autowired private ChatSessionRepository chatSessionRepository;
-  @Autowired private CanvasSessionRepository canvasSessionRepository;
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private InMemoryS3StorageService s3Storage;
   @Autowired private JdbcTemplate jdbc;
@@ -89,37 +84,25 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     UUID chatThreadId = UUID.randomUUID();
 
     accept(
-        new OwnerRef(OwnerType.CHAT, chatId),
+        new OwnerRef.Chat(chatId),
         chatSessionId,
         chatThreadId,
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
 
-    assertEquals(1, count("session_owner", "session_id", chatSessionId));
+    assertEquals(1, count("chat_session", "session_id", chatSessionId));
     assertEquals(1, count("harness_session", "id", chatSessionId));
     assertEquals(1, count("harness_entry", "session_id", chatSessionId));
     assertEquals(1, count("harness_thread", "id", chatThreadId));
     assertEquals(1, count("harness_thread_command", "thread_id", chatThreadId));
     assertEquals(1, count("harness_work", "target_id", chatThreadId));
-
-    UUID canvasId = canvasCommandService.createCanvas("accept-canvas").id();
-    UUID canvasSessionId = UUID.randomUUID();
-    UUID canvasThreadId = UUID.randomUUID();
-    accept(
-        new OwnerRef(OwnerType.CANVAS, canvasId),
-        canvasSessionId,
-        canvasThreadId,
-        new UserMessageCommandPayload(
-            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("canvas")))));
-    assertEquals(1, count("session_owner", "session_id", canvasSessionId));
-    assertEquals(1, count("harness_thread", "id", canvasThreadId));
   }
 
   /** 既有 Thread 必须经所属 Session 授权，并保持产品合法的 SET_* 前缀与末尾用户消息。 */
   @Test
   void threadTargetAcceptsOwnedSessionAndPreservesCommandPrefix() {
     UUID chatId = createChat("thread-target");
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, chatId);
+    OwnerRef owner = new OwnerRef.Chat(chatId);
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     AcceptedCommands initial =
@@ -164,7 +147,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   void goalCommandsPersistAndReplayInPostgresql() {
     // 测试意图：Goal 设置与清除均是 typed 用户命令，必须通过真实 PostgreSQL 约束并保持精确重放幂等。
     UUID chatId = createChat("goal-command");
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, chatId);
+    OwnerRef owner = new OwnerRef.Chat(chatId);
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     AcceptCommandsCommand setGoal =
@@ -216,10 +199,10 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> accept(new OwnerRef(OwnerType.CHAT, chatId), sessionId, threadId, payload));
+        () -> accept(new OwnerRef.Chat(chatId), sessionId, threadId, payload));
 
     assertEquals(1, count("storage_upload", "id", UUID.fromString(pending.getId())));
-    assertEquals(0, count("session_owner", "session_id", sessionId));
+    assertEquals(0, count("chat_session", "session_id", sessionId));
     assertEquals(0, count("harness_session", "id", sessionId));
     assertEquals(0, count("harness_entry", "session_id", sessionId));
     assertEquals(0, count("session_blob_ref", "session_id", sessionId));
@@ -231,7 +214,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   @Test
   void existingSessionResourceCanBeReusedWithoutAnotherRetain() {
     UUID chatId = createChat("resource-reuse");
-    OwnerRef owner = new OwnerRef(OwnerType.CHAT, chatId);
+    OwnerRef owner = new OwnerRef.Chat(chatId);
     byte[] content = "durable resource".getBytes(StandardCharsets.UTF_8);
     String uploadId = storage.completeUpload("resource.txt", content);
     UUID sessionId = UUID.randomUUID();
@@ -294,7 +277,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
                             new UserMessageCommandPayload(
                                 new AgentMessage(AgentMessageRole.USER, List.of(resource))),
                             UUID.randomUUID())))));
-    assertEquals(0, count("session_owner", "session_id", foreignSessionId));
+    assertEquals(0, count("chat_session", "session_id", foreignSessionId));
     assertEquals(0, count("harness_session", "id", foreignSessionId));
     assertEquals(0, count("harness_thread", "id", foreignThreadId));
     assertEquals(
@@ -304,8 +287,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
 
   @Test
   void acceptanceRejectsCrossOwnerSessionAndReplay() {
-    UUID chatId = createChat("chat-owner");
-    UUID canvasId = canvasCommandService.createCanvas("canvas-owner").id();
+    UUID chat1Id = createChat("chat-owner-1");
+    UUID chat2Id = createChat("chat-owner-2");
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     UUID idempotencyKey = UUID.randomUUID();
@@ -313,25 +296,17 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("owner"))));
 
-    accept(new OwnerRef(OwnerType.CHAT, chatId), sessionId, threadId, payload, idempotencyKey);
+    accept(new OwnerRef.Chat(chat1Id), sessionId, threadId, payload, idempotencyKey);
 
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            accept(
-                new OwnerRef(OwnerType.CANVAS, canvasId), sessionId, UUID.randomUUID(), payload));
+        () -> accept(new OwnerRef.Chat(chat2Id), sessionId, UUID.randomUUID(), payload));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            accept(
-                new OwnerRef(OwnerType.CANVAS, canvasId),
-                sessionId,
-                threadId,
-                payload,
-                idempotencyKey));
+        () -> accept(new OwnerRef.Chat(chat2Id), sessionId, threadId, payload, idempotencyKey));
 
-    assertEquals(1, chatSessionRepository.listSessionIds(chatId).size());
-    assertEquals(0, canvasSessionRepository.listSessionIds(canvasId).size());
+    assertEquals(1, chatSessionRepository.listSessionIds(chat1Id).size());
+    assertEquals(0, chatSessionRepository.listSessionIds(chat2Id).size());
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
   }
@@ -355,8 +330,8 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     // 逆证：无 owner relation 的内部 Session 即使能命中 Runtime exact replay，也不能被产品 owner 接管。
     assertThrows(
         IllegalArgumentException.class,
-        () -> acceptanceService.accept(new OwnerRef(OwnerType.CHAT, chatId), command));
-    assertEquals(0, count("session_owner", "session_id", sessionId));
+        () -> acceptanceService.accept(new OwnerRef.Chat(chatId), command));
+    assertEquals(0, count("chat_session", "session_id", sessionId));
     assertEquals(1, count("harness_session", "id", sessionId));
     assertEquals(1, count("harness_thread", "id", threadId));
   }

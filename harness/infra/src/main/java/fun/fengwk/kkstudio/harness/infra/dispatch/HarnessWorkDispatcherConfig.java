@@ -11,7 +11,8 @@ import java.util.Objects;
  *
  * <p>THREAD / MODEL / TOOL 各自独立的 {@code leaseDuration} 决定 claim 有效期；{@code periodicPollInterval} 是
  * fixed-delay 周期 poll 的间隔；{@code executorRejectionDelay} 是 worker executor 拒绝 handoff task 后仍 owned
- * claim 的归还重排延迟（正整毫秒）。所有 Duration 必须为正的整毫秒，与 HarnessStore 的毫秒精度时间边界一致。
+ * claim 的归还重排延迟；{@code admissionDeferral} 是宿主派发准入拒绝后仍 owned claim 的归还重排延迟（正整毫秒）：拒绝只延后 执行，不丢弃
+ * Work、不产生热循环。所有 Duration 必须为正的整毫秒，与 HarnessStore 的毫秒精度时间边界一致。
  *
  * <p>{@code maxDispatchTasks} 明确只约束 dispatcher 本地 queued/running 的 processor handoff task 总数（drain
  * 在达到上限后停止 claim）；它绝不约束异步 Model / Tool execution 的并发总数 —— 那些由各 Processor 及其注入的 Gateway / executor
@@ -23,6 +24,7 @@ public record HarnessWorkDispatcherConfig(
     Duration toolLeaseDuration,
     Duration periodicPollInterval,
     Duration executorRejectionDelay,
+    Duration admissionDeferral,
     int maxDispatchTasks) {
 
   public HarnessWorkDispatcherConfig {
@@ -32,6 +34,7 @@ public record HarnessWorkDispatcherConfig(
     periodicPollInterval = requireWholeMillisPositive(periodicPollInterval, "periodicPollInterval");
     executorRejectionDelay =
         requireWholeMillisPositive(executorRejectionDelay, "executorRejectionDelay");
+    admissionDeferral = requireWholeMillisPositive(admissionDeferral, "admissionDeferral");
     if (maxDispatchTasks <= 0) {
       throw new IllegalArgumentException("maxDispatchTasks must be positive");
     }

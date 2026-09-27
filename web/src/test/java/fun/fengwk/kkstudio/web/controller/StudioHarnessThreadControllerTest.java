@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
@@ -67,6 +68,7 @@ class StudioHarnessThreadControllerTest {
   private HarnessRuntime runtime;
   private ModelRequestDebugService modelRequestDebugService;
   private ProjectThreadOwnerResolver projectThreadOwnerResolver;
+  private InteractionService interactionService;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -74,9 +76,10 @@ class StudioHarnessThreadControllerTest {
     runtime = mock(HarnessRuntime.class);
     modelRequestDebugService = mock(ModelRequestDebugService.class);
     projectThreadOwnerResolver = mock(ProjectThreadOwnerResolver.class);
+    interactionService = mock(InteractionService.class);
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
-            runtime, modelRequestDebugService, projectThreadOwnerResolver);
+            runtime, modelRequestDebugService, projectThreadOwnerResolver, interactionService);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -504,7 +507,7 @@ class StudioHarnessThreadControllerTest {
                 .value(
                     "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}"));
 
-    when(runtime.decideToolApproval(any(ToolApprovalCommand.class)))
+    when(interactionService.decideApproval(any(ToolApprovalCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.waitingApprovalTool());
     mockMvc
         .perform(
@@ -522,7 +525,7 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.status").value("WAITING_APPROVAL"));
 
     ArgumentCaptor<ToolApprovalCommand> captor = ArgumentCaptor.forClass(ToolApprovalCommand.class);
-    verify(runtime).decideToolApproval(captor.capture());
+    verify(interactionService).decideApproval(captor.capture());
     assertEquals(ToolApprovalDecision.ALLOWED, captor.getValue().decision());
   }
 }

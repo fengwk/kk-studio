@@ -26,6 +26,7 @@ class PlatformPackageArchitectureTest {
             "environment",
             "error",
             "harness",
+            "interaction",
             "orchestration",
             "persistence",
             "plugin",

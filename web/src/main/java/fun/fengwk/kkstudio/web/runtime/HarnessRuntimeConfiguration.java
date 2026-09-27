@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolHistoryActionResolver;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
@@ -365,7 +366,8 @@ public class HarnessRuntimeConfiguration {
       @Qualifier("harnessDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
       ThreadProcessor threadProcessor,
       ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor) {
+      ToolProcessor toolProcessor,
+      ObjectProvider<WorkDispatchAdmission> workDispatchAdmissions) {
     Duration dispatcherLease = dispatcherProperties.getLeaseDuration();
     HarnessWorkDispatcherConfig config =
         new HarnessWorkDispatcherConfig(
@@ -374,6 +376,7 @@ public class HarnessRuntimeConfiguration {
             dispatcherLease,
             dispatcherProperties.getPollInterval(),
             dispatcherProperties.getRejectionDelay(),
+            dispatcherProperties.getAdmissionDeferral(),
             dispatcherProperties.getMaxDispatchTasks());
     return new HarnessWorkDispatcher(
         nodeInstanceId,
@@ -385,7 +388,8 @@ public class HarnessRuntimeConfiguration {
         pollScheduler,
         threadProcessor,
         modelProcessor,
-        toolProcessor);
+        toolProcessor,
+        workDispatchAdmissions.getIfAvailable(() -> WorkDispatchAdmission.ALLOW_ALL));
   }
 
   /**

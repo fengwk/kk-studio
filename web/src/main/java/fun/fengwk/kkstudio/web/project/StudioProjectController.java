@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.project;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -48,6 +49,7 @@ public class StudioProjectController {
   private final ProjectDtoMapper mapper;
   private final ProjectWorkflowJsonCodec workflowCodec;
 
+  @Autowired
   public StudioProjectController(
       ProjectService projectService,
       ProjectSnapshotAssembler projectSnapshotAssembler,

@@ -25,13 +25,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
-import fun.fengwk.kkstudio.platform.project.session.ProjectHarnessSessionBootstrapService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
@@ -45,8 +43,8 @@ import java.util.UUID;
  *
  * <p>测试意图：Issue Agent Session 的 Thread（无论是否存在活动 Run）与其同一 Session 的兄弟 Thread 的 YOLO 由 Project
  * 启动策略与内部 {@code IssueHarnessController} 对齐维护，公开 {@code PUT /api/harness/threads/{threadId}/yolo}
- * 必须以 409 拒绝且不触达 {@link HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat/Canvas Thread 仍走原
- * CAS 更新路径。
+ * 必须以 409 拒绝且不触达 {@link HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat Thread 仍走原 CAS
+ * 更新路径。
  *
  * <p>归属判定使用真实 Spring {@link ProjectThreadOwnerResolver} bean 与真实归属行，仅 {@link HarnessRuntime} 用 mock
  * 以便断言拒绝路径零调用。
@@ -61,8 +59,6 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
   @Autowired private ProjectThreadOwnerResolver projectThreadOwnerResolver;
   @Autowired private ProjectService projectService;
   @Autowired private IssueService issueService;
-  @Autowired private IssueRunService issueRunService;
-  @Autowired private ProjectHarnessSessionBootstrapService bootstrapService;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   private HarnessRuntime runtime;
@@ -73,7 +69,10 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
     runtime = mock(HarnessRuntime.class);
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
-            runtime, mock(ModelRequestDebugService.class), projectThreadOwnerResolver);
+            runtime,
+            mock(ModelRequestDebugService.class),
+            projectThreadOwnerResolver,
+            mock(InteractionService.class));
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -111,12 +110,30 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
     assertFalse(threadYoloEnabled(siblingThreadId), "兄弟 Branch 的 YOLO 不得被覆盖");
   }
 
-  /** 意图：存在活动 EXECUTOR Run 时同一个 Session 的兄弟 Branch 同样不可覆盖 YOLO（拒绝不依赖 Run 状态）。 */
+  /** 意图：存在活动 Run 时同一个 Session 的兄弟 Branch 同样不可覆盖 YOLO（拒绝不依赖 Run 状态）。 */
   @Test
   void rejectsYoloToggleOnSiblingThreadWhileExecutorRunIsActive() throws Exception {
     IssueAgentBranch branch = bootstrapIdleIssueAgentBranch();
     UUID siblingThreadId = insertSiblingThreadOfSameAgentSession(branch.sessionId());
-    issueRunService.startExecutorRun(branch.issueId(), AGENT_NAME, null, 3);
+    UUID headEntryId =
+        jdbcTemplate.queryForObject(
+            "select head_entry_id from harness_thread where id = ?", UUID.class, branch.threadId());
+    jdbcTemplate.update(
+        "insert into project_issue_stage_budget (issue_id, state, max_runs, budget_after_ordinal)"
+            + " values (?, 'WORK', 3, 0)",
+        branch.issueId());
+    jdbcTemplate.update(
+        """
+        insert into project_issue_run (
+            id, issue_id, ordinal, state, session_id, thread_id, status,
+            start_entry_id, remaining_execution_ms, active_since, version
+        ) values (?, ?, 1, 'WORK', ?, ?, 'RUNNING', ?, 1800000, current_timestamp, 0)
+        """,
+        UUID.randomUUID(),
+        branch.issueId(),
+        branch.sessionId(),
+        branch.threadId(),
+        headEntryId);
 
     mockMvc
         .perform(
@@ -153,16 +170,34 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
     assertTrue(captor.getValue().enabled());
   }
 
-  /** 建立 Project(yoloEnabled=false) + Issue + IssueAgentSession 的真实归属，且不启动任何 Run（idle）。 */
+  /** 建立 Project(yoloEnabled=false) + Issue + IssueAgentThread 的真实归属，且不启动任何 Run（idle）。 */
   private IssueAgentBranch bootstrapIdleIssueAgentBranch() {
-    Project project = projectService.createProject("Yolo Guard Project", "Desc", false, 0);
-    Issue issue =
-        issueService.createIssue(
-            project.getId(), "Yolo Guard Issue", "Desc", AGENT_NAME, null, IssueStatus.TODO);
+    Project project = projectService.createProject("Yolo Guard Project", "Desc", false);
+    Issue issue = issueService.createIssue(project.getId(), "Yolo Guard Issue", "Desc");
     UUID sessionId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "insert into harness_session (id, name, created_at) values (?, ?, current_timestamp)",
+        sessionId,
+        "session-" + sessionId);
+    UUID rootEntryId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, null, 'ROOT', ?::jsonb, current_timestamp)",
+        rootEntryId,
+        sessionId,
+        """
+        {"settings":{"agentName":"default-assistant","model":{"providerName":"openai",\
+        "modelName":"gpt-test","variant":"default"},"environmentName":null,"goal":null},\
+        "subagentContext":null}
+        """);
     UUID threadId = UUID.randomUUID();
-    bootstrapService.bootstrapIssueAgentSession(
-        issue.getId(), AGENT_NAME, sessionId, threadId, UUID.randomUUID(), "Execute issue task");
+    insertThread(sessionId, threadId, "issue-agent-main");
+    jdbcTemplate.update(
+        "insert into project_issue_agent_thread (issue_id, agent_name, thread_id)"
+            + " values (?, ?, ?)",
+        issue.getId(),
+        AGENT_NAME,
+        threadId);
     return new IssueAgentBranch(issue.getId(), sessionId, threadId);
   }
 
@@ -173,7 +208,7 @@ class StudioHarnessThreadControllerYoloOwnershipIntegrationTest extends WebPostg
     return threadId;
   }
 
-  /** 插入与任何 Issue Agent Session 都无关的普通 Thread（模拟 Chat/Canvas 归属）。 */
+  /** 插入与任何 Issue Agent Session 都无关的普通 Thread（模拟 Chat 归属）。 */
   private UUID insertStandaloneThread() {
     UUID sessionId = UUID.randomUUID();
     jdbcTemplate.update(

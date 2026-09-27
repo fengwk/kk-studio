@@ -14,6 +14,7 @@ import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -30,6 +31,7 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
+import fun.fengwk.kkstudio.harness.runtime.port.WorkDispatchAdmission;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -40,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.platform.harness.dispatch.IssueAgentWorkDispatchAdmission;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebTestApplication;
@@ -51,6 +54,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -104,6 +108,7 @@ class HarnessRuntimeConfigurationTest {
     registry.add("kk-studio.harness.dispatcher.lease-duration", () -> "45s");
     registry.add("kk-studio.harness.dispatcher.poll-interval", () -> "2s");
     registry.add("kk-studio.harness.dispatcher.rejection-delay", () -> "250ms");
+    registry.add("kk-studio.harness.dispatcher.admission-deferral", () -> "2s");
     registry.add("kk-studio.harness.dispatcher.worker.concurrency", () -> "3");
     registry.add("kk-studio.harness.dispatcher.worker.queue-capacity", () -> "5");
   }
@@ -122,6 +127,8 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private ModelRequestDebugService modelRequestDebugService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
+  @Autowired private WorkDispatchAdmission workDispatchAdmission;
+  @Autowired private ApplicationContext applicationContext;
   @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
   @Autowired private EnvironmentSessionListener environmentSessionListener;
 
@@ -168,6 +175,7 @@ class HarnessRuntimeConfigurationTest {
     assertEquals(Duration.ofSeconds(45), harnessDispatcherProperties.getLeaseDuration());
     assertEquals(Duration.ofSeconds(2), harnessDispatcherProperties.getPollInterval());
     assertEquals(Duration.ofMillis(250), harnessDispatcherProperties.getRejectionDelay());
+    assertEquals(Duration.ofSeconds(2), harnessDispatcherProperties.getAdmissionDeferral());
     assertEquals(3, harnessDispatcherProperties.getWorker().getConcurrency());
     assertEquals(5, harnessDispatcherProperties.getWorker().getQueueCapacity());
     assertNotNull(postgresqlNotificationLoop);
@@ -179,6 +187,18 @@ class HarnessRuntimeConfigurationTest {
             Duration.ofSeconds(2),
             Duration.ofSeconds(60)),
         invocationRetryPolicyProvider.retryPolicy());
+  }
+
+  /**
+   * 产品派发门禁必须真正装到 Dispatcher 上：应用上下文里唯一的 {@link WorkDispatchAdmission} 就是平台门禁实现，因此 Dispatcher 通过
+   * {@code ObjectProvider} 取到的正是它——paused/BLOCKED/归档 Issue 的 MODEL/TOOL 派发在真实组合根里也不会发生。
+   */
+  @Test
+  void wiresTheProductDispatchGateIntoTheDispatcher() {
+    assertInstanceOf(IssueAgentWorkDispatchAdmission.class, workDispatchAdmission);
+    assertEquals(
+        Set.of(workDispatchAdmission),
+        Set.copyOf(applicationContext.getBeansOfType(WorkDispatchAdmission.class).values()));
   }
 
   @Test
