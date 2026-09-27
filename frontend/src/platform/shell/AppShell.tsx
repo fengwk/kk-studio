@@ -1,13 +1,29 @@
 import { Menu, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchRoutes, useLocation, type Location } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
 import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { PageContribution } from '@/platform/extensions/types'
 import type { AppShellProps, PrimaryNavItem } from '@/platform/shell/types'
+import { interactionService } from '@/shared/api/interaction-service'
 import { hasBlockingModal, isEditableKeyboardTarget } from '@/shared/ui/blocking-overlay'
 import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
+import { queryKeys } from '@/shared/lib/query-keys'
+
+function usePendingInteractionsCount(): number {
+  try {
+    const { data } = useQuery({
+      queryKey: queryKeys.interactions.list(null, 50),
+      queryFn: () => interactionService.listInteractions(null, 50),
+      staleTime: 5000,
+    })
+    return data?.items?.length ?? 0
+  } catch {
+    return 0
+  }
+}
 
 /** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */
 function isInsideOpenMenuTarget(target: EventTarget | null): boolean {
@@ -78,6 +94,7 @@ export function AppShell({
   const location = useLocation()
   const host = useOptionalExtensionHostSnapshot()
   const { t } = useI18n()
+  const pendingInteractionsCount = usePendingInteractionsCount()
 
   const { activeGroupId, immersive, immersiveClass } = useMemo(() => {
     const pages = explicitPages ?? host?.pages.list() ?? []
@@ -172,6 +189,11 @@ export function AppShell({
                     <Icon aria-hidden="true" />
                     <span>{t(item.labelKey)}</span>
                     <small aria-hidden="true">{item.shortLabel}</small>
+                    {item.id === 'interactions' && pendingInteractionsCount > 0 ? (
+                      <span className="nav-pending-badge" aria-label={`${pendingInteractionsCount} pending`}>
+                        {pendingInteractionsCount}
+                      </span>
+                    ) : null}
                   </Link>
                 )
               })}

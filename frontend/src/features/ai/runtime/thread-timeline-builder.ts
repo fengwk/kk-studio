@@ -84,7 +84,7 @@ export function buildThreadTimeline(
     hasPendingInputs = true
   }
 
-  projectInvocationOverlays(messages, toolInvocations, toolStreams)
+  projectInvocationOverlays(messages, toolInvocations, toolStreams, modelInvocation?.threadId)
 
   if (!latestTurnIsCompaction) {
     projectModelAttemptFailures(messages, modelAttemptFailures, modelInvocation)
@@ -294,6 +294,7 @@ function projectInvocationOverlays(
   messages: DialogueMessage[],
   toolInvocations: ToolInvocationDTO[],
   toolStreams: ReadonlyMap<string, RealtimeToolStream> | null,
+  threadId?: string,
 ): void {
   if (toolInvocations.length === 0) {
     return
@@ -337,6 +338,7 @@ function projectInvocationOverlays(
         ? (invocation.errorJson != null || overlay?.error === true ? 'error' : 'done')
         : 'streaming',
       invocationId: invocation.id,
+      threadId: threadId ?? invocation.environmentId ?? undefined,
       partial: overlay && overlay.text ? overlay.text : undefined,
       partialAttachments:
         overlay && overlay.attachments && overlay.attachments.length > 0

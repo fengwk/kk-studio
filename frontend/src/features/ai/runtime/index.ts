@@ -42,3 +42,4 @@ export {
   type AgentPaneDefaults,
   type PaneInteraction,
 } from '@/features/ai/runtime/useAgentPaneController'
+export * from '@/features/ai/runtime/interactions'

@@ -2,6 +2,7 @@ import {
   DefaultToolCall,
   DefaultToolResult,
 } from '@/features/ai/runtime/thread-panel/messages/DefaultToolRenderer'
+import { QuestionnaireCard } from '@/features/ai/runtime/interactions/QuestionnaireCard'
 import { ToolApprovalBar } from '@/features/ai/runtime/thread-panel/messages/ToolApprovalBar'
 import {
   buildToolMessageView,
@@ -101,7 +102,16 @@ export function ToolMessageBlock({
               </button>
             ) : null}
           </div>
-          {Renderer ? (
+          {message.toolName === 'ask_user' && (message.invocationId || message.status === 'done') ? (
+            <div className="thread-tool-interactive-body">
+              <QuestionnaireCard
+                interactionId={message.invocationId || message.id}
+                threadId={message.threadId || ''}
+                argumentsJson={callMessage?.arguments || message.arguments}
+                resultJson={resultMessage?.text || result?.text || result?.arguments || null}
+              />
+            </div>
+          ) : Renderer ? (
             callMessage ? (
               <div className="thread-tool-call-body">
                 <Renderer message={callMessage} expanded={expanded} />
@@ -120,7 +130,7 @@ export function ToolMessageBlock({
             onDecideApproval={onDecideApproval}
             message={callMessage ?? message}
           />
-          {showResult ? (
+          {showResult && message.toolName !== 'ask_user' ? (
             <div className="thread-tool-result-body">
               {Renderer && resultMessage ? (
                 <Renderer message={resultMessage} expanded={expanded} />
