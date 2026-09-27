@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.ref.WeakReference;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -16,6 +17,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,7 +38,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>支持从回调内部安全重入 {@link #cancel()} 而不死锁。
  *   <li>竞态安全的 Future 挂接：任何 future 一经挂接若已处于终态必须立即 cancel。
  *   <li>非显式 cancel 导致的 {@link InterruptedException} 按基础 transport I/O 语义分类并保留中断标志。
- *   <li>自适应单调时钟 Watchdog 周期调度，彻底杜绝短超时调度延迟。
+ *   <li>单调时钟 deadline 一次性调度；timer 仅负责排期，不执行阻塞清理或回调。
  * </ul>
  */
 final class HttpSseStreamExecution implements ProviderStream {
@@ -67,8 +70,9 @@ final class HttpSseStreamExecution implements ProviderStream {
   private final Object futureLock = new Object();
   private volatile Thread workerThread;
   private volatile Future<?> workerFuture;
-  private volatile ScheduledFuture<?> watchdogFuture;
+  private ScheduledFuture<?> deadlineFuture;
   private volatile InputStream activeInputStream;
+  private ScheduledExecutorService scheduler;
 
   HttpSseStreamExecution(
       HttpClient httpClient,
@@ -105,14 +109,83 @@ final class HttpSseStreamExecution implements ProviderStream {
     return nanosFromSeconds + nanos;
   }
 
-  long watchdogIntervalNanos() {
-    long minTimeout = Math.min(totalTimeoutNanos, idleTimeoutNanos);
-    if (minTimeout <= 0) {
-      return TimeUnit.MILLISECONDS.toNanos(1);
+  // Elapsed-time comparisons avoid overflow even when nanoTime wraps around.
+  long nextDeadlineDelayNanos(long now) {
+    long totalRemaining =
+        totalTimeoutNanos == Long.MAX_VALUE
+            ? Long.MAX_VALUE
+            : Math.max(0L, totalTimeoutNanos - Math.max(0L, now - startNano));
+    long idleRemaining =
+        idleTimeoutNanos == Long.MAX_VALUE
+            ? Long.MAX_VALUE
+            : Math.max(0L, idleTimeoutNanos - Math.max(0L, now - lastActivityNano));
+    return Math.min(totalRemaining, idleRemaining);
+  }
+
+  void scheduleDeadline(ScheduledExecutorService scheduler) {
+    synchronized (futureLock) {
+      this.scheduler = scheduler;
+      scheduleNextDeadline();
     }
-    long half = minTimeout / 2;
-    return Math.max(
-        TimeUnit.MILLISECONDS.toNanos(1), Math.min(TimeUnit.MILLISECONDS.toNanos(25), half));
+  }
+
+  // Called with futureLock held. A read only updates lastActivityNano; no per-byte timer churn.
+  private void scheduleNextDeadline() {
+    if (!isTerminal()) {
+      deadlineFuture =
+          scheduler.schedule(
+              new DeadlineTask(this),
+              nextDeadlineDelayNanos(System.nanoTime()),
+              TimeUnit.NANOSECONDS);
+    }
+  }
+
+  private void onDeadline() {
+    synchronized (futureLock) {
+      if (isTerminal()) {
+        return;
+      }
+      if (nextDeadlineDelayNanos(System.nanoTime()) > 0) {
+        try {
+          scheduleNextDeadline();
+        } catch (RejectedExecutionException e) {
+          runDeadlineCleanup(
+              () ->
+                  dispatchFailure(
+                      new TransportException(
+                          TransportErrorKind.EXECUTOR_REJECTED,
+                          "Scheduler rejected deadline rescheduling",
+                          e)));
+        }
+        return;
+      }
+    }
+    // Never close a stream, wait for callbackLock, or invoke user code on the shared timer.
+    runDeadlineCleanup(this::checkDeadline);
+  }
+
+  private void runDeadlineCleanup(Runnable work) {
+    // Only actual expiry (or a failed reschedule) starts a short-lived cleanup thread.
+    // Never enqueue behind blocking I/O on the worker executor or run user callbacks on the timer.
+    Thread.ofVirtual().start(work);
+  }
+
+  // Some injected schedulers retain cancelled tasks until their deadline. Do not let a long
+  // cancelled timer retain the entire stream, client, callback and response body.
+  private static final class DeadlineTask implements Runnable {
+    private final WeakReference<HttpSseStreamExecution> execution;
+
+    private DeadlineTask(HttpSseStreamExecution execution) {
+      this.execution = new WeakReference<>(execution);
+    }
+
+    @Override
+    public void run() {
+      HttpSseStreamExecution current = execution.get();
+      if (current != null) {
+        current.onDeadline();
+      }
+    }
   }
 
   boolean isInlineExecutionDetected() {
@@ -124,15 +197,6 @@ final class HttpSseStreamExecution implements ProviderStream {
       this.workerFuture = workerFuture;
       if (isTerminal()) {
         cancelFutureSafe(workerFuture, true);
-      }
-    }
-  }
-
-  void attachWatchdogFuture(ScheduledFuture<?> watchdogFuture) {
-    synchronized (futureLock) {
-      this.watchdogFuture = watchdogFuture;
-      if (isTerminal()) {
-        cancelFutureSafe(watchdogFuture, false);
       }
     }
   }
@@ -349,7 +413,7 @@ final class HttpSseStreamExecution implements ProviderStream {
     }
   }
 
-  void checkWatchdog() {
+  private void checkDeadline() {
     if (state.get() != STATE_RUNNING && state.get() != STATE_PENDING) {
       return;
     }
@@ -363,6 +427,24 @@ final class HttpSseStreamExecution implements ProviderStream {
     // 检查无活动闲置超时
     if (isIdleTimeoutExceeded(now)) {
       triggerTimeout("Stream idle timeout exceeded " + timeoutPolicy.modelCallIdleTimeout());
+    } else {
+      RejectedExecutionException rejected = null;
+      synchronized (futureLock) {
+        if (!isTerminal()) {
+          try {
+            scheduleNextDeadline();
+          } catch (RejectedExecutionException e) {
+            rejected = e;
+          }
+        }
+      }
+      if (rejected != null) {
+        dispatchFailure(
+            new TransportException(
+                TransportErrorKind.EXECUTOR_REJECTED,
+                "Scheduler rejected deadline rescheduling",
+                rejected));
+      }
     }
   }
 
@@ -534,7 +616,7 @@ final class HttpSseStreamExecution implements ProviderStream {
   private void closeResources() {
     closeActiveStream();
     synchronized (futureLock) {
-      cancelFutureSafe(watchdogFuture, false);
+      cancelFutureSafe(deadlineFuture, false);
       cancelFutureSafe(workerFuture, true);
     }
   }
