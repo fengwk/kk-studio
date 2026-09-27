@@ -14,6 +14,7 @@ import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.CopyObjectResponse;
@@ -22,6 +23,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -67,6 +69,22 @@ public class S3StorageServiceTest {
     } finally {
       context.close();
     }
+  }
+
+  /** 服务端上传必须存储 SHA-256，以便 stage 路径的 checksum HEAD 严格复核。 */
+  @Test
+  void serverUploadRequestsSha256Checksum() {
+    AtomicReference<PutObjectRequest> captured = new AtomicReference<>();
+    S3StorageServiceImpl service =
+        newObservingStorageService(
+            (proxy, method, args) -> {
+              if (args != null && args.length > 0 && args[0] instanceof PutObjectRequest request) {
+                captured.set(request);
+              }
+            });
+    service.putObject(
+        "staged/output.png", new ByteArrayInputStream(new byte[] {1}), 1, "image/png");
+    assertEquals(ChecksumAlgorithm.SHA256, captured.get().checksumAlgorithm());
   }
 
   @Test
