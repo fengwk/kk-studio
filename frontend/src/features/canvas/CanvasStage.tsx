@@ -46,6 +46,7 @@ function StageInner() {
   const {
     state,
     snapshot: snapshotDTO,
+    projectedSnapshot,
     models,
     stageMetrics,
     nodeCallbacks,
@@ -66,8 +67,8 @@ function StageInner() {
     closeContextMenuRef,
   } = runtime
   const snapshot = useMemo(
-    () => snapshotDTO ? projectCanvasSnapshot(snapshotDTO) : null,
-    [snapshotDTO],
+    () => projectedSnapshot ?? (snapshotDTO ? projectCanvasSnapshot(snapshotDTO) : null),
+    [projectedSnapshot, snapshotDTO],
   )
   const containerRef = useRef<HTMLElement | null>(null)
   const lastViewportRef = useRef(state.viewport)

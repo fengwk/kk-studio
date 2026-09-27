@@ -6,8 +6,7 @@ import {
   getCanvasFunctionRun,
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
-  listCanvasFunctionModels,
-  listCanvasSessions,
+  listCanvasFunctions,
   listCanvases,
   postCanvasCommands,
   startCanvasFunctionRun,
@@ -52,7 +51,7 @@ function documentPayload() {
   return {
     id: CANVAS_ID,
     title: 'Canvas',
-    version: '3',
+    revision: '3',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-02T00:00:00Z',
   }
@@ -63,25 +62,22 @@ function snapshotPayload() {
     document: documentPayload(),
     nodes: [],
     groups: [],
-    links: [],
+    references: [],
   }
 }
 
 function patchPayload() {
   return {
-    baseVersion: '3',
-    version: '4',
+    revision: '4',
     groups: [],
     nodes: [],
-    links: [],
   }
 }
 
 describe('studio service transport adapter', () => {
   /**
    * 测试意图：验证 studio-service 导出的所有 Canvas 请求均能正常通过 fetch 传输，
-   * 包含画布生命周期、节点命令批应用、资源获取、模型列表、Function Run 生命周期，
-   * 以及 Canvas owner session 列表查询。
+   * 包含画布生命周期、节点命令批应用、资源获取、模型列表、Function Run 生命周期。
    */
   it('exercises every exported canvas request through fetch', async () => {
     fetchMock
@@ -90,24 +86,31 @@ describe('studio service transport adapter', () => {
       .mockResolvedValueOnce(response(envelope(documentPayload())))
       .mockResolvedValueOnce(response(envelope(snapshotPayload())))
       .mockResolvedValueOnce(response(envelope(patchPayload())))
-      .mockResolvedValueOnce(response(envelope([{ key: 'image' }])))
+      .mockResolvedValueOnce(response(envelope([{
+        name: 'image',
+        description: 'Image',
+        outputs: [{ kind: 'IMAGE', name: null }],
+        argsSchema: { type: 'object' },
+        referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
+        available: true,
+        unavailableReason: null,
+      }])))
       .mockResolvedValueOnce(response(envelope({ method: 'GET', url: 'https://download', headers: {}, expiresAt: 'later' })))
       .mockResolvedValueOnce(response(envelope({ method: 'GET', url: 'https://preview', headers: {}, expiresAt: 'later' })))
       .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'RUNNING', stage: 'start', error: null, updatedAt: 'now' })))
       .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'CANCELLED', stage: 'cancelled', error: 'stop', updatedAt: 'now' })))
       .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'SUCCEEDED', stage: 'done', error: null, updatedAt: 'now' })))
-      .mockResolvedValueOnce(response(envelope([{ sessionId: 's-1', createdAt: '2026-01-01T00:00:00Z', lastActivityAt: '2026-01-01T00:00:00Z', firstMessagePreview: 'hi', threadCount: 1 }])))
 
     expect(await listCanvases()).toHaveLength(1)
     expect((await createCanvas()).title).toBe('Canvas')
     expect((await createCanvas('Named')).title).toBe('Canvas')
     expect((await getCanvas(CANVAS_ID)).document.id).toBe(CANVAS_ID)
     expect((await postCanvasCommands(CANVAS_ID, {
-      expectedVersion: '3',
+      expectedRevision: '3',
       idempotencyKey: ID,
       commands: [],
-    })).version).toBe('4')
-    expect(await listCanvasFunctionModels()).toEqual([{ key: 'image' }])
+    })).revision).toBe('4')
+    expect(await listCanvasFunctions()).toHaveLength(1)
     expect((await getCanvasResourceOriginalUrl(CANVAS_ID, ID)).method).toBe('GET')
     expect((await getCanvasResourcePreviewUrl(CANVAS_ID, ID)).url).toContain('preview')
     expect((await startCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID })).status)
@@ -115,14 +118,12 @@ describe('studio service transport adapter', () => {
     expect((await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID })).status)
       .toBe('CANCELLED')
     expect((await getCanvasFunctionRun(CANVAS_ID, NODE_ID)).status).toBe('SUCCEEDED')
-    expect(await listCanvasSessions(CANVAS_ID)).toHaveLength(1)
-    expect(fetchMock).toHaveBeenCalledTimes(12)
+    expect(fetchMock).toHaveBeenCalledTimes(11)
   })
 
   /**
    * 测试意图：验证发出的 HTTP 路径、方法、Body 与 AbortSignal，
-   * 特别保证 Canvas function run 使用单例语义路径 /function-run 与 /cancel，
-   * 且 listCanvasSessions 请求正确的 /canvases/{canvasId}/sessions 端点。
+   * 特别保证 Canvas function run 使用单例语义路径 /function-run 与 /cancel。
    */
   it('issues the expected endpoints, methods, bodies, and signals', async () => {
     fetchMock
@@ -132,16 +133,14 @@ describe('studio service transport adapter', () => {
       .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'RUNNING' })))
       .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'SUCCEEDED' })))
       .mockResolvedValueOnce(response(envelope({ nodeId: NODE_ID, requestId: REQUEST_ID, status: 'CANCELLED' })))
-      .mockResolvedValueOnce(response(envelope([])))
 
     const controller = new AbortController()
     await createCanvas('Named', { signal: controller.signal })
     await getCanvas(CANVAS_ID, { signal: controller.signal })
-    await postCanvasCommands(CANVAS_ID, { expectedVersion: '3', idempotencyKey: ID, commands: [] }, { signal: controller.signal })
+    await postCanvasCommands(CANVAS_ID, { expectedRevision: '3', idempotencyKey: ID, commands: [] }, { signal: controller.signal })
     await startCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
     await getCanvasFunctionRun(CANVAS_ID, NODE_ID, { signal: controller.signal })
     await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
-    await listCanvasSessions(CANVAS_ID, { signal: controller.signal })
 
     const calls = fetchMock.mock.calls.map(([url, init]: [string, RequestInit]) => ({
       url,
@@ -154,7 +153,7 @@ describe('studio service transport adapter', () => {
     expect(calls[2]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/commands`,
       method: 'POST',
-      body: JSON.stringify({ expectedVersion: '3', idempotencyKey: ID, commands: [] }),
+      body: JSON.stringify({ expectedRevision: '3', idempotencyKey: ID, commands: [] }),
     })
     expect(calls[3]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
@@ -169,10 +168,6 @@ describe('studio service transport adapter', () => {
       url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run/cancel`,
       method: 'POST',
       body: JSON.stringify({ requestId: REQUEST_ID }),
-    })
-    expect(calls[6]).toMatchObject({
-      url: `/api/canvases/${CANVAS_ID}/sessions`,
-      method: 'GET',
     })
     for (const call of calls) {
       expect(call.signal).toBe(controller.signal)

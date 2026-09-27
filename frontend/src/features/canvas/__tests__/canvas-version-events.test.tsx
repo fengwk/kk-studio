@@ -10,7 +10,7 @@ const canvasResource = { kind: 'canvas', id: CANVAS_ID } as const
 
 interface Props {
   enabled?: boolean
-  version?: string
+  revision?: string
 }
 
 function renderEvents(initialProps: Props = {}) {
@@ -21,7 +21,7 @@ function renderEvents(initialProps: Props = {}) {
       useCanvasVersionEvents({
         canvasId: CANVAS_ID,
         enabled: props.enabled ?? true,
-        version: props.version ?? '0',
+        revision: props.revision ?? '0',
         onSnapshot,
       }),
     {
@@ -36,26 +36,26 @@ function renderEvents(initialProps: Props = {}) {
   return { ...rendered, sockets, onSnapshot }
 }
 
-function versionEvent(sockets: FakeWebSocketHarness, version: string) {
+function versionEvent(sockets: FakeWebSocketHarness, revision: string) {
   const socket = sockets.latest
   if (socket == null) {
     throw new Error('no socket created')
   }
-  // durable version 事件必须携带与 data.version 完全相等的 canonical cursor。
+  // durable revision 事件必须携带与 data.revision 完全相等的 canonical cursor。
   act(() =>
     socket.emitServer({
       type: 'event',
       resource: canvasResource,
-      name: 'version',
-      data: { version },
-      cursor: version,
+      name: 'revision',
+      data: { revision },
+      cursor: revision,
     }),
   )
 }
 
 describe('useCanvasVersionEvents', () => {
   it('subscribes the canvas resource and refreshes the snapshot on the subscribed ack', () => {
-    const { sockets, onSnapshot } = renderEvents({ version: '7' })
+    const { sockets, onSnapshot } = renderEvents({ revision: '7' })
     const socket = sockets.openLatest()
 
     expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: canvasResource }])
@@ -66,7 +66,7 @@ describe('useCanvasVersionEvents', () => {
   })
 
   it('refreshes the snapshot only for versions newer than the known one', () => {
-    const { sockets, onSnapshot, rerender } = renderEvents({ version: '7' })
+    const { sockets, onSnapshot, rerender } = renderEvents({ revision: '7' })
 
     // codec 已拒绝数字/前导零/负数/畸形 data 与缺失/不匹配的 cursor；hook 层
     // 只负责与最后已知版本比较，较低版本事件不触发同步。
@@ -76,13 +76,13 @@ describe('useCanvasVersionEvents', () => {
     expect(onSnapshot).toHaveBeenCalledTimes(1)
 
     // 本地版本前进后，迟到版本事件不再触发同步。
-    rerender({ version: '8' })
+    rerender({ revision: '8' })
     versionEvent(sockets, '8')
     expect(onSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it('compares versions beyond Number.MAX_SAFE_INTEGER without JS number loss', () => {
-    const { sockets, onSnapshot, rerender } = renderEvents({ version: '9007199254740992' })
+    const { sockets, onSnapshot, rerender } = renderEvents({ revision: '9007199254740992' })
 
     // MAX_SAFE_INTEGER+1 在 JS number 中无法区分，但十进制字符串必须精确比较。
     versionEvent(sockets, '9007199254740993')
@@ -90,7 +90,7 @@ describe('useCanvasVersionEvents', () => {
     versionEvent(sockets, '9007199254740992')
     expect(onSnapshot).toHaveBeenCalledTimes(1)
 
-    rerender({ version: '9007199254740993' })
+    rerender({ revision: '9007199254740993' })
     versionEvent(sockets, '9007199254740994')
     expect(onSnapshot).toHaveBeenCalledTimes(2)
   })

@@ -1,4 +1,4 @@
-import type { CanvasVersion } from '@/shared/api/contracts/base'
+import type { CanvasRevision } from '@/shared/api/contracts/base'
 
 /**
  * Canonical UUID ids cross the HTTP boundary as lowercase dashed strings.
@@ -9,19 +9,18 @@ export type UUIDString = `${string}-${string}-${string}-${string}-${string}`
 
 export type CanvasResourceKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'TEXT'
 export type CanvasFunctionOutputKind = 'IMAGE' | 'VIDEO'
-export type CanvasFunctionRunStatus = 'READY' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+export type CanvasFunctionRunStatus = 'READY' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'UNKNOWN'
 
 /**
- * Canvas 聚合的持久化头。version 是单调递增的 graph 版本，也是
- * command expected 游标与 patch base/version 的公共坐标系；wire 上是
- * canonical 非负十进制字符串（Java long，数据库仍为 bigint），
+ * Canvas 聚合的持久化头。revision 是单调递增的 graph 版本修订号；
+ * wire 上是 canonical 非负十进制字符串（Java long，数据库仍为 bigint），
  * 客户端绝不转换为 JS number。Agent Session/Thread 是独立的 owner 事实，
  * 不属于 Canvas graph document。
  */
 export interface CanvasDocumentDTO {
   id: UUIDString
   title: string
-  version: CanvasVersion
+  revision: CanvasRevision
   createdAt: string
   updatedAt: string
 }
@@ -59,9 +58,13 @@ export interface CanvasResourceDTO {
   createdAt: string
 }
 
+/**
+ * Canvas 节点的通用函数绑定配置。
+ * 函数名指向注册目录中的通用函数，args 携带传给插件运行时的参数（包含派生引用的 resource 指针）。
+ */
 export interface CanvasFunctionDTO {
-  modelKey: string
-  configJson: string
+  name: string
+  args: Record<string, unknown>
 }
 
 export interface CanvasFunctionRunDTO {
@@ -95,18 +98,23 @@ export interface CanvasGroupDTO {
   transform: CanvasTransformDTO
 }
 
-export interface CanvasLinkDTO {
+/**
+ * 只读派生引用投影：由服务端通过扫描各节点的 function.args 动态派生，
+ * 前端无需也不支持独立的 Link 增删改命令。
+ */
+export interface CanvasReferenceDTO {
   canvasId: UUIDString
   sourceNodeId: UUIDString
   targetNodeId: UUIDString
+  index: number
 }
 
-/** 权威全量投影：初始加载、gap 恢复或 resync 时整体替换客户端状态。 */
+/** 权威全量快照投影：初始加载、gap 恢复或 resync 时整体替换客户端状态。 */
 export interface CanvasSnapshotDTO {
   document: CanvasDocumentDTO
   nodes: CanvasResourceNodeDTO[]
   groups: CanvasGroupDTO[]
-  links: CanvasLinkDTO[]
+  references: CanvasReferenceDTO[]
 }
 
 export type CanvasGroupPatchDTO =
@@ -117,71 +125,154 @@ export type CanvasNodePatchDTO =
   | { op: 'UPSERT'; node: CanvasResourceNodeDTO }
   | { op: 'REMOVE'; nodeId: UUIDString }
 
-export type CanvasLinkPatchDTO =
-  | { op: 'UPSERT'; link: CanvasLinkDTO }
-  | { op: 'REMOVE'; sourceNodeId: UUIDString; targetNodeId: UUIDString }
-
 /**
- * 幂等 graph patch：仅作为 command 响应由发起命令的窗口本地应用。
- * baseVersion -> version 表示一次连续前进；version <= 客户端当前版本时忽略，
- * baseVersion != 客户端当前版本时改读权威 Snapshot。
- * 两个版本都是 canonical 非负十进制字符串（Java long wire）。
+ * 幂等 graph patch：作为 command 响应返回。
+ * revision 表示更新后的权威修订号。
  */
 export interface CanvasPatchDTO {
-  baseVersion: CanvasVersion
-  version: CanvasVersion
+  revision: CanvasRevision
   groups: CanvasGroupPatchDTO[]
   nodes: CanvasNodePatchDTO[]
-  links: CanvasLinkPatchDTO[]
 }
 
 /**
- * 应用事件 WebSocket `version` payload：version 前进提示，客户端随后读取
+ * 应用事件 WebSocket `revision` payload：revision 前进提示，客户端随后读取
  * 权威 Snapshot。'resync' 事件无 payload，同样要求全量快照。
- * version 是 canonical 非负十进制字符串；数字/前导零/负数/畸形 payload 一律忽略。
  */
-export interface CanvasVersionEventDTO {
-  version: CanvasVersion
+export interface CanvasRevisionEventDTO {
+  revision: CanvasRevision
 }
 
-export type PromptSegmentDTO =
-  | { type: 'TEXT'; text: string }
-  | { type: 'REFERENCE'; nodeId: UUIDString; index: number }
+/** typed command 中节点资源数组的槽位输入契约 */
+export type CanvasResourceInputDTO =
+  | { kind: 'KEEP'; resourceId: UUIDString }
+  | { kind: 'TEXT'; name: string; textContent: string }
+  | { kind: 'BLOB'; name: string; blobId: UUIDString }
 
-export interface CanvasFunctionConfigDTO {
-  prompt: {
-    segments: PromptSegmentDTO[]
-  }
-  parameters: Record<string, string | number>
-}
+/**
+ * 一次命令批中无法按前置条件执行的具体原因，随 409 响应返回。
+ */
+export type CanvasConflictDTO =
+  | { kind: 'TARGET_MISSING'; targetId: string; target: 'NODE' | 'GROUP' }
+  | { kind: 'TARGET_PRESENT'; targetId: string; target: 'NODE' | 'GROUP' }
+  | { kind: 'STALE_NODE'; nodeId: string; group: string; current: CanvasResourceNodeDTO }
+  | { kind: 'STALE_GROUP'; groupId: string; current: CanvasGroupDTO }
+  | { kind: 'NODE_RUNNING'; nodeId: string; run: CanvasFunctionRunDTO }
+  | { kind: 'NODE_REFERENCED'; nodeId: string; referencingNodeIds: string[] }
 
-export type CanvasFunctionParameterType = 'ENUM' | 'INTEGER'
+/**
+ * 11 种类型化 Canvas 命令：
+ * 每条命令只针对单一语义维度，显式携带编辑起点的语义前置条件（expected*），
+ * 绝不使用整图 CAS 版本。
+ */
+export type CanvasCommandDTO =
+  | {
+      type: 'CREATE_NODE'
+      nodeId: UUIDString
+      name: string
+      transform: CanvasTransformDTO
+      resources: CanvasResourceInputDTO[]
+    }
+  | {
+      type: 'RENAME_NODE'
+      nodeId: UUIDString
+      expectedName: string
+      name: string
+    }
+  | {
+      type: 'SET_NODE_RESOURCES'
+      nodeId: UUIDString
+      expectedResourceIds: UUIDString[]
+      resources: CanvasResourceInputDTO[]
+    }
+  | {
+      type: 'SET_NODE_FUNCTION'
+      nodeId: UUIDString
+      expectedFunction: CanvasFunctionDTO | null
+      function: CanvasFunctionDTO | null
+    }
+  | {
+      type: 'SET_NODE_GROUP'
+      nodeId: UUIDString
+      expectedGroupId: UUIDString | null
+      groupId: UUIDString | null
+    }
+  | {
+      type: 'DELETE_NODE'
+      nodeId: UUIDString
+      expectedResourceIds: UUIDString[]
+      expectedFunction: CanvasFunctionDTO | null
+    }
+  | {
+      type: 'UPDATE_NODE_TRANSFORM'
+      nodeId: UUIDString
+      transform: CanvasTransformDTO
+      expectedTransform?: CanvasTransformDTO | null
+    }
+  | {
+      type: 'CREATE_GROUP'
+      groupId: UUIDString
+      title: string
+      transform: CanvasTransformDTO
+    }
+  | {
+      type: 'RENAME_GROUP'
+      groupId: UUIDString
+      expectedTitle: string
+      title: string
+    }
+  | {
+      type: 'UPDATE_GROUP_TRANSFORM'
+      groupId: UUIDString
+      transform: CanvasTransformDTO
+      expectedTransform?: CanvasTransformDTO | null
+    }
+  | {
+      type: 'DELETE_GROUP'
+      groupId: UUIDString
+      expectedMemberNodeIds: UUIDString[]
+    }
 
-export interface CanvasFunctionParameterDefinitionDTO {
-  key: string
-  label: string
-  type: CanvasFunctionParameterType
-  required: boolean
-  defaultValue: string | number | null
-  options: string[]
-  min: number | null
-  max: number | null
+/**
+ * 命令批请求体：POST /api/canvases/{canvasId}/commands
+ * 不包含 expectedVersion，通过每条命令的 expected* 进行语义冲突检测。
+ */
+export interface ApplyCanvasCommandsRequestDTO {
+  idempotencyKey: UUIDString
+  commands: CanvasCommandDTO[]
 }
 
 export interface CanvasFunctionReferencePolicyDTO {
   allowedKinds: CanvasResourceKind[]
-  maxReferences: number
-  maxByKind: Partial<Record<CanvasResourceKind, number>>
+  maxReferences?: number | null
+  maxByKind?: Partial<Record<CanvasResourceKind, number>>
 }
 
-export interface CanvasFunctionModelDTO {
-  key: string
-  label: string
-  outputKind: CanvasFunctionOutputKind
-  referencePolicy: CanvasFunctionReferencePolicyDTO
-  parameters: CanvasFunctionParameterDefinitionDTO[]
-  available: boolean
-  unavailableReason: string | null
+export interface CanvasFunctionOutputDTO {
+  kind: string
+  name: string | null
+}
+
+/** Function 目录项 */
+export interface CanvasFunctionDefinitionDTO {
+  name: string
+  description?: string | null
+  argsSchema: Record<string, unknown>
+  outputs: CanvasFunctionOutputDTO[]
+  referencePolicy?: CanvasFunctionReferencePolicyDTO | null
+  available?: boolean
+  unavailableReason?: string | null
+}
+
+/** 人工核查 UNKNOWN Function Run 的请求体 */
+export interface CanvasFunctionUnknownResolutionDTO {
+  requestId: UUIDString
+  resolution: 'RESUME' | 'FAILED' | 'CANCELLED'
+  verification: string
+}
+
+export interface CanvasFunctionRunRequestDTO {
+  requestId: UUIDString
 }
 
 export interface CanvasPresignedUrlDTO {
@@ -195,104 +286,16 @@ export interface CreateCanvasRequestDTO {
   title?: string
 }
 
-/**
- * 命令批请求。expectedVersion 是精确的 graph 版本 CAS 游标（canonical
- * 非负十进制字符串，Java long wire）；idempotencyKey 是整批的幂等键（客户端 UUID）。
- * 创建类命令额外携带客户端生成的实体 UUID（nodeId/groupId），无时间戳回退；
- * 资源上传句柄由共享存储服务生成，命令只引用 uploadIds。
- */
-export interface ApplyCanvasCommandsRequestDTO {
-  expectedVersion: CanvasVersion
-  idempotencyKey: UUIDString
-  commands: CanvasCommandDTO[]
+// 辅助旧配置（向后兼容）
+export type PromptSegmentDTO =
+  | { type: 'TEXT'; text: string }
+  | { type: 'REFERENCE'; nodeId: UUIDString; index: number }
+
+export interface CanvasFunctionConfigDTO {
+  prompt: {
+    segments: PromptSegmentDTO[]
+  }
+  parameters: Record<string, string | number>
 }
 
-export interface CanvasFunctionRunRequestDTO {
-  requestId: UUIDString
-}
 
-export type CanvasCommandDTO =
-  | {
-      type: 'CREATE_TEXT_NODE'
-      nodeId: UUIDString
-      name: string
-      markdown: string
-      transform: CanvasTransformDTO
-    }
-  | {
-      type: 'UPDATE_TEXT_NODE'
-      nodeId: UUIDString
-      markdown: string
-    }
-  | {
-      type: 'CREATE_RESOURCE_NODE'
-      nodeId: UUIDString
-      name: string
-      /** 已 complete 的共享存储 upload 句柄（服务端生成，非 canvas-scoped）。 */
-      uploadIds: UUIDString[]
-      transform: CanvasTransformDTO
-    }
-  | {
-      type: 'CREATE_FUNCTION_NODE'
-      nodeId: UUIDString
-      name: string
-      modelKey: string
-      configJson: string
-      transform: CanvasTransformDTO
-    }
-  | {
-      type: 'UPDATE_FUNCTION'
-      nodeId: UUIDString
-      modelKey: string
-      configJson: string
-    }
-  | {
-      type: 'RENAME_NODE'
-      nodeId: UUIDString
-      name: string
-    }
-  | {
-      type: 'UPDATE_NODE_TRANSFORMS'
-      updates: Array<{ nodeId: UUIDString; transform: CanvasTransformDTO }>
-    }
-  | {
-      type: 'DELETE_NODE'
-      nodeId: UUIDString
-    }
-  | {
-      type: 'CREATE_LINK'
-      sourceNodeId: UUIDString
-      targetNodeId: UUIDString
-    }
-  | {
-      type: 'DELETE_LINK'
-      sourceNodeId: UUIDString
-      targetNodeId: UUIDString
-    }
-  | {
-      type: 'CREATE_GROUP'
-      groupId: UUIDString
-      title: string
-      transform: CanvasTransformDTO
-      memberNodeIds: UUIDString[]
-    }
-  | {
-      type: 'MOVE_GROUP'
-      groupId: UUIDString
-      x: number
-      y: number
-    }
-  | {
-      type: 'UNGROUP'
-      groupId: UUIDString
-      memberNodeIds: UUIDString[]
-    }
-  | {
-      type: 'DELETE_GROUP'
-      groupId: UUIDString
-    }
-  | {
-      type: 'RENAME_GROUP'
-      groupId: UUIDString
-      title: string
-    }

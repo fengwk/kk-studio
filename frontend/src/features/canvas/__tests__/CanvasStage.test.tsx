@@ -128,13 +128,13 @@ function snapshotDTO(overrides: Partial<CanvasSnapshotDTO> = {}): CanvasSnapshot
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '0',
+      revision: '0',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
     nodes: [resourceDTO()],
     groups: [],
-    links: [],
+    references: [],
     ...overrides,
   }
 }
@@ -268,7 +268,7 @@ describe('CanvasStage ReactFlow wiring', () => {
           title: 'Frame',
           transform: { x: 0, y: 0, width: 400, height: 300 },
         }],
-        links: [{ canvasId: CANVAS_ID, sourceNodeId: NODE_A, targetNodeId: NODE_B }],
+        references: [{ canvasId: CANVAS_ID, sourceNodeId: NODE_A, targetNodeId: NODE_B, index: 0 }],
       }),
     })
 
@@ -309,7 +309,7 @@ describe('CanvasStage ReactFlow wiring', () => {
     const { actions, flow } = renderStage({
       snapshot: snapshotDTO({
         nodes: [resourceDTO(), resourceDTO({ id: NODE_B, resources: [] })],
-        links: [{ canvasId: CANVAS_ID, sourceNodeId: NODE_A, targetNodeId: NODE_B }],
+        references: [{ canvasId: CANVAS_ID, sourceNodeId: NODE_A, targetNodeId: NODE_B, index: 0 }],
       }),
     })
 

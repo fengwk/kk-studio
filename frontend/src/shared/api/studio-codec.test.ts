@@ -18,7 +18,7 @@ function documentPayload() {
   return {
     id: CANVAS_ID,
     title: 'Canvas',
-    version: '3',
+    revision: '3',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-02T00:00:00Z',
   }
@@ -72,11 +72,12 @@ function groupPayload() {
   }
 }
 
-function linkPayload() {
+function referencePayload() {
   return {
     canvasId: CANVAS_ID,
     sourceNodeId: NODE_ID,
     targetNodeId: ID,
+    index: 0,
   }
 }
 
@@ -85,14 +86,13 @@ function snapshotPayload(): CanvasSnapshotDTO {
     document: documentPayload(),
     nodes: [nodePayload()],
     groups: [groupPayload()],
-    links: [linkPayload()],
+    references: [referencePayload()],
   }
 }
 
 function patchPayload() {
   return {
-    baseVersion: '3',
-    version: '4',
+    revision: '4',
     groups: [
       { op: 'UPSERT', group: groupPayload() },
       { op: 'REMOVE', groupId: GROUP_ID },
@@ -100,10 +100,6 @@ function patchPayload() {
     nodes: [
       { op: 'UPSERT', node: nodePayload() },
       { op: 'REMOVE', nodeId: NODE_ID },
-    ],
-    links: [
-      { op: 'UPSERT', link: linkPayload() },
-      { op: 'REMOVE', sourceNodeId: NODE_ID, targetNodeId: ID },
     ],
   }
 }
@@ -117,7 +113,7 @@ describe('studio codec', () => {
     expect(snapshot.nodes[0]?.resources[0]?.sizeBytes).toBe(12)
     expect(snapshot.nodes[0]?.transform).toEqual({ x: 1, y: 2, width: 100, height: 80 })
     expect(snapshot.groups[0]?.id).toBe(GROUP_ID)
-    expect(snapshot.links[0]).toEqual(linkPayload())
+    expect(snapshot.references[0]).toEqual(referencePayload())
     expect(snapshot.nodes[0]?.resources[0]?.kind).toBe('TEXT')
     expect(snapshot.nodes[0]?.run?.status).toBe('SUCCEEDED')
   })
@@ -126,8 +122,7 @@ describe('studio codec', () => {
     expect(decodeCanvasDocumentList([documentPayload()])).toEqual([documentPayload()])
 
     const patch = decodeCanvasPatch(patchPayload())
-    expect(patch.baseVersion).toBe('3')
-    expect(patch.version).toBe('4')
+    expect(patch.revision).toBe('4')
     expect(patch.groups).toEqual([
       { op: 'UPSERT', group: groupPayload() },
       { op: 'REMOVE', groupId: GROUP_ID },
@@ -135,10 +130,6 @@ describe('studio codec', () => {
     expect(patch.nodes).toEqual([
       { op: 'UPSERT', node: decodeCanvasSnapshot(snapshotPayload()).nodes[0] },
       { op: 'REMOVE', nodeId: NODE_ID },
-    ])
-    expect(patch.links).toEqual([
-      { op: 'UPSERT', link: linkPayload() },
-      { op: 'REMOVE', sourceNodeId: NODE_ID, targetNodeId: ID },
     ])
   })
 
@@ -254,12 +245,6 @@ describe('studio codec', () => {
       nodes: [{ op: 'REPLACE', node: nodePayload() }],
     }
     expect(() => decodeCanvasPatch(invalidNodeOp)).toThrow('node patch.op must be one of')
-
-    const invalidLinkOp = {
-      ...patchPayload(),
-      links: [{ op: 'REPLACE', link: linkPayload() }],
-    }
-    expect(() => decodeCanvasPatch(invalidLinkOp)).toThrow('link patch.op must be one of')
   })
 
   it('fails closed for a non-object document list', () => {
@@ -281,11 +266,11 @@ describe('studio codec', () => {
 
   it.each([
     ['document id not a UUID', { ...snapshotPayload(), document: { ...documentPayload(), id: 'bad' } }, 'document.id'],
-    ['document version with leading zero', { ...snapshotPayload(), document: { ...documentPayload(), version: '01' } }, 'document.version'],
-    ['document version numeric', { ...snapshotPayload(), document: { ...documentPayload(), version: 3 } }, 'document.version'],
+    ['document version with leading zero', { ...snapshotPayload(), document: { ...documentPayload(), revision: '01' } }, 'document.revision'],
+    ['document version numeric', { ...snapshotPayload(), document: { ...documentPayload(), revision: 3 as never } }, 'document.revision'],
     ['node not an object', { ...snapshotPayload(), nodes: [{}] }, 'node.id'],
     ['group not an object', { ...snapshotPayload(), groups: [{}] }, 'group.id'],
-    ['link not an object', { ...snapshotPayload(), links: [{}] }, 'link.canvasId'],
+    ['reference not an object', { ...snapshotPayload(), references: [{}] }, 'reference.canvasId'],
     ['transform width zero', {
       ...snapshotPayload(),
       nodes: [{ ...nodePayload(), transform: { ...nodePayload().transform, width: 0 } }],
@@ -323,7 +308,7 @@ describe('studio codec', () => {
   it('fails closed for non-canonical long strings in patches', () => {
     const payload = {
       ...patchPayload(),
-      baseVersion: '01',
+      revision: '01',
     }
     expect(() => decodeCanvasPatch(payload)).toThrow('canonical non-negative decimal string')
   })

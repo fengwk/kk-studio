@@ -3,6 +3,7 @@ import type { PendingFunctionConfig } from '@/features/canvas/types'
 import type {
   CanvasCommandDTO,
   CanvasFunctionConfigDTO,
+  CanvasSnapshotDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
 
@@ -26,6 +27,7 @@ export interface FunctionConfigSync {
  */
 export function useFunctionConfigSync(
   executeCommands: (commands: CanvasCommandDTO[]) => Promise<unknown>,
+  getSnapshot?: () => CanvasSnapshotDTO | undefined,
 ): FunctionConfigSync {
   const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingFunctionConfig>())
   const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
@@ -47,11 +49,20 @@ export function useFunctionConfigSync(
         if (!pending) {
           return
         }
+        const snapshot = getSnapshot?.()
+        const node = snapshot?.nodes.find((item) => item.id === nodeId)
+        const expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
         await executeCommands([{
-          type: 'UPDATE_FUNCTION',
+          type: 'SET_NODE_FUNCTION',
           nodeId: pending.nodeId,
-          modelKey: pending.modelKey,
-          configJson: JSON.stringify(pending.config),
+          expectedFunction,
+          function: {
+            name: pending.modelKey,
+            args: {
+              prompt: pending.config.prompt,
+              parameters: pending.config.parameters,
+            },
+          },
         }])
         if (pendingFunctionConfigsRef.current.get(nodeId) === pending) {
           pendingFunctionConfigsRef.current.delete(nodeId)
@@ -64,7 +75,7 @@ export function useFunctionConfigSync(
     })
     functionConfigFlushesRef.current.set(nodeId, trackedFlush)
     return trackedFlush
-  }, [executeCommands])
+  }, [executeCommands, getSnapshot])
 
   const scheduleFunctionConfig = useCallback((
     nodeId: UUIDString,

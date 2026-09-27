@@ -104,9 +104,11 @@ function mouseEvent(clientX = 100, clientY = 120): MouseEvent {
   } as unknown as MouseEvent
 }
 
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
+
 function setupHook(options: {
   snapshotValue?: CanvasSnapshot | null
-  models?: readonly CanvasFunctionModelDTO[]
+  models?: readonly CanvasFunctionDefinitionDTO[]
   selectedIds?: string[]
   setSelection?: (nodeIds: string[]) => void
 }) {

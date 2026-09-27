@@ -154,9 +154,9 @@ describe('ApplicationEventManager', () => {
     expect(onError).toHaveBeenCalledWith('SUBSCRIBE_FAILED', 'boom')
 
     // 其他资源的事件不派发给 threadA。
-    socket.emitServer({ type: 'event', resource: CANVAS_A, name: 'version', data: { version: '2' }, cursor: '2' })
+    socket.emitServer({ type: 'event', resource: CANVAS_A, name: 'revision', data: { revision: '2' }, cursor: '2' })
     expect(onEvent).toHaveBeenCalledTimes(2)
-    expect(otherOnEvent).toHaveBeenCalledWith('version', { version: '2' }, '2')
+    expect(otherOnEvent).toHaveBeenCalledWith('revision', { revision: '2' }, '2')
     // 未订阅资源与无资源 error 一律丢弃。
     socket.emitServer({ type: 'subscribed', resource: THREAD_B, cursor: '1' })
     socket.emitServer({ type: 'error', code: 'INTERNAL', message: 'orphan' })

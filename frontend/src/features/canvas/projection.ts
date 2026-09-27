@@ -7,7 +7,7 @@ import type {
   CanvasNodeCallbacks,
 } from '@/features/canvas/types'
 import type {
-  CanvasFunctionModelDTO,
+  CanvasFunctionDefinitionDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
 
@@ -17,12 +17,12 @@ export type CanvasFlowEdge = Edge
 export function projectNodes(
   snapshot: CanvasSnapshot,
   selectedIds: string[],
-  models: CanvasFunctionModelDTO[],
+  models: CanvasFunctionDefinitionDTO[],
   callbacks: CanvasNodeCallbacks,
   positionDrafts: Readonly<Record<string, { x: number; y: number }>> = {},
 ): CanvasFlowNode[] {
   const selected = new Set(selectedIds)
-  const modelByKey = new Map(models.map((model) => [model.key, model]))
+  const modelByKey = new Map(models.map((model) => [model.name, model]))
   const groupDrafts = new Map(snapshot.groups.map((group) => {
     const id = groupFlowId(group.id)
     const position = positionDrafts[id]
@@ -68,7 +68,7 @@ export function projectNodes(
       data: {
         kind: 'resource',
         node,
-        model: node.function ? modelByKey.get(node.function.modelKey) ?? null : null,
+        model: node.function ? modelByKey.get(node.function.name ?? node.function.modelKey) ?? null : null,
         callbacks,
       },
       zIndex: 1,

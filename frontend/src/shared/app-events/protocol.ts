@@ -35,7 +35,7 @@ export type ApplicationEventResource =
   | { kind: 'thread' | 'canvas'; id: string }
   | { kind: 'projects' }
 
-export type ApplicationEventName = 'version' | 'realtime' | 'changed'
+export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revision'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 export type ApplicationEventCursor = string
@@ -61,12 +61,12 @@ type ApplicationEventThreadRealtimeEvent = {
   data: Record<string, unknown>
 }
 
-/** canvas 的持久 version 事件：cursor 必带且与 data.version 完全相等。 */
-type ApplicationEventCanvasVersionEvent = {
+/** canvas 的持久 revision 事件：cursor 必带且与 data.revision 完全相等。 */
+type ApplicationEventCanvasRevisionEvent = {
   type: 'event'
   resource: ApplicationEventResource & { kind: 'canvas' }
-  name: 'version'
-  data: { version: ApplicationEventCursor }
+  name: 'revision'
+  data: { revision: ApplicationEventCursor }
   cursor: ApplicationEventCursor
 }
 
@@ -82,7 +82,7 @@ export type ApplicationEventServerMessage =
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | ApplicationEventThreadVersionEvent
   | ApplicationEventThreadRealtimeEvent
-  | ApplicationEventCanvasVersionEvent
+  | ApplicationEventCanvasRevisionEvent
   | ApplicationEventProjectChangedEvent
   | { type: 'resync'; resource: ApplicationEventResource }
   | { type: 'error'; resource?: ApplicationEventResource; code: string; message: string }
@@ -161,14 +161,14 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
         }
         return null
       }
-      if (isCanvasResource(resource) && parsed.name === 'version') {
-        const version = parseSingleCursorField(parsed.data, 'version')
-        // durable 事件必须携带 canonical cursor，且与 data.version 完全相等。
-        if (version == null || parsed.cursor !== version) {
+      if (isCanvasResource(resource) && parsed.name === 'revision') {
+        const revision = parseSingleCursorField(parsed.data, 'revision')
+        // durable 事件必须携带 canonical cursor，且与 data.revision 完全相等。
+        if (revision == null || parsed.cursor !== revision) {
           return null
         }
-        const data = { version }
-        return { type: 'event', resource, name: 'version', data, cursor: data.version }
+        const data = { revision }
+        return { type: 'event', resource, name: 'revision', data, cursor: data.revision }
       }
       if (resource.kind === 'projects' && parsed.name === 'changed') {
         const projectId = parseSingleUuidField(parsed.data, 'projectId')
@@ -247,7 +247,7 @@ function parseResource(value: unknown): ApplicationEventResource | null {
 }
 
 function isEventName(value: unknown): value is ApplicationEventName {
-  return value === 'version' || value === 'realtime' || value === 'changed'
+  return value === 'version' || value === 'realtime' || value === 'changed' || value === 'revision'
 }
 
 /** resource.kind 判别守卫：保证 thread/canvas 各自的事件组合在类型层面也合法。 */
@@ -270,7 +270,7 @@ function parseCursor(value: unknown): ApplicationEventCursor | null {
 /** durable version 事件的精确 data：单字段对象且字段值为 canonical 十进制字符串。 */
 function parseSingleCursorField(
   data: unknown,
-  key: 'version',
+  key: 'version' | 'revision',
 ): ApplicationEventCursor | null {
   if (!isRecord(data) || Object.keys(data).length !== 1) {
     return null

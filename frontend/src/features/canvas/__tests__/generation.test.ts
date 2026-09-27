@@ -13,38 +13,37 @@ import {
   removePromptSegment,
   updateTextSegment,
 } from '@/features/canvas/generation'
-import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
-const imageModel: CanvasFunctionModelDTO = {
-  key: 'fake-image',
-  label: 'Fake Image',
-  outputKind: 'IMAGE',
+const imageModel: CanvasFunctionDefinitionDTO = {
+  name: 'fake-image',
+  description: 'Fake Image',
+  outputs: [{ kind: 'IMAGE', name: null }],
+  argsSchema: {
+    type: 'object',
+    required: ['count'],
+    properties: {
+      ratio: {
+        type: 'string',
+        title: '比例',
+        default: 'AUTO',
+        enum: ['AUTO', '16:9'],
+      },
+      count: {
+        type: 'integer',
+        title: '数量',
+        minimum: 1,
+        maximum: 4,
+      },
+    },
+  },
   referencePolicy: {
     allowedKinds: ['IMAGE'],
     maxReferences: 2,
     maxByKind: { IMAGE: 2 },
   },
-  parameters: [{
-    key: 'ratio',
-    label: '比例',
-    type: 'ENUM',
-    required: false,
-    defaultValue: 'AUTO',
-    options: ['AUTO', '16:9'],
-    min: null,
-    max: null,
-  }, {
-    key: 'count',
-    label: '数量',
-    type: 'INTEGER',
-    required: true,
-    defaultValue: null,
-    options: [],
-    min: 1,
-    max: 4,
-  }],
   available: true,
   unavailableReason: null,
 }
@@ -117,14 +116,13 @@ describe('Canvas structured generation config', () => {
     })
     expect(createDefaultFunctionConfig({
       ...imageModel,
-      parameters: [{
-        ...imageModel.parameters[0]!,
-        defaultValue: null,
-      }, {
-        ...imageModel.parameters[1]!,
-        key: 'optional',
-        min: null,
-      }],
+      argsSchema: {
+        type: 'object',
+        properties: {
+          ratio: { type: 'string', enum: ['AUTO', '16:9'] },
+          optional: { type: 'integer' },
+        },
+      },
     }).parameters).toEqual({ ratio: 'AUTO' })
     expect(parseFunctionConfig('{bad', imageModel).parameters).toEqual({
       ratio: 'AUTO',

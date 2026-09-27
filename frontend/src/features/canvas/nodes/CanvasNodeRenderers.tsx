@@ -57,7 +57,9 @@ const ResourceNodeView = memo(function ResourceNodeView({
 }) {
   const { node, model, callbacks } = data
   const { t } = useI18n()
-  const descriptor = nodeDescriptor(node, model?.outputKind ?? null, t)
+  const firstKind = model?.outputs?.[0]?.kind
+  const outputKind = firstKind === 'IMAGE' || firstKind === 'VIDEO' ? firstKind : null
+  const descriptor = nodeDescriptor(node, outputKind, t)
 
   return (
     <CanvasNodeContainer

@@ -7,7 +7,7 @@ import {
 } from '@/features/canvas/canvas-stage-model'
 import type { CanvasSnapshot } from '@/features/canvas/domain'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
-import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 
 export interface CanvasStageContextMenuApi {
   contextMenu: CanvasContextMenuState | null
@@ -20,7 +20,7 @@ export interface CanvasStageContextMenuApi {
 
 export interface CanvasStageContextMenuOptions {
   snapshot: CanvasSnapshot | null
-  models: readonly CanvasFunctionModelDTO[]
+  models: readonly CanvasFunctionDefinitionDTO[]
   selectedIds: readonly string[]
   setSelection: (nodeIds: string[]) => void
   closeContextMenuRef: React.MutableRefObject<(() => void) | null>

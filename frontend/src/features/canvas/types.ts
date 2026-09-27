@@ -1,11 +1,13 @@
 import type {
   CanvasFunctionConfigDTO,
-  CanvasFunctionModelDTO,
+  CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import type { Group, ResourceNode } from '@/features/canvas/domain'
+
+import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 
 export type CanvasView = 'library' | 'editor'
 export type AddMenuAction =
@@ -31,6 +33,8 @@ export interface CanvasLocalState {
   selectedIds: string[]
   selectedLinks: CanvasLinkSelection[]
   positionDrafts: Record<string, { x: number; y: number }>
+  drafts: Record<string, CanvasNodeDraft>
+  storageError: string | null
   viewport: StoredCanvasViewport
   toast: string | null
   addMenuOpen: boolean
@@ -56,7 +60,7 @@ export interface PendingFunctionConfig {
 export interface ResourceFlowNodeData extends Record<string, unknown> {
   kind: 'resource'
   node: ResourceNode
-  model: CanvasFunctionModelDTO | null
+  model: CanvasFunctionDefinitionDTO | null
   callbacks: CanvasNodeCallbacks
 }
 

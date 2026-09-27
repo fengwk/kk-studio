@@ -1,6 +1,6 @@
 import type {
   CanvasFunctionConfigDTO,
-  CanvasFunctionModelDTO,
+  CanvasFunctionDefinitionDTO,
   CanvasResourceKind,
   UUIDString,
   PromptSegmentDTO,
@@ -20,9 +20,58 @@ export interface PromptCursor {
   offset: number
 }
 
-export function createDefaultFunctionConfig(model: CanvasFunctionModelDTO): CanvasFunctionConfigDTO {
+export interface CanvasFunctionParameterDefinition {
+  key: string
+  label: string
+  type: 'ENUM' | 'INTEGER'
+  required: boolean
+  defaultValue: string | number | null
+  options: string[]
+  min: number | null
+  max: number | null
+}
+
+export function extractParametersFromDefinition(model: CanvasFunctionDefinitionDTO): CanvasFunctionParameterDefinition[] {
+  const schema = model.argsSchema
+  if (!schema || typeof schema !== 'object' || !schema.properties || typeof schema.properties !== 'object') {
+    return []
+  }
+  const required = Array.isArray(schema.required) ? new Set(schema.required) : new Set<string>()
+  const params: CanvasFunctionParameterDefinition[] = []
+  for (const [key, prop] of Object.entries(schema.properties as Record<string, unknown>)) {
+    if (!prop || typeof prop !== 'object') continue
+    const p = prop as Record<string, unknown>
+    if (Array.isArray(p.enum)) {
+      params.push({
+        key,
+        label: typeof p.title === 'string' ? p.title : key,
+        type: 'ENUM',
+        required: required.has(key),
+        defaultValue: typeof p.default === 'string' || typeof p.default === 'number' ? p.default : (p.enum[0] ?? null),
+        options: p.enum.map(String),
+        min: null,
+        max: null,
+      })
+    } else if (p.type === 'integer' || p.type === 'number') {
+      params.push({
+        key,
+        label: typeof p.title === 'string' ? p.title : key,
+        type: 'INTEGER',
+        required: required.has(key),
+        defaultValue: typeof p.default === 'number' ? p.default : null,
+        options: [],
+        min: typeof p.minimum === 'number' ? p.minimum : null,
+        max: typeof p.maximum === 'number' ? p.maximum : null,
+      })
+    }
+  }
+  return params
+}
+
+export function createDefaultFunctionConfig(model: CanvasFunctionDefinitionDTO): CanvasFunctionConfigDTO {
   const parameters: Record<string, string | number> = {}
-  for (const parameter of model.parameters) {
+  const paramDefs = extractParametersFromDefinition(model)
+  for (const parameter of paramDefs) {
     if (parameter.defaultValue !== null) {
       parameters[parameter.key] = parameter.defaultValue
     } else if (parameter.type === 'ENUM' && parameter.options[0] !== undefined) {
@@ -39,7 +88,7 @@ export function createDefaultFunctionConfig(model: CanvasFunctionModelDTO): Canv
 
 export function parseFunctionConfig(
   configJson: string,
-  model: CanvasFunctionModelDTO,
+  model: CanvasFunctionDefinitionDTO,
 ): CanvasFunctionConfigDTO {
   try {
     const parsed: unknown = JSON.parse(configJson)
@@ -48,7 +97,8 @@ export function parseFunctionConfig(
     }
     const defaults = createDefaultFunctionConfig(model)
     const parameters: Record<string, string | number> = { ...defaults.parameters }
-    for (const definition of model.parameters) {
+    const paramDefs = extractParametersFromDefinition(model)
+    for (const definition of paramDefs) {
       const value = parsed.parameters[definition.key]
       if (
         definition.type === 'ENUM'
@@ -80,7 +130,7 @@ export function parseFunctionConfig(
 export function referenceCandidates(
   snapshot: CanvasSnapshot,
   targetNodeId: UUIDString,
-  model: CanvasFunctionModelDTO,
+  model: CanvasFunctionDefinitionDTO,
 ): ReferenceCandidate[] {
   const linkedIds = new Set(snapshot.links
     .filter((link) => link.targetNodeId === targetNodeId)
@@ -91,7 +141,7 @@ export function referenceCandidates(
       continue
     }
     node.resources.forEach((resource, index) => {
-      if (model.referencePolicy.allowedKinds.includes(resource.kind)) {
+      if (!model.referencePolicy || model.referencePolicy.allowedKinds.includes(resource.kind)) {
         candidates.push({
           nodeId: node.id,
           index,
@@ -155,7 +205,7 @@ export function removePromptSegment(
 export function filterConfigReferences(
   config: CanvasFunctionConfigDTO,
   candidates: ReferenceCandidate[],
-  model: CanvasFunctionModelDTO,
+  model: CanvasFunctionDefinitionDTO,
 ): CanvasFunctionConfigDTO {
   const byKey = new Map(candidates.map((candidate) => [
     referenceKey(candidate.nodeId, candidate.index),
@@ -181,9 +231,10 @@ export function filterConfigReferences(
       return false
     }
     const currentKindCount = kindCounts.get(candidate.resource.kind) ?? 0
-    const kindLimit = model.referencePolicy.maxByKind[candidate.resource.kind]
+    const kindLimit = model.referencePolicy?.maxByKind?.[candidate.resource.kind]
+    const maxRefs = model.referencePolicy?.maxReferences ?? Infinity
     if (
-      accepted.size >= model.referencePolicy.maxReferences
+      accepted.size >= maxRefs
       || (kindLimit !== undefined && currentKindCount >= kindLimit)
     ) {
       rejected.add(key)
@@ -203,7 +254,7 @@ export function canInsertReference(
   segments: PromptSegmentDTO[],
   candidate: ReferenceCandidate,
   candidates: ReferenceCandidate[],
-  model: CanvasFunctionModelDTO,
+  model: CanvasFunctionDefinitionDTO,
 ): boolean {
   const key = referenceKey(candidate.nodeId, candidate.index)
   const candidateByKey = new Map(candidates.map((item) => [
@@ -223,10 +274,10 @@ export function canInsertReference(
       }
     }
   }
-  if (unique.size >= model.referencePolicy.maxReferences) {
+  if (model.referencePolicy?.maxReferences != null && unique.size >= model.referencePolicy.maxReferences) {
     return false
   }
-  const kindLimit = model.referencePolicy.maxByKind[candidate.resource.kind]
+  const kindLimit = model.referencePolicy?.maxByKind?.[candidate.resource.kind]
   if (kindLimit === undefined) {
     return true
   }

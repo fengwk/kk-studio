@@ -8,6 +8,7 @@ import type {
 import {
   cancelCanvasFunctionRun,
   getCanvasFunctionRun,
+  resolveCanvasFunctionRun,
   startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -15,6 +16,12 @@ import { queryKeys } from '@/shared/lib/query-keys'
 export interface FunctionRunActions {
   startFunctionRun: (nodeId: UUIDString) => Promise<void>
   cancelFunctionRun: (nodeId: UUIDString, requestId: UUIDString) => Promise<void>
+  resolveFunctionRun: (
+    nodeId: UUIDString,
+    requestId: UUIDString,
+    resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
+    verification: string,
+  ) => Promise<void>
 }
 
 /**
@@ -86,21 +93,43 @@ export function useCanvasFunctionRun(options: {
 
   const cancelFunctionRun = useCallback(async (
     nodeId: UUIDString,
+    requestId?: UUIDString,
+  ) => {
+    const targetRequestId = requestId ?? readBasisRequestId(nodeId)
+    if (!canvasId || !targetRequestId) {
+      return
+    }
+    try {
+      const run = await cancelCanvasFunctionRun(canvasId, nodeId, { requestId: targetRequestId })
+      // cancel 以被取消的 requestId 为 basis：只允许更新该 request，不得覆盖更新的 request。
+      publishRun(run, targetRequestId)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '取消生成失败')
+    }
+  }, [canvasId, publishRun, readBasisRequestId, setToast])
+
+  const resolveFunctionRun = useCallback(async (
+    nodeId: UUIDString,
     requestId: UUIDString,
+    resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
+    verification: string,
   ) => {
     if (!canvasId || !requestId) {
       return
     }
     try {
-      const run = await cancelCanvasFunctionRun(canvasId, nodeId, { requestId })
-      // cancel 以被取消的 requestId 为 basis：只允许更新该 request，不得覆盖更新的 request。
+      const run = await resolveCanvasFunctionRun(canvasId, nodeId, {
+        requestId,
+        resolution,
+        verification,
+      })
       publishRun(run, requestId)
     } catch (error) {
-      setToast(error instanceof Error ? error.message : '取消生成失败')
+      setToast(error instanceof Error ? error.message : '核查确认失败')
     }
   }, [canvasId, publishRun, setToast])
 
-  return { startFunctionRun, cancelFunctionRun }
+  return { startFunctionRun, cancelFunctionRun, resolveFunctionRun }
 }
 
 /**
