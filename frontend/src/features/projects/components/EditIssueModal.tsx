@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Pencil, RefreshCw, X } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
-import { presentConflict } from '@/shared/conflict/conflict-presenter'
-import { useCatalogAgentNames } from '../useCatalogAgentNames'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { IssueDTO } from '../types'
@@ -24,33 +22,16 @@ export function EditIssueModal({
 }: EditIssueModalProps) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [assigneeAgentName, setAssigneeAgentName] = useState('')
-  const [reviewerAgentName, setReviewerAgentName] = useState('')
   const [expectedVersion, setExpectedVersion] = useState('0')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isReloading, setIsReloading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [conflictDetail, setConflictDetail] = useState<{
-    reason: string
-    detail: string
-  } | null>(null)
-
-  const { agentOptions } = useCatalogAgentNames({
-    preserveNames: [
-      issue?.assigneeAgentName,
-      issue?.reviewerAgentName,
-      assigneeAgentName,
-      reviewerAgentName,
-    ],
-    enabled: isOpen && Boolean(issue),
-  })
+  const [conflictDetail, setConflictDetail] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen && issue) {
       setTitle(issue.title)
       setDescription(issue.description)
-      setAssigneeAgentName(issue.assigneeAgentName ?? '')
-      setReviewerAgentName(issue.reviewerAgentName ?? '')
       setExpectedVersion(issue.version)
       setErrorMessage(null)
       setConflictDetail(null)
@@ -75,7 +56,8 @@ export function EditIssueModal({
     return null
   }
 
-  const handleReload = async () => {
+  // 409 发生后，重新从服务端获取最新版本号，但保留当前用户输入的所有编辑草稿
+  const handleReloadVersionKeepDraft = async () => {
     setIsReloading(true)
     setErrorMessage(null)
     try {
@@ -84,24 +66,6 @@ export function EditIssueModal({
       setConflictDetail(null)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : '重新加载最新 Issue 失败')
-    } finally {
-      setIsReloading(false)
-    }
-  }
-
-  const handleDiscardAndReset = async () => {
-    setIsReloading(true)
-    setErrorMessage(null)
-    try {
-      const freshDetail = await api.getIssue(issue.id)
-      setTitle(freshDetail.issue.title)
-      setDescription(freshDetail.issue.description)
-      setAssigneeAgentName(freshDetail.issue.assigneeAgentName ?? '')
-      setReviewerAgentName(freshDetail.issue.reviewerAgentName ?? '')
-      setExpectedVersion(freshDetail.issue.version)
-      setConflictDetail(null)
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '重置 Issue 数据失败')
     } finally {
       setIsReloading(false)
     }
@@ -117,25 +81,21 @@ export function EditIssueModal({
 
     setIsSubmitting(true)
     setErrorMessage(null)
+    setConflictDetail(null)
     try {
       const updated = await api.updateIssue(issue.id, {
         expectedVersion,
         title: trimmedTitle,
-        description: description.trim() || null,
-        assigneeAgentName: assigneeAgentName.trim() || null,
-        reviewerAgentName: reviewerAgentName.trim() || null,
+        description: description.trim(),
       })
       onSuccess(updated)
       onClose()
     } catch (err) {
       if (isConflictError(err)) {
-        const presentation = presentConflict(err)
-        setConflictDetail({
-          reason: presentation?.reason || 'PROJECT_VERSION_CONFLICT',
-          detail: presentation?.detail || '版本已过时。请点击重新加载获取最新版本并重试。',
-        })
+        // 409 保留编辑草稿
+        setConflictDetail('Issue 已被其他操作更新 (409 冲突)。已保留您的编辑草稿，请刷新版本后重试。')
       } else {
-        setErrorMessage(err instanceof Error ? err.message : '修改 Issue 失败')
+        setErrorMessage(err instanceof Error ? err.message : '更新 Issue 失败')
       }
     } finally {
       setIsSubmitting(false)
@@ -161,7 +121,7 @@ export function EditIssueModal({
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Pencil size={18} aria-hidden="true" />
-            <h3>编辑 Issue #{issue.number}</h3>
+            <h3>编辑 Issue #{issue.number ?? issue.id}</h3>
           </div>
           <button
             type="button"
@@ -176,102 +136,75 @@ export function EditIssueModal({
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {conflictDetail && (
-              <div className="cas-conflict-banner" role="alert">
-                <div className="cas-conflict-title">
+              <div
+                className="form-error-banner"
+                role="alert"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <AlertTriangle size={16} aria-hidden="true" />
-                  <span>版本冲突 ({conflictDetail.reason})</span>
+                  <span>{conflictDetail}</span>
                 </div>
-                <div className="cas-conflict-text">
-                  服务端 Issue 版本已更新，您的草稿已保留。可点击重新加载获取最新版本号再保存。
-                </div>
-                <div className="cas-conflict-actions">
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={handleReload}
-                    disabled={isReloading}
-                  >
-                    <RefreshCw size={14} aria-hidden="true" />
-                    {isReloading ? '同步中...' : '同步最新版本号并重试'}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={handleDiscardAndReset}
-                    disabled={isReloading}
-                  >
-                    放弃草稿重置
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void handleReloadVersionKeepDraft()}
+                  disabled={isReloading}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={isReloading ? 'animate-spin' : ''}
+                    aria-hidden="true"
+                  />
+                  <span>刷新版本</span>
+                </button>
               </div>
             )}
 
             {errorMessage && (
               <div className="form-error-banner" role="alert">
-                {errorMessage}
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>{errorMessage}</span>
               </div>
             )}
 
             <div className="form-group">
-              <label htmlFor="edit-issue-title">
-                标题 <span style={{ color: 'var(--danger)' }}>*</span>
+              <label htmlFor="edit-issue-title" className="form-label required">
+                需求标题
               </label>
               <input
                 id="edit-issue-title"
                 type="text"
+                className="form-input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="简明描述此 Issue 目标"
+                disabled={isSubmitting}
                 autoFocus
-                required
               />
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-issue-desc">规格与详细要求 (Spec)</label>
+              <label htmlFor="edit-issue-desc" className="form-label">
+                需求描述
+              </label>
               <textarea
                 id="edit-issue-desc"
+                className="form-textarea"
+                rows={5}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="详细说明此任务的上下文、边界与完成判据"
-                rows={4}
+                disabled={isSubmitting}
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div className="form-group">
-                <label htmlFor="edit-issue-assignee">Assignee Agent (EXECUTOR)</label>
-                <select
-                  id="edit-issue-assignee"
-                  value={assigneeAgentName}
-                  onChange={(e) => setAssigneeAgentName(e.target.value)}
-                  aria-label="Assignee Agent (EXECUTOR)"
-                >
-                  <option value="">未指定</option>
-                  {agentOptions.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="edit-issue-reviewer">Reviewer Agent (REVIEWER)</label>
-                <select
-                  id="edit-issue-reviewer"
-                  value={reviewerAgentName}
-                  onChange={(e) => setReviewerAgentName(e.target.value)}
-                  aria-label="Reviewer Agent (REVIEWER)"
-                >
-                  <option value="">人工审核</option>
-                  {agentOptions.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+              <span>当前状态: <code>{issue.state}</code> · 期望版本: <code>{expectedVersion}</code></span>
             </div>
           </div>
 
@@ -287,7 +220,7 @@ export function EditIssueModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={isSubmitting || !title.trim()}
+              disabled={isSubmitting}
             >
               {isSubmitting ? '保存中...' : '保存修改'}
             </button>

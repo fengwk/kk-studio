@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Pencil, AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Code, Pencil, RefreshCw, X } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
-import { presentConflict } from '@/shared/conflict/conflict-presenter'
+import { Checkbox } from '@/shared/ui/console/Checkbox'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type { ProjectDTO } from '../types'
+import type { ProjectDTO, ProjectWorkflowDTO } from '../types'
+import { decodeProjectWorkflow } from '../codecs'
 
 export interface EditProjectModalProps {
   isOpen: boolean
@@ -14,6 +15,8 @@ export interface EditProjectModalProps {
   api?: ProjectsApi
 }
 
+type TabKey = 'basic' | 'workflow'
+
 export function EditProjectModal({
   isOpen,
   project,
@@ -21,18 +24,17 @@ export function EditProjectModal({
   onSuccess,
   api = projectsApi,
 }: EditProjectModalProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>('basic')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [yoloEnabled, setYoloEnabled] = useState(true)
-  const [maxReviewRejections, setMaxReviewRejections] = useState<number | ''>(3)
+  const [workflowJson, setWorkflowJson] = useState('')
   const [expectedVersion, setExpectedVersion] = useState('0')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isReloading, setIsReloading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [conflictDetail, setConflictDetail] = useState<{
-    reason: string
-    detail: string
-  } | null>(null)
+  const [conflictDetail, setConflictDetail] = useState<string | null>(null)
+
   const initializedProjectIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -47,10 +49,11 @@ export function EditProjectModal({
     setTitle(project.title)
     setDescription(project.description)
     setYoloEnabled(project.yoloEnabled)
-    setMaxReviewRejections(parseInt(project.maxReviewRejections, 10) || 3)
+    setWorkflowJson(JSON.stringify(project.workflow, null, 2))
     setExpectedVersion(project.version)
     setErrorMessage(null)
     setConflictDetail(null)
+    setActiveTab('basic')
   }, [isOpen, project])
 
   useEffect(() => {
@@ -71,33 +74,26 @@ export function EditProjectModal({
     return null
   }
 
-  const handleReload = async () => {
-    setIsReloading(true)
-    setErrorMessage(null)
+  const handleFormatJson = () => {
     try {
-      const fresh = await api.getProject(project.id)
-      setExpectedVersion(fresh.version)
-      setConflictDetail(null)
+      const parsed = JSON.parse(workflowJson)
+      setWorkflowJson(JSON.stringify(parsed, null, 2))
+      setErrorMessage(null)
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '重新加载最新项目数据失败')
-    } finally {
-      setIsReloading(false)
+      setErrorMessage(err instanceof Error ? `JSON 格式错误: ${err.message}` : 'JSON 格式不合法')
     }
   }
 
-  const handleDiscardAndReset = async () => {
+  // 409 发生后，重新从服务端获取最新版本号，但保留当前用户输入的所有编辑草稿
+  const handleReloadVersionKeepDraft = async () => {
     setIsReloading(true)
     setErrorMessage(null)
     try {
       const fresh = await api.getProject(project.id)
-      setTitle(fresh.title)
-      setDescription(fresh.description)
-      setYoloEnabled(fresh.yoloEnabled)
-      setMaxReviewRejections(parseInt(fresh.maxReviewRejections, 10) || 3)
       setExpectedVersion(fresh.version)
       setConflictDetail(null)
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : '重置项目数据失败')
+      setErrorMessage(err instanceof Error ? err.message : '重新加载最新版本失败')
     } finally {
       setIsReloading(false)
     }
@@ -110,31 +106,70 @@ export function EditProjectModal({
       setErrorMessage('项目名称不能为空')
       return
     }
-    const rejections = typeof maxReviewRejections === 'number' ? maxReviewRejections : 3
-    if (rejections <= 0) {
-      setErrorMessage('最大打回次数必须为正整数')
+
+    let parsedWorkflow: ProjectWorkflowDTO | null = null
+    try {
+      const raw = JSON.parse(workflowJson)
+      parsedWorkflow = decodeProjectWorkflow(raw)
+      // 客户端语义校验：必须包含 INIT, BLOCKED, DONE
+      const states = parsedWorkflow.states
+      const codes = new Set(states.map((s) => s.state))
+      if (!codes.has('INIT') || !codes.has('BLOCKED') || !codes.has('DONE')) {
+        setErrorMessage('工作流必须包含固定的 INIT、BLOCKED 和 DONE 状态')
+        return
+      }
+      if (codes.size !== states.length) {
+        setErrorMessage('工作流状态编码不可重复')
+        return
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? `工作流配置错误: ${err.message}` : '工作流 JSON 不合法')
       return
     }
 
     setIsSubmitting(true)
     setErrorMessage(null)
+    setConflictDetail(null)
+
+    let currentVer = expectedVersion
+    let updatedProject: ProjectDTO = project
+
     try {
-      const updated = await api.updateProject(project.id, {
-        expectedVersion,
-        title: trimmedTitle,
-        description: description.trim() || null,
-        yoloEnabled,
-        maxReviewRejections: rejections,
-      })
-      onSuccess(updated)
+      // 1. 若基础配置有变更，更新配置
+      if (trimmedTitle !== project.title || description.trim() !== project.description) {
+        updatedProject = await api.updateProject(project.id, {
+          expectedVersion: currentVer,
+          title: trimmedTitle,
+          description: description.trim(),
+        })
+        currentVer = updatedProject.version
+      }
+
+      // 2. 若 YOLO 状态变更，更新 YOLO
+      if (yoloEnabled !== updatedProject.yoloEnabled) {
+        updatedProject = await api.updateYolo(project.id, {
+          expectedVersion: currentVer,
+          yoloEnabled,
+        })
+        currentVer = updatedProject.version
+      }
+
+      // 3. 严格保存工作流配置
+      const initialJsonNormalized = JSON.stringify(project.workflow)
+      const currentJsonNormalized = JSON.stringify(parsedWorkflow)
+      if (initialJsonNormalized !== currentJsonNormalized) {
+        updatedProject = await api.updateWorkflow(project.id, {
+          expectedVersion: currentVer,
+          workflow: parsedWorkflow,
+        })
+      }
+
+      onSuccess(updatedProject)
       onClose()
     } catch (err) {
       if (isConflictError(err)) {
-        const presentation = presentConflict(err)
-        setConflictDetail({
-          reason: presentation?.reason || 'PROJECT_VERSION_CONFLICT',
-          detail: presentation?.detail || '版本已过时。请点击重新加载获取最新版本并重试。',
-        })
+        // 关键需求：409 保留编辑草稿，不丢失用户修改
+        setConflictDetail('项目配置已在别处发生更新 (409 冲突)。已为您保留编辑草稿，请点击更新版本后重试。')
       } else {
         setErrorMessage(err instanceof Error ? err.message : '更新项目失败')
       }
@@ -158,11 +193,12 @@ export function EditProjectModal({
         role="dialog"
         aria-modal="true"
         aria-label="编辑项目"
+        style={{ maxWidth: '640px' }}
       >
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Pencil size={18} aria-hidden="true" />
-            <h3>编辑项目</h3>
+            <h3>编辑项目配置</h3>
           </div>
           <button
             type="button"
@@ -174,110 +210,148 @@ export function EditProjectModal({
           </button>
         </div>
 
+        <div className="tab-nav" style={{ padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'basic' ? 'active' : ''}`}
+            onClick={() => setActiveTab('basic')}
+          >
+            基础信息
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'workflow' ? 'active' : ''}`}
+            onClick={() => setActiveTab('workflow')}
+          >
+            工作流 JSON 配置
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {conflictDetail && (
-              <div className="cas-conflict-banner" role="alert">
-                <div className="cas-conflict-title">
+              <div
+                className="form-error-banner"
+                role="alert"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <AlertTriangle size={16} aria-hidden="true" />
-                  <span>版本冲突 ({conflictDetail.reason})</span>
+                  <span>{conflictDetail}</span>
                 </div>
-                <div className="cas-conflict-text">
-                  服务端项目版本已更新，您编辑的内容已被妥善保存在当前草稿中。
-                </div>
-                <div className="cas-conflict-actions">
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={handleReload}
-                    disabled={isReloading}
-                  >
-                    <RefreshCw size={14} aria-hidden="true" />
-                    保留草稿并重新加载最新版本号
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={handleDiscardAndReset}
-                    disabled={isReloading}
-                  >
-                    放弃更改并完全刷新
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => void handleReloadVersionKeepDraft()}
+                  disabled={isReloading}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={isReloading ? 'animate-spin' : ''}
+                    aria-hidden="true"
+                  />
+                  <span>刷新版本</span>
+                </button>
               </div>
             )}
 
             {errorMessage && (
               <div className="form-error-banner" role="alert">
-                {errorMessage}
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>{errorMessage}</span>
               </div>
             )}
 
-            <div className="form-group">
-              <label htmlFor="edit-project-title">
-                项目名称 <span style={{ color: 'var(--danger)' }}>*</span>
-              </label>
-              <input
-                id="edit-project-title"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="输入项目标题"
-                autoFocus
-                required
-              />
-            </div>
+            {activeTab === 'basic' && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="edit-project-title" className="form-label required">
+                    项目名称
+                  </label>
+                  <input
+                    id="edit-project-title"
+                    type="text"
+                    className="form-input"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    disabled={isSubmitting}
+                    autoFocus
+                  />
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="edit-project-desc">项目描述</label>
-              <textarea
-                id="edit-project-desc"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="可选的项目背景与目标描述"
-                rows={3}
-              />
-            </div>
+                <div className="form-group">
+                  <label htmlFor="edit-project-desc" className="form-label">
+                    项目描述
+                  </label>
+                  <textarea
+                    id="edit-project-desc"
+                    className="form-textarea"
+                    rows={3}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    disabled={isSubmitting}
+                  />
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="edit-project-max-rejections">
-                最大审查打回次数 <span style={{ color: 'var(--danger)' }}>*</span>
-              </label>
-              <input
-                id="edit-project-max-rejections"
-                type="number"
-                min={1}
-                value={maxReviewRejections}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setMaxReviewRejections(val === '' ? '' : parseInt(val, 10))
-                }}
-                required
-                aria-label="最大审查打回次数"
-              />
-              <span className="field-hint" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
-                连续打回达到该次数后单据转入 BLOCKED 状态
-              </span>
-            </div>
+                <div className="form-group">
+                  <Checkbox
+                    checked={yoloEnabled}
+                    onChange={setYoloEnabled}
+                    label="启用 YOLO 执行策略 (自主执行，跳过人工交互门禁)"
+                    disabled={isSubmitting}
+                  />
+                </div>
 
-            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-              <input
-                id="edit-project-yolo"
-                type="checkbox"
-                checked={yoloEnabled}
-                onChange={(e) => setYoloEnabled(e.target.checked)}
-                style={{ marginTop: '3px' }}
-                aria-label="YOLO 模式"
-              />
-              <div>
-                <label htmlFor="edit-project-yolo" style={{ cursor: 'pointer', fontWeight: 500 }}>
-                  YOLO 模式 (自动执行)
-                </label>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block' }}>
-                  新建 Issue 时自动启动 Agent Run 分支，无需手动触发
-                </span>
-              </div>
-            </div>
+                <div className="form-group" style={{ fontSize: '12px', color: 'var(--fg-muted)' }}>
+                  <span>期望版本: <code>{expectedVersion}</code></span>
+                </div>
+              </>
+            )}
+
+            {activeTab === 'workflow' && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label htmlFor="edit-project-workflow-json" className="form-label" style={{ margin: 0 }}>
+                    工作流配置 (JSON 严格校验)
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={handleFormatJson}
+                    style={{ fontSize: '12px', padding: '2px 8px' }}
+                  >
+                    <Code size={12} aria-hidden="true" />
+                    <span>格式化 JSON</span>
+                  </button>
+                </div>
+
+                <div className="form-group">
+                  <textarea
+                    id="edit-project-workflow-json"
+                    className="form-textarea"
+                    rows={12}
+                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    value={workflowJson}
+                    onChange={(e) => setWorkflowJson(e.target.value)}
+                    disabled={isSubmitting}
+                    placeholder="输入 workflow JSON 配置..."
+                  />
+                </div>
+
+                <div style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
+                  <p style={{ margin: 0 }}>
+                    * 必须包含固定保留状态：<code>INIT</code>、<code>BLOCKED</code> 与 <code>DONE</code>。
+                    工作阶段可配置 <code>agent</code>、<code>environment</code>、<code>instructions</code>、<code>maxRuns</code> 及 <code>next</code> 白名单。
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="modal-footer">
@@ -292,11 +366,7 @@ export function EditProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={
-                isSubmitting ||
-                !title.trim() ||
-                (typeof maxReviewRejections === 'number' && maxReviewRejections <= 0)
-              }
+              disabled={isSubmitting}
             >
               {isSubmitting ? '保存中...' : '保存更改'}
             </button>

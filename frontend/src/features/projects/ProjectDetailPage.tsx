@@ -5,6 +5,7 @@ import {
   Archive,
   ArrowLeft,
   Calendar,
+  Layers,
   Pencil,
   RefreshCw,
   Trash2,
@@ -16,7 +17,7 @@ import { IssueBoard } from './components/IssueBoard'
 import { IssueDetailModal } from './components/IssueDetailModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
-import type { IssueStatus } from './types'
+import { createUuid } from '@/shared/lib/uuid'
 import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
 
@@ -33,7 +34,7 @@ export function ProjectDetailPage({
 }: ProjectDetailPageProps) {
   const queryClient = useQueryClient()
 
-  // 统一通过 TanStack Query 管理 Project Snapshot 权威状态
+  // 权威聚合状态
   const {
     data: snapshot,
     isLoading,
@@ -46,7 +47,7 @@ export function ProjectDetailPage({
 
   const [actionError, setActionError] = useState<string | null>(null)
 
-  // Dialogs
+  // Modals
   const [isEditProjectOpen, setIsEditProjectOpen] = useState(false)
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
@@ -59,33 +60,52 @@ export function ProjectDetailPage({
     })
   }
 
-  // Status transitions from board
-  const handleChangeIssueStatus = async (
+  // 看板上的动作：每个写操作冻结 requestKey 支持相同重试
+  const handleTransitionIssue = async (
     issueId: string,
     expectedVersion: string,
-    status: IssueStatus,
+    toState: string,
   ) => {
+    const requestKey = createUuid()
     try {
       setActionError(null)
-      await api.changeIssueStatus(issueId, { expectedVersion, status })
+      await api.transitionIssue(issueId, { expectedVersion, requestKey, toState })
       await invalidateSnapshot()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '变更 Issue 状态失败')
+      setActionError(err instanceof Error ? err.message : '流转 Issue 状态失败')
     }
   }
 
-  // Cancel Issue from board
-  const handleCancelIssue = async (issueId: string, expectedVersion: string) => {
+  const handleBlockIssue = async (issueId: string, _expectedVersion: string) => {
+    setSelectedIssueId(issueId)
+  }
+
+  const handleRecoverIssue = async (issueId: string, expectedVersion: string) => {
+    const requestKey = createUuid()
     try {
       setActionError(null)
-      await api.cancelIssue(issueId, { expectedVersion })
+      await api.recoverIssue(issueId, { expectedVersion, requestKey })
       await invalidateSnapshot()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '取消 Issue 失败')
+      setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
     }
   }
 
-  // Archive / Unarchive Issue from board
+  const handleReopenIssue = async (issueId: string, expectedVersion: string) => {
+    const requestKey = createUuid()
+    try {
+      setActionError(null)
+      await api.reopenIssue(issueId, { expectedVersion, requestKey })
+      await invalidateSnapshot()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '重新打开 Issue 失败')
+    }
+  }
+
+  const handleResolveUnknownIssue = async (issueId: string, _expectedVersion: string) => {
+    setSelectedIssueId(issueId)
+  }
+
   const handleArchiveIssue = async (issueId: string, expectedVersion: string) => {
     try {
       setActionError(null)
@@ -106,7 +126,7 @@ export function ProjectDetailPage({
     }
   }
 
-  // Archive / Unarchive Project
+  // 项目归档 / 取消归档
   const handleProjectArchiveToggle = async () => {
     if (!snapshot) {
       return
@@ -198,10 +218,10 @@ export function ProjectDetailPage({
               type="button"
               className="ghost-btn"
               onClick={() => setIsEditProjectOpen(true)}
-              title="编辑项目"
+              title="编辑项目配置与工作流 JSON"
             >
               <Pencil size={14} aria-hidden="true" />
-              <span>编辑</span>
+              <span>编辑 / 工作流</span>
             </button>
 
             <button
@@ -233,8 +253,9 @@ export function ProjectDetailPage({
           </span>
 
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span>最大打回:</span>
-            <strong style={{ color: 'var(--fg)' }}>{project.maxReviewRejections} 次</strong>
+            <Layers size={14} aria-hidden="true" />
+            <span>工作流阶段:</span>
+            <strong style={{ color: 'var(--fg)' }}>{project.workflow?.states?.length ?? 0} 个</strong>
           </span>
 
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -269,14 +290,18 @@ export function ProjectDetailPage({
         </div>
       )}
 
+      {/* 状态自然 token 看板 */}
       <div className="project-detail-body">
         <IssueBoard
+          workflow={project.workflow}
           issues={snapshot.issues}
-          maxReviewRejections={project.maxReviewRejections}
           onSelectIssue={(id) => setSelectedIssueId(id)}
           onCreateIssue={() => setIsCreateIssueOpen(true)}
-          onChangeIssueStatus={handleChangeIssueStatus}
-          onCancelIssue={handleCancelIssue}
+          onTransitionIssue={handleTransitionIssue}
+          onBlockIssue={handleBlockIssue}
+          onRecoverIssue={handleRecoverIssue}
+          onReopenIssue={handleReopenIssue}
+          onResolveUnknownIssue={handleResolveUnknownIssue}
           onArchiveIssue={handleArchiveIssue}
           onUnarchiveIssue={handleUnarchiveIssue}
         />
@@ -311,7 +336,7 @@ export function ProjectDetailPage({
         isOpen={Boolean(selectedIssueId)}
         projectId={projectId}
         issueId={selectedIssueId}
-        projectIssues={snapshot.issues}
+        workflow={project.workflow}
         onClose={() => setSelectedIssueId(null)}
         onUpdated={() => void invalidateSnapshot()}
         api={api}

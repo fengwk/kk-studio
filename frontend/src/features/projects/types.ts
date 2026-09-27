@@ -1,9 +1,32 @@
+/**
+ * Project 领域前端实体与传输对象定义。
+ *
+ * <p>基于 dev/spec §4 规范，彻底移除 dependencies、executor-reviewer 与 maxReviewRejections；
+ * 支持动态工作流配置、自然状态 token、稳定 AgentThread 绑定、阶段预算、Run 执行事实与区间报告、
+ * 明确区分的评论与指令活动事实流、证据上传与预览、Stop 终止、UNKNOWN 门禁人工核查以及项目/Issue 彻底删除。
+ */
+
+export interface ProjectWorkflowStateDTO {
+  state: string
+  name: string
+  agent?: string | null
+  environment?: string | null
+  instructions?: string | null
+  maxRuns?: string | null
+  enabled?: boolean | null
+  next?: string[] | null
+}
+
+export interface ProjectWorkflowDTO {
+  states: ProjectWorkflowStateDTO[]
+}
+
 export interface ProjectDTO {
   id: string
   title: string
   description: string
+  workflow: ProjectWorkflowDTO
   yoloEnabled: boolean
-  maxReviewRejections: string
   nextIssueNumber: string
   version: string
   archivedAt: string | null
@@ -15,15 +38,22 @@ export interface CreateProjectRequest {
   title: string
   description?: string | null
   yoloEnabled?: boolean | null
-  maxReviewRejections?: number | null
 }
 
 export interface UpdateProjectRequest {
   expectedVersion: string
   title?: string | null
   description?: string | null
-  yoloEnabled?: boolean | null
-  maxReviewRejections?: number | null
+}
+
+export interface UpdateProjectWorkflowRequest {
+  expectedVersion: string
+  workflow: ProjectWorkflowDTO
+}
+
+export interface UpdateProjectYoloRequest {
+  expectedVersion: string
+  yoloEnabled: boolean
 }
 
 export interface ProjectArchiveRequest {
@@ -34,14 +64,7 @@ export interface ProjectUnarchiveRequest {
   expectedVersion: string
 }
 
-export type IssueStatus =
-  | 'BACKLOG'
-  | 'TODO'
-  | 'IN_PROGRESS'
-  | 'IN_REVIEW'
-  | 'BLOCKED'
-  | 'DONE'
-  | 'CANCELED'
+export type IssuePauseReason = 'USER' | 'ERROR' | 'UNKNOWN'
 
 export interface IssueDTO {
   id: string
@@ -49,9 +72,11 @@ export interface IssueDTO {
   number: string
   title: string
   description: string
-  status: IssueStatus
-  assigneeAgentName: string | null
-  reviewerAgentName: string | null
+  state: string
+  blockedFromState: string | null
+  blockReason: string | null
+  pauseReason: IssuePauseReason | null
+  pauseDetail: string | null
   version: string
   archivedAt: string | null
   createdAt: string
@@ -61,158 +86,65 @@ export interface IssueDTO {
 export interface CreateIssueRequest {
   title: string
   description?: string | null
-  assigneeAgentName?: string | null
-  reviewerAgentName?: string | null
-  initialStatus?: 'BACKLOG' | 'TODO' | null
 }
 
 export interface UpdateIssueRequest {
   expectedVersion: string
   title?: string | null
   description?: string | null
-  assigneeAgentName?: string | null
-  reviewerAgentName?: string | null
 }
 
-export interface ChangeIssueStatusRequest {
+export interface TransitionIssueRequest {
   expectedVersion: string
-  status: IssueStatus
+  requestKey: string
+  toState: string
 }
 
 export interface BlockIssueRequest {
   expectedVersion: string
+  requestKey: string
   reason: string
 }
 
 export interface RecoverIssueRequest {
   expectedVersion: string
-  toBacklog?: boolean | null
-  comment?: string | null
+  requestKey: string
 }
 
-export interface IssueDependencyDTO {
-  issueId: string
-  dependsOnIssueId: string
-  projectId: string
-  createdAt: string
-}
-
-export interface AddIssueDependencyRequest {
+export interface PauseIssueRequest {
   expectedVersion: string
-  dependsOnIssueId: string
+  requestKey: string
+  reason: 'USER' | 'ERROR'
+  detail?: string | null
 }
 
-export type IssueRunRole = 'EXECUTOR' | 'REVIEWER'
-
-export interface IssueAgentSessionDTO {
-  id: string
-  issueId: string
-  agentName: string
-  role: IssueRunRole
-  sessionId: string
-  branchId: string
-  createdAt: string
-}
-
-export type IssueActivityKind =
-  | 'SPEC_CHANGE'
-  | 'INSTRUCTION'
-  | 'COMMENT'
-  | 'HUMAN_INPUT'
-  | 'REVIEW_DECISION'
-  | 'RECOVERY'
-  | 'RETRY'
-  | 'SYSTEM'
-
-export type IssueActivityActorType = 'HUMAN' | 'AGENT' | 'SYSTEM'
-
-export interface IssueActivityDTO {
-  issueId: string
-  sequence: string
-  kind: IssueActivityKind
-  actorType: IssueActivityActorType
-  actorAgentName: string | null
-  targetRole: IssueRunRole | null
-  runId: string | null
-  submissionRunId: string | null
-  decision: string | null
-  body: string
-  idempotencyKey: string | null
-  createdAt: string
-}
-
-export interface AppendIssueActivityRequest {
-  body: string
-  kind?: string | null
-  targetRole?: IssueRunRole | null
-  idempotencyKey?: string | null
-}
-
-export type IssueRunStatus =
-  | 'RUNNING'
-  | 'WAITING_HUMAN'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'CANCELLED'
-  | 'UNKNOWN'
-
-export type IssueRunOutcome = 'SUBMITTED' | 'APPROVED' | 'CHANGES_REQUESTED' | null
-
-export interface IssueRunSummaryDTO {
-  id: string
-  issueId: string
-  ordinal: string
-  role: IssueRunRole
-  agentName: string | null
-  submissionRunId: string | null
-  status: IssueRunStatus
-  outcome: IssueRunOutcome
-  waitingReason: string | null
-  createdAt: string | null
-  completedAt: string | null
-}
-
-export interface IssueRunDTO {
-  id: string
-  issueId: string
-  ordinal: string
-  role: IssueRunRole
-  agentName: string | null
-  agentSessionId: string | null
-  sessionId: string | null
-  submissionRunId: string | null
-  status: IssueRunStatus
-  outcome: IssueRunOutcome
-  observedActivitySequence: string
-  continuationCount: number
-  maxContinuations: number
-  deadline: string | null
-  waitingReason: string | null
-  result: string | null
-  terminalActionId: string | null
-  version: string
-  createdAt: string
-  updatedAt: string
-  completedAt: string | null
-}
-
-export type ReviewDecision = 'APPROVE' | 'REQUEST_CHANGES'
-
-export interface ReviewIssueRequest {
-  decision: ReviewDecision
-  reason?: string | null
-  idempotencyKey?: string | null
-}
-
-export interface CancelIssueRequest {
+export interface ResumeIssueRequest {
   expectedVersion: string
-  reason?: string | null
+  requestKey: string
 }
 
-export interface RetryIssueRequest {
-  idempotencyKey?: string | null
-  // 最新 Run 为 UNKNOWN 时必填：人工核对残留模型/工具调用与外部副作用后的说明。
-  verification?: string | null
+export interface StopIssueRequest {
+  expectedVersion: string
+  requestKey: string
+  detail?: string | null
+}
+
+export interface ResolveUnknownIssueRequest {
+  expectedVersion: string
+  requestKey: string
+  verification: string
+}
+
+export interface ReopenIssueRequest {
+  expectedVersion: string
+  requestKey: string
+}
+
+export interface ResetStageBudgetRequest {
+  expectedVersion: string
+  requestKey: string
+  state: string
+  maxRuns: number
 }
 
 export interface ArchiveIssueRequest {
@@ -223,29 +155,99 @@ export interface UnarchiveIssueRequest {
   expectedVersion: string
 }
 
-export interface ProjectIssueSnapshotDTO {
-  issue: IssueDTO
-  blocked: boolean
-  reviewRejectionCount: string
-  currentOrLatestRun: IssueRunSummaryDTO | null
+export type IssueActivityKind =
+  | 'COMMENT'
+  | 'INSTRUCTION'
+  | 'RUN'
+  | 'SPEC_CHANGE'
+  | 'STATE_CHANGE'
+  | 'CONTROL'
+  | string
+
+export type IssueActivityActorType = 'HUMAN' | 'AGENT' | 'SYSTEM' | string
+
+export interface IssueActivityDTO {
+  issueId: string
+  sequence: string
+  kind: IssueActivityKind
+  actorType: IssueActivityActorType
+  actorAgentName: string | null
+  runId: string | null
+  body: string | null
+  data?: unknown
+  createdAt: string
 }
 
-export interface ProjectSnapshotDTO {
-  project: ProjectDTO
-  issues: ProjectIssueSnapshotDTO[]
-  dependencies: IssueDependencyDTO[]
+export interface AppendIssueActivityRequest {
+  expectedVersion: string
+  requestKey: string
+  kind?: 'COMMENT' | 'INSTRUCTION' | null
+  body: string
 }
 
-export type IssueEvidenceOrigin = 'EXECUTOR' | 'HUMAN'
+export interface IssueAgentThreadDTO {
+  issueId: string
+  agentName: string
+  threadId: string
+}
+
+export interface IssueStageBudgetDTO {
+  state: string
+  maxRuns: number
+  budgetAfterOrdinal: string
+  usedRuns: string
+  remainingRuns: string
+}
+
+export type IssueRunStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'UNKNOWN'
+  | string
+
+export interface IssueRunSummaryDTO {
+  id: string
+  issueId: string
+  ordinal: string
+  state: string
+  status: IssueRunStatus
+  agentName: string | null
+  startedAt: string
+  endedAt: string | null
+}
+
+export interface IssueRunDTO {
+  id: string
+  issueId: string
+  ordinal: string
+  state: string
+  agentName: string | null
+  sessionId: string
+  threadId: string
+  status: IssueRunStatus
+  startEntryId: string
+  endEntryId: string | null
+  finalAnswerEntryId: string | null
+  nextState: string | null
+  observedActivitySequence: string
+  remainingExecutionMs: string
+  error: string | null
+  version: string
+  startedAt: string
+  endedAt: string | null
+}
 
 export interface IssueEvidenceDTO {
   issueId: string
   blobId: string
   uri: string
-  origin: IssueEvidenceOrigin | string
   name: string | null
+  actorAgentName: string | null
   runId: string | null
-  publishedAt: string
+  createdAt: string
 }
 
 export interface AddIssueEvidenceRequest {
@@ -254,15 +256,23 @@ export interface AddIssueEvidenceRequest {
 
 export interface IssueDetailDTO {
   issue: IssueDTO
-  blocked: boolean
-  dependencies: IssueDependencyDTO[]
-  sessions: IssueAgentSessionDTO[]
   activities: IssueActivityDTO[]
-  evidence: IssueEvidenceDTO[]
   nextActivityCursor: string | null
   runs: IssueRunDTO[]
   currentRun: IssueRunDTO | null
   latestRun: IssueRunDTO | null
+  stageBudgets: IssueStageBudgetDTO[]
+  agentThreads: IssueAgentThreadDTO[]
+}
+
+export interface ProjectIssueSnapshotDTO {
+  issue: IssueDTO
+  currentOrLatestRun: IssueRunSummaryDTO | null
+}
+
+export interface ProjectSnapshotDTO {
+  project: ProjectDTO
+  issues: ProjectIssueSnapshotDTO[]
 }
 
 export interface ProjectsChangedEventPayload {
