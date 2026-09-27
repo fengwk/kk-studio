@@ -15,7 +15,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -35,7 +38,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>支持从回调内部安全重入 {@link #cancel()} 而不死锁。
  *   <li>竞态安全的 Future 挂接：任何 future 一经挂接若已处于终态必须立即 cancel。
  *   <li>非显式 cancel 导致的 {@link InterruptedException} 按基础 transport I/O 语义分类并保留中断标志。
- *   <li>自适应单调时钟 Watchdog 周期调度，彻底杜绝短超时调度延迟。
+ *   <li>单调时钟 deadline 一次性调度；timer 仅负责排期，不执行阻塞清理或回调。
  * </ul>
  */
 final class HttpSseStreamExecution implements ProviderStream {
@@ -69,6 +72,8 @@ final class HttpSseStreamExecution implements ProviderStream {
   private volatile Future<?> workerFuture;
   private volatile ScheduledFuture<?> watchdogFuture;
   private volatile InputStream activeInputStream;
+  private ScheduledExecutorService scheduler;
+  private ExecutorService timeoutExecutor;
 
   HttpSseStreamExecution(
       HttpClient httpClient,
@@ -105,14 +110,76 @@ final class HttpSseStreamExecution implements ProviderStream {
     return nanosFromSeconds + nanos;
   }
 
-  long watchdogIntervalNanos() {
-    long minTimeout = Math.min(totalTimeoutNanos, idleTimeoutNanos);
-    if (minTimeout <= 0) {
-      return TimeUnit.MILLISECONDS.toNanos(1);
+  // Elapsed-time comparisons avoid overflow even when nanoTime wraps around.
+  long nextDeadlineDelayNanos(long now) {
+    long totalRemaining =
+        totalTimeoutNanos == Long.MAX_VALUE
+            ? Long.MAX_VALUE
+            : Math.max(0L, totalTimeoutNanos - Math.max(0L, now - startNano));
+    long idleRemaining =
+        idleTimeoutNanos == Long.MAX_VALUE
+            ? Long.MAX_VALUE
+            : Math.max(0L, idleTimeoutNanos - Math.max(0L, now - lastActivityNano));
+    return Math.min(totalRemaining, idleRemaining);
+  }
+
+  void scheduleWatchdog(ScheduledExecutorService scheduler, ExecutorService timeoutExecutor) {
+    synchronized (futureLock) {
+      this.scheduler = scheduler;
+      this.timeoutExecutor = timeoutExecutor;
+      scheduleNextDeadline();
     }
-    long half = minTimeout / 2;
-    return Math.max(
-        TimeUnit.MILLISECONDS.toNanos(1), Math.min(TimeUnit.MILLISECONDS.toNanos(25), half));
+  }
+
+  // Called with futureLock held. A read only updates lastActivityNano; no per-byte timer churn.
+  private void scheduleNextDeadline() {
+    if (!isTerminal()) {
+      watchdogFuture =
+          scheduler.schedule(
+              this::onDeadline, nextDeadlineDelayNanos(System.nanoTime()), TimeUnit.NANOSECONDS);
+    }
+  }
+
+  private void onDeadline() {
+    synchronized (futureLock) {
+      if (isTerminal()) {
+        return;
+      }
+      if (nextDeadlineDelayNanos(System.nanoTime()) > 0) {
+        try {
+          scheduleNextDeadline();
+        } catch (RejectedExecutionException e) {
+          submitTimeoutWork(
+              () ->
+                  dispatchFailure(
+                      new TransportException(
+                          TransportErrorKind.EXECUTOR_REJECTED,
+                          "Scheduler rejected deadline rescheduling",
+                          e)));
+        }
+        return;
+      }
+    }
+    // Never close a stream, wait for callbackLock, or invoke user code on the shared timer.
+    submitTimeoutWork(this::checkWatchdog);
+  }
+
+  private void submitTimeoutWork(Runnable work) {
+    Thread timerThread = Thread.currentThread();
+    try {
+      timeoutExecutor.execute(
+          () -> {
+            if (Thread.currentThread() == timerThread) {
+              // A caller-runs executor must not run cleanup or user callbacks on the timer.
+              Thread.ofVirtual().start(work);
+            } else {
+              work.run();
+            }
+          });
+    } catch (RejectedExecutionException e) {
+      // The executor may have shut down after admission. Preserve cleanup without blocking timer.
+      Thread.ofVirtual().start(work);
+    }
   }
 
   boolean isInlineExecutionDetected() {
@@ -363,6 +430,24 @@ final class HttpSseStreamExecution implements ProviderStream {
     // 检查无活动闲置超时
     if (isIdleTimeoutExceeded(now)) {
       triggerTimeout("Stream idle timeout exceeded " + timeoutPolicy.modelCallIdleTimeout());
+    } else {
+      RejectedExecutionException rejected = null;
+      synchronized (futureLock) {
+        if (!isTerminal()) {
+          try {
+            scheduleNextDeadline();
+          } catch (RejectedExecutionException e) {
+            rejected = e;
+          }
+        }
+      }
+      if (rejected != null) {
+        dispatchFailure(
+            new TransportException(
+                TransportErrorKind.EXECUTOR_REJECTED,
+                "Scheduler rejected deadline rescheduling",
+                rejected));
+      }
     }
   }
 
