@@ -60,6 +60,7 @@ class ProjectDtoContractTest {
     "UpdateIssueRequestDTO.description",
     "PauseIssueRequestDTO.detail",
     "StopIssueRequestDTO.detail",
+    "ResolveUnknownIssueRequestDTO.verification",
     "AppendIssueActivityRequestDTO.kind"
   };
 
@@ -91,6 +92,7 @@ class ProjectDtoContractTest {
     "ReopenIssueRequestDTO.expectedVersion",
     "ResetStageBudgetRequestDTO.expectedVersion",
     "StopIssueRequestDTO.expectedVersion",
+    "ResolveUnknownIssueRequestDTO.expectedVersion",
     "ArchiveIssueRequestDTO.expectedVersion",
     "UnarchiveIssueRequestDTO.expectedVersion",
     "AppendIssueActivityRequestDTO.expectedVersion"
@@ -265,6 +267,10 @@ class ProjectDtoContractTest {
     assertEquals(
         Set.of("expectedVersion", "requestKey", "detail"),
         getInstanceFieldNames(StopIssueRequestDTO.class));
+
+    assertEquals(
+        Set.of("expectedVersion", "requestKey", "verification"),
+        getInstanceFieldNames(ResolveUnknownIssueRequestDTO.class));
 
     assertEquals(Set.of("expectedVersion"), getInstanceFieldNames(ArchiveIssueRequestDTO.class));
 

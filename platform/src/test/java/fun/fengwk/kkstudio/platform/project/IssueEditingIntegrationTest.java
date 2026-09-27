@@ -711,17 +711,15 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
         count("select count(*) from project where id = ? and archived_at is not null", projectId));
   }
 
-  /** deleteProject 删除项目行；仍拥有 Issue 时拒绝删除；过期版本 CAS 冲突。 */
+  /** deleteProject 深删除项目及其下属 Issue；过期版本 CAS 冲突。 */
   @Test
   void deleteProjectDeletesRowAndRejectsWhenOwningIssuesOrStaleVersion() {
-    // 拥有 Issue 的项目拒绝删除
+    // 拥有 Issue 的项目支持深删除
     Project projectWithIssue = projectService.createProject("含Issue项目", "描述", true);
-    createIssue(projectWithIssue.getId());
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            projectService.deleteProject(projectWithIssue.getId(), projectWithIssue.getVersion()));
-    assertEquals(1L, count("select count(*) from project where id = ?", projectWithIssue.getId()));
+    Issue issue = createIssue(projectWithIssue.getId());
+    projectService.deleteProject(projectWithIssue.getId(), projectWithIssue.getVersion());
+    assertEquals(0L, count("select count(*) from project_issue where id = ?", issue.getId()));
+    assertEquals(0L, count("select count(*) from project where id = ?", projectWithIssue.getId()));
 
     // 无 Issue 的项目支持删除
     Project cleanProject = projectService.createProject("空项目", "描述", true);

@@ -7,11 +7,20 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueStageBudgetRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
@@ -77,6 +86,12 @@ public class ProjectServiceImpl implements ProjectService {
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
+  private final IssueEvidenceService issueEvidenceService;
+  private final IssueActivityRepository issueActivityRepository;
+  private final IssueWorkRepository issueWorkRepository;
+  private final IssueStageBudgetRepository issueStageBudgetRepository;
+  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final SessionDeletionOrchestrator sessionDeletionOrchestrator;
   private final ProjectWorkflowJsonCodec workflowCodec;
 
   @Override
@@ -201,9 +216,34 @@ public class ProjectServiceImpl implements ProjectService {
     Objects.requireNonNull(projectId, "projectId");
     Project locked = lockProject(projectId);
     requireVersion(locked, expectedVersion);
-    if (!issueRepository.listByProjectId(projectId).isEmpty()) {
-      throw new AiValidationException(
-          "project", "Cannot delete a project while it still owns issues");
+    List<Issue> issues = issueRepository.listByProjectId(projectId);
+    for (Issue issue : issues) {
+      if (issueRunRepository.lockActiveByIssueId(issue.getId()) != null) {
+        throw new AiValidationException(
+            "project",
+            "Cannot delete a project while an issue has an active run; stop or settle it first");
+      }
+      if (PauseReason.UNKNOWN.name().equals(issue.getPauseReason())) {
+        throw new AiValidationException(
+            "project",
+            "Cannot delete a project while an issue has an unresolved UNKNOWN gate; resolve unknown verification first");
+      }
+    }
+    for (Issue issue : issues) {
+      issueEvidenceService.releaseAll(issue.getId());
+      issueActivityRepository.deleteByIssueId(issue.getId());
+      issueWorkRepository.deleteByIssueId(issue.getId());
+      issueRunRepository.deleteByIssueId(issue.getId());
+      issueStageBudgetRepository.deleteByIssueId(issue.getId());
+      List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issue.getId());
+      for (IssueAgentThread binding : bindings) {
+        sessionDeletionOrchestrator.deleteSessionsByOwner(
+            new OwnerRef.IssueAgent(issue.getId(), binding.agentName()));
+      }
+      if (!issueRepository.deleteById(issue.getId(), issue.getVersion())) {
+        throw new AiVersionConflictException(
+            "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
+      }
     }
     if (!projectRepository.deleteById(projectId, expectedVersion)) {
       throw conflict(locked, expectedVersion);

@@ -32,4 +32,6 @@ public interface IssueRunRepository {
   boolean updateById(IssueRun run, long expectedVersion);
 
   boolean deleteById(UUID id, long expectedVersion);
+
+  int deleteByIssueId(UUID issueId);
 }

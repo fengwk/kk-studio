@@ -4,13 +4,22 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
@@ -25,7 +34,10 @@ import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueStageBudgetRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.service.impl.IssueActivityIdempotency.Identity;
@@ -64,9 +76,14 @@ public class IssueServiceImpl implements IssueService {
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueActivityRepository issueActivityRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final IssueWorkRepository issueWorkRepository;
   private final IssueWorkStore issueWorkStore;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final ObjectMapper objectMapper;
+  private final IssueRunService issueRunService;
+  private final IssueEvidenceService issueEvidenceService;
+  private final SessionDeletionOrchestrator sessionDeletionOrchestrator;
+  private final ObjectProvider<HarnessRuntime> runtimes;
 
   @Override
   @Transactional
@@ -150,6 +167,11 @@ public class IssueServiceImpl implements IssueService {
     if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
       throw new AiValidationException(
           "issue", "Cannot archive an issue while it has an active run; stop or settle it first");
+    }
+    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot archive an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
     }
     if (locked.issue().isArchived()) {
       // 缺少响应后的重试：归档已经是当前事实，不重复写行。
@@ -274,6 +296,11 @@ public class IssueServiceImpl implements IssueService {
       return getIssue(issueId);
     }
     Locked locked = lock(issueId, expectedVersion, false);
+    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot block an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
+    }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectValidationUtils.validate(
         "issue",
@@ -360,6 +387,11 @@ public class IssueServiceImpl implements IssueService {
       return getIssue(issueId);
     }
     Locked locked = lock(issueId, expectedVersion, false);
+    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot resume an issue with unresolved UNKNOWN gate; resolve unknown verification first");
+    }
     ObjectNode data = objectMapper.createObjectNode();
     data.put("action", "RESUME");
     data.put("reason", locked.issue().getPauseReason());
@@ -370,6 +402,109 @@ public class IssueServiceImpl implements IssueService {
     // 门禁解除后重新登记 Work；额度限制新建 Run，但不限制已接受 Run 的恢复。
     wakeIfExecutable(persisted, locked.project());
     return persisted;
+  }
+
+  @Override
+  @Transactional
+  public Issue stopIssue(UUID issueId, long expectedVersion, String requestKey, String detail) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    String validDetail =
+        detail == null || detail.isBlank()
+            ? "Stopped by user"
+            : ProjectValidationUtils.requireUtf8Text(
+                detail, "detail", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "STOP", key, validDetail);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion, false);
+    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
+    if (activeRun == null) {
+      ObjectNode data = objectMapper.createObjectNode();
+      data.put("action", "STOP");
+      data.put("reason", PauseReason.USER.name());
+      appendActivity(
+          locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
+      locked.issue().setPauseReason(PauseReason.USER.name());
+      locked.issue().setPauseDetail(validDetail);
+      return persist(locked, expectedVersion);
+    }
+    HarnessRuntime runtime = runtimes != null ? runtimes.getIfAvailable() : null;
+    ThreadSnapshot snapshot =
+        runtime != null ? runtime.getThreadSnapshot(activeRun.getThreadId()) : null;
+    if (snapshot != null && isUndeterminedInFlight(snapshot)) {
+      UUID headId =
+          snapshot.thread() != null ? snapshot.thread().headEntryId() : activeRun.getStartEntryId();
+      issueRunService.markUnknown(
+          activeRun.getId(), activeRun.getVersion(), key + ":unknown", headId, validDetail);
+      return issueRepository.getById(issueId);
+    }
+    UUID endId =
+        snapshot != null && snapshot.thread() != null
+            ? snapshot.thread().headEntryId()
+            : activeRun.getStartEntryId();
+    issueRunService.cancelRun(activeRun.getId(), activeRun.getVersion(), key + ":cancel", endId);
+    return issueRepository.getById(issueId);
+  }
+
+  @Override
+  @Transactional
+  public Issue resolveUnknown(
+      UUID issueId, long expectedVersion, String requestKey, String verification) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    String validVerification =
+        ProjectValidationUtils.requireUtf8Text(
+            verification, "verification", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL, "RESOLVE_UNKNOWN", key, validVerification);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion, false);
+    if (!PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException("issue", "Issue does not carry an unresolved UNKNOWN gate");
+    }
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "RESOLVE_UNKNOWN");
+    data.put("verification", validVerification);
+    appendActivity(locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
+    locked.issue().setPauseReason(PauseReason.USER.name());
+    locked.issue().setPauseDetail(validVerification);
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public void deleteIssue(UUID issueId, long expectedVersion) {
+    Objects.requireNonNull(issueId, "issueId");
+    Locked locked = lock(issueId, expectedVersion, true);
+    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
+      throw new AiValidationException(
+          "issue", "Cannot delete an issue while it has an active run; stop or settle it first");
+    }
+    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot delete an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
+    }
+    issueEvidenceService.releaseAll(issueId);
+    issueActivityRepository.deleteByIssueId(issueId);
+    issueWorkRepository.deleteByIssueId(issueId);
+    issueRunRepository.deleteByIssueId(issueId);
+    stageBudgetRepository.deleteByIssueId(issueId);
+    List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issueId);
+    for (IssueAgentThread binding : bindings) {
+      sessionDeletionOrchestrator.deleteSessionsByOwner(
+          new OwnerRef.IssueAgent(issueId, binding.agentName()));
+    }
+    if (!issueRepository.deleteById(issueId, expectedVersion)) {
+      throw new AiVersionConflictException(
+          "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
+    }
   }
 
   @Override
@@ -385,6 +520,19 @@ public class IssueServiceImpl implements IssueService {
       return getIssue(issueId);
     }
     Locked locked = lock(issueId, expectedVersion, false);
+    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot transition an issue while it has an active run; stop or settle it first");
+    }
+    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot transition an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
+    }
+    if (locked.issue().isPaused()) {
+      throw new AiValidationException("issue", "Cannot transition a paused issue; resume it first");
+    }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectStateCode to = ProjectStateCode.of(toState);
     ProjectValidationUtils.validate(
@@ -408,6 +556,18 @@ public class IssueServiceImpl implements IssueService {
       return getIssue(issueId);
     }
     Locked locked = lock(issueId, expectedVersion, false);
+    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
+      throw new AiValidationException(
+          "issue", "Cannot reopen an issue while it has an active run; stop or settle it first");
+    }
+    if (PauseReason.UNKNOWN.name().equals(locked.issue().getPauseReason())) {
+      throw new AiValidationException(
+          "issue",
+          "Cannot reopen an issue with an unresolved UNKNOWN gate; resolve unknown verification first");
+    }
+    if (locked.issue().isPaused()) {
+      throw new AiValidationException("issue", "Cannot reopen a paused issue; resume it first");
+    }
     ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
     ProjectStateCode to =
         ProjectValidationUtils.resolve(
@@ -415,6 +575,36 @@ public class IssueServiceImpl implements IssueService {
     appendStateChange(locked.issue(), identity, "REOPEN", from.value(), to.value());
     locked.issue().setState(to.value());
     return persist(locked, expectedVersion);
+  }
+
+  private static boolean isUndeterminedInFlight(ThreadSnapshot snapshot) {
+    if (snapshot == null) {
+      return false;
+    }
+    if (snapshot.queuedCommands() != null && !snapshot.queuedCommands().isEmpty()) {
+      return true;
+    }
+    if (snapshot.model() != null
+        && (snapshot.model().status() == null || !snapshot.model().status().isTerminal())) {
+      return true;
+    }
+    for (ToolInvocation tool : snapshot.toolSiblings()) {
+      ToolInvocationStatus status = tool.status();
+      if (status == null
+          || status == ToolInvocationStatus.READY
+          || status == ToolInvocationStatus.DISPATCHING
+          || status == ToolInvocationStatus.RUNNING
+          || status == ToolInvocationStatus.UNKNOWN) {
+        return true;
+      }
+    }
+    if (snapshot.entryPath() != null) {
+      Entry head = snapshot.entryPath().head();
+      if (head != null && head.payload() instanceof TurnEndPayload end && end.continueModel()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @Override
