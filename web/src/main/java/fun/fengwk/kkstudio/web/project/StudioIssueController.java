@@ -440,14 +440,17 @@ public class StudioIssueController {
       throw new IllegalArgumentException("kind is invalid");
     }
 
+    String activityKey =
+        (kind != null && "INSTRUCTION".equalsIgnoreCase(kind) ? "instruction:" : "comment:")
+            + request.getRequestKey();
     IssueActivity activity = null;
     if (issueActivityRepository != null) {
-      activity = issueActivityRepository.findByIdempotencyKey(issueId, request.getRequestKey());
+      activity = issueActivityRepository.findByIdempotencyKey(issueId, activityKey);
     }
     if (activity == null) {
       List<IssueActivity> recent = issueService.listActivities(issueId, 0, MAX_ACTIVITY_LIMIT);
       for (IssueActivity a : recent) {
-        if (Objects.equals(request.getRequestKey(), a.getIdempotencyKey())) {
+        if (Objects.equals(activityKey, a.getIdempotencyKey())) {
           activity = a;
           break;
         }
