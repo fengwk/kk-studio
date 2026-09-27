@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -235,10 +236,12 @@ final class ToolProcessorTestSupport {
               new ThreadState(
                   threadId,
                   sessionId,
+                  null,
                   turnStartEntryId,
                   ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                   "main",
                   yoloEnabled,
+                  ThreadLifecycleStatus.ACTIVE,
                   1L,
                   0L,
                   now,

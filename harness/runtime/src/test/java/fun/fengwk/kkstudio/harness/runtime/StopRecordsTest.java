@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.lang.reflect.Modifier;
@@ -40,10 +41,12 @@ class StopRecordsTest {
       new ThreadState(
           id(1L),
           id(2L),
+          null,
           id(3L),
           CREATION_REQUEST_HASH,
           "main",
           false,
+          ThreadLifecycleStatus.ACTIVE,
           1,
           0,
           Instant.ofEpochMilli(1),

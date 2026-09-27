@@ -9,7 +9,7 @@
 -- ON UPDATE CURRENT_TIMESTAMP.
 --
 -- Harness execution state is the exact infra protocol: section 2 below
--- (the seven tables + their indexes) is the single authoritative definition of
+-- (the eight tables + their indexes) is the single authoritative definition of
 -- the durable Harness protocol schema. There is no separate infra
 -- schema file; this block is the only copy. HarnessRuntime owns every execution
 -- id via the injected Supplier<UUID> (production: UUID::randomUUID) and owns
@@ -770,7 +770,7 @@ create trigger trg_system_setting_version_notify
 ------------------------------------------------------------------------------
 -- 2. Harness runtime execution protocol
 --
--- The block below (the seven tables + their indexes, including comments) is the
+-- The block below (the eight tables + their indexes, including comments) is the
 -- single authoritative definition of the durable Harness protocol schema.
 -- Columns, checks, FKs and indexes must never drift; HarnessRuntime allocates
 -- ids via the injected Supplier<UUID> (production: UUID::randomUUID) and
@@ -865,42 +865,58 @@ comment on index idx_harness_entry_parent is 'parent 回溯与同 Session 树遍
 create table harness_thread (
     id uuid primary key,
     session_id uuid not null,
+    parent_thread_id uuid,
     head_entry_id uuid not null,
     creation_request_hash char(64) not null,
     name varchar(256) not null,
     yolo_enabled boolean not null,
+    status varchar(16) not null,
     next_command_sequence bigint not null check (next_command_sequence >= 1),
     version bigint not null check (version >= 0),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     constraint fk_harness_thread_session foreign key (session_id)
         references harness_session (id),
+    constraint fk_harness_thread_parent foreign key (parent_thread_id)
+        references harness_thread (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
+    constraint ck_harness_thread_parent_not_self check (
+        parent_thread_id is null or parent_thread_id <> id
+    ),
     constraint ck_harness_thread_creation_request_hash check (
         creation_request_hash ~ '^[0-9a-f]{64}$'
     ),
     constraint ck_harness_thread_name check (
         btrim(name) <> ''
     ),
+    constraint ck_harness_thread_status check (
+        status in ('IDLE', 'ACTIVE', 'STOPPED')
+    ),
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，status 维护递归生命周期（IDLE/ACTIVE/STOPPED）';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
+comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
 comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
+comment on column harness_thread.status is '递归生命周期状态（IDLE/ACTIVE/STOPPED）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
 comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
 comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度），不得早于 created_at';
 
+create index idx_harness_thread_parent
+    on harness_thread (parent_thread_id);
+
 create index idx_harness_thread_session
     on harness_thread (session_id, created_at, id);
 
+comment on index idx_harness_thread_parent is 'parent 回溯与子 Thread 树遍历索引';
 comment on index idx_harness_thread_session is 'listThreadsBySession 按 (session_id, created_at, id) 读取 Session 的 Thread 列表';
 
 create table harness_thread_command (
@@ -1154,111 +1170,92 @@ create index idx_harness_work_lease_until
 comment on index idx_harness_work_available is 'claimNextWork 按 (available_at, target_type, target_id) 选取候选';
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
--- 异步 task 委派记录：每次 task Tool invocation 一行，标识本次委派的父子 Thread、本次执行边界
--- （source_head_entry_id）、执行终态与投递状态。子 Thread 与命令、Work、Entry 一律复用第 2 节既有协议，
--- 本表只补足「哪个父 Tool 调用委派了哪个子执行、子执行是否终结、结果是否已通知父」这一归属、执行与投递事实。
---
--- status 是清晰的三段状态机，把「子执行终结」与「父通知完成」分开：
---   OPEN      —— 子执行仍在进行（含其子树仍在进行），占并发额度
---   SETTLED   —— 子执行已终结，终态与报告已持久化（outcome/report/partial_result/error/settled_at），
---                父通知尚未入队；不占并发额度，停止的父恢复后仍可交付
---   DELIVERED —— 父通知已与状态在同一 store 事务内入队
-create table harness_subagent_task (
+-- Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、
+-- 子 Thread 执行边界（after_version）、匹配的首个 Idle 版本与结果 head Entry、以及交付给父
+-- Thread 的命令序列。无独立状态枚举，无 prompt/report 冗余复制。
+create table harness_thread_join (
     invocation_id uuid primary key,
-    parent_thread_id uuid not null,
-    root_thread_id uuid not null,
-    child_session_id uuid not null,
+    request_hash char(64) not null,
+    parent_thread_id uuid,
     child_thread_id uuid not null,
-    source_head_entry_id uuid not null,
+    source_command_sequence bigint not null check (source_command_sequence > 0),
+    after_version bigint not null check (after_version >= 0),
     agent varchar(256) not null,
-    prompt text not null,
     max_turns integer,
-    status varchar(16) not null,
-    outcome varchar(16),
-    report text,
-    partial_result text,
-    error text,
     reminder_turn bigint not null default 0,
-    settled_at timestamptz(3),
+    matched_idle_version bigint,
+    result_head_entry_id uuid,
+    delivery_command_sequence bigint,
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
-    constraint fk_harness_subagent_task_parent_thread foreign key (parent_thread_id)
-        references harness_thread (id) on delete cascade,
-    constraint ck_harness_subagent_task_agent check (
+    constraint fk_harness_thread_join_child_thread foreign key (child_thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_join_parent_thread foreign key (parent_thread_id)
+        references harness_thread (id),
+    constraint fk_harness_thread_join_source_command foreign key (child_thread_id, source_command_sequence)
+        references harness_thread_command (thread_id, sequence),
+    constraint fk_harness_thread_join_result_head foreign key (result_head_entry_id)
+        references harness_entry (id),
+    constraint fk_harness_thread_join_delivery_command foreign key (parent_thread_id, delivery_command_sequence)
+        references harness_thread_command (thread_id, sequence),
+    constraint ck_harness_thread_join_request_hash check (
+        request_hash ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_harness_thread_join_parent_not_child check (
+        parent_thread_id is null or parent_thread_id <> child_thread_id
+    ),
+    constraint ck_harness_thread_join_agent check (
         btrim(agent) <> ''
     ),
-    constraint ck_harness_subagent_task_prompt check (
-        btrim(prompt) <> ''
-    ),
-    constraint ck_harness_subagent_task_max_turns check (
+    constraint ck_harness_thread_join_max_turns check (
         max_turns is null or max_turns > 0
     ),
-    constraint ck_harness_subagent_task_status check (
-        status in ('OPEN', 'SETTLED', 'DELIVERED')
+    constraint ck_harness_thread_join_reminder_turn check (
+        reminder_turn >= 0
     ),
-    constraint ck_harness_subagent_task_outcome check (
-        outcome is null
-        or outcome in ('COMPLETED', 'ERROR', 'CANCELLED')
+    constraint ck_harness_thread_join_receipt_pair check (
+        (matched_idle_version is null and result_head_entry_id is null)
+        or (matched_idle_version is not null and result_head_entry_id is not null)
     ),
-    constraint ck_harness_subagent_task_state_shape check (
-        (status = 'OPEN' and outcome is null and settled_at is null)
-        or (status <> 'OPEN' and outcome is not null and settled_at is not null)
+    constraint ck_harness_thread_join_matched_order check (
+        matched_idle_version is null or matched_idle_version > after_version
     ),
-    constraint ck_harness_subagent_task_reminder_turn check (reminder_turn >= 0),
-    constraint ck_harness_subagent_task_time_order check (
+    constraint ck_harness_thread_join_delivery check (
+        delivery_command_sequence is null
+        or (delivery_command_sequence > 0 and matched_idle_version is not null and parent_thread_id is not null)
+    ),
+    constraint ck_harness_thread_join_time_order check (
         updated_at >= created_at
-        and (settled_at is null or settled_at >= created_at)
     )
 );
 
-comment on table harness_subagent_task is '异步 task 委派：以 task Tool invocation id 为主键记录每次父子委派、本次执行边界、执行终态与父通知状态；同一子 Thread 可有多次执行（多行），但在任一时刻至多一行 OPEN（执行中）';
-comment on column harness_subagent_task.invocation_id is 'task Tool invocation 的 UUID（主键）；同一次 Tool 调用重试复用同一行，避免双开子执行';
-comment on column harness_subagent_task.parent_thread_id is '父 Thread UUID（发起委派的一方）；带级联删除：父 Thread 被删除时委派双方都不复存在，无待交付结果，记录随之清理';
-comment on column harness_subagent_task.root_thread_id is '委派树根 Thread UUID（整棵树并发额度与停止传播的归属键）；不使用外键，根 Thread 删除只影响额度统计而不影响已存在的委派事实';
-comment on column harness_subagent_task.child_session_id is '子 Session UUID（新建委派时由父 invocation 稳定派生）';
-comment on column harness_subagent_task.child_thread_id is '子 Thread UUID（新建委派时由父 invocation 稳定派生；继续既有执行时为被继续的 Thread）；刻意不建外键：子 Session/Thread 被删除时记录必须留存，使父 Thread 仍持有未结清事实并可结清为明确的终态错误，而不是静默丢失委派（父被误判空闲）';
-comment on column harness_subagent_task.source_head_entry_id is '本次执行边界：接受时子 Thread 的 head Entry id，用于把结果限定在本次执行之后';
-comment on column harness_subagent_task.agent is '本次执行的 Agent（subagent_type）名；继续既有 Thread 可切换 Agent';
-comment on column harness_subagent_task.prompt is '本次委派的完整 prompt 原文（结果交付时的权威来源）';
-comment on column harness_subagent_task.max_turns is '本次调用的 max_turns 软预算（null 表示使用当前 policy 默认）';
-comment on column harness_subagent_task.status is '状态机：OPEN（子执行进行中，占额度）→ SETTLED（执行已终结且终态已持久化，父通知待交付，不占额度）→ DELIVERED（父通知已入队）';
-comment on column harness_subagent_task.outcome is '执行终态（COMPLETED/ERROR/CANCELLED）；OPEN 时必须为 null，SETTLED/DELIVERED 时必须非 null';
-comment on column harness_subagent_task.report is '终态报告原文（COMPLETED 时的完整结果；交付内容以本列为准，不重新从子历史推导）';
-comment on column harness_subagent_task.partial_result is '失败/取消时保留的部分输出原文（与 error 分离，供完成消息按契约渲染）';
-comment on column harness_subagent_task.error is '失败或取消的说明文本（与 partial_result 分离）';
-comment on column harness_subagent_task.reminder_turn is '已发出的 max_turns 软提醒轮次计数（用于周期性收敛提醒）';
-comment on column harness_subagent_task.settled_at is '执行终结时间（毫秒精度）；OPEN 时为 null';
-comment on column harness_subagent_task.created_at is '创建时间（毫秒精度）';
-comment on column harness_subagent_task.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on table harness_thread_join is 'Thread Join 契约记录：以 invocation_id 为主键记录原子源 prompt 接受与 join 契约、子 Thread 执行边界、匹配的 Idle 版本与结果 head、以及交付给父 Thread 的命令序列；无独立状态枚举，无 prompt/report 冗余复制';
+comment on column harness_thread_join.invocation_id is 'Join 的全局唯一 UUID（主键，与发起调用的 Tool/Ticket invocation 对齐）';
+comment on column harness_thread_join.request_hash is '创建请求指纹（64 位小写 SHA-256）';
+comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可空，空表示 root one-shot completion ticket，不投递父消息）';
+comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
+comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
+comment on column harness_thread_join.after_version is '源 prompt 接受完成后的 child Thread version';
+comment on column harness_thread_join.agent is '本次执行的 Agent 名';
+comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
+comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
+comment on column harness_thread_join.matched_idle_version is '匹配的首个 Idle 时的 child Thread version（与 result_head_entry_id 同空或同非空，matched > after_version）';
+comment on column harness_thread_join.result_head_entry_id is '匹配的首个 Idle 时的 child Thread head Entry UUID（与 matched_idle_version 同空或同非空）';
+comment on column harness_thread_join.delivery_command_sequence is '向父 Thread 投递结果 CUSTOM_MESSAGE 的 command sequence（非空必须已 matched 且 parent_thread_id 非空）';
+comment on column harness_thread_join.created_at is '创建时间（毫秒精度）';
+comment on column harness_thread_join.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
 
-create unique index uk_harness_subagent_task_child_open
-    on harness_subagent_task (child_thread_id)
-    where status = 'OPEN';
+create index idx_harness_thread_join_child_pending
+    on harness_thread_join (child_thread_id)
+    where matched_idle_version is null;
 
-comment on index uk_harness_subagent_task_child_open is '同一子 Thread 至多一行 OPEN，阻止重叠执行（换 Agent 继续必须等上一次执行终结）';
+comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲时检索等待匹配的 pending join';
 
-create index idx_harness_subagent_task_undelivered_scan
-    on harness_subagent_task (created_at, invocation_id)
-    where status <> 'DELIVERED';
+create index idx_harness_thread_join_parent_pending
+    on harness_thread_join (parent_thread_id)
+    where delivery_command_sequence is null;
 
-comment on index idx_harness_subagent_task_undelivered_scan is '后台扫描待结清/待交付 task 的稳定排序候选';
-
-create index idx_harness_subagent_task_parent
-    on harness_subagent_task (parent_thread_id);
-
-comment on index idx_harness_subagent_task_parent is '按父 Thread 展开委派子树（递归聚合子树内是否仍有未交付委派）';
-
-create index idx_harness_subagent_task_parent_open
-    on harness_subagent_task (parent_thread_id)
-    where status = 'OPEN';
-
-comment on index idx_harness_subagent_task_parent_open is '按父 Thread 统计仍在执行的委派（父级并发额度）';
-
-create index idx_harness_subagent_task_root_open
-    on harness_subagent_task (root_thread_id)
-    where status = 'OPEN';
-
-comment on index idx_harness_subagent_task_root_open is '按根 Thread 统计仍在执行的委派（树级并发额度）';
+comment on index idx_harness_thread_join_parent_pending is '父 Thread 恢复或接受输入时检索待交付给父的 pending join';
 
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts and global Session ownership

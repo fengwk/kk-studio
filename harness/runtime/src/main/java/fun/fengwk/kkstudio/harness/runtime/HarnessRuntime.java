@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
@@ -152,6 +154,24 @@ public final class HarnessRuntime {
   public AcceptedCommands acceptCommands(
       AcceptCommandsCommand command, AcceptancePreflight preflight) {
     return acceptCommandsControl.acceptCommands(command, preflight);
+  }
+
+  /** 原子接受源 prompt、执行父子归属、join 凭据和持久 Work。 */
+  public AcceptedCommands acceptCommandsAndJoin(
+      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight) {
+    return acceptCommandsControl.acceptCommandsAndJoin(command, join, preflight);
+  }
+
+  /** 按 invocationId 读取固定 join receipt（未匹配时 receipt 字段为空）。 */
+  public Optional<ThreadJoin> findJoin(UUID invocationId) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    return store.transaction(tx -> tx.findJoin(invocationId));
+  }
+
+  /** 当前不可变执行关系的 head-to-root 祖先链。 */
+  public List<UUID> findAncestorChain(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return store.transaction(tx -> tx.findAncestorChain(threadId));
   }
 
   /**

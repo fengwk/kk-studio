@@ -17,11 +17,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -84,10 +86,12 @@ final class PostgresqlHarnessRows {
           new ThreadState(
               uuid(resultSet, "id"),
               uuid(resultSet, "session_id"),
+              nullableUuid(resultSet, "parent_thread_id"),
               uuid(resultSet, "head_entry_id"),
               resultSet.getString("creation_request_hash"),
               resultSet.getString("name"),
               resultSet.getBoolean("yolo_enabled"),
+              ThreadLifecycleStatus.valueOf(resultSet.getString("status")),
               resultSet.getLong("next_command_sequence"),
               resultSet.getLong("version"),
               instant(resultSet, "created_at"),
@@ -107,6 +111,24 @@ final class PostgresqlHarnessRows {
             nullableInstant(resultSet, "cancelled_at"),
             instant(resultSet, "created_at"));
       };
+
+  static final RowMapper<ThreadJoin> JOIN =
+      (resultSet, rowNumber) ->
+          new ThreadJoin(
+              uuid(resultSet, "invocation_id"),
+              resultSet.getString("request_hash").trim(),
+              nullableUuid(resultSet, "parent_thread_id"),
+              uuid(resultSet, "child_thread_id"),
+              resultSet.getLong("source_command_sequence"),
+              resultSet.getLong("after_version"),
+              resultSet.getString("agent"),
+              (Integer) resultSet.getObject("max_turns"),
+              resultSet.getLong("reminder_turn"),
+              (Long) resultSet.getObject("matched_idle_version"),
+              nullableUuid(resultSet, "result_head_entry_id"),
+              (Long) resultSet.getObject("delivery_command_sequence"),
+              instant(resultSet, "created_at"),
+              instant(resultSet, "updated_at"));
 
   static final RowMapper<ModelInvocation> MODEL_INVOCATION =
       (resultSet, rowNumber) ->

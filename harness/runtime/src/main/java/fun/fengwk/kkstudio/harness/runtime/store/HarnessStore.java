@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -170,6 +171,14 @@ public interface HarnessStore {
     List<ThreadState> listThreadsBySession(UUID sessionId);
 
     /**
+     * 读取指定 parentThreadId 的全部直接子 Thread，按 UUID 升序返回不可变列表；不产生锁。
+     *
+     * @param parentThreadId 父 Thread ID，不能为 null
+     * @return 子 Thread 列表，按 UUID 升序排列
+     */
+    List<ThreadState> listChildren(UUID parentThreadId);
+
+    /**
      * 更新 Thread current state。要求行存在且已在本事务锁定（{@link #lockThread} 或同事务 {@link #insertThread}），并通过共享
      * transition validation（{@link ThreadState#validateTransition}）：id / sessionId /
      * creationRequestHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
@@ -178,6 +187,49 @@ public interface HarnessStore {
      * IllegalArgumentException}。
      */
     void updateThread(ThreadState thread);
+
+    /**
+     * 由不可变 parent 链派生 head-to-root 祖先（包含自身）。不存在返回空列表；环路必须 fail closed。 PG 实现在加锁前可用此查询发现 root，但获取
+     * tree lock 后必须重新读取确认。
+     */
+    List<UUID> findAncestorChain(UUID threadId);
+
+    /** 在任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 必须为真实根。 */
+    void lockTree(UUID rootThreadId);
+
+    /** Join 是源 command 的 FK 约束引用，必须与源 command 在同一事务内创建。 */
+    void insertJoin(ThreadJoin join);
+
+    Optional<ThreadJoin> findJoin(UUID invocationId);
+
+    /** 子 Thread 空闲时读取尚未匹配且 afterVersion 小于 idleVersion 的全部 join。 */
+    List<ThreadJoin> loadMatchableJoins(UUID childThreadId, long idleVersion);
+
+    /** 父 Thread 恢复时读取已匹配未交付 join。 */
+    List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId);
+
+    /**
+     * 统计指定父 Thread 下尚未匹配（{@code matchedIdleVersion == null}）的 join 数量；不产生锁。
+     *
+     * @param parentThreadId 父 Thread ID，不能为 null
+     * @return 尚未匹配的 join 数量
+     */
+    int countUnmatchedJoinsByParent(UUID parentThreadId);
+
+    /**
+     * 递归统计以 rootThreadId 为根的整棵 Thread 树（root 自身及其全部后代 Thread）中尚未匹配（{@code matchedIdleVersion ==
+     * null}）的 join 数量；不产生锁。
+     *
+     * @param rootThreadId 根 Thread ID，不能为 null
+     * @return 树中尚未匹配的 join 数量
+     */
+    int countUnmatchedJoinsInTree(UUID rootThreadId);
+
+    /** 只允许首次冻结结果与单调推进提醒，以及首次写入交付引用。 */
+    void updateJoin(ThreadJoin join);
+
+    /** GC 必须显式收敛和删除 Join 后方可删除其父、子线程和历史。 */
+    int deleteJoinsByChild(UUID childThreadId);
 
     /** 按 (threadId, idempotencyKey) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */
     Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey);

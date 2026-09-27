@@ -4,11 +4,14 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -53,36 +56,60 @@ final class AcceptCommandsControl {
   }
 
   AcceptedCommands acceptCommands(AcceptCommandsCommand command, AcceptancePreflight preflight) {
+    return acceptCommands(command, null, preflight);
+  }
+
+  AcceptedCommands acceptCommandsAndJoin(
+      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight) {
+    Objects.requireNonNull(join, "join");
+    return acceptCommands(command, join, preflight);
+  }
+
+  private AcceptedCommands acceptCommands(
+      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight) {
     Objects.requireNonNull(command, "command");
     Objects.requireNonNull(preflight, "preflight");
     List<NewThreadCommand> commands = command.commands();
     return switch (command.target()) {
-      case AcceptCommandsTarget.NewSession target -> acceptNewSession(target, commands, preflight);
-      case AcceptCommandsTarget.NewThread target -> acceptNewThread(target, commands, preflight);
-      case AcceptCommandsTarget.Thread target -> acceptOnThread(target, commands, preflight);
+      case AcceptCommandsTarget.NewSession target -> acceptNewSession(
+          target, commands, join, preflight);
+      case AcceptCommandsTarget.NewThread target -> acceptNewThread(
+          target, commands, join, preflight);
+      case AcceptCommandsTarget.Thread target -> acceptOnThread(target, commands, join, preflight);
     };
   }
 
   private AcceptedCommands acceptNewSession(
       AcceptCommandsTarget.NewSession target,
       List<NewThreadCommand> commands,
+      ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
+          lockAcceptanceTree(tx, target.threadId(), target.parentThreadId());
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
                   target.threadId(),
                   target.rootSettings(),
-                  target.subagentContext(),
+                  target.parentThreadId(),
                   target.yoloEnabled(),
                   commands);
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
-            return replayInitial(
-                tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
+            return attachJoin(
+                tx,
+                replayInitial(
+                    tx,
+                    target.sessionId(),
+                    target.threadId(),
+                    existing,
+                    commands,
+                    creationRequestHash),
+                join);
           }
+          admitJoin(tx, target.threadId(), target.parentThreadId(), join, true);
           Instant now = clock.instant();
           Session session =
               new Session(
@@ -94,32 +121,37 @@ final class AcceptCommandsControl {
                   rootEntryId,
                   target.sessionId(),
                   null,
-                  new RootPayload(target.rootSettings(), target.subagentContext()),
+                  new RootPayload(target.rootSettings()),
                   now));
           ThreadState thread =
               new ThreadState(
                   target.threadId(),
                   target.sessionId(),
+                  target.parentThreadId(),
                   rootEntryId,
                   creationRequestHash,
                   Names.rootThreadName(),
                   target.yoloEnabled(),
+                  ThreadLifecycleStatus.IDLE,
                   1,
                   0,
                   now,
                   now);
           tx.insertThread(thread);
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+          return attachJoin(
+              tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
         });
   }
 
   private AcceptedCommands acceptNewThread(
       AcceptCommandsTarget.NewThread target,
       List<NewThreadCommand> commands,
+      ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
+          lockAcceptanceTree(tx, target.threadId(), null);
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
             String creationRequestHash =
@@ -129,9 +161,18 @@ final class AcceptCommandsControl {
                     target.threadId(),
                     target.yoloEnabled(),
                     commands);
-            return replayInitial(
-                tx, target.sessionId(), target.threadId(), existing, commands, creationRequestHash);
+            return attachJoin(
+                tx,
+                replayInitial(
+                    tx,
+                    target.sessionId(),
+                    target.threadId(),
+                    existing,
+                    commands,
+                    creationRequestHash),
+                join);
           }
+          admitJoin(tx, target.threadId(), null, join, true);
           // NEW_THREAD 新建路径用 KEY SHARE：不串行化同 Session 的 sibling 初始创建。
           tx.lockSessionForKeyShare(target.sessionId())
               .orElseThrow(
@@ -168,16 +209,19 @@ final class AcceptCommandsControl {
               new ThreadState(
                   target.threadId(),
                   target.sessionId(),
+                  null,
                   target.startEntryId(),
                   creationRequestHash,
                   Names.defaultThreadName(target.threadId()),
                   target.yoloEnabled(),
+                  ThreadLifecycleStatus.IDLE,
                   1,
                   0,
                   now,
                   now);
           tx.insertThread(thread);
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+          return attachJoin(
+              tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
         });
   }
 
@@ -196,9 +240,11 @@ final class AcceptCommandsControl {
   private AcceptedCommands acceptOnThread(
       AcceptCommandsTarget.Thread target,
       List<NewThreadCommand> commands,
+      ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
+          lockAcceptanceTree(tx, target.threadId(), null);
           ThreadState immutable =
               tx.findThread(target.threadId())
                   .orElseThrow(
@@ -236,13 +282,110 @@ final class AcceptCommandsControl {
                     + " commands");
           }
           if (present == existing.size()) {
-            return replayThreadBatch(tx, target, commands, thread, existing);
+            return attachJoin(tx, replayThreadBatch(tx, target, commands, thread, existing), join);
           }
           validateThreadBatchAdmission(target, thread);
           validateBatchShape(target, commands);
+          admitJoin(tx, thread.id(), thread.parentThreadId(), join, false);
           Instant now = clock.instant();
-          return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
+          return attachJoin(
+              tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
         });
+  }
+
+  private static void lockAcceptanceTree(
+      HarnessStore.Transaction tx, UUID childId, UUID newParentId) {
+    UUID anchor = newParentId == null ? childId : newParentId;
+    List<UUID> chain = tx.findAncestorChain(anchor);
+    if (newParentId != null && chain.isEmpty()) {
+      throw new IllegalArgumentException("join parent does not exist");
+    }
+    UUID root = chain.isEmpty() ? anchor : chain.get(chain.size() - 1);
+    tx.lockTree(root);
+    // The initial lookup is only a hint. Re-read immutable ancestry after taking the tree lock.
+    if (!chain.equals(tx.findAncestorChain(anchor))) {
+      throw new IllegalStateException("execution tree changed while acquiring its lock");
+    }
+  }
+
+  private static void admitJoin(
+      HarnessStore.Transaction tx,
+      UUID childId,
+      UUID parentId,
+      ThreadJoinRequest join,
+      boolean creating) {
+    if (join == null) {
+      if (creating && parentId != null) {
+        throw new IllegalArgumentException("executing child requires atomic join acceptance");
+      }
+      return;
+    }
+    if (!Objects.equals(join.parentThreadId(), parentId)) {
+      throw new IllegalArgumentException("join parent differs from immutable child parent");
+    }
+    List<UUID> chain = tx.findAncestorChain(creating && parentId != null ? parentId : childId);
+    if (parentId != null) {
+      ThreadState parent =
+          tx.findThread(parentId)
+              .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
+      if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())
+          || parent.status().isStopped()) {
+        throw new IllegalArgumentException("join parent no longer accepts this invocation");
+      }
+      if (tx.countUnmatchedJoinsByParent(parentId) >= join.maxConcurrentChildren()) {
+        throw new IllegalArgumentException("parent join quota exceeded");
+      }
+    }
+    int depth = creating ? chain.size() + 1 : chain.size();
+    if (depth > join.maxDepth()) {
+      throw new IllegalArgumentException("join depth quota exceeded");
+    }
+    UUID root = chain.isEmpty() ? childId : chain.get(chain.size() - 1);
+    if (tx.countUnmatchedJoinsInTree(root) >= join.maxConcurrentTreeJoins()) {
+      throw new IllegalArgumentException("tree join quota exceeded");
+    }
+  }
+
+  private static AcceptedCommands attachJoin(
+      HarnessStore.Transaction tx, AcceptedCommands accepted, ThreadJoinRequest join) {
+    if (join == null) {
+      return accepted;
+    }
+    ThreadJoin existing = tx.findJoin(join.invocationId()).orElse(null);
+    if (existing != null) {
+      if (!accepted.replayed()
+          || !existing.childThreadId().equals(accepted.thread().id())
+          || !Objects.equals(existing.parentThreadId(), join.parentThreadId())
+          || !existing.requestHash().equals(join.requestHash())
+          || !existing.agent().equals(join.agent())
+          || !Objects.equals(existing.maxTurns(), join.maxTurns())
+          || accepted.acceptedCommands().stream()
+              .noneMatch(cmd -> cmd.sequence() == existing.sourceCommandSequence())) {
+        throw new IllegalArgumentException("join invocation identity reused");
+      }
+      return accepted;
+    }
+    if (accepted.replayed()) {
+      throw new IllegalArgumentException("source commands replayed without their join");
+    }
+    ThreadCommand source = accepted.acceptedCommands().get(accepted.acceptedCommands().size() - 1);
+    tx.insertJoin(
+        new ThreadJoin(
+            join.invocationId(),
+            join.requestHash(),
+            join.parentThreadId(),
+            accepted.thread().id(),
+            source.sequence(),
+            accepted.thread().version(),
+            join.agent(),
+            join.maxTurns(),
+            0,
+            null,
+            null,
+            null,
+            accepted.thread().updatedAt(),
+            accepted.thread().updatedAt()));
+    return accepted;
   }
 
   /** 全新 batch 的共性写入：preflight、插入 Commands、推进 version/next sequence、请求 THREAD Work。 */
