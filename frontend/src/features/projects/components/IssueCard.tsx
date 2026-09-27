@@ -1,35 +1,39 @@
-import { AlertCircle, Bot, Clock, RotateCcw, User, XCircle } from 'lucide-react'
-import type { IssueStatus, ProjectIssueSnapshotDTO } from '../types'
+import { AlertCircle, Clock, RotateCcw, ShieldAlert, XCircle } from 'lucide-react'
+import type { ProjectIssueSnapshotDTO } from '../types'
 
 export interface IssueCardProps {
   item: ProjectIssueSnapshotDTO
-  maxReviewRejections: string
+  availableNextStates?: string[]
   onClick: () => void
-  onChangeStatus?: (targetStatus: IssueStatus) => void
-  onCancel?: () => void
+  onTransition?: (toState: string) => void
+  onBlock?: () => void
+  onRecover?: () => void
+  onReopen?: () => void
+  onResolveUnknown?: () => void
   onArchive?: () => void
   onUnarchive?: () => void
 }
 
 export function IssueCard({
   item,
-  maxReviewRejections,
+  availableNextStates = [],
   onClick,
-  onChangeStatus,
-  onCancel,
-  onArchive,
-  onUnarchive,
+  onTransition,
+  onBlock,
+  onRecover,
+  onReopen,
+  onResolveUnknown,
 }: IssueCardProps) {
-  const { issue, blocked, currentOrLatestRun } = item
-  const isBlocked = blocked || issue.status === 'BLOCKED'
-  const isWaitingHuman = currentOrLatestRun?.status === 'WAITING_HUMAN'
+  const { issue, currentOrLatestRun } = item
+  const isBlocked = issue.state === 'BLOCKED' || Boolean(issue.blockedFromState)
+  const isUnknown = issue.pauseReason === 'UNKNOWN' || currentOrLatestRun?.status === 'UNKNOWN'
+  const isWaiting = currentOrLatestRun?.status === 'WAITING'
   const isFailed = currentOrLatestRun?.status === 'FAILED'
-  const isUnknown = currentOrLatestRun?.status === 'UNKNOWN'
-  const isTerminal = issue.status === 'DONE' || issue.status === 'CANCELED'
+  const isDone = issue.state === 'DONE'
 
   return (
     <div
-      className={`issue-card ${isBlocked ? 'is-blocked' : ''} ${isWaitingHuman ? 'is-waiting' : ''}`}
+      className={`issue-card ${isBlocked ? 'is-blocked' : ''} ${isUnknown ? 'is-unknown' : ''}`}
       onClick={onClick}
       role="button"
       tabIndex={0}
@@ -42,37 +46,44 @@ export function IssueCard({
       aria-label={`Issue #${issue.number} ${issue.title}`}
     >
       <div className="issue-card-header">
-        <span className="issue-number">#{issue.number}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span className="issue-number">#{issue.number}</span>
+          <span className="badge badge-state">{issue.state}</span>
+        </div>
+
         <div className="issue-badges-row">
           {isBlocked && (
-            <span className="badge badge-blocked" title="Issue 处于阻塞状态">
+            <span className="badge badge-blocked" title={`阻塞原因: ${issue.blockReason || '未说明'}`}>
               <AlertCircle size={12} aria-hidden="true" />
               BLOCKED
             </span>
           )}
-          {isBlocked && (
-            <span
-              className="badge badge-blocked-rejections"
-              title={`打回次数: ${item.reviewRejectionCount} / ${maxReviewRejections}`}
-            >
-              {item.reviewRejectionCount} / {maxReviewRejections}
+          {isUnknown && (
+            <span className="badge badge-unknown" title="存在未知副作用门禁，需人工核查">
+              <ShieldAlert size={12} aria-hidden="true" />
+              UNKNOWN
             </span>
           )}
-          {isWaitingHuman && (
-            <span className="badge badge-waiting" title="等待人类输入">
+          {issue.pauseReason === 'USER' && (
+            <span className="badge badge-paused" title="已人工暂停">
+              PAUSED
+            </span>
+          )}
+          {issue.pauseReason === 'ERROR' && (
+            <span className="badge badge-failed" title="发生错误已暂停">
+              ERROR
+            </span>
+          )}
+          {isWaiting && (
+            <span className="badge badge-waiting" title="等待处理">
               <Clock size={12} aria-hidden="true" />
               WAITING
             </span>
           )}
           {isFailed && (
-            <span className="badge badge-failed" title="Run 执行失败">
+            <span className="badge badge-failed" title="执行失败">
               <XCircle size={12} aria-hidden="true" />
               FAILED
-            </span>
-          )}
-          {isUnknown && (
-            <span className="badge badge-unknown" title="Run 状态未知">
-              UNKNOWN
             </span>
           )}
           {issue.archivedAt && (
@@ -84,97 +95,89 @@ export function IssueCard({
       <h4 className="issue-title">{issue.title}</h4>
 
       {currentOrLatestRun && (
-        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+        <div className="issue-card-meta-row">
           <span className="badge badge-run">
-            {currentOrLatestRun.role === 'REVIEWER' ? '审核' : '执行'} #{currentOrLatestRun.ordinal}
-            {currentOrLatestRun.outcome ? ` · ${currentOrLatestRun.outcome}` : ` · ${currentOrLatestRun.status}`}
+            #{currentOrLatestRun.ordinal} {currentOrLatestRun.state}
+            {currentOrLatestRun.agentName ? ` · ${currentOrLatestRun.agentName}` : ''}
+            {` · ${currentOrLatestRun.status}`}
           </span>
         </div>
       )}
 
-      <div className="issue-card-meta">
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {issue.assigneeAgentName ? (
-            <>
-              <Bot size={12} aria-hidden="true" />
-              <span>{issue.assigneeAgentName}</span>
-            </>
-          ) : (
-            <>
-              <User size={12} aria-hidden="true" />
-              <span>未指定</span>
-            </>
-          )}
-        </span>
-        <span style={{ fontSize: '0.75rem' }}>
-          {issue.reviewerAgentName ? `审: ${issue.reviewerAgentName}` : '人审'}
-        </span>
-      </div>
+      {issue.blockReason && isBlocked && (
+        <p className="issue-block-reason" title={issue.blockReason}>
+          原因: {issue.blockReason}
+        </p>
+      )}
 
+      {/* 快捷操作区 */}
       <div
         className="issue-card-quick-actions"
         onClick={(e) => e.stopPropagation()}
       >
-        {issue.status === 'BACKLOG' && onChangeStatus && (
+        {isUnknown && onResolveUnknown && (
           <button
             type="button"
-            className="quick-action-btn"
-            onClick={() => onChangeStatus('TODO')}
-            title="移至待办"
+            className="action-pill danger"
+            onClick={onResolveUnknown}
+            title="核查外部副作用并解除 UNKNOWN 门禁"
           >
-            → TODO
+            <ShieldAlert size={12} aria-hidden="true" />
+            <span>人工核查</span>
           </button>
         )}
-        {issue.status === 'TODO' && onChangeStatus && (
+
+        {isBlocked && onRecover && (
           <button
             type="button"
-            className="quick-action-btn"
-            onClick={() => onChangeStatus('BACKLOG')}
-            title="放回需求池"
+            className="action-pill primary"
+            onClick={onRecover}
+            title={`恢复至 ${issue.blockedFromState || '原阶段'}`}
           >
-            ← BACKLOG
+            <RotateCcw size={12} aria-hidden="true" />
+            <span>恢复</span>
           </button>
         )}
-        {isTerminal && onChangeStatus && (
+
+        {isDone && onReopen && (
           <button
             type="button"
-            className="quick-action-btn"
-            onClick={() => onChangeStatus('TODO')}
-            title="重新打开至 TODO"
+            className="action-pill"
+            onClick={onReopen}
+            title="重新打开已完成的 Issue 回到 INIT"
           >
-            <RotateCcw size={11} style={{ marginRight: '2px' }} aria-hidden="true" />
-            Reopen
+            <RotateCcw size={12} aria-hidden="true" />
+            <span>重开</span>
           </button>
         )}
-        {!isTerminal && onCancel && (
+
+        {!isBlocked && !isDone && onBlock && (
           <button
             type="button"
-            className="quick-action-btn"
-            onClick={onCancel}
-            title="取消此 Issue"
+            className="action-pill"
+            onClick={onBlock}
+            title="设置业务阻塞原因"
           >
-            取消
+            <AlertCircle size={12} aria-hidden="true" />
+            <span>阻塞</span>
           </button>
         )}
-        {isTerminal && !issue.archivedAt && onArchive && (
-          <button
-            type="button"
-            className="quick-action-btn"
-            onClick={onArchive}
-            title="归档此 Issue"
-          >
-            归档
-          </button>
-        )}
-        {isTerminal && issue.archivedAt && onUnarchive && (
-          <button
-            type="button"
-            className="quick-action-btn"
-            onClick={onUnarchive}
-            title="取消归档"
-          >
-            恢复
-          </button>
+
+        {/* 根据工作流 next 转移白名单提供的快捷流转 */}
+        {!isBlocked && availableNextStates.length > 0 && onTransition && (
+          <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            {availableNextStates.map((nextState) => (
+              <button
+                key={nextState}
+                type="button"
+                className="action-pill primary"
+                onClick={() => onTransition(nextState)}
+                title={`流转到 ${nextState}`}
+              >
+                <span>→ {nextState}</span>
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>

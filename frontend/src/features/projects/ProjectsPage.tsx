@@ -5,6 +5,7 @@ import {
   Archive,
   ArrowRight,
   Calendar,
+  Layers,
   Pencil,
   RefreshCw,
   Search,
@@ -159,7 +160,7 @@ export function ProjectsPage({
       <div className="cards-grid">
         <CreateCard
           title="新建项目"
-          subtitle="支持多 Issue 看板、独立 Agent 分支与审查工作流"
+          subtitle="支持动态工作流 JSON、状态自然 token 看板与稳定 AgentThread 编排"
           onClick={() => setIsCreateOpen(true)}
         />
 
@@ -197,9 +198,12 @@ export function ProjectsPage({
                 </div>
 
                 <div className="project-meta-row">
-                  <span>最大打回次数:</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Layers size={14} aria-hidden="true" />
+                    <span>工作流阶段:</span>
+                  </span>
                   <strong style={{ color: 'var(--fg)' }}>
-                    {project.maxReviewRejections}
+                    {project.workflow?.states?.length ?? 0} 个阶段
                   </strong>
                 </div>
 
@@ -226,7 +230,7 @@ export function ProjectsPage({
                   style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                   onClick={() => onSelectProject(project.id)}
                 >
-                  <span>进入项目</span>
+                  <span>进入看板</span>
                   <ArrowRight size={14} aria-hidden="true" />
                 </button>
               ) : (
@@ -238,7 +242,7 @@ export function ProjectsPage({
                   type="button"
                   className="ghost-btn"
                   onClick={() => setEditingProject(project)}
-                  title="编辑项目"
+                  title="编辑项目配置与工作流"
                   aria-label={`编辑项目 ${project.title}`}
                 >
                   <Pencil size={14} aria-hidden="true" />

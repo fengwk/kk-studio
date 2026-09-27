@@ -1,19 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
   AlertCircle,
   AlertTriangle,
-  Archive,
-  Ban,
-  Clock,
+  ArrowRight,
+  Bot,
+  Coins,
   Download,
+  Eye,
+  FileText,
+  ListOrdered,
+  MessageSquare,
+  Paperclip,
   Pencil,
-  Plus,
   RefreshCw,
   RotateCcw,
+  Send,
   ShieldAlert,
+  Square,
   Trash2,
   Upload,
+  User,
   X,
 } from 'lucide-react'
 import { isConflictError } from '@/shared/api/client'
@@ -26,35 +34,30 @@ import {
   validateUploadFile,
   type HashFile,
 } from '@/features/ai/composer'
-import { presentConflict } from '@/shared/conflict/conflict-presenter'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
-import { useCatalogAgentNames } from '../useCatalogAgentNames'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type {
-  IssueActivityDTO,
-  IssueDetailDTO,
   IssueEvidenceDTO,
-  IssueRunRole,
-  IssueStatus,
-  ProjectIssueSnapshotDTO,
-  ReviewDecision,
+  ProjectWorkflowDTO,
 } from '../types'
 
 export interface IssueDetailModalProps {
   isOpen: boolean
   issueId: string | null
-  projectId: string
-  projectIssues?: ProjectIssueSnapshotDTO[]
+  projectId?: string
+  workflow?: ProjectWorkflowDTO
   onClose: () => void
-  onUpdated: () => void
+  onUpdated?: () => void
+  onIssueUpdated?: () => void
   api?: ProjectsApi
   storageService?: StorageService
   hashFile?: HashFile
+  onOpenThread?: (threadId: string) => void
 }
 
-type TabKey = 'spec' | 'deps' | 'activities' | 'runs' | 'evidence'
+type TabKey = 'spec' | 'activities' | 'runs' | 'stageBudgets' | 'agentThreads' | 'evidence'
 
 async function calculateFileSha256(file: File, customHasher?: HashFile): Promise<string> {
   if (customHasher) {
@@ -81,14 +84,20 @@ async function calculateFileSha256(file: File, customHasher?: HashFile): Promise
 export function IssueDetailModal({
   isOpen,
   issueId,
-  projectId,
-  projectIssues = [],
+  projectId = '',
+  workflow,
   onClose,
   onUpdated,
+  onIssueUpdated,
   api = projectsApi,
   storageService = defaultStorageService,
   hashFile,
+  onOpenThread,
 }: IssueDetailModalProps) {
+  const notifyUpdated = () => {
+    onUpdated?.()
+    onIssueUpdated?.()
+  }
   const queryClient = useQueryClient()
   const issueQueryKey = queryKeys.projects.issue(projectId, issueId ?? '')
 
@@ -105,1897 +114,1307 @@ export function IssueDetailModal({
 
   const [activeTab, setActiveTab] = useState<TabKey>('spec')
   const [actionError, setActionError] = useState<string | null>(null)
-  const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
+  const displayError = actionError || (queryError instanceof Error ? queryError.message : null)
+  const [conflictDetail, setConflictDetail] = useState<string | null>(null)
+  const [isActionPending, setIsActionPending] = useState(false)
 
-  // Edit Spec state
+  // 1. Spec 编辑草稿状态与 409 保护
   const [isEditingSpec, setIsEditingSpec] = useState(false)
   const [draftTitle, setDraftTitle] = useState('')
   const [draftDescription, setDraftDescription] = useState('')
-  const [draftAssignee, setDraftAssignee] = useState('')
-  const [draftReviewer, setDraftReviewer] = useState('')
-  const [draftExpectedVersion, setDraftExpectedVersion] = useState('0')
-  const [isSavingSpec, setIsSavingSpec] = useState(false)
-  const [specConflict, setSpecConflict] = useState<{
-    reason: string
-    detail: string
-  } | null>(null)
+  const [specVersion, setSpecVersion] = useState('0')
 
-  const { agentOptions } = useCatalogAgentNames({
-    preserveNames: [
-      detail?.issue?.assigneeAgentName,
-      detail?.issue?.reviewerAgentName,
-      draftAssignee,
-      draftReviewer,
-    ],
-    enabled: isOpen && Boolean(issueId),
-  })
-
-  // Cancel state
-  const [isCanceling, setIsCanceling] = useState(false)
-  const [cancelReason, setCancelReason] = useState('')
-
-  // Block state
-  const [isBlocking, setIsBlocking] = useState(false)
-  const [blockReason, setBlockReason] = useState('')
-  const [isSubmittingBlock, setIsSubmittingBlock] = useState(false)
-
-  // Recover state
-  const [isRecovering, setIsRecovering] = useState(false)
-  const [recoverToBacklog, setRecoverToBacklog] = useState(false)
-  const [recoverComment, setRecoverComment] = useState('')
-  const [isSubmittingRecover, setIsSubmittingRecover] = useState(false)
-
-  // Add dependency state
-  const [selectedDepIssueId, setSelectedDepIssueId] = useState('')
-  const [isAddingDep, setIsAddingDep] = useState(false)
-
-  // Activity list & pagination state
-  const [activities, setActivities] = useState<IssueActivityDTO[]>([])
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [isLoadingMoreActivities, setIsLoadingMoreActivities] = useState(false)
-
-  // Append Activity state
+  // 2. Activity 发布状态（普通评论 vs 运行指令）
+  const [activityKind, setActivityKind] = useState<'COMMENT' | 'INSTRUCTION'>('COMMENT')
   const [activityBody, setActivityBody] = useState('')
-  const [activityTargetRole, setActivityTargetRole] = useState<IssueRunRole | ''>('')
-  const [isAppendingActivity, setIsAppendingActivity] = useState(false)
+  const [activityRequestKey, setActivityRequestKey] = useState<string>(() => createUuid())
 
-  // Human review state
-  const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('APPROVE')
-  const [reviewReason, setReviewReason] = useState('')
-  const [isSubmittingReview, setIsSubmittingReview] = useState(false)
+  // 3. 阻塞表单
+  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
+  const [blockReason, setBlockReason] = useState('')
+  const [blockRequestKey, setBlockRequestKey] = useState<string>(() => createUuid())
 
-  // Retry state
-  const [isRetrying, setIsRetrying] = useState(false)
-  const [retryVerification, setRetryVerification] = useState('')
-  // UNKNOWN 的最新 Run 无法判定外部副作用是否已发生，后端要求人工核对说明；前端按同一判定启用输入。
-  const retryNeedsVerification =
-    detail?.latestRun?.status === 'UNKNOWN' || detail?.currentRun?.status === 'UNKNOWN'
+  // 4. UNKNOWN 人工核查表单
+  const [isResolveUnknownOpen, setIsResolveUnknownOpen] = useState(false)
+  const [verificationInput, setVerificationInput] = useState('')
+  const [resolveUnknownRequestKey, setResolveUnknownRequestKey] = useState<string>(() => createUuid())
 
-  // Evidence state
-  const currentIssueIdRef = useRef(issueId)
-  useEffect(() => {
-    currentIssueIdRef.current = issueId
-  }, [issueId])
+  // 5. 阶段预算重置表单
+  const [isResetBudgetOpen, setIsResetBudgetOpen] = useState(false)
+  const [resetBudgetState, setResetBudgetState] = useState('')
+  const [resetBudgetMaxRuns, setResetBudgetMaxRuns] = useState<number>(3)
+  const [budgetRequestKey, setBudgetRequestKey] = useState<string>(() => createUuid())
 
+  // 6. Stop 终止表单
+  const [isStopModalOpen, setIsStopModalOpen] = useState(false)
+  const [stopDetail, setStopDetail] = useState('')
+  const [stopRequestKey, setStopRequestKey] = useState<string>(() => createUuid())
+
+  // 7. 删除 Issue 确认
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+
+  // 8. Evidence 状态
+  const [localEvidences, setLocalEvidences] = useState<IssueEvidenceDTO[]>([])
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false)
-  const [evidenceActionError, setEvidenceActionError] = useState<string | null>(null)
-  const evidenceFileInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [downloadingBlobId, setDownloadingBlobId] = useState<string | null>(null)
-  const [downloadError, setDownloadError] = useState<{ blobId: string; message: string } | null>(null)
-
-  // Sync activities from detail query
+  // 初始化草稿
   useEffect(() => {
-    if (detail) {
-      setActivities(detail.activities ?? [])
-      setNextCursor(detail.nextActivityCursor ?? null)
+    if (detail?.issue) {
+      if (!isEditingSpec) {
+        setDraftTitle(detail.issue.title)
+        setDraftDescription(detail.issue.description)
+        setSpecVersion(detail.issue.version)
+      }
     }
-  }, [detail])
+  }, [detail, isEditingSpec])
 
-  // Reset transient modal states on issue or open change
-  useEffect(() => {
-    if (isOpen && issueId) {
-      setIsEditingSpec(false)
-      setSpecConflict(null)
-      setIsCanceling(false)
-      setCancelReason('')
-      setIsBlocking(false)
-      setBlockReason('')
-      setIsRecovering(false)
-      setRecoverToBacklog(false)
-      setRecoverComment('')
-      setActivityBody('')
-      setActivityTargetRole('')
-      setRetryVerification('')
-      setActiveTab('spec')
-      setActionError(null)
-      setIsUploadingEvidence(false)
-      setEvidenceActionError(null)
-      setDownloadingBlobId(null)
-      setDownloadError(null)
-    }
-  }, [isOpen, issueId])
-
-  // Synchronize drafts with detail when not actively editing spec
-  const lastSyncedIssueIdRef = useRef<string | null>(null)
-
+  // 关闭时清理临时对话框
   useEffect(() => {
     if (!isOpen) {
-      lastSyncedIssueIdRef.current = null
-      return
+      setIsEditingSpec(false)
+      setIsBlockModalOpen(false)
+      setIsResolveUnknownOpen(false)
+      setIsResetBudgetOpen(false)
+      setIsStopModalOpen(false)
+      setIsDeleteModalOpen(false)
+      setActionError(null)
+      setConflictDetail(null)
     }
-    if (!detail) {
-      return
-    }
-    const issueChanged = lastSyncedIssueIdRef.current !== detail.issue.id
-    if (!isEditingSpec || issueChanged) {
-      setDraftTitle(detail.issue.title)
-      setDraftDescription(detail.issue.description ?? '')
-      setDraftAssignee(detail.issue.assigneeAgentName ?? '')
-      setDraftReviewer(detail.issue.reviewerAgentName ?? '')
-      setDraftExpectedVersion(detail.issue.version)
-      lastSyncedIssueIdRef.current = detail.issue.id
-    }
-  }, [isOpen, detail, isEditingSpec])
+  }, [isOpen])
 
+  // ESC 键关闭
   useEffect(() => {
     if (!isOpen) {
       return
     }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isEditingSpec) {
+      if (e.key === 'Escape') {
         e.preventDefault()
         onClose()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, isEditingSpec, onClose])
+  }, [isOpen, onClose])
 
   if (!isOpen || !issueId) {
     return null
   }
 
   const issue = detail?.issue
+  const isBlocked = issue?.state === 'BLOCKED' || Boolean(issue?.blockedFromState)
+  const isUnknown = issue?.state === 'UNKNOWN' || issue?.pauseReason === 'UNKNOWN'
+  const isDone = issue?.state === 'DONE'
 
-  // 1. Save Spec edit
+  // 从传入的 workflow 找到可转移的 next 列表
+  const currentWorkflowState = workflow?.states.find((s) => s.state === issue?.state)
+  const availableNextStates = currentWorkflowState?.next ?? []
+
+  // 刷新最新数据（保留草稿）
+  const handleReloadFreshData = async () => {
+    setActionError(null)
+    setConflictDetail(null)
+    const fresh = await refetch()
+    if (fresh.data?.issue) {
+      setSpecVersion(fresh.data.issue.version)
+    }
+  }
+
+  // --- 写操作执行封装：冻结 requestKey 支持相同重试，409 保留草稿 ---
+
+  // 1. 保存 Spec
   const handleSaveSpec = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!issue) {
+    if (!issue) return
+    const trimmedTitle = draftTitle.trim()
+    if (!trimmedTitle) {
+      setActionError('标题不能为空')
       return
     }
-    setIsSavingSpec(true)
+
+    setIsActionPending(true)
     setActionError(null)
+    setConflictDetail(null)
     try {
-      const updated = await api.updateIssue(issue.id, {
-        expectedVersion: draftExpectedVersion,
-        title: draftTitle.trim(),
-        description: draftDescription.trim() || null,
-        assigneeAgentName: draftAssignee.trim() || null,
-        reviewerAgentName: draftReviewer.trim() || null,
+      await api.updateIssue(issue.id, {
+        expectedVersion: specVersion,
+        title: trimmedTitle,
+        description: draftDescription.trim(),
       })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated } : prev,
-      )
       setIsEditingSpec(false)
-      setSpecConflict(null)
-      onUpdated()
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
       if (isConflictError(err)) {
-        const presentation = presentConflict(err)
-        setSpecConflict({
-          reason: presentation?.reason || 'PROJECT_VERSION_CONFLICT',
-          detail: presentation?.detail || '版本已冲突，您的草稿已保留。',
-        })
+        setConflictDetail('Issue 已被其他操作更新 (409 冲突)。已保留编辑草稿，请刷新版本后重试。')
       } else {
-        setActionError(err instanceof Error ? err.message : '保存修改失败')
+        setActionError(err instanceof Error ? err.message : '更新 Issue 失败')
       }
     } finally {
-      setIsSavingSpec(false)
+      setIsActionPending(false)
     }
   }
 
-  const handleReloadLatestSpec = async () => {
-    if (!issue) {
-      return
-    }
-    try {
-      const fresh = await api.getIssue(issue.id)
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, fresh)
-      setDraftExpectedVersion(fresh.issue.version)
-      setSpecConflict(null)
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '重新同步版本号失败')
-    }
-  }
-
-  // 2. Change Status (BACKLOG <-> TODO, or Reopen to TODO)
-  const handleChangeStatus = async (targetStatus: IssueStatus) => {
-    if (!issue) {
-      return
-    }
+  // 2. 流转状态 (Transition) - 每次操作开始时分配 key，重试时沿用 key
+  const handleTransition = async (toState: string, retryKey?: string) => {
+    if (!issue) return
+    const reqKey = retryKey || createUuid()
+    setIsActionPending(true)
     setActionError(null)
+    setConflictDetail(null)
     try {
-      const updated = await api.changeIssueStatus(issue.id, {
+      await api.transitionIssue(issue.id, {
         expectedVersion: issue.version,
-        status: targetStatus,
+        requestKey: reqKey,
+        toState,
       })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated } : prev,
-      )
-      onUpdated()
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '变更状态失败')
+      if (isConflictError(err)) {
+        setConflictDetail(`流转到 ${toState} 失败：版本冲突 (409)，请刷新数据后重试。`)
+      } else {
+        setActionError(err instanceof Error ? err.message : '状态流转失败')
+      }
+    } finally {
+      setIsActionPending(false)
     }
   }
 
-  // 3. Block Issue (POST /block with required reason)
-  const handleBlockIssue = async (e: React.FormEvent) => {
+  // 3. 阻塞 (Block) - 冻结 blockRequestKey
+  const handleBlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!issue) {
+    if (!issue) return
+    if (!blockReason.trim()) {
+      setActionError('阻塞原因不能为空')
       return
     }
-    const trimmedReason = blockReason.trim()
-    if (!trimmedReason) {
-      setActionError('阻塞理由不能为空')
-      return
-    }
-    setIsSubmittingBlock(true)
+
+    setIsActionPending(true)
     setActionError(null)
+    setConflictDetail(null)
     try {
-      const updated = await api.blockIssue(issue.id, {
+      await api.blockIssue(issue.id, {
         expectedVersion: issue.version,
-        reason: trimmedReason,
+        requestKey: blockRequestKey,
+        reason: blockReason.trim(),
       })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated, blocked: true } : prev,
-      )
-      setIsBlocking(false)
+      setIsBlockModalOpen(false)
       setBlockReason('')
-      await refetch()
-      onUpdated()
+      setBlockRequestKey(createUuid()) // 成功后重置下一次 key
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '阻塞 Issue 失败')
+      if (isConflictError(err)) {
+        setConflictDetail('阻塞操作遇到版本冲突 (409)。已为您保留输入内容，请刷新版本后以相同请求键重试。')
+      } else {
+        setActionError(err instanceof Error ? err.message : '阻塞 Issue 失败')
+      }
     } finally {
-      setIsSubmittingBlock(false)
+      setIsActionPending(false)
     }
   }
 
-  // 4. Recover Issue (POST /recover with toBacklog and optional comment)
-  const handleRecoverIssue = async (e: React.FormEvent) => {
+  // 4. 恢复 (Recover) - 沿用或分配 requestKey
+  const handleRecover = async (retryKey?: string) => {
+    if (!issue) return
+    const reqKey = retryKey || createUuid()
+    setIsActionPending(true)
+    setActionError(null)
+    setConflictDetail(null)
+    try {
+      await api.recoverIssue(issue.id, {
+        expectedVersion: issue.version,
+        requestKey: reqKey,
+      })
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
+    } catch (err) {
+      if (isConflictError(err)) {
+        setConflictDetail('恢复操作遇到版本冲突 (409)，请刷新后重试。')
+      } else {
+        setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
+      }
+    } finally {
+      setIsActionPending(false)
+    }
+  }
+
+  // 5. 人工核查 UNKNOWN - 冻结 resolveUnknownRequestKey
+  const handleResolveUnknownSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!issue) {
+    if (!issue) return
+    if (!verificationInput.trim()) {
+      setActionError('人工核查说明不能为空')
       return
     }
-    setIsSubmittingRecover(true)
+
+    setIsActionPending(true)
     setActionError(null)
+    setConflictDetail(null)
     try {
-      const updated = await api.recoverIssue(issue.id, {
+      await api.resolveUnknown(issue.id, {
         expectedVersion: issue.version,
-        toBacklog: recoverToBacklog,
-        comment: recoverComment.trim() || null,
+        requestKey: resolveUnknownRequestKey,
+        verification: verificationInput.trim(),
       })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated, blocked: false } : prev,
-      )
-      setIsRecovering(false)
-      setRecoverComment('')
-      await refetch()
-      onUpdated()
+      setIsResolveUnknownOpen(false)
+      setVerificationInput('')
+      setResolveUnknownRequestKey(createUuid())
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '恢复 Issue 失败')
+      if (isConflictError(err)) {
+        setConflictDetail('核查操作遇到版本冲突 (409)。已为您保留核查文本，请刷新版本后重试。')
+      } else {
+        setActionError(err instanceof Error ? err.message : '解除 UNKNOWN 门禁失败')
+      }
     } finally {
-      setIsSubmittingRecover(false)
+      setIsActionPending(false)
     }
   }
 
-  // 5. Cancel Issue
-  const handleCancelIssue = async (e: React.FormEvent) => {
+  // 6. Stop 终止 - 冻结 stopRequestKey
+  const handleStopSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!issue) {
-      return
-    }
+    if (!issue) return
+    setIsActionPending(true)
     setActionError(null)
+    setConflictDetail(null)
     try {
-      const updated = await api.cancelIssue(issue.id, {
+      await api.stopIssue(issue.id, {
         expectedVersion: issue.version,
-        reason: cancelReason.trim() || null,
+        requestKey: stopRequestKey,
+        detail: stopDetail.trim() || null,
       })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated } : prev,
-      )
-      setIsCanceling(false)
-      setCancelReason('')
-      onUpdated()
+      setIsStopModalOpen(false)
+      setStopDetail('')
+      setStopRequestKey(createUuid())
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '取消 Issue 失败')
-    }
-  }
-
-  // 6. Archive / Unarchive
-  const handleArchive = async () => {
-    if (!issue) {
-      return
-    }
-    setActionError(null)
-    try {
-      const updated = await api.archiveIssue(issue.id, {
-        expectedVersion: issue.version,
-      })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated } : prev,
-      )
-      onUpdated()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '归档失败')
-    }
-  }
-
-  const handleUnarchive = async () => {
-    if (!issue) {
-      return
-    }
-    setActionError(null)
-    try {
-      const updated = await api.unarchiveIssue(issue.id, {
-        expectedVersion: issue.version,
-      })
-      queryClient.setQueryData<IssueDetailDTO>(issueQueryKey, (prev) =>
-        prev ? { ...prev, issue: updated } : prev,
-      )
-      onUpdated()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '取消归档失败')
-    }
-  }
-
-  // 7. Add / Remove Dependency
-  const handleAddDependency = async () => {
-    if (!issue || !selectedDepIssueId) {
-      return
-    }
-    setIsAddingDep(true)
-    setActionError(null)
-    try {
-      await api.addIssueDependency(issue.id, {
-        expectedVersion: issue.version,
-        dependsOnIssueId: selectedDepIssueId,
-      })
-      setSelectedDepIssueId('')
-      await refetch()
-      onUpdated()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '添加依赖失败')
+      if (isConflictError(err)) {
+        setConflictDetail('终止操作遇到版本冲突 (409)，请刷新后重试。')
+      } else {
+        setActionError(err instanceof Error ? err.message : '终止运行失败')
+      }
     } finally {
-      setIsAddingDep(false)
+      setIsActionPending(false)
     }
   }
 
-  const handleRemoveDependency = async (dependsOnIssueId: string) => {
-    if (!issue) {
-      return
-    }
+  // 7. 重开 (Reopen) - 沿用或分配 requestKey
+  const handleReopen = async (retryKey?: string) => {
+    if (!issue) return
+    const reqKey = retryKey || createUuid()
+    setIsActionPending(true)
     setActionError(null)
     try {
-      await api.removeIssueDependency(issue.id, dependsOnIssueId, issue.version)
-      await refetch()
-      onUpdated()
+      await api.reopenIssue(issue.id, {
+        expectedVersion: issue.version,
+        requestKey: reqKey,
+      })
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '移除依赖失败')
+      setActionError(err instanceof Error ? err.message : '重新打开 Issue 失败')
+    } finally {
+      setIsActionPending(false)
     }
   }
 
-  // 8. Append Activity
+  // 8. 重置阶段预算 - 冻结 budgetRequestKey
+  const handleResetBudgetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!issue) return
+    if (!resetBudgetState) {
+      setActionError('请选择要重置预算的工作阶段')
+      return
+    }
+    if (resetBudgetMaxRuns <= 0) {
+      setActionError('最大额度必须大于 0')
+      return
+    }
+
+    setIsActionPending(true)
+    setActionError(null)
+    setConflictDetail(null)
+    try {
+      await api.resetStageBudget(issue.id, {
+        expectedVersion: issue.version,
+        requestKey: budgetRequestKey,
+        state: resetBudgetState,
+        maxRuns: resetBudgetMaxRuns,
+      })
+      setIsResetBudgetOpen(false)
+      setBudgetRequestKey(createUuid())
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
+    } catch (err) {
+      if (isConflictError(err)) {
+        setConflictDetail('重置阶段预算遇到版本冲突 (409)。已保留设置，请刷新版本后重试。')
+      } else {
+        setActionError(err instanceof Error ? err.message : '重置阶段预算失败')
+      }
+    } finally {
+      setIsActionPending(false)
+    }
+  }
+
+  // 9. 追加活动 (Activity) - 区分 COMMENT 与 INSTRUCTION，冻结 activityRequestKey
   const handleAppendActivity = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!issue || !activityBody.trim()) {
+    if (!issue) return
+    const trimmedBody = activityBody.trim()
+    if (!trimmedBody) {
+      setActionError('内容不能为空')
       return
     }
-    setIsAppendingActivity(true)
+
+    setIsActionPending(true)
     setActionError(null)
+    setConflictDetail(null)
     try {
-      const appended = await api.appendIssueActivity(issue.id, {
-        body: activityBody.trim(),
-        targetRole: activityTargetRole || null,
-        idempotencyKey: createUuid(),
+      await api.appendIssueActivity(issue.id, {
+        expectedVersion: issue.version,
+        requestKey: activityRequestKey,
+        kind: activityKind,
+        body: trimmedBody,
       })
-      setActivities((prev) => [...prev, appended])
       setActivityBody('')
-      setActivityTargetRole('')
-      await refetch()
-      onUpdated()
+      setActivityRequestKey(createUuid()) // 提交成功生成新 key
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '追加活动失败')
-    } finally {
-      setIsAppendingActivity(false)
-    }
-  }
-
-  // 9. Load more activities
-  const handleLoadMoreActivities = async () => {
-    if (!issue || !nextCursor) {
-      return
-    }
-    setIsLoadingMoreActivities(true)
-    setActionError(null)
-    try {
-      const nextPage = await api.listActivities(issue.id, nextCursor, 50)
-      setActivities((prev) => [...prev, ...nextPage])
-      // Calculate next cursor: if page size reached limit, last sequence is next cursor
-      if (nextPage.length >= 50) {
-        setNextCursor(nextPage[nextPage.length - 1].sequence)
+      if (isConflictError(err)) {
+        setConflictDetail('发布活动遇到版本冲突 (409)。已保留您的输入草稿，请刷新版本后以相同请求键重试。')
       } else {
-        setNextCursor(null)
+        setActionError(err instanceof Error ? err.message : '发布活动失败')
       }
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : '加载更多活动失败')
     } finally {
-      setIsLoadingMoreActivities(false)
+      setIsActionPending(false)
     }
   }
 
-  // 10. Human Review
-  const handleReview = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!issue) {
-      return
-    }
-    setIsSubmittingReview(true)
+  // 10. 删除 Issue
+  const handleDeleteIssue = async () => {
+    if (!issue) return
+    setIsActionPending(true)
     setActionError(null)
     try {
-      await api.reviewIssue(issue.id, {
-        decision: reviewDecision,
-        reason: reviewReason.trim() || null,
-        idempotencyKey: createUuid(),
-      })
-      setReviewReason('')
-      await refetch()
-      onUpdated()
+      await api.deleteIssue(issue.id, issue.version)
+      setIsDeleteModalOpen(false)
+      onClose()
+      notifyUpdated()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '提交审核失败')
+      setActionError(err instanceof Error ? err.message : '删除 Issue 失败')
     } finally {
-      setIsSubmittingReview(false)
+      setIsActionPending(false)
     }
   }
 
-  // 11. Retry Run
-  const handleRetryRun = async () => {
-    if (!issue) {
-      return
-    }
-    const verification = retryVerification.trim()
-    if (retryNeedsVerification && !verification) {
-      setActionError('重试 UNKNOWN Run 前必须填写人工核对说明')
-      return
-    }
-    setIsRetrying(true)
-    setActionError(null)
+  // 11. 上传证据
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !issue) return
     try {
-      await api.retryIssue(issue.id, {
-        idempotencyKey: createUuid(),
-        verification: verification || null,
-      })
-      setRetryVerification('')
-      await refetch()
-      onUpdated()
+      validateUploadFile(file)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '重试 Run 失败')
-    } finally {
-      setIsRetrying(false)
-    }
-  }
-
-  // 12. Evidence Upload & Download
-  const handleEvidenceUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file || !issue) {
-      return
-    }
-    event.target.value = ''
-    const targetIssueId = issue.id
-
-    const sizeError = validateUploadFile(file)
-    if (sizeError) {
-      setEvidenceActionError(sizeError)
+      setActionError(err instanceof Error ? err.message : '文件校验不通过')
       return
     }
 
     setIsUploadingEvidence(true)
-    setEvidenceActionError(null)
-    let reservationId: string | null = null
-
+    setActionError(null)
     try {
       const sha256 = await calculateFileSha256(file, hashFile)
-      if (currentIssueIdRef.current !== targetIssueId) {
-        return
-      }
-
-      const reservation = await storageService.reserveUpload({
+      const upload = await storageService.reserveUpload({
         filename: file.name,
-        mediaType: file.type || 'application/octet-stream',
         sizeBytes: file.size,
+        mediaType: file.type || 'application/octet-stream',
         sha256,
       })
-      reservationId = reservation.id
-      if (currentIssueIdRef.current !== targetIssueId) {
-        void storageService.deleteUpload(reservation.id).catch(() => undefined)
-        return
+      if (upload.state === 'PENDING') {
+        await storageService.uploadFile(upload.presignedPut, file)
       }
+      await storageService.completeUpload(upload.id)
 
-      if (reservation.state === 'PENDING') {
-        await storageService.uploadFile(reservation.presignedPut, file)
-        if (currentIssueIdRef.current !== targetIssueId) {
-          void storageService.deleteUpload(reservation.id).catch(() => undefined)
-          return
-        }
-      }
-
-      const completed = await storageService.completeUpload(reservation.id)
-      if (currentIssueIdRef.current !== targetIssueId) {
-        void storageService.deleteUpload(completed.id).catch(() => undefined)
-        return
-      }
-
-      await api.addIssueEvidence(targetIssueId, { uploadId: completed.id })
-      if (currentIssueIdRef.current !== targetIssueId) {
-        return
-      }
-
-      await refetch()
-      onUpdated()
-    } catch (err) {
-      if (currentIssueIdRef.current !== targetIssueId) {
-        return
-      }
-      if (reservationId) {
-        void storageService.deleteUpload(reservationId).catch(() => undefined)
-      }
-      setEvidenceActionError(err instanceof Error ? err.message : '上传证据失败')
-    } finally {
-      if (currentIssueIdRef.current === targetIssueId) {
-        setIsUploadingEvidence(false)
-      }
-    }
-  }
-
-  const handleDownloadEvidence = async (ev: IssueEvidenceDTO) => {
-    if (!issue || !ev.blobId || downloadingBlobId === ev.blobId) {
-      return
-    }
-    const targetIssueId = issue.id
-    setDownloadingBlobId(ev.blobId)
-    setDownloadError(null)
-    try {
-      const result = await storageService.getBlobDownloadUrl(ev.blobId)
-      if (currentIssueIdRef.current !== targetIssueId) {
-        return
-      }
-      if (result?.url) {
-        const a = document.createElement('a')
-        a.href = result.url
-        a.target = '_blank'
-        a.rel = 'noreferrer noopener'
-        if (ev.name) {
-          a.download = ev.name
-        }
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-      } else {
-        throw new Error('未获取到有效的下载地址')
-      }
-    } catch (err) {
-      if (currentIssueIdRef.current !== targetIssueId) {
-        return
-      }
-      setDownloadError({
-        blobId: ev.blobId,
-        message: err instanceof Error ? err.message : '获取下载链接失败',
+      const published = await api.addIssueEvidence(issue.id, {
+        uploadId: upload.id,
       })
+      setLocalEvidences((prev) => [published, ...prev])
+      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '上传证据失败')
     } finally {
-      if (currentIssueIdRef.current === targetIssueId) {
-        setDownloadingBlobId(null)
+      setIsUploadingEvidence(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
       }
     }
   }
 
-  const isBlocked = Boolean(detail?.blocked) || issue?.status === 'BLOCKED'
-  const isTerminal = issue?.status === 'DONE' || issue?.status === 'CANCELED'
-  const canHumanReview =
-    issue?.status === 'IN_REVIEW' && issue?.reviewerAgentName === null
-  const currentRun = detail?.currentRun
-  const isWaitingHuman = currentRun?.status === 'WAITING_HUMAN'
-  const isFailedOrUnknown =
-    currentRun?.status === 'FAILED' ||
-    currentRun?.status === 'UNKNOWN' ||
-    detail?.latestRun?.status === 'FAILED' ||
-    detail?.latestRun?.status === 'UNKNOWN'
-
-  // Dependency candidates
-  const existingDepIds = new Set(detail?.dependencies.map((d) => d.dependsOnIssueId) ?? [])
-  const depCandidates = projectIssues.filter(
-    (item) =>
-      item.issue.id !== issue?.id &&
-      !existingDepIds.has(item.issue.id) &&
-      !item.issue.archivedAt,
-  )
+  const allEvidences = [...localEvidences]
 
   return (
     <div
       className="modal-backdrop"
       role="presentation"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !isEditingSpec) {
+        if (e.target === e.currentTarget) {
           onClose()
         }
       }}
     >
       <div
-        className="modal-card resource-modal-card"
-        style={{ maxWidth: '820px', width: '92%' }}
+        className="modal-card issue-detail-modal-card"
         role="dialog"
         aria-modal="true"
         aria-label={`Issue #${issue?.number || ''} 详情`}
       >
+        {/* 弹窗头部 */}
         <div className="modal-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <h3 style={{ margin: 0 }}>
-              Issue #{issue?.number}: {issue?.title}
-            </h3>
-            {issue && (
-              <span className="badge badge-status" style={{ fontWeight: 600 }}>
-                {issue.status}
-              </span>
-            )}
+          <div className="issue-detail-header-left">
+            <span className="issue-number" style={{ fontSize: '1.1rem' }}>
+              #{issue?.number || '...'}
+            </span>
+            <span className="badge badge-state">{issue?.state || 'INIT'}</span>
+
             {isBlocked && (
-              <span className="badge badge-blocked">
+              <span className="badge badge-blocked" title={issue?.blockReason || '业务阻塞'}>
                 <AlertCircle size={12} aria-hidden="true" />
                 BLOCKED
               </span>
             )}
-            {issue?.archivedAt && (
-              <span className="badge badge-archived">已归档</span>
+            {isUnknown && (
+              <span className="badge badge-unknown" title="待人工核查外部副作用">
+                <ShieldAlert size={12} aria-hidden="true" />
+                UNKNOWN 门禁
+              </span>
+            )}
+            {issue?.pauseReason === 'USER' && (
+              <span className="badge badge-paused">PAUSED</span>
+            )}
+            {issue?.pauseReason === 'ERROR' && (
+              <span className="badge badge-failed">ERROR</span>
             )}
           </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => void handleReloadFreshData()}
+              disabled={isLoading || isActionPending}
+              title="刷新数据"
+            >
+              <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="ghost-btn danger"
+              onClick={() => setIsDeleteModalOpen(true)}
+              title="删除 Issue"
+              aria-label="删除 Issue"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="modal-close-button"
+              onClick={onClose}
+              aria-label="关闭"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+
+        {/* 顶部操作动作条 */}
+        <div className="issue-actions-bar">
+          <div className="issue-actions-left">
+            {/* 流转目标按钮 */}
+            {!isBlocked && availableNextStates.map((toState) => (
+              <button
+                key={toState}
+                type="button"
+                className="btn-action primary"
+                disabled={isActionPending}
+                onClick={() => handleTransition(toState)}
+                title={`流转状态至 ${toState}`}
+              >
+                <span>流转至 {toState}</span>
+                <ArrowRight size={12} aria-hidden="true" />
+              </button>
+            ))}
+
+            {/* UNKNOWN 人工核查 */}
+            {isUnknown && (
+              <button
+                type="button"
+                className="btn-action danger"
+                disabled={isActionPending}
+                onClick={() => setIsResolveUnknownOpen(true)}
+                title="核查外部副作用并解除 UNKNOWN"
+              >
+                <ShieldAlert size={13} aria-hidden="true" />
+                <span>人工核查</span>
+              </button>
+            )}
+
+            {/* 阻塞与恢复 */}
+            {isBlocked ? (
+              <button
+                type="button"
+                className="btn-action primary"
+                disabled={isActionPending}
+                onClick={() => handleRecover()}
+                title="解除阻塞并恢复至原工作阶段"
+              >
+                <RotateCcw size={13} aria-hidden="true" />
+                <span>恢复执行</span>
+              </button>
+            ) : !isDone && (
+              <button
+                type="button"
+                className="btn-action"
+                disabled={isActionPending}
+                onClick={() => setIsBlockModalOpen(true)}
+                title="记录原因并标记业务阻塞"
+              >
+                <AlertCircle size={13} aria-hidden="true" />
+                <span>业务阻塞</span>
+              </button>
+            )}
+
+            {/* 停止 (Stop) */}
+            {!isDone && (
+              <button
+                type="button"
+                className="btn-action"
+                disabled={isActionPending}
+                onClick={() => setIsStopModalOpen(true)}
+                title="终止当前活动 Run 并置为暂停"
+              >
+                <Square size={13} aria-hidden="true" />
+                <span>终止 (Stop)</span>
+              </button>
+            )}
+
+            {/* 重开 (Reopen) */}
+            {isDone && (
+              <button
+                type="button"
+                className="btn-action primary"
+                disabled={isActionPending}
+                onClick={() => handleReopen()}
+                title="重新打开已完成的 Issue 回到 INIT"
+              >
+                <RotateCcw size={13} aria-hidden="true" />
+                <span>重新打开</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 冲突与错误提示横幅 */}
+        {conflictDetail && (
+          <div
+            className="form-error-banner"
+            role="alert"
+            style={{ margin: '8px 20px 0 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span>{conflictDetail}</span>
+            </div>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => void handleReloadFreshData()}
+              style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
+            >
+              <RefreshCw size={12} aria-hidden="true" />
+              <span>刷新并保留草稿</span>
+            </button>
+          </div>
+        )}
+
+        {displayError && (
+          <div className="form-error-banner" role="alert" style={{ margin: '8px 20px 0 20px' }}>
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>{displayError}</span>
+          </div>
+        )}
+
+        {/* Tab 导航 */}
+        <div className="tab-nav" style={{ padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
           <button
             type="button"
-            className="modal-close-button"
-            onClick={onClose}
-            aria-label="关闭"
+            className={`tab-btn ${activeTab === 'spec' ? 'active' : ''}`}
+            onClick={() => setActiveTab('spec')}
           >
-            <X size={16} aria-hidden="true" />
+            <FileText size={14} aria-hidden="true" />
+            <span>需求事实</span>
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'activities' ? 'active' : ''}`}
+            onClick={() => setActiveTab('activities')}
+          >
+            <Activity size={14} aria-hidden="true" />
+            <span>活动时间线 ({detail?.activities?.length || 0})</span>
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'runs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('runs')}
+          >
+            <ListOrdered size={14} aria-hidden="true" />
+            <span>Run 报告 ({detail?.runs?.length || 0})</span>
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'stageBudgets' ? 'active' : ''}`}
+            onClick={() => setActiveTab('stageBudgets')}
+          >
+            <Coins size={14} aria-hidden="true" />
+            <span>阶段预算 ({detail?.stageBudgets?.length || 0})</span>
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'agentThreads' ? 'active' : ''}`}
+            onClick={() => setActiveTab('agentThreads')}
+          >
+            <Bot size={14} aria-hidden="true" />
+            <span>Agent 线程 ({detail?.agentThreads?.length || 0})</span>
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'evidence' ? 'active' : ''}`}
+            onClick={() => setActiveTab('evidence')}
+          >
+            <Paperclip size={14} aria-hidden="true" />
+            <span>公开证据 ({allEvidences.length})</span>
           </button>
         </div>
 
-        <nav className="modal-tabs" aria-label="Issue 详情标签页">
-          <button
-            type="button"
-            className={`modal-tab-button ${activeTab === 'spec' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('spec')}
-          >
-            规格与状态
-          </button>
-          <button
-            type="button"
-            className={`modal-tab-button ${activeTab === 'deps' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('deps')}
-          >
-            依赖关系 ({detail?.dependencies.length ?? 0})
-          </button>
-          <button
-            type="button"
-            className={`modal-tab-button ${activeTab === 'activities' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('activities')}
-          >
-            活动流 ({activities.length})
-          </button>
-          <button
-            type="button"
-            className={`modal-tab-button ${activeTab === 'runs' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('runs')}
-          >
-            执行与审核 ({detail?.runs.length ?? 0})
-          </button>
-          <button
-            type="button"
-            className={`modal-tab-button ${activeTab === 'evidence' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('evidence')}
-          >
-            已发布证据 ({detail?.evidence?.length ?? 0})
-          </button>
-        </nav>
-
-        <div className="modal-body" style={{ maxHeight: '68vh', overflowY: 'auto' }}>
-          {errorMessage && (
-            <div className="form-error-banner" role="alert" style={{ marginBottom: '14px' }}>
-              <AlertTriangle size={14} aria-hidden="true" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {isLoading && !detail && (
-            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--fg-muted)' }}>
+        {/* Tab 内容区 */}
+        <div className="modal-body issue-detail-body">
+          {isLoading && !detail ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-muted)' }}>
               加载 Issue 详情中...
             </div>
-          )}
-
-          {detail && issue && activeTab === 'spec' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {isBlocked && (
-                <div
-                  style={{
-                    background: 'rgba(239, 68, 68, 0.1)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '12px 14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f87171', fontWeight: 600 }}>
-                    <ShieldAlert size={16} aria-hidden="true" />
-                    <span>Issue 当前处于阻塞状态 (BLOCKED)，自动推进已停止</span>
-                  </div>
-                  {!isRecovering && (
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      style={{ fontSize: '0.8125rem', height: '28px', padding: '0 12px' }}
-                      onClick={() => setIsRecovering(true)}
-                    >
-                      <RotateCcw size={12} style={{ marginRight: '4px' }} aria-hidden="true" />
-                      恢复 Issue
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {isWaitingHuman && (
-                <div
-                  style={{
-                    background: 'rgba(245, 158, 11, 0.1)',
-                    border: '1px solid rgba(245, 158, 11, 0.3)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '12px 14px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontWeight: 600 }}>
-                    <Clock size={16} aria-hidden="true" />
-                    <span>Run 当前正等待人类输入 (WAITING_HUMAN)</span>
-                  </div>
-                  <div style={{ fontSize: '0.875rem', marginTop: '4px', color: 'var(--fg)' }}>
-                    原因：{currentRun?.waitingReason || '无具体说明'}
-                  </div>
-                  <div style={{ marginTop: '8px' }}>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      style={{ fontSize: '0.8125rem', height: '28px', padding: '0 10px' }}
-                      onClick={() => setActiveTab('activities')}
-                    >
-                      前往“活动流”追加答复
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {isEditingSpec ? (
-                <form onSubmit={handleSaveSpec}>
-                  {specConflict && (
-                    <div className="cas-conflict-banner" role="alert">
-                      <div className="cas-conflict-title">
-                        <AlertTriangle size={16} aria-hidden="true" />
-                        <span>版本冲突 ({specConflict.reason})</span>
-                      </div>
-                      <div className="cas-conflict-text">
-                        服务端 Issue 内容已更新，您的草稿已保留在下方表单。
-                      </div>
-                      <div className="cas-conflict-actions">
-                        <button
-                          type="button"
-                          className="btn-primary"
-                          onClick={handleReloadLatestSpec}
-                        >
-                          <RefreshCw size={14} aria-hidden="true" />
-                          同步最新版本号
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="form-group">
-                    <label htmlFor="edit-spec-title">标题</label>
-                    <input
-                      id="edit-spec-title"
-                      type="text"
-                      value={draftTitle}
-                      onChange={(e) => setDraftTitle(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="edit-spec-desc">规格要求 (Spec)</label>
-                    <textarea
-                      id="edit-spec-desc"
-                      value={draftDescription}
-                      onChange={(e) => setDraftDescription(e.target.value)}
-                      rows={5}
-                    />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                    <div className="form-group">
-                      <label htmlFor="edit-spec-assignee">执行 Agent (EXECUTOR)</label>
-                      <select
-                        id="edit-spec-assignee"
-                        value={draftAssignee}
-                        onChange={(e) => setDraftAssignee(e.target.value)}
-                        aria-label="执行 Agent (EXECUTOR)"
-                      >
-                        <option value="">未指定</option>
-                        {agentOptions.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label htmlFor="edit-spec-reviewer">审查 Agent (REVIEWER)</label>
-                      <select
-                        id="edit-spec-reviewer"
-                        value={draftReviewer}
-                        onChange={(e) => setDraftReviewer(e.target.value)}
-                        aria-label="审查 Agent (REVIEWER)"
-                      >
-                        <option value="">人工审核</option>
-                        {agentOptions.map((name) => (
-                          <option key={name} value={name}>
-                            {name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                    <button
-                      type="submit"
-                      className="btn-primary"
-                      disabled={isSavingSpec || !draftTitle.trim()}
-                    >
-                      {isSavingSpec ? '保存中...' : '保存修改'}
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      onClick={() => setIsEditingSpec(false)}
-                      disabled={isSavingSpec}
-                    >
-                      取消
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div>
-                    <h4 style={{ margin: '0 0 6px 0', fontSize: '0.875rem', color: 'var(--fg-muted)' }}>
-                      规格与任务描述
-                    </h4>
-                    <div
-                      style={{
-                        background: 'var(--bg-subtle, rgba(255,255,255,0.03))',
-                        border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '12px 14px',
-                        fontSize: '0.875rem',
-                        lineHeight: 1.5,
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {issue.description || '（无规格描述）'}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-                      gap: '12px',
-                      background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
-                      border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '12px',
-                      fontSize: '0.8125rem',
-                    }}
-                  >
-                    <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>执行 Agent (EXECUTOR): </span>
-                      <strong style={{ color: 'var(--fg)' }}>
-                        {issue.assigneeAgentName || '未指定'}
-                      </strong>
-                    </div>
-                    <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>审查 Agent (REVIEWER): </span>
-                      <strong style={{ color: 'var(--fg)' }}>
-                        {issue.reviewerAgentName || '人工 Review'}
-                      </strong>
-                    </div>
-                    <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>Version: </span>
-                      <code>{issue.version}</code>
-                    </div>
-                    <div>
-                      <span style={{ color: 'var(--fg-muted)' }}>状态: </span>
-                      <code>{issue.status}</code>
-                    </div>
-                  </div>
-
-                  {/* Agent Sessions & Work Branches */}
-                  {detail.sessions && detail.sessions.length > 0 && (
-                    <div>
-                      <h4 style={{ margin: '8px 0 6px 0', fontSize: '0.875rem', color: 'var(--fg-muted)' }}>
-                        Agent 稳定归属与工作分支 (Sessions)
-                      </h4>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {detail.sessions.map((sess) => (
-                          <div
-                            key={sess.id}
-                            style={{
-                              padding: '10px 12px',
-                              background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
-                              border: '1px solid var(--border)',
-                              borderRadius: 'var(--radius-sm)',
-                              fontSize: '0.8125rem',
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                              <span style={{ fontWeight: 600 }}>
-                                {sess.role === 'EXECUTOR' ? '执行' : '审查'}角色: {sess.agentName}
-                              </span>
-                              <span className="badge badge-status" style={{ fontSize: '0.75rem' }}>
-                                Branch: {sess.branchId.slice(0, 8)}...
-                              </span>
-                            </div>
-                            <div style={{ color: 'var(--fg-muted)', fontSize: '0.75rem', marginTop: '4px' }}>
-                              Session: <code>{sess.sessionId}</code>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Recover Form */}
-                  {isRecovering && (
-                    <form
-                      onSubmit={handleRecoverIssue}
-                      style={{
-                        background: 'rgba(59, 130, 246, 0.08)',
-                        border: '1px solid rgba(59, 130, 246, 0.3)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '10px',
-                      }}
-                    >
-                      <h4 style={{ margin: 0, color: '#60a5fa' }}>人工恢复 Issue</h4>
-                      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
-                        恢复将解除阻塞并开启新的打回计数区间，旧的未处理提交不重新获得审查资格。
-                      </p>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                          <input
-                            type="radio"
-                            name="recoverTarget"
-                            checked={!recoverToBacklog}
-                            onChange={() => setRecoverToBacklog(false)}
-                          />
-                          <span>恢复至 TODO（要求不变，直接就绪自动推进）</span>
-                        </label>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                          <input
-                            type="radio"
-                            name="recoverTarget"
-                            checked={recoverToBacklog}
-                            onChange={() => setRecoverToBacklog(true)}
-                          />
-                          <span>恢复至 BACKLOG（放回需求池，需先修改要求再重新开始）</span>
-                        </label>
-                      </div>
-
-                      <div className="form-group" style={{ margin: 0 }}>
-                        <label htmlFor="recover-comment">恢复说明 (可选)</label>
-                        <textarea
-                          id="recover-comment"
-                          placeholder="说明恢复原因或指导意见..."
-                          value={recoverComment}
-                          onChange={(e) => setRecoverComment(e.target.value)}
-                          rows={2}
-                        />
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          type="submit"
-                          className="btn-primary"
-                          disabled={isSubmittingRecover}
-                        >
-                          {isSubmittingRecover ? '恢复中...' : '确认恢复'}
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={() => setIsRecovering(false)}
-                          disabled={isSubmittingRecover}
-                        >
-                          取消
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  {/* Block Form */}
-                  {isBlocking && (
-                    <form
-                      onSubmit={handleBlockIssue}
-                      style={{
-                        background: 'rgba(239, 68, 68, 0.08)',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '10px',
-                      }}
-                    >
-                      <h4 style={{ margin: 0, color: '#f87171' }}>显式阻塞 Issue</h4>
-                      <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
-                        阻塞会停止自动推进并将 Issue 转入 BLOCKED 状态，必须填写阻塞原因。
-                      </p>
-
-                      <div className="form-group" style={{ margin: 0 }}>
-                        <label htmlFor="block-reason">
-                          阻塞原因 <span style={{ color: 'var(--danger)' }}>*</span>
-                        </label>
-                        <textarea
-                          id="block-reason"
-                          placeholder="详细说明业务障碍或待决问题..."
-                          value={blockReason}
-                          onChange={(e) => setBlockReason(e.target.value)}
-                          rows={3}
-                          required
-                        />
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button
-                          type="submit"
-                          className="btn-primary danger"
-                          disabled={isSubmittingBlock || !blockReason.trim()}
-                        >
-                          {isSubmittingBlock ? '阻塞中...' : '确认阻塞'}
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={() => setIsBlocking(false)}
-                          disabled={isSubmittingBlock}
-                        >
-                          取消
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  {/* Cancel Form */}
-                  {isCanceling && (
-                    <form
-                      onSubmit={handleCancelIssue}
-                      style={{
-                        background: 'rgba(239, 68, 68, 0.05)',
-                        border: '1px solid rgba(239, 68, 68, 0.2)',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '12px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                      }}
-                    >
-                      <h4 style={{ margin: 0, color: '#f87171' }}>确认取消 Issue #{issue.number}</h4>
-                      <input
-                        type="text"
-                        placeholder="可选：取消原因"
-                        value={cancelReason}
-                        onChange={(e) => setCancelReason(e.target.value)}
-                        aria-label="取消原因"
-                      />
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button type="submit" className="btn-primary danger">
-                          确认取消
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={() => setIsCanceling(false)}
-                        >
-                          返回
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  {/* Actions Toolbar */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      flexWrap: 'wrap',
-                      marginTop: '8px',
-                      borderTop: '1px solid var(--border)',
-                      paddingTop: '12px',
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      onClick={() => setIsEditingSpec(true)}
-                    >
-                      <Pencil size={14} aria-hidden="true" />
-                      编辑规格
-                    </button>
-
-                    {issue.status === 'BACKLOG' && (
-                      <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={() => handleChangeStatus('TODO')}
-                      >
-                        移至 TODO
-                      </button>
-                    )}
-
-                    {issue.status === 'TODO' && (
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={() => handleChangeStatus('BACKLOG')}
-                      >
-                        放回 BACKLOG
-                      </button>
-                    )}
-
-                    {isTerminal && (
-                      <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={() => handleChangeStatus('TODO')}
-                      >
-                        <RotateCcw size={14} aria-hidden="true" />
-                        重新打开至 TODO
-                      </button>
-                    )}
-
-                    {isBlocked && !isRecovering && (
-                      <button
-                        type="button"
-                        className="btn-primary"
-                        onClick={() => setIsRecovering(true)}
-                      >
-                        <RotateCcw size={14} aria-hidden="true" />
-                        恢复 Issue
-                      </button>
-                    )}
-
-                    {!isTerminal && !isBlocked && !isBlocking && (
-                      <button
-                        type="button"
-                        className="ghost-btn danger"
-                        onClick={() => setIsBlocking(true)}
-                      >
-                        <AlertCircle size={14} aria-hidden="true" />
-                        阻塞 Issue
-                      </button>
-                    )}
-
-                    {!isTerminal && !isCanceling && (
-                      <button
-                        type="button"
-                        className="ghost-btn danger"
-                        onClick={() => setIsCanceling(true)}
-                      >
-                        <Ban size={14} aria-hidden="true" />
-                        取消 Issue
-                      </button>
-                    )}
-
-                    {isTerminal && !issue.archivedAt && (
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={handleArchive}
-                      >
-                        <Archive size={14} aria-hidden="true" />
-                        归档
-                      </button>
-                    )}
-
-                    {isTerminal && issue.archivedAt && (
-                      <button
-                        type="button"
-                        className="ghost-btn"
-                        onClick={handleUnarchive}
-                      >
-                        <RotateCcw size={14} aria-hidden="true" />
-                        取消归档
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
+          ) : !issue ? (
+            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--fg-muted)' }}>
+              未找到该 Issue 详情
             </div>
-          )}
-
-          {detail && activeTab === 'deps' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.875rem' }}>依赖的 Issue</h4>
-                {detail.dependencies.length === 0 ? (
-                  <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: 0 }}>
-                    此 Issue 当前没有依赖项。
-                  </p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {detail.dependencies.map((dep) => {
-                      const match = projectIssues.find((i) => i.issue.id === dep.dependsOnIssueId)
-                      return (
-                        <div
-                          key={dep.dependsOnIssueId}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            background: 'var(--bg-subtle, rgba(255,255,255,0.03))',
-                            border: '1px solid var(--border)',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '8px 12px',
+          ) : (
+            <>
+              {/* TAB 1: 需求事实 (Spec) */}
+              {activeTab === 'spec' && (
+                <div className="tab-pane">
+                  {isEditingSpec ? (
+                    <form onSubmit={handleSaveSpec} className="spec-edit-form">
+                      <div className="form-group">
+                        <label className="form-label required">需求标题</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={draftTitle}
+                          onChange={(e) => setDraftTitle(e.target.value)}
+                          disabled={isActionPending}
+                          autoFocus
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">需求描述与验收标准</label>
+                        <textarea
+                          className="form-textarea"
+                          rows={8}
+                          value={draftDescription}
+                          onChange={(e) => setDraftDescription(e.target.value)}
+                          disabled={isActionPending}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => {
+                            setIsEditingSpec(false)
+                            setDraftTitle(issue.title)
+                            setDraftDescription(issue.description)
                           }}
+                          disabled={isActionPending}
                         >
-                          <div>
-                            <strong>
-                              {match ? `#${match.issue.number} ${match.issue.title}` : dep.dependsOnIssueId}
-                            </strong>
-                            {match && (
-                              <span
-                                className="badge badge-status"
-                                style={{ marginLeft: '8px', fontSize: '0.75rem' }}
-                              >
-                                {match.issue.status}
+                          取消
+                        </button>
+                        <button
+                          type="submit"
+                          className="btn-primary"
+                          disabled={isActionPending}
+                        >
+                          {isActionPending ? '保存中...' : '保存更改'}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <h2 className="spec-title">{issue.title}</h2>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={() => setIsEditingSpec(true)}
+                          title="编辑需求标题与描述"
+                        >
+                          <Pencil size={14} aria-hidden="true" />
+                          <span>编辑需求</span>
+                        </button>
+                      </div>
+
+                      <div className="spec-desc-block">
+                        {issue.description ? (
+                          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{issue.description}</div>
+                        ) : (
+                          <span style={{ color: 'var(--fg-dim)' }}>（暂无需求描述）</span>
+                        )}
+                      </div>
+
+                      <div className="spec-meta-grid">
+                        <div className="meta-item">
+                          <span className="meta-label">当前阶段:</span>
+                          <span className="meta-value"><code>{issue.state}</code></span>
+                        </div>
+                        <div className="meta-item">
+                          <span className="meta-label">期望版本号:</span>
+                          <span className="meta-value"><code>{issue.version}</code></span>
+                        </div>
+                        {issue.blockedFromState && (
+                          <div className="meta-item">
+                            <span className="meta-label">阻塞前阶段:</span>
+                            <span className="meta-value">{issue.blockedFromState}</span>
+                          </div>
+                        )}
+                        {issue.blockReason && (
+                          <div className="meta-item" style={{ gridColumn: 'span 2' }}>
+                            <span className="meta-label">阻塞原因:</span>
+                            <span className="meta-value" style={{ color: 'var(--danger)' }}>{issue.blockReason}</span>
+                          </div>
+                        )}
+                        {issue.pauseDetail && (
+                          <div className="meta-item" style={{ gridColumn: 'span 2' }}>
+                            <span className="meta-label">暂停详情:</span>
+                            <span className="meta-value">{issue.pauseDetail}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: 活动时间线 (Activities - 区分 COMMENT 与 INSTRUCTION) */}
+              {activeTab === 'activities' && (
+                <div className="tab-pane">
+                  {/* 发布活动表单 */}
+                  <form onSubmit={handleAppendActivity} className="activity-input-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div className="segmented-control">
+                        <button
+                          type="button"
+                          className={`segmented-item ${activityKind === 'COMMENT' ? 'active' : ''}`}
+                          onClick={() => setActivityKind('COMMENT')}
+                        >
+                          <MessageSquare size={13} aria-hidden="true" />
+                          <span>普通评论 (Comment)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`segmented-item ${activityKind === 'INSTRUCTION' ? 'active' : ''}`}
+                          onClick={() => setActivityKind('INSTRUCTION')}
+                        >
+                          <Send size={13} aria-hidden="true" />
+                          <span>下达指令 (Instruction)</span>
+                        </button>
+                      </div>
+
+                      <span style={{ fontSize: '11px', color: 'var(--fg-dim)' }}>
+                        {activityKind === 'INSTRUCTION' ? '投递给当前活动 Run' : '仅在时间线记录，不自动唤醒 Agent'}
+                      </span>
+                    </div>
+
+                    <textarea
+                      className="form-textarea"
+                      rows={3}
+                      placeholder={activityKind === 'INSTRUCTION' ? '输入指令内容要求当前 Agent 遵循...' : '添加一条讨论或事实备注...'}
+                      value={activityBody}
+                      onChange={(e) => setActivityBody(e.target.value)}
+                      disabled={isActionPending}
+                    />
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                      <button
+                        type="submit"
+                        className="btn-primary"
+                        disabled={isActionPending || !activityBody.trim()}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Send size={12} aria-hidden="true" />
+                        <span>{activityKind === 'INSTRUCTION' ? '派发指令' : '发表评论'}</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* 历史活动事实流 */}
+                  <div className="activity-timeline">
+                    {(detail.activities ?? []).length === 0 ? (
+                      <div className="empty-tip">暂无活动记录</div>
+                    ) : (
+                      (detail.activities ?? []).map((act) => (
+                        <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
+                          <div className="activity-item-header">
+                            <span className="activity-badge-kind">{act.kind}</span>
+                            <span className="activity-actor">
+                              {act.actorType === 'AGENT' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <Bot size={12} aria-hidden="true" />
+                                  <span>{act.actorAgentName || 'Agent'}</span>
+                                </span>
+                              ) : act.actorType === 'HUMAN' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                  <User size={12} aria-hidden="true" />
+                                  <span>人类</span>
+                                </span>
+                              ) : (
+                                <span>系统</span>
+                              )}
+                            </span>
+                            <span className="activity-time">{act.createdAt}</span>
+                            <span className="activity-seq">#{act.sequence}</span>
+                          </div>
+
+                          {act.body && (
+                            <div className="activity-body-text">{act.body}</div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: Run 执行事实与区间报告 */}
+              {activeTab === 'runs' && (
+                <div className="tab-pane">
+                  {(detail.runs ?? []).length === 0 ? (
+                    <div className="empty-tip">暂无 Run 记录</div>
+                  ) : (
+                    <div className="runs-list">
+                      {(detail.runs ?? []).map((r) => (
+                        <div key={r.id} className="run-card">
+                          <div className="run-card-header">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span className="run-ordinal">Run #{r.ordinal}</span>
+                              <span className="badge badge-state">{r.state}</span>
+                              {r.agentName && (
+                                <span className="badge badge-agent">
+                                  <Bot size={12} aria-hidden="true" />
+                                  {r.agentName}
+                                </span>
+                              )}
+                              <span className={`badge badge-run-status status-${r.status.toLowerCase()}`}>
+                                {r.status}
                               </span>
+                            </div>
+                            <span style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
+                              耗时/余量: {r.remainingExecutionMs}ms
+                            </span>
+                          </div>
+
+                          <div className="run-card-details">
+                            <div className="run-detail-row">
+                              <span>Entry 区间:</span>
+                              <code>{r.startEntryId} → {r.endEntryId || '执行中'}</code>
+                            </div>
+                            {r.finalAnswerEntryId && (
+                              <div className="run-detail-row">
+                                <span>最终报告条目:</span>
+                                <code>{r.finalAnswerEntryId}</code>
+                              </div>
+                            )}
+                            {r.nextState && (
+                              <div className="run-detail-row">
+                                <span>交接目标:</span>
+                                <strong style={{ color: 'var(--primary)' }}>{r.nextState}</strong>
+                              </div>
+                            )}
+                            {r.error && (
+                              <div className="run-detail-row" style={{ color: 'var(--danger)' }}>
+                                <span>错误信息:</span>
+                                <span>{r.error}</span>
+                              </div>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            className="quick-action-btn"
-                            style={{ color: 'var(--danger)' }}
-                            onClick={() => handleRemoveDependency(dep.dependsOnIssueId)}
-                            title="移除此依赖"
-                          >
-                            <Trash2 size={12} aria-hidden="true" />
-                            移除
-                          </button>
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
-              <div
-                style={{
-                  borderTop: '1px solid var(--border)',
-                  paddingTop: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <select
-                  value={selectedDepIssueId}
-                  onChange={(e) => setSelectedDepIssueId(e.target.value)}
-                  style={{ flex: 1, minWidth: '220px' }}
-                  aria-label="选择要依赖的 Issue"
-                >
-                  <option value="">选择要添加的依赖 Issue...</option>
-                  {depCandidates.map((c) => (
-                    <option key={c.issue.id} value={c.issue.id}>
-                      #{c.issue.number} {c.issue.title} ({c.issue.status})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={handleAddDependency}
-                  disabled={isAddingDep || !selectedDepIssueId}
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <Plus size={14} aria-hidden="true" />
-                  <span>{isAddingDep ? '添加中...' : '添加依赖'}</span>
+              {/* TAB 4: 阶段预算 (Stage Budgets) */}
+              {activeTab === 'stageBudgets' && (
+                <div className="tab-pane">
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => {
+                        setIsResetBudgetOpen(true)
+                        if (!resetBudgetState && detail.stageBudgets[0]) {
+                          setResetBudgetState(detail.stageBudgets[0].state)
+                        }
+                      }}
+                      style={{ fontSize: '13px' }}
+                    >
+                      <Coins size={14} aria-hidden="true" />
+                      <span>重置阶段预算</span>
+                    </button>
+                  </div>
+
+                  {(detail.stageBudgets ?? []).length === 0 ? (
+                    <div className="empty-tip">阶段预算尚未授权或暂无工作阶段预算</div>
+                  ) : (
+                    <div className="budget-grid">
+                      {(detail.stageBudgets ?? []).map((b) => (
+                        <div key={b.state} className="budget-card">
+                          <div className="budget-card-title">
+                            <span className="badge badge-state">{b.state}</span>
+                            <span>最大额度: {b.maxRuns} 次</span>
+                          </div>
+                          <div className="budget-stats">
+                            <div>
+                              <span>已用次数:</span>
+                              <strong>{b.usedRuns}</strong>
+                            </div>
+                            <div>
+                              <span>剩余可用:</span>
+                              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                                {b.remainingRuns}
+                              </strong>
+                            </div>
+                            <div>
+                              <span>高水位序号:</span>
+                              <code>#{b.budgetAfterOrdinal}</code>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 5: Agent 线程绑定 (AgentThreads) */}
+              {activeTab === 'agentThreads' && (
+                <div className="tab-pane">
+                  {(detail.agentThreads ?? []).length === 0 ? (
+                    <div className="empty-tip">当前 Issue 尚未绑定任何 Agent 线程（将在首次 Run 接受时创建）</div>
+                  ) : (
+                    <div className="thread-list">
+                      {(detail.agentThreads ?? []).map((t) => (
+                        <div key={t.threadId} className="thread-item">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Bot size={16} aria-hidden="true" />
+                            <strong>{t.agentName}</strong>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <code>{t.threadId}</code>
+                            {onOpenThread && (
+                              <button
+                                type="button"
+                                className="ghost-btn"
+                                onClick={() => onOpenThread(t.threadId)}
+                                title="打开此 Agent 线程视图"
+                              >
+                                <Eye size={14} aria-hidden="true" />
+                                <span>打开</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 6: 公开证据 (Evidence) */}
+              {activeTab === 'evidence' && (
+                <div className="tab-pane">
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      style={{ display: 'none' }}
+                      onChange={handleFileSelected}
+                      disabled={isUploadingEvidence}
+                    />
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploadingEvidence}
+                      style={{ fontSize: '13px' }}
+                    >
+                      <Upload size={14} aria-hidden="true" />
+                      <span>{isUploadingEvidence ? '正在上传...' : '上传证据文件'}</span>
+                    </button>
+                  </div>
+
+                  {allEvidences.length === 0 ? (
+                    <div className="empty-tip">暂无公开证据交付物</div>
+                  ) : (
+                    <div className="evidence-list">
+                      {allEvidences.map((ev) => (
+                        <div key={ev.blobId} className="evidence-card">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Paperclip size={14} aria-hidden="true" />
+                            <strong>{ev.name || ev.blobId}</strong>
+                            {ev.actorAgentName && (
+                              <span className="badge badge-agent">{ev.actorAgentName}</span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <a
+                              href={`/api/resources/${ev.blobId}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="ghost-btn"
+                              title="预览或下载"
+                            >
+                              <Download size={14} aria-hidden="true" />
+                              <span>下载/查看</span>
+                            </a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 弹窗底部 */}
+        <div className="modal-footer">
+          <button type="button" className="ghost-btn" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+
+        {/* --- 子对话框区 --- */}
+
+        {/* 1. 业务阻塞弹窗 */}
+        {isBlockModalOpen && (
+          <div className="modal-backdrop sub-modal" role="dialog" aria-label="标记业务阻塞">
+            <div className="modal-card sub-card">
+              <div className="modal-header">
+                <h3>标记业务阻塞 (BLOCKED)</h3>
+                <button type="button" className="modal-close-button" onClick={() => setIsBlockModalOpen(false)}>
+                  <X size={16} aria-hidden="true" />
                 </button>
               </div>
-            </div>
-          )}
-
-          {detail && activeTab === 'activities' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.875rem' }}>唯一有序事实流 (Activities)</h4>
-                {activities.length === 0 ? (
-                  <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: 0 }}>
-                    暂无活动记录。
-                  </p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {activities.map((act) => (
-                      <div
-                        key={act.sequence}
-                        style={{
-                          background: 'var(--bg-subtle, rgba(255,255,255,0.03))',
-                          border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '10px 12px',
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            fontSize: '0.75rem',
-                            color: 'var(--fg-muted)',
-                            marginBottom: '4px',
-                            gap: '8px',
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontWeight: 600 }}>#{act.sequence}</span>
-                            <span className="badge badge-status" style={{ fontSize: '0.7rem' }}>
-                              {act.kind}
-                            </span>
-                            <span>
-                              {act.actorType === 'AGENT'
-                                ? `Agent: ${act.actorAgentName}`
-                                : act.actorType}
-                            </span>
-                            {act.targetRole && (
-                              <span className="badge badge-waiting" style={{ fontSize: '0.7rem' }}>
-                                @{act.targetRole}
-                              </span>
-                            )}
-                            {act.decision && (
-                              <span className="badge badge-run" style={{ fontSize: '0.7rem' }}>
-                                {act.decision}
-                              </span>
-                            )}
-                          </div>
-                          <span>{act.createdAt}</span>
-                        </div>
-                        <div style={{ fontSize: '0.875rem', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
-                          {act.body}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {nextCursor && (
-                  <div style={{ marginTop: '12px', textAlign: 'center' }}>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      onClick={handleLoadMoreActivities}
-                      disabled={isLoadingMoreActivities}
-                    >
-                      {isLoadingMoreActivities ? '加载中...' : '加载更早的活动记录'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Append Activity Form */}
-              <form
-                onSubmit={handleAppendActivity}
-                style={{
-                  borderTop: '1px solid var(--border)',
-                  paddingTop: '14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                  <label htmlFor="append-activity-body" style={{ fontWeight: 600, fontSize: '0.875rem' }}>
-                    追加活动记录 / 定向指示
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--fg-muted)' }}>目标角色:</span>
-                    <select
-                      value={activityTargetRole}
-                      onChange={(e) => setActivityTargetRole(e.target.value as IssueRunRole | '')}
-                      style={{ fontSize: '0.75rem', padding: '2px 8px' }}
-                      aria-label="目标职责"
-                    >
-                      <option value="">无定向 (普通评论 COMMENT)</option>
-                      <option value="EXECUTOR">@EXECUTOR (定向指示)</option>
-                      <option value="REVIEWER">@REVIEWER (定向指示)</option>
-                    </select>
+              <form onSubmit={handleBlockSubmit}>
+                <div className="modal-body">
+                  <div className="form-group">
+                    <label className="form-label required">阻塞原因</label>
+                    <textarea
+                      className="form-textarea"
+                      rows={3}
+                      value={blockReason}
+                      onChange={(e) => setBlockReason(e.target.value)}
+                      placeholder="说明导致 Issue 无法继续执行的外部原因..."
+                      autoFocus
+                    />
                   </div>
                 </div>
-
-                <textarea
-                  id="append-activity-body"
-                  aria-label="活动内容"
-                  value={activityBody}
-                  onChange={(e) => setActivityBody(e.target.value)}
-                  placeholder={
-                    activityTargetRole
-                      ? `输入对 ${activityTargetRole} 的定向补充说明或指令...`
-                      : '输入评论留言...'
-                  }
-                  rows={3}
-                  required
-                />
-
-                <div style={{ alignSelf: 'flex-end' }}>
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={isAppendingActivity || !activityBody.trim()}
-                  >
-                    {isAppendingActivity ? '提交中...' : '追加活动'}
+                <div className="modal-footer">
+                  <button type="button" className="ghost-btn" onClick={() => setIsBlockModalOpen(false)}>
+                    取消
+                  </button>
+                  <button type="submit" className="btn-primary danger" disabled={isActionPending}>
+                    {isActionPending ? '提交中...' : '确认阻塞'}
                   </button>
                 </div>
               </form>
             </div>
-          )}
+          </div>
+        )}
 
-          {detail && activeTab === 'runs' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {canHumanReview && (
-                <form
-                  onSubmit={handleReview}
-                  style={{
-                    background: 'rgba(59, 130, 246, 0.06)',
-                    border: '1px solid rgba(59, 130, 246, 0.3)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                  }}
-                >
-                  <h4 style={{ margin: 0, color: '#60a5fa' }}>人工审核 (Human Review)</h4>
-                  <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
-                    此 Issue 处于 IN_REVIEW 状态且未配置 Reviewer Agent，请人工核查提交成果。
+        {/* 2. UNKNOWN 人工核查弹窗 */}
+        {isResolveUnknownOpen && (
+          <div className="modal-backdrop sub-modal" role="dialog" aria-label="人工核查 UNKNOWN">
+            <div className="modal-card sub-card">
+              <div className="modal-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShieldAlert size={16} className="text-danger" aria-hidden="true" />
+                  <h3>解除 UNKNOWN 门禁（人工核查）</h3>
+                </div>
+                <button type="button" className="modal-close-button" onClick={() => setIsResolveUnknownOpen(false)}>
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
+              <form onSubmit={handleResolveUnknownSubmit}>
+                <div className="modal-body">
+                  <p style={{ fontSize: '13px', color: 'var(--fg-dim)', margin: '0 0 12px 0' }}>
+                    * 运行因崩溃或超时导致在途副作用不明。人工核对残留模型/工具调用与外部副作用后，填写处理依据以解除暂停门禁。
                   </p>
-
-                  <div style={{ display: 'flex', gap: '16px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="reviewDecision"
-                        value="APPROVE"
-                        checked={reviewDecision === 'APPROVE'}
-                        onChange={() => setReviewDecision('APPROVE')}
-                      />
-                      <span>批准并完成 (APPROVE → DONE)</span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                      <input
-                        type="radio"
-                        name="reviewDecision"
-                        value="REQUEST_CHANGES"
-                        checked={reviewDecision === 'REQUEST_CHANGES'}
-                        onChange={() => setReviewDecision('REQUEST_CHANGES')}
-                      />
-                      <span>打回修改 (REQUEST_CHANGES → TODO)</span>
-                    </label>
-                  </div>
-
-                  <div className="form-group" style={{ margin: 0 }}>
-                    <label htmlFor="review-reason">审核理由 / 反馈说明</label>
+                  <div className="form-group">
+                    <label className="form-label required">核查结论与说明</label>
                     <textarea
-                      id="review-reason"
-                      placeholder="说明审核意见或修改要求..."
-                      value={reviewReason}
-                      onChange={(e) => setReviewReason(e.target.value)}
-                      rows={3}
+                      className="form-textarea"
+                      rows={4}
+                      value={verificationInput}
+                      onChange={(e) => setVerificationInput(e.target.value)}
+                      placeholder="说明已核实的内容与外部状态一致性保证..."
+                      autoFocus
                     />
                   </div>
-
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={isSubmittingReview}
-                    style={{ alignSelf: 'flex-start' }}
-                  >
-                    {isSubmittingReview ? '提交中...' : '提交审核决定'}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="ghost-btn" onClick={() => setIsResolveUnknownOpen(false)}>
+                    取消
                   </button>
-                </form>
-              )}
-
-              {isFailedOrUnknown && (
-                <div
-                  style={{
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '12px 14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'stretch',
-                    gap: '10px',
-                  }}
-                >
-                  <div style={{ color: '#f87171', fontSize: '0.875rem' }}>
-                    {retryNeedsVerification
-                      ? 'Run 处于 UNKNOWN 状态：外部副作用是否已发生不可判定。请先核对残留的模型/工具调用，填写核对说明后再重试。'
-                      : 'Run 执行失败或处于未知状态，可执行显式重试。'}
-                  </div>
-                  {retryNeedsVerification && (
-                    <div className="form-group" style={{ margin: 0 }}>
-                      <label htmlFor="retry-verification">
-                        人工核对说明 <span style={{ color: 'var(--danger)' }}>*</span>
-                      </label>
-                      <textarea
-                        id="retry-verification"
-                        placeholder="说明已核对的残留模型/工具调用及其结果与外部副作用..."
-                        value={retryVerification}
-                        onChange={(e) => setRetryVerification(e.target.value)}
-                        rows={3}
-                        required
-                      />
-                      {!retryVerification.trim() && (
-                        <div
-                          role="alert"
-                          style={{
-                            color: 'var(--danger)',
-                            fontSize: '0.75rem',
-                            marginTop: '6px',
-                          }}
-                        >
-                          必须填写人工核对说明才能重试 UNKNOWN Run
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={handleRetryRun}
-                    disabled={
-                      isRetrying || (retryNeedsVerification && !retryVerification.trim())
-                    }
-                    style={{ alignSelf: 'flex-start' }}
-                  >
-                    <RefreshCw size={14} className={isRetrying ? 'animate-spin' : ''} aria-hidden="true" />
-                    <span>{isRetrying ? '重试中...' : '重试 Run'}</span>
+                  <button type="submit" className="btn-primary" disabled={isActionPending}>
+                    {isActionPending ? '解除中...' : '确认解除门禁'}
                   </button>
                 </div>
-              )}
+              </form>
+            </div>
+          </div>
+        )}
 
-              <div>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.875rem' }}>历史 Run 记录</h4>
-                {detail.runs.length === 0 ? (
-                  <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: 0 }}>
-                    暂无 Run 记录。
-                  </p>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {detail.runs.map((run) => (
-                      <div
-                        key={run.id}
-                        style={{
-                          background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
-                          border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '12px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px',
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            flexWrap: 'wrap',
-                            gap: '8px',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <strong style={{ fontSize: '0.875rem' }}>
-                              Run #{run.ordinal} ({run.role === 'REVIEWER' ? '审核' : '执行'})
-                            </strong>
-                            <span className="badge badge-status">{run.status}</span>
-                            {run.outcome && (
-                              <span className="badge badge-run">{run.outcome}</span>
-                            )}
-                          </div>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--fg-muted)' }}>
-                            {run.createdAt}
-                          </span>
-                        </div>
-
-                        <div style={{ fontSize: '0.8125rem', color: 'var(--fg-muted)' }}>
-                          Agent: <strong style={{ color: 'var(--fg)' }}>{run.agentName || '人工'}</strong>
-                          {run.continuationCount > 0 && ` · 轮次: ${run.continuationCount}/${run.maxContinuations}`}
-                          {run.observedActivitySequence && ` · 已消费活动: #${run.observedActivitySequence}`}
-                        </div>
-
-                        {run.waitingReason && (
-                          <div style={{ fontSize: '0.8125rem', color: '#fbbf24' }}>
-                            等待原因: {run.waitingReason}
-                          </div>
-                        )}
-
-                        {run.result && (
-                          <div
-                            style={{
-                              fontSize: '0.8125rem',
-                              background: 'rgba(0,0,0,0.15)',
-                              padding: '8px',
-                              borderRadius: 'var(--radius-sm)',
-                              marginTop: '4px',
-                              whiteSpace: 'pre-wrap',
-                            }}
-                          >
-                            {run.result}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+        {/* 3. Stop 终止弹窗 */}
+        {isStopModalOpen && (
+          <div className="modal-backdrop sub-modal" role="dialog" aria-label="终止运行">
+            <div className="modal-card sub-card">
+              <div className="modal-header">
+                <h3>终止当前运行 (Stop)</h3>
+                <button type="button" className="modal-close-button" onClick={() => setIsStopModalOpen(false)}>
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
+              <form onSubmit={handleStopSubmit}>
+                <div className="modal-body">
+                  <div className="form-group">
+                    <label className="form-label">终止原因 (可选)</label>
+                    <textarea
+                      className="form-textarea"
+                      rows={3}
+                      value={stopDetail}
+                      onChange={(e) => setStopDetail(e.target.value)}
+                      placeholder="说明人工中止执行的原因..."
+                      autoFocus
+                    />
                   </div>
-                )}
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="ghost-btn" onClick={() => setIsStopModalOpen(false)}>
+                    取消
+                  </button>
+                  <button type="submit" className="btn-primary danger" disabled={isActionPending}>
+                    {isActionPending ? '终止中...' : '确认终止'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 4. 阶段预算重置弹窗 */}
+        {isResetBudgetOpen && (
+          <div className="modal-backdrop sub-modal" role="dialog" aria-label="重置阶段预算">
+            <div className="modal-card sub-card">
+              <div className="modal-header">
+                <h3>重置阶段预算</h3>
+                <button type="button" className="modal-close-button" onClick={() => setIsResetBudgetOpen(false)}>
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
+              <form onSubmit={handleResetBudgetSubmit}>
+                <div className="modal-body">
+                  <div className="form-group">
+                    <label htmlFor="reset-budget-state" className="form-label required">工作阶段</label>
+                    <input
+                      id="reset-budget-state"
+                      type="text"
+                      className="form-input"
+                      value={resetBudgetState}
+                      onChange={(e) => setResetBudgetState(e.target.value)}
+                      placeholder="例如：DESIGN"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="reset-budget-max-runs" className="form-label required">最大 Run 额度</label>
+                    <input
+                      id="reset-budget-max-runs"
+                      type="number"
+                      min={1}
+                      className="form-input"
+                      value={resetBudgetMaxRuns}
+                      onChange={(e) => setResetBudgetMaxRuns(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="ghost-btn" onClick={() => setIsResetBudgetOpen(false)}>
+                    取消
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={isActionPending}>
+                    {isActionPending ? '重置中...' : '确认重置'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* 5. 删除 Issue 确认弹窗 */}
+        {isDeleteModalOpen && (
+          <div className="modal-backdrop sub-modal" role="dialog" aria-label="删除 Issue 确认">
+            <div className="modal-card sub-card">
+              <div className="modal-header">
+                <h3>删除 Issue #{issue?.number}</h3>
+                <button type="button" className="modal-close-button" onClick={() => setIsDeleteModalOpen(false)}>
+                  <X size={16} aria-hidden="true" />
+                </button>
+              </div>
+              <div className="modal-body">
+                <p style={{ margin: 0, color: 'var(--fg)' }}>
+                  确定要彻底删除该 Issue 吗？此操作将清理对应的全部 Work、Activity、Evidence、Run 及关联会话，无法恢复。
+                </p>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="ghost-btn" onClick={() => setIsDeleteModalOpen(false)}>
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary danger"
+                  disabled={isActionPending}
+                  onClick={handleDeleteIssue}
+                >
+                  {isActionPending ? '删除中...' : '确认删除'}
+                </button>
               </div>
             </div>
-          )}
-
-          {detail && activeTab === 'evidence' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '8px',
-                }}
-              >
-                <div>
-                  <h4 style={{ margin: '0 0 4px 0', fontSize: '0.875rem' }}>
-                    已发布证据 (Published Evidence)
-                  </h4>
-                  <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--fg-muted)' }}>
-                    由 Issue 自主持有的已发布产物与人工证明材料；仅在点击时换取下载原件地址。
-                  </p>
-                </div>
-                <div>
-                  <input
-                    type="file"
-                    ref={evidenceFileInputRef}
-                    style={{ display: 'none' }}
-                    onChange={handleEvidenceUpload}
-                  />
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={isUploadingEvidence || isLoading}
-                    onClick={() => evidenceFileInputRef.current?.click()}
-                    style={{ fontSize: '0.8125rem', padding: '6px 12px' }}
-                  >
-                    <Upload size={14} aria-hidden="true" style={{ marginRight: '6px' }} />
-                    {isUploadingEvidence ? '正在上传证据...' : '上传证据'}
-                  </button>
-                </div>
-              </div>
-
-              {evidenceActionError && (
-                <div
-                  className="form-error-banner"
-                  role="alert"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <AlertTriangle size={14} aria-hidden="true" />
-                    <span>{evidenceActionError}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => setEvidenceActionError(null)}
-                    aria-label="关闭上传错误提示"
-                    style={{ padding: '2px 8px', fontSize: '0.75rem' }}
-                  >
-                    关闭
-                  </button>
-                </div>
-              )}
-
-              {isUploadingEvidence && (
-                <div
-                  style={{
-                    padding: '12px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
-                    fontSize: '0.8125rem',
-                    color: 'var(--fg-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <RefreshCw size={14} className="spin" aria-hidden="true" />
-                  <span>正在上传并发布证据材料，请稍候...</span>
-                </div>
-              )}
-
-              {(() => {
-                const scopedEvidence = (detail.evidence ?? []).filter((e) => e.issueId === issueId)
-                if (scopedEvidence.length === 0) {
-                  return (
-                    <p style={{ fontSize: '0.875rem', color: 'var(--fg-muted)', margin: '16px 0' }}>
-                      暂无已发布证据。执行者完成交付或人工上传后，将在此公开展示。
-                    </p>
-                  )
-                }
-
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {scopedEvidence.map((ev) => {
-                      const isDownloading = downloadingBlobId === ev.blobId
-                      const currentError = downloadError?.blobId === ev.blobId ? downloadError.message : null
-                      const displayName = ev.name || ev.uri
-                      const originLabel =
-                        ev.origin === 'HUMAN'
-                          ? '人工上传'
-                          : ev.origin === 'EXECUTOR'
-                            ? '执行者交付'
-                            : ev.origin
-
-                      return (
-                        <div
-                          key={`${ev.issueId}-${ev.blobId}`}
-                          className="evidence-card"
-                          data-blob-id={ev.blobId}
-                          data-origin={ev.origin}
-                          style={{
-                            background: 'var(--bg-subtle, rgba(255,255,255,0.02))',
-                            border: '1px solid var(--border)',
-                            borderRadius: 'var(--radius-sm)',
-                            padding: '12px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '8px',
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              flexWrap: 'wrap',
-                              gap: '8px',
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                              <span
-                                className={`badge ${ev.origin === 'HUMAN' ? 'badge-waiting' : 'badge-run'}`}
-                                style={{ fontSize: '0.7rem', flexShrink: 0 }}
-                              >
-                                {originLabel}
-                              </span>
-                              <strong
-                                style={{
-                                  fontSize: '0.875rem',
-                                  color: 'var(--fg)',
-                                  wordBreak: 'break-all',
-                                }}
-                                title={displayName}
-                              >
-                                {displayName}
-                              </strong>
-                            </div>
-                            <button
-                              type="button"
-                              className="quick-action-btn"
-                              disabled={isDownloading}
-                              onClick={() => handleDownloadEvidence(ev)}
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
-                              aria-label={`下载 ${displayName}`}
-                            >
-                              <Download size={13} aria-hidden="true" />
-                              <span>{isDownloading ? '获取链接中...' : '下载原件'}</span>
-                            </button>
-                          </div>
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '12px',
-                              flexWrap: 'wrap',
-                              fontSize: '0.75rem',
-                              color: 'var(--fg-muted)',
-                            }}
-                          >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              <span>URI:</span>
-                              <code
-                                style={{
-                                  fontFamily: 'var(--mono)',
-                                  fontSize: '0.75rem',
-                                  color: 'var(--fg-dim)',
-                                  background: 'rgba(0, 0, 0, 0.2)',
-                                  padding: '1px 5px',
-                                  borderRadius: '3px',
-                                }}
-                              >
-                                {ev.uri}
-                              </code>
-                            </span>
-                            {ev.runId && <span>关联 Run: #{ev.runId.slice(0, 8)}</span>}
-                            <span>发布于: {ev.publishedAt}</span>
-                          </div>
-
-                          {currentError && (
-                            <div
-                              className="form-error-banner"
-                              role="alert"
-                              style={{
-                                marginTop: '4px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                fontSize: '0.75rem',
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <AlertTriangle size={13} aria-hidden="true" />
-                                <span>{currentError}</span>
-                              </div>
-                              <button
-                                type="button"
-                                className="ghost-btn"
-                                onClick={() => setDownloadError(null)}
-                                aria-label="关闭下载错误提示"
-                                style={{ padding: '1px 6px', fontSize: '0.75rem' }}
-                              >
-                                关闭
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })()}
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

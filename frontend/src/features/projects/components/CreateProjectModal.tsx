@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { X, FolderPlus } from 'lucide-react'
+import { FolderPlus, X } from 'lucide-react'
+import { Checkbox } from '@/shared/ui/console/Checkbox'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
 import type { ProjectDTO } from '../types'
@@ -20,7 +21,6 @@ export function CreateProjectModal({
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [yoloEnabled, setYoloEnabled] = useState(true)
-  const [maxReviewRejections, setMaxReviewRejections] = useState<number | ''>(3)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -29,7 +29,6 @@ export function CreateProjectModal({
       setTitle('')
       setDescription('')
       setYoloEnabled(true)
-      setMaxReviewRejections(3)
       setErrorMessage(null)
     }
   }, [isOpen])
@@ -59,11 +58,6 @@ export function CreateProjectModal({
       setErrorMessage('项目名称不能为空')
       return
     }
-    const rejections = typeof maxReviewRejections === 'number' ? maxReviewRejections : 3
-    if (rejections <= 0) {
-      setErrorMessage('最大打回次数必须为正整数')
-      return
-    }
 
     setIsSubmitting(true)
     setErrorMessage(null)
@@ -72,7 +66,6 @@ export function CreateProjectModal({
         title: trimmedTitle,
         description: description.trim() || null,
         yoloEnabled,
-        maxReviewRejections: rejections,
       })
       onSuccess(created)
       onClose()
@@ -118,74 +111,48 @@ export function CreateProjectModal({
           <div className="modal-body">
             {errorMessage && (
               <div className="form-error-banner" role="alert">
-                {errorMessage}
+                <span>{errorMessage}</span>
               </div>
             )}
 
             <div className="form-group">
-              <label htmlFor="create-project-title">
-                项目名称 <span style={{ color: 'var(--danger)' }}>*</span>
+              <label htmlFor="create-project-title" className="form-label required">
+                项目名称
               </label>
               <input
                 id="create-project-title"
                 type="text"
+                className="form-input"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="输入项目标题"
+                placeholder="例如：视频生成流水线"
+                disabled={isSubmitting}
                 autoFocus
-                required
               />
             </div>
 
             <div className="form-group">
-              <label htmlFor="create-project-desc">项目描述</label>
+              <label htmlFor="create-project-desc" className="form-label">
+                项目描述
+              </label>
               <textarea
                 id="create-project-desc"
+                className="form-textarea"
+                rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="可选的项目背景与目标描述"
-                rows={3}
+                placeholder="描述项目的目标与业务范围..."
+                disabled={isSubmitting}
               />
             </div>
 
             <div className="form-group">
-              <label htmlFor="create-project-max-rejections">
-                最大审查打回次数 <span style={{ color: 'var(--danger)' }}>*</span>
-              </label>
-              <input
-                id="create-project-max-rejections"
-                type="number"
-                min={1}
-                value={maxReviewRejections}
-                onChange={(e) => {
-                  const val = e.target.value
-                  setMaxReviewRejections(val === '' ? '' : parseInt(val, 10))
-                }}
-                required
-                aria-label="最大审查打回次数"
-              />
-              <span className="field-hint" style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
-                连续打回达到该次数后单据转入 BLOCKED 状态，默认 3 次
-              </span>
-            </div>
-
-            <div className="form-group" style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-              <input
-                id="create-project-yolo"
-                type="checkbox"
+              <Checkbox
                 checked={yoloEnabled}
-                onChange={(e) => setYoloEnabled(e.target.checked)}
-                style={{ marginTop: '3px' }}
-                aria-label="YOLO 模式"
+                onChange={setYoloEnabled}
+                label="启用 YOLO 执行策略 (自主执行，跳过人工交互门禁)"
+                disabled={isSubmitting}
               />
-              <div>
-                <label htmlFor="create-project-yolo" style={{ cursor: 'pointer', fontWeight: 500 }}>
-                  YOLO 模式 (自动执行)
-                </label>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block' }}>
-                  新建 Issue 时自动启动 Agent Run 分支，无需手动触发，默认开启
-                </span>
-              </div>
             </div>
           </div>
 
@@ -201,11 +168,7 @@ export function CreateProjectModal({
             <button
               type="submit"
               className="btn-primary"
-              disabled={
-                isSubmitting ||
-                !title.trim() ||
-                (typeof maxReviewRejections === 'number' && maxReviewRejections <= 0)
-              }
+              disabled={isSubmitting}
             >
               {isSubmitting ? '创建中...' : '创建项目'}
             </button>

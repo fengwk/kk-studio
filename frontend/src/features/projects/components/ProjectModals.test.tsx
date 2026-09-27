@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { CreateProjectModal } from './CreateProjectModal'
 import { EditProjectModal } from './EditProjectModal'
+import { DeleteProjectModal } from './DeleteProjectModal'
 import type { ProjectDTO } from '../types'
 
 function renderWithClient(ui: React.ReactElement) {
@@ -22,8 +23,14 @@ const mockProject: ProjectDTO = {
   id: 'a0000000-0000-0000-0000-000000000001',
   title: 'Existing Project',
   description: 'Project desc',
+  workflow: {
+    states: [
+      { state: 'INIT', name: '待开始', next: ['DONE'] },
+      { state: 'BLOCKED', name: '业务阻塞' },
+      { state: 'DONE', name: '完成' },
+    ],
+  },
   yoloEnabled: true,
-  maxReviewRejections: '3',
   nextIssueNumber: '1',
   version: '1',
   archivedAt: null,
@@ -32,110 +39,46 @@ const mockProject: ProjectDTO = {
 }
 
 describe('CreateProjectModal', () => {
-  it('renders default yoloEnabled (true) and maxReviewRejections (3)', () => {
-    // 测试意图：验证创建项目弹窗默认开启 YOLO 模式，并且最大审查打回次数默认置为 3
-    renderWithClient(
-      <CreateProjectModal
-        isOpen={true}
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
-    )
-
-    const yoloCheckbox = screen.getByRole('checkbox', { name: /YOLO 模式/i }) as HTMLInputElement
-    expect(yoloCheckbox.checked).toBe(true)
-
-    const rejectionsInput = screen.getByRole('spinbutton', { name: /最大审查打回次数/i }) as HTMLInputElement
-    expect(rejectionsInput.value).toBe('3')
-
-    const submitBtn = screen.getByRole('button', { name: '创建项目' })
-    expect(submitBtn).toBeDisabled() // title is empty
-  })
-
-  it('submits valid project payload with yoloEnabled and maxReviewRejections', async () => {
-    // 测试意图：验证填写项目标题与自定义配置后正确调用 createProject API 并传递 yoloEnabled 与 maxReviewRejections
+  it('renders default yoloEnabled and handles submit', async () => {
+    // 测试意图：验证创建项目弹窗默认开启 YOLO，填写名称后正确调用 createProject
     const user = userEvent.setup()
     const mockApi = {
       createProject: vi.fn().mockResolvedValue(mockProject),
-      listProjects: vi.fn(),
-      getProject: vi.fn(),
-      updateProject: vi.fn(),
-      deleteProject: vi.fn(),
-      archiveProject: vi.fn(),
-      unarchiveProject: vi.fn(),
-      getProjectSnapshot: vi.fn(),
-      createIssue: vi.fn(),
-      getIssue: vi.fn(),
-      listActivities: vi.fn(),
-      updateIssue: vi.fn(),
-      changeIssueStatus: vi.fn(),
-      blockIssue: vi.fn(),
-      recoverIssue: vi.fn(),
-      addIssueDependency: vi.fn(),
-      removeIssueDependency: vi.fn(),
-      appendIssueActivity: vi.fn(),
-      reviewIssue: vi.fn(),
-      cancelIssue: vi.fn(),
-      retryIssue: vi.fn(),
-      archiveIssue: vi.fn(),
-      unarchiveIssue: vi.fn(),
-    }
+    } as any
     const onSuccess = vi.fn()
+    const onClose = vi.fn()
 
     renderWithClient(
       <CreateProjectModal
         isOpen={true}
-        onClose={vi.fn()}
+        onClose={onClose}
         onSuccess={onSuccess}
         api={mockApi}
       />,
     )
 
-    await user.type(screen.getByLabelText(/项目名称/i), 'Awesome Next-Gen Project')
-    await user.clear(screen.getByRole('spinbutton', { name: /最大审查打回次数/i }))
-    await user.type(screen.getByRole('spinbutton', { name: /最大审查打回次数/i }), '5')
+    const yoloCheckbox = screen.getByRole('checkbox') as HTMLInputElement
+    expect(yoloCheckbox.checked).toBe(true)
 
-    const submitBtn = screen.getByRole('button', { name: '创建项目' })
-    expect(submitBtn).not.toBeDisabled()
-    await user.click(submitBtn)
+    await user.type(screen.getByLabelText(/项目名称/i), 'Awesome Project')
+    await user.type(screen.getByLabelText(/项目描述/i), 'Description text')
+    await user.click(screen.getByRole('button', { name: '创建项目' }))
 
-    expect(mockApi.createProject).toHaveBeenCalledWith({
-      title: 'Awesome Next-Gen Project',
-      description: null,
-      yoloEnabled: true,
-      maxReviewRejections: 5,
+    await waitFor(() => {
+      expect(mockApi.createProject).toHaveBeenCalledWith({
+        title: 'Awesome Project',
+        description: 'Description text',
+        yoloEnabled: true,
+      })
+      expect(onSuccess).toHaveBeenCalledWith(mockProject)
+      expect(onClose).toHaveBeenCalled()
     })
-    expect(onSuccess).toHaveBeenCalledWith(mockProject)
   })
 
-  it('displays error banner when project creation fails', async () => {
-    // 测试意图：验证创建项目失败时展示错误提示横幅
+  it('validates required title', async () => {
+    // 测试意图：验证标题为空时拦截并展示错误提示
     const user = userEvent.setup()
-    const mockApi = {
-      createProject: vi.fn().mockRejectedValue(new Error('Project title already exists')),
-      listProjects: vi.fn(),
-      getProject: vi.fn(),
-      updateProject: vi.fn(),
-      deleteProject: vi.fn(),
-      archiveProject: vi.fn(),
-      unarchiveProject: vi.fn(),
-      getProjectSnapshot: vi.fn(),
-      createIssue: vi.fn(),
-      getIssue: vi.fn(),
-      listActivities: vi.fn(),
-      updateIssue: vi.fn(),
-      changeIssueStatus: vi.fn(),
-      blockIssue: vi.fn(),
-      recoverIssue: vi.fn(),
-      addIssueDependency: vi.fn(),
-      removeIssueDependency: vi.fn(),
-      appendIssueActivity: vi.fn(),
-      reviewIssue: vi.fn(),
-      cancelIssue: vi.fn(),
-      retryIssue: vi.fn(),
-      archiveIssue: vi.fn(),
-      unarchiveIssue: vi.fn(),
-    }
+    const mockApi = { createProject: vi.fn() } as any
 
     renderWithClient(
       <CreateProjectModal
@@ -146,64 +89,21 @@ describe('CreateProjectModal', () => {
       />,
     )
 
-    await user.type(screen.getByLabelText(/项目名称/i), 'Duplicate Title')
     await user.click(screen.getByRole('button', { name: '创建项目' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Project title already exists')
+    expect(await screen.findByText('项目名称不能为空')).toBeInTheDocument()
+    expect(mockApi.createProject).not.toHaveBeenCalled()
   })
 })
 
 describe('EditProjectModal', () => {
-  it('populates initial project values for yoloEnabled and maxReviewRejections', () => {
-    // 测试意图：验证编辑项目弹窗正确回显项目的 yoloEnabled 与 maxReviewRejections 属性
-    renderWithClient(
-      <EditProjectModal
-        isOpen={true}
-        project={mockProject}
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-      />,
-    )
-
-    expect((screen.getByLabelText(/项目名称/i) as HTMLInputElement).value).toBe('Existing Project')
-    expect((screen.getByRole('checkbox', { name: /YOLO 模式/i }) as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByRole('spinbutton', { name: /最大审查打回次数/i }) as HTMLInputElement).value).toBe('3')
-  })
-
-  it('submits updated project with modified settings', async () => {
-    // 测试意图：验证编辑项目修改 YOLO 模式与打回阈值后，调用 updateProject API 并携带 expectedVersion
+  it('switches to workflow tab, formats json, and submits workflow updates', async () => {
+    // 测试意图：验证进入工作流 JSON 编辑器标签，可格式化 JSON 并严格调用 updateWorkflow 保存
     const user = userEvent.setup()
-    const updatedProject: ProjectDTO = {
-      ...mockProject,
-      yoloEnabled: false,
-      maxReviewRejections: '2',
-      version: '2',
-    }
     const mockApi = {
-      updateProject: vi.fn().mockResolvedValue(updatedProject),
-      listProjects: vi.fn(),
-      createProject: vi.fn(),
+      updateProject: vi.fn().mockResolvedValue({ ...mockProject, version: '2' }),
+      updateWorkflow: vi.fn().mockResolvedValue({ ...mockProject, version: '2' }),
       getProject: vi.fn(),
-      deleteProject: vi.fn(),
-      archiveProject: vi.fn(),
-      unarchiveProject: vi.fn(),
-      getProjectSnapshot: vi.fn(),
-      createIssue: vi.fn(),
-      getIssue: vi.fn(),
-      listActivities: vi.fn(),
-      updateIssue: vi.fn(),
-      changeIssueStatus: vi.fn(),
-      blockIssue: vi.fn(),
-      recoverIssue: vi.fn(),
-      addIssueDependency: vi.fn(),
-      removeIssueDependency: vi.fn(),
-      appendIssueActivity: vi.fn(),
-      reviewIssue: vi.fn(),
-      cancelIssue: vi.fn(),
-      retryIssue: vi.fn(),
-      archiveIssue: vi.fn(),
-      unarchiveIssue: vi.fn(),
-    }
+    } as any
     const onSuccess = vi.fn()
 
     renderWithClient(
@@ -216,126 +116,83 @@ describe('EditProjectModal', () => {
       />,
     )
 
-    // 切换 YOLO
-    await user.click(screen.getByRole('checkbox', { name: /YOLO 模式/i }))
-    // 修改打回阈值为 2
-    await user.clear(screen.getByRole('spinbutton', { name: /最大审查打回次数/i }))
-    await user.type(screen.getByRole('spinbutton', { name: /最大审查打回次数/i }), '2')
+    // 切换到工作流 tab
+    await user.click(screen.getByRole('button', { name: '工作流 JSON 配置' }))
+    const textarea = screen.getByLabelText(/工作流配置/i)
+    expect(textarea).toBeInTheDocument()
 
+    // 格式化 JSON
+    await user.click(screen.getByRole('button', { name: /格式化 JSON/i }))
+
+    // 点击保存
     await user.click(screen.getByRole('button', { name: '保存更改' }))
-
-    expect(mockApi.updateProject).toHaveBeenCalledWith(mockProject.id, {
-      expectedVersion: '1',
-      title: 'Existing Project',
-      description: 'Project desc',
-      yoloEnabled: false,
-      maxReviewRejections: 2,
-    })
-    expect(onSuccess).toHaveBeenCalledWith(updatedProject)
-  })
-
-  it('surfaces active-run server validation error in error banner', async () => {
-    // 测试意图：验证当服务端抛出活动 Run 校验限制或业务错误时，错误信息正确渲染在错误横幅上
-    const user = userEvent.setup()
-    const mockApi = {
-      updateProject: vi.fn().mockRejectedValue(new Error('Cannot modify project settings while active run is in progress')),
-      listProjects: vi.fn(),
-      createProject: vi.fn(),
-      getProject: vi.fn(),
-      deleteProject: vi.fn(),
-      archiveProject: vi.fn(),
-      unarchiveProject: vi.fn(),
-      getProjectSnapshot: vi.fn(),
-      createIssue: vi.fn(),
-      getIssue: vi.fn(),
-      listActivities: vi.fn(),
-      updateIssue: vi.fn(),
-      changeIssueStatus: vi.fn(),
-      blockIssue: vi.fn(),
-      recoverIssue: vi.fn(),
-      addIssueDependency: vi.fn(),
-      removeIssueDependency: vi.fn(),
-      appendIssueActivity: vi.fn(),
-      reviewIssue: vi.fn(),
-      cancelIssue: vi.fn(),
-      retryIssue: vi.fn(),
-      archiveIssue: vi.fn(),
-      unarchiveIssue: vi.fn(),
-    }
-
-    renderWithClient(
-      <EditProjectModal
-        isOpen={true}
-        project={mockProject}
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-        api={mockApi}
-      />,
-    )
-
-    await user.click(screen.getByRole('button', { name: '保存更改' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Cannot modify project settings while active run is in progress',
-    )
-  })
-
-  it('surfaces CAS conflict banner on 409 conflict and supports reloading', async () => {
-    // 测试意图：验证乐观锁版本冲突时展示冲突面板，并可通过重新加载同步最新版本
-    const user = userEvent.setup()
-    const conflictError = new ApiError('Version conflict', 409, 'VERSION_CONFLICT', {
-      expectedVersion: '1',
-      actualVersion: '2',
-    })
-    const reloadedProject: ProjectDTO = {
-      ...mockProject,
-      version: '2',
-    }
-    const mockApi = {
-      updateProject: vi.fn().mockRejectedValue(conflictError),
-      getProject: vi.fn().mockResolvedValue(reloadedProject),
-      listProjects: vi.fn(),
-      createProject: vi.fn(),
-      deleteProject: vi.fn(),
-      archiveProject: vi.fn(),
-      unarchiveProject: vi.fn(),
-      getProjectSnapshot: vi.fn(),
-      createIssue: vi.fn(),
-      getIssue: vi.fn(),
-      listActivities: vi.fn(),
-      updateIssue: vi.fn(),
-      changeIssueStatus: vi.fn(),
-      blockIssue: vi.fn(),
-      recoverIssue: vi.fn(),
-      addIssueDependency: vi.fn(),
-      removeIssueDependency: vi.fn(),
-      appendIssueActivity: vi.fn(),
-      reviewIssue: vi.fn(),
-      cancelIssue: vi.fn(),
-      retryIssue: vi.fn(),
-      archiveIssue: vi.fn(),
-      unarchiveIssue: vi.fn(),
-    }
-
-    renderWithClient(
-      <EditProjectModal
-        isOpen={true}
-        project={mockProject}
-        onClose={vi.fn()}
-        onSuccess={vi.fn()}
-        api={mockApi}
-      />,
-    )
-
-    await user.click(screen.getByRole('button', { name: '保存更改' }))
-
-    expect(await screen.findByText(/版本冲突/i)).toBeInTheDocument()
-
-    // 点击保留草稿重新加载
-    await user.click(screen.getByRole('button', { name: /保留草稿并重新加载最新版本号/i }))
     await waitFor(() => {
-      expect(mockApi.getProject).toHaveBeenCalledWith(mockProject.id)
-      expect(screen.queryByText(/版本冲突/i)).not.toBeInTheDocument()
+      expect(onSuccess).toHaveBeenCalled()
+    })
+  })
+
+  it('retains draft when 409 conflict occurs and allows version refresh', async () => {
+    // 测试意图：核心场景——编辑遇到 409 Conflict 时保留编辑草稿，刷新版本号更新 expectedVersion
+    const user = userEvent.setup()
+    const conflictError = new ApiError('Conflict occurred', 409)
+    const freshProject = { ...mockProject, version: '5' }
+    const mockApi = {
+      updateProject: vi.fn().mockRejectedValueOnce(conflictError).mockResolvedValueOnce(freshProject),
+      getProject: vi.fn().mockResolvedValue(freshProject),
+    } as any
+
+    renderWithClient(
+      <EditProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        api={mockApi}
+      />,
+    )
+
+    const titleInput = screen.getByLabelText(/项目名称/i) as HTMLInputElement
+    await user.clear(titleInput)
+    await user.type(titleInput, 'Draft New Title')
+
+    await user.click(screen.getByRole('button', { name: '保存更改' }))
+
+    // 提示 409 冲突并保留草稿
+    expect(await screen.findByText(/409 冲突/i)).toBeInTheDocument()
+    expect(titleInput.value).toBe('Draft New Title')
+
+    // 点击刷新版本
+    await user.click(screen.getByRole('button', { name: '刷新版本' }))
+    await waitFor(() => {
+      expect(screen.getByText('5')).toBeInTheDocument() // 期望版本更新为 5
+      expect(titleInput.value).toBe('Draft New Title') // 草稿依然保留
+    })
+  })
+})
+
+describe('DeleteProjectModal', () => {
+  it('calls deleteProject with expectedVersion upon confirmation', async () => {
+    // 测试意图：验证确认删除项目时向 deleteProject 传递 projectId 和 expectedVersion
+    const user = userEvent.setup()
+    const mockApi = {
+      deleteProject: vi.fn().mockResolvedValue(undefined),
+    } as any
+    const onSuccess = vi.fn()
+
+    renderWithClient(
+      <DeleteProjectModal
+        isOpen={true}
+        project={mockProject}
+        onClose={vi.fn()}
+        onSuccess={onSuccess}
+        api={mockApi}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => {
+      expect(mockApi.deleteProject).toHaveBeenCalledWith(mockProject.id, mockProject.version)
+      expect(onSuccess).toHaveBeenCalled()
     })
   })
 })

@@ -1,66 +1,24 @@
 import { ApiError } from '@/shared/api/client'
 import type {
-  IssueActivityActorType,
   IssueActivityDTO,
-  IssueActivityKind,
-  IssueAgentSessionDTO,
+  IssueAgentThreadDTO,
   IssueDTO,
-  IssueDependencyDTO,
   IssueDetailDTO,
   IssueEvidenceDTO,
-  IssueEvidenceOrigin,
+  IssuePauseReason,
   IssueRunDTO,
-  IssueRunOutcome,
-  IssueRunRole,
-  IssueRunStatus,
   IssueRunSummaryDTO,
-  IssueStatus,
+  IssueStageBudgetDTO,
   ProjectDTO,
   ProjectIssueSnapshotDTO,
   ProjectSnapshotDTO,
+  ProjectWorkflowDTO,
+  ProjectWorkflowStateDTO,
 } from './types'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DECIMAL_LONG_REGEX = /^(0|[1-9][0-9]*)$/
-const ISSUE_STATUSES: readonly IssueStatus[] = [
-  'BACKLOG',
-  'TODO',
-  'IN_PROGRESS',
-  'IN_REVIEW',
-  'BLOCKED',
-  'DONE',
-  'CANCELED',
-]
-const ISSUE_ACTIVITY_KINDS: readonly IssueActivityKind[] = [
-  'SPEC_CHANGE',
-  'INSTRUCTION',
-  'COMMENT',
-  'HUMAN_INPUT',
-  'REVIEW_DECISION',
-  'RECOVERY',
-  'RETRY',
-  'SYSTEM',
-]
-const ISSUE_ACTIVITY_ACTOR_TYPES: readonly IssueActivityActorType[] = [
-  'HUMAN',
-  'AGENT',
-  'SYSTEM',
-]
-const ISSUE_EVIDENCE_ORIGINS: readonly IssueEvidenceOrigin[] = ['EXECUTOR', 'HUMAN']
-const ISSUE_RUN_ROLES: readonly IssueRunRole[] = ['EXECUTOR', 'REVIEWER']
-const ISSUE_RUN_STATUSES: readonly IssueRunStatus[] = [
-  'RUNNING',
-  'WAITING_HUMAN',
-  'COMPLETED',
-  'FAILED',
-  'CANCELLED',
-  'UNKNOWN',
-]
-const ISSUE_RUN_OUTCOMES: readonly Exclude<IssueRunOutcome, null>[] = [
-  'SUBMITTED',
-  'APPROVED',
-  'CHANGES_REQUESTED',
-]
+const STATE_CODE_REGEX = /^[A-Z][A-Z0-9_]{0,63}$/
 
 function invalidPayload(detail: string): ApiError {
   return new ApiError(`Project API returned an invalid payload: ${detail}`)
@@ -74,8 +32,8 @@ export function isDecimalLong(value: unknown): value is string {
   return typeof value === 'string' && DECIMAL_LONG_REGEX.test(value)
 }
 
-export function isIssueStatus(value: unknown): value is IssueStatus {
-  return typeof value === 'string' && (ISSUE_STATUSES as readonly string[]).includes(value)
+export function isValidStateCode(value: unknown): value is string {
+  return typeof value === 'string' && STATE_CODE_REGEX.test(value)
 }
 
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
@@ -105,24 +63,6 @@ function requireNullableString(value: unknown, path: string): string | null {
   return value
 }
 
-function requireUuid(value: unknown, path: string): string {
-  const str = requireString(value, path)
-  if (!UUID_REGEX.test(str)) {
-    throw invalidPayload(`${path} must be a canonical UUID string`)
-  }
-  return str.toLowerCase()
-}
-
-function requireNullableUuid(value: unknown, path: string): string | null {
-  if (value === undefined) {
-    throw invalidPayload(`${path} must not be undefined`)
-  }
-  if (value === null) {
-    return null
-  }
-  return requireUuid(value, path)
-}
-
 function optionalNullableString(value: unknown, path: string): string | null {
   if (value === undefined || value === null) {
     return null
@@ -132,6 +72,14 @@ function optionalNullableString(value: unknown, path: string): string | null {
   }
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function requireUuid(value: unknown, path: string): string {
+  const str = requireString(value, path)
+  if (!UUID_REGEX.test(str)) {
+    throw invalidPayload(`${path} must be a canonical UUID string`)
+  }
+  return str.toLowerCase()
 }
 
 function optionalNullableUuid(value: unknown, path: string): string | null {
@@ -163,37 +111,6 @@ function requireSafeInteger(value: unknown, path: string, min = 0): number {
   return value
 }
 
-function requireIssueStatus(value: unknown, path: string): IssueStatus {
-  const str = requireString(value, path)
-  if (!isIssueStatus(str)) {
-    throw invalidPayload(`${path} must be one of ${ISSUE_STATUSES.join(', ')}`)
-  }
-  return str
-}
-
-function requireEnumValue<T extends string>(
-  value: unknown,
-  path: string,
-  allowed: readonly T[],
-): T {
-  const str = requireString(value, path)
-  if (!(allowed as readonly string[]).includes(str)) {
-    throw invalidPayload(`${path} has an unknown value`)
-  }
-  return str as T
-}
-
-function requireNullableEnumValue<T extends string>(
-  value: unknown,
-  path: string,
-  allowed: readonly T[],
-): T | null {
-  if (value === null) {
-    return null
-  }
-  return requireEnumValue(value, path, allowed)
-}
-
 function requireArray<T>(
   value: unknown,
   path: string,
@@ -205,14 +122,60 @@ function requireArray<T>(
   return value.map((item, index) => decoder(item, `${path}[${index}]`))
 }
 
+export function decodeProjectWorkflowState(
+  raw: unknown,
+  path = 'state',
+): ProjectWorkflowStateDTO {
+  const obj = requireRecord(raw, path)
+  const stateCode = requireString(obj.state, `${path}.state`)
+  if (!isValidStateCode(stateCode)) {
+    throw invalidPayload(`${path}.state must match [A-Z][A-Z0-9_]{0,63}`)
+  }
+
+  let next: string[] | null = null
+  if (obj.next !== undefined && obj.next !== null) {
+    next = requireArray(obj.next, `${path}.next`, (item, itemPath) => {
+      const code = requireString(item, itemPath)
+      if (!isValidStateCode(code)) {
+        throw invalidPayload(`${itemPath} must match [A-Z][A-Z0-9_]{0,63}`)
+      }
+      return code
+    })
+  }
+
+  return {
+    state: stateCode,
+    name: requireString(obj.name, `${path}.name`),
+    agent: optionalNullableString(obj.agent, `${path}.agent`),
+    environment: optionalNullableString(obj.environment, `${path}.environment`),
+    instructions: optionalNullableString(obj.instructions, `${path}.instructions`),
+    maxRuns:
+      obj.maxRuns !== undefined && obj.maxRuns !== null
+        ? String(obj.maxRuns)
+        : null,
+    enabled: typeof obj.enabled === 'boolean' ? obj.enabled : null,
+    next,
+  }
+}
+
+export function decodeProjectWorkflow(
+  raw: unknown,
+  path = 'workflow',
+): ProjectWorkflowDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    states: requireArray(obj.states, `${path}.states`, decodeProjectWorkflowState),
+  }
+}
+
 export function decodeProject(raw: unknown, path = 'project'): ProjectDTO {
   const obj = requireRecord(raw, path)
   return {
     id: requireUuid(obj.id, `${path}.id`),
     title: requireString(obj.title, `${path}.title`),
     description: requireString(obj.description, `${path}.description`),
+    workflow: decodeProjectWorkflow(obj.workflow, `${path}.workflow`),
     yoloEnabled: requireBoolean(obj.yoloEnabled, `${path}.yoloEnabled`),
-    maxReviewRejections: requireDecimalLong(obj.maxReviewRejections, `${path}.maxReviewRejections`),
     nextIssueNumber: requireDecimalLong(obj.nextIssueNumber, `${path}.nextIssueNumber`),
     version: requireDecimalLong(obj.version, `${path}.version`),
     archivedAt: requireNullableString(obj.archivedAt, `${path}.archivedAt`),
@@ -227,21 +190,26 @@ export function decodeProjectList(raw: unknown, path = 'projects'): ProjectDTO[]
 
 export function decodeIssue(raw: unknown, path = 'issue'): IssueDTO {
   const obj = requireRecord(raw, path)
+  let pauseReason: IssuePauseReason | null = null
+  if (obj.pauseReason !== undefined && obj.pauseReason !== null) {
+    const pr = requireString(obj.pauseReason, `${path}.pauseReason`)
+    if (pr !== 'USER' && pr !== 'ERROR' && pr !== 'UNKNOWN') {
+      throw invalidPayload(`${path}.pauseReason must be USER, ERROR, or UNKNOWN`)
+    }
+    pauseReason = pr
+  }
+
   return {
     id: requireUuid(obj.id, `${path}.id`),
     projectId: requireUuid(obj.projectId, `${path}.projectId`),
     number: requireDecimalLong(obj.number, `${path}.number`),
     title: requireString(obj.title, `${path}.title`),
     description: requireString(obj.description, `${path}.description`),
-    status: requireIssueStatus(obj.status, `${path}.status`),
-    assigneeAgentName: requireNullableString(
-      obj.assigneeAgentName,
-      `${path}.assigneeAgentName`,
-    ),
-    reviewerAgentName: requireNullableString(
-      obj.reviewerAgentName,
-      `${path}.reviewerAgentName`,
-    ),
+    state: requireString(obj.state, `${path}.state`),
+    blockedFromState: optionalNullableString(obj.blockedFromState, `${path}.blockedFromState`),
+    blockReason: optionalNullableString(obj.blockReason, `${path}.blockReason`),
+    pauseReason,
+    pauseDetail: optionalNullableString(obj.pauseDetail, `${path}.pauseDetail`),
     version: requireDecimalLong(obj.version, `${path}.version`),
     archivedAt: requireNullableString(obj.archivedAt, `${path}.archivedAt`),
     createdAt: requireString(obj.createdAt, `${path}.createdAt`),
@@ -249,36 +217,109 @@ export function decodeIssue(raw: unknown, path = 'issue'): IssueDTO {
   }
 }
 
-export function decodeIssueDependency(raw: unknown, path = 'dependency'): IssueDependencyDTO {
-  const obj = requireRecord(raw, path)
-  return {
-    issueId: requireUuid(obj.issueId, `${path}.issueId`),
-    dependsOnIssueId: requireUuid(obj.dependsOnIssueId, `${path}.dependsOnIssueId`),
-    projectId: requireUuid(obj.projectId, `${path}.projectId`),
-    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
-  }
-}
-
-export function decodeIssueDependencyList(
+export function decodeIssueRunSummary(
   raw: unknown,
-  path = 'dependencies',
-): IssueDependencyDTO[] {
-  return requireArray(raw, path, decodeIssueDependency)
-}
-
-export function decodeIssueAgentSession(
-  raw: unknown,
-  path = 'agentSession',
-): IssueAgentSessionDTO {
+  path = 'runSummary',
+): IssueRunSummaryDTO {
   const obj = requireRecord(raw, path)
   return {
     id: requireUuid(obj.id, `${path}.id`),
     issueId: requireUuid(obj.issueId, `${path}.issueId`),
+    ordinal: requireDecimalLong(obj.ordinal, `${path}.ordinal`),
+    state: requireString(obj.state, `${path}.state`),
+    status: requireString(obj.status, `${path}.status`),
+    agentName: optionalNullableString(obj.agentName, `${path}.agentName`),
+    startedAt: requireString(obj.startedAt, `${path}.startedAt`),
+    endedAt: requireNullableString(obj.endedAt, `${path}.endedAt`),
+  }
+}
+
+export function decodeProjectIssueSnapshot(
+  raw: unknown,
+  path = 'issueSnapshot',
+): ProjectIssueSnapshotDTO {
+  const obj = requireRecord(raw, path)
+  const currentOrLatestRun =
+    obj.currentOrLatestRun === null || obj.currentOrLatestRun === undefined
+      ? null
+      : decodeIssueRunSummary(obj.currentOrLatestRun, `${path}.currentOrLatestRun`)
+
+  return {
+    issue: decodeIssue(obj.issue, `${path}.issue`),
+    currentOrLatestRun,
+  }
+}
+
+export function decodeProjectSnapshot(
+  raw: unknown,
+  path = 'projectSnapshot',
+): ProjectSnapshotDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    project: decodeProject(obj.project, `${path}.project`),
+    issues: requireArray(obj.issues, `${path}.issues`, decodeProjectIssueSnapshot),
+  }
+}
+
+export function decodeIssueAgentThread(
+  raw: unknown,
+  path = 'agentThread',
+): IssueAgentThreadDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    issueId: requireUuid(obj.issueId, `${path}.issueId`),
     agentName: requireString(obj.agentName, `${path}.agentName`),
-    role: requireEnumValue(obj.role, `${path}.role`, ISSUE_RUN_ROLES),
+    threadId: requireUuid(obj.threadId, `${path}.threadId`),
+  }
+}
+
+export function decodeIssueStageBudget(
+  raw: unknown,
+  path = 'stageBudget',
+): IssueStageBudgetDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    state: requireString(obj.state, `${path}.state`),
+    maxRuns: requireSafeInteger(obj.maxRuns, `${path}.maxRuns`, 1),
+    budgetAfterOrdinal: requireDecimalLong(
+      obj.budgetAfterOrdinal,
+      `${path}.budgetAfterOrdinal`,
+    ),
+    usedRuns: requireDecimalLong(obj.usedRuns, `${path}.usedRuns`),
+    remainingRuns: requireDecimalLong(obj.remainingRuns, `${path}.remainingRuns`),
+  }
+}
+
+export function decodeIssueRun(raw: unknown, path = 'run'): IssueRunDTO {
+  const obj = requireRecord(raw, path)
+  return {
+    id: requireUuid(obj.id, `${path}.id`),
+    issueId: requireUuid(obj.issueId, `${path}.issueId`),
+    ordinal: requireDecimalLong(obj.ordinal, `${path}.ordinal`),
+    state: requireString(obj.state, `${path}.state`),
+    agentName: optionalNullableString(obj.agentName, `${path}.agentName`),
     sessionId: requireUuid(obj.sessionId, `${path}.sessionId`),
-    branchId: requireUuid(obj.branchId, `${path}.branchId`),
-    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
+    threadId: requireUuid(obj.threadId, `${path}.threadId`),
+    status: requireString(obj.status, `${path}.status`),
+    startEntryId: requireUuid(obj.startEntryId, `${path}.startEntryId`),
+    endEntryId: optionalNullableUuid(obj.endEntryId, `${path}.endEntryId`),
+    finalAnswerEntryId: optionalNullableUuid(
+      obj.finalAnswerEntryId,
+      `${path}.finalAnswerEntryId`,
+    ),
+    nextState: optionalNullableString(obj.nextState, `${path}.nextState`),
+    observedActivitySequence: requireDecimalLong(
+      obj.observedActivitySequence,
+      `${path}.observedActivitySequence`,
+    ),
+    remainingExecutionMs: requireDecimalLong(
+      obj.remainingExecutionMs,
+      `${path}.remainingExecutionMs`,
+    ),
+    error: optionalNullableString(obj.error, `${path}.error`),
+    version: requireDecimalLong(obj.version, `${path}.version`),
+    startedAt: requireString(obj.startedAt, `${path}.startedAt`),
+    endedAt: requireNullableString(obj.endedAt, `${path}.endedAt`),
   }
 }
 
@@ -287,15 +328,12 @@ export function decodeIssueActivity(raw: unknown, path = 'activity'): IssueActiv
   return {
     issueId: requireUuid(obj.issueId, `${path}.issueId`),
     sequence: requireDecimalLong(obj.sequence, `${path}.sequence`),
-    kind: requireEnumValue(obj.kind, `${path}.kind`, ISSUE_ACTIVITY_KINDS),
-    actorType: requireEnumValue(obj.actorType, `${path}.actorType`, ISSUE_ACTIVITY_ACTOR_TYPES),
-    actorAgentName: requireNullableString(obj.actorAgentName, `${path}.actorAgentName`),
-    targetRole: requireNullableEnumValue(obj.targetRole, `${path}.targetRole`, ISSUE_RUN_ROLES),
-    runId: requireNullableUuid(obj.runId, `${path}.runId`),
-    submissionRunId: requireNullableUuid(obj.submissionRunId, `${path}.submissionRunId`),
-    decision: requireNullableString(obj.decision, `${path}.decision`),
-    body: requireString(obj.body, `${path}.body`),
-    idempotencyKey: requireNullableString(obj.idempotencyKey, `${path}.idempotencyKey`),
+    kind: requireString(obj.kind, `${path}.kind`),
+    actorType: requireString(obj.actorType, `${path}.actorType`),
+    actorAgentName: optionalNullableString(obj.actorAgentName, `${path}.actorAgentName`),
+    runId: optionalNullableUuid(obj.runId, `${path}.runId`),
+    body: optionalNullableString(obj.body, `${path}.body`),
+    data: obj.data,
     createdAt: requireString(obj.createdAt, `${path}.createdAt`),
   }
 }
@@ -313,10 +351,10 @@ export function decodeIssueEvidence(raw: unknown, path = 'evidence'): IssueEvide
     issueId: requireUuid(obj.issueId, `${path}.issueId`),
     blobId: requireString(obj.blobId, `${path}.blobId`),
     uri: requireString(obj.uri, `${path}.uri`),
-    origin: requireEnumValue(obj.origin, `${path}.origin`, ISSUE_EVIDENCE_ORIGINS),
     name: optionalNullableString(obj.name, `${path}.name`),
+    actorAgentName: optionalNullableString(obj.actorAgentName, `${path}.actorAgentName`),
     runId: optionalNullableUuid(obj.runId, `${path}.runId`),
-    publishedAt: requireString(obj.publishedAt, `${path}.publishedAt`),
+    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
   }
 }
 
@@ -325,86 +363,6 @@ export function decodeIssueEvidenceList(
   path = 'evidence',
 ): IssueEvidenceDTO[] {
   return requireArray(raw, path, decodeIssueEvidence)
-}
-
-export function decodeIssueRunSummary(raw: unknown, path = 'runSummary'): IssueRunSummaryDTO {
-  const obj = requireRecord(raw, path)
-  return {
-    id: requireUuid(obj.id, `${path}.id`),
-    issueId: requireUuid(obj.issueId, `${path}.issueId`),
-    ordinal: requireDecimalLong(obj.ordinal, `${path}.ordinal`),
-    role: requireEnumValue(obj.role, `${path}.role`, ISSUE_RUN_ROLES),
-    agentName: requireNullableString(obj.agentName, `${path}.agentName`),
-    submissionRunId: requireNullableUuid(obj.submissionRunId, `${path}.submissionRunId`),
-    status: requireEnumValue(obj.status, `${path}.status`, ISSUE_RUN_STATUSES),
-    outcome: requireNullableEnumValue(obj.outcome, `${path}.outcome`, ISSUE_RUN_OUTCOMES),
-    waitingReason: requireNullableString(obj.waitingReason, `${path}.waitingReason`),
-    createdAt: requireNullableString(obj.createdAt, `${path}.createdAt`),
-    completedAt: requireNullableString(obj.completedAt, `${path}.completedAt`),
-  }
-}
-
-export function decodeIssueRun(raw: unknown, path = 'run'): IssueRunDTO {
-  const obj = requireRecord(raw, path)
-  return {
-    id: requireUuid(obj.id, `${path}.id`),
-    issueId: requireUuid(obj.issueId, `${path}.issueId`),
-    ordinal: requireDecimalLong(obj.ordinal, `${path}.ordinal`),
-    role: requireEnumValue(obj.role, `${path}.role`, ISSUE_RUN_ROLES),
-    agentName: requireNullableString(obj.agentName, `${path}.agentName`),
-    agentSessionId: requireNullableUuid(obj.agentSessionId, `${path}.agentSessionId`),
-    sessionId: requireNullableUuid(obj.sessionId, `${path}.sessionId`),
-    submissionRunId: requireNullableUuid(obj.submissionRunId, `${path}.submissionRunId`),
-    status: requireEnumValue(obj.status, `${path}.status`, ISSUE_RUN_STATUSES),
-    outcome: requireNullableEnumValue(obj.outcome, `${path}.outcome`, ISSUE_RUN_OUTCOMES),
-    observedActivitySequence: requireDecimalLong(
-      obj.observedActivitySequence,
-      `${path}.observedActivitySequence`,
-    ),
-    continuationCount: requireSafeInteger(obj.continuationCount, `${path}.continuationCount`, 0),
-    maxContinuations: requireSafeInteger(obj.maxContinuations, `${path}.maxContinuations`, 0),
-    deadline: requireNullableString(obj.deadline, `${path}.deadline`),
-    waitingReason: requireNullableString(obj.waitingReason, `${path}.waitingReason`),
-    result: requireNullableString(obj.result, `${path}.result`),
-    terminalActionId: requireNullableString(obj.terminalActionId, `${path}.terminalActionId`),
-    version: requireDecimalLong(obj.version, `${path}.version`),
-    createdAt: requireString(obj.createdAt, `${path}.createdAt`),
-    updatedAt: requireString(obj.updatedAt, `${path}.updatedAt`),
-    completedAt: requireNullableString(obj.completedAt, `${path}.completedAt`),
-  }
-}
-
-export function decodeProjectIssueSnapshot(
-  raw: unknown,
-  path = 'issueSnapshot',
-): ProjectIssueSnapshotDTO {
-  const obj = requireRecord(raw, path)
-  const currentOrLatestRun =
-    obj.currentOrLatestRun === null || obj.currentOrLatestRun === undefined
-      ? null
-      : decodeIssueRunSummary(obj.currentOrLatestRun, `${path}.currentOrLatestRun`)
-
-  return {
-    issue: decodeIssue(obj.issue, `${path}.issue`),
-    blocked: requireBoolean(obj.blocked, `${path}.blocked`),
-    reviewRejectionCount: requireDecimalLong(
-      obj.reviewRejectionCount,
-      `${path}.reviewRejectionCount`,
-    ),
-    currentOrLatestRun,
-  }
-}
-
-export function decodeProjectSnapshot(
-  raw: unknown,
-  path = 'projectSnapshot',
-): ProjectSnapshotDTO {
-  const obj = requireRecord(raw, path)
-  return {
-    project: decodeProject(obj.project, `${path}.project`),
-    issues: requireArray(obj.issues, `${path}.issues`, decodeProjectIssueSnapshot),
-    dependencies: decodeIssueDependencyList(obj.dependencies, `${path}.dependencies`),
-  }
 }
 
 export function decodeIssueDetail(raw: unknown, path = 'issueDetail'): IssueDetailDTO {
@@ -420,17 +378,23 @@ export function decodeIssueDetail(raw: unknown, path = 'issueDetail'): IssueDeta
 
   return {
     issue: decodeIssue(obj.issue, `${path}.issue`),
-    blocked: requireBoolean(obj.blocked, `${path}.blocked`),
-    dependencies: decodeIssueDependencyList(obj.dependencies, `${path}.dependencies`),
-    sessions: requireArray(obj.sessions ?? [], `${path}.sessions`, decodeIssueAgentSession),
     activities: requireArray(obj.activities ?? [], `${path}.activities`, decodeIssueActivity),
-    evidence: requireArray(obj.evidence ?? [], `${path}.evidence`, decodeIssueEvidence),
     nextActivityCursor: requireNullableString(
       obj.nextActivityCursor,
       `${path}.nextActivityCursor`,
     ),
-    runs: requireArray(obj.runs, `${path}.runs`, decodeIssueRun),
+    runs: requireArray(obj.runs ?? [], `${path}.runs`, decodeIssueRun),
     currentRun,
     latestRun,
+    stageBudgets: requireArray(
+      obj.stageBudgets ?? [],
+      `${path}.stageBudgets`,
+      decodeIssueStageBudget,
+    ),
+    agentThreads: requireArray(
+      obj.agentThreads ?? [],
+      `${path}.agentThreads`,
+      decodeIssueAgentThread,
+    ),
   }
 }

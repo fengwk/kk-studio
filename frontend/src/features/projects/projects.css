@@ -488,3 +488,472 @@
     border-bottom: 1px solid var(--border);
   }
 }
+
+/* New Project & Issue Features Styles */
+
+.badge-state {
+  background: rgba(14, 165, 233, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  font-family: monospace;
+}
+
+.badge-paused {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-agent {
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.issue-card.is-unknown {
+  border-left: 3px solid #c084fc;
+}
+
+.issue-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.issue-block-reason {
+  margin: 4px 0 0 0;
+  font-size: 0.75rem;
+  color: #f87171;
+  line-height: 1.2;
+}
+
+.action-pill {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.action-pill:hover {
+  border-color: var(--border-hover);
+  background: var(--surface-hover, rgba(255, 255, 255, 0.04));
+}
+
+.action-pill.primary {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.action-pill.danger {
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.project-board-columns {
+  flex: 1;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 16px;
+  gap: 16px;
+}
+
+.project-board-column {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-subtle, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  max-height: 100%;
+}
+
+.column-header {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.column-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.column-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.column-count {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.column-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.column-empty {
+  text-align: center;
+  padding: 24px 0;
+  font-size: 0.8125rem;
+  color: var(--fg-dim);
+}
+
+/* Issue Detail Modal Card */
+.modal-card.issue-detail-modal-card {
+  width: 90vw;
+  max-width: 960px;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.issue-detail-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-actions-bar {
+  padding: 8px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 0.8125rem;
+  padding: 4px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-action:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  border-color: var(--border-hover);
+}
+
+.btn-action.primary {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+.btn-action.primary:hover {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.btn-action.danger {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+.tab-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.spec-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.spec-desc-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.spec-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+
+.meta-label {
+  color: var(--fg-muted);
+}
+
+.meta-value {
+  color: var(--fg);
+}
+
+/* Activity Segmented Control */
+.segmented-control {
+  display: inline-flex;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.segmented-item {
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.segmented-item.active {
+  background: var(--primary, #3b82f6);
+  color: #fff;
+  font-weight: 500;
+}
+
+.activity-input-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.activity-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity-item.kind-instruction {
+  border-left: 3px solid #3b82f6;
+}
+
+.activity-item.kind-comment {
+  border-left: 3px solid #10b981;
+}
+
+.activity-item-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+}
+
+.activity-badge-kind {
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--primary);
+}
+
+.activity-actor {
+  color: var(--fg);
+}
+
+.activity-time {
+  color: var(--fg-dim);
+}
+
+.activity-seq {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-family: monospace;
+}
+
+.activity-body-text {
+  font-size: 0.875rem;
+  color: var(--fg);
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+/* Runs List */
+.runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.run-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+
+.run-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.run-ordinal {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--fg);
+}
+
+.run-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--fg-muted);
+}
+
+.run-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Stage Budgets */
+.budget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.budget-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.budget-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.875rem;
+}
+
+.budget-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--fg-muted);
+}
+
+/* Agent Threads */
+.thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thread-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.875rem;
+}
+
+/* Evidence */
+.evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evidence-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.875rem;
+}
+
+/* Sub Modals */
+.modal-backdrop.sub-modal {
+  z-index: 1100;
+}
+
+.modal-card.sub-card {
+  max-width: 440px;
+}
+
+.empty-tip {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--fg-dim);
+  font-size: 0.875rem;
+}

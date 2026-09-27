@@ -25,8 +25,14 @@ describe('ProjectsPage', () => {
       id: 'a0000000-0000-0000-0000-000000000001',
       title: 'Alpha Project',
       description: 'First project for testing',
+      workflow: {
+        states: [
+          { state: 'INIT', name: '待开始', next: ['DONE'] },
+          { state: 'BLOCKED', name: '业务阻塞' },
+          { state: 'DONE', name: '完成' },
+        ],
+      },
       yoloEnabled: true,
-      maxReviewRejections: '3',
       nextIssueNumber: '5',
       version: '1',
       archivedAt: null,
@@ -37,8 +43,14 @@ describe('ProjectsPage', () => {
       id: 'a0000000-0000-0000-0000-000000000002',
       title: 'Beta Project',
       description: 'Second project',
+      workflow: {
+        states: [
+          { state: 'INIT', name: '待开始', next: ['DONE'] },
+          { state: 'BLOCKED', name: '业务阻塞' },
+          { state: 'DONE', name: '完成' },
+        ],
+      },
       yoloEnabled: false,
-      maxReviewRejections: '1',
       nextIssueNumber: '1',
       version: '0',
       archivedAt: '2026-09-14T01:00:00Z',
@@ -52,27 +64,28 @@ describe('ProjectsPage', () => {
     createProject: vi.fn().mockResolvedValue(mockProjects[0]),
     getProject: vi.fn().mockResolvedValue(mockProjects[0]),
     updateProject: vi.fn().mockResolvedValue(mockProjects[0]),
+    updateWorkflow: vi.fn().mockResolvedValue(mockProjects[0]),
     deleteProject: vi.fn().mockResolvedValue(undefined),
     archiveProject: vi.fn().mockResolvedValue({ ...mockProjects[0], archivedAt: 'now' }),
     unarchiveProject: vi.fn().mockResolvedValue({ ...mockProjects[1], archivedAt: null }),
     getProjectSnapshot: vi.fn().mockResolvedValue({
       project: mockProjects[0],
       issues: [],
-      dependencies: [],
     }),
     createIssue: vi.fn(),
     getIssue: vi.fn(),
-    listActivities: vi.fn(),
     updateIssue: vi.fn(),
-    changeIssueStatus: vi.fn(),
+    transitionIssue: vi.fn(),
     blockIssue: vi.fn(),
     recoverIssue: vi.fn(),
-    addIssueDependency: vi.fn(),
-    removeIssueDependency: vi.fn(),
+    reopenIssue: vi.fn(),
+    resolveUnknownIssue: vi.fn(),
+    pauseIssue: vi.fn(),
+    stopIssue: vi.fn(),
+    resetStageBudget: vi.fn(),
     appendIssueActivity: vi.fn(),
-    reviewIssue: vi.fn(),
-    cancelIssue: vi.fn(),
-    retryIssue: vi.fn(),
+    addIssueEvidence: vi.fn(),
+    deleteIssue: vi.fn(),
     archiveIssue: vi.fn(),
     unarchiveIssue: vi.fn(),
     ...overrides,
@@ -109,14 +122,20 @@ describe('ProjectsPage', () => {
   })
 
   it('creates a new project and triggers onSelectProject', async () => {
-    // 测试意图：验证新建项目弹窗提交成功后触发刷新并进入新项目（携带 yoloEnabled 与 maxReviewRejections）
+    // 测试意图：验证新建项目弹窗提交成功后触发刷新并进入新项目（携带 yoloEnabled）
     const onSelectProject = vi.fn()
     const newProj: ProjectDTO = {
       id: 'a0000000-0000-0000-0000-000000000003',
       title: 'Gamma Project',
       description: 'Brand new project',
+      workflow: {
+        states: [
+          { state: 'INIT', name: '待开始', next: ['DONE'] },
+          { state: 'BLOCKED', name: '业务阻塞' },
+          { state: 'DONE', name: '完成' },
+        ],
+      },
       yoloEnabled: true,
-      maxReviewRejections: '3',
       nextIssueNumber: '1',
       version: '0',
       archivedAt: null,
@@ -152,7 +171,6 @@ describe('ProjectsPage', () => {
         title: 'Gamma Project',
         description: 'Brand new project',
         yoloEnabled: true,
-        maxReviewRejections: 3,
       })
       expect(onSelectProject).toHaveBeenCalledWith(newProj.id)
     })
@@ -199,7 +217,7 @@ describe('ProjectsPage', () => {
 
     // CAS conflict banner should appear
     await waitFor(() => {
-      expect(screen.getByText(/版本冲突/i)).toBeInTheDocument()
+      expect(screen.getByText(/409 冲突/i)).toBeInTheDocument()
     })
 
     // User draft remains in form
@@ -207,8 +225,8 @@ describe('ProjectsPage', () => {
       'My Custom Draft',
     )
 
-    // Click "保留草稿并重新加载最新版本号"
-    const reloadBtn = screen.getByRole('button', { name: /保留草稿并重新加载最新版本号/i })
+    // Click "刷新版本"
+    const reloadBtn = screen.getByRole('button', { name: '刷新版本' })
     fireEvent.click(reloadBtn)
 
     await waitFor(() => {
@@ -226,8 +244,6 @@ describe('ProjectsPage', () => {
         expectedVersion: '2',
         title: 'My Custom Draft',
         description: mockProjects[0].description,
-        yoloEnabled: true,
-        maxReviewRejections: 3,
       })
     })
   })
@@ -244,7 +260,7 @@ describe('ProjectsPage', () => {
     const deleteBtn = screen.getByLabelText('删除项目 Alpha Project')
     fireEvent.click(deleteBtn)
 
-    expect(screen.getByText(/确认删除项目/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '确认删除项目' })).toBeInTheDocument()
 
     const confirmBtn = screen.getByRole('button', { name: '确认删除' })
     fireEvent.click(confirmBtn)
@@ -357,7 +373,7 @@ describe('ProjectsPage', () => {
     expect(onSelectProject).toHaveBeenCalledWith(mockProjects[0].id)
 
     // Click "进入项目" button
-    const enterBtns = screen.getAllByRole('button', { name: /进入项目/i })
+    const enterBtns = screen.getAllByRole('button', { name: /进入看板/i })
     fireEvent.click(enterBtns[0])
     expect(onSelectProject).toHaveBeenCalledWith(mockProjects[0].id)
   })

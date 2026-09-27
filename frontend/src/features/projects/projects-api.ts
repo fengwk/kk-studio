@@ -3,38 +3,42 @@ import {
   decodeIssue,
   decodeIssueActivity,
   decodeIssueActivityList,
-  decodeIssueDependency,
   decodeIssueDetail,
   decodeIssueEvidence,
+  decodeIssueStageBudget,
   decodeProject,
   decodeProjectList,
   decodeProjectSnapshot,
 } from './codecs'
 import type {
-  AddIssueDependencyRequest,
   AddIssueEvidenceRequest,
   AppendIssueActivityRequest,
   ArchiveIssueRequest,
   BlockIssueRequest,
-  CancelIssueRequest,
-  ChangeIssueStatusRequest,
   CreateIssueRequest,
   CreateProjectRequest,
   IssueActivityDTO,
   IssueDTO,
-  IssueDependencyDTO,
   IssueDetailDTO,
   IssueEvidenceDTO,
+  IssueStageBudgetDTO,
+  PauseIssueRequest,
   ProjectArchiveRequest,
   ProjectDTO,
   ProjectSnapshotDTO,
   ProjectUnarchiveRequest,
   RecoverIssueRequest,
-  RetryIssueRequest,
-  ReviewIssueRequest,
+  ReopenIssueRequest,
+  ResetStageBudgetRequest,
+  ResolveUnknownIssueRequest,
+  ResumeIssueRequest,
+  StopIssueRequest,
+  TransitionIssueRequest,
   UnarchiveIssueRequest,
   UpdateIssueRequest,
   UpdateProjectRequest,
+  UpdateProjectWorkflowRequest,
+  UpdateProjectYoloRequest,
 } from './types'
 
 export interface ProjectsApiOptions {
@@ -67,6 +71,28 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
       request: UpdateProjectRequest,
     ): Promise<ProjectDTO> => {
       const raw = await client.put<unknown>(`/projects/${encodeURIComponent(projectId)}`, request)
+      return decodeProject(raw)
+    },
+
+    updateWorkflow: async (
+      projectId: string,
+      request: UpdateProjectWorkflowRequest,
+    ): Promise<ProjectDTO> => {
+      const raw = await client.put<unknown>(
+        `/projects/${encodeURIComponent(projectId)}/workflow`,
+        request,
+      )
+      return decodeProject(raw)
+    },
+
+    updateYolo: async (
+      projectId: string,
+      request: UpdateProjectYoloRequest,
+    ): Promise<ProjectDTO> => {
+      const raw = await client.put<unknown>(
+        `/projects/${encodeURIComponent(projectId)}/yolo`,
+        request,
+      )
       return decodeProject(raw)
     },
 
@@ -149,12 +175,12 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
       return decodeIssue(raw)
     },
 
-    changeIssueStatus: async (
+    transitionIssue: async (
       issueId: string,
-      request: ChangeIssueStatusRequest,
+      request: TransitionIssueRequest,
     ): Promise<IssueDTO> => {
       const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/status`,
+        `/issues/${encodeURIComponent(issueId)}/transition`,
         request,
       )
       return decodeIssue(raw)
@@ -176,65 +202,75 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
       return decodeIssue(raw)
     },
 
-    addIssueDependency: async (
-      issueId: string,
-      request: AddIssueDependencyRequest,
-    ): Promise<IssueDependencyDTO> => {
+    pauseIssue: async (issueId: string, request: PauseIssueRequest): Promise<IssueDTO> => {
       const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/dependencies`,
-        request,
-      )
-      return decodeIssueDependency(raw)
-    },
-
-    removeIssueDependency: async (
-      issueId: string,
-      dependsOnIssueId: string,
-      expectedVersion: string,
-    ): Promise<void> => {
-      await client.delete(
-        `/issues/${encodeURIComponent(issueId)}/dependencies/${encodeURIComponent(dependsOnIssueId)}`,
-        {
-          params: { expectedVersion },
-        },
-      )
-    },
-
-    appendIssueActivity: async (
-      issueId: string,
-      request: AppendIssueActivityRequest,
-    ): Promise<IssueActivityDTO> => {
-      const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/activities`,
-        request,
-      )
-      return decodeIssueActivity(raw)
-    },
-
-    reviewIssue: async (
-      issueId: string,
-      request: ReviewIssueRequest,
-    ): Promise<void> => {
-      await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/review`,
-        request,
-      )
-    },
-
-    cancelIssue: async (issueId: string, request: CancelIssueRequest): Promise<IssueDTO> => {
-      const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/cancel`,
+        `/issues/${encodeURIComponent(issueId)}/pause`,
         request,
       )
       return decodeIssue(raw)
     },
 
-    retryIssue: async (issueId: string, request: RetryIssueRequest = {}): Promise<IssueActivityDTO> => {
+    resumeIssue: async (issueId: string, request: ResumeIssueRequest): Promise<IssueDTO> => {
       const raw = await client.post<unknown>(
-        `/issues/${encodeURIComponent(issueId)}/retry`,
+        `/issues/${encodeURIComponent(issueId)}/resume`,
         request,
       )
-      return decodeIssueActivity(raw)
+      return decodeIssue(raw)
+    },
+
+    stopIssue: async (issueId: string, request: StopIssueRequest): Promise<IssueDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/stop`,
+        request,
+      )
+      return decodeIssue(raw)
+    },
+
+    resolveUnknown: async (
+      issueId: string,
+      request: ResolveUnknownIssueRequest,
+    ): Promise<IssueDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/resolve-unknown`,
+        request,
+      )
+      return decodeIssue(raw)
+    },
+
+    resolveUnknownIssue: async (
+      issueId: string,
+      request: ResolveUnknownIssueRequest,
+    ): Promise<IssueDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/resolve-unknown`,
+        request,
+      )
+      return decodeIssue(raw)
+    },
+
+    deleteIssue: async (issueId: string, expectedVersion: string): Promise<void> => {
+      await client.delete(`/issues/${encodeURIComponent(issueId)}`, {
+        params: { expectedVersion },
+      })
+    },
+
+    reopenIssue: async (issueId: string, request: ReopenIssueRequest): Promise<IssueDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/reopen`,
+        request,
+      )
+      return decodeIssue(raw)
+    },
+
+    resetStageBudget: async (
+      issueId: string,
+      request: ResetStageBudgetRequest,
+    ): Promise<IssueStageBudgetDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/budget-reset`,
+        request,
+      )
+      return decodeIssueStageBudget(raw)
     },
 
     archiveIssue: async (issueId: string, request: ArchiveIssueRequest): Promise<IssueDTO> => {
@@ -251,6 +287,17 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
         request,
       )
       return decodeIssue(raw)
+    },
+
+    appendIssueActivity: async (
+      issueId: string,
+      request: AppendIssueActivityRequest,
+    ): Promise<IssueActivityDTO> => {
+      const raw = await client.post<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/activities`,
+        request,
+      )
+      return decodeIssueActivity(raw)
     },
 
     addIssueEvidence: async (
