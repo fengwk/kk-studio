@@ -3,14 +3,20 @@ import { X } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugSkill,
+  ThreadModelRequestDebugSubagent,
   ThreadModelRequestDebugTool,
+  ThreadProviderRequestPreviewData,
 } from '@/features/ai/runtime/thread-timeline-types'
+import { formatFileSize } from '@/features/ai/composer'
 import { useI18n } from '@/shared/i18n'
 
 export type DebugInspectorSelection =
   | { type: 'tool'; tool: ThreadModelRequestDebugTool }
   | { type: 'skill'; skill: ThreadModelRequestDebugSkill }
+  | { type: 'subagent'; subagent: ThreadModelRequestDebugSubagent }
+  | { type: 'cache' }
   | { type: 'request' }
+  | { type: 'preview'; preview: ThreadProviderRequestPreviewData }
 
 function formatJson(raw: string | undefined): string {
   if (!raw) {
@@ -71,7 +77,7 @@ export function ThreadDebugInspector({
   autoFocusCloseButton = true,
 }: {
   selection: DebugInspectorSelection
-  debug: ThreadModelRequestDebugData
+  debug?: ThreadModelRequestDebugData | null
   onClose: () => void
   closeButtonRef?: Ref<HTMLButtonElement>
   autoFocusCloseButton?: boolean
@@ -95,11 +101,17 @@ export function ThreadDebugInspector({
 
   let title = t('ai.runtime.debug.inspectorTitle')
   if (selection.type === 'tool') {
-    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.toolLabel')} · ${selection.tool.name}`
+    title = selection.tool.name
   } else if (selection.type === 'skill') {
-    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.skillLabel')} · ${selection.skill.name}`
+    title = selection.skill.name
+  } else if (selection.type === 'subagent') {
+    title = selection.subagent.name
+  } else if (selection.type === 'cache') {
+    title = t('ai.runtime.debug.inspector.cacheTitle')
   } else if (selection.type === 'request') {
-    title = `${t('ai.runtime.debug.inspectorTitle')}: ${t('ai.runtime.debug.requestLabel')}`
+    title = t('ai.runtime.debug.requestLabel')
+  } else if (selection.type === 'preview') {
+    title = t('ai.runtime.debug.inspector.draftPreviewTitle')
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -238,9 +250,62 @@ export function ThreadDebugInspector({
         </div>
       )}
 
+      {selection.type === 'subagent' && (
+        <div className="thread-debug-inspector-body">
+          <dl className="thread-event-detail-rows">
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.name')}</dt>
+              <dd><code>{selection.subagent.name}</code></dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.description')}</dt>
+              <dd>{selection.subagent.description || '—'}</dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
+      {selection.type === 'cache' && (
+        <div className="thread-debug-inspector-body">
+          <dl className="thread-event-detail-rows">
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.cacheRetention')}</dt>
+              <dd>
+                <code>{debug?.cacheControl?.retention ?? 'NONE'}</code>
+                {(!debug?.cacheControl || debug.cacheControl.retention === 'NONE') ? (
+                  <span className="thread-debug-filter-reason">
+                    ({t('ai.runtime.debug.inspector.cacheProviderDisclaimer')})
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.cacheAffinityKey')}</dt>
+              <dd>
+                {debug?.cacheControl?.affinityKey ? (
+                  <code>{debug.cacheControl.affinityKey}</code>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.cacheBreakpoints')}</dt>
+              <dd>
+                {debug?.cacheControl?.breakpoints && debug.cacheControl.breakpoints.length > 0 ? (
+                  <code>{debug.cacheControl.breakpoints.join(', ')}</code>
+                ) : (
+                  '—'
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      )}
+
       {selection.type === 'request' && (
         <div className="thread-debug-inspector-body">
-          {debug.frozenInvocation ? (
+          {debug?.frozenInvocation ? (
             <div>
               <div className="thread-debug-frozen-badge">
                 <span className="status-pill is-ready">
@@ -260,6 +325,59 @@ export function ThreadDebugInspector({
               {t('ai.runtime.debug.noFrozenInvocation')}
             </div>
           )}
+        </div>
+      )}
+
+      {selection.type === 'preview' && (
+        <div className="thread-debug-inspector-body">
+          <div className="thread-debug-frozen-badge">
+            <span className="status-pill is-ready">
+              {selection.preview.kind}
+            </span>
+            <span className="status-pill is-neutral">
+              {t('ai.runtime.debug.inspector.clickTimeSnapshot')}
+            </span>
+          </div>
+          <dl className="thread-event-detail-rows">
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.providerType')}</dt>
+              <dd><code>{selection.preview.providerType}</code></dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.modelName')}</dt>
+              <dd><code>{selection.preview.modelName}</code></dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.bodyByteSize')}</dt>
+              <dd><code>{formatFileSize(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</code></dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.generatedAt')}</dt>
+              <dd><code>{selection.preview.generatedAt}</code></dd>
+            </div>
+            <div className="thread-event-detail-row">
+              <dt>{t('ai.runtime.debug.inspector.sourceHeadEntryId')}</dt>
+              <dd><code>{selection.preview.sourceHeadEntryId || '—'}</code></dd>
+            </div>
+            {selection.preview.snapshotNotice ? (
+              <div className="thread-event-detail-row">
+                <dt>{t('ai.runtime.debug.inspector.snapshotNotice')}</dt>
+                <dd>{selection.preview.snapshotNotice}</dd>
+              </div>
+            ) : null}
+          </dl>
+          <div className="thread-debug-payload-section">
+            <span className="thread-debug-payload-title">
+              {t('ai.runtime.debug.inspector.requestBodyJson')}
+            </span>
+            <pre
+              className="thread-event-detail-payload"
+              tabIndex={0}
+              data-testid="preview-request-body"
+            >
+              {formatJson(selection.preview.bodyJson)}
+            </pre>
+          </div>
         </div>
       )}
     </section>

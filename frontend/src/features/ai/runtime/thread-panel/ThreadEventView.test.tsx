@@ -447,7 +447,7 @@ describe('ThreadEventView', () => {
       expect(detailTab).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByTestId('thread-debug-inspector')).toHaveAttribute(
         'aria-label',
-        expect.stringMatching(/检查器: 工具 · read|INSPECTOR: Tool · read/),
+        'read',
       )
 
       // 关闭详情
@@ -455,6 +455,78 @@ describe('ThreadEventView', () => {
       await user.click(closeBtn)
 
       // 来源是 preview，故返回 preview tab
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveAttribute('aria-selected', 'false')
+    })
+
+    it('automatically activates detail tab on subagent chip click and restores focus on Escape', async () => {
+      const user = userEvent.setup()
+      render(
+        <ResponsiveHarness
+          initialDebug={sampleDebugData({
+            subagents: [{ name: 'Explorer', description: 'Read-only exploration subagent' }],
+          })}
+        />,
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+
+      const previewTab = screen.getByRole('tab', { name: '请求预览' })
+      const detailTab = screen.getByRole('tab', { name: '详情' })
+
+      await user.click(previewTab)
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+
+      // 点击 Subagent 按钮
+      const subagentBtn = screen.getByRole('button', { name: '子代理 Explorer' })
+      await user.click(subagentBtn)
+
+      // 自动激活详情并显示 Subagent Inspector
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', 'Explorer')
+      expect(screen.getByRole('heading', { level: 3, name: 'Explorer' })).toBeInTheDocument()
+      expect(screen.getByText('Read-only exploration subagent')).toBeInTheDocument()
+
+      // 按 Escape 局部关闭详情
+      await user.keyboard('{Escape}')
+      expect(previewTab).toHaveAttribute('aria-selected', 'true')
+      expect(detailTab).toHaveAttribute('aria-selected', 'false')
+    })
+
+    it('automatically activates detail tab on cache chip click and restores focus on Escape', async () => {
+      const user = userEvent.setup()
+      render(
+        <ResponsiveHarness
+          initialDebug={sampleDebugData({
+            cacheControl: {
+              retention: 'SHORT',
+              affinityKey: 'key-1',
+              breakpoints: ['SYSTEM'],
+            },
+          })}
+        />,
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+
+      const previewTab = screen.getByRole('tab', { name: '请求预览' })
+      const detailTab = screen.getByRole('tab', { name: '详情' })
+
+      await user.click(previewTab)
+
+      // 点击 Cache 按钮
+      const cacheBtn = screen.getByRole('button', { name: /缓存 短期 \(SHORT\) \(key-1\)/ })
+      await user.click(cacheBtn)
+
+      expect(detailTab).toHaveAttribute('aria-selected', 'true')
+      const inspector = screen.getByTestId('thread-debug-inspector')
+      expect(inspector).toHaveAttribute('aria-label', '缓存策略')
+      expect(screen.getByRole('heading', { level: 3, name: '缓存策略' })).toBeInTheDocument()
+      expect(screen.getByText('SHORT')).toBeInTheDocument()
+
+      // 按 Escape 局部关闭详情
+      await user.keyboard('{Escape}')
       expect(previewTab).toHaveAttribute('aria-selected', 'true')
       expect(detailTab).toHaveAttribute('aria-selected', 'false')
     })
@@ -628,6 +700,55 @@ describe('ThreadEventView', () => {
 
       // 切回 zh-CN
       setLocale('zh-CN')
+    })
+
+    it('displays provider request preview in wide 3rd column and automatically activates detail tab in narrow mode', async () => {
+      // 测试意图：验证当 debugSelection 传入 preview 类型时，宽模式在第三列详情区展示请求预览与代码块；
+      // 在窄屏模式下自动切换 activeTab 至「详情」tabpanel。
+      const mockPreview = {
+        kind: 'DRAFT_REQUEST_PREVIEW' as const,
+        providerType: 'OPENAI',
+        modelName: 'MiniMax',
+        bodyByteSize: 88,
+        bodyJson: '{"prompt":"hello responsive preview"}',
+        sourceHeadEntryId: null,
+        generatedAt: '2026-09-27T06:00:00Z',
+      }
+
+      function PreviewResponsiveHarness() {
+        const [debugSelection, setDebugSelection] = useState<DebugInspectorSelection | null>(null)
+        return (
+          <div>
+            <div data-testid="controls">
+              <button type="button" onClick={() => triggerResize(800)}>Trigger Narrow</button>
+              <button type="button" onClick={() => triggerResize(1400)}>Trigger Wide</button>
+              <button type="button" onClick={() => setDebugSelection({ type: 'preview', preview: mockPreview })}>
+                Set Preview
+              </button>
+            </div>
+            <ThreadEventView
+              events={[record('e1')]}
+              selectedEventId={null}
+              onSelectedEventIdChange={vi.fn()}
+              debugSelection={debugSelection}
+              onSelectInspector={setDebugSelection}
+            />
+          </div>
+        )
+      }
+
+      const user = userEvent.setup()
+      render(<PreviewResponsiveHarness />)
+
+      // 宽模式下设置 preview
+      await user.click(screen.getByRole('button', { name: 'Set Preview' }))
+      expect(screen.getByRole('heading', { level: 3, name: '请求预览' })).toBeInTheDocument()
+      expect(screen.getByTestId('preview-request-body')).toHaveTextContent('hello responsive preview')
+
+      // 切到窄模式：自动切到详情页签
+      await user.click(screen.getByRole('button', { name: 'Trigger Narrow' }))
+      expect(screen.getByRole('tab', { name: '详情', selected: true })).toBeInTheDocument()
+      expect(screen.getByTestId('preview-request-body')).toBeInTheDocument()
     })
   })
 })

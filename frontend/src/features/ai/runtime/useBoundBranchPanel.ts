@@ -384,5 +384,6 @@ export function useBoundBranchPanel({
     selectModel,
     selectEnvironment,
     resetDraftFromThread,
+    buildBatch,
   }
 }

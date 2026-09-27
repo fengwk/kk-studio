@@ -15,6 +15,7 @@ import type {
   HarnessToolApprovalDTO,
   ManualCompactionRequestDTO,
   ManualCompactionResponseDTO,
+  ProviderRequestPreviewDTO,
   RuntimeThreadSummaryDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
@@ -66,6 +67,12 @@ export function createHarnessService(client: HttpClient = apiClient) {
 
     getModelRequestDebug: (threadId: string): Promise<HarnessModelRequestDebugDTO> =>
       client.get(`/harness/threads/${encodeURIComponent(threadId)}/model-request-debug`),
+
+    previewProviderRequest: (
+      threadId: string,
+      data: AgentCommandBatchRequestDTO,
+    ): Promise<ProviderRequestPreviewDTO> =>
+      client.post(`/harness/threads/${encodeURIComponent(threadId)}/provider-request-preview`, data),
 
     setThreadYolo: (
       threadId: string,

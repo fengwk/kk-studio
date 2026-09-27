@@ -1248,6 +1248,10 @@ class PlatformModelGatewayTest {
             openCount.incrementAndGet();
             openedPolicy.set(policy);
             return opener.apply(policy);
+          },
+          // 网关回归不覆盖请求体预览：显式声明为不支持，与默认 adapter 行为一致。
+          ignored -> {
+            throw new UnsupportedOperationException("request body preview is not under test");
           });
     }
   }

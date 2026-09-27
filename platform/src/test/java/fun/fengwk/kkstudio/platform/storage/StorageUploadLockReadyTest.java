@@ -248,6 +248,121 @@ class StorageUploadLockReadyTest extends PostgresSpringTestSupport {
             "select count(*) from storage_upload where id = ?", Integer.class, uploadUuid));
   }
 
+  /**
+   * 测试意图：{@code peekReady} 是只读事实读取——返回权威 blobId 与权威文件名，但不加行锁、不标记 cleanup、不换 blob、不做任何 S3 I/O，因此
+   * upload 之后仍可被 {@code lockReady} 正式消费。只读预览正依赖这一点。
+   */
+  @Test
+  void peekReadyReturnsAuthoritativeFactsWithoutConsumingTheUpload() {
+    byte[] content = "preview".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO pending =
+        storage.reserve("preview.txt", "text/plain", content.length, storage.sha256Hex(content));
+    storage.putUploadContent(pending.getId(), content, "text/plain");
+    StorageUploadDTO ready = storageUploadService.complete(UUID.fromString(pending.getId()));
+    s3Storage.clearNetworkCalls();
+
+    // peek 不需要活动事务：只读预览路径就是这样直接调用它的。
+    StorageUploadService.ReadyUpload peeked =
+        storageUploadService.peekReady(UUID.fromString(ready.getId()));
+
+    assertEquals(UUID.fromString(ready.getBlobId()), peeked.blobId());
+    assertEquals("preview.txt", peeked.filename(), "权威文件名必须来自 upload 行");
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ?"
+                + " and cleanup_requested_at is null and cleanup_token is null",
+            Integer.class,
+            UUID.fromString(ready.getId())),
+        "peek 不得推进任何生命周期标记");
+    assertEquals(1L, storage.blobRefCount(ready.getBlobId()), "peek 不得 retain 或 release blob ref");
+    assertTrue(s3Storage.networkCalls().isEmpty(), "peek 不得产生任何 S3 I/O");
+
+    // peek 不是消费授权：之后仍必须能被正式消费。
+    tx.execute(
+        status -> {
+          storageUploadService.lockReady(UUID.fromString(ready.getId()));
+          storageUploadService.delete(UUID.fromString(ready.getId()));
+          return null;
+        });
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ? and cleanup_requested_at is not null",
+            Integer.class,
+            UUID.fromString(ready.getId())));
+  }
+
+  /**
+   * 测试意图：{@code peekReady} 与 {@code lockReady} 共用同一份 READY 判定——PENDING、已过期、已被正式消费（cleanup 已请求）与不存在的
+   * upload 一律确定性拒绝，且被拒绝的行保持原样。
+   */
+  @Test
+  void peekReadyRejectsUnreadyUploadsWithTheSameJudgmentAsLockReady() {
+    StorageUploadDTO pending =
+        storage.reserve(
+            "pending-peek.bin", "application/octet-stream", 1, storage.sha256Hex(new byte[] {1}));
+    StorageVerificationException pendingError =
+        assertThrows(
+            StorageVerificationException.class,
+            () -> storageUploadService.peekReady(UUID.fromString(pending.getId())));
+    assertTrue(
+        pendingError.getMessage().contains("PENDING"), "actual: " + pendingError.getMessage());
+
+    byte[] expiredContent = "expired-peek".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO expiring =
+        storage.reserve(
+            "expired-peek.bin",
+            "application/octet-stream",
+            expiredContent.length,
+            storage.sha256Hex(expiredContent));
+    storage.putUploadContent(expiring.getId(), expiredContent, "application/octet-stream");
+    StorageUploadDTO expired = storageUploadService.complete(UUID.fromString(expiring.getId()));
+    storage.backdateUpload(expired.getId());
+    StorageVerificationException expiredError =
+        assertThrows(
+            StorageVerificationException.class,
+            () -> storageUploadService.peekReady(UUID.fromString(expired.getId())));
+    assertTrue(
+        expiredError.getMessage().contains("expired"), "actual: " + expiredError.getMessage());
+
+    byte[] consumedContent = "consumed-peek".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO consumable =
+        storage.reserve(
+            "consumed-peek.bin",
+            "application/octet-stream",
+            consumedContent.length,
+            storage.sha256Hex(consumedContent));
+    storage.putUploadContent(consumable.getId(), consumedContent, "application/octet-stream");
+    StorageUploadDTO consumed = storageUploadService.complete(UUID.fromString(consumable.getId()));
+    tx.execute(
+        status -> {
+          storageUploadService.lockReady(UUID.fromString(consumed.getId()));
+          storageUploadService.delete(UUID.fromString(consumed.getId()));
+          return null;
+        });
+    StorageVerificationException consumedError =
+        assertThrows(
+            StorageVerificationException.class,
+            () -> storageUploadService.peekReady(UUID.fromString(consumed.getId())));
+    assertTrue(
+        consumedError.getMessage().contains("cleanup was requested"),
+        "actual: " + consumedError.getMessage());
+
+    assertThrows(
+        StorageResourceNotFoundException.class,
+        () -> storageUploadService.peekReady(UUID.randomUUID()));
+
+    // 被拒绝的 PENDING 行必须保持可完成状态。
+    assertEquals(
+        1,
+        jdbc.queryForObject(
+            "select count(*) from storage_upload where id = ?"
+                + " and blob_id is null and cleanup_requested_at is null",
+            Integer.class,
+            UUID.fromString(pending.getId())));
+  }
+
   @TestConfiguration(proxyBeanMethods = false)
   static class StorageUploadWakeupTestConfiguration {
 

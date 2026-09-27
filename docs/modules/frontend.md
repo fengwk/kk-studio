@@ -174,7 +174,7 @@ durable Entry 投影为恰好一条记录，把 active model/tool invocation 和
 - **宽面板（≥ 1100px）**：三列等宽，各列独立纵向滚动，外框不滚动。
   未选中事件或检查项时，详情列显示选择提示。
 - **窄面板（< 1100px）**：通过「请求预览 / 事件 / 详情」页签切换，
-  当前区域占满可用空间。选择事件、Tool、Skill 或 Request 后进入详情；
+  当前区域占满可用空间。选择事件、Tool、Skill、Subagent、Cache 或 Request 后进入详情；
   关闭详情返回来源区域，焦点回到事件列表或预览中的触发按钮。
 - 页签支持左右箭头、Home、End；宽屏事件列表保留上下箭头导航。
   多 Pane 的 DOM ID 按实例隔离，详情内 Escape 仅关闭当前 Pane 的详情。
@@ -184,7 +184,7 @@ durable Entry 投影为恰好一条记录，把 active model/tool invocation 和
 | NEXT REQUEST PREVIEW | EVENTS               | DETAIL               |
 | System Prompt        | Entry / Invocation   | Metadata             |
 | Tools / Skills       | ...                  | JSON / Tool / Skill  |
-| Subagents / Cache    |                      | ...                  |
+| Subagents / Cache    |                      | Subagent / Cache     |
 +----------------------+----------------------+----------------------+
 ```
 
@@ -194,6 +194,11 @@ System Prompt 正文占据预览列可用高度约 50%（通过 CSS 容器查询
 展示完整 description、input schema、EnvironmentSupport、Contributor、发送/过滤状态；
 Skill 展示 Package、description、稳定 path、Platform current/observed commit、Daemon
 installed commit 与实际 Prompt XML。
+Subagent 列表与 Cache 摘要也作为独立条目可点击查看详情：Subagent 展示真实名称与描述；
+Cache 策略展示留存档位（真实保留 NONE 并提示不保证 Provider 自动缓存）、前缀标识与断点，
+不伪造 raw 数据。
+各检查器标题直接采用目标标识（如 `edit`、`dev`、`Explorer`、`缓存策略`、`请求快照`），
+去除冗余的「检查器:」前缀。
 Detail 和 Inspector 独立渲染于第 3列，不再侵入 `AgentPane` 的底部小部件栈，确保底部的
 Composer 和队列控制区在任何分辨率下均保持可见且交互不受遮挡。
 
@@ -201,9 +206,17 @@ Debug 视图标题精简本地化为“下一次请求预览”（去掉 DEBUG �
 属于前者；后者通过仅在活动 `frozenInvocation` 存在时渲染的“请求快照”按钮展示由冻结 ModelRequestSpec 物化的 canonical
 ProviderRequest（空态防御留在 Inspector 内部不再常显无效按钮），其精确 Skill 列表已在冻结 systemInstruction 的 XML 中。预览不能冒充
 历史实际请求。详情完整保留可读 JSON，但不展示 credential、Authorization header、
-对象存储内部地址或 Base64 正文。前端只调用
+对象存储内部地址或 Base64 正文。这一结构化诊断只调用
 `GET /api/harness/threads/{threadId}/model-request-debug`，进入 Debug 拉取一次，并在
 Turn 开始/结束时刷新。
+
+已绑定 Thread 的 Composer 在发送旁提供“预览请求”：沿用发送的批次构建（包括草稿设置与就绪
+附件的 uploadId），调用 `POST /api/harness/threads/{threadId}/provider-request-preview`，
+不清空草稿，也不提交命令。结果直接打开 Debug 第三列的独立“请求预览”检查器；窄屏自动进入
+“详情”页签。此处展示的是**点击时**真实 Provider 协议 JSON body，可能包含历史与附件的
+Base64 内联媒体；与上述不包含 Base64 的结构化诊断、活动请求快照互不混淆，且不展示
+认证 Header。新建 Session/Thread 无此按钮；409 等失败只提示原因并保留草稿。请求和发送
+之间的历史或配置可能变化，预览不是对后续发送字节的保证。
 
 运行控制面同样以 Snapshot 为对账依据：
 
@@ -226,7 +239,7 @@ Composer 区域包含编辑器、命令菜单、底栏 controls 与附件栏，�
 关闭 slash 提示时主动 blur 避免立即再开。菜单可见时 Enter 执行可见选项；收起状态下不执行隐藏命令，
 且 `canSend` 阻止 slash 发送普通消息。普通文本与带目标正文的 `/goal` 保持各自的提交路径。
 
-Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用可访问下拉菜单切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。底部 ThreadStatusFooter 严格左对齐并以细竖线分隔各只读单元（`环境 | 上下文 | 累计usage | cache N% | tok/s`），在小屏下自然折行；上下文输入 token 采用最新模型调用估算，同回合内多个 Assistant 调用的 usage 和 cost 予以累计聚合，有效流式时长与解码 token 共同计算 `tok/s` 速率。target 三态是：
+Chat Pane 有两个正交维度。布局支持 1-9 分屏（`single`、`split-2`、`split-3`、`grid-4`、`grid-5`、`grid-6`、`grid-7`、`grid-8`、`grid-9`），使用可访问下拉菜单切换并按 Chat id 保存在 `kk-studio.chat-pane.<chatId>`；分屏下拉菜单采用高特异性 `.ui-select.chat-layout-selector.is-compact .ui-select-menu` 约束 `80px` 紧凑定宽与 `28px` option 最小高度，全部 9 项在视口高度 ≥ 350px 时自适应容纳且无纵向滚动条，超短视口（< 300px）保留滚动能力，在 320px 窄屏下靠右对齐且不横向溢出，同时不影响全仓其他通用 Select；其中 5 布局为左侧整高跨两行加右侧 2x2，7 布局为左侧整高跨两行加右侧 3x2，9 布局为 3x3 均匀网格，在窄屏（<=960px）下统一响应式降级为纵向单列滚动。底部 ThreadStatusFooter 严格左对齐并以细竖线分隔各只读单元（`环境 | 上下文 | 累计usage | cache N% | tok/s`），在小屏下自然折行；上下文输入 token 采用最新模型调用估算，同回合内多个 Assistant 调用的 usage 和 cost 予以累计聚合，有效流式时长与解码 token 共同计算 `tok/s` 速率。target 三态是：
 
 | Pane target | 入口 | 本地事实 | 发送结果 |
 | --- | --- | --- | --- |
