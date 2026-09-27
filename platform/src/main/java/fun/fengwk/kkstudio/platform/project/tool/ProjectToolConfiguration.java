@@ -4,11 +4,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 /**
  * Project Issue Agent 交接工具与 Turn 事实解析的 Spring 装配。

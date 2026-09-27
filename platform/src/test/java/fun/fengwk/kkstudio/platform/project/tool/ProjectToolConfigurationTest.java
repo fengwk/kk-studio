@@ -10,11 +10,11 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.util.List;
 

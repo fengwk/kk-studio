@@ -13,8 +13,8 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerProperties;
+import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 

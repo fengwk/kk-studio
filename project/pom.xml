@@ -15,12 +15,29 @@
 
     <dependencies>
         <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.convention4j</groupId>
+            <artifactId>convention4j-spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -46,9 +63,17 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
+                            <!--
+                              | 本模块自身独立验证的指标是领域核心：domain 包保持 ≥90% 行覆盖。
+                              | service/repository/controller 的事务、锁序与宿主适配语义由 platform 集成测试在同一 reactor 内以真实
+                              | PostgreSQL + Harness 事实验证，不在本模块重复构建宿主测试基座。
+                              |-->
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.project.domain.*</include>
+                                    </includes>
                                     <limits>
                                         <limit>
                                             <counter>LINE</counter>

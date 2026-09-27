@@ -15,11 +15,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
@@ -93,7 +93,7 @@ public class StudioProjectController {
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     Project project = projectService.getProject(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project");
+      throw new ProjectNotFoundException("project");
     }
     return Results.ok(mapper.toDto(project));
   }

@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
 
 import java.util.UUID;
 
@@ -119,7 +119,8 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
 
     assertEquals(0L, issueService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
     assertThrows(
-        AiValidationException.class, () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+        ProjectValidationException.class,
+        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -162,7 +163,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(project.getId());
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueService.authorizeStageBudget(
                 issue.getId(), issue.getVersion(), key("auth"), "INIT", 1));
@@ -174,7 +175,7 @@ class IssueStageBudgetIntegrationTest extends ProjectTestSupport {
     assertEquals(2, view.maxRuns());
     Issue afterAuth = issueService.getIssue(issue.getId());
     assertThrows(
-        AiDuplicateException.class,
+        ProjectDuplicateException.class,
         () ->
             issueService.authorizeStageBudget(
                 afterAuth.getId(), afterAuth.getVersion(), key("auth"), "DESIGN", 5));

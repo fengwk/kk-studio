@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.project.tool;
 
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 
 import java.util.Objects;
 import java.util.UUID;

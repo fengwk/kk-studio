@@ -3,14 +3,14 @@ package fun.fengwk.kkstudio.web.project;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
-import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.platform.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueRunService;
+import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectIssueSnapshotDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
@@ -40,7 +40,7 @@ public class ProjectSnapshotAssembler {
 
     Project project = projectService.getProject(projectId);
     if (project == null) {
-      throw new AiResourceNotFoundException("project");
+      throw new ProjectNotFoundException("project");
     }
     if (!project.getId().equals(projectId)) {
       throw new IllegalStateException("Foreign project returned for snapshot");

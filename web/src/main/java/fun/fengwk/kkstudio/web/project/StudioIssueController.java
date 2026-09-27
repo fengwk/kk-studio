@@ -15,23 +15,23 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.PauseReason;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
-import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
-import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivity;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.model.IssueEvidence;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.project.service.IssueRunService;
+import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
@@ -202,12 +202,12 @@ public class StudioIssueController {
             try {
               StageBudgetView view = issueService.getStageBudget(issueId, state.state().value());
               stageBudgets.add(mapper.toDto(view));
-            } catch (AiResourceNotFoundException ignored) {
+            } catch (ProjectNotFoundException ignored) {
               // 阶段额度尚未授权时静默跳过
             }
           }
         }
-      } catch (AiResourceNotFoundException ignored) {
+      } catch (ProjectNotFoundException ignored) {
         // 项目未找到时跳过
       }
     }

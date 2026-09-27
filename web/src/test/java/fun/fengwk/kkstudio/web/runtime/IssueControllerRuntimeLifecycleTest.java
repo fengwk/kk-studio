@@ -12,7 +12,7 @@ import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 

@@ -14,10 +14,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,8 +32,8 @@ import java.util.Map;
     assignableTypes = {StudioProjectController.class, StudioIssueController.class})
 public class StudioProjectErrorAdvice {
 
-  @ExceptionHandler(AiVersionConflictException.class)
-  public ResponseEntity<Result<Void>> handleVersionConflict(AiVersionConflictException error) {
+  @ExceptionHandler(ProjectVersionConflictException.class)
+  public ResponseEntity<Result<Void>> handleVersionConflict(ProjectVersionConflictException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("resource", error.resource());
     ctx.put("expectedVersion", error.expectedVersion());
@@ -45,8 +45,8 @@ public class StudioProjectErrorAdvice {
         ctx);
   }
 
-  @ExceptionHandler(AiDuplicateException.class)
-  public ResponseEntity<Result<Void>> handleDuplicate(AiDuplicateException error) {
+  @ExceptionHandler(ProjectDuplicateException.class)
+  public ResponseEntity<Result<Void>> handleDuplicate(ProjectDuplicateException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("resource", error.resource());
     ctx.put("detail", error.getMessage());
@@ -61,8 +61,8 @@ public class StudioProjectErrorAdvice {
         HttpStatus.CONFLICT, "PROJECT_RUNTIME_CONFLICT", "Issue runtime conflict occurred", ctx);
   }
 
-  @ExceptionHandler(AiResourceNotFoundException.class)
-  public ResponseEntity<Result<Void>> handleResourceNotFound(AiResourceNotFoundException error) {
+  @ExceptionHandler(ProjectNotFoundException.class)
+  public ResponseEntity<Result<Void>> handleResourceNotFound(ProjectNotFoundException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("resource", error.resource());
     return build(
@@ -80,7 +80,7 @@ public class StudioProjectErrorAdvice {
         HttpStatus.NOT_FOUND, "PROJECT_RUNTIME_NOT_FOUND", "Issue runtime resource not found", ctx);
   }
 
-  @ExceptionHandler({AiValidationException.class, IllegalArgumentException.class})
+  @ExceptionHandler({ProjectValidationException.class, IllegalArgumentException.class})
   public ResponseEntity<Result<Void>> handleValidation(RuntimeException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", error.getMessage());

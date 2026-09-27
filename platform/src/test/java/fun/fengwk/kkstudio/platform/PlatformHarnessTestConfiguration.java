@@ -8,7 +8,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerProperties;
+import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 
 /**
  * Platform 测试上下文的 Harness 装配基座。

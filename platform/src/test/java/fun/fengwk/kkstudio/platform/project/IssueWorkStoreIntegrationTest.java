@@ -10,11 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueWork;
-import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueWork;
+import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -68,10 +68,10 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
     assertTrue(
         issueWorkStore.claimNext(now.plusSeconds(1), key("other"), now.plusSeconds(60)).isEmpty());
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueWorkStore.renewLease(issueId, key("other"), now, now.plusSeconds(120)));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueWorkStore.renewLease(issueId, leaseToken, now, now.plusSeconds(10)));
 
     issueWorkStore.renewLease(issueId, leaseToken, now, now.plusSeconds(120));
@@ -105,7 +105,7 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
     assertTrue(
         issueWorkStore.completeWork(issueId, secondToken, reclaimed.getWakeVersion(), later));
 
-    assertThrows(AiResourceNotFoundException.class, () -> issueWorkStore.getWork(issueId));
+    assertThrows(ProjectNotFoundException.class, () -> issueWorkStore.getWork(issueId));
     assertTrue(issueWorkStore.claimNext(later, key("lease"), later.plusSeconds(30)).isEmpty());
   }
 
@@ -116,11 +116,12 @@ class IssueWorkStoreIntegrationTest extends ProjectTestSupport {
     Instant now = Instant.now();
 
     assertThrows(
-        AiValidationException.class, () -> issueWorkStore.claimNext(now, key("lease"), now));
+        ProjectValidationException.class, () -> issueWorkStore.claimNext(now, key("lease"), now));
     assertThrows(
-        AiValidationException.class, () -> issueWorkStore.claimNext(now, " ", now.plusSeconds(1)));
+        ProjectValidationException.class,
+        () -> issueWorkStore.claimNext(now, " ", now.plusSeconds(1)));
     assertThrows(
-        AiResourceNotFoundException.class,
+        ProjectNotFoundException.class,
         () -> issueWorkStore.renewLease(issueId, key("lease"), now, now.plusSeconds(30)));
   }
 

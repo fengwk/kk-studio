@@ -21,11 +21,11 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.CreateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.share.project.ProjectVersionRequestDTO;
@@ -187,7 +187,7 @@ class StudioProjectControllerTest {
             .description("Updated Desc")
             .build();
     when(projectService.updateConfiguration(projectId, 1L, "Updated Title", "Updated Desc"))
-        .thenThrow(new AiVersionConflictException("project", "1", "2"));
+        .thenThrow(new ProjectVersionConflictException("project", "1", "2"));
 
     mockMvc
         .perform(
@@ -312,8 +312,7 @@ class StudioProjectControllerTest {
 
   @Test
   void testResourceNotFoundAdvice() throws Exception {
-    when(projectService.getProject(projectId))
-        .thenThrow(new AiResourceNotFoundException("project"));
+    when(projectService.getProject(projectId)).thenThrow(new ProjectNotFoundException("project"));
 
     mockMvc.perform(get("/api/projects/" + projectId)).andExpect(status().isNotFound());
   }

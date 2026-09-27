@@ -10,19 +10,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.PauseReason;
-import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivity;
+import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
 
 import java.util.List;
 import java.util.Map;
@@ -80,7 +80,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     String originalDesc = issue.getDescription();
 
     assertThrows(
-        AiVersionConflictException.class,
+        ProjectVersionConflictException.class,
         () -> issueService.updateIssue(issue.getId(), 999L, "冲突标题", "冲突描述"));
 
     Map<String, Object> row =
@@ -100,7 +100,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(1L, archived.getVersion());
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.updateIssue(issue.getId(), 1L, "归档后修改", "描述"));
 
     Map<String, Object> row =
@@ -162,16 +162,16 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     issueService.archiveIssue(issue.getId(), 0L);
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.transition(issue.getId(), 1L, key("t"), "WORK"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.blockIssue(issue.getId(), 1L, key("b"), "阻塞原因"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.appendComment(issue.getId(), 1L, key("c"), "普通评论"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.pauseIssue(issue.getId(), 1L, key("p"), PauseReason.USER, "暂停详情"));
 
     assertEquals(
@@ -193,7 +193,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     Issue current = issueService.getIssue(issue.getId());
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.archiveIssue(current.getId(), current.getVersion()));
 
     assertEquals(
@@ -350,9 +350,9 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProject();
     Issue issue = createIssue(projectId);
 
-    AiValidationException ex =
+    ProjectValidationException ex =
         assertThrows(
-            AiValidationException.class,
+            ProjectValidationException.class,
             () ->
                 issueService.appendInstruction(
                     issue.getId(), issue.getVersion(), key("inst"), "没有 Run 时的指示"));
@@ -401,13 +401,14 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 参数边界校验
     assertThrows(
-        AiValidationException.class, () -> issueService.listActivities(issue.getId(), -1L, 10));
+        ProjectValidationException.class,
+        () -> issueService.listActivities(issue.getId(), -1L, 10));
     assertThrows(
-        AiValidationException.class, () -> issueService.listActivities(issue.getId(), 0L, 0));
+        ProjectValidationException.class, () -> issueService.listActivities(issue.getId(), 0L, 0));
     assertThrows(
-        AiValidationException.class, () -> issueService.listActivities(issue.getId(), 0L, -5));
+        ProjectValidationException.class, () -> issueService.listActivities(issue.getId(), 0L, -5));
     assertThrows(
-        AiResourceNotFoundException.class,
+        ProjectNotFoundException.class,
         () -> issueService.listActivities(UUID.randomUUID(), 0L, 10));
   }
 
@@ -499,9 +500,9 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
             issue.getId()));
 
-    // 同键异指纹（请求键复用）：抛出 AiDuplicateException 冲突，且不写入新活动
+    // 同键异指纹（请求键复用）：抛出 ProjectDuplicateException 冲突，且不写入新活动
     assertThrows(
-        AiDuplicateException.class,
+        ProjectDuplicateException.class,
         () -> issueService.appendComment(issue.getId(), 1L, commentKey, "被篡改的不同评论正文"));
     assertEquals(
         1L,
@@ -539,7 +540,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 同键异指纹（同一个 key 试图流转到 DONE 或不同目标状态）：抛出冲突，状态不改变
     assertThrows(
-        AiDuplicateException.class,
+        ProjectDuplicateException.class,
         () -> issueService.transition(issue.getId(), 1L, transitionKey, "DONE"));
     assertEquals("WORK", issueService.getIssue(issue.getId()).getState());
     assertEquals(
@@ -580,7 +581,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 同键异指纹（不同 reason）
     assertThrows(
-        AiDuplicateException.class,
+        ProjectDuplicateException.class,
         () -> issueService.blockIssue(inWork.getId(), 2L, blockKey, "篡改后的阻塞原因"));
     assertEquals(
         1L,
@@ -614,7 +615,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 过期版本 CAS 冲突
     assertThrows(
-        AiVersionConflictException.class,
+        ProjectVersionConflictException.class,
         () -> projectService.updateConfiguration(project.getId(), 0L, "再次更新", "描述"));
   }
 
@@ -632,19 +633,21 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     // 项目配置类修改被拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.updateConfiguration(project.getId(), 1L, "归档后标题", "归档后描述"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.updateWorkflow(project.getId(), 1L, workflowJson(agent, agent, 3)));
     assertThrows(
-        AiValidationException.class, () -> projectService.updateYolo(project.getId(), 1L, false));
+        ProjectValidationException.class,
+        () -> projectService.updateYolo(project.getId(), 1L, false));
 
     // 归档项目下的 Issue 写操作与新建 Issue 被拒绝
     assertThrows(
-        AiValidationException.class, () -> issueService.createIssue(project.getId(), "新需求", "描述"));
+        ProjectValidationException.class,
+        () -> issueService.createIssue(project.getId(), "新需求", "描述"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.updateIssue(issue.getId(), 0L, "修改需求", "描述"));
   }
 
@@ -703,7 +706,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     Project current = projectService.getProject(projectId);
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.archiveProject(current.getId(), current.getVersion()));
 
     assertEquals(
@@ -725,7 +728,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Project cleanProject = projectService.createProject("空项目", "描述", true);
     // 过期版本拒绝
     assertThrows(
-        AiVersionConflictException.class,
+        ProjectVersionConflictException.class,
         () -> projectService.deleteProject(cleanProject.getId(), 999L));
     assertEquals(1L, count("select count(*) from project where id = ?", cleanProject.getId()));
 
@@ -733,6 +736,6 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     projectService.deleteProject(cleanProject.getId(), cleanProject.getVersion());
     assertEquals(0L, count("select count(*) from project where id = ?", cleanProject.getId()));
     assertThrows(
-        AiResourceNotFoundException.class, () -> projectService.getProject(cleanProject.getId()));
+        ProjectNotFoundException.class, () -> projectService.getProject(cleanProject.getId()));
   }
 }
