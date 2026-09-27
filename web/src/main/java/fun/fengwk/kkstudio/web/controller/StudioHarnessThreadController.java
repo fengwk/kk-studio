@@ -49,14 +49,14 @@ import java.util.function.Supplier;
  *
  * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
  * result.status} 对齐。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->} 404、业务冲突 {@literal ->} 409、非法请求/DTO
- * {@literal ->} 400。属于 Issue Agent Session 的 Thread（含其分支）不接受本控制面的 YOLO 覆盖，由 Project 设置与
- * IssueHarnessController 对齐维护（409）。
+ * {@literal ->} 400。属于 Issue+Agent 的 Thread（含其分支）不接受本控制面的 YOLO 覆盖，由 Project 设置与
+ * Issue 工作流统一维护（409）。
  */
 @RestController
 @RequestMapping("/api/harness/threads")
 public class StudioHarnessThreadController {
 
-  /** Issue Agent Branch 的 YOLO 由 Project 启动策略与 IssueHarnessController 对齐维护，通用 Branch API 不得覆盖。 */
+  /** Issue Agent Branch 的 YOLO 由 Project 启动策略与 Issue 工作流统一维护，通用 Branch API 不得覆盖。 */
   private static final String ISSUE_AGENT_BRANCH_YOLO_OWNED_BY_PROJECT =
       "Issue Agent Branch YOLO is owned by the project settings";
 

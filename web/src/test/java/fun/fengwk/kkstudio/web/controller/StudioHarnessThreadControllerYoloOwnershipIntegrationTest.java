@@ -42,8 +42,8 @@ import java.util.UUID;
 /**
  * 公开 Thread YOLO 控制面在真实 PostgreSQL 归属数据上的拒绝边界。
  *
- * <p>测试意图：Issue Agent Session 的 Thread（无论是否存在活动 Run）与其同一 Session 的兄弟 Thread 的 YOLO 由 Project
- * 启动策略与内部 {@code IssueHarnessController} 对齐维护，公开 {@code PUT /api/harness/threads/{threadId}/yolo}
+ * <p>测试意图：Issue+Agent 的 Thread（无论是否存在活动 Run）与其同一 Session 的兄弟 Thread 的 YOLO 由 Project
+ * 启动策略与 Issue 工作流统一维护，公开 {@code PUT /api/harness/threads/{threadId}/yolo}
  * 必须以 409 拒绝且不触达 {@link HarnessRuntime}（既不改 Thread 行也不产生任何运行副作用）；非 Issue 归属的 Chat Thread 仍走原 CAS
  * 更新路径。
  *
