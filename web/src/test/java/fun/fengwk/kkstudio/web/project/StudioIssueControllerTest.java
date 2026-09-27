@@ -433,10 +433,10 @@ class StudioIssueControllerTest {
             .kind(IssueActivityKind.COMMENT)
             .actorType(IssueActivityActorType.HUMAN)
             .body("A human comment")
-            .idempotencyKey("k1")
+            .idempotencyKey("comment:k1")
             .createdAt(now)
             .build();
-    when(issueActivityRepository.findByIdempotencyKey(issueId, "k1")).thenReturn(act);
+    when(issueActivityRepository.findByIdempotencyKey(issueId, "comment:k1")).thenReturn(act);
 
     mockMvc
         .perform(
@@ -466,10 +466,10 @@ class StudioIssueControllerTest {
             .kind(IssueActivityKind.INSTRUCTION)
             .actorType(IssueActivityActorType.HUMAN)
             .body("A human instruction")
-            .idempotencyKey("k2")
+            .idempotencyKey("instruction:k2")
             .createdAt(now)
             .build();
-    when(issueActivityRepository.findByIdempotencyKey(issueId, "k2")).thenReturn(act);
+    when(issueActivityRepository.findByIdempotencyKey(issueId, "instruction:k2")).thenReturn(act);
 
     mockMvc
         .perform(

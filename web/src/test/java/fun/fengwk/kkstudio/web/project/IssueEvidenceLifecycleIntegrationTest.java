@@ -2,14 +2,20 @@ package fun.fengwk.kkstudio.web.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -57,6 +63,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>活跃或 UNKNOWN 门禁拒绝删除</b>：存在活动 Run 或未核查 UNKNOWN 时严格拒绝删除 Project / Issue。
  * </ul>
  */
+@AutoConfigureMockMvc
 @Import(WebStorageS3TestConfiguration.class)
 @TestPropertySource(
     properties = {
@@ -75,6 +82,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
       new HistoryEntryPayloadJsonCodec();
 
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private MockMvc mockMvc;
   @Autowired private ProjectService projectService;
   @Autowired private IssueService issueService;
   @Autowired private IssueEvidenceService issueEvidenceService;
@@ -94,6 +102,64 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     s3Storage.clear();
     support = new IssueEvidenceTestSupport(uploadService, s3Storage, jdbc);
     tx = new TransactionTemplate(transactionManager);
+  }
+
+  /** 真实 Run 与事务写入的 namespaced 请求键必须能在 HTTP 层找回活动；重试不可重复留痕。 */
+  @Test
+  void appendInstructionReturnsPersistedActivityAndReplaysWithoutDuplicate() throws Exception {
+    Fixture fixture = createIssue(createTestAgent());
+    IssueRun run = issueRunService.acceptRun(fixture.issueId(), "req:accept:" + UUID.randomUUID());
+    Issue issue = issueService.getIssue(fixture.issueId());
+    String requestKey = "instruction-" + UUID.randomUUID();
+    String body =
+        "{\"expectedVersion\":\""
+            + issue.getVersion()
+            + "\",\"requestKey\":\""
+            + requestKey
+            + "\",\"kind\":\"INSTRUCTION\",\"body\":\"Please review\"}";
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+      mockMvc
+          .perform(
+              post("/api/issues/" + fixture.issueId() + "/activities")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isCreated())
+          .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"))
+          .andExpect(jsonPath("$.data.body").value("Please review"))
+          .andExpect(jsonPath("$.data.runId").value(run.getId().toString()));
+    }
+
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+            Long.class,
+            fixture.issueId(),
+            "instruction:" + requestKey));
+    assertEquals(issue.getVersion() + 1, issueService.getIssue(fixture.issueId()).getVersion());
+
+    String commentKey = "comment-" + UUID.randomUUID();
+    mockMvc
+        .perform(
+            post("/api/issues/" + fixture.issueId() + "/activities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedVersion\":\""
+                        + (issue.getVersion() + 1)
+                        + "\",\"requestKey\":\""
+                        + commentKey
+                        + "\",\"kind\":\"COMMENT\",\"body\":\"A comment\"}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.kind").value("COMMENT"))
+        .andExpect(jsonPath("$.data.body").value("A comment"));
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select count(*) from project_issue_activity where issue_id = ? and idempotency_key = ?",
+            Long.class,
+            fixture.issueId(),
+            "comment:" + commentKey));
   }
 
   @Test
