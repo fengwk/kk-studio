@@ -13,8 +13,19 @@ import java.io.InputStream;
  */
 public interface S3StorageService {
 
+  /** 无预计算 checksum 的上传；不会要求 SDK 生成 SHA-256 trailer。 */
+  default PutObjectResponse putObject(
+      String key, InputStream content, long contentLength, String contentType) {
+    return putObject(key, content, contentLength, contentType, null);
+  }
+
+  /** 上传时可提供预计算的 SHA-256（32 字节摘要的 Base64）；null 表示不提供 checksum。 */
   PutObjectResponse putObject(
-      String key, InputStream content, long contentLength, String contentType);
+      String key,
+      InputStream content,
+      long contentLength,
+      String contentType,
+      String checksumSHA256);
 
   boolean exists(String key);
 
