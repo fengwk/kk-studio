@@ -1026,10 +1026,19 @@ registerCase({
         (await ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, resetRequest)).json,
       )
       assert(JSON.stringify(replayed) === JSON.stringify(authorized), JSON.stringify(replayed))
+      const afterReplay = await readIssueDetail(ctx, issue.id)
+      assert(
+        afterReplay.issue.version === String(BigInt(resetRequest.expectedVersion) + 1n)
+          && afterReplay.stageBudgets.length === 1
+          && JSON.stringify(afterReplay.stageBudgets[0]) === JSON.stringify(authorized),
+        JSON.stringify(afterReplay),
+      )
+      // 首次 RESET 已消费 expectedVersion；重放命中相同 requestKey 才能越过版本门禁。
+      // 新 requestKey 必须仍用重置前的版本验证真正的 CAS 过期，而非误用 +1 的当前版本。
       await expectHttpError(
         () =>
           ctx.call('POST', `/api/issues/${issue.id}/budget-reset`, {
-            expectedVersion: String(BigInt(resetRequest.expectedVersion) + 1n),
+            expectedVersion: resetRequest.expectedVersion,
             requestKey: `e2e-budget-stale-${cid()}`,
             state: 'BUILD',
             maxRuns: 4,
@@ -1038,6 +1047,7 @@ registerCase({
       )
 
       current = envelopeData((await ctx.call('GET', `/api/issues/${issue.id}`)).json).issue
+      assert(current.version === afterReplay.issue.version, JSON.stringify(current))
       const withBudget = await readIssueDetail(ctx, issue.id)
       assert(
         withBudget.stageBudgets.length === 1
@@ -1061,6 +1071,13 @@ registerCase({
         raised.maxRuns === 7 && raised.budgetAfterOrdinal === '0' && raised.remainingRuns === '7',
         JSON.stringify(raised),
       )
+      const afterRaise = await readIssueDetail(ctx, issue.id)
+      assert(
+        afterRaise.issue.version === String(BigInt(current.version) + 1n)
+          && JSON.stringify(afterRaise.stageBudgets) === JSON.stringify([raised]),
+        JSON.stringify(afterRaise),
+      )
+      current = afterRaise.issue
 
       const facts = await readActivityPages(ctx, issue.id, 5)
       const budgetFacts = facts.filter((activity) => activity.data?.action === 'RESET')
