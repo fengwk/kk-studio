@@ -180,6 +180,34 @@ test('docs check passes against an isolated physical mirror', () => {
   }
 })
 
+test('docs check requires the designated target DDL and rejects unrelated SQL files', () => {
+  // Test intent: admitting the executable design contract must not weaken the fixed docs inventory.
+  const mirrorRoot = createRepositoryMirror()
+  const contractPath = path.join(mirrorRoot, 'docs/canvas-project.sql')
+  const contract = readFileSync(contractPath, 'utf8')
+  const check = () =>
+    execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+      cwd: mirrorRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  try {
+    rmSync(contractPath)
+    assert.throws(
+      check,
+      (error) => (error.stderr || '').includes('missing fixed document: docs/canvas-project.sql'),
+    )
+    writeFileSync(contractPath, contract)
+    writeFileSync(path.join(mirrorRoot, 'docs/unrelated.sql'), 'select 1;\n')
+    assert.throws(
+      check,
+      (error) => (error.stderr || '').includes('unexpected docs file: docs/unrelated.sql'),
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
 test('docs check fails when harness module docs path is reintroduced', () => {
   // Test intent: ensure docs check rejects any docs directory or file under any harness module,
   // verifying that relative paths are reported and real repository is not mutated.
