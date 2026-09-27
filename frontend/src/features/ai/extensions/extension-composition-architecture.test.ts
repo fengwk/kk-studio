@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import { createApplicationExtensionHost } from '@/app/extension-host'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
-import { comfyuiExtension } from '@/features/comfyui/extensions/comfyui-extension.definition'
 import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'
 
@@ -30,16 +29,9 @@ describe('AI extension composition architecture', () => {
     // MessageList 不做 name switch，展开能力也由 contribution 声明。
     expect(aiExtension.toolRenderers?.map((renderer) => renderer.id)).toEqual(['task'])
     expect(aiExtension.toolRenderers?.[0]?.isExpandable).toBeTypeOf('function')
-    expect(comfyuiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
-      ['ai.comfyui', 'comfyui'],
-    ])
     expect(canvasExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['canvas.home', 'canvas'],
       ['canvas.editor', 'canvas/:canvasId'],
-    ])
-    expect(comfyuiExtension.dialogs?.map((dialog) => dialog.id)).toEqual([
-      'ai.comfyui-editor',
-      'ai.comfyui-delete',
     ])
     // Settings 是独立 extension，不塞进 aiExtension。
     expect(settingsExtension.pages?.map((page) => [page.id, page.path])).toEqual([
@@ -59,17 +51,15 @@ describe('AI extension composition architecture', () => {
       'ai.skill-packages',
       'ai.environments',
       'ai.mcp-servers',
-      'ai.comfyui',
       'settings.page',
       'canvas.home',
       'canvas.editor',
       'projects.home',
       'projects.detail',
     ])
-    expect(host.dialogs.list().map((dialog) => dialog.id)).toEqual([
-      ...aiExtension.dialogs!.map((dialog) => dialog.id),
-      ...comfyuiExtension.dialogs!.map((dialog) => dialog.id),
-    ])
+    expect(host.dialogs.list().map((dialog) => dialog.id)).toEqual(
+      aiExtension.dialogs!.map((dialog) => dialog.id),
+    )
     expect(host.overlays.list().map((overlay) => overlay.id)).toEqual(['projects.invalidation'])
     expect(host.pages.get('canvas.home')?.component).toBe(
       canvasExtension.pages?.[0].component,
@@ -90,8 +80,6 @@ describe('AI extension composition architecture', () => {
     const aiDefinitionSource = source('./ai-extension.definition.ts')
     const createChatDialogSource = source('./CreateChatDialog.tsx')
     const taskRendererSource = source('./TaskToolRendererLazy.tsx')
-    const comfyuiContext = source('../../comfyui/ComfyuiContext.ts')
-    const comfyuiExtensionSource = source('../../comfyui/extensions/comfyui-extension.tsx')
 
     expect(chatController).not.toContain('@/features/ai/catalog')
     expect(chatController).toContain('@/shared/api/agent-service')
@@ -119,13 +107,6 @@ describe('AI extension composition architecture', () => {
       "import('@/features/ai/runtime/thread-panel/messages/TaskToolRenderer')",
     )
     expect(aiExtensionSource).not.toContain('useCatalogPageController')
-    expect(comfyuiContext).toContain(
-      "import type { ComfyuiPageController } from '@/features/comfyui/useComfyuiPageController'",
-    )
-    expect(comfyuiExtensionSource).toContain(
-      "from '@/features/comfyui/ComfyuiContext'",
-    )
-    expect(comfyuiExtensionSource).not.toContain('useComfyuiPageController')
   })
 })
 
