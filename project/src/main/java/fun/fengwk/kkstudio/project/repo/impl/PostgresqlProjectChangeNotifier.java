@@ -35,7 +35,7 @@ public class PostgresqlProjectChangeNotifier {
     }
   }
 
-  private static void requireTransaction() {
+  static void requireTransaction() {
     if (!TransactionSynchronizationManager.isActualTransactionActive()) {
       throw new IllegalStateException("Project change notification requires an active transaction");
     }

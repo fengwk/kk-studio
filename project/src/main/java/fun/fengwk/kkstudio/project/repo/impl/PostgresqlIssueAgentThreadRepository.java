@@ -46,6 +46,7 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
   @Override
   public boolean insert(IssueAgentThread binding) {
     Objects.requireNonNull(binding, "binding");
+    PostgresqlProjectChangeNotifier.requireTransaction();
     boolean changed =
         mapper.insert(binding.issueId(), binding.agentName(), binding.threadId()) == 1;
     if (changed) {
@@ -56,6 +57,7 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
 
   @Override
   public int deleteByIssueIdAndAgentName(UUID issueId, String agentName) {
+    PostgresqlProjectChangeNotifier.requireTransaction();
     int changed = mapper.deleteByIssueIdAndAgentName(issueId, agentName);
     if (changed > 0) {
       notifier.issueChanged(issueId);
