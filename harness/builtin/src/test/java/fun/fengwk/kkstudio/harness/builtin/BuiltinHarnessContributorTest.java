@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.builtin.input.AskUserTool;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -44,7 +45,7 @@ import java.util.stream.Collectors;
 /**
  * BuiltinHarnessContributor 的全面目录冻结与完整能力清单测试。
  *
- * <p>验证 exact inventory (12 tools: 1 read + 8 environment + 1 internal task + 2 goal),
+ * <p>验证 exact inventory (13 tools: 1 read + 8 environment + 1 internal task + 2 goal + 1 ask_user),
  * visibility/requirements/capability 映射, 稳定模型可见 name, goal.progress ownership（无 Goal projector）,
  * 和全局唯一性。
  */
@@ -126,13 +127,13 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertTrue(catalog.findDescriptor(new ContributorId("builtin")).isPresent());
 
-    // Tools inventory: exactly 12 tools（Goal 正文由用户维护，没有 create_goal）
+    // Tools inventory: exactly 13 tools（Goal 正文由用户维护，没有 create_goal；含 1 个人工输入工具）
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(12, tools.size(), "exact total 12 tools expected");
+    assertEquals(13, tools.size(), "exact total 13 tools expected");
 
-    // Selectable tools: 1 read + 8 environment + 2 goal = 11 tools (task is INTERNAL)
+    // Selectable tools: 1 read + 8 environment + 2 goal + 1 ask_user = 12 tools (task is INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
-    assertEquals(11, selectables.size(), "exact 11 selectable tools expected");
+    assertEquals(12, selectables.size(), "exact 12 selectable tools expected");
 
     // 统一 read 工具（SELECTABLE, localName=read, name=read, OPTIONAL, ReadTool 实例）
     assertReadTool(catalog);
@@ -203,6 +204,9 @@ class BuiltinHarnessContributorTest {
     assertGoalTool(catalog, "get_goal", "goal.get", ToolSideEffect.READ_ONLY, StateMode.READ);
     assertGoalTool(
         catalog, "update_goal", "goal.update", ToolSideEffect.IDEMPOTENT, StateMode.WRITE);
+
+    // 人工输入工具：Runtime 的 provenance 判据是 (contributor=builtin, name=ask_user)，因此身份必须在目录里冻结。
+    assertAskUserTool(catalog);
 
     // Custom entry types: exactly goal.progress ownership
     assertEquals(1, catalog.customEntryTypes().size());
@@ -375,6 +379,24 @@ class BuiltinHarnessContributorTest {
     assertEquals(ToolVisibility.INTERNAL, tool.definition().visibility());
     assertEquals(new ContributionId(new ContributorId("builtin"), localName), tool.id());
     assertEquals(expectedRequirements, tool.requirements());
+
+    assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
+  }
+
+  /** 人工输入工具：稳定身份 + NONE requirements + READ_ONLY 且没有执行 deadline（真正的等待由 Runtime 冻结）。 */
+  private static void assertAskUserTool(HarnessCatalog catalog) {
+    ToolContribution tool = catalog.findTool("ask_user").orElseThrow();
+    assertEquals(ToolVisibility.SELECTABLE, tool.definition().visibility());
+    assertEquals(new ContributionId(new ContributorId("builtin"), "ask-user"), tool.id());
+    assertEquals(ToolRequirements.none(), tool.requirements());
+    assertInstanceOf(AskUserTool.class, tool.tool());
+
+    ToolDescriptor descriptor = tool.definition().descriptor();
+    assertEquals("ask_user", descriptor.name());
+    assertEquals("ask_user", descriptor.rendererKey());
+    assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
+    assertEquals(Duration.ZERO, descriptor.defaultTimeout());
+    assertFalse(descriptor.description().isBlank());
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
   }

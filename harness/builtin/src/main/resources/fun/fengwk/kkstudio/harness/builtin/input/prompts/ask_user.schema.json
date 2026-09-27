@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "description": "The questionnaire to ask the user: one or more questions whose answers the runtime freezes at acceptance time.",
+  "properties": {
+    "questions": {
+      "type": "array",
+      "description": "Questions to ask, in the order the user should answer them; at least one question is required.",
+      "items": {
+        "type": "object",
+        "description": "One question of the questionnaire.",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question text shown to the user."
+          },
+          "multiple": {
+            "type": "boolean",
+            "description": "true allows more than one answer; omit it or send false for a single choice question."
+          },
+          "options": {
+            "type": "array",
+            "description": "Optional answer choices; omit when the question has no meaningful choices, because every question also accepts one free-form answer.",
+            "items": {
+              "type": "object",
+              "description": "One answer choice of a question.",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "The answer label; it must be unique within its question and answers match it verbatim."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Optional elaboration of what the choice means."
+                },
+                "recommended": {
+                  "type": "boolean",
+                  "description": "true marks a suggestion only; at most one option per single choice question and it never replaces the user's choice."
+                }
+              },
+              "required": ["label"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["question"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["questions"],
+  "additionalProperties": false
+}
