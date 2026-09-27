@@ -85,7 +85,7 @@ public class JdkHttpSseTransport {
     }
 
     try {
-      execution.scheduleWatchdog(scheduler, workerExecutor);
+      execution.scheduleDeadline(scheduler);
     } catch (RejectedExecutionException e) {
       // 调度器拒绝时，worker 仍在 start gate 阻塞，绝对未发起任何网络请求
       execution.abortAdmission();

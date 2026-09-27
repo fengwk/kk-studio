@@ -54,6 +54,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -1116,9 +1117,9 @@ class JdkHttpSseTransportTest {
         1, eventDeliveries.get(), "worker must halt reading immediately upon callback failure");
   }
 
-  /** 阻塞项 A.2：重新设计的 Future 挂接必须竞态安全：一经挂接若已处于终态必须立即 cancel。 */
+  /** 工作器 future 晚于 cancel 挂接时仍须立即取消；终态也不再安排 deadline。 */
   @Test
-  void future_attach_after_terminal_is_immediately_cancelled() {
+  void worker_future_attach_after_terminal_is_immediately_cancelled() {
     HttpRequest request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
             .GET()
@@ -1132,7 +1133,7 @@ class JdkHttpSseTransportTest {
     execution.cancel();
     assertTrue(execution.isCancelled());
 
-    // 随后挂接未完成的 futures，必须被立即 cancel
+    // 随后挂接未完成的 worker future，必须被立即 cancel。
     CountDownLatch blocker = new CountDownLatch(1);
     Future<?> mockWorkerFuture =
         workerExecutor.submit(
@@ -1142,18 +1143,21 @@ class JdkHttpSseTransportTest {
               } catch (InterruptedException ignored) {
               }
             });
-    ScheduledFuture<?> mockWatchdogFuture = scheduler.schedule(() -> {}, 1, TimeUnit.MINUTES);
-
     execution.attachWorkerFuture(mockWorkerFuture);
-    execution.attachWatchdogFuture(mockWatchdogFuture);
+    ScheduledThreadPoolExecutor deadlineScheduler = new ScheduledThreadPoolExecutor(1);
+    try {
+      execution.scheduleDeadline(deadlineScheduler);
 
-    assertTrue(
-        mockWorkerFuture.isCancelled(),
-        "workerFuture must be cancelled immediately when attached in terminal state");
-    assertTrue(
-        mockWatchdogFuture.isCancelled(),
-        "watchdogFuture must be cancelled immediately when attached in terminal state");
-    blocker.countDown();
+      assertTrue(
+          mockWorkerFuture.isCancelled(),
+          "workerFuture must be cancelled immediately when attached in terminal state");
+      assertTrue(
+          deadlineScheduler.getQueue().isEmpty(),
+          "terminal execution must not schedule another deadline");
+    } finally {
+      blocker.countDown();
+      deadlineScheduler.shutdownNow();
+    }
   }
 
   /** 阻塞项 A.3：检测并拒绝 direct executor inline execution，防止 stream 死锁，保证无触网、无回调。 */
@@ -1437,6 +1441,100 @@ class JdkHttpSseTransportTest {
     }
   }
 
+  /** 单线程 worker 的唯一线程卡在 read 时，deadline 清理不能排在同一 I/O 队列后。 */
+  @Test
+  void deadline_expires_with_single_worker_blocked_in_stream_read() throws Exception {
+    verifyDeadlineIndependentOfWorker(
+        new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1)), false);
+  }
+
+  /** CallerRunsPolicy 不能把 deadline 清理转移到共享 timer 上。 */
+  @Test
+  void deadline_expires_with_caller_runs_worker() throws Exception {
+    verifyDeadlineIndependentOfWorker(
+        new ThreadPoolExecutor(
+            1,
+            1,
+            0,
+            TimeUnit.SECONDS,
+            new SynchronousQueue<>(),
+            new ThreadPoolExecutor.CallerRunsPolicy()),
+        false);
+  }
+
+  /** 入场后的 worker 池关闭也不能使已经排期的 timeout 失效。 */
+  @Test
+  void deadline_expires_after_worker_executor_shutdown() throws Exception {
+    verifyDeadlineIndependentOfWorker(
+        new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1)), true);
+  }
+
+  private void verifyDeadlineIndependentOfWorker(ThreadPoolExecutor singleWorker, boolean shutdown)
+      throws Exception {
+    CountDownLatch firstEvent = new CountDownLatch(1);
+    CountDownLatch releaseServer = new CountDownLatch(1);
+    AtomicReference<Thread> timerThread = new AtomicReference<>();
+    ScheduledThreadPoolExecutor singleTimer =
+        new ScheduledThreadPoolExecutor(
+            1,
+            runnable ->
+                new Thread(
+                    () -> {
+                      timerThread.set(Thread.currentThread());
+                      runnable.run();
+                    },
+                    "deadline-test-timer"));
+    try {
+      httpServer.createContext(
+          "/single-worker-deadline",
+          exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (OutputStream out = exchange.getResponseBody()) {
+              out.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
+              out.flush();
+              releaseServer.await(5, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+            }
+          });
+      RecordingCallback callback =
+          new RecordingCallback() {
+            @Override
+            public void onEvent(ServerSentEvent event) {
+              super.onEvent(event);
+              firstEvent.countDown();
+            }
+          };
+      ProviderStream stream =
+          new JdkHttpSseTransport(httpClient, singleWorker, singleTimer)
+              .stream(
+                  HttpRequest.newBuilder(
+                          URI.create("http://127.0.0.1:" + serverPort + "/single-worker-deadline"))
+                      .GET()
+                      .build(),
+                  new ModelCallTimeoutPolicy(Duration.ofSeconds(2), Duration.ofMillis(300)),
+                  HttpSseLimits.DEFAULT,
+                  callback);
+      assertTrue(firstEvent.await(5, TimeUnit.SECONDS));
+      assertEquals(1, singleWorker.getActiveCount(), "only worker remains in blocking read");
+      if (shutdown) {
+        singleWorker.shutdown();
+      }
+      assertTrue(callback.latch.await(2, TimeUnit.SECONDS), "deadline must not queue behind I/O");
+      assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
+      assertTrue(callback.error.getMessage().contains("idle timeout"));
+      assertFalse(stream.isCancelled());
+      assertFalse(callback.completed);
+      assertNotEquals(timerThread.get(), callback.callbackThread, "timer never executes callbacks");
+      assertEquals(
+          1, callback.lifecycleEvents.stream().filter(e -> e.startsWith("FAILURE")).count());
+    } finally {
+      releaseServer.countDown();
+      singleTimer.shutdownNow();
+      singleWorker.shutdownNow();
+    }
+  }
+
   /** 有读活动时不逐字节重建 timer；结束时取消未到期任务。 */
   @Test
   void activity_does_not_churn_deadline_tasks_and_completion_cancels_timer() throws Exception {
@@ -1567,7 +1665,7 @@ class JdkHttpSseTransportTest {
               ModelCallTimeoutPolicy.DEFAULT,
               HttpSseLimits.DEFAULT,
               callback);
-      execution.scheduleWatchdog(capturingScheduler, workerExecutor);
+      execution.scheduleDeadline(capturingScheduler);
       execution.cancel();
       timerTask.get().run();
       assertEquals(1, schedules.get());
@@ -1581,8 +1679,16 @@ class JdkHttpSseTransportTest {
 
   /** 已入场的流在 idle 重新排期时遇调度器关闭，应明确失败并清理旧 timer。 */
   @Test
-  void reschedule_rejection_fails_and_cleans_up() {
-    ScheduledThreadPoolExecutor closingScheduler = new ScheduledThreadPoolExecutor(1);
+  void reschedule_rejection_fails_and_cleans_up() throws Exception {
+    AtomicReference<Runnable> deadlineTask = new AtomicReference<>();
+    ScheduledThreadPoolExecutor closingScheduler =
+        new ScheduledThreadPoolExecutor(1) {
+          @Override
+          public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+            deadlineTask.set(command);
+            return super.schedule(command, delay, unit);
+          }
+        };
     RecordingCallback callback = new RecordingCallback();
     HttpSseStreamExecution execution =
         new HttpSseStreamExecution(
@@ -1593,10 +1699,11 @@ class JdkHttpSseTransportTest {
             ModelCallTimeoutPolicy.DEFAULT,
             HttpSseLimits.DEFAULT,
             callback);
-    execution.scheduleWatchdog(closingScheduler, workerExecutor);
+    execution.scheduleDeadline(closingScheduler);
     closingScheduler.shutdownNow();
-    // 直接模拟已触发的 timer 的 worker 检查：调度器不再接纳剩余 idle 时间。
-    execution.checkWatchdog();
+    // 真实 timer 入口触发重排；拒绝清理在短寿虚拟线程上完成。
+    deadlineTask.get().run();
+    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
     assertEquals(HttpSseStreamExecution.STATE_FAILED, execution.currentState());
     assertEquals(TransportErrorKind.EXECUTOR_REJECTED, callback.error.kind());
   }
