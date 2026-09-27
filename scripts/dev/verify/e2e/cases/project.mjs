@@ -186,7 +186,7 @@ registerCase({
       const projectOwnerBatch = await expectHttpError(
         () =>
           ctx.call('POST', '/api/harness/command-batches', {
-            owner: { type: 'PROJECT', id: project.id },
+            owner: { type: 'PROJECT' },
             target: {
               type: 'NEW_SESSION',
               sessionId: cid(),

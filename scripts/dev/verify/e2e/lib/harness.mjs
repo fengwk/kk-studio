@@ -125,7 +125,7 @@ export function branchSettingsOf(agent, model, environmentName = null) {
 
 /** Chat owner 引用（canonical chatId）。 */
 export function chatOwner(chatId) {
-  return { type: 'CHAT', id: canonicalUuid(chatId, 'chatId') }
+  return { type: 'CHAT', chatId: canonicalUuid(chatId, 'chatId') }
 }
 
 /** NEW_SESSION target：预分配 sessionId/threadId，携带 root settings 与 initial yolo。 */
@@ -194,12 +194,15 @@ function assertAcceptedCommands(accepted) {
  *   且每项 threadId、positive sequence、canonical idempotencyKey 均校验。
  */
 export async function acceptCommandBatch(ctx, { owner, target, commands }) {
-  assert(owner?.type && owner?.id, `owner required: ${JSON.stringify(owner)}`)
   assert(
-    owner.type === 'CHAT',
+    owner?.type === 'CHAT',
     `owner.type must be CHAT: ${JSON.stringify(owner)}`,
   )
-  canonicalUuid(owner.id, 'owner.id')
+  canonicalUuid(owner.chatId, 'owner.chatId')
+  assert(
+    Object.keys(owner).sort().join(',') === 'chatId,type',
+    `owner must contain only type and chatId: ${JSON.stringify(owner)}`,
+  )
   assert(target?.type, `target required: ${JSON.stringify(target)}`)
   assert(Array.isArray(commands) && commands.length > 0, 'commands required')
   for (const command of commands) {

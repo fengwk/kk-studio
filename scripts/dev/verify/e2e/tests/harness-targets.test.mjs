@@ -19,7 +19,7 @@ test('harness owner helpers expose only the Chat owner shape', async () => {
   // Test intent: Canvas 不持有 Harness Session（公共 batch 端点只服务 CHAT），
   // 因此 canvasOwner 死代码与其 /sessions 查询 helper 必须保持删除状态。
   const chat = chatOwner(sampleId())
-  assert.deepEqual(chat, { type: 'CHAT', id: sampleId() })
+  assert.deepEqual(chat, { type: 'CHAT', chatId: sampleId() })
   assert.equal(Object.hasOwn(harnessModule, 'canvasOwner'), false)
   assert.equal(Object.hasOwn(harnessModule, 'listCanvasSessions'), false)
   await assert.rejects(
@@ -102,12 +102,24 @@ test('legacy ENTRY target tokens and helpers are no longer part of the lib API',
   assert.doesNotMatch(source, /entryTarget|createEntryThread/)
 })
 
-test('chatOwner/canonicalUuid keep canonical UUID owner identity', () => {
-  // Test intent: owner discriminator stays CHAT with a canonical UUID id.
+test('chatOwner/canonicalUuid keep the strict Chat owner wire shape', () => {
+  // Test intent: public command owner is {type,chatId}, never the legacy {type,id}.
   const id = cid()
-  assert.deepEqual(chatOwner(id), { type: 'CHAT', id })
+  assert.deepEqual(chatOwner(id), { type: 'CHAT', chatId: id })
   assert.equal(canonicalUuid(id, 'id'), id)
   assert.throws(() => chatOwner('bad'), /canonical UUID/)
+})
+
+test('acceptCommandBatch rejects legacy owner aliases before HTTP', async () => {
+  // Test intent: the backend rejects unknown owner keys, including an id alongside chatId.
+  const ctx = { call: async () => { throw new Error('unexpected HTTP call') } }
+  const target = newSessionTarget({ sessionId: cid(), threadId: cid(), rootSettings: {} })
+  for (const owner of [{ type: 'CHAT', id: cid() }, { ...chatOwner(cid()), id: cid() }]) {
+    await assert.rejects(
+      () => acceptCommandBatch(ctx, { owner, target, commands: [userMessageCommand('x', cid())] }),
+      /owner\.chatId|owner must contain only type and chatId/,
+    )
+  }
 })
 
 test('acceptCommandBatch rejects the removed PROJECT owner before any HTTP call', async () => {
