@@ -26,13 +26,13 @@ function snapshotDTO(overrides: Partial<CanvasSnapshotDTO> = {}): CanvasSnapshot
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '3',
+      revision: '3',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
     nodes: [],
     groups: [],
-    links: [],
+    references: [],
     ...overrides,
   }
 }

@@ -10,7 +10,7 @@ import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
 import { getCanvasResourceOriginalUrl } from '@/shared/api/studio-service'
-import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 import { setLocale } from '@/shared/i18n'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
@@ -22,12 +22,12 @@ vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourceOriginalUrl: vi.fn(() => new Promise(() => undefined)),
 }))
 
-const model: CanvasFunctionModelDTO = {
-  key: 'fake-image',
-  label: 'Fake Image',
-  outputKind: 'IMAGE',
+const model: CanvasFunctionDefinitionDTO = {
+  name: 'fake-image',
+  description: 'Fake Image',
+  outputs: [{ kind: 'IMAGE', name: null }],
+  argsSchema: {},
   referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
-  parameters: [],
   available: true,
   unavailableReason: null,
 }

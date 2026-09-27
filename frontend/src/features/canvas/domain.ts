@@ -1,19 +1,19 @@
 import type {
   CanvasFunctionRunStatus,
+  CanvasReferenceDTO,
   CanvasResourceDTO,
   CanvasResourceKind,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
-import type { CanvasVersion } from '@/shared/api/contracts/base'
+import type { CanvasRevision } from '@/shared/api/contracts/base'
 import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 
 export interface CanvasDocument {
   id: UUIDString
   title: string
-  /** canonical 非负十进制字符串（Java long wire），显示与比较都保持字符串。 */
-  version: CanvasVersion
+  revision: CanvasRevision
   createdAt: string
   updatedAt: string
 }
@@ -23,7 +23,6 @@ export interface Resource {
   canvasId: UUIDString
   ownerNodeId: UUIDString
   resourceIndex: number
-  /** TEXT 资源内容在 textContent 中，无对象存储 blob；其余资源引用共享存储的持久 blob。 */
   blobId: string | null
   name: string
   textContent: string | null
@@ -37,8 +36,11 @@ export interface Resource {
 }
 
 export interface Function {
-  modelKey: string
-  configJson: string
+  name: string
+  args: Record<string, unknown>
+  /** 兼容旧代码访问 */
+  modelKey?: string
+  configJson?: string
 }
 
 export interface Run {
@@ -68,6 +70,14 @@ export interface Group {
   transform: CanvasTransformDTO
 }
 
+export interface Reference {
+  canvasId: UUIDString
+  sourceNodeId: UUIDString
+  targetNodeId: UUIDString
+  index: number
+}
+
+/** 兼容旧的 Link 接口 */
 export interface Link {
   canvasId: UUIDString
   sourceNodeId: UUIDString
@@ -78,30 +88,100 @@ export interface CanvasSnapshot {
   document: CanvasDocument
   resourceNodes: ResourceNode[]
   groups: Group[]
+  references: Reference[]
+  /** 兼容现有渲染代码 */
   links: Link[]
 }
 
+export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, index: number) => void): void {
+  if (!obj || typeof obj !== 'object') {
+    return
+  }
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      scanArgsForReferences(item, onRef)
+    }
+    return
+  }
+  const rec = obj as Record<string, unknown>
+  if (rec.type === 'resource' && typeof rec.nodeId === 'string') {
+    const index = typeof rec.index === 'number' ? rec.index : 0
+    onRef(rec.nodeId, index)
+  }
+  for (const val of Object.values(rec)) {
+    scanArgsForReferences(val, onRef)
+  }
+}
+
+export function deriveReferencesFromNodes(nodes: Array<{ id: UUIDString; canvasId: UUIDString; function?: Function | null }>): Reference[] {
+  const refs: Reference[] = []
+  for (const node of nodes) {
+    if (!node.function?.args) {
+      continue
+    }
+    scanArgsForReferences(node.function.args, (sourceNodeId, index) => {
+      refs.push({
+        canvasId: node.canvasId,
+        sourceNodeId: sourceNodeId as UUIDString,
+        targetNodeId: node.id,
+        index,
+      })
+    })
+  }
+  return refs
+}
+
 export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapshot {
+  const resourceNodes: ResourceNode[] = snapshot.nodes.map((node) => {
+    const projected: ResourceNode = {
+      ...node,
+      transform: { ...node.transform },
+      resources: node.resources.map(projectCanvasResource),
+      function: node.function ? {
+        name: node.function.name,
+        args: node.function.args,
+        modelKey: node.function.name,
+        configJson: typeof node.function.args?.configJson === 'string'
+          ? (node.function.args.configJson as string)
+          : JSON.stringify(node.function.args ?? {}),
+      } : null,
+      run: node.run ? { ...node.run } : null,
+    }
+    return {
+      ...projected,
+      transform: { ...projected.transform, ...resourceNodeSize(projected) },
+    }
+  })
+
+  const rawReferences = snapshot.references && snapshot.references.length > 0
+    ? snapshot.references
+    : deriveReferencesFromNodes(snapshot.nodes)
+
+  const references: Reference[] = rawReferences.map((ref: CanvasReferenceDTO) => ({
+    canvasId: ref.canvasId,
+    sourceNodeId: ref.sourceNodeId,
+    targetNodeId: ref.targetNodeId,
+    index: ref.index,
+  }))
+
+  const links: Link[] = references.map((ref) => ({
+    canvasId: ref.canvasId,
+    sourceNodeId: ref.sourceNodeId,
+    targetNodeId: ref.targetNodeId,
+  }))
+
   return {
-    document: { ...snapshot.document },
-    resourceNodes: snapshot.nodes.map((node) => {
-      const projected: ResourceNode = {
-        ...node,
-        transform: { ...node.transform },
-        resources: node.resources.map(projectCanvasResource),
-        function: node.function ? { ...node.function } : null,
-        run: node.run ? { ...node.run } : null,
-      }
-      return {
-        ...projected,
-        transform: { ...projected.transform, ...resourceNodeSize(projected) },
-      }
-    }),
+    document: {
+      ...snapshot.document,
+      revision: snapshot.document.revision,
+    },
+    resourceNodes,
     groups: snapshot.groups.map((group) => ({
       ...group,
       transform: { ...group.transform },
     })),
-    links: snapshot.links.map((link) => ({ ...link })),
+    references,
+    links,
   }
 }
 

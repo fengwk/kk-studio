@@ -14,7 +14,6 @@ import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
-import { listCanvasSessions } from '@/shared/api/studio-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
@@ -56,9 +55,6 @@ vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
     listChatSessions: vi.fn(),
   },
-}))
-vi.mock('@/shared/api/studio-service', () => ({
-  listCanvasSessions: vi.fn(),
 }))
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
@@ -898,13 +894,11 @@ describe('AgentPane orchestration', () => {
     )
   })
 
-  it('uses the Canvas session query when opening thread navigation', async () => {
-    vi.mocked(listCanvasSessions).mockResolvedValue([])
+  it('handles the Canvas owner when opening thread navigation', async () => {
     const hook = renderController({ owner: { type: 'CANVAS', id: CANVAS_ID } })
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.composer.onCommand(testCommand('thread')))
     expect(hook.result.current.interaction).toBe('thread-sessions')
-    await waitFor(() => expect(listCanvasSessions).toHaveBeenCalledWith(CANVAS_ID))
   })
 
   it('shows required names as primary selection titles and falls back previews only', async () => {

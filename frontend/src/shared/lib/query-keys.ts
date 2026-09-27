@@ -55,7 +55,8 @@ export const queryKeys = {
   studio: {
     canvases: ['studio', 'canvases'] as const,
     canvas: (canvasId: string) => ['studio', 'canvas', canvasId] as const,
-    canvasModels: ['studio', 'canvas-function-models'] as const,
+    canvasModels: ['studio', 'canvas-functions'] as const,
+    canvasFunctions: ['studio', 'canvas-functions'] as const,
     canvasResourcePreview: (canvasId: string, resourceId: string) => (
       ['studio', 'canvas-resource', canvasId, resourceId, 'preview'] as const
     ),

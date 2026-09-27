@@ -13,7 +13,7 @@ import type {
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type {
   CanvasFunctionConfigDTO,
-  CanvasFunctionModelDTO,
+  CanvasFunctionDefinitionDTO,
 } from '@/shared/api/contracts/studio'
 
 vi.mock('@/shared/api/studio-service', () => ({
@@ -26,46 +26,51 @@ vi.mock('@/shared/api/studio-service', () => ({
   })),
 }))
 
-const models: CanvasFunctionModelDTO[] = [{
-  key: 'image-a',
-  label: 'Image A',
-  outputKind: 'IMAGE',
+const models: CanvasFunctionDefinitionDTO[] = [{
+  name: 'image-a',
+  description: 'Image A',
+  outputs: [{ kind: 'IMAGE', name: null }],
+  argsSchema: {
+    type: 'object',
+    required: ['ratio'],
+    properties: {
+      ratio: {
+        type: 'string',
+        title: '比例',
+        default: '1:1',
+        enum: ['1:1', '16:9'],
+      },
+    },
+  },
   referencePolicy: {
     allowedKinds: ['IMAGE'],
     maxReferences: 2,
     maxByKind: { IMAGE: 2 },
   },
-  parameters: [{
-    key: 'ratio',
-    label: '比例',
-    type: 'ENUM',
-    required: true,
-    defaultValue: '1:1',
-    options: ['1:1', '16:9'],
-    min: null,
-    max: null,
-  }],
   available: true,
   unavailableReason: null,
 }, {
-  key: 'image-b',
-  label: 'Image B',
-  outputKind: 'IMAGE',
+  name: 'image-b',
+  description: 'Image B',
+  outputs: [{ kind: 'IMAGE', name: null }],
+  argsSchema: {
+    type: 'object',
+    required: ['duration'],
+    properties: {
+      duration: {
+        type: 'integer',
+        title: '时长',
+        default: 5,
+        minimum: 4,
+        maximum: 15,
+      },
+    },
+  },
   referencePolicy: {
     allowedKinds: ['VIDEO'],
     maxReferences: 1,
     maxByKind: { VIDEO: 1 },
   },
-  parameters: [{
-    key: 'duration',
-    label: '时长',
-    type: 'INTEGER',
-    required: true,
-    defaultValue: 5,
-    options: [],
-    min: 4,
-    max: 15,
-  }],
   available: true,
   unavailableReason: null,
 }]
@@ -152,7 +157,7 @@ function fixture(run: ResourceNode['run'] = null, modelKey: 'image-a' | 'image-b
 
 function renderPanel(
   run: ResourceNode['run'] = null,
-  availableModels: CanvasFunctionModelDTO[] = models,
+  availableModels: CanvasFunctionDefinitionDTO[] = models,
   rawAnchor?: CanvasGenerationPanelAnchor | { targetNodeId: string },
 ) {
   const scheduleFunctionConfig = vi.fn()
@@ -602,10 +607,10 @@ describe('Canvas generic generation panel', () => {
   it('toasts the reference limit when another distinct reference exceeds the model limit', async () => {
     // maxReferences=1 时第二个不同参考触发上限提示，且不产生新草稿。
     const user = userEvent.setup()
-    const limited: CanvasFunctionModelDTO[] = [{
+    const limited: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
       referencePolicy: {
-        ...models[0]!.referencePolicy,
+        ...models[0]!.referencePolicy!,
         maxReferences: 1,
       },
     }]
@@ -621,7 +626,7 @@ describe('Canvas generic generation panel', () => {
   it('shows an empty candidate menu when no reference candidates exist', async () => {
     // 模型只接受 AUDIO 而本节点只链接 IMAGE/VIDEO 时，@ 菜单显示空态文案。
     const user = userEvent.setup()
-    const emptyModels: CanvasFunctionModelDTO[] = [{
+    const emptyModels: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
       referencePolicy: {
         allowedKinds: ['AUDIO'],
@@ -642,7 +647,7 @@ describe('Canvas generic generation panel', () => {
 
   it('disables an unavailable model option and ignores an unknown model selection', async () => {
     // 不可用模型以「label（reason）」展示并禁用；select 收到非法值时静默忽略。
-    const unavailable: CanvasFunctionModelDTO[] = [{
+    const unavailable: CanvasFunctionDefinitionDTO[] = [{
       ...models[0]!,
       available: false,
       unavailableReason: 'quota exceeded',

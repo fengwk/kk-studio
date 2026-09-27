@@ -28,10 +28,11 @@ import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionConfigDTO,
-  CanvasFunctionModelDTO,
+  CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
   PromptSegmentDTO,
 } from '@/shared/api/contracts/studio'
+import { extractParametersFromDefinition } from '@/features/canvas/generation'
 
 export interface CanvasGenerationPanelAnchor {
   node: CanvasTransformDTO
@@ -52,17 +53,21 @@ export function CanvasGenerationPanel({
   const { t } = useI18n()
   const { flushFunctionConfig } = runtime
   const sourceModel = modelForNode(runtime.models, node)
-  const [modelKey, setModelKey] = useState(sourceModel?.key ?? node.function?.modelKey ?? '')
-  const model = runtime.models.find((item) => item.key === modelKey) ?? sourceModel
+  const [modelKey, setModelKey] = useState(sourceModel?.name ?? node.function?.name ?? node.function?.modelKey ?? '')
+  const model = runtime.models.find((item) => item.name === modelKey) ?? sourceModel
   const [expanded, setExpanded] = useState(false)
   const [config, setConfig] = useState<CanvasFunctionConfigDTO>(() => (
     sourceModel && node.function
-      ? parseFunctionConfig(node.function.configJson, sourceModel)
+      ? parseFunctionConfig(node.function.configJson ?? '', sourceModel)
       : sourceModel
         ? createDefaultFunctionConfig(sourceModel)
         : { prompt: { segments: [{ type: 'TEXT', text: '' }] }, parameters: {} }
   ))
   const [mentionMenuOpen, setMentionMenuOpen] = useState(false)
+  const [unknownResolution, setUnknownResolution] = useState<'RESUME' | 'FAILED' | 'CANCELLED'>('RESUME')
+  const [verificationText, setVerificationText] = useState('')
+  const [showJsonArgs, setShowJsonArgs] = useState(false)
+  const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.parameters, null, 2))
   const [panelSize, setPanelSize] = useState({ width: 560, height: 190 })
   const panelRef = useRef<HTMLElement | null>(null)
   const inputRefs = useRef(new Map<number, HTMLInputElement>())
@@ -157,11 +162,11 @@ export function CanvasGenerationPanel({
 
   const sourceConfig = useMemo(() => (
     node.function && sourceModel
-      ? parseFunctionConfig(node.function.configJson, sourceModel)
+      ? parseFunctionConfig(node.function.configJson ?? '', sourceModel)
       : null
   ), [node.function, sourceModel])
   const sourceIdentity = node.function && sourceConfig
-    ? functionSourceIdentity(node.function.modelKey, sourceConfig)
+    ? functionSourceIdentity(node.function.modelKey ?? node.function.name, sourceConfig)
     : ''
   const sourceModelSignature = sourceModel ? JSON.stringify(sourceModel) : ''
   useEffect(() => {
@@ -192,7 +197,7 @@ export function CanvasGenerationPanel({
     } else {
       localSourceVersionsRef.current.clear()
     }
-    setModelKey(node.function.modelKey)
+    setModelKey(node.function.modelKey ?? node.function.name)
     setConfig(sourceConfig)
     cursorRef.current = { segmentIndex: 0, offset: 0 }
     dirtyRef.current = false
@@ -221,8 +226,11 @@ export function CanvasGenerationPanel({
   }
 
   const activeModel = model
-  const outputKind = sourceModel?.outputKind ?? activeModel.outputKind
-  const modelOptions = runtime.models.filter((item) => item.outputKind === outputKind)
+  const outputKind = sourceModel?.outputs?.[0]?.kind
+    ?? activeModel.outputs?.[0]?.kind
+  const modelOptions = runtime.models.filter((item) =>
+    item.outputs?.[0]?.kind === outputKind
+  )
   const active = node.run?.status === 'READY' || node.run?.status === 'RUNNING'
 
   function updateConfig(next: CanvasFunctionConfigDTO, nextModelKey = modelKey) {
@@ -284,7 +292,7 @@ export function CanvasGenerationPanel({
       <div className="generation-panel-head">
         <div>
           <span className="generation-node-kicker">{t('canvas.generation.nodeKicker')}</span>
-          <strong>{model.label}</strong>
+          <strong>{model.description || model.name}</strong>
           <span className={`generation-node-status ${node.run?.status.toLowerCase() ?? 'ready'}`}>
             {node.run
               ? t(runStatusKey(node.run.status))
@@ -445,6 +453,15 @@ export function CanvasGenerationPanel({
       </div>
 
       <div className="generation-footer">
+        {activeModel.outputs && activeModel.outputs.length > 0 ? (
+          <div className="generation-outputs-badge-list" aria-label="函数预期输出">
+            {activeModel.outputs.map((out, idx) => (
+              <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} (${out.kind})` : out.kind}>
+                {out.kind}{out.name ? `: ${out.name}` : ''}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <div className="generation-controls">
           <label>
             <span className="sr-only">{t('canvas.generation.modelLabel')}</span>
@@ -453,7 +470,7 @@ export function CanvasGenerationPanel({
               value={modelKey}
               disabled={active}
               onChange={(event) => {
-                const nextModel = runtime.models.find((item) => item.key === event.target.value)
+                const nextModel = runtime.models.find((item) => item.name === event.target.value)
                 if (!nextModel) {
                   return
                 }
@@ -465,23 +482,23 @@ export function CanvasGenerationPanel({
                   },
                   parameters: defaults.parameters,
                 }, nextCandidates, nextModel)
-                setModelKey(nextModel.key)
-                updateConfig(nextConfig, nextModel.key)
+                setModelKey(nextModel.name)
+                updateConfig(nextConfig, nextModel.name)
               }}
             >
               {modelOptions.map((item) => (
-                <option key={item.key} value={item.key} disabled={!item.available}>
-                {item.available
-                  ? item.label
+                <option key={item.name} value={item.name} disabled={item.available === false}>
+                {item.available !== false
+                  ? (item.description || item.name)
                   : t('canvas.generation.modelUnavailableOption', {
-                    label: item.label,
+                    label: item.description || item.name,
                     reason: item.unavailableReason ?? t('canvas.generation.modelUnavailable'),
                   })}
                 </option>
               ))}
             </select>
           </label>
-        {activeModel.parameters.map((parameter) => (
+        {extractParametersFromDefinition(activeModel).map((parameter) => (
           <label key={parameter.key}>
             <span>{parameter.label}</span>
             {parameter.type === 'ENUM' ? (
@@ -531,6 +548,81 @@ export function CanvasGenerationPanel({
             )}
           </label>
         ))}
+        <div className="generation-json-toggle" style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="generation-subtle-btn"
+            style={{ fontSize: 12, padding: '2px 6px', cursor: 'pointer' }}
+            onClick={() => setShowJsonArgs((v) => !v)}
+          >
+            {showJsonArgs ? '收起参数 JSON' : '编辑参数 JSON'}
+          </button>
+          {showJsonArgs ? (
+            <textarea
+              aria-label="参数 JSON"
+              className="generation-json-textarea"
+              style={{ width: '100%', minHeight: 90, marginTop: 6, fontFamily: 'monospace', fontSize: 12 }}
+              value={jsonArgsText}
+              onChange={(e) => {
+                setJsonArgsText(e.target.value)
+                try {
+                  const parsed = JSON.parse(e.target.value)
+                  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    updateConfig({
+                      ...config,
+                      parameters: parsed,
+                    })
+                  }
+                } catch {
+                  // user is in the middle of editing json
+                }
+              }}
+            />
+          ) : null}
+        </div>
+        {node.run?.status === 'UNKNOWN' ? (
+          <div className="generation-unknown-resolution" role="region" aria-label="待核查确认" style={{ marginTop: 10, padding: 8, border: '1px solid var(--orange, #fa8c16)', borderRadius: 4 }}>
+            <div style={{ fontWeight: 600, color: 'var(--orange, #fa8c16)', marginBottom: 6 }}>
+              待人工核查确认 (UNKNOWN)
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select
+                aria-label="核查决定"
+                value={unknownResolution}
+                onChange={(e) => setUnknownResolution(e.target.value as 'RESUME' | 'FAILED' | 'CANCELLED')}
+              >
+                <option value="RESUME">RESUME (继续运行)</option>
+                <option value="FAILED">FAILED (标记失败)</option>
+                <option value="CANCELLED">CANCELLED (取消运行)</option>
+              </select>
+              <input
+                type="text"
+                aria-label="核查说明"
+                placeholder="输入核查记录文本（必填）"
+                value={verificationText}
+                onChange={(e) => setVerificationText(e.target.value)}
+                style={{ flex: 1, minWidth: 160 }}
+              />
+              <button
+                type="button"
+                className="generation-resolve-btn"
+                disabled={!verificationText.trim()}
+                onClick={() => {
+                  if (node.run?.requestId && verificationText.trim()) {
+                    void runtime.resolveFunctionRun(
+                      node.id,
+                      node.run.requestId,
+                      unknownResolution,
+                      verificationText.trim(),
+                    )
+                  }
+                }}
+              >
+                提交核查
+              </button>
+            </div>
+          </div>
+        ) : null}
         {node.run?.status === 'FAILED' ? (
           <span className="generation-run-feedback failed" role="alert">
             {node.run.error ?? t('canvas.generation.runFailed')}
@@ -547,10 +639,10 @@ export function CanvasGenerationPanel({
 }
 
 function modelForNode(
-  models: CanvasFunctionModelDTO[],
+  models: CanvasFunctionDefinitionDTO[],
   node: ResourceNode,
-): CanvasFunctionModelDTO | null {
-  return models.find((model) => model.key === node.function?.modelKey) ?? null
+): CanvasFunctionDefinitionDTO | null {
+  return models.find((model) => model.name === (node.function?.name ?? node.function?.modelKey)) ?? null
 }
 
 function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfigDTO): string {
@@ -575,6 +667,9 @@ function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): strin
   if (status === 'CANCELLED') {
     return 'canvas.generation.status.cancelled'
   }
+  if (status === 'UNKNOWN') {
+    return 'canvas.generation.status.unknown'
+  }
   return 'canvas.generation.status.succeeded'
 }
 
@@ -583,5 +678,8 @@ function runDisplayLabel(
   status: NonNullable<ResourceNode['run']>['status'],
   stage: string,
 ): string {
+  if (status === 'UNKNOWN') {
+    return stage && stage !== status ? stage : '待核查确认'
+  }
   return stage && stage !== status ? stage : t(runStatusKey(status))
 }

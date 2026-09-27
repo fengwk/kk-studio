@@ -1,34 +1,35 @@
 import type {
   CanvasGroupDTO,
-  CanvasLinkDTO,
   CanvasPatchDTO,
+  CanvasReferenceDTO,
   CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/contracts/studio'
-import { compareCanvasVersions } from '@/shared/lib/canvas-version'
+import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
+import { deriveReferencesFromNodes } from '@/features/canvas/domain'
 
 /**
- * 应用单个 graph patch。返回 null 表示该 patch 无法连续应用：
- * - `patch.version <= snapshot.document.version`：重复/过期 patch，调用方应忽略；
- * - `patch.baseVersion !== snapshot.document.version`：存在 gap，
- *   调用方必须读取权威 Snapshot 恢复。
- * 版本是 canonical 非负十进制字符串，比较使用长度/字典序（bigint-safe）。
+ * 应用单个 graph patch。返回 null 表示该 patch 无法应用（重复或过期的 revision）。
  */
 export function applyEntityPatch(
   snapshot: CanvasSnapshotDTO,
   patch: CanvasPatchDTO,
 ): CanvasSnapshotDTO | null {
-  if (compareCanvasVersions(patch.version, snapshot.document.version) <= 0) {
+  if (compareCanvasRevisions(patch.revision, snapshot.document.revision) <= 0) {
     return null
   }
-  if (patch.baseVersion !== snapshot.document.version) {
-    return null
-  }
+  const nextNodes = applyNodePatches(snapshot.nodes, patch.nodes)
+  const nextGroups = applyGroupPatches(snapshot.groups, patch.groups)
+  const nextReferences = deriveReferencesFromNodes(nextNodes) as unknown as CanvasReferenceDTO[]
+
   return {
-    document: { ...snapshot.document, version: patch.version },
-    nodes: applyNodePatches(snapshot.nodes, patch.nodes),
-    groups: applyGroupPatches(snapshot.groups, patch.groups),
-    links: applyLinkPatches(snapshot.links, patch.links),
+    document: {
+      ...snapshot.document,
+      revision: patch.revision,
+    },
+    nodes: nextNodes,
+    groups: nextGroups,
+    references: nextReferences,
   }
 }
 
@@ -60,21 +61,4 @@ function applyGroupPatches(
     }
   }
   return [...byId.values()]
-}
-
-function applyLinkPatches(
-  links: CanvasLinkDTO[],
-  patches: CanvasPatchDTO['links'],
-): CanvasLinkDTO[] {
-  const linkKey = (link: Pick<CanvasLinkDTO, 'sourceNodeId' | 'targetNodeId'>) =>
-    `${link.sourceNodeId}->${link.targetNodeId}`
-  const byKey = new Map(links.map((link) => [linkKey(link), link]))
-  for (const patch of patches) {
-    if (patch.op === 'UPSERT') {
-      byKey.set(linkKey(patch.link), patch.link)
-    } else {
-      byKey.delete(`${patch.sourceNodeId}->${patch.targetNodeId}`)
-    }
-  }
-  return [...byKey.values()]
 }

@@ -53,11 +53,7 @@ function createHarness(options?: Partial<CanvasUploadPipelineOptions>) {
   })
   const executeCommands = vi.fn(async (commands: CanvasCommandDTO[]) => {
     for (const command of commands) {
-      if (
-        command.type === 'CREATE_RESOURCE_NODE'
-        || command.type === 'CREATE_TEXT_NODE'
-        || command.type === 'CREATE_FUNCTION_NODE'
-      ) {
+      if (command.type === 'CREATE_NODE') {
         snapshotNames.add(command.name)
       }
     }
@@ -130,10 +126,14 @@ describe('useCanvasUploadPipeline', () => {
     expect(storageService.uploadFile).not.toHaveBeenCalled()
     expect(storageService.completeUpload).toHaveBeenCalledWith(UPLOAD_ID)
     expect(resourceNodeCommands(executeCommands)).toEqual([{
-      type: 'CREATE_RESOURCE_NODE',
+      type: 'CREATE_NODE',
       nodeId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
       name: 'upload.png',
-      uploadIds: [UPLOAD_ID],
+      resources: [{
+        kind: 'BLOB',
+        name: 'upload.png',
+        blobId: 'blob-existing',
+      }],
       transform: { x: 100, y: 100, width: 320, height: 246 },
     }])
     expect(progressCalls).toEqual([

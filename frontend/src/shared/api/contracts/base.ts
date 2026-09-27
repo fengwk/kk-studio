@@ -26,5 +26,5 @@ export type CatalogVersion = string
 /** 后端 Jackson 对 Java long/Long 的 wire 形态：canonical 非负十进制字符串。 */
 export type DecimalLong = string
 
-/** Canvas graph 单调版本：canonical 非负十进制字符串（数据库仍是 bigint，仅 wire 为字符串）。 */
-export type CanvasVersion = DecimalLong
+/** Canvas graph 单调修订号：canonical 非负十进制字符串（数据库仍是 bigint，仅 wire 为字符串）。 */
+export type CanvasRevision = DecimalLong

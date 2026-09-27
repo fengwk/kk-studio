@@ -1,18 +1,19 @@
 import { ApiError, apiBaseUrl } from '@/shared/api/client'
 import type { ResultEnvelope } from '@/shared/api/contracts/base'
-import type { RuntimeSessionSummaryDTO } from '@/shared/api/contracts/ai-runtime'
 import {
   decodeCanvasDocument,
   decodeCanvasDocumentList,
+  decodeCanvasFunctionDefinition,
   decodeCanvasPatch,
   decodeCanvasSnapshot,
 } from '@/shared/api/studio-codec'
 import type {
   ApplyCanvasCommandsRequestDTO,
   CanvasDocumentDTO,
-  CanvasFunctionModelDTO,
+  CanvasFunctionDefinitionDTO,
   CanvasFunctionRunDTO,
   CanvasFunctionRunRequestDTO,
+  CanvasFunctionUnknownResolutionDTO,
   CanvasPatchDTO,
   CanvasPresignedUrlDTO,
   CanvasSnapshotDTO,
@@ -41,6 +42,16 @@ export function createCanvas(
   }, decodeCanvasDocument)
 }
 
+export function deleteCanvas(
+  canvasId: UUIDString,
+  options?: CanvasRequestOptions,
+): Promise<void> {
+  return canvasRequest(`/canvases/${canvasId}`, {
+    method: 'DELETE',
+    signal: options?.signal,
+  })
+}
+
 export function getCanvas(
   canvasId: UUIDString,
   options?: CanvasRequestOptions,
@@ -49,9 +60,8 @@ export function getCanvas(
 }
 
 /**
- * POST /canvases/{id}/commands：应用命令批并返回 graph patch。
- * 响应通过本地 reducer 直接应用；重复/过期 patch 会被忽略，
- * baseVersion 不连续时读取权威 Snapshot 恢复。
+ * POST /canvases/{id}/commands：应用类型化命令批并返回 graph patch。
+ * 响应通过本地 reducer 直接应用；重复/过期 patch 会被忽略。
  */
 export function postCanvasCommands(
   canvasId: UUIDString,
@@ -65,10 +75,15 @@ export function postCanvasCommands(
   }, decodeCanvasPatch)
 }
 
-export function listCanvasFunctionModels(
+export function listCanvasFunctions(
   options?: CanvasRequestOptions,
-): Promise<CanvasFunctionModelDTO[]> {
-  return canvasRequest('/canvas-function-models', { signal: options?.signal })
+): Promise<CanvasFunctionDefinitionDTO[]> {
+  return canvasRequest('/canvas-functions', { signal: options?.signal }, (data) => {
+    if (!Array.isArray(data)) {
+      throw new ApiError('Canvas functions payload must be an array')
+    }
+    return data.map(decodeCanvasFunctionDefinition)
+  })
 }
 
 export function getCanvasResourceOriginalUrl(
@@ -129,11 +144,15 @@ export function cancelCanvasFunctionRun(
   })
 }
 
-export function listCanvasSessions(
-  canvasId: string,
+export function resolveCanvasFunctionRun(
+  canvasId: UUIDString,
+  nodeId: UUIDString,
+  request: CanvasFunctionUnknownResolutionDTO,
   options?: CanvasRequestOptions,
-): Promise<RuntimeSessionSummaryDTO[]> {
-  return canvasRequest(`/canvases/${encodeURIComponent(canvasId)}/sessions`, {
+): Promise<CanvasFunctionRunDTO> {
+  return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run/resolve`, {
+    method: 'POST',
+    body: request,
     signal: options?.signal,
   })
 }
@@ -141,7 +160,7 @@ export function listCanvasSessions(
 async function canvasRequest<T>(
   path: string,
   options: {
-    method?: 'GET' | 'POST'
+    method?: 'GET' | 'POST' | 'DELETE'
     body?: unknown
     signal?: AbortSignal
   } = {},

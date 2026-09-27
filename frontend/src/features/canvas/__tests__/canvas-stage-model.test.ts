@@ -11,7 +11,7 @@ import type {
   Resource,
   ResourceNode,
 } from '@/features/canvas/domain'
-import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f'
@@ -19,12 +19,12 @@ const RESOURCE_NODE_ID = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
 const FUNCTION_NODE_ID = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d'
 const EMPTY_NODE_ID = 'b3c4d5e6-7f8a-4b9c-8d0e-1f2a3b4c5d6e'
 
-const model: CanvasFunctionModelDTO = {
-  key: 'fake-image',
-  label: 'Fake Image',
-  outputKind: 'IMAGE',
+const model: CanvasFunctionDefinitionDTO = {
+  name: 'fake-image',
+  description: 'Fake Image',
+  outputs: [{ kind: 'IMAGE', name: null }],
+  argsSchema: {},
   referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
-  parameters: [],
   available: true,
   unavailableReason: null,
 }

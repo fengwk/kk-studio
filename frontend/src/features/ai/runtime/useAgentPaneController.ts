@@ -28,7 +28,6 @@ import {
 } from '@/features/ai/composer/composer-draft'
 import { harnessService } from '@/shared/api/harness-service'
 import { chatService } from '@/shared/api/chat-service'
-import { listCanvasSessions } from '@/shared/api/studio-service'
 import { ownerService } from '@/shared/api/owner-service'
 import {
   presentConflict,
@@ -307,14 +306,14 @@ export function useAgentPaneController({
     : isNewThreadTarget(target)
       ? target.sessionId
       : null
-  const sessionsQuery = useQuery({
+  const sessionsQuery = useQuery<RuntimeSessionSummaryDTO[]>({
     queryKey: ['agent-pane', 'sessions', owner.type, owner.id],
     queryFn: () => {
       if (owner.type === 'CHAT') {
         return chatService.listChatSessions(owner.id)
       }
       if (owner.type === 'CANVAS') {
-        return listCanvasSessions(owner.id)
+        return Promise.resolve([])
       }
       if (owner.type === 'ISSUE_AGENT_SESSION') {
         return ownerService.listProjectSessions(owner.id)

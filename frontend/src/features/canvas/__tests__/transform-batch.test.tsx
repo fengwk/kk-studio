@@ -4,19 +4,19 @@ import {
   useCanvasTransformBatch,
   type CanvasTransformBatchActions,
 } from '@/features/canvas/transform-batch'
-import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
+import type { CanvasCommandDTO, CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
-const NODE_A = 'aaaaaaaa-0000-4000-8000-000000000001'
-const NODE_B = 'aaaaaaaa-0000-4000-8000-000000000002'
-const GROUP_G = 'bbbbbbbb-0000-4000-8000-000000000004'
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const NODE_A = 'aaaaaaaa-0000-4000-8000-000000000001' as UUIDString
+const NODE_B = 'aaaaaaaa-0000-4000-8000-000000000002' as UUIDString
+const GROUP_G = 'bbbbbbbb-0000-4000-8000-000000000004' as UUIDString
 
 function snapshot(): CanvasSnapshotDTO {
   return {
     document: {
       id: CANVAS_ID,
       title: 'Board',
-      version: '0',
+      revision: '0',
       createdAt: '2026-08-10T00:00:00Z',
       updatedAt: '2026-08-10T00:00:00Z',
     },
@@ -46,7 +46,7 @@ function snapshot(): CanvasSnapshotDTO {
       // 着色 Body 顶部 = y + 头部 20 + 间隙 6 = 26。
       transform: { x: 0, y: 0, width: 800, height: 700 },
     }],
-    links: [],
+    references: [],
   }
 }
 
@@ -112,8 +112,9 @@ describe('useCanvasTransformBatch', () => {
     })
     expect(executeCommands).toHaveBeenCalledTimes(1)
     expect(firstCommands(executeCommands)).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_A, transform: transform(30, 40) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_A,
+      transform: transform(30, 40),
     }])
   })
 
@@ -130,8 +131,9 @@ describe('useCanvasTransformBatch', () => {
 
     expect(executeCommands).toHaveBeenCalledTimes(1)
     expect(firstCommands(executeCommands)).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_B, transform: transform(760, 100) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_B,
+      transform: transform(760, 100),
     }])
     // 提交成功后清理对应草稿。
     expect(getDrafts()[NODE_B]).toBeUndefined()
@@ -142,7 +144,7 @@ describe('useCanvasTransformBatch', () => {
     const { result } = createHarness(executeCommands)
 
     act(() => {
-      // 左边界恰好贴住 Group 右边界：无正面积交集，必须携带 UNGROUP。
+      // 左边界恰好贴住 Group 右边界：无正面积交集，必须携带 UNGROUP (SET_NODE_GROUP)。
       result.current.moveNodes([{ id: NODE_B, kind: 'resource', transform: transform(800, 100) }])
       result.current.flushTransforms()
     })
@@ -150,13 +152,15 @@ describe('useCanvasTransformBatch', () => {
 
     expect(firstCommands(executeCommands)).toEqual([
       {
-        type: 'UPDATE_NODE_TRANSFORMS',
-        updates: [{ nodeId: NODE_B, transform: transform(800, 100) }],
+        type: 'UPDATE_NODE_TRANSFORM',
+        nodeId: NODE_B,
+        transform: transform(800, 100),
       },
       {
-        type: 'UNGROUP',
-        groupId: GROUP_G,
-        memberNodeIds: [NODE_B],
+        type: 'SET_NODE_GROUP',
+        nodeId: NODE_B,
+        groupId: null,
+        expectedGroupId: GROUP_G,
       },
     ])
   })
@@ -174,18 +178,26 @@ describe('useCanvasTransformBatch', () => {
     await act(async () => {})
 
     expect(firstCommands(executeCommands)).toEqual([
-      { type: 'MOVE_GROUP', groupId: GROUP_G, x: 10, y: 20 },
       {
-        type: 'UPDATE_NODE_TRANSFORMS',
-        updates: [
-          { nodeId: NODE_A, transform: transform(50, 60) },
-          { nodeId: NODE_B, transform: transform(800, 100) },
-        ],
+        type: 'UPDATE_NODE_TRANSFORM',
+        nodeId: NODE_A,
+        transform: transform(50, 60),
       },
       {
-        type: 'UNGROUP',
+        type: 'UPDATE_NODE_TRANSFORM',
+        nodeId: NODE_B,
+        transform: transform(800, 100),
+      },
+      {
+        type: 'UPDATE_GROUP_TRANSFORM',
         groupId: GROUP_G,
-        memberNodeIds: [NODE_B],
+        transform: { x: 10, y: 20, width: 800, height: 700 },
+      },
+      {
+        type: 'SET_NODE_GROUP',
+        nodeId: NODE_B,
+        groupId: null,
+        expectedGroupId: GROUP_G,
       },
     ])
     expect(getDrafts()[`group:${GROUP_G}`]).toBeUndefined()
@@ -216,8 +228,9 @@ describe('useCanvasTransformBatch', () => {
 
     expect(executeCommands).toHaveBeenCalledTimes(2)
     expect(firstCommands(executeCommands)).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_A, transform: transform(50, 60) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_A,
+      transform: transform(50, 60),
     }])
     expect(executeCommands.mock.calls[1]?.[0]).toEqual(firstCommands(executeCommands))
     // 重试成功后清理草稿。
@@ -258,14 +271,11 @@ describe('useCanvasTransformBatch', () => {
 
     expect(executeCommands).toHaveBeenCalledTimes(2)
     const retry = executeCommands.mock.calls[1]?.[0] as CanvasCommandDTO[]
-    const update = retry.find((command) => command.type === 'UPDATE_NODE_TRANSFORMS')
-    expect(update).toEqual({
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: expect.arrayContaining([
-        { nodeId: NODE_A, transform: transform(10, 20) },
-        { nodeId: NODE_B, transform: transform(100, 100) },
-      ]),
-    })
+    expect(retry).toEqual(expect.arrayContaining([
+      { type: 'UPDATE_NODE_TRANSFORM', nodeId: NODE_A, transform: transform(10, 20) },
+      { type: 'UPDATE_NODE_TRANSFORM', nodeId: NODE_B, transform: transform(100, 100) },
+    ]))
+    expect(retry).toHaveLength(2)
   })
 
   it('never auto-retries a persistently failing flush', async () => {
@@ -315,8 +325,9 @@ describe('useCanvasTransformBatch', () => {
     // 成功后会补发在途期间累积的新批次（drain）。
     await waitFor(() => expect(executeCommands).toHaveBeenCalledTimes(2))
     expect(executeCommands.mock.calls[1]?.[0]).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_A, transform: transform(30, 40) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_A,
+      transform: transform(30, 40),
     }])
     await waitFor(() => expect(getDrafts()[NODE_A]).toBeUndefined())
   })
@@ -347,8 +358,9 @@ describe('useCanvasTransformBatch', () => {
     })
     await waitFor(() => expect(executeCommands).toHaveBeenCalledTimes(2))
     expect(executeCommands.mock.calls[1]?.[0]).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_B, transform: transform(30, 40) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_B,
+      transform: transform(30, 40),
     }])
     await waitFor(() => expect(getDrafts()[NODE_B]).toBeUndefined())
 
@@ -392,8 +404,9 @@ describe('useCanvasTransformBatch', () => {
     await act(async () => {})
     expect(executeCommands).toHaveBeenCalledTimes(2)
     expect(executeCommands.mock.calls[1]?.[0]).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_A, transform: transform(50, 60) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_A,
+      transform: transform(50, 60),
     }])
     expect(getDrafts()[NODE_A]).toBeUndefined()
   })
@@ -409,19 +422,21 @@ describe('useCanvasTransformBatch', () => {
     const { result, getDrafts } = createHarness(executeCommands)
 
     act(() => {
-      // 批次 A：拖出组外 → 携带 UNGROUP。
+      // 批次 A：拖出组外 → 携带 UNGROUP (SET_NODE_GROUP)。
       result.current.moveNodes([{ id: NODE_B, kind: 'resource', transform: transform(800, 100) }])
       result.current.flushTransforms()
     })
     expect(firstCommands(executeCommands)).toEqual([
       {
-        type: 'UPDATE_NODE_TRANSFORMS',
-        updates: [{ nodeId: NODE_B, transform: transform(800, 100) }],
+        type: 'UPDATE_NODE_TRANSFORM',
+        nodeId: NODE_B,
+        transform: transform(800, 100),
       },
       {
-        type: 'UNGROUP',
-        groupId: GROUP_G,
-        memberNodeIds: [NODE_B],
+        type: 'SET_NODE_GROUP',
+        nodeId: NODE_B,
+        groupId: null,
+        expectedGroupId: GROUP_G,
       },
     ])
 
@@ -446,8 +461,9 @@ describe('useCanvasTransformBatch', () => {
     await act(async () => {})
     expect(executeCommands).toHaveBeenCalledTimes(2)
     expect(executeCommands.mock.calls[1]?.[0]).toEqual([{
-      type: 'UPDATE_NODE_TRANSFORMS',
-      updates: [{ nodeId: NODE_B, transform: transform(100, 50) }],
+      type: 'UPDATE_NODE_TRANSFORM',
+      nodeId: NODE_B,
+      transform: transform(100, 50),
     }])
     expect(getDrafts()[NODE_B]).toBeUndefined()
   })

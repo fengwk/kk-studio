@@ -1,9 +1,9 @@
 import type { CanvasSnapshot, Group, ResourceNode } from '@/features/canvas/domain'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
-import type { CanvasFunctionModelDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
 
 export type ContextMenuTarget =
-  | { kind: 'resource'; node: ResourceNode; model: CanvasFunctionModelDTO | null }
+  | { kind: 'resource'; node: ResourceNode; model: CanvasFunctionDefinitionDTO | null }
   | { kind: 'group'; group: Group }
   | { kind: 'multi'; nodeIds: string[]; hasUngroupedResource: boolean }
 
@@ -22,7 +22,7 @@ export interface CanvasContextMenuState {
 export function buildContextMenuTarget(
   snapshot: CanvasSnapshot,
   nodeIds: string[],
-  models: readonly CanvasFunctionModelDTO[],
+  models: readonly CanvasFunctionDefinitionDTO[],
 ): ContextMenuTarget | null {
   if (nodeIds.length === 1) {
     const id = nodeIds[0] as string
@@ -39,7 +39,7 @@ export function buildContextMenuTarget(
       kind: 'resource',
       node,
       model: node.function
-        ? models.find((model) => model.key === node.function?.modelKey) ?? null
+        ? models.find((def) => def.name === (node.function?.name ?? node.function?.modelKey)) ?? null
         : null,
     }
   }

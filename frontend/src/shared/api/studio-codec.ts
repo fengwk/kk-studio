@@ -1,12 +1,16 @@
 import { ApiError } from '@/shared/api/client'
-import type { CanvasVersion } from '@/shared/api/contracts/base'
-import { isCanvasVersion } from '@/shared/lib/canvas-version'
+import type { CanvasRevision } from '@/shared/api/contracts/base'
+import { isCanvasRevision } from '@/shared/lib/canvas-version'
 import type {
+  CanvasConflictDTO,
   CanvasDocumentDTO,
+  CanvasFunctionDefinitionDTO,
+  CanvasFunctionOutputDTO,
+  CanvasFunctionReferencePolicyDTO,
   CanvasGroupPatchDTO,
-  CanvasLinkPatchDTO,
   CanvasNodePatchDTO,
   CanvasPatchDTO,
+  CanvasReferenceDTO,
   CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
   UUIDString,
@@ -58,8 +62,8 @@ function requireArray(value: unknown, path: string): unknown[] {
   return value
 }
 
-function requireCanvasVersion(value: unknown, path: string): CanvasVersion {
-  if (!isCanvasVersion(value)) {
+function requireCanvasRevision(value: unknown, path: string): CanvasRevision {
+  if (!isCanvasRevision(value)) {
     throw invalidPayload(`${path} must be a canonical non-negative decimal string`)
   }
   return value
@@ -74,11 +78,11 @@ function requireResourceKind(value: unknown, path: string): CanvasResourceNodeDT
   return value as CanvasResourceNodeDTO['resources'][number]['kind']
 }
 
-const RUN_STATUSES = ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'] as const
+const RUN_STATUSES = ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'] as const
 
 function requireRunStatus(value: unknown, path: string): NonNullable<CanvasResourceNodeDTO['run']>['status'] {
   if (typeof value !== 'string' || !(RUN_STATUSES as readonly string[]).includes(value)) {
-    throw invalidPayload(`${path} must be one of READY, RUNNING, SUCCEEDED, FAILED, CANCELLED`)
+    throw invalidPayload(`${path} must be one of READY, RUNNING, SUCCEEDED, FAILED, CANCELLED, UNKNOWN`)
   }
   return value as NonNullable<CanvasResourceNodeDTO['run']>['status']
 }
@@ -132,7 +136,7 @@ function decodeLong(value: unknown, path: string): number | null {
   if (!decodeNullable(value, path)) {
     return null
   }
-  if (!isCanvasVersion(value)) {
+  if (!isCanvasRevision(value)) {
     throw invalidPayload(`${path} must be a canonical non-negative decimal string or null`)
   }
   const parsed = Number(value)
@@ -147,7 +151,7 @@ export function decodeCanvasDocument(value: unknown): CanvasDocumentDTO {
   return {
     id: requireUuid(candidate.id, 'document.id'),
     title: requireString(candidate.title, 'document.title'),
-    version: requireCanvasVersion(candidate.version, 'document.version'),
+    revision: requireCanvasRevision(candidate.revision ?? candidate.version, 'document.revision'),
     createdAt: requireString(candidate.createdAt, 'document.createdAt'),
     updatedAt: requireString(candidate.updatedAt, 'document.updatedAt'),
   }
@@ -181,7 +185,7 @@ function decodeNullableUuid(value: unknown, path: string): UUIDString | null {
   return decodeNullable(value, path) ? requireUuid(value, path) : null
 }
 
-function decodeCanvasResourceNode(value: unknown): CanvasResourceNodeDTO {
+export function decodeCanvasResourceNode(value: unknown): CanvasResourceNodeDTO {
   const candidate = requireRecord(value, 'node')
   return {
     id: requireUuid(candidate.id, 'node.id'),
@@ -209,13 +213,20 @@ function decodeTransform(value: unknown, path: string): CanvasResourceNodeDTO['t
 
 function decodeFunction(value: unknown): NonNullable<CanvasResourceNodeDTO['function']> {
   const candidate = requireRecord(value, 'node.function')
+  if ('name' in candidate && 'args' in candidate) {
+    return {
+      name: requireString(candidate.name, 'node.function.name'),
+      args: requireRecord(candidate.args, 'node.function.args'),
+    }
+  }
+  // 向后兼容旧模型格式
   return {
-    modelKey: requireString(candidate.modelKey, 'node.function.modelKey'),
-    configJson: requireString(candidate.configJson, 'node.function.configJson'),
+    name: requireString(candidate.modelKey ?? '', 'node.function.name'),
+    args: { configJson: candidate.configJson },
   }
 }
 
-function decodeFunctionRun(value: unknown): NonNullable<CanvasResourceNodeDTO['run']> {
+export function decodeFunctionRun(value: unknown): NonNullable<CanvasResourceNodeDTO['run']> {
   const candidate = requireRecord(value, 'node.run')
   return {
     nodeId: requireUuid(candidate.nodeId, 'node.run.nodeId'),
@@ -227,32 +238,33 @@ function decodeFunctionRun(value: unknown): NonNullable<CanvasResourceNodeDTO['r
   }
 }
 
+export function decodeCanvasReference(value: unknown): CanvasReferenceDTO {
+  const candidate = requireRecord(value, 'reference')
+  return {
+    canvasId: requireUuid(candidate.canvasId, 'reference.canvasId'),
+    sourceNodeId: requireUuid(candidate.sourceNodeId, 'reference.sourceNodeId'),
+    targetNodeId: requireUuid(candidate.targetNodeId, 'reference.targetNodeId'),
+    index: requireInt(candidate.index, 'reference.index'),
+  }
+}
+
 export function decodeCanvasSnapshot(value: unknown): CanvasSnapshotDTO {
   const candidate = requireRecord(value, 'snapshot')
   return {
     document: decodeCanvasDocument(candidate.document),
     nodes: requireArray(candidate.nodes, 'snapshot.nodes').map(decodeCanvasResourceNode),
     groups: requireArray(candidate.groups, 'snapshot.groups').map(decodeCanvasGroup),
-    links: requireArray(candidate.links, 'snapshot.links').map(decodeCanvasLink),
+    references: candidate.references ? requireArray(candidate.references, 'snapshot.references').map(decodeCanvasReference) : [],
   }
 }
 
-function decodeCanvasGroup(value: unknown): CanvasSnapshotDTO['groups'][number] {
+export function decodeCanvasGroup(value: unknown): CanvasSnapshotDTO['groups'][number] {
   const candidate = requireRecord(value, 'group')
   return {
     id: requireUuid(candidate.id, 'group.id'),
     canvasId: requireUuid(candidate.canvasId, 'group.canvasId'),
     title: requireString(candidate.title, 'group.title'),
     transform: decodeTransform(candidate.transform, 'group.transform'),
-  }
-}
-
-function decodeCanvasLink(value: unknown): CanvasSnapshotDTO['links'][number] {
-  const candidate = requireRecord(value, 'link')
-  return {
-    canvasId: requireUuid(candidate.canvasId, 'link.canvasId'),
-    sourceNodeId: requireUuid(candidate.sourceNodeId, 'link.sourceNodeId'),
-    targetNodeId: requireUuid(candidate.targetNodeId, 'link.targetNodeId'),
   }
 }
 
@@ -274,26 +286,89 @@ function decodeCanvasNodePatch(value: unknown): CanvasNodePatchDTO {
   return { op: 'UPSERT', node: decodeCanvasResourceNode(candidate.node) }
 }
 
-function decodeCanvasLinkPatch(value: unknown): CanvasLinkPatchDTO {
-  const candidate = requireRecord(value, 'link patch')
-  const op = requirePatchOp(candidate.op, 'link patch.op')
-  if (op === 'REMOVE') {
-    return {
-      op,
-      sourceNodeId: requireUuid(candidate.sourceNodeId, 'link patch.sourceNodeId'),
-      targetNodeId: requireUuid(candidate.targetNodeId, 'link patch.targetNodeId'),
-    }
-  }
-  return { op: 'UPSERT', link: decodeCanvasLink(candidate.link) }
-}
-
 export function decodeCanvasPatch(value: unknown): CanvasPatchDTO {
   const candidate = requireRecord(value, 'patch')
   return {
-    baseVersion: requireCanvasVersion(candidate.baseVersion, 'patch.baseVersion'),
-    version: requireCanvasVersion(candidate.version, 'patch.version'),
+    revision: requireCanvasRevision(candidate.revision ?? candidate.version, 'patch.revision'),
     groups: requireArray(candidate.groups, 'patch.groups').map(decodeCanvasGroupPatch),
     nodes: requireArray(candidate.nodes, 'patch.nodes').map(decodeCanvasNodePatch),
-    links: requireArray(candidate.links, 'patch.links').map(decodeCanvasLinkPatch),
+  }
+}
+
+export function decodeCanvasConflict(value: unknown): CanvasConflictDTO {
+  const candidate = requireRecord(value, 'conflict')
+  const kind = requireString(candidate.kind, 'conflict.kind')
+  switch (kind) {
+    case 'TARGET_MISSING':
+    case 'TARGET_PRESENT':
+      return {
+        kind,
+        targetId: requireString(candidate.targetId, 'conflict.targetId'),
+        target: requireString(candidate.target, 'conflict.target') as 'NODE' | 'GROUP',
+      }
+    case 'STALE_NODE':
+      return {
+        kind,
+        nodeId: requireString(candidate.nodeId, 'conflict.nodeId'),
+        group: requireString(candidate.group, 'conflict.group'),
+        current: decodeCanvasResourceNode(candidate.current),
+      }
+    case 'STALE_GROUP':
+      return {
+        kind,
+        groupId: requireString(candidate.groupId, 'conflict.groupId'),
+        current: decodeCanvasGroup(candidate.current),
+      }
+    case 'NODE_RUNNING':
+      return {
+        kind,
+        nodeId: requireString(candidate.nodeId, 'conflict.nodeId'),
+        run: decodeFunctionRun(candidate.run),
+      }
+    case 'NODE_REFERENCED':
+      return {
+        kind,
+        nodeId: requireString(candidate.nodeId, 'conflict.nodeId'),
+        referencingNodeIds: requireArray(candidate.referencingNodeIds, 'conflict.referencingNodeIds').map((item, idx) =>
+          requireString(item, `conflict.referencingNodeIds[${idx}]`),
+        ),
+      }
+    default:
+      throw invalidPayload(`unknown conflict kind: ${kind}`)
+  }
+}
+
+function decodeReferencePolicy(value: unknown): CanvasFunctionReferencePolicyDTO {
+  const candidate = requireRecord(value, 'referencePolicy')
+  return {
+    allowedKinds: requireArray(candidate.allowedKinds, 'referencePolicy.allowedKinds').map((k, i) =>
+      requireResourceKind(k, `referencePolicy.allowedKinds[${i}]`),
+    ),
+    maxReferences: decodeNullableInt(candidate.maxReferences, 'referencePolicy.maxReferences'),
+    maxByKind: (candidate.maxByKind ?? {}) as Partial<Record<CanvasResourceNodeDTO['resources'][number]['kind'], number>>,
+  }
+}
+
+function decodeFunctionOutput(value: unknown, path: string): CanvasFunctionOutputDTO {
+  const candidate = requireRecord(value, path)
+  return {
+    kind: requireString(candidate.kind, `${path}.kind`),
+    name: decodeNullableString(candidate.name, `${path}.name`),
+  }
+}
+
+export function decodeCanvasFunctionDefinition(value: unknown): CanvasFunctionDefinitionDTO {
+  const candidate = requireRecord(value, 'function definition')
+  const outputs = Array.isArray(candidate.outputs)
+    ? candidate.outputs.map((out, idx) => decodeFunctionOutput(out, `function.outputs[${idx}]`))
+    : (candidate.outputKind ? [{ kind: String(candidate.outputKind), name: null }] : [])
+  return {
+    name: requireString(candidate.name, 'function.name'),
+    description: decodeNullableString(candidate.description, 'function.description'),
+    argsSchema: requireRecord(candidate.argsSchema ?? {}, 'function.argsSchema'),
+    outputs,
+    referencePolicy: candidate.referencePolicy ? decodeReferencePolicy(candidate.referencePolicy) : null,
+    available: typeof candidate.available === 'boolean' ? candidate.available : true,
+    unavailableReason: decodeNullableString(candidate.unavailableReason, 'function.unavailableReason'),
   }
 }

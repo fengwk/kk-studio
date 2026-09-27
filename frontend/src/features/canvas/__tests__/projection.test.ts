@@ -5,18 +5,18 @@ import {
   projectEdges,
   projectNodes,
 } from '@/features/canvas/projection'
-import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
-const NODE_IMAGE = 'aaaaaaaa-1111-4111-8111-111111111111'
-const NODE_NOTE = 'bbbbbbbb-2222-4222-8222-222222222222'
-const GROUP_A = 'cccccccc-3333-4333-8333-333333333333'
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const NODE_IMAGE = 'aaaaaaaa-1111-4111-8111-111111111111' as UUIDString
+const NODE_NOTE = 'bbbbbbbb-2222-4222-8222-222222222222' as UUIDString
+const GROUP_A = 'cccccccc-3333-4333-8333-333333333333' as UUIDString
 
 const snapshotDTO: CanvasSnapshotDTO = {
   document: {
     id: CANVAS_ID,
     title: 'Board',
-    version: '3',
+    revision: '3',
     createdAt: '2026-08-10T00:00:00Z',
     updatedAt: '2026-08-10T00:00:00Z',
   },
@@ -27,11 +27,11 @@ const snapshotDTO: CanvasSnapshotDTO = {
     transform: { x: 20, y: 30, width: 320, height: 260 },
     groupId: GROUP_A,
     resources: [{
-      id: 'dddddddd-4444-4444-8444-444444444444',
+      id: 'dddddddd-4444-4444-8444-444444444444' as UUIDString,
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_IMAGE,
       resourceIndex: 0,
-      blobId: 'blob-image',
+      blobId: 'blob-image' as UUIDString,
       name: 'image.png',
       textContent: null,
       kind: 'IMAGE',
@@ -43,12 +43,15 @@ const snapshotDTO: CanvasSnapshotDTO = {
       createdAt: '2026-08-10T00:00:00Z',
     }],
     function: {
-      modelKey: 'fake-image',
-      configJson: '{"prompt":{"segments":[{"type":"TEXT","text":"x"}]},"parameters":{}}',
+      name: 'fake-image',
+      args: {
+        prompt: { segments: [{ type: 'TEXT', text: 'x' }] },
+        parameters: {},
+      },
     },
     run: {
       nodeId: NODE_IMAGE,
-      requestId: 'c3c3c3c3-3333-4333-8333-333333333331',
+      requestId: 'c3c3c3c3-3333-4333-8333-333333333331' as UUIDString,
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
@@ -61,7 +64,7 @@ const snapshotDTO: CanvasSnapshotDTO = {
     transform: { x: 600, y: 30, width: 320, height: 260 },
     groupId: null,
     resources: [{
-      id: 'eeeeeeee-5555-4555-8555-555555555555',
+      id: 'eeeeeeee-5555-4555-8555-555555555555' as UUIDString,
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_NOTE,
       resourceIndex: 0,
@@ -76,7 +79,7 @@ const snapshotDTO: CanvasSnapshotDTO = {
       durationMs: null,
       createdAt: '2026-08-10T00:00:00Z',
     }, {
-      id: 'ffffffff-6666-4666-8666-666666666666',
+      id: 'ffffffff-6666-4666-8666-666666666666' as UUIDString,
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_NOTE,
       resourceIndex: 1,
@@ -100,10 +103,11 @@ const snapshotDTO: CanvasSnapshotDTO = {
     title: 'group',
     transform: { x: 0, y: 0, width: 500, height: 400 },
   }],
-  links: [{
+  references: [{
     canvasId: CANVAS_ID,
     sourceNodeId: NODE_NOTE,
     targetNodeId: NODE_IMAGE,
+    index: 0,
   }],
 }
 
@@ -111,10 +115,10 @@ describe('Canvas snapshot projection', () => {
   it('projects DTOs into clean ResourceNode/Resource/Function/Run/Group/Link values', () => {
     const snapshot = projectCanvasSnapshot(snapshotDTO)
 
-    expect(snapshot.document.version).toBe('3')
+    expect(snapshot.document.revision).toBe('3')
     expect(snapshot.resourceNodes[0]).toMatchObject({
       id: NODE_IMAGE,
-      function: { modelKey: 'fake-image' },
+      function: { name: 'fake-image' },
       run: { requestId: 'c3c3c3c3-3333-4333-8333-333333333331', status: 'RUNNING' },
       resources: [{
         id: 'dddddddd-4444-4444-8444-444444444444',
@@ -136,6 +140,12 @@ describe('Canvas snapshot projection', () => {
       sourceNodeId: NODE_NOTE,
       targetNodeId: NODE_IMAGE,
     })
+    expect(snapshot.references[0]).toEqual({
+      canvasId: CANVAS_ID,
+      sourceNodeId: NODE_NOTE,
+      targetNodeId: NODE_IMAGE,
+      index: 0,
+    })
   })
 
   it('projects a single media renderer at its source-ratio size', () => {
@@ -143,19 +153,19 @@ describe('Canvas snapshot projection', () => {
       ...snapshotDTO,
       nodes: [{
         ...snapshotDTO.nodes[0],
-        id: 'aaaaaaaa-7777-4777-8777-777777777777',
+        id: 'aaaaaaaa-7777-4777-8777-777777777777' as UUIDString,
         groupId: null,
         function: null,
         run: null,
         resources: [{
           ...snapshotDTO.nodes[0].resources[0],
-          id: 'aaaaaaaa-8888-4888-8888-888888888888',
+          id: 'aaaaaaaa-8888-4888-8888-888888888888' as UUIDString,
           width: 1122,
           height: 1402,
         }],
       }],
       groups: [],
-      links: [],
+      references: [],
     })
     expect(snapshot.resourceNodes[0]?.transform).toEqual({
       x: 20,

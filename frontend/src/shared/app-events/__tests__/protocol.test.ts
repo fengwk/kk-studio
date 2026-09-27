@@ -103,16 +103,16 @@ describe('decodeServerMessage', () => {
           version: 1,
           type: 'event',
           resource: canvasResource,
-          name: 'version',
-          data: { version: '3' },
+          name: 'revision',
+          data: { revision: '3' },
           cursor: '3',
         }),
       ),
     ).toEqual({
       type: 'event',
       resource: canvasResource,
-      name: 'version',
-      data: { version: '3' },
+      name: 'revision',
+      data: { revision: '3' },
       cursor: '3',
     })
     expect(
@@ -272,11 +272,11 @@ describe('decodeServerMessage', () => {
         JSON.stringify({ ...threadBase, name: 'unknown_event', data: { version: '3' }, cursor: '3' }),
       ),
     ).toBeNull()
-    // version data 必须是精确单字段 {version}。
+    // revision data 必须是精确单字段 {revision}。
     const canvasBase = { version: 1, type: 'event', resource: canvasResource }
     expect(
       decodeServerMessage(
-        JSON.stringify({ ...canvasBase, name: 'version', data: { version: '01' }, cursor: '01' }),
+        JSON.stringify({ ...canvasBase, name: 'revision', data: { revision: '01' }, cursor: '01' }),
       ),
     ).toBeNull()
     // realtime data 必须是 JSON 对象（字符串/数组/数字拒绝）。
@@ -517,14 +517,14 @@ describe('backend wire samples', () => {
     })
   })
 
-  it('decodes the backend canvas version event frame', () => {
+  it('decodes the backend canvas revision event frame', () => {
     const raw =
-      `{"version":1,"type":"event","resource":{"kind":"canvas","id":"${CANVAS_ID}"},"name":"version","data":{"version":"7"},"cursor":"7"}`
+      `{"version":1,"type":"event","resource":{"kind":"canvas","id":"${CANVAS_ID}"},"name":"revision","data":{"revision":"7"},"cursor":"7"}`
     expect(decodeServerMessage(raw)).toEqual({
       type: 'event',
       resource: { kind: 'canvas', id: CANVAS_ID },
-      name: 'version',
-      data: { version: '7' },
+      name: 'revision',
+      data: { revision: '7' },
       cursor: '7',
     })
   })
