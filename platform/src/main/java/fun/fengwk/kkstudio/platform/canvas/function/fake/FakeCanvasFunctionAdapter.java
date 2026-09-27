@@ -8,7 +8,9 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 
 import java.io.IOException;
@@ -98,8 +100,24 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
           }
           """);
 
+  private static final JsonObject REPORT_ARGS_SCHEMA =
+      CanvasJson.parseObject(
+          """
+          {
+            "type": "object",
+            "description": "Fake report parameters",
+            "additionalProperties": false,
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Prompt text"
+              }
+            }
+          }
+          """);
+
   private static final CanvasFunctionDefinition IMAGE_FUNCTION =
-      new CanvasFunctionDefinition(
+      CanvasFunctionDefinition.of(
           "fake-image",
           "Fake Image",
           IMAGE_ARGS_SCHEMA,
@@ -107,7 +125,7 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 12, Map.of()));
 
   private static final CanvasFunctionDefinition VIDEO_FUNCTION =
-      new CanvasFunctionDefinition(
+      CanvasFunctionDefinition.of(
           "fake-video",
           "Fake Video",
           VIDEO_ARGS_SCHEMA,
@@ -117,9 +135,19 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
               12,
               Map.of(CanvasResourceKind.VIDEO, 3, CanvasResourceKind.AUDIO, 3)));
 
+  private static final CanvasFunctionDefinition REPORT_FUNCTION =
+      new CanvasFunctionDefinition(
+          "fake-report",
+          "Fake Report",
+          REPORT_ARGS_SCHEMA,
+          List.of(
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.TEXT, "report.txt"),
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "chart.png")),
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 12, Map.of()));
+
   @Override
   public List<CanvasFunctionDefinition> functions() {
-    return List.of(IMAGE_FUNCTION, VIDEO_FUNCTION);
+    return List.of(IMAGE_FUNCTION, VIDEO_FUNCTION, REPORT_FUNCTION);
   }
 
   @Override
@@ -135,7 +163,8 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
   @Override
   public void preflight(CanvasFunctionFrozenRun run) {
     if (!run.definition().name().equals(IMAGE_FUNCTION.name())
-        && !run.definition().name().equals(VIDEO_FUNCTION.name())) {
+        && !run.definition().name().equals(VIDEO_FUNCTION.name())
+        && !run.definition().name().equals(REPORT_FUNCTION.name())) {
       throw new IllegalArgumentException("unsupported fake function: " + run.definition().name());
     }
   }
@@ -147,10 +176,24 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
-    context.checkpoint("FAKE_RENDERING", Map.of("fixture", fixture(run)));
-    ClassPathResource resource = new ClassPathResource(fixture(run));
+    if (run.definition().name().equals(REPORT_FUNCTION.name())) {
+      context.checkpoint("FAKE_REPORTING", Map.of("fixture", IMAGE_FIXTURE));
+      CanvasFunctionFrozenOutput textOutput = run.output(0);
+      CanvasFunctionFrozenOutput imageOutput = run.output(1);
+      UUID textId = context.materializeTextOutput(textOutput, "Fake report for " + run.nodeName());
+      ClassPathResource resource = new ClassPathResource(IMAGE_FIXTURE);
+      try (InputStream content = resource.getInputStream()) {
+        UUID imageId = context.materializeOutput(imageOutput, content);
+        return List.of(textId, imageId);
+      } catch (IOException exception) {
+        throw new UncheckedIOException("failed to read fake Canvas Function fixture", exception);
+      }
+    }
+    String fixture = fixture(run);
+    context.checkpoint("FAKE_RENDERING", Map.of("fixture", fixture));
+    ClassPathResource resource = new ClassPathResource(fixture);
     try (InputStream content = resource.getInputStream()) {
-      UUID resourceId = context.materializeTarget(run.targetResourceId(), content);
+      UUID resourceId = context.materializeOutput(run.output(0), content);
       return List.of(resourceId);
     } catch (IOException exception) {
       throw new UncheckedIOException("failed to read fake Canvas Function fixture", exception);
@@ -158,8 +201,6 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   private static String fixture(CanvasFunctionFrozenRun run) {
-    return run.definition().outputKind() == CanvasResourceKind.IMAGE
-        ? IMAGE_FIXTURE
-        : VIDEO_FIXTURE;
+    return run.output(0).kind() == CanvasResourceKind.IMAGE ? IMAGE_FIXTURE : VIDEO_FIXTURE;
   }
 }

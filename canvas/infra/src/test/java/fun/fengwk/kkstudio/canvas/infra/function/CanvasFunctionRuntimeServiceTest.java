@@ -188,7 +188,7 @@ class CanvasFunctionRuntimeServiceTest {
   }
 
   private static CanvasFunctionDefinition definition(String name) {
-    return new CanvasFunctionDefinition(
+    return CanvasFunctionDefinition.of(
         name,
         "Description",
         CanvasJson.parseObject(

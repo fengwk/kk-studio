@@ -20,26 +20,33 @@ import java.util.UUID;
 /**
  * Canvas Function args 的严格 JSON Schema 子集。
  *
- * <p>Schema 根必须是 object：只允许 {@code type/description/properties/required/additionalProperties}；属性只允许
- * {@code type/description/enum/default/minimum/maximum/items/minItems/maxItems}。{@code
- * additionalProperties} 必须显式为 {@code false}，因此未知字段一律拒绝；任何未在该集合内的关键字都会在注册期 fail
- * closed，插件无法声明核心不校验的约束。
+ * <p>Schema 根必须是 object；每个 schema 节点只允许 {@code
+ * type/description/properties/required/additionalProperties/enum/default/minimum/maximum/items/minItems/maxItems}，任何其它关键字都会在注册期
+ * fail closed，插件无法声明核心不校验的约束。object 必须显式声明 {@code additionalProperties: false} 与 {@code
+ * properties}，因此每一层 object 的未知字段都被拒绝。
+ *
+ * <p>object 与 array 可以任意递归嵌套（{@code MAX_DEPTH} 内），使 args 可以表达嵌套业务参数；嵌套深度与数组长度都有界，加上 Core 对 args 的
+ * JSON 深度/长度上限，冻结计划不会无界增长。
  *
  * <p>核心保留的引用值用 {@code "type":"resourceReference"} 声明，它必须恰好是 {@code {type,nodeId,index}} 形状，与 {@link
- * fun.fengwk.kkstudio.canvas.CanvasFunction} 的引用投影一致。{@code number} 允许整数与小数，{@code integer} 只允许整数值。
- * 数组必须有 {@code items} 且成员数量有界，嵌套对象被拒绝，因此冻结 manifest 与输出计划都不会无界增长。
+ * fun.fengwk.kkstudio.canvas.CanvasFunction} 的引用投影一致，并且可以出现在任意嵌套位置。{@code number} 允许整数与小数，{@code
+ * integer} 只允许整数值。
  */
 public final class CanvasFunctionArgsSchema {
 
   /** 单个数组参数的成员数量上限。 */
   public static final int MAX_ITEMS = 32;
 
-  private static final Set<String> ROOT_KEYWORDS =
-      Set.of("type", "description", "properties", "required", "additionalProperties");
-  private static final Set<String> PROPERTY_KEYWORDS =
+  /** 嵌套 object/array 的最大深度。 */
+  public static final int MAX_DEPTH = 8;
+
+  private static final Set<String> NODE_KEYWORDS =
       Set.of(
           "type",
           "description",
+          "properties",
+          "required",
+          "additionalProperties",
           "enum",
           "default",
           "minimum",
@@ -49,6 +56,8 @@ public final class CanvasFunctionArgsSchema {
           "maxItems");
   private static final Set<String> SCALAR_TYPES = Set.of("string", "integer", "number", "boolean");
   private static final Set<String> ARRAY_KEYWORDS = Set.of("items", "minItems", "maxItems");
+  private static final Set<String> OBJECT_KEYWORDS =
+      Set.of("properties", "required", "additionalProperties");
   private static final String OBJECT = "object";
   private static final String ARRAY = "array";
   private static final String REFERENCE_TYPE = "resourceReference";
@@ -59,94 +68,86 @@ public final class CanvasFunctionArgsSchema {
   /** 校验 schema 本身；关键字、类型、必填与默认值不一致时抛 {@link IllegalArgumentException}。 */
   public static void validate(JsonObject schema) {
     Objects.requireNonNull(schema, "argsSchema");
-    requireKeywords(schema, ROOT_KEYWORDS, "argsSchema");
     if (!OBJECT.equals(type(schema, "argsSchema"))) {
       throw new IllegalArgumentException("argsSchema.type must be object");
     }
-    optionalText(schema, "description", "argsSchema.description");
-    requireAdditionalPropertiesFalse(schema);
-    JsonObject properties = requireObject(schema, "properties", "argsSchema.properties");
-    Set<String> required = requiredNames(schema);
-    for (Map.Entry<String, CanvasJson> entry : properties.values().entrySet()) {
-      validateProperty(entry.getKey(), entry.getValue(), "argsSchema.properties." + entry.getKey());
-    }
-    for (String name : required) {
-      if (!properties.values().containsKey(name)) {
-        throw new IllegalArgumentException("argsSchema.required must name declared properties");
-      }
-    }
+    validateNode(schema, "argsSchema", 0);
   }
 
   /**
    * 按 schema 严格校验 args，补齐 {@code default} 后返回 canonical object。
    *
-   * <p>返回对象的字段顺序与 schema 声明顺序一致，使冻结文本稳定可比；未知字段、类型错误或越界一律拒绝。
+   * <p>返回对象各层字段顺序与 schema 声明顺序一致，使冻结文本稳定可比；未知字段、类型错误或越界一律拒绝。
    */
   public static JsonObject normalize(JsonObject args, JsonObject schema, String field) {
     Objects.requireNonNull(args, "args");
     validate(schema);
-    JsonObject properties = requireObject(schema, "properties", "argsSchema.properties");
-    Set<String> required = requiredNames(schema);
-    Set<String> unknown = new LinkedHashSet<>(args.values().keySet());
-    unknown.removeAll(properties.values().keySet());
-    if (!unknown.isEmpty()) {
-      throw new IllegalArgumentException(field + " contains unknown fields: " + unknown);
+    return (JsonObject) coerce(args, schema, field, 0);
+  }
+
+  private static void validateNode(JsonObject node, String path, int depth) {
+    if (depth > MAX_DEPTH) {
+      throw new IllegalArgumentException(path + " must not nest deeper than " + MAX_DEPTH);
     }
-    Map<String, CanvasJson> normalized = new LinkedHashMap<>();
+    requireKeywords(node, NODE_KEYWORDS, path);
+    String type = type(node, path);
+    optionalText(node, "description", path + ".description");
+    switch (type) {
+      case REFERENCE_TYPE -> requireKeywords(node, Set.of("type", "description"), path);
+      case ARRAY -> validateArray(node, path, depth);
+      case OBJECT -> validateObject(node, path, depth);
+      default -> {
+        if (SCALAR_TYPES.contains(type)) {
+          validateScalar(node, path);
+        } else {
+          throw new IllegalArgumentException(path + ".type is unsupported: " + type);
+        }
+      }
+    }
+    if (node.values().containsKey("default")) {
+      coerce(node.values().get("default"), node, path + ".default", depth);
+    }
+  }
+
+  private static void validateObject(JsonObject node, String path, int depth) {
+    for (String keyword : ARRAY_KEYWORDS) {
+      if (node.values().containsKey(keyword)) {
+        throw new IllegalArgumentException(path + " object must not declare " + keyword);
+      }
+    }
+    requireAdditionalPropertiesFalse(node, path);
+    JsonObject properties = requireObject(node, "properties", path + ".properties");
+    Set<String> required = requiredNames(node, path);
     for (Map.Entry<String, CanvasJson> entry : properties.values().entrySet()) {
       String name = entry.getKey();
-      JsonObject property = requireObject(entry.getValue(), "argsSchema property");
-      CanvasJson value = args.values().get(name);
-      if (value == null) {
-        if (property.values().containsKey("default")) {
-          normalized.put(name, property.values().get("default"));
-        } else if (required.contains(name)) {
-          throw new IllegalArgumentException(field + "." + name + " is required");
-        }
-        continue;
+      if (name == null || name.isEmpty()) {
+        throw new IllegalArgumentException(path + ".properties names must not be empty");
       }
-      normalized.put(name, coerce(value, property, field + "." + name));
+      validateNode(
+          requireObject(entry.getValue(), path + ".properties." + name),
+          path + ".properties." + name,
+          depth + 1);
     }
-    return new JsonObject(normalized);
-  }
-
-  private static void validateProperty(String name, CanvasJson value, String path) {
-    if (name == null || name.isEmpty()) {
-      throw new IllegalArgumentException("argsSchema property names must not be empty");
-    }
-    JsonObject property = requireObject(value, path);
-    requireKeywords(property, PROPERTY_KEYWORDS, path);
-    String type = type(property, path);
-    optionalText(property, "description", path + ".description");
-    if (REFERENCE_TYPE.equals(type)) {
-      requireKeywords(property, Set.of("type", "description"), path);
-    } else if (ARRAY.equals(type)) {
-      validateArray(property, path);
-    } else if (SCALAR_TYPES.contains(type)) {
-      validateScalar(property, path);
-    } else if (OBJECT.equals(type)) {
-      throw new IllegalArgumentException(
-          path + " must not declare a nested object; use resourceReference or scalars");
-    } else {
-      throw new IllegalArgumentException(path + ".type is unsupported: " + type);
-    }
-    if (property.values().containsKey("default")) {
-      coerce(property.values().get("default"), property, path + ".default");
+    for (String name : required) {
+      if (!properties.values().containsKey(name)) {
+        throw new IllegalArgumentException(path + ".required must name declared properties");
+      }
     }
   }
 
-  private static void validateArray(JsonObject property, String path) {
-    if (property.values().containsKey("enum")) {
+  private static void validateArray(JsonObject node, String path, int depth) {
+    for (String keyword : OBJECT_KEYWORDS) {
+      if (node.values().containsKey(keyword)) {
+        throw new IllegalArgumentException(path + " array must not declare " + keyword);
+      }
+    }
+    if (node.values().containsKey("enum")) {
       throw new IllegalArgumentException(path + " array must not declare enum");
     }
-    JsonObject items = requireObject(property, "items", path + ".items");
-    String itemType = type(items, path + ".items");
-    if (OBJECT.equals(itemType) || ARRAY.equals(itemType)) {
-      throw new IllegalArgumentException(path + ".items must be a scalar or resourceReference");
-    }
-    validateProperty(path + ".items", items, path + ".items");
-    int minItems = boundedInt(property, "minItems", 0, path);
-    int maxItems = boundedInt(property, "maxItems", MAX_ITEMS, path);
+    JsonObject items = requireObject(node, "items", path + ".items");
+    validateNode(items, path + ".items", depth + 1);
+    int minItems = boundedInt(node, "minItems", 0, path);
+    int maxItems = boundedInt(node, "maxItems", MAX_ITEMS, path);
     if (maxItems > MAX_ITEMS) {
       throw new IllegalArgumentException(path + ".maxItems must not exceed " + MAX_ITEMS);
     }
@@ -157,6 +158,11 @@ public final class CanvasFunctionArgsSchema {
 
   private static void validateScalar(JsonObject property, String path) {
     for (String keyword : ARRAY_KEYWORDS) {
+      if (property.values().containsKey(keyword)) {
+        throw new IllegalArgumentException(path + " scalar must not declare " + keyword);
+      }
+    }
+    for (String keyword : OBJECT_KEYWORDS) {
       if (property.values().containsKey(keyword)) {
         throw new IllegalArgumentException(path + " scalar must not declare " + keyword);
       }
@@ -179,25 +185,58 @@ public final class CanvasFunctionArgsSchema {
     }
     Set<CanvasJson> distinct = new LinkedHashSet<>();
     for (CanvasJson option : options) {
-      CanvasJson canonical = coerce(option, withoutKeyword(property, "enum"), path + ".enum item");
+      CanvasJson canonical =
+          coerce(option, withoutKeyword(property, "enum"), path + ".enum item", 0);
       if (!distinct.add(canonical)) {
         throw new IllegalArgumentException(path + ".enum must not contain duplicates");
       }
     }
   }
 
-  private static CanvasJson coerce(CanvasJson value, JsonObject property, String path) {
-    String type = type(property, path);
+  private static CanvasJson coerce(CanvasJson value, JsonObject schema, String path, int depth) {
+    if (depth > MAX_DEPTH) {
+      throw new IllegalArgumentException(path + " must not nest deeper than " + MAX_DEPTH);
+    }
+    String type = type(schema, path);
     return switch (type) {
-      case "string" -> requireEnum(property, requireText(value, path), path);
-      case "integer" -> integer(value, property, path);
-      case "number" -> decimal(value, property, path);
+      case "string" -> requireEnum(schema, requireText(value, path), path);
+      case "integer" -> integer(value, schema, path);
+      case "number" -> decimal(value, schema, path);
       case "boolean" -> requireBool(value, path);
-      case ARRAY -> coerceArray(value, property, path);
+      case ARRAY -> coerceArray(value, schema, path, depth);
+      case OBJECT -> coerceObject(value, schema, path, depth);
       case REFERENCE_TYPE -> coerceReference(value, path);
       default -> throw new IllegalArgumentException(
           path + " has an unsupported schema type: " + type);
     };
+  }
+
+  private static JsonObject coerceObject(
+      CanvasJson value, JsonObject schema, String path, int depth) {
+    JsonObject object = requireObject(value, path);
+    JsonObject properties = requireObject(schema, "properties", path + ".properties");
+    Set<String> required = requiredNames(schema, path);
+    Set<String> unknown = new LinkedHashSet<>(object.values().keySet());
+    unknown.removeAll(properties.values().keySet());
+    if (!unknown.isEmpty()) {
+      throw new IllegalArgumentException(path + " contains unknown fields: " + unknown);
+    }
+    Map<String, CanvasJson> normalized = new LinkedHashMap<>();
+    for (Map.Entry<String, CanvasJson> entry : properties.values().entrySet()) {
+      String name = entry.getKey();
+      JsonObject property = requireObject(entry.getValue(), path + ".properties." + name);
+      CanvasJson child = object.values().get(name);
+      if (child == null) {
+        if (property.values().containsKey("default")) {
+          normalized.put(name, property.values().get("default"));
+        } else if (required.contains(name)) {
+          throw new IllegalArgumentException(path + "." + name + " is required");
+        }
+        continue;
+      }
+      normalized.put(name, coerce(child, property, path + "." + name, depth + 1));
+    }
+    return new JsonObject(normalized);
   }
 
   private static JsonNumber integer(CanvasJson value, JsonObject property, String path) {
@@ -235,20 +274,21 @@ public final class CanvasFunctionArgsSchema {
     }
   }
 
-  private static CanvasJson coerceArray(CanvasJson value, JsonObject property, String path) {
+  private static CanvasJson coerceArray(
+      CanvasJson value, JsonObject schema, String path, int depth) {
     if (!(value instanceof JsonArray array)) {
       throw new IllegalArgumentException(path + " must be an array");
     }
-    int minItems = boundedInt(property, "minItems", 0, path);
-    int maxItems = boundedInt(property, "maxItems", MAX_ITEMS, path);
+    int minItems = boundedInt(schema, "minItems", 0, path);
+    int maxItems = boundedInt(schema, "maxItems", MAX_ITEMS, path);
     if (array.values().size() < minItems || array.values().size() > maxItems) {
       throw new IllegalArgumentException(
           path + " must declare between " + minItems + " and " + maxItems + " items");
     }
-    JsonObject items = requireObject(property, "items", path + ".items");
+    JsonObject items = requireObject(schema, "items", path + ".items");
     List<CanvasJson> normalized = new ArrayList<>(array.values().size());
     for (int index = 0; index < array.values().size(); index++) {
-      normalized.add(coerce(array.values().get(index), items, path + "[" + index + "]"));
+      normalized.add(coerce(array.values().get(index), items, path + "[" + index + "]", depth + 1));
     }
     return new JsonArray(normalized);
   }
@@ -315,24 +355,24 @@ public final class CanvasFunctionArgsSchema {
     return number.value();
   }
 
-  private static void requireAdditionalPropertiesFalse(JsonObject schema) {
-    CanvasJson value = schema.values().get("additionalProperties");
+  private static void requireAdditionalPropertiesFalse(JsonObject node, String path) {
+    CanvasJson value = node.values().get("additionalProperties");
     if (!(value instanceof JsonBool bool) || bool.value()) {
-      throw new IllegalArgumentException("argsSchema.additionalProperties must be false");
+      throw new IllegalArgumentException(path + ".additionalProperties must be false");
     }
   }
 
-  private static Set<String> requiredNames(JsonObject schema) {
-    if (!schema.values().containsKey("required")) {
+  private static Set<String> requiredNames(JsonObject node, String path) {
+    if (!node.values().containsKey("required")) {
       return Set.of();
     }
     Set<String> names = new LinkedHashSet<>();
-    for (CanvasJson item : requireArray(schema, "required", "argsSchema.required")) {
+    for (CanvasJson item : requireArray(node, "required", path + ".required")) {
       if (!(item instanceof JsonText text) || text.value().isBlank()) {
-        throw new IllegalArgumentException("argsSchema.required must contain non-blank names");
+        throw new IllegalArgumentException(path + ".required must contain non-blank names");
       }
       if (!names.add(text.value())) {
-        throw new IllegalArgumentException("argsSchema.required must not contain duplicates");
+        throw new IllegalArgumentException(path + ".required must not contain duplicates");
       }
     }
     return names;

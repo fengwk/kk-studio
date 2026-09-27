@@ -338,7 +338,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
           context.checkpoint("SEEDANCE_MATERIALIZING", state);
           ExecutionResource output = statusResult.resources().get(0);
           try (HubResourceStream stream = client.openResource(output)) {
-            UUID resourceId = context.materializeTarget(run.targetResourceId(), stream.content());
+            UUID resourceId = context.materializeOutput(run.output(0), stream.content());
             return List.of(resourceId);
           } catch (IOException exception) {
             throw new UncheckedIOException("failed to close Seedance Hub resource", exception);
@@ -536,7 +536,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   private static CanvasFunctionDefinition definition(String key, String label) {
-    return new CanvasFunctionDefinition(
+    return CanvasFunctionDefinition.of(
         key, label, ARGS_SCHEMA, CanvasResourceKind.VIDEO, REFERENCE_POLICY);
   }
 

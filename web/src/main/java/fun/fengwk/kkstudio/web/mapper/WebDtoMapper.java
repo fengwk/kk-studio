@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasFunctionOutputDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionReferencePolicyDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasGroupDTO;
@@ -183,7 +184,16 @@ public class WebDtoMapper {
     dto.setName(definition.name());
     dto.setDescription(definition.description());
     dto.setArgsSchema(toArgs(definition.argsSchema()));
-    dto.setOutputKind(definition.outputKind().name());
+    dto.setOutputs(
+        definition.outputs().stream()
+            .map(
+                output -> {
+                  CanvasFunctionOutputDTO outputDto = new CanvasFunctionOutputDTO();
+                  outputDto.setKind(output.kind().name());
+                  outputDto.setName(output.name());
+                  return outputDto;
+                })
+            .toList());
     CanvasFunctionReferencePolicyDTO referencePolicy = new CanvasFunctionReferencePolicyDTO();
     referencePolicy.setAllowedKinds(
         definition.referencePolicy().allowedKinds().stream().map(Enum::name).sorted().toList());

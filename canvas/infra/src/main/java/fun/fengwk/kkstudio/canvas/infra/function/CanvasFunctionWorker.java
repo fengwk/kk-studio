@@ -108,9 +108,9 @@ public class CanvasFunctionWorker {
       }
       List<UUID> result = List.copyOf(registered.adapter().execute(context, frozen));
       requireOwnership(ownershipLost);
-      if (!result.equals(List.of(frozen.targetResourceId()))) {
+      if (!result.equals(frozen.outputResourceIds())) {
         throw new IllegalArgumentException(
-            "adapter result must equal the preallocated target Resource id");
+            "adapter result must equal the frozen output plan, in order");
       }
       transactions.completeSuccess(context.currentRun(), claim.leaseToken(), result);
     } catch (CanvasFunctionUnknownException unknown) {

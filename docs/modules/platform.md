@@ -377,7 +377,7 @@ Canvas Function 也以构建期 Plugin 发布，唯一扩展点是实现 `Canvas
 - [`plugins/canvas-comfyui`](../../plugins/canvas-comfyui)：内置 ComfyUI workflow 模板与
   `StandardComfyuiClient`，发布 `minimax-h3-ref2va`。`submit` 完成 Harness one-shot prompt、
   媒体上传与 ComfyUI prompt 提交并把 `promptId` 写进 checkpoint；`execute` 只按
-  `promptId` 轮询 history、下载产物并物化 target。产品不提供独立 workflow CRUD、绑定表或
+  `promptId` 轮询 history、下载产物并物化冻结的 `VIDEO` 输出槽位。产品不提供独立 workflow CRUD、绑定表或
   第二套运行 API，因此没有新增任务表。
 
 功能是否可用由 `enabled()`/`unavailableReason()` 决定（未配置 ComfyUI endpoint 时函数仍
@@ -931,8 +931,8 @@ Function adapter 只实现 `CanvasFunctionAdapter`：
 
 | adapter | 运行边界 |
 | --- | --- |
-| [FakeCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/fake/FakeCanvasFunctionAdapter.java) | 读取 classpath 的 tiny image/video fixture，仍通过真实 materializer，受 `fake-enabled` property 控制 |
-| [GptImage2CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/GptImage2CanvasFunctionAdapter.java) | OpenCLI Hub + `chatgpt-agent`，image reference 每项最多 20 MiB；`submit` 上传引用并发起 Hub 执行，`execute` 只轮询既有 execution 并物化 target |
+| [FakeCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/fake/FakeCanvasFunctionAdapter.java) | 参考 adapter：读取 classpath 的 tiny image/video fixture，仍通过真实 materializer；`fake-report` 演示多输出计划（内联文本 + 图片 Blob），受 `fake-enabled` property 控制 |
+| [GptImage2CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/GptImage2CanvasFunctionAdapter.java) | OpenCLI Hub + `chatgpt-agent`，image reference 每项最多 20 MiB；`submit` 上传引用并发起 Hub 执行，`execute` 只轮询既有 execution 并物化冻结输出槽位 |
 | [SeedanceCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/SeedanceCanvasFunctionAdapter.java) | OpenCLI Hub，冻结 reference policy、上传和有界 polling；`submit` 记录外部 asset id，`execute` 只查询同一 asset |
 
 [PlatformCanvasFunctionBlobAccess](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/PlatformCanvasFunctionBlobAccess.java)
@@ -946,7 +946,7 @@ Platform 只保留 `fake`/`opencli` 两个参考 adapter 与 Function runtime �
 `CanvasFunctionBlobAccess`。每个 adapter 只实现
 `CanvasFunctionAdapter`(`functions`/`enabled`/`unavailableReason`/`preflight`/`submit`/`execute`/`cancel`)：
 `submit` 负责一次外部提交并把恢复所需的任务身份写进 checkpoint，`execute` 只查询已提交的
-原任务并物化预分配 target，因此崩溃恢复永远不会重复提交。
+原任务并按输出计划顺序物化预分配槽位，因此崩溃恢复永远不会重复提交。
 
 ## 关键流程
 

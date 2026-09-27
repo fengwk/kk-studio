@@ -27,8 +27,10 @@ import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
@@ -87,7 +89,8 @@ class OpenCliCanvasFunctionAdaptersTest {
     CanvasFunctionDefinition definition = adapter.functions().get(0);
     assertEquals("gpt-image-2", definition.name());
     assertEquals("GPT Image 2", definition.description());
-    assertEquals(CanvasResourceKind.IMAGE, definition.outputKind());
+    assertEquals(
+        List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)), definition.outputs());
     assertEquals(20, definition.referencePolicy().maxReferences());
 
     CanvasFunctionFrozenReference first = image(10L, 0, 100L, "first.png");
@@ -130,8 +133,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             definition,
             run.args(),
             run.manifest(),
-            run.outputName(),
-            TARGET,
+            run.outputs(),
             CanvasFunctionSubmitState.SUBMITTED,
             "GPT_IMAGE_POLLING",
             submittedState);
@@ -281,7 +283,11 @@ class OpenCliCanvasFunctionAdaptersTest {
         List.of("seedance2.0", "seedance2.0fast", "seedance2.0_vip", "seedance2.0fast_vip"),
         adapter.functions().stream().map(CanvasFunctionDefinition::name).toList());
     assertTrue(
-        adapter.functions().stream().allMatch(def -> def.outputKind() == CanvasResourceKind.VIDEO));
+        adapter.functions().stream()
+            .allMatch(
+                def ->
+                    def.outputs().size() == 1
+                        && def.outputs().get(0).kind() == CanvasResourceKind.VIDEO));
 
     CanvasFunctionFrozenReference image = image(10L, 0, 100L, "image.png");
     CanvasFunctionFrozenReference video =
@@ -360,8 +366,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             adapter.functions().get(1),
             run.args(),
             run.manifest(),
-            run.outputName(),
-            TARGET,
+            run.outputs(),
             CanvasFunctionSubmitState.SUBMITTED,
             "SEEDANCE_STATUS_WAITING",
             submittedState);
@@ -1006,6 +1011,10 @@ class OpenCliCanvasFunctionAdaptersTest {
         }
       }
     }
+    CanvasFunctionOutputSpec spec = definition.outputs().get(0);
+    String outputName = spec.resolveName("output");
+    List<CanvasFunctionFrozenOutput> outputs =
+        List.of(new CanvasFunctionFrozenOutput(TARGET, 0, spec.kind(), outputName));
     return new CanvasFunctionFrozenRun(
         CANVAS,
         NODE,
@@ -1014,8 +1023,7 @@ class OpenCliCanvasFunctionAdaptersTest {
         definition,
         new JsonObject(argsMap),
         manifest,
-        definition.outputKind() == CanvasResourceKind.IMAGE ? "output.png" : "output.mp4",
-        TARGET,
+        outputs,
         CanvasFunctionSubmitState.SUBMITTED,
         stage,
         state);
@@ -1097,13 +1105,18 @@ class OpenCliCanvasFunctionAdaptersTest {
     }
 
     @Override
-    public UUID materializeTarget(UUID targetResourceId, InputStream content) {
+    public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
       try {
         materialized = content.readAllBytes();
       } catch (IOException exception) {
         throw new UncheckedIOException(exception);
       }
-      return targetResourceId;
+      return output.resourceId();
+    }
+
+    @Override
+    public UUID materializeTextOutput(CanvasFunctionFrozenOutput output, String text) {
+      throw new UnsupportedOperationException();
     }
   }
 }

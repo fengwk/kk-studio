@@ -26,11 +26,13 @@ import java.util.UUID;
  *
  * <p>Resource 行与 {@code OUTPUT} pin 必须同事务写入：pin 依赖真实 Resource 外键，不允许先写占位 pin。物化前先在文档锁内确认 {@code
  * (nodeId, requestId)} 仍是当前 RUNNING Run，因此被取消、被新请求替换或已被新 owner 接管的旧 Run 都不可能再发布输出。相同 resourceId
- * 幂等返回既有资源；并发竞争或事务失败会立即 best-effort 释放未消费 upload，统一过期清理仅作为兜底。
+ * 幂等返回既有资源；并发竞争或事务失败会立即 best-effort 释放未消费 upload，统一过期清理仅作为兜底。TEXT 槽位不使用 upload/Blob，内容内联写在同一
+ * Resource 行里。
  */
 public class CanvasBlobResourceMaterializer implements CanvasResourceMaterializer {
 
   private static final long MAX_MATERIALIZE_SIZE = 512L * 1024 * 1024;
+  private static final int MAX_MATERIALIZE_TEXT_LENGTH = 1024 * 1024;
   private static final String OCTET_STREAM = "application/octet-stream";
 
   private final StorageUploadService uploadService;
@@ -59,7 +61,7 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
   }
 
   @Override
-  public CanvasResource materialize(
+  public CanvasResource materializeBlob(
       UUID canvasId,
       UUID nodeId,
       UUID requestId,
@@ -84,7 +86,7 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       resource =
           transactionTemplate.execute(
               status ->
-                  materializeInTransaction(
+                  materializeBlobInTransaction(
                       canvasId, nodeId, requestId, resourceId, name, uploadId));
     } catch (RuntimeException failure) {
       discardBestEffort(uploadId);
@@ -93,18 +95,33 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
     return resource;
   }
 
-  private CanvasResource materializeInTransaction(
+  @Override
+  public CanvasResource materializeText(
+      UUID canvasId, UUID nodeId, UUID requestId, UUID resourceId, String name, String text) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
+    Objects.requireNonNull(requestId, "requestId");
+    Objects.requireNonNull(resourceId, "resourceId");
+    Objects.requireNonNull(name, "name");
+    if (text == null) {
+      throw new IllegalArgumentException("text output content is required");
+    }
+    if (text.length() > MAX_MATERIALIZE_TEXT_LENGTH) {
+      throw new IllegalArgumentException(
+          "text output must be at most " + MAX_MATERIALIZE_TEXT_LENGTH + " characters");
+    }
+    CanvasResource existing = resourceRepository.findById(canvasId, resourceId).orElse(null);
+    if (existing != null) {
+      return existing;
+    }
+    return transactionTemplate.execute(
+        status ->
+            materializeTextInTransaction(canvasId, nodeId, requestId, resourceId, name, text));
+  }
+
+  private CanvasResource materializeBlobInTransaction(
       UUID canvasId, UUID nodeId, UUID requestId, UUID resourceId, String name, UUID uploadId) {
-    if (canvasStore.lockDocument(canvasId).isEmpty()) {
-      throw new IllegalStateException("Canvas no longer exists: " + canvasId);
-    }
-    CanvasFunctionRun run = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
-    if (run == null
-        || run.status() != CanvasFunctionRunStatus.RUNNING
-        || !run.requestId().equals(requestId)) {
-      throw new IllegalStateException(
-          "Function target can only be materialized by the running request: " + resourceId);
-    }
+    requireRunningRequest(canvasId, nodeId, requestId);
     CanvasResource winner = resourceRepository.findById(canvasId, resourceId).orElse(null);
     if (winner != null) {
       uploadService.delete(uploadId);
@@ -125,13 +142,52 @@ public class CanvasBlobResourceMaterializer implements CanvasResourceMaterialize
       uploadService.delete(uploadId);
       return existing;
     }
+    addOutputPin(canvasId, nodeId, requestId, resourceId);
+    blobManager.retain(ready.blobId());
+    uploadService.delete(uploadId);
+    return resource;
+  }
+
+  /** TEXT 槽位：内容内联在 Resource 行，与 OUTPUT pin 同事务写入，不涉及 upload 或 Blob 引用。 */
+  private CanvasResource materializeTextInTransaction(
+      UUID canvasId, UUID nodeId, UUID requestId, UUID resourceId, String name, String text) {
+    requireRunningRequest(canvasId, nodeId, requestId);
+    CanvasResource winner = resourceRepository.findById(canvasId, resourceId).orElse(null);
+    if (winner != null) {
+      return winner;
+    }
+    CanvasResource resource =
+        new CanvasResource(resourceId, canvasId, null, null, null, name, text, Instant.now());
+    if (!resourceRepository.addIfAbsent(resource)) {
+      return resourceRepository
+          .findById(canvasId, resourceId)
+          .orElseThrow(
+              () ->
+                  new IllegalStateException("resource insertIfAbsent race: winner row is missing"));
+    }
+    addOutputPin(canvasId, nodeId, requestId, resourceId);
+    return resource;
+  }
+
+  private void addOutputPin(UUID canvasId, UUID nodeId, UUID requestId, UUID resourceId) {
     pinRepository.addAll(
         List.of(
             new CanvasFunctionResourcePin(
                 canvasId, nodeId, requestId, resourceId, CanvasFunctionResourcePin.Role.OUTPUT)));
-    blobManager.retain(ready.blobId());
-    uploadService.delete(uploadId);
-    return resource;
+  }
+
+  /** 物化前置条件：文档存在，且 (nodeId, requestId) 仍是当前 RUNNING Run。 */
+  private void requireRunningRequest(UUID canvasId, UUID nodeId, UUID requestId) {
+    if (canvasStore.lockDocument(canvasId).isEmpty()) {
+      throw new IllegalStateException("Canvas no longer exists: " + canvasId);
+    }
+    CanvasFunctionRun run = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
+    if (run == null
+        || run.status() != CanvasFunctionRunStatus.RUNNING
+        || !run.requestId().equals(requestId)) {
+      throw new IllegalStateException(
+          "Function output can only be materialized by the running request: " + nodeId);
+    }
   }
 
   private void discardBestEffort(UUID uploadId) {

@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
@@ -69,7 +70,7 @@ class CanvasFunctionExecutionContextImplTest {
     blobAccess = mock(CanvasFunctionBlobAccess.class);
     materializer = mock(CanvasResourceMaterializer.class);
     CanvasFunctionDefinition definition =
-        new CanvasFunctionDefinition(
+        CanvasFunctionDefinition.of(
             "test.image",
             "Test Image",
             CanvasJson.parseObject(
@@ -98,8 +99,8 @@ class CanvasFunctionExecutionContextImplTest {
             definition,
             CanvasJson.parseObject("{}"),
             List.of(reference),
-            "output.png",
-            TARGET,
+            List.of(
+                new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.IMAGE, "output.png")),
             CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
@@ -155,28 +156,38 @@ class CanvasFunctionExecutionContextImplTest {
   /** 只能物化预分配的目标资源 ID，且宿主返回不匹配资源时必须报错。 */
   @Test
   void materializesOnlyFrozenTargetAndOutputKind() {
-    when(materializer.materialize(
+    when(materializer.materializeBlob(
             eq(CANVAS), eq(NODE), eq(REQUEST), eq(TARGET), anyString(), any(InputStream.class)))
         .thenReturn(
             new CanvasResource(
                 TARGET, CANVAS, null, null, BLOB, "output.png", null, Instant.EPOCH));
     CanvasFunctionExecutionContextImpl context = context();
 
+    CanvasFunctionFrozenOutput plannedOutput = frozen.output(0);
+    CanvasFunctionFrozenOutput invalidOutput =
+        new CanvasFunctionFrozenOutput(
+            UUID.randomUUID(), 0, CanvasResourceKind.IMAGE, "output.png");
+
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            context.materializeTarget(
-                UUID.randomUUID(), new ByteArrayInputStream(new byte[] {1, 2, 3})));
+            context.materializeOutput(
+                invalidOutput, new ByteArrayInputStream(new byte[] {1, 2, 3})));
     assertEquals(
-        TARGET, context.materializeTarget(TARGET, new ByteArrayInputStream(new byte[] {1, 2, 3})));
+        TARGET,
+        context.materializeOutput(plannedOutput, new ByteArrayInputStream(new byte[] {1, 2, 3})));
     verify(materializer)
-        .materialize(
+        .materializeBlob(
             eq(CANVAS),
             eq(NODE),
             eq(REQUEST),
             eq(TARGET),
             eq("output.png"),
             any(InputStream.class));
+
+    // TEXT 槽位入口调用媒体槽位抛异常
+    assertThrows(
+        IllegalArgumentException.class, () -> context.materializeTextOutput(plannedOutput, "text"));
   }
 
   /** 只有在 Run 处于 RUNNING 且租约有效时才允许预签名原图 URL。 */
@@ -254,8 +265,7 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.definition(),
             frozen.args(),
             frozen.manifest(),
-            frozen.outputName(),
-            frozen.targetResourceId(),
+            frozen.outputs(),
             CanvasFunctionSubmitState.SUBMITTING,
             "SUBMITTING",
             Map.of("jobId", "job"));
@@ -314,8 +324,7 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.definition(),
             frozen.args(),
             frozen.manifest(),
-            frozen.outputName(),
-            frozen.targetResourceId(),
+            frozen.outputs(),
             CanvasFunctionSubmitState.SUBMITTED,
             "SUBMITTED",
             Map.of());
@@ -332,8 +341,7 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.definition(),
             frozen.args(),
             frozen.manifest(),
-            frozen.outputName(),
-            frozen.targetResourceId(),
+            frozen.outputs(),
             CanvasFunctionSubmitState.SUBMITTED,
             "SUBMITTED",
             Map.of());

@@ -138,7 +138,7 @@ class CanvasFunctionCatalogTest {
         CanvasJson.parseObject(
             "{\"type\":\"object\",\"properties\":{},\"required\":[],"
                 + "\"additionalProperties\":false}"),
-        CanvasResourceKind.IMAGE,
+        List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)),
         new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
   }
 

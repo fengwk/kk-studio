@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
@@ -59,7 +60,7 @@ class CanvasFunctionRunStateCodecTest {
             }
             """);
     definition =
-        new CanvasFunctionDefinition(
+        CanvasFunctionDefinition.of(
             "test.video",
             "Test Video",
             schema,
@@ -103,8 +104,8 @@ class CanvasFunctionRunStateCodecTest {
                     640L,
                     480L,
                     null)),
-            "output.mp4",
-            TARGET,
+            List.of(
+                new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.VIDEO, "output.mp4")),
             CanvasFunctionSubmitState.SUBMITTED,
             "SUBMITTED",
             Map.of("jobId", "job-1", "attempt", 1));
@@ -128,7 +129,7 @@ class CanvasFunctionRunStateCodecTest {
             .submitState());
   }
 
-  /** 拒绝非版本 3、未知根字段、未知计划字段以及与已注册定义不匹配的函数名或输出类型。 */
+  /** 拒绝非版本 4、未知根字段、未知计划字段以及与已注册定义不匹配的函数名或输出类型。 */
   @Test
   void rejectsSchemaVersionAndRegistryDrift() throws Exception {
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(run));
@@ -137,13 +138,13 @@ class CanvasFunctionRunStateCodecTest {
     assertThrows(IllegalArgumentException.class, () -> codec.decode(unknownField, definition));
 
     root.remove("extra");
-    root.put("version", 2);
+    root.put("version", 3);
     String unsupportedVersion = root.toString();
     assertThrows(
         IllegalArgumentException.class, () -> codec.decode(unsupportedVersion, definition));
 
     CanvasFunctionDefinition otherDefinition =
-        new CanvasFunctionDefinition(
+        CanvasFunctionDefinition.of(
             "other.video",
             "Other Video",
             definition.argsSchema(),
@@ -153,7 +154,7 @@ class CanvasFunctionRunStateCodecTest {
         IllegalArgumentException.class, () -> codec.decode(codec.encode(run), otherDefinition));
 
     CanvasFunctionDefinition imageDefinition =
-        new CanvasFunctionDefinition(
+        CanvasFunctionDefinition.of(
             "test.video",
             "Test Video",
             definition.argsSchema(),
@@ -185,7 +186,7 @@ class CanvasFunctionRunStateCodecTest {
         IllegalArgumentException.class, () -> codec.decode(invalidSubmitState, definition));
 
     String duplicate =
-        codec.encode(run).replaceFirst("\"version\":3", "\"version\":3,\"version\":3");
+        codec.encode(run).replaceFirst("\"version\":4", "\"version\":4,\"version\":4");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate, definition));
     assertThrows(IllegalArgumentException.class, () -> codec.stage("{"));
     assertThrows(IllegalArgumentException.class, () -> codec.functionName("{}"));
@@ -201,8 +202,7 @@ class CanvasFunctionRunStateCodecTest {
             run.definition(),
             run.args(),
             run.manifest(),
-            run.outputName(),
-            run.targetResourceId(),
+            run.outputs(),
             run.submitState(),
             run.stage(),
             oversized);

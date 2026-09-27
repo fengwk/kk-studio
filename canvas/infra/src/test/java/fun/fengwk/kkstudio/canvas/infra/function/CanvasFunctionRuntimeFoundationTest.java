@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,7 +37,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
@@ -46,12 +49,16 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
 
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -79,11 +86,38 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
           }
           """);
   private static final CanvasFunctionDefinition DEFINITION =
-      new CanvasFunctionDefinition(
+      CanvasFunctionDefinition.of(
           "test.image",
           "Test Image",
           ARGS_SCHEMA,
           CanvasResourceKind.IMAGE,
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+  private static final CanvasFunctionDefinition MULTI_MEDIA_DEFINITION =
+      new CanvasFunctionDefinition(
+          "test.multimedia",
+          "Test Multimedia",
+          ARGS_SCHEMA,
+          List.of(
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "preview.png"),
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.VIDEO, "video.mp4")),
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+  private static final CanvasFunctionDefinition TEXT_IMAGE_DEFINITION =
+      new CanvasFunctionDefinition(
+          "test.textimage",
+          "Test Text and Image",
+          ARGS_SCHEMA,
+          List.of(
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.TEXT, "summary.txt"),
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "preview.png")),
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+  private static final CanvasFunctionDefinition TWO_IMAGES_DEFINITION =
+      new CanvasFunctionDefinition(
+          "test.twoimages",
+          "Test Two Images",
+          ARGS_SCHEMA,
+          List.of(
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "first.png"),
+              CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "second.png")),
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
 
   @Autowired private CanvasResourceRepository resourceRepository;
@@ -140,7 +174,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     CanvasFunctionFrozenRun firstFrozen = decode(first);
     CanvasResource cancelledTarget =
-        materializeTarget(canvasId, nodeId, first.requestId(), firstFrozen.targetResourceId());
+        materializeTarget(canvasId, nodeId, first.requestId(), firstFrozen.output(0));
     runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
     CanvasFunctionRun cancelledReplay = runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1);
     assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelledReplay.status());
@@ -166,10 +200,10 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(3L, frozen.manifest().get(0).sizeBytes());
 
     CanvasResource target =
-        materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.targetResourceId());
+        materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.output(0));
     assertTrue(
         runtimeTransactions.completeSuccess(
-            frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+            frozen, claim.leaseToken(), frozen.outputResourceIds()));
 
     CanvasResource attached = resourceRepository.findById(canvasId, target.id()).orElseThrow();
     assertEquals(targetNodeId, attached.ownerNodeId());
@@ -220,14 +254,13 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // 5. 宿主物化目标资源 (写入 OUTPUT pin 与未挂接 Resource 行)
     CanvasResource target =
-        materializeTarget(
-            canvasId, targetNodeId, submitted.requestId(), submitted.targetResourceId());
+        materializeTarget(canvasId, targetNodeId, submitted.requestId(), submitted.output(0));
     assertEquals(2, pinRepository.findByRun(canvasId, targetNodeId, submitted.requestId()).size());
 
     // 6. completeSuccess 原子收敛为 SUCCEEDED 并释放 pin
     assertTrue(
         runtimeTransactions.completeSuccess(
-            submitted, claim.leaseToken(), List.of(submitted.targetResourceId())));
+            submitted, claim.leaseToken(), submitted.outputResourceIds()));
 
     CanvasFunctionRun completed = runRepository.findByNodeId(targetNodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.SUCCEEDED, completed.status());
@@ -253,7 +286,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-submitting");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
-        materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.targetResourceId());
+        materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.output(0));
 
     // 推进到 SUBMITTING
     runtimeTransactions.beginSubmit(frozen, claim.leaseToken());
@@ -318,7 +351,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         runtimeTransactions.completeSuccess(
             decode(resumedClaim.run()),
             resumedClaim.leaseToken(),
-            List.of(frozenResumed.targetResourceId())));
+            frozenResumed.outputResourceIds()));
 
     CanvasFunctionRun finalRun = runRepository.findByNodeId(targetNodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.SUCCEEDED, finalRun.status());
@@ -337,7 +370,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     ClaimedRun claim1 = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-failed");
     CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
     CanvasResource target1 =
-        materializeTarget(canvasId, targetNodeId, frozen1.requestId(), frozen1.targetResourceId());
+        materializeTarget(canvasId, targetNodeId, frozen1.requestId(), frozen1.output(0));
     runtimeTransactions.beginSubmit(frozen1, claim1.leaseToken());
     runtimeTransactions.markUnknown(targetNodeId, REQUEST_1, claim1.leaseToken(), "timeout");
 
@@ -377,7 +410,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             .orElseThrow();
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
     CanvasResource target2 =
-        materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.targetResourceId());
+        materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.output(0));
     runtimeTransactions.beginSubmit(frozen2, claim2.leaseToken());
     runtimeTransactions.markUnknown(targetNodeId, REQUEST_2, claim2.leaseToken(), "timeout-2");
 
@@ -415,7 +448,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-fencing");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
-        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.targetResourceId());
+        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
 
     // 结果列表为空
     assertThrows(
@@ -427,7 +460,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         IllegalArgumentException.class,
         () ->
             runtimeTransactions.completeSuccess(
-                frozen, claim.leaseToken(), List.of(frozen.targetResourceId(), UUID.randomUUID())));
+                frozen,
+                claim.leaseToken(),
+                List.of(frozen.output(0).resourceId(), UUID.randomUUID())));
 
     // 结果列表 ID 不匹配预分配目标
     assertThrows(
@@ -439,7 +474,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     // 失效租约写回返回 false，状态保持 RUNNING
     assertFalse(
         runtimeTransactions.completeSuccess(
-            frozen, "stale-lease-token", List.of(frozen.targetResourceId())));
+            frozen, "stale-lease-token", frozen.outputResourceIds()));
     assertFalse(
         runtimeTransactions.markUnknown(
             nodeId, REQUEST_1, "stale-lease-token", "stale unknown reason"));
@@ -547,10 +582,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "foundation-success-fence");
     CanvasFunctionFrozenRun frozen = decode(claim.run());
     CanvasResource target =
-        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.targetResourceId());
+        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
 
-    assertFalse(
-        runtimeTransactions.completeSuccess(frozen, "stale", List.of(frozen.targetResourceId())));
+    assertFalse(runtimeTransactions.completeSuccess(frozen, "stale", frozen.outputResourceIds()));
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
     assertEquals(claim.leaseToken(), current.leaseToken());
@@ -569,7 +603,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     assertFalse(
         runtimeTransactions.completeSuccess(
-            frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+            frozen, claim.leaseToken(), frozen.outputResourceIds()));
     assertFalse(
         runtimeTransactions.failIfRunning(
             nodeId, REQUEST_1, claim.leaseToken(), "ignored failure"));
@@ -593,9 +627,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         IllegalArgumentException.class,
         () ->
             runtimeTransactions.completeSuccess(
-                frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+                frozen, claim.leaseToken(), frozen.outputResourceIds()));
     CanvasResource target =
-        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.targetResourceId());
+        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.output(0));
     blobAccess.put(
         new CanvasFunctionBlobAccess.BlobFacts(
             target.blobId(), "video/mp4", 3L, null, null, 1_000L));
@@ -603,7 +637,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         IllegalArgumentException.class,
         () ->
             runtimeTransactions.completeSuccess(
-                frozen, claim.leaseToken(), List.of(frozen.targetResourceId())));
+                frozen, claim.leaseToken(), frozen.outputResourceIds()));
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
     assertEquals(1L, version(canvasId));
@@ -632,6 +666,358 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
                 canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
   }
 
+  /**
+   * 验收测试 1 - 双媒体输出原子发布： 声明 2 个媒体槽位的函数在单个 SUCCEEDED 事务中同时发布两个资源， 节点最终严格按计划槽位顺序挂接 index 0 和 1 的资源，Run
+   * 收敛为 SUCCEEDED，且本次 Run 的 pin 全部释放。
+   */
+  @Test
+  void multiOutputTwoMediaSlotsPublishAtomicallyInPlanOrderAndReleasePins() {
+    UUID canvasId = addDocument();
+    UUID nodeId =
+        addFunctionNode(
+            canvasId, "multi-media-node", MULTI_MEDIA_DEFINITION.name(), configWithoutReferences());
+
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-two-media");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    assertEquals(2, frozen.outputs().size());
+    CanvasFunctionFrozenOutput slot0 = frozen.output(0);
+    CanvasFunctionFrozenOutput slot1 = frozen.output(1);
+    assertEquals(CanvasResourceKind.IMAGE, slot0.kind());
+    assertEquals("preview.png", slot0.name());
+    assertEquals(CanvasResourceKind.VIDEO, slot1.kind());
+    assertEquals("video.mp4", slot1.name());
+
+    // 物化两个槽位
+    CanvasResource res0 = materializeBlobOutput(canvasId, nodeId, frozen.requestId(), slot0);
+    CanvasResource res1 = materializeBlobOutput(canvasId, nodeId, frozen.requestId(), slot1);
+    assertEquals(2, pinRepository.findByRun(canvasId, nodeId, frozen.requestId()).size());
+
+    // 单事务原子发布
+    assertTrue(
+        runtimeTransactions.completeSuccess(
+            frozen, claim.leaseToken(), frozen.outputResourceIds()));
+
+    // 校验 Run 状态与 pin 清理
+    CanvasFunctionRun completed = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.SUCCEEDED, completed.status());
+    assertEquals("SUCCEEDED", completed.stage());
+    assertTrue(pinRepository.findByRun(canvasId, nodeId, frozen.requestId()).isEmpty());
+
+    // 校验节点按 plan 顺序严格挂接 index 0/1
+    List<CanvasResource> attached = resourceRepository.findByOwnerNode(canvasId, nodeId);
+    assertEquals(2, attached.size());
+    assertEquals(res0.id(), attached.get(0).id());
+    assertEquals(nodeId, attached.get(0).ownerNodeId());
+    assertEquals(0, attached.get(0).resourceIndex());
+    assertEquals("preview.png", attached.get(0).name());
+    assertEquals(res1.id(), attached.get(1).id());
+    assertEquals(nodeId, attached.get(1).ownerNodeId());
+    assertEquals(1, attached.get(1).resourceIndex());
+    assertEquals("video.mp4", attached.get(1).name());
+  }
+
+  /**
+   * 验收测试 2 - TEXT + IMAGE 混合输出发布： TEXT 槽位以内联文本存储（textContent 非空、blobId 为 null、不产生 Blob）， IMAGE 槽位以
+   * Blob 存储（blobId 非空、textContent 为 null）； 成功发布后按计划顺序挂接，并精确断言重新读出的数据库行字段值。
+   */
+  @Test
+  void multiOutputTextImagePublishesInlineTextAndMediaBlobInPlanOrder() {
+    UUID canvasId = addDocument();
+    UUID nodeId =
+        addFunctionNode(
+            canvasId, "text-image-node", TEXT_IMAGE_DEFINITION.name(), configWithoutReferences());
+
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-text-image");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    assertEquals(2, frozen.outputs().size());
+    CanvasFunctionFrozenOutput slot0Text = frozen.output(0);
+    CanvasFunctionFrozenOutput slot1Image = frozen.output(1);
+    assertTrue(slot0Text.inlineText());
+    assertFalse(slot1Image.inlineText());
+
+    // 物化 TEXT（内联）与 IMAGE（Blob）
+    String inlineText = "This is generated inline summary text.";
+    CanvasResource resText =
+        materializeTextOutput(canvasId, nodeId, frozen.requestId(), slot0Text, inlineText);
+    CanvasResource resImage =
+        materializeBlobOutput(canvasId, nodeId, frozen.requestId(), slot1Image);
+
+    // 断言物化后的未挂接状态
+    assertNull(resText.blobId());
+    assertEquals(inlineText, resText.textContent());
+    assertNotNull(resImage.blobId());
+    assertNull(resImage.textContent());
+
+    // 原子发布
+    assertTrue(
+        runtimeTransactions.completeSuccess(
+            frozen, claim.leaseToken(), frozen.outputResourceIds()));
+
+    // 重新从数据库精确读取行并断言
+    List<CanvasResource> attached = resourceRepository.findByOwnerNode(canvasId, nodeId);
+    assertEquals(2, attached.size());
+
+    CanvasResource attachedText = attached.get(0);
+    assertEquals(slot0Text.resourceId(), attachedText.id());
+    assertEquals(canvasId, attachedText.canvasId());
+    assertEquals(nodeId, attachedText.ownerNodeId());
+    assertEquals(0, attachedText.resourceIndex());
+    assertNull(attachedText.blobId());
+    assertEquals("summary.txt", attachedText.name());
+    assertEquals(inlineText, attachedText.textContent());
+
+    CanvasResource attachedImage = attached.get(1);
+    assertEquals(slot1Image.resourceId(), attachedImage.id());
+    assertEquals(canvasId, attachedImage.canvasId());
+    assertEquals(nodeId, attachedImage.ownerNodeId());
+    assertEquals(1, attachedImage.resourceIndex());
+    assertEquals(resImage.blobId(), attachedImage.blobId());
+    assertEquals("preview.png", attachedImage.name());
+    assertNull(attachedImage.textContent());
+
+    CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.SUCCEEDED, runInDb.status());
+    assertTrue(pinRepository.findByRun(canvasId, nodeId, frozen.requestId()).isEmpty());
+  }
+
+  /**
+   * 验收测试 3 - 部分物化与崩溃恢复： 两个槽位中仅物化第一个槽位后模拟 Worker 崩溃与租约过期，新 Worker 认领后（submitState = SUBMITTED）： (1)
+   * 仅用已物化的第一个槽位调用 completeSuccess 被拒绝； (2) 重复物化第一个槽位不会产生新行或多余 pin（幂等复用既有资源）； (3)
+   * 补齐物化第二个槽位后，completeSuccess 成功发布两个槽位。
+   */
+  @Test
+  void partialMaterializationCrashRecoveryFinishesOnlyAfterMissingSlotMaterialized() {
+    UUID canvasId = addDocument();
+    UUID nodeId =
+        addFunctionNode(
+            canvasId,
+            "crash-recovery-node",
+            TWO_IMAGES_DEFINITION.name(),
+            configWithoutReferences());
+
+    // 1. Worker 1 认领并推进提交确认
+    ClaimedRun claim1 = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-1-crash");
+    CanvasFunctionFrozenRun initialFrozen = decode(claim1.run());
+    CanvasFunctionFrozenRun submittingFrozen =
+        runtimeTransactions.beginSubmit(initialFrozen, claim1.leaseToken());
+    CanvasFunctionFrozenRun submittedFrozen =
+        runtimeTransactions.confirmSubmitted(submittingFrozen, claim1.leaseToken());
+
+    CanvasFunctionFrozenOutput slot0 = submittedFrozen.output(0);
+    CanvasFunctionFrozenOutput slot1 = submittedFrozen.output(1);
+
+    // 仅物化 slot 0
+    CanvasResource res0First =
+        materializeBlobOutput(canvasId, nodeId, submittedFrozen.requestId(), slot0);
+    assertEquals(1, pinRepository.findByRun(canvasId, nodeId, submittedFrozen.requestId()).size());
+
+    // 尝试仅用 slot 0 的 id 发布 -> 抛出 IllegalArgumentException
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                submittedFrozen, claim1.leaseToken(), List.of(slot0.resourceId())));
+
+    // 尝试直接发布完整 plan -> 因 slot 1 尚未物化而抛出 IllegalArgumentException
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                submittedFrozen, claim1.leaseToken(), submittedFrozen.outputResourceIds()));
+
+    // 2. 模拟 Worker 1 崩溃与租约过期
+    Instant now = Instant.now();
+    Instant past = now.minusSeconds(10);
+    jdbc.update(
+        "update canvas_function_run set lease_until = ? where node_id = ?",
+        Timestamp.from(past),
+        nodeId);
+
+    // 3. Worker 2 重新认领
+    ClaimedRun claim2 =
+        workStore.claimNext(now, Duration.ofSeconds(30), "worker-2-recovered").orElseThrow();
+    assertEquals(nodeId, claim2.nodeId());
+    assertEquals(REQUEST_1, claim2.requestId().toString());
+    CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
+    assertTrue(frozen2.submitted());
+    assertEquals(CanvasFunctionSubmitState.SUBMITTED, frozen2.submitState());
+
+    // 证明已物化的槽位不会被重复插入，且 OUTPUT pin 保持唯一
+    CanvasResource res0Second = materializeBlobOutput(canvasId, nodeId, frozen2.requestId(), slot0);
+    assertEquals(res0First.id(), res0Second.id());
+    assertEquals(res0First.blobId(), res0Second.blobId());
+    assertEquals(1, pinRepository.findByRun(canvasId, nodeId, frozen2.requestId()).size());
+
+    // 4. 补齐物化 slot 1
+    materializeBlobOutput(canvasId, nodeId, frozen2.requestId(), slot1);
+    assertEquals(2, pinRepository.findByRun(canvasId, nodeId, frozen2.requestId()).size());
+
+    // 5. 现在发布成功
+    assertTrue(
+        runtimeTransactions.completeSuccess(
+            frozen2, claim2.leaseToken(), frozen2.outputResourceIds()));
+
+    CanvasFunctionRun finalRun = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.SUCCEEDED, finalRun.status());
+    List<CanvasResource> attached = resourceRepository.findByOwnerNode(canvasId, nodeId);
+    assertEquals(2, attached.size());
+    assertEquals(slot0.resourceId(), attached.get(0).id());
+    assertEquals(slot1.resourceId(), attached.get(1).id());
+    assertTrue(pinRepository.findByRun(canvasId, nodeId, frozen2.requestId()).isEmpty());
+  }
+
+  /** 验收测试 4 - 重复物化幂等性： 同一 Run 对同一槽位重复调用物化入口，返回同一 Resource 行，不产生第二行，不产生多余 pin。 */
+  @Test
+  void duplicateMaterializationIsIdempotentAndDoesNotDuplicateRowsOrPins() {
+    UUID canvasId = addDocument();
+    UUID nodeId =
+        addFunctionNode(
+            canvasId, "dup-mat-node", TWO_IMAGES_DEFINITION.name(), configWithoutReferences());
+
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-dup-mat");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    CanvasFunctionFrozenOutput slot0 = frozen.output(0);
+
+    // 第一次物化
+    CanvasResource first = materializeBlobOutput(canvasId, nodeId, frozen.requestId(), slot0);
+    assertEquals(1, pinRepository.findByRun(canvasId, nodeId, frozen.requestId()).size());
+    assertEquals(1, resourceRepository.findByCanvasId(canvasId).size());
+
+    // 第二次物化相同槽位
+    CanvasResource second = materializeBlobOutput(canvasId, nodeId, frozen.requestId(), slot0);
+    assertEquals(first.id(), second.id());
+    assertEquals(first.blobId(), second.blobId());
+    assertEquals(1, pinRepository.findByRun(canvasId, nodeId, frozen.requestId()).size());
+    assertEquals(1, resourceRepository.findByCanvasId(canvasId).size());
+  }
+
+  /**
+   * 验收测试 5 - 缺失输出绝不发布： 在多输出槽位中若有任一槽位未物化，completeSuccess 抛出异常并保持 Run 为 RUNNING， 目标资源保持无
+   * owner，绝不挂接部分数组。
+   */
+  @Test
+  void missingOutputNeverPublishesAndLeavesRunRunningWithUnownedTargets() {
+    UUID canvasId = addDocument();
+    UUID nodeId =
+        addFunctionNode(
+            canvasId,
+            "missing-output-node",
+            TWO_IMAGES_DEFINITION.name(),
+            configWithoutReferences());
+
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-missing-output");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    CanvasFunctionFrozenOutput slot0 = frozen.output(0);
+
+    // 仅物化 slot 0，slot 1 故意不物化
+    CanvasResource res0 = materializeBlobOutput(canvasId, nodeId, frozen.requestId(), slot0);
+
+    long versionBefore = version(canvasId);
+
+    // completeSuccess 传入完整计划 ID 抛出异常（因 slot 1 未物化）
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                frozen, claim.leaseToken(), frozen.outputResourceIds()));
+
+    // 状态必须保持 RUNNING，版本不变
+    CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, runInDb.status());
+    assertEquals(versionBefore, version(canvasId));
+
+    // 已物化的 slot 0 资源保持未挂接（ownerNodeId 为 null）
+    CanvasResource res0InDb = resourceRepository.findById(canvasId, res0.id()).orElseThrow();
+    assertNull(res0InDb.ownerNodeId());
+    assertNull(res0InDb.resourceIndex());
+
+    // 节点没有任何挂接资源，绝不发布部分数组
+    assertTrue(resourceRepository.findByOwnerNode(canvasId, nodeId).isEmpty());
+
+    // completeSuccess 传入部分 ID 列表同样抛出异常
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                frozen, claim.leaseToken(), List.of(slot0.resourceId())));
+  }
+
+  /**
+   * 验收测试 6 - 过期租约与取消资源保全： (a) 过期租约调用 completeSuccess 或 markUnknown 返回 false，不产生状态变更与资源挂接； (b)
+   * 取消或失败时释放全部 pin 并丢弃所有未挂接的预分配输出（无孤儿 Resource 行与孤儿 pin）， 同时被其他活跃 Run 引用的资源必须安全存活。
+   */
+  @Test
+  void staleLeaseFailsSafeAndCancelOrFailureConservesResourcesWhilePreservingSharedPins() {
+    UUID canvasId = addDocument();
+
+    // 准备一个被其他 Run 引用的共享资源
+    UUID sharedNodeId = addPlainNode(canvasId, "shared-source");
+    CanvasResource sharedResource = addBlobResource(canvasId, sharedNodeId, 0, UUID.randomUUID());
+
+    // 节点 1：双输出函数，引用 sharedResource
+    UUID node1 =
+        addFunctionNode(
+            canvasId, "node-1", TWO_IMAGES_DEFINITION.name(), configWithReference(sharedNodeId));
+    ClaimedRun claim1 = claimStartedRun(canvasId, node1, REQUEST_1, "worker-run-1");
+    CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
+
+    // 节点 2：另一个函数也启动并引用 sharedResource
+    UUID node2 =
+        addFunctionNode(canvasId, "node-2", DEFINITION.name(), configWithReference(sharedNodeId));
+    claimStartedRun(canvasId, node2, REQUEST_2, "worker-run-2");
+
+    // 部分物化 node1 的 slot 0
+    CanvasResource slot0Res =
+        materializeBlobOutput(canvasId, node1, frozen1.requestId(), frozen1.output(0));
+
+    // (a) 过期租约调用 completeSuccess / markUnknown 返回 false
+    assertFalse(
+        runtimeTransactions.completeSuccess(
+            frozen1, "stale-lease-token", frozen1.outputResourceIds()));
+    assertFalse(
+        runtimeTransactions.markUnknown(
+            node1, REQUEST_1, "stale-lease-token", "stale unknown reason"));
+
+    CanvasFunctionRun run1InDb = runRepository.findByNodeId(node1).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, run1InDb.status());
+    assertNull(resourceRepository.findById(canvasId, slot0Res.id()).orElseThrow().ownerNodeId());
+    assertTrue(resourceRepository.findByOwnerNode(canvasId, node1).isEmpty());
+
+    // (b) 取消 node 1 的 Run
+    runtimeTransactions.cancel(canvasId, node1, REQUEST_1);
+
+    CanvasFunctionRun cancelledRun1 = runRepository.findByNodeId(node1).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelledRun1.status());
+
+    // node1 的全部 pin 已清空
+    assertTrue(pinRepository.findByRun(canvasId, node1, UUID.fromString(REQUEST_1)).isEmpty());
+
+    // node1 未挂接的输出 slot0Res 已被物理删除（无孤儿 Resource 行）
+    assertTrue(resourceRepository.findById(canvasId, slot0Res.id()).isEmpty());
+
+    // sharedResource 仍然被 node2 的 Run pin 住，必须安全存活！
+    assertTrue(resourceRepository.findById(canvasId, sharedResource.id()).isPresent());
+    assertTrue(pinRepository.countByResource(canvasId, sharedResource.id()) > 0);
+
+    // 同样验证 failure 分支的资源保全
+    UUID node3 =
+        addFunctionNode(
+            canvasId, "node-3", TWO_IMAGES_DEFINITION.name(), configWithoutReferences());
+    String request3 = "00000000-0000-0000-0000-000000000103";
+    ClaimedRun claim3 = claimStartedRun(canvasId, node3, request3, "worker-run-3");
+    CanvasFunctionFrozenRun frozen3 = decode(claim3.run());
+    CanvasResource slot0Res3 =
+        materializeBlobOutput(canvasId, node3, frozen3.requestId(), frozen3.output(0));
+
+    assertTrue(
+        runtimeTransactions.failIfRunning(
+            node3, request3, claim3.leaseToken(), "execution failed"));
+    CanvasFunctionRun failedRun3 = runRepository.findByNodeId(node3).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.FAILED, failedRun3.status());
+    assertTrue(pinRepository.findByRun(canvasId, node3, UUID.fromString(request3)).isEmpty());
+    assertTrue(resourceRepository.findById(canvasId, slot0Res3.id()).isEmpty());
+  }
+
   /** start 提交的 availableAt 是 claim 的权威时间；不能用独立 wall clock 跨过同一事务的时间边界。 */
   private ClaimedRun claimStartedRun(
       UUID canvasId, UUID nodeId, String requestId, String ownerToken) {
@@ -645,6 +1031,10 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   }
 
   private UUID addFunctionNode(UUID canvasId, String name, String config) {
+    return addFunctionNode(canvasId, name, DEFINITION.name(), config);
+  }
+
+  private UUID addFunctionNode(UUID canvasId, String name, String functionName, String config) {
     UUID nodeId = UUID.randomUUID();
     canvasStore.addNode(
         new NodeRecord(
@@ -653,7 +1043,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             name,
             TRANSFORM,
             null,
-            new CanvasFunction(DEFINITION.name(), CanvasJson.parseObject(config))));
+            new CanvasFunction(functionName, CanvasJson.parseObject(config))));
     return nodeId;
   }
 
@@ -663,28 +1053,87 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     return nodeId;
   }
 
-  /** 宿主物化的忠实双替身：Resource 行与 OUTPUT pin 必须同事务写入，才能同时满足 pin→resource 外键与「pin 只指向真实资源」的约定。 */
-  private CanvasResource materializeTarget(
-      UUID canvasId, UUID nodeId, UUID requestId, UUID targetResourceId) {
+  /** 宿主物化媒体槽位的忠实双替身：Resource 行与 OUTPUT pin 必须同事务写入，相同 resourceId 幂等返回。 */
+  private CanvasResource materializeBlobOutput(
+      UUID canvasId, UUID nodeId, UUID requestId, CanvasFunctionFrozenOutput output) {
     return transactions.execute(
         status -> {
-          CanvasResource resource = addBlobResource(canvasId, null, null, targetResourceId);
+          CanvasResource existing =
+              resourceRepository.findById(canvasId, output.resourceId()).orElse(null);
+          if (existing != null) {
+            return existing;
+          }
+          CanvasResource resource =
+              addBlobResource(
+                  canvasId, null, null, output.resourceId(), output.name(), output.kind());
           pinRepository.addAll(
               List.of(
                   new CanvasFunctionResourcePin(
                       canvasId,
                       nodeId,
                       requestId,
-                      targetResourceId,
+                      output.resourceId(),
                       CanvasFunctionResourcePin.Role.OUTPUT)));
           return resource;
         });
   }
 
+  /** 宿主物化文本槽位的忠实双替身：内容内联在 Resource 行，无 blob，与 OUTPUT pin 同事务写入。 */
+  private CanvasResource materializeTextOutput(
+      UUID canvasId, UUID nodeId, UUID requestId, CanvasFunctionFrozenOutput output, String text) {
+    return transactions.execute(
+        status -> {
+          CanvasResource existing =
+              resourceRepository.findById(canvasId, output.resourceId()).orElse(null);
+          if (existing != null) {
+            return existing;
+          }
+          CanvasResource resource =
+              new CanvasResource(
+                  output.resourceId(),
+                  canvasId,
+                  null,
+                  null,
+                  null,
+                  output.name(),
+                  text,
+                  Instant.now());
+          resourceRepository.add(resource);
+          pinRepository.addAll(
+              List.of(
+                  new CanvasFunctionResourcePin(
+                      canvasId,
+                      nodeId,
+                      requestId,
+                      output.resourceId(),
+                      CanvasFunctionResourcePin.Role.OUTPUT)));
+          return resource;
+        });
+  }
+
+  private CanvasResource materializeTarget(
+      UUID canvasId, UUID nodeId, UUID requestId, CanvasFunctionFrozenOutput output) {
+    return output.inlineText()
+        ? materializeTextOutput(canvasId, nodeId, requestId, output, "text content")
+        : materializeBlobOutput(canvasId, nodeId, requestId, output);
+  }
+
   private CanvasResource addBlobResource(
-      UUID canvasId, UUID ownerNodeId, Integer resourceIndex, UUID resourceId) {
+      UUID canvasId,
+      UUID ownerNodeId,
+      Integer resourceIndex,
+      UUID resourceId,
+      String name,
+      CanvasResourceKind kind) {
     UUID blobId = UUID.randomUUID();
-    blobAccess.put(new CanvasFunctionBlobAccess.BlobFacts(blobId, "image/png", 3L, 1L, 1L, null));
+    String mediaType =
+        switch (kind) {
+          case IMAGE -> "image/png";
+          case VIDEO -> "video/mp4";
+          case AUDIO -> "audio/mp4";
+          case TEXT -> "text/plain";
+        };
+    blobAccess.put(new CanvasFunctionBlobAccess.BlobFacts(blobId, mediaType, 3L, 1L, 1L, null));
     jdbc.update(
         "insert into storage_blob "
             + "(id, sha256, size_bytes, media_type, width, height, ref_count, state) "
@@ -692,7 +1141,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         blobId,
         String.format("%064x", blobId.getLeastSignificantBits() & Long.MAX_VALUE),
         3L,
-        "image/png",
+        mediaType,
         1,
         1,
         1L,
@@ -704,11 +1153,17 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             ownerNodeId,
             resourceIndex,
             blobId,
-            "resource.png",
+            name != null ? name : "resource.png",
             null,
             Instant.now());
     resourceRepository.add(resource);
     return resource;
+  }
+
+  private CanvasResource addBlobResource(
+      UUID canvasId, UUID ownerNodeId, Integer resourceIndex, UUID resourceId) {
+    return addBlobResource(
+        canvasId, ownerNodeId, resourceIndex, resourceId, "resource.png", CanvasResourceKind.IMAGE);
   }
 
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
@@ -743,7 +1198,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
       return new CanvasFunctionAdapter() {
         @Override
         public List<CanvasFunctionDefinition> functions() {
-          return List.of(DEFINITION);
+          return List.of(
+              DEFINITION, MULTI_MEDIA_DEFINITION, TEXT_IMAGE_DEFINITION, TWO_IMAGES_DEFINITION);
         }
 
         @Override
@@ -838,36 +1294,58 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     }
 
     @Override
-    public CanvasResource replaceOwnedWithTarget(
-        UUID canvasId, UUID nodeId, UUID targetResourceId) {
-      CanvasResource target = resources.findByIdForUpdate(canvasId, targetResourceId).orElseThrow();
+    public List<CanvasResource> replaceOwnedWithTargets(
+        UUID canvasId, UUID nodeId, List<UUID> orderedTargetResourceIds) {
+      Objects.requireNonNull(orderedTargetResourceIds, "orderedTargetResourceIds");
+      if (orderedTargetResourceIds.isEmpty()) {
+        throw new IllegalArgumentException("Function output plan must not be empty");
+      }
+      Set<UUID> distinct = new LinkedHashSet<>(orderedTargetResourceIds);
+      if (distinct.size() != orderedTargetResourceIds.size() || distinct.contains(null)) {
+        throw new IllegalArgumentException("Function output targets must be distinct Resources");
+      }
+      List<CanvasResource> targets = new ArrayList<>(orderedTargetResourceIds.size());
+      for (UUID targetResourceId : orderedTargetResourceIds) {
+        CanvasResource target =
+            resources.findByIdForUpdate(canvasId, targetResourceId).orElse(null);
+        if (target == null || target.ownerNodeId() != null || target.resourceIndex() != null) {
+          throw new IllegalArgumentException(
+              "Function target must be an unowned Resource in the same canvas");
+        }
+        targets.add(target);
+      }
       for (CanvasResource current : resources.findByOwnerNode(canvasId, nodeId)) {
         if (pins.countByResource(canvasId, current.id()) > 0) {
-          resources.detachOwner(canvasId, current.id(), nodeId);
+          if (!resources.detachOwner(canvasId, current.id(), nodeId)) {
+            throw new IllegalStateException("detach replaced canvas resource failed");
+          }
         } else {
           resources.delete(canvasId, current.id());
         }
       }
-      if (!resources.attachOwner(canvasId, targetResourceId, nodeId, 0)) {
-        throw new IllegalStateException("attach test target failed");
+      List<CanvasResource> attached = new ArrayList<>(targets.size());
+      for (int index = 0; index < targets.size(); index++) {
+        UUID targetResourceId = targets.get(index).id();
+        if (!resources.attachOwner(canvasId, targetResourceId, nodeId, index)) {
+          throw new IllegalStateException("attach Function target Resource failed");
+        }
+        attached.add(targets.get(index).withSlot(nodeId, index));
       }
-      return new CanvasResource(
-          target.id(),
-          target.canvasId(),
-          nodeId,
-          0,
-          target.blobId(),
-          target.name(),
-          target.textContent(),
-          target.createdAt());
+      return List.copyOf(attached);
     }
 
     @Override
-    public void discardUnownedTarget(UUID canvasId, UUID targetResourceId) {
-      resources
-          .findByIdForUpdate(canvasId, targetResourceId)
-          .filter(resource -> resource.ownerNodeId() == null)
-          .ifPresent(resource -> resources.delete(canvasId, resource.id()));
+    public void discardUnownedTargets(UUID canvasId, Collection<UUID> targetResourceIds) {
+      Objects.requireNonNull(targetResourceIds, "targetResourceIds");
+      for (UUID resourceId : new LinkedHashSet<>(targetResourceIds)) {
+        if (resourceId == null) {
+          continue;
+        }
+        resources
+            .findByIdForUpdate(canvasId, resourceId)
+            .filter(resource -> resource.ownerNodeId() == null)
+            .ifPresent(resource -> resources.delete(canvasId, resource.id()));
+      }
     }
 
     @Override
