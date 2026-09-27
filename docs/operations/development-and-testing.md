@@ -200,6 +200,19 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
 这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
 
+异步 `task` 的工具结果只表示已接受，完成结果由后续独立的 `<subagent_result>` 消息交付。
+`real.task_delegation` 分别验证 JSON 受理收据与同一子 Thread 的完成消息，不能将受理当作完成。
+受理卡片的 Thread 链接进入 `/threads/:threadId`，复用独立 Thread 面板查看进度并处理工具审批，
+不依赖 Chat 归属，也不开放无 owner 的会话命令发送。
+[`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
+通过真实组件交互验证子 Thread 的允许/拒绝审批目标，并覆盖非法 ID、加载失败与返回入口；
+这些是 jsdom 回归，不替代真实浏览器验证。
+
+真实 `read` 工具的 L4 用例 `tool.read_turn` 断言非 YOLO tool turn 的审批链路，以及 durable
+`tool_result` 内联的完整 `path`/`ends_with_newline`/`range` 投影。read 文本窗口恒在终态链路为 read
+身份加宽的内联预算（320 KiB / 2020 行）内，因此不产生 resource 预览；工具结果外部化到全局 Blob 与
+session 归属由 platform 集成测试守卫，E2E 没有真实模型 tool→blob 端到端证据。
+
 ## Compose、静态资源与文档门禁
 
 ```bash

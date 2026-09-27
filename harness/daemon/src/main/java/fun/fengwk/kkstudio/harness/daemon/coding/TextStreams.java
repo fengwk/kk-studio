@@ -21,15 +21,25 @@ import java.util.Objects;
  * <p>read 与 grep 都需要在不受文件大小限制的前提下读取 Daemon 自己生成或外部工具产生的超大文本。这里统一“只读前缀做编码/二进制判定”“按固定大小缓冲流式解码”“遇到非法
  * UTF-8 或 NUL 以明确错误失败”的语义，避免两处各自实现出不一致的判定。
  *
- * <p>本类型不分配整文件内存：所有操作都在固定大小的缓冲上进行，因此读取成本与文件大小无关。
+ * <p>本类型不分配整文件内存：所有操作都在固定大小的缓冲上进行，因此读取成本与文件大小无关。逐行扫描对单行保留设有显式上限 {@link #MAX_LINE_CHARS}：超过上限的行以
+ * {@code truncated=true} 报告，调用方必须显式处理（{@code grep} 将其升级为
+ * “无法完整搜索”的明确失败），不得把它当成“该行无匹配”。需要真正无上限单行视图的调用方（例如 read 的窗口扫描）不能只依赖本方法。
  */
 final class TextStreams {
 
   /** 编码与二进制探测读取的前缀字节数：足够覆盖 BOM 与典型的二进制起始特征。 */
   static final int PROBE_BYTES = 8192;
 
-  /** 流式逐行读取的单行最大字符数：超长行被截断而不是整体驻留内存。 */
-  static final int MAX_LINE_CHARS = 64 * 1024;
+  /**
+   * 逐行扫描的单行保留上限（字符数）。
+   *
+   * <p>取值必须显著高于常见的“超长行”阈值，使后续内容里出现的匹配仍能被找到；超过上限的行不是被静默截断，而是以 {@code truncated=true}
+   * 显式交给调用方，由调用方决定失败还是降级。
+   */
+  static final int MAX_LINE_CHARS = 1024 * 1024;
+
+  /** 流式解码的读取缓冲字符数：与单行保留上限无关，固定常量即可。 */
+  private static final int READ_BUFFER_CHARS = 64 * 1024;
 
   private TextStreams() {}
 
@@ -50,13 +60,16 @@ final class TextStreams {
    *
    * <p>{@code consumer} 返回 false 表示提前终止扫描；返回的 {@link Outcome} 仍准确报告扫描到该点为止的总行数与是否以换行结尾。
    *
+   * <p>单行超过 {@link #MAX_LINE_CHARS} 时，该行以保留前缀加 {@code truncated=true} 交付，超出的字符被丢弃但行号与后续行不变。调用方必须 处理
+   * {@code truncated}：{@code grep} 视为“无法完整搜索”的显式失败，绝不把它当成该行无匹配。
+   *
    * @return 扫描结果：总行数与“文件是否以换行符结尾”
-   * @throws IllegalArgumentException 文件包含非法 UTF-8 序列或 NUL 字符
+   * @throws DecodeException 文件包含非法 UTF-8 序列或 NUL 字符
    */
   static Outcome forEachLine(Path path, Encoding encoding, LineConsumer consumer)
       throws IOException, InterruptedException {
     Objects.requireNonNull(encoding, "encoding");
-    try (BufferedReader reader = new BufferedReader(encoding.openReader(path), MAX_LINE_CHARS)) {
+    try (BufferedReader reader = new BufferedReader(encoding.openReader(path), READ_BUFFER_CHARS)) {
       StringBuilder line = new StringBuilder();
       int lineNumber = 0;
       boolean truncated = false;
@@ -68,7 +81,7 @@ final class TextStreams {
         for (int index = 0; index < count; index++) {
           char value = buffer[index];
           if (value == '\u0000') {
-            throw new IllegalArgumentException("file appears to be binary: contains NUL character");
+            throw new DecodeException("file appears to be binary: contains NUL character");
           }
           if (sawCr) {
             sawCr = false;
@@ -121,6 +134,24 @@ final class TextStreams {
 
   /** 扫描结果：文件总行数与是否以换行符结尾。 */
   record Outcome(int totalLines, boolean endsWithNewline) {}
+
+  /**
+   * 严格解码判定为二进制/非法文本。
+   *
+   * <p>是 {@link IllegalArgumentException} 的子类，使调用方能把它与超时等其它非法参数错误区分开，从而在目录扫描中按二进制静默跳过，而把超时如实上报。
+   */
+  static final class DecodeException extends IllegalArgumentException {
+
+    private static final long serialVersionUID = 1L;
+
+    DecodeException(String message) {
+      super(message);
+    }
+
+    DecodeException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
 
   /** 逐行消费者的返回值表示是否继续扫描。 */
   @FunctionalInterface
@@ -188,9 +219,8 @@ final class TextStreams {
           try {
             return super.read(buffer, offset, length);
           } catch (IOException error) {
-            if (error.getCause() instanceof CharacterCodingException) {
-              throw new IllegalArgumentException(
-                  "file appears to be binary: invalid text encoding", error);
+            if (error instanceof CharacterCodingException) {
+              throw new DecodeException("file appears to be binary: invalid text encoding", error);
             }
             throw error;
           }

@@ -1,0 +1,11 @@
+
+# comment
+   
+\#literal.txt
+\!literal.txt
+ignored-dir/
+blocked/
+nested/path-dir/
+/root-only.txt
+logs/**/debug?.log
+.pi/git/*

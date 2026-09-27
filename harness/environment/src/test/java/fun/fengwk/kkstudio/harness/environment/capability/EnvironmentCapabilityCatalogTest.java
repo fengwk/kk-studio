@@ -62,15 +62,20 @@ class EnvironmentCapabilityCatalogTest {
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
       assertEquals("2", descriptor.version(), descriptor.id().value());
     }
-    // workdir 语义由 capability ID 决定，不能从可能被其它能力独立使用的版本号推断。
+    // Schema 是参数必填性的唯一事实源；只有无目标 path 的进程执行始终需要 workdir。
     assertEquals(
-        expected.subList(1, expected.size() - 1),
+        List.of(EnvironmentCapabilityIds.PROCESS_EXEC),
         EnvironmentCapabilityCatalog.descriptors().stream()
             .map(EnvironmentCapabilityDescriptor::id)
             .filter(EnvironmentCapabilityCatalog::requiresWorkdir)
             .toList());
     assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.FS_READ));
     assertFalse(EnvironmentCapabilityCatalog.requiresWorkdir(EnvironmentCapabilityIds.SKILL_SYNC));
+    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
+      assertEquals(
+          descriptor.inputSchema().required().contains("workdir"),
+          EnvironmentCapabilityCatalog.requiresWorkdir(descriptor.id()));
+    }
     assertEquals(
         Set.of("path"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ)

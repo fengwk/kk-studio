@@ -2,7 +2,6 @@ import { writeFileSync } from 'node:fs'
 import path from 'node:path'
 import {
   assert,
-  assertDecimalVersion,
   envelopeData,
   expectHttpError,
   pageResults,
@@ -1238,7 +1237,7 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；最终 TOOL MESSAGE 冻结 rendererKey=task 与 <task id> envelope；id 对应子 Thread ROOT.subagentContext(parent/root/taskInvocation/depth=2)',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；TOOL MESSAGE 冻结 rendererKey=task 与 {"thread_id","status":"accepted"} 收据；后续独立消息携带 <subagent_result> 完成结果；thread_id 对应子 Thread ROOT.subagentContext(parent/root/taskInvocation/depth=2)',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
     const suffix = cid().slice(0, 8)
@@ -1333,10 +1332,31 @@ registerCase({
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
         .join('')
-      const taskId = /<task id="([^"]+)" state="completed">/.exec(taskText)?.[1]
-      assert(taskId, `completed task envelope missing: ${taskText}`)
-      canonicalUuid(taskId, 'task envelope thread id')
-      assert(taskText.includes(marker), `subagent report missing marker: ${taskText}`)
+      const receipt = JSON.parse(taskText)
+      assert(receipt.status === 'accepted', `expected accepted receipt: ${taskText}`)
+      const taskId = receipt.thread_id
+      assert(taskId, `accepted receipt thread_id missing: ${taskText}`)
+      canonicalUuid(taskId, 'task receipt thread id')
+
+      let subagentResultText = ''
+      for (const entry of parentSnapshot.entries || []) {
+        if (entryType(entry) !== 'MESSAGE') continue
+        const message = parseEntryPayload(entry).message
+        for (const content of message?.contents || []) {
+          if (content?.type === 'text' && typeof content.text === 'string') {
+            if (
+              content.text.includes('<subagent_result')
+              && (content.text.includes(`thread_id="${taskId}"`) || content.text.includes(`id="${taskId}"`))
+            ) {
+              subagentResultText = content.text
+            }
+          }
+        }
+      }
+      assert(
+        subagentResultText.includes(marker),
+        `subagent result for thread ${taskId} missing marker: ${subagentResultText}`,
+      )
 
       const childSnapshot = await getThreadSnapshot(ctx, taskId)
       const childRoot = (childSnapshot.entries || [])[0]
@@ -1797,9 +1817,9 @@ registerCase({
 registerCase({
   id: 'tool.read_turn',
   level: 'L4',
-  title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 Resource 外部化',
+  title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 read 内联结果',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '使用 minimax-anthropic/MiniMax-M3 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 读取 >8KB fixture，Tool Result Entry 写入前摄入全局 Blob；durable tool_result.contents 只携带 resource(blobId,name,preview)，再通过 Blob 原件预签名下载验证字节；后续模型轮次在嵌套 Resource fallback/materialization 后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束',
+  docs: '使用 minimax-anthropic/MiniMax-M3 + backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     const minimaxModel = await requireRealMiniMaxM3(ctx)
@@ -1848,10 +1868,12 @@ registerCase({
         (_, index) => `E2E-RESOURCE-FIXTURE-${String(index).padStart(2, '0')} ${'x'.repeat(512)}`,
       )
       const fixtureContent = `${fixtureLines.join('\n')}\n`
+      // 32 行 × 512 字符 fixture 落在 TextReadWindow 的 2000 行 / 60000 码点窗口内：header 只有
+      // path/ends_with_newline/range，没有截断元数据，该文件类型也没有可用 LSP 服务器（lsp 行省略）。
       const expectedReadOutput = [
         'path: e2e-resource.txt',
         'ends_with_newline: yes',
-        'lsp: unsupported',
+        `range: 1:1-${fixtureLines.length}:${fixtureLines[0].length}`,
         '',
         ...fixtureLines.map(
           (line, index) => `${String(index + 1).padStart(2, ' ')}|${line}`,
@@ -2039,84 +2061,44 @@ registerCase({
         toolEntries.length > 0,
         `no durable TOOL MESSAGE entry: ${safeDiagnosticJson(finalSnapshot.entries)}`,
       )
-      const resources = []
       const toolResultContents = []
       for (const entry of toolEntries) {
         const contents = parseEntryPayload(entry).message?.contents || []
         for (const content of contents) {
           if (content?.type !== 'tool_result') continue
           toolResultContents.push(content)
-          for (const child of content.contents || []) {
-            if (child?.type === 'resource') resources.push(child)
-          }
         }
       }
       assert(
         toolResultContents.length > 0,
         `tool_result contents missing: ${safeDiagnosticJson(finalSnapshot.entries)}`,
       )
+      // 归属验证：durable tool_result 必须精确对应该次已 ALLOW 的 read 调用。
+      const readResults = toolResultContents.filter((content) => content.toolName === 'read')
       assert(
-        resources.length >= 1,
-        `expected at least one externalized resource: ${safeDiagnosticJson(toolResultContents)}`,
+        readResults.length === 1,
+        `expected exactly one durable read tool_result: ${safeDiagnosticJson(toolResultContents)}`,
       )
-      for (const resource of resources) {
-        assert(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
-            String(resource.blobId || ''),
-          ),
-          `durable resource must carry a blobId: ${safeDiagnosticJson(resource)}`,
-        )
-        assert(
-          typeof resource.name === 'string' && resource.name.trim(),
-          `durable resource name must be present: ${safeDiagnosticJson(resource)}`,
-        )
-        assert(
-          resource.preview == null || typeof resource.preview === 'string',
-          `durable resource preview must be null or text: ${safeDiagnosticJson(resource)}`,
-        )
-        assert(
-          !Object.hasOwn(resource, 'uri')
-            && !Object.hasOwn(resource, 'mediaType')
-            && !Object.hasOwn(resource, 'size')
-            && !Object.hasOwn(resource, 'sha256'),
-          `durable history must not copy transient ResourceRef facts: ${safeDiagnosticJson(resource)}`,
-        )
-      }
-      const managed = resources[0]
-      const { json: signedJson } = await ctx.call(
-        'POST',
-        `/api/storage/blobs/${managed.blobId}/download-url`,
-      )
-      const signed = envelopeData(signedJson)
-      assert(signed.method === 'GET', safeDiagnosticJson(signed))
+      const readResult = readResults[0]
       assert(
-        /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(String(signed.mediaType || '')),
-        `blob mediaType must be canonical: ${safeDiagnosticJson(signed)}`,
-      )
-      assertDecimalVersion(signed.sizeBytes, 'blob.sizeBytes')
-      const signedSizeBytes = Number(signed.sizeBytes)
-      assert(
-        Number.isSafeInteger(signedSizeBytes) && signedSizeBytes > 0,
-        `blob sizeBytes must be a positive safe decimal: ${safeDiagnosticJson(signed)}`,
+        readResult.toolCallId === readInvocation.toolCallId,
+        `read tool_result must belong to the approved call ${readInvocation.toolCallId}: ${safeDiagnosticJson(readResult)}`,
       )
       assert(
-        signedSizeBytes === Buffer.byteLength(expectedReadOutput),
-        `blob size ${signedSizeBytes} != formatted read output ${Buffer.byteLength(expectedReadOutput)}`,
+        readResult.error === false,
+        `read tool_result must succeed: ${safeDiagnosticJson(readResult)}`,
       )
-      const download = await fetch(signed.url, { headers: signed.headers || {} })
-      assert(download.status === 200, `blob resource download status ${download.status}`)
+      // 内容完整性：durable history 必须内联 TextReadWindow 的完整 canonical 投影（header + 编号正文），
+      // 既不能少一段，也不能被终态链路换成 resource 预览。
+      const readContents = readResult.contents || []
       assert(
-        String(download.headers.get('content-type') || '').startsWith(signed.mediaType),
-        `managed resource media type mismatch: ${download.headers.get('content-type')}`,
-      )
-      const bytes = Buffer.from(await download.arrayBuffer())
-      assert(
-        bytes.length === signedSizeBytes,
-        `download size ${bytes.length} != ${signedSizeBytes}`,
-      )
-      assert(
-        bytes.equals(Buffer.from(expectedReadOutput)),
-        'blob resource download bytes differ from the formatted read result',
+        readContents.length === 1
+          && readContents[0]?.type === 'text'
+          && readContents[0].text === expectedReadOutput,
+        `read tool_result must inline the complete canonical read projection: ${safeDiagnosticJson({
+          expectedReadOutput,
+          readContents,
+        })}`,
       )
       ctx.writeArtifact(
         'tool-turn-final.json',

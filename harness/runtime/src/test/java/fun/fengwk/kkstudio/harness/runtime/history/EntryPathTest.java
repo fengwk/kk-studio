@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -21,6 +22,10 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -519,6 +524,114 @@ class EntryPathTest {
             toolResult(id(5L), id(4L), 0, id(4L), "call-1", "read"),
             turnEnd(
                 id(6L), id(5L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(1L))));
+  }
+
+  /**
+   * STOP turn 是显式停止的持久屏障：只允许 ASSISTANT_ERROR 取消屏障 + STOPPED/continueModel=false/closeRequestId 非
+   * null 的 TURN_END；紧随其后的普通 INPUT turn 仍按既有约束校验（STOP 不放宽任何约束）。
+   */
+  @Test
+  void acceptsStopBarrierTurnAndUnchangedFollowingTurns() {
+    Entry root = root(settings("root"));
+    Entry stopStart = turnStart(id(2L), id(1L), TurnStartReason.STOP, settings("stop"));
+    Entry error = cancelBarrier(id(3L), id(2L));
+    Entry stopEnd =
+        turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(9L));
+
+    EntryPath path = new EntryPath(List.of(root, stopStart, error, stopEnd));
+    assertEquals(stopEnd, path.head());
+    assertEquals(TurnStartReason.STOP, ((TurnStartPayload) stopStart.payload()).reason());
+    // STOP turn 不承载 settings 变更：settings 快照仍是它写入时的那份。
+    assertEquals(settings("stop"), path.baseSettings());
+
+    Entry inputStart = turnStart(id(5L), id(4L), TurnStartReason.INPUT, settings("next"));
+    Entry user = userMessage(id(6L), id(5L));
+    Entry assistant = assistantMessage(id(7L), id(6L));
+    Entry completed = turnEnd(id(8L), id(7L), id(5L), TurnEndOutcome.COMPLETED, null, null);
+    EntryPath next =
+        new EntryPath(
+            List.of(root, stopStart, error, stopEnd, inputStart, user, assistant, completed));
+    assertEquals(completed, next.head());
+  }
+
+  @Test
+  void rejectsStopTurnShapeViolations() {
+    Entry root = root(settings("root"));
+    Entry start = turnStart(id(2L), id(1L), TurnStartReason.STOP, settings("stop"));
+    Entry error = cancelBarrier(id(3L), id(2L));
+    Entry stopped =
+        turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(9L));
+
+    // 不允许 USER / CUSTOM MESSAGE、真实 Assistant、Tool 结果、ABORTED barrier、COMPACTION 载荷、model attempt
+    // failure。
+    assertRejectsEntryPath(List.of(root, start, userMessage(id(3L), id(2L))));
+    assertRejectsEntryPath(List.of(root, start, customMessage(id(3L), id(2L))));
+    assertRejectsEntryPath(List.of(root, start, assistantMessage(id(3L), id(2L))));
+    assertRejectsEntryPath(
+        List.of(
+            root,
+            start,
+            assistantMessage(id(3L), id(2L), "call-1:read"),
+            toolResult(id(4L), id(3L), 0, id(3L), "call-1", "read")));
+    assertRejectsEntryPath(List.of(root, start, assistantAborted(id(3L), id(2L))));
+    assertRejectsEntryPath(List.of(root, start, modelAttemptFailure(id(3L), id(2L), 1)));
+    // 缺少唯一取消屏障。
+    assertRejectsEntryPath(
+        List.of(
+            root,
+            start,
+            turnEnd(
+                id(3L), id(2L), id(2L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(9L))));
+    // 取消屏障必须是稳定 CANCELLED code：模型失败的 ASSISTANT_ERROR 不属于显式停止。
+    assertRejectsEntryPath(List.of(root, start, assistantError(id(3L), id(2L))));
+    assertRejectsEntryPath(
+        List.of(
+            root,
+            start,
+            assistantErrorWithMessage(id(3L), id(2L), "MODEL_FAILED", "down"),
+            stopped));
+    // STOP turn 不可能误携 provider replay state：Entry 不变式只允许 replay state 出现在 ASSISTANT MESSAGE 上，
+    // 而 STOP turn 不接受任何 ASSISTANT MESSAGE。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new Entry(
+                id(3L),
+                SESSION_ID,
+                id(2L),
+                new AssistantErrorPayload(
+                    new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"), null),
+                time(id(3L)),
+                sampleReplayState()));
+    // 重复取消屏障。
+    assertRejectsEntryPath(List.of(root, start, error, assistantError(id(4L), id(3L)), stopped));
+    // outcome 必须是 STOPPED：COMPLETED / FAILED / CANCELLED 都不允许。
+    assertRejectsEntryPath(
+        List.of(
+            root,
+            start,
+            error,
+            turnEnd(
+                id(4L), id(3L), id(2L), TurnEndOutcome.CANCELLED, TurnEndReason.CANCELLED, null)));
+    assertRejectsEntryPath(
+        List.of(
+            root,
+            start,
+            error,
+            turnEnd(
+                id(4L), id(3L), id(2L), TurnEndOutcome.FAILED, TurnEndReason.TURN_FAILED, null)));
+    // TURN_END 必须引用本 turn 的 TURN_START。
+    assertRejectsEntryPath(
+        List.of(
+            root,
+            start,
+            error,
+            turnEnd(
+                id(4L), id(3L), id(1L), TurnEndOutcome.STOPPED, TurnEndReason.USER_STOP, id(9L))));
+  }
+
+  private static void assertRejectsEntryPath(List<Entry> entries) {
+    assertThrows(IllegalArgumentException.class, () -> new EntryPath(entries));
   }
 
   @Test
@@ -1294,12 +1407,32 @@ class EntryPathTest {
   }
 
   private static Entry assistantError(UUID id, UUID parentId) {
+    return assistantErrorWithMessage(id, parentId, "MODEL_FAILED", "down");
+  }
+
+  private static Entry assistantErrorWithMessage(
+      UUID id, UUID parentId, String code, String message) {
     return new Entry(
         id,
         SESSION_ID,
         parentId,
-        new AssistantErrorPayload(new AssistantError("MODEL_FAILED", "down"), null),
+        new AssistantErrorPayload(new AssistantError(code, message), null),
         time(id));
+  }
+
+  /** STOP barrier：稳定 CANCELLED code 的 ASSISTANT_ERROR。 */
+  private static Entry cancelBarrier(UUID id, UUID parentId) {
+    return assistantErrorWithMessage(
+        id, parentId, AssistantError.CANCELLED_CODE, "Cancelled by user");
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    return new ProviderReplayState(
+        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+        new ProviderReplayAffinity(
+            ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 9L), "claude-3-5-sonnet"),
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   private static Entry modelAttemptFailure(UUID id, UUID parentId, int attempt) {

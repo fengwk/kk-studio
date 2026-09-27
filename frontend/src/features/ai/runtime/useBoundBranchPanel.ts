@@ -93,7 +93,7 @@ export function useBoundBranchPanel({
   initialParts = [],
   initialReplay,
 }: {
-  owner: AgentRuntimeOwnerDTO
+  owner?: AgentRuntimeOwnerDTO
   threadId: string
   initialParts?: ComposerPart[]
   initialReplay?: CommandBatchReplay
@@ -182,7 +182,7 @@ export function useBoundBranchPanel({
         return null
       }
       return buildMessageBatchPlan({
-        owner,
+        owner: owner ?? { type: 'CHAT', id: '' },
         thread: boundThread,
         effectiveBase,
         draft: boundBranchState.draft,

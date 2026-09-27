@@ -32,19 +32,28 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** TaskTool 薄适配器的严格参数解析、Runner 委托、异常降级与取消传递测试。 */
+/**
+ * TaskTool 薄适配器的严格参数解析、持久接受委托与错误降级测试。
+ *
+ * <p>异步契约下 TaskTool 只有「持久接受」一个阶段：接受成功即回一次唯一 JSON {@code {"thread_id","status"}} 的
+ * tool_result，不等待终态、不返回可取消句柄。
+ */
 class TaskToolTest {
 
   private static final UUID INVOCATION_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
-  private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID PARENT_THREAD_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000002");
+  private static final UUID CHILD_SESSION_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000003");
+  private static final UUID CHILD_THREAD_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000004");
 
-  /** descriptor 固定暴露 name/renderer/sideEffect/no-timeout 与必填 schema 及 requirements。 */
+  /** descriptor 固定暴露 name/renderer/sideEffect/no-timeout 与 snake_case 参数 schema。 */
   @Test
   void exposesCanonicalDescriptorContract() {
-    TaskTool tool = new TaskTool((request, listener) -> mock(ToolExecutionHandle.class));
+    TaskTool tool = new TaskTool(request -> acceptance(false));
     ToolDescriptor descriptor = tool.descriptor();
 
     assertEquals(TaskTool.NAME, descriptor.name());
@@ -57,57 +66,67 @@ class TaskToolTest {
     InputSchema schema = descriptor.inputSchema();
     assertEquals(Set.of("subagent_type", "prompt"), schema.required());
     assertEquals(
-        Set.of("subagent_type", "prompt", "maxTurns", "session_id"), schema.properties().keySet());
+        Set.of("subagent_type", "prompt", "max_turns", "thread_id"), schema.properties().keySet());
     assertInstanceOf(StringSchema.class, schema.properties().get("subagent_type"));
     assertInstanceOf(StringSchema.class, schema.properties().get("prompt"));
-    assertInstanceOf(IntegerSchema.class, schema.properties().get("maxTurns"));
-    assertInstanceOf(StringSchema.class, schema.properties().get("session_id"));
+    assertInstanceOf(IntegerSchema.class, schema.properties().get("max_turns"));
+    assertInstanceOf(StringSchema.class, schema.properties().get("thread_id"));
   }
 
-  /** 合法参数正常解析并完整委托给 SubagentRunner 执行。 */
+  /** 合法参数完整委托给 Runner，并把接受结果立即回执为一次成功 tool_result。 */
   @Test
-  void parsesValidArgumentsAndDelegatesToRunner() {
+  void acceptsValidArgumentsAndReturnsAcceptedReceipt() {
     AtomicReference<SubagentTaskRequest> receivedRequest = new AtomicReference<>();
-    ToolExecutionHandle mockHandle = mock(ToolExecutionHandle.class);
-
     SubagentRunner runner =
-        (taskRequest, listener) -> {
-          receivedRequest.set(taskRequest);
-          listener.onComplete(ToolResult.error("call-1", "done"));
-          return mockHandle;
+        request -> {
+          receivedRequest.set(request);
+          return acceptance(false);
         };
 
     TaskTool tool = new TaskTool(runner);
     AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
-
     ToolExecutionRequest request =
         createRequest(
             tool,
             "call-1",
-            "{\"subagent_type\":\"coder\",\"prompt\":\"write"
-                + " code\",\"maxTurns\":5,\"session_id\":\"00000000-0000-0000-0000-000000000003\"}");
+            "{\"subagent_type\":\"coder\",\"prompt\":\"write code\",\"max_turns\":5,"
+                + "\"thread_id\":\"00000000-0000-0000-0000-00000000000a\"}");
 
     ToolExecutionHandle handle = tool.execute(request, createListener(outcomeRef));
 
-    assertEquals(mockHandle, handle);
+    assertNotNull(handle);
     assertNotNull(receivedRequest.get());
     assertEquals(INVOCATION_ID, receivedRequest.get().invocationId());
-    assertEquals(THREAD_ID, receivedRequest.get().threadId());
+    assertEquals(PARENT_THREAD_ID, receivedRequest.get().parentThreadId());
     assertEquals("coder", receivedRequest.get().subagentType());
     assertEquals("write code", receivedRequest.get().prompt());
     assertEquals(5, receivedRequest.get().maxTurns());
     assertEquals(
-        UUID.fromString("00000000-0000-0000-0000-000000000003"), receivedRequest.get().sessionId());
+        UUID.fromString("00000000-0000-0000-0000-00000000000a"),
+        receivedRequest.get().resumeThreadId());
+
+    ToolResult result = outcomeRef.get().result();
+    assertFalse(result.error());
+    // 即时回执是唯一形状的 JSON，不重复 prompt。
+    assertEquals(
+        "{\"thread_id\":\"" + CHILD_THREAD_ID + "\",\"status\":\"accepted\"}", text(result));
+    assertFalse(text(result).contains("write code"), text(result));
+    // details 与回执表达同一份事实，并保留 UI 需要的 kind/会话/幂等元数据。
+    String details = result.detailsJson();
+    assertTrue(details.contains("\"kind\":\"task.accepted\""), details);
+    assertTrue(details.contains("\"thread_id\":\"" + CHILD_THREAD_ID + "\""), details);
+    assertTrue(details.contains("\"status\":\"accepted\""), details);
+    assertTrue(details.contains("\"replayed\":false"), details);
   }
 
-  /** 可选参数缺省时正确传递 null。 */
+  /** 可选参数缺省时正确传递 null（新任务、policy 默认预算）。 */
   @Test
-  void handlesOptionalMaxTurnsAndSessionId() {
+  void handlesOptionalMaxTurnsAndThreadId() {
     AtomicReference<SubagentTaskRequest> receivedRequest = new AtomicReference<>();
     SubagentRunner runner =
-        (taskRequest, listener) -> {
-          receivedRequest.set(taskRequest);
-          return mock(ToolExecutionHandle.class);
+        request -> {
+          receivedRequest.set(request);
+          return acceptance(false);
         };
 
     TaskTool tool = new TaskTool(runner);
@@ -120,29 +139,22 @@ class TaskToolTest {
     assertEquals("explorer", receivedRequest.get().subagentType());
     assertEquals("search", receivedRequest.get().prompt());
     assertNull(receivedRequest.get().maxTurns());
-    assertNull(receivedRequest.get().sessionId());
+    assertNull(receivedRequest.get().resumeThreadId());
   }
 
-  /** Schema 级参数校验拒绝：缺少必填字段、非法 JSON、非对象结构会在请求构造阶段抛出 IllegalArgumentException。 */
+  /** Schema 级参数校验拒绝在请求构造阶段抛出 IllegalArgumentException。 */
   @Test
   void rejectsSchemaViolationsOnRequestCreation() {
-    TaskTool tool = new TaskTool((req, listener) -> mock(ToolExecutionHandle.class));
+    TaskTool tool = new TaskTool(request -> acceptance(false));
 
-    // Missing subagent_type
     assertThrows(
         IllegalArgumentException.class,
         () -> createRequest(tool, "call-rej-1", "{\"prompt\":\"foo\"}"));
-
-    // Missing prompt
     assertThrows(
         IllegalArgumentException.class,
         () -> createRequest(tool, "call-rej-2", "{\"subagent_type\":\"coder\"}"));
-
-    // Invalid JSON
     assertThrows(
         IllegalArgumentException.class, () -> createRequest(tool, "call-rej-3", "not json"));
-
-    // Non-object JSON
     assertThrows(
         IllegalArgumentException.class, () -> createRequest(tool, "call-rej-4", "[\"coder\"]"));
   }
@@ -150,52 +162,54 @@ class TaskToolTest {
   /** 语义级参数校验拒绝：空白、前后空格、非正整轮数、非法 UUID 在执行期安全返回错误 ToolResult。 */
   @Test
   void rejectsSemanticViolationsWithDescriptiveErrors() {
-    SubagentRunner runner = (req, listener) -> mock(ToolExecutionHandle.class);
-    TaskTool tool = new TaskTool(runner);
+    TaskTool tool = new TaskTool(request -> acceptance(false));
 
-    // Subagent type with whitespace
     assertRejection(
         tool,
         "{\"subagent_type\":\" coder \",\"prompt\":\"foo\"}",
         "subagent_type must not contain surrounding whitespace");
-
-    // Subagent type blank
     assertRejection(
         tool, "{\"subagent_type\":\"  \",\"prompt\":\"foo\"}", "subagent_type is required");
-
-    // Prompt blank
     assertRejection(tool, "{\"subagent_type\":\"coder\",\"prompt\":\"  \"}", "prompt is required");
-
-    // Invalid maxTurns non-positive (0)
     assertRejection(
         tool,
-        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"maxTurns\":0}",
-        "maxTurns must be a positive integer");
-
-    // Invalid maxTurns negative (-1)
+        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"max_turns\":0}",
+        "max_turns must be a positive integer");
     assertRejection(
         tool,
-        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"maxTurns\":-1}",
-        "maxTurns must be a positive integer");
-
-    // Invalid session_id not UUID
+        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"max_turns\":-1}",
+        "max_turns must be a positive integer");
     assertRejection(
         tool,
-        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"session_id\":\"invalid-uuid\"}",
-        "session_id must be a canonical UUID string");
-
-    // Invalid session_id uppercase
+        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"thread_id\":\"invalid-uuid\"}",
+        "thread_id must be a canonical UUID string");
     assertRejection(
         tool,
-        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\",\"session_id\":\"00000000-0000-0000-0000-00000000000A\"}",
-        "session_id must be a canonical UUID string");
+        "{\"subagent_type\":\"coder\",\"prompt\":\"foo\","
+            + "\"thread_id\":\"00000000-0000-0000-0000-00000000000A\"}",
+        "thread_id must be a canonical UUID string");
   }
 
-  /** Runner 抛出 RuntimeException（如 RejectedExecutionException）时捕获并安全通知 listener。 */
+  /** 非幂等重放：Runner 返回 replayed=true 时回执同样成功，交给父判断是否已有既有执行。 */
+  @Test
+  void reportsReplayedAcceptanceOnIdempotentRetry() {
+    TaskTool tool = new TaskTool(request -> acceptance(true));
+    AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
+    ToolExecutionRequest request =
+        createRequest(tool, "call-replay", "{\"subagent_type\":\"coder\",\"prompt\":\"p\"}");
+
+    tool.execute(request, createListener(outcomeRef));
+
+    ToolResult result = outcomeRef.get().result();
+    assertFalse(result.error());
+    assertTrue(result.detailsJson().contains("\"replayed\":true"));
+  }
+
+  /** Runner 拒绝或抛异常时捕获并安全通知 listener，绝不逃出调用线程。 */
   @Test
   void catchesRunnerExceptionsAndCompletesListenerWithError() {
     SubagentRunner runner =
-        (taskRequest, listener) -> {
+        request -> {
           throw new RejectedExecutionException("subagent concurrency limit reached");
         };
 
@@ -205,6 +219,7 @@ class TaskToolTest {
         createRequest(tool, "call-err", "{\"subagent_type\":\"coder\",\"prompt\":\"do\"}");
 
     ToolExecutionHandle handle = tool.execute(request, createListener(outcomeRef));
+
     assertNotNull(handle);
     assertNotNull(outcomeRef.get());
     assertTrue(outcomeRef.get().result().error());
@@ -214,7 +229,7 @@ class TaskToolTest {
   /** 执行缺少 durable 上下文时快速抛出 IllegalArgumentException。 */
   @Test
   void requiresDurableExecutionContext() {
-    TaskTool tool = new TaskTool((req, listener) -> mock(ToolExecutionHandle.class));
+    TaskTool tool = new TaskTool(request -> acceptance(false));
     ToolExecutionRequest requestWithoutContext =
         new ToolExecutionRequest(
             tool.descriptor(),
@@ -226,35 +241,8 @@ class TaskToolTest {
         () -> tool.execute(requestWithoutContext, createListener(new AtomicReference<>())));
   }
 
-  /** 取消句柄正常委托至 Runner 返回的 handle。 */
-  @Test
-  void delegatesCancellationToRunnerHandle() {
-    AtomicBoolean cancelled = new AtomicBoolean();
-    ToolExecutionHandle handleStub =
-        new ToolExecutionHandle() {
-          @Override
-          public void cancel() {
-            cancelled.set(true);
-          }
-
-          @Override
-          public boolean isCancelled() {
-            return cancelled.get();
-          }
-        };
-
-    SubagentRunner runner = (taskRequest, listener) -> handleStub;
-    TaskTool tool = new TaskTool(runner);
-
-    ToolExecutionRequest request =
-        createRequest(tool, "call-cancel", "{\"subagent_type\":\"coder\",\"prompt\":\"p\"}");
-    ToolExecutionHandle returnedHandle =
-        tool.execute(request, createListener(new AtomicReference<>()));
-
-    assertFalse(returnedHandle.isCancelled());
-    returnedHandle.cancel();
-    assertTrue(returnedHandle.isCancelled());
-    assertTrue(cancelled.get());
+  private static SubagentTaskAcceptance acceptance(boolean replayed) {
+    return new SubagentTaskAcceptance(CHILD_SESSION_ID, CHILD_THREAD_ID, replayed);
   }
 
   private static void assertRejection(
@@ -278,7 +266,8 @@ class TaskToolTest {
   private static ToolExecutionRequest createRequest(
       TaskTool tool, String callId, String argumentsJson) {
     ToolExecutionContext context =
-        new ToolExecutionContext(INVOCATION_ID, THREAD_ID, Instant.now(), mock(BranchView.class));
+        new ToolExecutionContext(
+            INVOCATION_ID, PARENT_THREAD_ID, Instant.now(), mock(BranchView.class));
     return new ToolExecutionRequest(
         tool.descriptor(),
         new ToolCall(callId, TaskTool.NAME, argumentsJson),

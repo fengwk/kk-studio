@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
@@ -51,6 +52,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -174,7 +176,13 @@ final class StopControl {
     StopResult result =
         switch (context) {
           case ThreadContext.IdleOrHistorical ignored -> stopIdle(
-              tx, thread, cancelledCommandCount, cancelledUserMessages, now);
+              tx,
+              thread,
+              path,
+              command.stopRequestId(),
+              cancelledCommandCount,
+              cancelledUserMessages,
+              now);
           case ThreadContext.ContinuationDue ignored -> stopContinuation(
               tx,
               thread,
@@ -265,7 +273,7 @@ final class StopControl {
       }
       return cancelledReceipt(tx, thread, stopRequestId, match.id());
     }
-    // queued-only receipt：未创建 Turn 的先前 Stop 以 (threadId, stop_request_id) 作幂等键。
+    // queued-only receipt：未写停止边界的先前 Stop（open Turn 属其它 Thread）以 (threadId, stop_request_id) 作幂等键。
     List<ThreadCommand> cancelledWithRequest =
         tx.loadCancelledCommandsByRequest(thread.id(), stopRequestId);
     if (!cancelledWithRequest.isEmpty()) {
@@ -357,7 +365,146 @@ final class StopControl {
     };
   }
 
+  /**
+   * 空闲（无 live Invocation）Stop：写一个完整的 STOP barrier Turn —— TURN_START({@code STOP}) →
+   * ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, closeRequestId) —— 并同事务把 head 推进到该
+   * TURN_END、恰好递增一次 version。它不消费 Command、从不调度模型，也不计入模型工作轮数。
+   *
+   * <p>STOP Turn 与其它 Stop 同域（TURN_START.ownerThreadId + TURN_END.closeRequestId），因此 {@link
+   * #findReplay} 直接复用它做幂等重放。
+   *
+   * <p>head 停在已关闭 TURN_END / ROOT 的 Thread（例如父 Thread 本地 turn 已结束、仍在等异步子委派）必须拿到这样的 durable
+   * 停止边界：没有它，子结果会被照常交付并唤醒父。
+   */
   private static StopResult stopIdle(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      UUID stopRequestId,
+      int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
+      Instant now) {
+    Optional<Entry> openTurn = path.openTurnStart();
+    if (openTurn.isPresent() && !isOwnedBy(openTurn.get(), thread.id())) {
+      // 共享历史上属于其它 Thread 的 open Turn：本 Thread 没有自己的 live 执行，也无权替换别人的 Turn，因此没有本 Thread
+      // 自己的停止边界可写（所有权各自独立），只取消排队 Command。
+      return touchVersionForCancelledCommands(
+          tx, thread, cancelledCommandCount, cancelledUserMessages, now);
+    }
+    EntryPath base = path;
+    if (openTurn.isPresent()) {
+      Entry turn = openTurn.get();
+      HistoryNormalization.StopClose close = HistoryNormalization.stopClose(path, turn);
+      if (close != HistoryNormalization.StopClose.HISTORY_CUT) {
+        // 本 Thread 的 open Turn 已不可能再被模型推进，但前缀足以按 STOPPED 合法关闭：已有完整 assistant 结果就直接复用它，
+        // 尚无 assistant 结果才追加取消屏障；既不新增第二个 TURN_START，也不伪造模型完成。
+        return closeOwnOpenTurnAsStopped(
+            tx,
+            thread,
+            path,
+            turn,
+            close,
+            stopRequestId,
+            cancelledCommandCount,
+            cancelledUserMessages,
+            now);
+      }
+      // 前缀不能按 STOPPED 关闭（尚无输入的空 INPUT Turn，或工具结果缺失的 assistant 结果）：先按既有 history normalization
+      // 语义收尾（必要时补写 synthetic HISTORY_CUT ToolResult，再以 CANCELLED/HISTORY_CUT 关闭），随后照常写 STOP
+      // boundary
+      // Turn 承载 durable 停止事实。
+      base = normalizeOpenOwnTurn(tx, path, now);
+    }
+    return appendStopBoundaryTurn(
+        tx, thread, base, stopRequestId, cancelledCommandCount, cancelledUserMessages, now);
+  }
+
+  /** 本 Thread 拥有、且无 live Invocation 的 open Turn：在其内部收尾，绝不新增 TURN_START。 */
+  private static StopResult closeOwnOpenTurnAsStopped(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      Entry openTurn,
+      HistoryNormalization.StopClose close,
+      UUID stopRequestId,
+      int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
+      Instant now) {
+    UUID sessionId = path.root().sessionId();
+    UUID parentId = path.head().id();
+    if (close == HistoryNormalization.StopClose.APPEND_CANCEL_BARRIER) {
+      parentId = insertCancelBarrier(tx, sessionId, parentId, now);
+    }
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId, sessionId, parentId, stoppedTurnEnd(openTurn.id(), stopRequestId), now));
+    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    tx.updateThread(stopped);
+    return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
+  }
+
+  /** 本 Thread 的 open Turn 前缀不足以按 STOPPED 关闭：按既有 history cut 语义收尾并返回收尾后的 EntryPath。 */
+  private static EntryPath normalizeOpenOwnTurn(
+      HarnessStore.Transaction tx, EntryPath path, Instant now) {
+    List<Entry> suffix = HistoryNormalization.suffix(path, tx::nextId, now);
+    for (Entry entry : suffix) {
+      tx.insertEntry(entry);
+    }
+    return tx.loadEntryPath(suffix.getLast().id());
+  }
+
+  /**
+   * STOP boundary Turn：TURN_START({@code STOP}) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED,
+   * closeRequestId)。
+   */
+  private static StopResult appendStopBoundaryTurn(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      UUID stopRequestId,
+      int cancelledCommandCount,
+      List<CancelledUserMessage> cancelledUserMessages,
+      Instant now) {
+    UUID sessionId = path.root().sessionId();
+    UUID turnStartId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnStartId,
+            sessionId,
+            path.head().id(),
+            new TurnStartPayload(TurnStartReason.STOP, path.baseSettings(), thread.id()),
+            now));
+    UUID barrierId = insertCancelBarrier(tx, sessionId, turnStartId, now);
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
+    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    tx.updateThread(stopped);
+    return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
+  }
+
+  /** 取消屏障 Entry：ASSISTANT_ERROR(CANCELLED)，不携 provider replay state。 */
+  private static UUID insertCancelBarrier(
+      HarnessStore.Transaction tx, UUID sessionId, UUID parentId, Instant now) {
+    UUID barrierId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            barrierId,
+            sessionId,
+            parentId,
+            new AssistantErrorPayload(
+                new AssistantError(AssistantError.CANCELLED_CODE, CANCELLED_MESSAGE), null),
+            now));
+    return barrierId;
+  }
+
+  /**
+   * 仅取消 Command 并推进 version：open Turn 属于其它 Thread 时本 Thread 既没有自己的 live 执行，也没有本 Thread
+   * 自己的停止边界可写（Turn 与停止边界的所有权都归拥有它的 Thread），因此只取消排队 Command。
+   */
+  private static StopResult touchVersionForCancelledCommands(
       HarnessStore.Transaction tx,
       ThreadState thread,
       int cancelledCommandCount,
@@ -369,6 +516,11 @@ final class StopControl {
       tx.updateThread(current);
     }
     return new StopResult(false, current, null, cancelledCommandCount, cancelledUserMessages);
+  }
+
+  private static boolean isOwnedBy(Entry openTurn, UUID threadId) {
+    return openTurn.payload() instanceof TurnStartPayload start
+        && threadId.equals(start.ownerThreadId());
   }
 
   private static StopResult stopContinuation(

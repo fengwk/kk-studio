@@ -63,7 +63,7 @@ class Fixture:
         mvn_mode="ok",
         java_mode="ok",
         jar_body="fixture-shaded-daemon-jar",
-        jdk_tools=("java", "javac", "javap"),
+        jdk_tools=("java", "javac"),
         with_unit=None,
     ):
         self.root = Path(root)
@@ -421,7 +421,9 @@ class TestDaemonInstallSuccess(DaemonInstallTestCase):
     def test_exec_start_passes_daemon_arguments_directly_with_escaping(self):
         """ExecStart must call java -jar directly and keep the daemon CLI values verbatim."""
         fixture = self.fixture()
-        result = fixture.install(**{"note": NOTE, "lsp-bridge-command": "lsp-bridge --stdio"})
+        lsp_config = fixture.home / "lsp-config.json"
+        lsp_config.write_text('{"servers": {}}', encoding="utf-8")
+        result = fixture.install(**{"note": NOTE, "lsp-config": str(lsp_config)})
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
         exec_line = next(
@@ -445,23 +447,22 @@ class TestDaemonInstallSuccess(DaemonInstallTestCase):
                 systemd_escape(NOTE),
                 systemd_escape("--bash-executable"),
                 systemd_escape("/usr/bin/bash"),
-                systemd_escape("--lsp-bridge-command"),
-                systemd_escape("lsp-bridge --stdio"),
-                systemd_escape("--javap-executable"),
-                systemd_escape(str(fixture.jdk / "bin" / "javap")),
+                systemd_escape("--lsp-config"),
+                systemd_escape(str(lsp_config)),
             ],
             tokens,
         )
         # 逐字确认 `%` 与 `$` 的转义（systemd 会先做说明符与变量展开，再做引号解析）。
         self.assertIn('"Laptop \\"A\\" 100%% honest $$USER"', exec_line)
 
-    def test_optional_lsp_bridge_is_omitted_by_default(self):
-        """Omitting --lsp-bridge-command must leave LSP disabled instead of passing a blank value."""
+    def test_optional_lsp_config_is_omitted_by_default(self):
+        """Omitting --lsp-config must leave LSP disabled instead of passing a blank value."""
         fixture = self.fixture()
         result = fixture.install()
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("--lsp-config", fixture.unit_text())
         self.assertNotIn("--lsp-bridge-command", fixture.unit_text())
-        self.assertIn("--javap-executable", fixture.unit_text())
+        self.assertNotIn("--javap-executable", fixture.unit_text())
 
     def test_maven_receives_only_build_arguments_and_the_selected_java_home(self):
         """Config/token/note must never reach Maven's argv or environment."""
@@ -761,8 +762,8 @@ class TestDaemonInstallValidation(DaemonInstallTestCase):
                 self.assertIn(f"{name} must be a non-negative decimal integer", result.stderr)
                 self.assertNotIn("mvn", fixture.tools())
 
-    def test_jdk_home_must_provide_javac_and_javap(self):
-        """A JRE-only home fails the build, and the unit's default javap must be executable."""
+    def test_jdk_home_must_provide_javac(self):
+        """A JRE-only home fails the build; bin/javac is required while bin/javap is not."""
         no_javac = self.fixture(jdk_tools=("java", "javap"))
         result = no_javac.install()
         self.assert_failed_without_install(no_javac, result)
@@ -771,9 +772,36 @@ class TestDaemonInstallValidation(DaemonInstallTestCase):
 
         no_javap = self.fixture(jdk_tools=("java", "javac"))
         result = no_javap.install()
-        self.assert_failed_without_install(no_javap, result)
-        self.assertIn("bin/javap", result.stderr)
-        self.assertNotIn("mvn", no_javap.tools())
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertTrue(no_javap.unit.is_file())
+
+    def test_lsp_config_validation(self):
+        """--lsp-config must be an absolute path to an existing readable file with no ~ or placeholders."""
+        fixture = self.fixture()
+
+        relative = fixture.install(**{"lsp-config": "relative/config.json"})
+        self.assert_failed_without_install(fixture, relative)
+        self.assertIn("--lsp-config must be an absolute path", relative.stderr)
+
+        tilde = fixture.install(**{"lsp-config": "~/config.json"})
+        self.assert_failed_without_install(fixture, tilde)
+        self.assertIn("~", tilde.stderr)
+
+        env_var = fixture.install(**{"lsp-config": "/path/$FOO/config.json"})
+        self.assert_failed_without_install(fixture, env_var)
+        self.assertIn("environment-variable placeholders", env_var.stderr)
+
+        missing = fixture.install(**{"lsp-config": "/nonexistent/config.json"})
+        self.assert_failed_without_install(fixture, missing)
+        self.assertIn("existing readable regular file", missing.stderr)
+
+        bridge = fixture.install(**{"lsp-bridge-command": "cmd"})
+        self.assert_failed_without_install(fixture, bridge)
+        self.assertIn("unknown option: --lsp-bridge-command", bridge.stderr)
+
+        javap = fixture.install(**{"javap-executable": "/bin/javap"})
+        self.assert_failed_without_install(fixture, javap)
+        self.assertIn("unknown option: --javap-executable", javap.stderr)
 
     def test_java_home_environment_values_are_validated(self):
         """Env-provided JDK homes are validated like the explicit option, not silently skipped."""

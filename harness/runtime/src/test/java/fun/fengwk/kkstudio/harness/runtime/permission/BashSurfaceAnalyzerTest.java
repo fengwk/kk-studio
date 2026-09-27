@@ -29,6 +29,14 @@ class BashSurfaceAnalyzerTest {
     assertEquals(
         List.of("echo 'a && b; c | d'", "echo a\\;b", "grep a"),
         analyzer.analyze("echo 'a && b; c | d' && echo a\\;b | grep a").segments());
+    // 双引号内的分隔符不分段（来源：pi-base bash-command-analyzer）。
+    assertEquals(
+        List.of("printf \"a && b | c; d\"", "grep a"),
+        analyzer.analyze("printf \"a && b | c; d\" | grep a").segments());
+    // 转义的分隔符不分段（来源：pi-base bash-command-analyzer）。
+    assertEquals(
+        List.of("echo a\\;b", "echo c\\|d", "echo e\\&\\&f"),
+        analyzer.analyze("echo a\\;b && echo c\\|d && echo e\\&\\&f").segments());
     assertEquals(
         List.of("echo ok", "printf done"),
         analyzer.analyze("echo ok # ignore && rm\nprintf done").segments());
@@ -41,9 +49,19 @@ class BashSurfaceAnalyzerTest {
     assertTrue(assigned.contains("npm *"));
     assertTrue(assigned.contains("npm test"));
 
+    // 多 token 的 quoted assignment 前缀同样保留，并生成去除赋值后的候选（来源：pi-base bash-command-analyzer）。
+    List<String> quotedAssignment =
+        analyzer.buildCandidates("NODE_ENV=test DEBUG=\"pi base\" npm test");
+    assertTrue(quotedAssignment.contains("NODE_ENV=test DEBUG=\"pi base\" npm test"));
+    assertTrue(quotedAssignment.contains("NODE_ENV=test *"));
+    assertTrue(quotedAssignment.contains("NODE_ENV=test DEBUG=\"pi base\" npm *"));
+    assertTrue(quotedAssignment.contains("npm *"));
+
+    // 静态 quoting、escaping 与绝对路径都生成规范化 executable 候选（来源：pi-base bash-command-analyzer）。
     for (String command :
         List.of("r'm' -rf tmp", "'r''m' -rf tmp", "r\\m -rf tmp", "/bin/rm -rf tmp")) {
       assertTrue(analyzer.buildCandidates(command).contains("rm *"), command);
+      assertTrue(analyzer.buildCandidates(command).contains("rm -rf tmp"), command);
     }
   }
 

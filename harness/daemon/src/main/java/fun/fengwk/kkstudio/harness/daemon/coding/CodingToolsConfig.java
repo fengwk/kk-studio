@@ -6,7 +6,7 @@ import java.util.Objects;
 /**
  * Daemon coding capabilities 共享的不可变本地执行配置。
  *
- * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments。本配置只持有本地执行程序、输出存储与进程参数。
+ * <p>工具目录不是静态配置：每次调用的显式 workdir 来自该调用自己的 arguments。本配置只持有本地执行程序、LSP 服务器集合、输出存储与进程参数。
  *
  * <p>没有本地二进制 resource 导出根：图片等二进制内容以 {@code BinaryResultContent} 直接进入终态，由 Daemon 侧上传端口直传全局对象
  * 存储；本地只保留大文本全文（{@link TextOutputStore}）。
@@ -19,13 +19,11 @@ public record CodingToolsConfig(
     int previewMaxBytes,
     String bashExecutable,
     TextOutputStore textOutputStore,
-    String lspBridgeCommand,
-    String javapExecutable) {
+    LspDiscovery lsp) {
 
   public static final int DEFAULT_PREVIEW_MAX_LINES = 2000;
   public static final int DEFAULT_PREVIEW_MAX_BYTES = 50 * 1024;
   public static final String DEFAULT_BASH_EXECUTABLE = "bash";
-  public static final String DEFAULT_JAVAP_EXECUTABLE = "javap";
 
   public CodingToolsConfig {
     if (previewMaxLines < 1 || previewMaxBytes < 1) {
@@ -33,28 +31,16 @@ public record CodingToolsConfig(
     }
     bashExecutable = requireNonBlank(bashExecutable, "bashExecutable");
     textOutputStore = Objects.requireNonNull(textOutputStore, "textOutputStore");
-    lspBridgeCommand = blankToNull(lspBridgeCommand);
-    javapExecutable =
-        requireNonBlank(
-            javapExecutable == null || javapExecutable.isBlank()
-                ? DEFAULT_JAVAP_EXECUTABLE
-                : javapExecutable,
-            "javapExecutable");
+    lsp = Objects.requireNonNull(lsp, "lsp");
   }
 
-  /** 便捷构造器：保持可选 LSP bridge 处于禁用状态。 */
+  /** 便捷构造器：没有任何 LSP 服务器。 */
   public CodingToolsConfig(
       int previewMaxLines,
       int previewMaxBytes,
       String bashExecutable,
       TextOutputStore textOutputStore) {
-    this(
-        previewMaxLines,
-        previewMaxBytes,
-        bashExecutable,
-        textOutputStore,
-        null,
-        DEFAULT_JAVAP_EXECUTABLE);
+    this(previewMaxLines, previewMaxBytes, bashExecutable, textOutputStore, LspDiscovery.empty());
   }
 
   /**
@@ -64,11 +50,9 @@ public record CodingToolsConfig(
    *
    * @param resources 数据目录下的资源根（{@code <data-dir>/resources}）
    * @param bashExecutable 显式 bash 可执行文件，空白时回退默认值
-   * @param lspBridgeCommand 显式 LSP bridge 命令；空白表示禁用
-   * @param javapExecutable 显式 javap 可执行文件，空白时回退默认值
+   * @param lsp 预先配置的 LSP 服务器；未配置时为空集合
    */
-  public static CodingToolsConfig fromCli(
-      Path resources, String bashExecutable, String lspBridgeCommand, String javapExecutable) {
+  public static CodingToolsConfig fromCli(Path resources, String bashExecutable, LspDiscovery lsp) {
     Path root = Objects.requireNonNull(resources, "resources").toAbsolutePath().normalize();
     return new CodingToolsConfig(
         DEFAULT_PREVIEW_MAX_LINES,
@@ -77,10 +61,7 @@ public record CodingToolsConfig(
             ? DEFAULT_BASH_EXECUTABLE
             : bashExecutable,
         TextOutputStore.open(root.resolve("text"), root.resolve("staging")),
-        lspBridgeCommand,
-        javapExecutable == null || javapExecutable.isBlank()
-            ? DEFAULT_JAVAP_EXECUTABLE
-            : javapExecutable);
+        lsp);
   }
 
   private static String requireNonBlank(String value, String name) {
@@ -88,9 +69,5 @@ public record CodingToolsConfig(
       throw new IllegalArgumentException(name + " must not be blank");
     }
     return value;
-  }
-
-  private static String blankToNull(String value) {
-    return value == null || value.isBlank() ? null : value;
   }
 }

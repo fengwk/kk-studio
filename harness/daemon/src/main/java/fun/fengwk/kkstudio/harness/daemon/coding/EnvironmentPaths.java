@@ -54,9 +54,14 @@ final class EnvironmentPaths {
     return canonicalExisting(candidate, "path");
   }
 
-  /** 解析写目标：允许尚不存在的末段，把现存祖先解析为真实路径后再拼接剩余段。 */
+  /**
+   * 解析写目标：允许尚不存在的末段，把现存祖先解析为真实路径后再拼接剩余段。
+   *
+   * <p>{@code workdir} 与 {@link #existing(String, Path)} 同为可选：绝对路径不需要它，相对路径缺少它时 {@link #resolve}
+   * 直接拒绝，不回退到任何默认目录。
+   */
   static Path writable(String rawPath, Path workdir) {
-    Path candidate = resolve(rawPath, requireWorkdir(workdir), "path");
+    Path candidate = resolve(rawPath, workdir, "path");
     if (Files.exists(candidate)) {
       return canonicalExisting(candidate, "path");
     }

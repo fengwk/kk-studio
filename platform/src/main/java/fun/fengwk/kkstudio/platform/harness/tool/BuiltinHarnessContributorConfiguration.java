@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -16,27 +15,28 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
-import fun.fengwk.kkstudio.platform.harness.subagent.SubagentRunRegistry;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.harness.configuration.SubagentTaskProperties;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.platform.harness.task.DatabaseSubagentRunner;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskRunner;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskSettlementScanner;
+import fun.fengwk.kkstudio.platform.harness.task.repo.SubagentTaskRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 import java.time.Duration;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 装配第一方内置工具（{@code read} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
  *
  * <p>核心内置装配为无条件装配（不使用 {@code @ConditionalOnBean}），确保缺失必要依赖时在启动期明确失败， 而不会静默降级并丢失最小功能集。
+ *
+ * <p>异步 task 的 {@link SubagentTaskRunner} 只做持久接受，{@link SubagentTaskSettlementScanner}
+ * 负责未结清结果的后台交付与停止传播；两者都不持有阻塞等待线程，并发额度来自持久 未结清记录。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
+@EnableConfigurationProperties(SubagentTaskProperties.class)
 public class BuiltinHarnessContributorConfiguration {
 
   @Bean
@@ -65,42 +65,42 @@ public class BuiltinHarnessContributorConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public SubagentRunRegistry subagentRunRegistry() {
-    return new SubagentRunRegistry();
-  }
-
-  @Bean(name = "subagentTaskExecutor", destroyMethod = "close")
-  @ConditionalOnMissingBean(name = "subagentTaskExecutor")
-  public ExecutorService subagentTaskExecutor(HarnessExecutionAdmissionProperties properties) {
-    int concurrency = properties.getSubagent();
-    return new ThreadPoolExecutor(
-        concurrency,
-        concurrency,
-        0L,
-        TimeUnit.MILLISECONDS,
-        new SynchronousQueue<>(),
-        Thread.ofVirtual().name("subagent-task-", 0L).factory(),
-        new ThreadPoolExecutor.AbortPolicy());
-  }
-
-  @Bean
-  @ConditionalOnMissingBean
   public SubagentRunner subagentRunner(
       ObjectProvider<HarnessRuntime> runtimeProvider,
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider subagentConfigProvider,
-      SubagentRunRegistry runRegistry,
-      HarnessThreadChangeSource changeSource,
-      @Qualifier("subagentTaskExecutor") ExecutorService executor,
-      ObjectMapper objectMapper) {
-    return new DatabaseSubagentRunner(
+      SubagentTaskRepository subagentTaskRepository) {
+    return new SubagentTaskRunner(
         runtimeProvider::getIfAvailable,
         settingsMaterializer,
         subagentConfigProvider,
-        runRegistry,
-        changeSource,
-        executor,
-        objectMapper);
+        subagentTaskRepository);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public SubagentTaskActivity subagentTaskActivity(
+      ObjectProvider<HarnessRuntime> runtimeProvider,
+      SubagentTaskRepository subagentTaskRepository) {
+    return new SubagentTaskActivity(subagentTaskRepository, runtimeProvider::getIfAvailable);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  public SubagentTaskSettlementScanner subagentTaskSettlementScanner(
+      ObjectProvider<HarnessRuntime> runtimeProvider,
+      HarnessStore harnessStore,
+      SubagentTaskRepository subagentTaskRepository,
+      SubagentTaskActivity subagentTaskActivity,
+      SubagentConfigProvider subagentConfigProvider,
+      SubagentTaskProperties subagentTaskProperties) {
+    return new SubagentTaskSettlementScanner(
+        runtimeProvider::getIfAvailable,
+        harnessStore,
+        subagentTaskRepository,
+        subagentTaskActivity,
+        subagentConfigProvider,
+        subagentTaskProperties);
   }
 
   @Bean

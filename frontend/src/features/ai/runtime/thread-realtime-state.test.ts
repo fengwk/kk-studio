@@ -374,69 +374,6 @@ describe('thread realtime state', () => {
     expect(stream.attachments).toBeUndefined()
   })
 
-  it('replaces task.status heartbeat snapshots instead of appending them', () => {
-    const status = (state: string, createdAt: string) => ({
-      threadId: '7',
-      invocationId: 'inv-task',
-      attempt: 1,
-      payload: {
-        toolCallId: 'call-task',
-        contents: [{ type: 'text', text: `{"kind":"task.status","state":"${state}"}\n` }],
-        error: false,
-        details: { kind: 'task.status', state },
-      },
-      createdAt,
-    })
-
-    const running = reduceRealtimeToolStream(
-      null,
-      status('running_model', '2026-07-28T10:00:00Z'),
-    )
-    const waiting = reduceRealtimeToolStream(
-      running,
-      status('waiting_approval', '2026-07-28T10:00:01Z'),
-    )
-
-    expect(waiting.text).toBe('{"kind":"task.status","state":"waiting_approval"}\n')
-    expect(waiting.createdAt).toBe('2026-07-28T10:00:01Z')
-  })
-
-  it('reuses the task stream when a heartbeat only changes JSON order and transport time', () => {
-    const partial = (text: string, createdAt: string) => ({
-      threadId: '7',
-      invocationId: 'inv-task',
-      attempt: 1,
-      payload: {
-        toolCallId: 'call-task',
-        contents: [{ type: 'text', text }],
-        error: false,
-        details: { kind: 'task.status' },
-      },
-      createdAt,
-    })
-    const first = reduceRealtimeToolStream(
-      null,
-      partial(
-        '{"kind":"task.status","threadId":"8","subagentType":"coder",'
-        + '"state":"running_model","depth":2,"turns":1,"toolCalls":0,'
-        + '"lastActivity":"running","approvals":[]}\n',
-        '2026-07-28T10:00:00Z',
-      ),
-    )
-    const semanticallySame = reduceRealtimeToolStream(
-      first,
-      partial(
-        '{ "approvals": [], "lastActivity": "running", "toolCalls": 0, "turns": 1,'
-        + '"depth": 2, "state": "running_model", "subagentType": "coder",'
-        + '"threadId": "8", "kind": "task.status" }\n',
-        '2026-07-28T10:00:01Z',
-      ),
-    )
-
-    expect(semanticallySame).toBe(first)
-    expect(semanticallySame.createdAt).toBe('2026-07-28T10:00:00Z')
-  })
-
   it('restores the stream from the single snapshot ModelInvocation checkpoint', () => {
     const invocation = {
       id: '9007199254740995',
@@ -802,35 +739,7 @@ describe('thread realtime state', () => {
     })
   })
 
-  it('treats task.status heartbeats as complete snapshots, replacing the previous frame', () => {
-    const frame = (state: string, createdAt: string) => ({
-      threadId: '7',
-      invocationId: 'inv-task',
-      attempt: 1,
-      payload: {
-        toolCallId: 'call-task',
-        contents: [{ type: 'text', text: `{"kind":"task.status","state":"${state}"}\n` }],
-        error: false,
-        details: { kind: 'task.status' },
-      },
-      createdAt,
-    })
-    const first = reduceRealtimeToolStream(null, frame('running', '2026-07-28T10:00:00Z'))
-    // 相同 task 状态的新心跳只更新时间，不重复追加文本。
-    const same = reduceRealtimeToolStream(first, frame('running', '2026-07-28T10:00:01Z'))
-    // 状态变化时替换为最新一帧（不是拼接旧帧）。
-    const changed = reduceRealtimeToolStream(same, frame('waiting_approval', '2026-07-28T10:00:02Z'))
-    expect(same).toMatchObject({
-      text: '{"kind":"task.status","state":"running"}\n',
-      createdAt: '2026-07-28T10:00:01Z',
-    })
-    expect(changed).toMatchObject({
-      text: '{"kind":"task.status","state":"waiting_approval"}\n',
-      createdAt: '2026-07-28T10:00:02Z',
-    })
-  })
-
-  it('does not treat non-task or malformed task payloads as replaceable snapshots', () => {
+  it('appends streaming tool chunks incrementally', () => {
     const first = reduceRealtimeToolStream(null, {
       threadId: '7',
       invocationId: 'inv-t',
@@ -839,12 +748,9 @@ describe('thread realtime state', () => {
         toolCallId: 'call-1',
         contents: [{ type: 'text', text: 'first' }],
         error: false,
-        details: null,
       },
       createdAt: '2026-07-28T10:00:00Z',
     })
-    // details 缺失或 kind 非 task.status 的 chunk 仍是增量文本；错误 JSON
-    // 不会被解析成 fingerprint，因此也按增量处理。
     const appended = reduceRealtimeToolStream(first, {
       threadId: '7',
       invocationId: 'inv-t',

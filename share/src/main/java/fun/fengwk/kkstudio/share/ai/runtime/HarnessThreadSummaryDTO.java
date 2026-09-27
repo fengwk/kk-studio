@@ -22,8 +22,16 @@ public class HarnessThreadSummaryDTO {
   /** Thread 最后更新时间（UTC Instant）。 */
   private Instant updatedAt;
 
-  /** 从当前 Thread context、Invocation 与 queued Command 派生的状态。 */
+  /** 从当前 Thread context、Invocation 与 queued Command 派生的状态（只描述该 Thread 自身的执行）。 */
   private String status;
+
+  /**
+   * 该 Thread（含其委派子树）当前是否仍在处理。
+   *
+   * <p>异步 task 的父 Thread 在等待子结果时自身已静止，但工作并未结束；因此本字段是"自身执行中或子树仍有未交付委派"的聚合，{@code status} 为 {@code
+   * IDLE} 时它仍可能为 true。
+   */
+  private boolean processing;
 
   /** 当前 head branch 的完整 Model selection。 */
   private HarnessModelSelectionDTO model;

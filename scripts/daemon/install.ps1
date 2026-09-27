@@ -28,9 +28,7 @@ param(
     [AllowEmptyString()]
     [string] $BashExecutable,
     [AllowEmptyString()]
-    [string] $LspBridgeCommand,
-    [AllowEmptyString()]
-    [string] $JavapExecutable
+    [string] $LspConfig
 )
 
 Set-StrictMode -Version Latest
@@ -49,8 +47,7 @@ $script:InstallParameterNames = @(
     "DataDir",
     "Note",
     "BashExecutable",
-    "LspBridgeCommand",
-    "JavapExecutable"
+    "LspConfig"
 )
 $script:VerifyTimeoutSeconds = 30
 $script:VerifyStableSeconds = 3
@@ -64,10 +61,10 @@ $script:TaskName = $null
 $script:TaskDescription = $null
 $script:SelectedJavaHome = $null
 $script:SelectedJava = $null
-$script:SelectedJavap = $null
 $script:SelectedBash = $null
 $script:ResolvedTokenFile = $null
 $script:ResolvedDataDir = $null
+$script:ResolvedLspConfig = $null
 $script:StagedJar = $null
 
 function Write-Usage {
@@ -104,9 +101,9 @@ Install options:
   -BashExecutable <path>            Optional bash.exe used by process.exec.
                                     Defaults to bash.exe on PATH; Git for
                                     Windows or a compatible Bash is required.
-  -LspBridgeCommand <command>       Optional LSP bridge command.
-  -JavapExecutable <path>           Optional javap.exe; defaults to the
-                                    selected JDK's bin\javap.exe.
+  -LspConfig <path>                 Optional absolute path to a JSON file
+                                    declaring pre-installed language servers.
+                                    Omitted by default, which disables LSP.
 
 Environment:
   DAEMON_VERIFY_TIMEOUT_SECONDS=30  Seconds to wait for task state changes.
@@ -258,6 +255,34 @@ function Assert-RegistrationTokenFile {
         Throw-Failure "-RegistrationTokenFile must be readable by its owner"
     }
     return $item.FullName
+}
+
+function Assert-LspConfigFile {
+    param([AllowEmptyString()][string] $Path)
+    Assert-RequiredValue -Value $Path -Name "-LspConfig"
+    Assert-AbsoluteWindowsPath -Value $Path -Name "-LspConfig"
+    if ($Path -like "*~*") {
+        Throw-Failure "-LspConfig must not contain '~'"
+    }
+    if ($Path -match '[\$%]') {
+        Throw-Failure "-LspConfig must not contain environment-variable placeholders"
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Throw-Failure "-LspConfig must be an existing readable regular file"
+    }
+    try {
+        $stream = [System.IO.File]::Open(
+            (Get-Item -LiteralPath $Path).FullName,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite
+        )
+        $stream.Dispose()
+    }
+    catch {
+        Throw-Failure "-LspConfig must be an existing readable regular file"
+    }
+    return (Get-Item -LiteralPath $Path).FullName
 }
 
 function Get-NonnegativeEnvironmentInteger {
@@ -461,11 +486,8 @@ function Resolve-InstallInputs {
     if ($script:InvocationParameters.ContainsKey("BashExecutable")) {
         Assert-RequiredValue -Value $BashExecutable -Name "-BashExecutable"
     }
-    if ($script:InvocationParameters.ContainsKey("LspBridgeCommand")) {
-        Assert-RequiredValue -Value $LspBridgeCommand -Name "-LspBridgeCommand"
-    }
-    if ($script:InvocationParameters.ContainsKey("JavapExecutable")) {
-        Assert-RequiredValue -Value $JavapExecutable -Name "-JavapExecutable"
+    if ($script:InvocationParameters.ContainsKey("LspConfig")) {
+        $script:ResolvedLspConfig = Assert-LspConfigFile -Path $LspConfig
     }
 
     $script:ResolvedTokenFile = Assert-RegistrationTokenFile `
@@ -482,19 +504,6 @@ function Resolve-InstallInputs {
     $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
     $script:SelectedBash = Resolve-Executable -Value $BashExecutable `
         -DefaultName "bash.exe" -OptionName "-BashExecutable"
-    if ($script:InvocationParameters.ContainsKey("JavapExecutable")) {
-        $script:SelectedJavap = Resolve-Executable -Value $JavapExecutable `
-            -DefaultName "javap.exe" -OptionName "-JavapExecutable"
-    }
-    else {
-        $script:SelectedJavap =
-            Join-Path $script:SelectedJavaHome "bin\javap.exe"
-        if (-not (Test-Path -LiteralPath $script:SelectedJavap -PathType Leaf)) {
-            Throw-Failure (
-                "the selected JDK has no bin\javap.exe: $($script:SelectedJavaHome)"
-            )
-        }
-    }
 }
 
 function Invoke-DaemonBuild {
@@ -641,10 +650,9 @@ function New-DaemonArgumentList {
         $arguments += @("--note", $Note)
     }
     $arguments += @("--bash-executable", $script:SelectedBash)
-    if ($script:InvocationParameters.ContainsKey("LspBridgeCommand")) {
-        $arguments += @("--lsp-bridge-command", $LspBridgeCommand)
+    if ($script:InvocationParameters.ContainsKey("LspConfig")) {
+        $arguments += @("--lsp-config", $script:ResolvedLspConfig)
     }
-    $arguments += @("--javap-executable", $script:SelectedJavap)
     return $arguments
 }
 

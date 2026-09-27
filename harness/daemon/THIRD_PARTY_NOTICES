@@ -10,6 +10,8 @@ dependency-provided notices are also retained in the JAR.
 | LangChain4j, Apache OpenNLP, Apache Commons Codec | Apache License 2.0 |
 | JavaEWAH, JetBrains annotations, JSpecify | Apache License 2.0 |
 | Eclipse JGit | Eclipse Distribution License 1.0 |
+| Eclipse LSP4J (`org.eclipse.lsp4j`, `org.eclipse.lsp4j.jsonrpc`) | Eclipse Public License（版本声明不一致，见下节） |
+| Gson | Apache License 2.0 |
 | SLF4J | MIT License |
 | RE2/J | Go License (BSD-style) |
 
@@ -45,9 +47,34 @@ POSSIBILITY OF SUCH DAMAGE.
 
 Source: https://github.com/google/re2j
 
-## pi-base WSL environment note
+## Eclipse LSP4J
 
-The default WSL environment note in `DaemonConfig` is adapted from pi-base.
+`harness/daemon` directly depends on `org.eclipse.lsp4j:org.eclipse.lsp4j:1.0.0` and
+`org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc:1.0.0` for the stdio JSON-RPC transport, and pulls
+`com.google.code.gson:gson:2.13.2` transitively through `org.eclipse.lsp4j.jsonrpc`.
+
+The license statements shipped with those artifacts do not agree, and this notice does not
+resolve the discrepancy:
+
+- the Maven POMs declare `Eclipse Public License, Version 2.0`
+  (`http://www.eclipse.org/legal/epl-2.0`);
+- the `about.html` inside both bundled JARs states that the plug-in content is provided under the
+  `Eclipse Public License Version 1.0` (`http://www.eclipse.org/legal/epl-v10.html`) and points to
+  `http://www.eclipse.org` for the corresponding source. No alternative or dual-license grant
+  (for example the Eclipse Distribution License) is stated in those files.
+
+Both `about.html` files are retained inside the bundled JARs, and the
+`org.eclipse.lsp4j-1.0.0-sources.jar` published alongside them carries the same
+`about.html` with no separate `LICENSE` or `NOTICE` file, so the artifact metadata does not
+settle the question either. A redistributor that needs one
+authoritative license must establish it from the Eclipse project
+(`https://github.com/eclipse-lsp4j/lsp4j`) instead of relying on this table.
+
+## pi-base behavior reference
+
+The default WSL environment note in `DaemonConfig`, and the built-in LSP capability's behavior
+(workspace-root discovery, client lifecycle, position handling and tool semantics) are implemented
+after pi-base.
 
 Source: https://github.com/fengwk/pi-base
 

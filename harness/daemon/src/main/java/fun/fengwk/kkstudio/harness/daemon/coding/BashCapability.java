@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -12,8 +13,10 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -21,7 +24,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -36,6 +38,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>stdout/stderr 合并后持续排空：读取永不因输出体积停止，因此子进程不会因为管道写满而阻塞或被杀。输出超过内联阈值时落本地文件，超出捕获预算时只停止文件捕获并继续计数；
  * 两种情况都不终止进程，子进程自然退出后的退出码始终是权威事实。
+ *
+ * <p>成功、非零退出、超时和取消都收尾并保留已捕获输出：唯一的中转文件始终被发布或有界预览替代，绝不因收尾路径被删除。终态用 {@code
+ * detailsJson.process.outcome}（{@code EXITED}/{@code TIMED_OUT}/{@code
+ * CANCELLED}）与文本说明区分三种失败；取消或失败只说明输出可能不完整， 不声称已执行的副作用被回滚。
+ *
+ * <p>所有终态通知都发生在进程树收敛之后：自然退出与终止收尾都在提交结果前完成进程树终止（已收敛时是幂等空操作）， 因此调用方一旦收到终态，就不再有进程会写输出或改副作用。
  *
  * <p>live 阶段按块或按时间合并发出 {@code APPEND} partial，携带精确的字节区间与已观测总量；捕获被截断时补发一条 {@code SNAPSHOT}
  * partial，让调用方尽早知道全文不完整。终态结果的预览与本地路径才是权威内容。
@@ -78,8 +86,8 @@ public final class BashCapability implements EnvironmentCapability {
       throw new IllegalArgumentException("request descriptor does not match tool descriptor");
     }
     Objects.requireNonNull(listener, "listener");
-    BashHandle handle = new BashHandle(request.call().id(), listener);
-    handle.worker = executor.submit(() -> run(request, listener, handle));
+    BashHandle handle = new BashHandle(listener);
+    executor.submit(() -> run(request, listener, handle));
     return handle;
   }
 
@@ -87,19 +95,29 @@ public final class BashCapability implements EnvironmentCapability {
       EnvironmentCapabilityExecutionRequest request,
       EnvironmentCapabilityExecutionListener listener,
       BashHandle handle) {
+    OutputSpool output = null;
     try {
       JsonNode args = AbstractCodingCapability.arguments(request);
       String command = AbstractCodingCapability.string(args, "command");
       Path workdir = EnvironmentPaths.workdir(AbstractCodingCapability.string(args, "workdir"));
       // 有效超时在 Platform 侧解析完成；这里只消费 request.timeout()，0 表示不设 deadline。
       Duration processTimeout = request.timeout();
+      ProcessOutcome early = terminatedOutcome(handle);
+      if (early != null) {
+        // 取消或超时可能早于执行线程开始：此时不启动 shell、不产生任何本地文件，直接给出明确去向。
+        handle.complete(terminatedBeforeStart(request.call().id(), early, processTimeout));
+        return;
+      }
       Process process =
           new ProcessBuilder(config.bashExecutable(), "-lc", command)
               .directory(workdir.toFile())
               .redirectErrorStream(true)
               .start();
       handle.process = process;
-      if (handle.cancelled.get()) {
+      // 命令以参数传入，进程不会从 stdin 读取；立刻关闭写端，等待 EOF 的命令才能自然退出而不是阻塞到超时。
+      closeStdin(process);
+      // 取消或超时仍可能发生在上面的检查之后、进程启动之前：启动后补一次终止检查，避免漏杀刚创建的进程树。
+      if (terminatedOutcome(handle) != null) {
         handle.stopProcessTree();
       }
       // 0 表示没有执行 deadline：绝不能退化为立即超时。
@@ -121,11 +139,18 @@ public final class BashCapability implements EnvironmentCapability {
           handle.timeoutFuture.cancel(false);
         }
       }
-      EnvironmentCapabilityResult res = drain(request, listener, handle, process);
-      handle.complete(listener, res);
-    } catch (Exception error) {
-      handle.complete(
-          listener, AbstractCodingCapability.error(request.call().id(), error.getMessage()));
+      output = new OutputSpool(config.textOutputStore(), request.call().id());
+      handle.complete(drain(request, listener, handle, process, processTimeout, output));
+    } catch (Exception failure) {
+      // 终态通知必须在进程清理与收敛完成之后：callback 一旦触发，调用方就据此认为调用已结束，
+      // 此后不得再有进程在写输出或改副作用；因此这里先终止进程树，再收尾并提交终态。
+      handle.stopProcessTree();
+      handle.complete(captureFailure(request, handle, output, failure));
+    } finally {
+      // 兜底：参数校验失败、资源只创建了一部分等未走到上面两条路径的情况都不能遗留进程或未收尾的中转文件。
+      // 进程树终止是幂等的，已收敛时只是空操作，也不会触发第二次终态回调。
+      handle.stopProcessTree();
+      closeQuietly(output);
     }
   }
 
@@ -134,13 +159,16 @@ public final class BashCapability implements EnvironmentCapability {
       EnvironmentCapabilityExecutionRequest request,
       EnvironmentCapabilityExecutionListener listener,
       BashHandle handle,
-      Process process)
+      Process process,
+      Duration processTimeout,
+      OutputSpool output)
       throws Exception {
-    try (OutputSpool output = new OutputSpool(config.textOutputStore(), request.call().id())) {
-      Utf8StreamDecoder streamDecoder = new Utf8StreamDecoder();
-      LiveEmitter emitter = new LiveEmitter(request.call().id(), listener, handle);
-      byte[] buffer = new byte[4096];
-      try (InputStream input = process.getInputStream()) {
+    Utf8StreamDecoder streamDecoder = new Utf8StreamDecoder();
+    LiveEmitter emitter = new LiveEmitter(request.call().id(), listener, handle);
+    byte[] buffer = new byte[4096];
+    InputStream input = process.getInputStream();
+    try {
+      try {
         int count;
         while ((count = input.read(buffer)) >= 0) {
           output.write(buffer, 0, count);
@@ -150,22 +178,161 @@ public final class BashCapability implements EnvironmentCapability {
             emitter.snapshot(output);
           }
         }
-        emitter.accept(streamDecoder.finish());
+      } catch (IOException ignored) {
+        // 终止导致的流异常关闭：已读取的字节仍然有效，不能因此丢弃已捕获输出。
       }
-      emitter.flush();
-      int exitCode = process.waitFor();
-      if (handle.cancelled.get()) {
-        return AbstractCodingCapability.error(request.call().id(), "Operation cancelled");
-      }
-      if (handle.timedOut.get()) {
-        return AbstractCodingCapability.error(request.call().id(), "Command timed out");
-      }
-      boolean failed = exitCode != 0;
-      if (failed) {
-        output.write(("\nCommand exited with code " + exitCode).getBytes(StandardCharsets.UTF_8));
-      }
-      return output.finish(failed);
+    } catch (RuntimeException | Error failure) {
+      // 排空期间的异常（监听器抛错等）必须先收敛进程树，再关闭 stdout：读端一旦提前关闭，
+      // 主进程会因为 SIGPIPE 自行退出，而它当时已经 fork 的后台后代就此脱离可达范围，收尾再也覆盖不到。
+      handle.stopProcessTree();
+      throw failure;
+    } finally {
+      closeQuietly(input);
     }
+    emitter.accept(streamDecoder.finish());
+    emitter.flush();
+    // 到这里进程一定已经收敛：自然退出，或在超时/取消时被终止。退出码只在自然退出时才是命令的事实。
+    int exitCode = process.waitFor();
+    ProcessOutcome termination = terminatedOutcome(handle);
+    ProcessOutcome outcome = termination == null ? ProcessOutcome.EXITED : termination;
+    boolean failed = outcome != ProcessOutcome.EXITED || exitCode != 0;
+    // 终态通知只能发生在进程树收敛之后：自然退出时这里是空操作（主进程已退出），
+    // 超时/取消时这里等到已发出的终止完全收敛，避免还有进程存活时就回调。
+    handle.stopProcessTree();
+    // 任何退出方式都先收尾并发布已捕获输出：这是唯一副本，收尾只会在本地存储失败时降级为有界预览。
+    return withProcessOutcome(
+        output.finish(failed, terminationNote(outcome, exitCode, processTimeout)),
+        outcome,
+        exitCode);
+  }
+
+  /** 已知的终止去向；没有取消或超时信号时返回 {@code null}，表示进程去向由自然退出决定。 */
+  private static ProcessOutcome terminatedOutcome(BashHandle handle) {
+    if (handle.cancelled.get()) {
+      return ProcessOutcome.CANCELLED;
+    }
+    return handle.timedOut.get() ? ProcessOutcome.TIMED_OUT : null;
+  }
+
+  /**
+   * 启动前已被取消或超时的收尾：不启动 shell、不创建任何本地文件，直接给出明确的进程去向。
+   *
+   * <p>此处没有任何输出可保留，正文只有与其它终态一致的说明：输出可能不完整，已执行的副作用不回滚。
+   */
+  private static EnvironmentCapabilityResult terminatedBeforeStart(
+      String callId, ProcessOutcome outcome, Duration processTimeout) {
+    ObjectNode details = AbstractCodingCapability.OBJECT_MAPPER.createObjectNode();
+    details.putObject("process").put("outcome", outcome.name());
+    return new EnvironmentCapabilityResult(
+        callId,
+        List.of(new TextResultContent(terminationNote(outcome, 0, processTimeout))),
+        true,
+        details.toString());
+  }
+
+  /**
+   * 异常路径的收尾：进程树终止与 spool 关闭已由 {@link #run} 的 {@code finally} 保证，这里只决定终态内容。
+   *
+   * <p>已捕获输出优先保留：有内容时按捕获事实收尾，失败原因只作为终态说明追加；完全没有输出时才退回纯错误结果，绝不谎称捕获过内容。
+   */
+  private static EnvironmentCapabilityResult captureFailure(
+      EnvironmentCapabilityExecutionRequest request,
+      BashHandle handle,
+      OutputSpool output,
+      Exception error) {
+    String reason = error.getMessage() == null ? error.toString() : error.getMessage();
+    if (output == null || output.totalBytes() == 0) {
+      return AbstractCodingCapability.error(request.call().id(), reason);
+    }
+    EnvironmentCapabilityResult captured = output.finish(true, "[" + reason + "]");
+    ObjectNode details = parseDetails(captured.detailsJson());
+    ProcessOutcome outcome = terminatedOutcome(handle);
+    if (outcome != null) {
+      details.putObject("process").put("outcome", outcome.name());
+    }
+    return new EnvironmentCapabilityResult(
+        captured.callId(), captured.contents(), true, details.toString());
+  }
+
+  /** 关闭子进程 stdin：命令以参数传入、不读 stdin，写端未关闭会让等待 EOF 的命令一直阻塞到超时。 */
+  private static void closeStdin(Process process) {
+    try {
+      process.getOutputStream().close();
+    } catch (IOException ignored) {
+      // 关闭失败只影响子进程能否读到 EOF：超时与取消仍会收敛进程树。
+    }
+  }
+
+  /** 关闭捕获中转：{@link OutputSpool#close()} 只删除未发布的中转文件，已发布全文与已提交终态不受影响。 */
+  private static void closeQuietly(OutputSpool output) {
+    if (output == null) {
+      return;
+    }
+    try {
+      output.close();
+    } catch (Exception ignored) {
+      // 关闭失败只影响未发布中转文件的清理。
+    }
+  }
+
+  /** 关闭子进程 stdout：关闭失败只影响后续读取，已捕获的字节仍然有效。 */
+  private static void closeQuietly(InputStream input) {
+    try {
+      input.close();
+    } catch (IOException ignored) {
+      // 关闭失败只影响后续读取。
+    }
+  }
+
+  /**
+   * 终态说明：区分成功、非零退出、超时与取消，并明确取消或失败不代表副作用回滚。
+   *
+   * <p>说明只追加到返回文本；它不写入已发布的 durable 全文，也不计入捕获总量。
+   */
+  private static String terminationNote(
+      ProcessOutcome outcome, int exitCode, Duration processTimeout) {
+    switch (outcome) {
+      case CANCELLED:
+        return "[Operation cancelled by the caller. Captured output above may be incomplete; side"
+            + " effects already performed are not rolled back.]";
+      case TIMED_OUT:
+        return "[Command timed out after "
+            + processTimeout.toMillis()
+            + " ms and was terminated. Captured output above may be incomplete; side effects"
+            + " already performed are not rolled back.]";
+      case EXITED:
+        return exitCode == 0 ? "" : "[Command exited with code " + exitCode + ".]";
+      default:
+        throw new IllegalStateException("unhandled process outcome: " + outcome);
+    }
+  }
+
+  /** 在捕获事实之上补充机器可判定的进程收尾结果；退出码只在自然退出时报告。 */
+  private static EnvironmentCapabilityResult withProcessOutcome(
+      EnvironmentCapabilityResult captured, ProcessOutcome outcome, int exitCode) {
+    ObjectNode details = parseDetails(captured.detailsJson());
+    ObjectNode process = details.putObject("process");
+    process.put("outcome", outcome.name());
+    if (outcome == ProcessOutcome.EXITED) {
+      process.put("exitCode", exitCode);
+    }
+    return new EnvironmentCapabilityResult(
+        captured.callId(), captured.contents(), captured.error(), details.toString());
+  }
+
+  private static ObjectNode parseDetails(String detailsJson) {
+    try {
+      return (ObjectNode) AbstractCodingCapability.OBJECT_MAPPER.readTree(detailsJson);
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException("capability detailsJson must be a JSON object", error);
+    }
+  }
+
+  /** 进程的最终去向：只有 {@link #EXITED} 时退出码才是命令的事实。 */
+  private enum ProcessOutcome {
+    EXITED,
+    TIMED_OUT,
+    CANCELLED
   }
 
   /** live partial 的 details 形状：模式、精确字节区间与已观测总量。 */
@@ -294,44 +461,66 @@ public final class BashCapability implements EnvironmentCapability {
   }
 
   private static final class BashHandle implements EnvironmentCapabilityExecutionHandle {
-    private final String callId;
     private final EnvironmentCapabilityExecutionListener listener;
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final AtomicBoolean timedOut = new AtomicBoolean();
     private final AtomicBoolean terminal = new AtomicBoolean();
     private final AtomicBoolean truncationReported = new AtomicBoolean();
     private volatile Process process;
-    private volatile Future<?> worker;
     private volatile ScheduledFuture<?> timeoutFuture;
 
-    private BashHandle(String callId, EnvironmentCapabilityExecutionListener listener) {
-      this.callId = callId;
+    private BashHandle(EnvironmentCapabilityExecutionListener listener) {
       this.listener = listener;
     }
 
     @Override
     public void cancel() {
       if (cancelled.compareAndSet(false, true)) {
-        Future<?> current = worker;
-        if (current != null) {
-          current.cancel(true);
-        }
+        // 只标记取消并终止进程树：终态由执行线程在排空并收尾已捕获输出后统一提交，
+        // 因此取消不会丢弃捕获结果，也不会让 close 删除唯一的中转文件。
         stopProcessTree();
-        complete(listener, AbstractCodingCapability.error(callId, "Operation cancelled"));
       }
+    }
+
+    /**
+     * 按运行时的明确原因收尾：原因决定终态如何描述进程去向，因此超时绝不会被报告成调用方取消。
+     *
+     * <p>运行时的超时与调用方取消都只终止进程树，终态仍由执行线程在排空并收尾已捕获输出后提交。
+     */
+    @Override
+    public void terminate(EnvironmentCapabilityTerminationCause cause) {
+      if (cause == EnvironmentCapabilityTerminationCause.TIMED_OUT) {
+        if (timedOut.compareAndSet(false, true)) {
+          stopProcessTree();
+        }
+        return;
+      }
+      cancel();
     }
 
     @Override
     public boolean isCancelled() {
-      return cancelled.get();
+      // 超时收尾与取消一样要求进程停止，因此这里表达「已被请求终止」，与其它能力的协作式中断信号一致。
+      return cancelled.get() || timedOut.get();
+    }
+
+    /**
+     * 收尾预算：运行时不再以「超时/取消」立即收敛终态，而是最多等这么久让本能力提交携带已捕获输出的终态。
+     *
+     * <p>预算只需覆盖进程树终止后的排空、收尾与中转文件发布；运行时的终止请求会同步终止进程树，执行线程在提交终态前还会等待收敛完成， 两者合计上限是进程树自身两个宽限窗口（约 400
+     * ms），因此秒级预算对同步收敛、排空与发布仍然充裕，不构成无界等待。
+     */
+    @Override
+    public Duration terminationGrace() {
+      return Duration.ofSeconds(2);
     }
 
     private void stopProcessTree() {
       ProcessTree.terminate(process);
     }
 
-    private void complete(
-        EnvironmentCapabilityExecutionListener listener, EnvironmentCapabilityResult result) {
+    /** 提交唯一终态；终态一旦提交就不再调度超时，也不再触发第二次回调。 */
+    private void complete(EnvironmentCapabilityResult result) {
       if (terminal.compareAndSet(false, true)) {
         ScheduledFuture<?> timeout = timeoutFuture;
         if (timeout != null) {

@@ -6,6 +6,7 @@ import { useI18n } from '@/shared/i18n'
 
 const ChatsRoute = lazy(() => import('@/features/ai/chat/ChatsRoute'))
 const ChatWorkspacePage = lazy(() => import('@/features/ai/chat/ChatWorkspaceRoute'))
+const ThreadWorkspacePage = lazy(() => import('@/features/ai/thread/ThreadWorkspaceRoute'))
 const AgentsPage = lazy(async () => {
   const module = await import('@/features/ai/catalog/AgentsPage')
   return { default: module.AgentsPage }
@@ -140,6 +141,15 @@ export function ChatWorkspaceRoute({ children }: ExtensionComponentProps) {
   return (
     <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
       <ChatWorkspacePage>{children}</ChatWorkspacePage>
+    </Suspense>
+  )
+}
+
+export function ThreadWorkspaceRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
+      <ThreadWorkspacePage>{children}</ThreadWorkspacePage>
     </Suspense>
   )
 }

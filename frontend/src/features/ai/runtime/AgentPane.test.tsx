@@ -569,6 +569,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
+      processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: 'thread preview',
     }])
@@ -702,6 +703,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'MODEL_STREAMING' as const,
+      processing: true,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })
@@ -933,6 +935,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
+      processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })).toMatchObject({
@@ -1264,6 +1267,7 @@ describe('AgentPane orchestration', () => {
       createdAt: null,
       updatedAt: null,
       status: 'IDLE',
+      processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     }])

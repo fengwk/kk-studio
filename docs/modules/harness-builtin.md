@@ -26,7 +26,7 @@ ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 环境能力工具适配与 prompt 模板加载 | `read` 按地址选择 Platform 或可选 `BoundEnvironment`，其余宿主工具要求 Environment；传输协议与宿主进程管理由 Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | 只读 Goal 工具（`get_goal`、`update_goal`）、进度声明 `GoalProgress` 与确定性编解码器 `GoalProgressCodec` | 目标正文由 branch settings 拥有（用户经 typed `GOAL` 命令设置/清除），本包只读取它并声明进度；进度依托通用 `harness_entry` 的 CUSTOM 载荷，通过 `AppendCustomEntry` 由 Runtime 原子追加 |
 | `fun.fengwk.kkstudio.harness.builtin.skill` | Skill 稳定地址读取所需的窄端口和值契约 | 不注册专用模型工具；Git cache、Package Catalog 与本地安装由 Platform/Daemon 承接 |
-| `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部委派工具 `TaskTool`、任务请求 `SubagentTaskRequest`、执行端口 `SubagentRunner` 与配置接入 | 只做参数解析与转发；多轮调度、并发上限与持久化状态机由运行时负责 |
+| `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部委派工具 `TaskTool`、任务请求 `SubagentTaskRequest`、接受结果 `SubagentTaskAcceptance`、消息契约 `SubagentTaskMessages`、执行端口 `SubagentRunner` 与配置接入 | 只做参数解析与转发，即时返回持久接受回执；多轮结算、并发额度、停止传播与持久化状态机由 Platform 负责 |
 
 ## 注册清单
 
@@ -113,9 +113,15 @@ System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`rea
 `kkstudio:/skills/<package>/<skill>/...` 读取 Platform 当前发布 commit；对绝对本地
 路径委托当前 Daemon。Skill 没有专用 Tool、运行时 binding 或独立超时。
 
-[`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 同样以 `INTERNAL` 注册，本身不携带环境需求。它把 arguments 解析为 [`SubagentTaskRequest`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java) 后交给 [`SubagentRunner`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)：`subagent_type` 与 `prompt` 必填非空白，`maxTurns` 若给出必须为正整数，`session_id` 若给出必须是规范 UUID 文本（大小写与格式都必须与原值逐字一致，用于恢复既有 Session）。参数被拒或 Runner 抛异常都收敛为错误结果，返回的句柄原样承接取消。多轮调度、深度与并发限制、会话与 Thread 的创建或恢复都在 Runner 实现侧。
+[`TaskTool`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java) 同样以 `INTERNAL` 注册，本身不携带环境需求。它把 arguments 解析为 [`SubagentTaskRequest`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java) 后交给 [`SubagentRunner`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)：`subagent_type` 与 `prompt` 必填非空白（`subagent_type` 禁止首尾空格），`max_turns` 若给出必须为正整数，`thread_id` 若给出必须是规范 UUID 文本（用于继续既有子 Thread）。工具严格异步，不包含同步阻塞等待逻辑，也没有 `session_id` 别名。参数被拒或 Runner 抛异常都收敛为错误 ToolResult，绝不抛出异常。
+
+委派接受是单事务的持久化动作：Runner 接受成功返回 [`SubagentTaskAcceptance`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskAcceptance.java)（包含 `childSessionId`、`childThreadId` 与 `replayed` 幂等标志），`TaskTool` 立即用一次成功 `tool_result` 回执唯一 JSON `{"thread_id":"...","status":"accepted"}`（[`SubagentTaskMessages.accepted`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)），不重复 prompt，也不提供 XML 或别名形状。任务正文与完成结果的确定性文本编码由 [`SubagentTaskMessages`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java) 规范：对 5 大 XML 特殊字符做转义，正文完整保留不截断（长文本由平台资源化机制处理），prompt 显式声明为历史参考而非新指令；完成消息外层是 `<subagent_result thread_id agent state>`，内含本次任务原文 `<task>` 与结果 `<result>`，失败/取消时改为 `<error>` 与可选的 `<partial_result>`。多轮调度、并发额度加锁、停止传播与持久状态机由 Platform 侧（`SubagentTaskRunner` / `SubagentTaskSettlementScanner` / `SubagentTaskActivity`）承担，本模块只做参数解析、端口转发与文本编码。
 
 [`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency`、`idleTimeout` 与 `maxTurns`：`maxDepth`、`maxConcurrency` 与 `maxTurns` 必须为正，`maxTotalConcurrency` 允许 0 表示不限，`idleTimeout` 允许 0 表示关闭、非零值必须是整毫秒。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
+
+## pi-base 委派测试迁移映射
+
+委派能力的设计入口是 [内置工具与异步委派](builtin-tools-design.md)：`pi-base` 用同步阻塞的 `task` 调用交付结果，本仓库改为持久接受 + 两段状态机（`OPEN -> SETTLED -> DELIVERED`），由后台扫描器推进子执行结清与向父交付。逐用例的 pi-base → 本仓库测试映射见 [Builtin Task 测试映射](../operations/builtin-task-tests.md)。
 
 ## 源码与测试
 
@@ -123,14 +129,17 @@ System Prompt 中给出每个 Skill 的 name、description 与稳定 path。`rea
 - Goal：[`GoalProgress.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgress.java)、[`GoalProgressCodec.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalProgressCodec.java)、[`GoalToolSupport.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalToolSupport.java)、[`GoalPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalPrompts.java)
 - 环境工具：[`EnvironmentCapabilityTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityTool.java)、[`EnvironmentPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentPrompts.java)
 - 历史动作：[`BuiltinHistoryRenderers.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderers.java)、[`EnvironmentCapabilityRenderer.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/environment/EnvironmentCapabilityRenderer.java)
-- Subagent：[`TaskTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)、[`SubagentConfig.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java)
+- Subagent：[`TaskTool.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskTool.java)、[`SubagentRunner.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentRunner.java)、[`SubagentTaskRequest.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskRequest.java)、[`SubagentTaskAcceptance.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskAcceptance.java)、[`SubagentTaskMessages.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessages.java)、[`SubagentConfig.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java)、[`SubagentPrompts.java`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentPrompts.java)
+- Subagent Prompt：[`task.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/task.md)、[`task-system.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/task-system.md)、[`task.schema.json`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/task.schema.json)、[`subagent-max-turns.md`](../../harness/builtin/src/main/resources/fun/fengwk/kkstudio/harness/builtin/subagent/prompts/subagent-max-turns.md)
 - [`BuiltinHarnessContributorTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)
   锁定完整的 12 工具清单、环境支持级别、capability 映射与 descriptor
   schema/defaultTimeout；[`GoalFeatureTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalFeatureTest.java)
   覆盖 catalog 无创建工具、只读目标读取、旧 `goalId` 进度陈旧、声明绑定当前 `goalId`、
-  重复终态声明被拒与缺失上下文安全失败；[`BuiltinHistoryRenderersTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderersTest.java)
-  与 [`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java)
-  分别锁定历史动作渲染与委派参数校验。
+  重复终态声明被拒与缺失上下文安全失败；[`BuiltinHistoryRenderersTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHistoryRenderersTest.java)、
+  [`TaskToolTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/TaskToolTest.java)、
+  [`SubagentTaskMessagesTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentTaskMessagesTest.java)
+  与 [`SubagentConfigTest.java`](../../harness/builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigTest.java)
+  分别锁定历史动作渲染、委派参数解析与即时回执、XML 消息编码契约与配置约束校验。
 
 ---
 

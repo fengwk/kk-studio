@@ -12,6 +12,7 @@ describe('AI extension composition architecture', () => {
     expect(aiExtension.pages?.map((page) => [page.id, page.path])).toEqual([
       ['ai.chats', 'chats'],
       ['ai.chat-workspace', 'chats/:chatId'],
+      ['ai.thread-workspace', 'threads/:threadId'],
       ['ai.agents', 'agents'],
       ['ai.models', 'models'],
       ['ai.providers', 'providers'],
@@ -53,6 +54,7 @@ describe('AI extension composition architecture', () => {
     expect(host.pages.list().map((page) => page.id)).toEqual([
       'ai.chats',
       'ai.chat-workspace',
+      'ai.thread-workspace',
       'ai.agents',
       'ai.models',
       'ai.providers',
@@ -109,6 +111,7 @@ describe('AI extension composition architecture', () => {
     )
     expect(aiExtensionSource).toContain("import('@/features/ai/chat/ChatsRoute')")
     expect(aiExtensionSource).toContain("import('@/features/ai/chat/ChatWorkspaceRoute')")
+    expect(aiExtensionSource).toContain("import('@/features/ai/thread/ThreadWorkspaceRoute')")
     expect(aiDefinitionSource).not.toContain(
       "@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'",
     )

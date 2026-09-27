@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,10 +28,13 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -293,6 +297,63 @@ public abstract class HarnessStoreEntryTreeContract {
               List.of(baseline.rootEntryId()), path.entries().stream().map(Entry::id).toList());
           return null;
         });
+  }
+
+  /**
+   * STOP barrier Turn（显式 idle Stop 的持久形态）端到端往返：TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) →
+   * TURN_END(STOPPED, closeRequestId) 必须逐字段持久化并可重新加载（新枚举值只走 JSON，无 DDL 影响）。
+   */
+  @Test
+  void stopBarrierTurnRoundTripsThroughTheStore() {
+    Baseline baseline = seedThreadBaseline(store);
+    EntryPath reloaded =
+        store.transaction(
+            tx -> {
+              UUID turnStartId = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      turnStartId,
+                      baseline.sessionId(),
+                      baseline.rootEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.STOP, branchSettings(), baseline.threadId()),
+                      T1));
+              UUID barrierId = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      barrierId,
+                      baseline.sessionId(),
+                      turnStartId,
+                      new AssistantErrorPayload(
+                          new AssistantError("CANCELLED", "Cancelled by user"), null),
+                      T1));
+              UUID closeRequestId = tx.nextId();
+              UUID turnEndId = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      turnEndId,
+                      baseline.sessionId(),
+                      barrierId,
+                      new TurnEndPayload(
+                          turnStartId,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          closeRequestId),
+                      T1));
+              return tx.loadEntryPath(turnEndId);
+            });
+
+    assertEquals(4, reloaded.entries().size());
+    TurnStartPayload start = (TurnStartPayload) reloaded.entries().get(1).payload();
+    assertEquals(TurnStartReason.STOP, start.reason());
+    assertEquals(baseline.threadId(), start.ownerThreadId());
+    assertInstanceOf(AssistantErrorPayload.class, reloaded.entries().get(2).payload());
+    TurnEndPayload end = (TurnEndPayload) reloaded.head().payload();
+    assertEquals(TurnEndOutcome.STOPPED, end.outcome());
+    assertEquals(TurnEndReason.USER_STOP, end.reason());
+    assertEquals(start.ownerThreadId(), start.ownerThreadId());
+    assertEquals(reloaded.entries().get(1).id(), end.turnStartEntryId());
   }
 
   @Test

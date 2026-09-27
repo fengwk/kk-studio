@@ -80,8 +80,7 @@ class TestWindowsInstallerSurface(unittest.TestCase):
             "-DataDir",
             "-Note",
             "-BashExecutable",
-            "-LspBridgeCommand",
-            "-JavapExecutable",
+            "-LspConfig",
         ):
             self.assertIn(option, text)
         self.assertIn("%LOCALAPPDATA%\\kk-studio\\daemon", text)
@@ -141,7 +140,7 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
     def test_explicit_executable_and_jdk_options_cannot_be_empty(self):
         """An explicitly empty option must not silently fall back to a different executable."""
         body = function_body("Resolve-InstallInputs")
-        for name in ("JavaHome", "BashExecutable", "JavapExecutable"):
+        for name in ("JavaHome", "BashExecutable"):
             self.assertIn(
                 f'$script:InvocationParameters.ContainsKey("{name}")',
                 body,

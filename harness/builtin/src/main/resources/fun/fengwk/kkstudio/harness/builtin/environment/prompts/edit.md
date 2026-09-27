@@ -7,11 +7,18 @@ Usage:
 - For long lines, `read` returns exact bounded fragments without truncation markers inside the body. Copy the unique fragment directly from the numbered body into `old_string`. To inspect subsequent parts of a long line, pass `column_offset` with `limit=1` to `read`.
 - If `read` reports `ends_with_newline: yes`, remember that the file ends with a newline, even though `read` does not add an extra numbered blank line to represent it.
 - Prefer `edit` for existing text files. Use `write` for new files or intentional whole-file replacement.
+- `edit` keeps the file's encoding, BOM and existing line-ending style. Matching happens on a
+  newline-normalized view, so CRLF/CR/LF spelling alone is not a change.
+- `edit` supports regular text files only. Directories, devices, FIFOs and binary files are
+  rejected before any write.
 - The edit fails if `old_string` is not found in the file with an error "Could not find old_string".
 - The edit fails if `old_string` is found more than once, reporting the match count as "Found N exact matches". Either provide a larger string with more surrounding context to make the match unique or use `replace_all` to change every instance of `old_string`.
 - Use `replace_all` for file-wide exact renames or repeated replacements when every occurrence should change.
-- Every call must include `workdir`. It must be an expanded absolute directory on the target daemon's file system; no call inherits a previous directory, session default, environment root, cwd, or home directory.
+- `workdir` is optional: pass it only to resolve a relative `path`. It must be an expanded
+  absolute directory on the target daemon's file system; no call inherits a previous directory,
+  session default, environment root, cwd, or home directory. An absolute `path` needs no
+  `workdir`; a relative `path` without an explicit `workdir` is rejected.
 
 Examples:
-- `edit({ path: "src/app.ts", old_string: "const port = 80", new_string: "const port = 8080", workdir: "/srv/project" })`
-- `edit({ path: "src/app.ts", old_string: "oldName", new_string: "newName", replace_all: true, workdir: "C:/src/project" })`
+- `edit({ path: "/srv/project/src/app.ts", old_string: "const port = 80", new_string: "const port = 8080" })`
+- `edit({ path: "src/app.ts", old_string: "oldName", new_string: "newName", replace_all: true, workdir: "/srv/project" })`

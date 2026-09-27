@@ -31,16 +31,6 @@ public final class EnvironmentCapabilityCatalog {
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
 
   private static final SchemaJsonCodec CODEC = new SchemaJsonCodec();
-  private static final Set<EnvironmentCapabilityId> WORKDIR_CAPABILITY_IDS =
-      Set.of(
-          EnvironmentCapabilityIds.FS_WRITE,
-          EnvironmentCapabilityIds.FS_EDIT,
-          EnvironmentCapabilityIds.PROCESS_EXEC,
-          EnvironmentCapabilityIds.FS_GREP,
-          EnvironmentCapabilityIds.FS_FIND,
-          EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
-          EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-          EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
   private static final List<EnvironmentCapabilityDescriptor> DESCRIPTORS = createDescriptors();
   private static final Map<EnvironmentCapabilityId, EnvironmentCapabilityDescriptor> BY_ID =
       indexById(DESCRIPTORS);
@@ -106,8 +96,7 @@ public final class EnvironmentCapabilityCatalog {
 
   /** 该能力是否要求 arguments 携带目标 Daemon 上的显式绝对 workdir。 */
   public static boolean requiresWorkdir(EnvironmentCapabilityId id) {
-    require(id);
-    return WORKDIR_CAPABILITY_IDS.contains(id);
+    return require(id).inputSchema().required().contains("workdir");
   }
 
   private static InputSchema loadSchema(EnvironmentCapabilityId id) {

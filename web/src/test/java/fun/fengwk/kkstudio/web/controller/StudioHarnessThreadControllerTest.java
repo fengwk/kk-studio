@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
@@ -67,6 +68,7 @@ class StudioHarnessThreadControllerTest {
   private HarnessRuntime runtime;
   private ModelRequestDebugService modelRequestDebugService;
   private ProjectThreadOwnerResolver projectThreadOwnerResolver;
+  private SubagentTaskActivity subagentTaskActivity;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -74,15 +76,34 @@ class StudioHarnessThreadControllerTest {
     runtime = mock(HarnessRuntime.class);
     modelRequestDebugService = mock(ModelRequestDebugService.class);
     projectThreadOwnerResolver = mock(ProjectThreadOwnerResolver.class);
+    subagentTaskActivity = mock(SubagentTaskActivity.class);
     StudioHarnessThreadController controller =
         new StudioHarnessThreadController(
-            runtime, modelRequestDebugService, projectThreadOwnerResolver);
+            runtime, modelRequestDebugService, projectThreadOwnerResolver, subagentTaskActivity);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
                 new ResultResponseBodyAdvice())
             .build();
+  }
+
+  /**
+   * 意图：父 Thread 自身静止但子树仍有未交付委派时，快照必须保持 processing=true 而 status 仍为该 Thread
+   * 自身的状态——前端据此显示"仍在工作"，而不是诱使用户以为可以开始下一轮。
+   */
+  @Test
+  void snapshotKeepsProcessingWhileDelegatedWorkIsPending() throws Exception {
+    when(runtime.getThreadSnapshot(id(1))).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
+    when(runtime.manualCompactionAvailability(id(1)))
+        .thenReturn(ManualCompactionAvailability.enabled());
+    when(subagentTaskActivity.hasPendingDelegatedWork(id(1))).thenReturn(true);
+
+    mockMvc
+        .perform(get("/api/harness/threads/" + idText(1)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
+        .andExpect(jsonPath("$.data.thread.processing").value(true));
   }
 
   /** 意图：验证 GET /api/harness/threads/{threadId} 折叠快照查询路径并投影 manualCompaction 状态。 */

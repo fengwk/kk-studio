@@ -1,21 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -66,6 +59,10 @@ final class TurnPlanBuilder {
       throw new IllegalArgumentException(
           "compaction preparation must be present iff reason is COMPACTION");
     }
+    if (reason == TurnStartReason.STOP) {
+      // STOP Turn 只由 StopControl 在自己的事务里完整写入；它绝不调度模型，因此必须 fail closed。
+      throw new IllegalArgumentException("STOP turns are never planned by the processor");
+    }
 
     List<ThreadCommand> consumedCommands = new ArrayList<>();
     for (ThreadCommand command : plannedCommands) {
@@ -94,7 +91,7 @@ final class TurnPlanBuilder {
     List<Entry> candidateEntries = new ArrayList<>();
     UUID parentId = sourcePath.head().id();
     if (reason == TurnStartReason.INPUT) {
-      List<Entry> normalization = normalizationSuffix(sourcePath, idAllocator, now);
+      List<Entry> normalization = HistoryNormalization.suffix(sourcePath, idAllocator, now);
       candidateEntries.addAll(normalization);
       if (!normalization.isEmpty()) {
         parentId = normalization.get(normalization.size() - 1).id();
@@ -199,100 +196,5 @@ final class TurnPlanBuilder {
   /** user-like：最终用户输入，含 contributor / runtime 注入的 USER CUSTOM_MESSAGE 与 typed GOAL。 */
   private static boolean isUserLike(ThreadCommand command) {
     return command.type().isMessage();
-  }
-
-  /**
-   * history normalization suffix：source path 存在 open 历史 Turn 时，基于该 path 已有的严格 ToolResult 前缀补写缺失
-   * callIndex 的 synthetic UNKNOWN/HISTORY_CUT ToolResult，再追加 CANCELLED TURN_END；不读取任何 descendant
-   * Invocation 结果。ROOT / 已关闭 TURN_END 无 suffix。
-   */
-  private List<Entry> normalizationSuffix(
-      EntryPath sourcePath, Supplier<UUID> idAllocator, Instant now) {
-    var openTurn = sourcePath.openTurnStart();
-    if (openTurn.isEmpty()) {
-      return List.of();
-    }
-    Entry turn = openTurn.get();
-    UUID sessionId = sourcePath.root().sessionId();
-    List<Entry> suffix = new ArrayList<>();
-    UUID parentId = sourcePath.head().id();
-    Entry assistant = assistantResultInTurn(sourcePath, turn);
-    if (assistant != null
-        && assistant.payload() instanceof MessagePayload message
-        && message.message().role() == AgentMessageRole.ASSISTANT) {
-      List<ToolCallMessageContent> calls = new ArrayList<>();
-      for (var content : message.message().contents()) {
-        if (content instanceof ToolCallMessageContent call) {
-          calls.add(call);
-        }
-      }
-      int present = countToolResultsAfter(sourcePath, assistant.id());
-      for (int callIndex = present; callIndex < calls.size(); callIndex++) {
-        ToolCallMessageContent call = calls.get(callIndex);
-        UUID entryId = idAllocator.get();
-        suffix.add(
-            new Entry(
-                entryId,
-                sessionId,
-                parentId,
-                payloadMapper.syntheticHistoryCutToolResult(assistant.id(), callIndex, call),
-                now));
-        parentId = entryId;
-      }
-    }
-    UUID turnEndId = idAllocator.get();
-    suffix.add(
-        new Entry(
-            turnEndId,
-            sessionId,
-            parentId,
-            new TurnEndPayload(
-                turn.id(), TurnEndOutcome.CANCELLED, false, TurnEndReason.HISTORY_CUT, null),
-            now));
-    return suffix;
-  }
-
-  /** 返回 open Turn 内唯一的 assistant result Entry（ASSISTANT MESSAGE / ASSISTANT_ERROR / ABORTED）。 */
-  static Entry assistantResultInTurn(EntryPath path, Entry turn) {
-    boolean inTurn = false;
-    for (Entry entry : path.entries()) {
-      if (entry.id().equals(turn.id())) {
-        inTurn = true;
-        continue;
-      }
-      if (!inTurn) {
-        continue;
-      }
-      EntryPayload payload = entry.payload();
-      if (payload instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.ASSISTANT) {
-        return entry;
-      }
-      if (payload instanceof AssistantErrorPayload || payload instanceof AssistantAbortedPayload) {
-        return entry;
-      }
-      if (payload instanceof TurnEndPayload) {
-        return null;
-      }
-    }
-    return null;
-  }
-
-  /** 统计 assistant Entry 之后 path 上已有的 TOOL Message 数量（TurnPathValidator 保证是 callIndex 严格前缀）。 */
-  static int countToolResultsAfter(EntryPath path, UUID assistantEntryId) {
-    int count = 0;
-    boolean after = false;
-    for (Entry entry : path.entries()) {
-      if (entry.id().equals(assistantEntryId)) {
-        after = true;
-        continue;
-      }
-      if (after
-          && entry.payload() instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.TOOL) {
-        count++;
-      }
-    }
-    return count;
   }
 }
