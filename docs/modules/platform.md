@@ -33,14 +33,15 @@ dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行�
 | [harness/thread/command](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` | 每个 live turn 的 Agent/Model/Environment/skill/subagent 解析 |
 | [harness/task](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | `AgentPromptComposer`、`AgentBranchSettingsMaterializer` | system prompt 拼接与分支设置物化 |
 | [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | `PlatformReadToolExecutor`、`PlatformSkillContentReader`、`PlatformResourceContentReader`、`ReadTextWindow` | 统一 `read` 的 path 路由：Skill Git cache 与 Session 授权的 Blob 文本读取，本地路径委托 `BoundEnvironment` |
-| [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`SessionDeletionOrchestrator`、`PlatformCanvasCommandService`、`OwnerType` | 跨 owner 的 Harness 命令接受、深删除与 Canvas command |
+| [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`HarnessOwnerQueryService`、`SessionDeletionOrchestrator`、`OwnerRef` | 产品 owner 的 Harness 命令接受、Session 查询与深删除；owner 只有 Chat 与 Issue+Agent 两种形态 |
+| [interaction](../../platform/src/main/java/fun/fengwk/kkstudio/platform/interaction) | `InteractionQueryService`、`InteractionService` | 把 Harness 两种等待（问卷 / 审批）投影为带产品来源的待处理列表，并提供唯一人工写入口 |
 | [chat](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat) | `ChatServiceImpl` | Chat CRUD 与深删除 |
 | [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | `PlatformEvidenceBlobPort`、`PlatformHarnessCommandAcceptancePort`、`PlatformAgentBranchSettingsPort`、`PlatformIssueAgentSessionDeletionPort`、`ProjectHarnessContributor`、`IssueTransitionTool` | Project 端口实现与 Issue Agent 工具；领域、用例、持久化与 Reconciler 在 [project](project.md) 模块 |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
 | plugin | `StudioPluginRegistry`、`PluginCredentialStore`、`PluginResourceGateway` | 构建期 Plugin 发现、安全管理面、加密凭据与 Session Resource 桥接 |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration` | Environment Card、Daemon 会话装配与宿主元数据保留 |
-| [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `PlatformCanvasResourceLifecycle`、`CanvasBlobResourceMaterializer`、Canvas Function adapters | Canvas Resource 生命周期与 Function adapter |
+| [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `CanvasBlobResourceMaterializer`、`CanvasMediaConfiguration`、`PlatformCanvasFunctionBlobAccess`、Canvas Function adapters | Function 输出物化、宿主 Blob 引用释放适配、媒体 probe 与参考 adapter；Canvas 命令、查询与 Resource 生命周期在 [canvas-infra](canvas-infra.md) |
 | [error](../../platform/src/main/java/fun/fengwk/kkstudio/platform/error)、[persistence](../../platform/src/main/java/fun/fengwk/kkstudio/platform/persistence) | `DomainErrorCode`、`PostgresqlIntegrityViolationClassifier` | 领域错误分类与 FK/唯一约束到领域错误的映射 |
 
 平台把 PostgreSQL 作为 Catalog、Chat、SystemSettings、Canvas graph、Harness durable
@@ -497,9 +498,9 @@ Tool-owned action；动态 MCP 没有 renderer，该路径不访问数据库。
 提供 Chat CRUD，保存 title、agentName、`yoloEnabled`、version 和时间；
 Chat 本身不持有 Environment；具体 branch 的环境身份由该 branch 的 `BranchSettings.environmentName` 在每轮 turn 解析，Agent definition 的 `config` 不含任何 Environment 字段。
 `deleteChat` 先排他锁定 Chat，再调用
-`SessionDeletionOrchestrator.deleteSessionsByOwner(OwnerType.CHAT, chatId)` 深删除
-全部 Session，最后删除 Chat 行；`session_owner` 只表达 owner relation，不绕过 Session
-的 Harness/Blob 清理。
+`SessionDeletionOrchestrator` 以 `OwnerRef.Chat` 深删除全部 Session，最后删除 Chat 行；
+`chat_session` 归属行只表达 owner relation（RESTRICT 外键，必须先于 Thread/Session 行删除），
+不绕过 Session 的 Harness/Blob 清理。
 
 Project 的领域规则、Issue/Run/Evidence 用例、PostgreSQL 持久化与 Reconciler 都归
 [Project 模块](project.md) 所有。platform 在这里只提供该模块无法自持的两类东西：
@@ -532,7 +533,6 @@ Project 模块声明的 4 个端口；它们都运行在调用方已有的物理
 模块的 `ProjectWorkflowJsonCodec` 与 `IssueStateTransitions` 而不是复制状态机，工具边界把 Project
 错误译成平台错误类型；包级约定见
 [project/tool 包约定](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/package-info.java)。
-
 ## SystemSettings
 
 `system_setting` 恰好一行（存在 `id = 1` 的 check 约束），`config` 是六个必填 section
@@ -837,22 +837,14 @@ invocation 归属在 durable binding 中冻结，执行期间不因 Catalog 变�
 resolver 是窄路径：只解析 `CompactionPreparation.executionModel`，返回零
 tools/subagents 的 ModelRequestSpec。
 
-## Canvas 与 ComfyUI 适配
+## Canvas 媒体与 Function 适配
 
-[PlatformCanvasCommandService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration/PlatformCanvasCommandService.java)
-实现 Canvas application command：`createCanvas/applyCommands/deleteCanvas` 都在事务内；
-`applyCommands` 先锁 `canvas_document` 行，再以 `(canvasId, idempotencyKey, requestHash)`
-做精确 replay/conflict 并以 `expectedVersion` 推进 graph version；
-`CREATE_RESOURCE_NODE` 在同一事务锁定 READY upload、retain Canvas Blob 引用、标记 upload
-cleanup 并创建 `canvas_resource`，上传对象由提交后的 Storage Maintenance 清理；Function
-run、node、group、link、resource 的状态变化通过 Canvas core port 写入并以 patch 返回。
-
-[PlatformCanvasResourceLifecycle](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycle.java)
-的核心不变量是：Resource row 对其 Blob 贡献一个引用，Function pin 只保护无 owner
-Resource 而不增加 `ref_count`；run/node/canvas pin 释放后只回收不再被 pin 且无 owner 的
-Resource，Function success 用 target 替换 owner resource，失败/cancel/迟到结果只丢弃
-unowned target。这使 Resource row、Session ref 和 upload owner 各自只维护一条明确引用
-边，任何 owner 删除都必须经过对应 manager。
+Canvas 命令、查询与 Resource 生命周期不在 Platform：`createCanvas/applyCommands/deleteCanvas`、graph
+revision 推进、`(canvasId, idempotencyKey)` 去重与 `canvas_resource` 的 Blob 引用边都由
+[canvas-infra](canvas-infra.md) 的 PostgreSQL 实现承担，Platform 只提供宿主 Storage 与媒体处理事实。
+Platform 在 Canvas 上的职责是：把 Function 的输出物化到本机 Storage，
+把宿主 `StorageBlobManager` 适配成 `CanvasBlobReleaser` 端口，并为 Function runtime 提供 blob facts、
+原件流与 presign 访问。
 
 [CanvasBlobResourceMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobResourceMaterializer.java)
 把 Function 输出 spool 到临时目录（上限 512 MiB），在事务外写 `blobs/{blobId}/original`
@@ -996,7 +988,7 @@ token 或 OpenCLI instance identity。
 | `kk-studio.plugins.resource.{connect-timeout,request-timeout,upload-timeout,max-bytes,temp-directory}` | platform | Plugin 资源端口受控下载与暂存边界；默认连接 `5s`、请求与读取整体期限 `30s`、PUT 直传超时 `5m`、单次暂存上限 `256MiB`（硬上限 `1GiB`）、临时目录留空为 `java.io.tmpdir` |
 | `kk-studio.canvas.resource.{ffprobe-binary,ffmpeg-binary,temp-dir}` | platform | 媒体处理本地路径 |
 | `kk-studio.opencli-hub.instance-id` | platform | OpenCLI Hub 部署身份 |
-| `kk-studio.canvas.function.minimax-h3.comfy-bearer-token` | platform | H3 ComfyUI bearer secret；启用/路由/timeout 仍由 SystemSettings |
+| `kk-studio.canvas.function.minimax-h3.comfy-bearer-token` | plugins/canvas-comfyui | H3 ComfyUI bearer secret；启用/路由/timeout 仍由 SystemSettings |
 | `kk-studio.canvas.function.runtime.*` | canvas-infra | Canvas Function 调度容量、lease、heartbeat 与 poll |
 | `kk-studio.harness.environment-gateway.{max-message-bytes,queue-capacity,max-bytes,send-timeout}` | web | Daemon WebSocket 传输安全边界，默认 `16MiB/256/16MiB/10s`；不是 Environment 并发配额 |
 
@@ -1027,11 +1019,10 @@ third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错�
 | --- | --- | --- |
 | Catalog、MCP | [catalog/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/)、[catalog/mcp/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/) | [`McpServerServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerServiceTest.java)、[`AgentDefinitionConfigCodecTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/definition/configuration/AgentDefinitionConfigCodecTest.java) |
 | Chat、跨 owner 事务 | [chat/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/)、[orchestration/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/orchestration/) | [`ChatServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/ChatServiceIntegrationTest.java)、[`HarnessCommandAcceptanceOrchestratorTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestratorTest.java) |
-| Project、Issue | [project/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)、[project/tool/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/tool/) | [`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueReconcilerIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueReconcilerIntegrationTest.java)、[`tool/IssueTransitionIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/tool/IssueTransitionIntegrationTest.java) |
-| Model、Tool 执行 | [harness/model/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/)、[harness/tool/gateway/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/) | [`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java) |
+| Project、Issue | [project/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)、[project/tool/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/tool/) | [`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueReconcilerIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueReconcilerIntegrationTest.java)、[`tool/IssueTransitionIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/tool/IssueTransitionIntegrationTest.java) || Model、Tool 执行 | [harness/model/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/)、[harness/tool/gateway/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/) | [`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java) |
 | turn 解析与 prompt 物化 | [harness/thread/command/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/)、[harness/task/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/)、[harness/read/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/read/) | [`DatabaseTurnResolverTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolverTest.java)、[`AgentPromptComposerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposerTest.java) |
 | Environment | [environment/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/)、[environment/registry/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/) | [`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、[`EnvironmentServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImplTest.java) |
-| Canvas 与 Function 适配 | [canvas/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/)、[canvas/function/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/) | [`PlatformCanvasResourceLifecycleTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycleTest.java)、[`OpenCliCanvasFunctionAdaptersTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliCanvasFunctionAdaptersTest.java) |
+| Canvas 与 Function 适配 | [canvas/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/)、[canvas/function/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/) | [`CanvasBlobReleaseIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/resource/CanvasBlobReleaseIntegrationTest.java)、[`OpenCliCanvasFunctionAdaptersTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliCanvasFunctionAdaptersTest.java) |
 | Storage、Blob | [storage/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/)、[storage/service/impl/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/service/impl/) | [`StorageUploadServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadServiceIntegrationTest.java)、[`StorageUploadCleanupLeaseIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadCleanupLeaseIntegrationTest.java) |
 | Settings | [settings/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/) | [`SystemSettingsServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImplTest.java)、[`SystemSettingsServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceIntegrationTest.java) |
 | PostgreSQL schema | [harness/persistence/postgresql/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/) | [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)、[`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java) |

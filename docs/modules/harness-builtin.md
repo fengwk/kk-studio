@@ -5,7 +5,7 @@ Harness 需要一个可直接使用的工具集：读文件、执行命令、查
 模型可见列表随装配方式漂移的问题。本模块把第一方能力收拢到唯一入口
 [`BuiltinHarnessContributor`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributor.java)
 （`ContributorId` 为 `builtin`），通过 [`harness-contributor-api`](harness-contributor-api.md)
-的统一 SPI 注册 12 个工具与 `goal.progress` 自定义条目类型；模型可见的工具集合因此由
+的统一 SPI 注册 13 个工具与 `goal.progress` 自定义条目类型；模型可见的工具集合因此由
 代码确定，而不是由容器装配顺序决定。
 
 模块只负责「这些工具做什么」：实现委托、参数与领域校验、以及要追加什么分支状态。目标
@@ -22,10 +22,10 @@ ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor` 与完成态句柄 | 集中注册 12 个工具与 Goal 进度自定义类型；网络传输与持久化调度在外层模块 |
+| `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor` 与完成态句柄 | 集中注册 13 个工具与 Goal 进度自定义类型；网络传输与持久化调度在外层模块 |
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 环境能力工具适配与 prompt 模板加载 | `read` 按地址选择 Platform 或可选 `BoundEnvironment`，其余宿主工具要求 Environment；传输协议与宿主进程管理由 Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | 只读 Goal 工具（`get_goal`、`update_goal`）、进度声明 `GoalProgress` 与确定性编解码器 `GoalProgressCodec` | 目标正文由 branch settings 拥有（用户经 typed `GOAL` 命令设置/清除），本包只读取它并声明进度；进度依托通用 `harness_entry` 的 CUSTOM 载荷，通过 `AppendCustomEntry` 由 Runtime 原子追加 |
-| `fun.fengwk.kkstudio.harness.builtin.skill` | Skill 稳定地址读取所需的窄端口和值契约 | 不注册专用模型工具；Git cache、Package Catalog 与本地安装由 Platform/Daemon 承接 |
+| `fun.fengwk.kkstudio.harness.builtin.input` | 人工输入工具 `AskUserTool` 及其问卷提示词 | 只声明 `ask_user` 的模型可见契约；等待冻结与答案校验由 [harness-runtime](harness-runtime.md) 的 `runtime.input` 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.subagent` | 内部委派工具 `TaskTool`、任务请求 `SubagentTaskRequest`、执行端口 `SubagentRunner` 与配置接入 | 只做参数解析与转发；多轮调度、并发上限与持久化状态机由运行时负责 |
 
 ## 注册清单
@@ -45,6 +45,7 @@ ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](
 | `environment.lsp-workspace-symbols` | `lsp_workspace_symbols` | Environment | SELECTABLE | `lsp.workspace-symbols`，READ_ONLY |
 | `environment.lsp-java-decompile` | `lsp_java_decompile` | Environment | SELECTABLE | `lsp.java-decompile`，READ_ONLY |
 | `runtime.task` | `task` | 无 | INTERNAL | 委派 Subagent 任务 |
+| `ask-user` | `ask_user` | 无 | SELECTABLE | 向人提出冻结问卷；Runtime 在 dispatch 前按 contributor `builtin` + name `ask_user` 冻结为 `WAITING_INPUT` |
 | `goal.get` | `get_goal` | READ(`goal.progress`) | SELECTABLE | 读取当前用户 Goal 与其进度声明 |
 | `goal.update` | `update_goal` | WRITE(`goal.progress`) | SELECTABLE | 声明当前 Goal 的终态进度 |
 
