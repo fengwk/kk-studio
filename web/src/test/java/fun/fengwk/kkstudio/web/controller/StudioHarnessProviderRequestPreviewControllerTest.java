@@ -140,7 +140,9 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         .preview(eq(UUID.fromString(THREAD_ID)), ownerCaptor.capture(), commandCaptor.capture());
 
     assertEquals(OwnerType.CHAT, ownerCaptor.getValue().type());
-    assertEquals(UUID.fromString(OWNER_ID), ownerCaptor.getValue().id());
+    assertEquals(
+        UUID.fromString(OWNER_ID),
+        assertInstanceOf(OwnerRef.Chat.class, ownerCaptor.getValue()).chatId());
 
     AcceptCommandsTarget.Thread target =
         assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
@@ -260,6 +262,19 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                                 .formatted(HEAD_ENTRY_ID, HEAD_ENTRY_ID))))
         .andExpect(status().isBadRequest());
 
+    // 历史 owner.id 不能被静默接受为 chatId，避免错误身份进入只读授权。
+    mockMvc
+        .perform(
+            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    batch(draftCommands())
+                        .replace(
+                            "\"chatId\":\"%s\"".formatted(OWNER_ID),
+                            "\"id\":\"%s\"".formatted(OWNER_ID))))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.errors.detail").value("unknown command owner field: id"));
+
     verify(previewService, never()).preview(any(UUID.class), any(OwnerRef.class), any());
   }
 
@@ -268,8 +283,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   void previewRejectsIssueAgentSessionOwnerAtPublicHttpBoundary() throws Exception {
     when(previewService.preview(any(UUID.class), any(OwnerRef.class), any()))
         .thenThrow(
-            new IllegalArgumentException(
-                "provider request preview is limited to CHAT and CANVAS owners"));
+            new IllegalArgumentException("provider request preview is limited to CHAT owners"));
 
     mockMvc
         .perform(
@@ -277,11 +291,14 @@ class StudioHarnessProviderRequestPreviewControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     batch(draftCommands())
-                        .replace("\"type\":\"CHAT\"", "\"type\":\"ISSUE_AGENT_SESSION\"")))
+                        .replace(
+                            "\"type\":\"CHAT\",\"chatId\":\"%s\"".formatted(OWNER_ID),
+                            "\"type\":\"ISSUE_AGENT\",\"issueId\":\"%s\",\"agentName\":\"executor\""
+                                .formatted(OWNER_ID))))
         .andExpect(status().isBadRequest())
         .andExpect(
             jsonPath("$.errors.detail")
-                .value("provider request preview is limited to CHAT and CANVAS owners"));
+                .value("provider request preview is limited to CHAT owners"));
   }
 
   /** 预览服务只在请求形状合法后被调用一次，因此它不可能被用作绕过形状校验的探测通道。 */
@@ -321,7 +338,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
   private static String batch(String commands) {
     return """
         {
-          "owner":{"type":"CHAT","id":"%s"},
+          "owner":{"type":"CHAT","chatId":"%s"},
           "target":{
             "type":"THREAD",
             "threadId":"%s",

@@ -318,39 +318,34 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
   @Test
   void readOnlyAuthorizeThreadSharesAcceptanceOwnershipJudgmentWithoutAnyWrite() {
     UUID chatId = createChat("authorize-readonly");
-    UUID canvasId = canvasCommandService.createCanvas("authorize-readonly-canvas").id();
+    UUID otherChatId = createChat("authorize-readonly-other");
     UUID sessionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
     accept(
-        new OwnerRef(OwnerType.CHAT, chatId),
+        new OwnerRef.Chat(chatId),
         sessionId,
         threadId,
         new UserMessageCommandPayload(
             new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("owned")))));
 
-    int sessionOwners = count("session_owner", "session_id", sessionId);
+    int sessionOwners = count("chat_session", "session_id", sessionId);
     int entries = count("harness_entry", "session_id", sessionId);
     int commands = count("harness_thread_command", "thread_id", threadId);
     int works = count("harness_work", "target_id", threadId);
 
-    acceptanceService.authorizeThread(new OwnerRef(OwnerType.CHAT, chatId), threadId);
+    acceptanceService.authorizeThread(new OwnerRef.Chat(chatId), threadId);
 
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            acceptanceService.authorizeThread(new OwnerRef(OwnerType.CANVAS, canvasId), threadId));
+        () -> acceptanceService.authorizeThread(new OwnerRef.Chat(otherChatId), threadId));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            acceptanceService.authorizeThread(
-                new OwnerRef(OwnerType.CHAT, UUID.randomUUID()), threadId));
+        () -> acceptanceService.authorizeThread(new OwnerRef.Chat(UUID.randomUUID()), threadId));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            acceptanceService.authorizeThread(
-                new OwnerRef(OwnerType.CHAT, chatId), UUID.randomUUID()));
+        () -> acceptanceService.authorizeThread(new OwnerRef.Chat(chatId), UUID.randomUUID()));
 
-    assertEquals(sessionOwners, count("session_owner", "session_id", sessionId));
+    assertEquals(sessionOwners, count("chat_session", "session_id", sessionId));
     assertEquals(entries, count("harness_entry", "session_id", sessionId));
     assertEquals(commands, count("harness_thread_command", "thread_id", threadId));
     assertEquals(works, count("harness_work", "target_id", threadId));
