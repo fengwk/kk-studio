@@ -4,117 +4,96 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.platform.project.repo.impl.mapper.IssueRunMapper;
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueRunDO;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @AllArgsConstructor
 @Repository
 public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
-  private final IssueRunMapper issueRunMapper;
+  private final IssueRunMapper mapper;
 
   @Override
-  public boolean create(IssueRun run) {
-    return issueRunMapper.insert(toDO(run)) == 1;
+  public boolean insert(IssueRun run) {
+    return mapper.insert(toDO(run)) == 1;
   }
 
   @Override
   public IssueRun getById(UUID id) {
-    return toModel(issueRunMapper.getById(id));
+    return toModel(mapper.getById(id));
   }
 
   @Override
   public IssueRun lockById(UUID id) {
-    return toModel(issueRunMapper.lockById(id));
+    return toModel(mapper.lockById(id));
   }
 
   @Override
-  public IssueRun findActiveByIssueId(UUID issueId) {
-    return toModel(issueRunMapper.findActiveByIssueId(issueId));
+  public IssueRun getActiveByIssueId(UUID issueId) {
+    return toModel(mapper.getActiveByIssueId(issueId));
   }
 
   @Override
   public IssueRun lockActiveByIssueId(UUID issueId) {
-    return toModel(issueRunMapper.lockActiveByIssueId(issueId));
+    return toModel(mapper.lockActiveByIssueId(issueId));
   }
 
   @Override
-  public boolean hasActiveByProjectId(UUID projectId) {
-    return issueRunMapper.hasActiveByProjectId(projectId);
-  }
-
-  @Override
-  public IssueRun findByTerminalActionId(String terminalActionId) {
-    return toModel(issueRunMapper.findByTerminalActionId(terminalActionId));
-  }
-
-  @Override
-  public IssueRun findLatestByIssueId(UUID issueId) {
-    return toModel(issueRunMapper.findLatestByIssueId(issueId));
+  public IssueRun getLatestByIssueId(UUID issueId) {
+    return toModel(mapper.getLatestByIssueId(issueId));
   }
 
   @Override
   public List<IssueRun> listByIssueId(UUID issueId) {
-    return issueRunMapper.listByIssueId(issueId).stream()
-        .map(this::toModel)
-        .collect(Collectors.toList());
+    return mapper.listByIssueId(issueId).stream()
+        .map(PostgresqlIssueRunRepository::toModel)
+        .toList();
   }
 
   @Override
-  public long allocateNextOrdinal(UUID issueId) {
-    Long next = issueRunMapper.allocateNextOrdinal(issueId);
-    if (next == null) {
-      throw new IllegalStateException("Failed to allocate next issue run ordinal");
-    }
-    return next;
+  public long countByIssueIdAndStateAfterOrdinal(UUID issueId, String state, long afterOrdinal) {
+    return mapper.countByIssueIdAndStateAfterOrdinal(issueId, state, afterOrdinal);
   }
 
   @Override
   public boolean updateById(IssueRun run, long expectedVersion) {
-    return issueRunMapper.updateById(toDO(run), expectedVersion) == 1;
+    return mapper.updateById(toDO(run), expectedVersion) == 1;
   }
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    return issueRunMapper.deleteById(id, expectedVersion) == 1;
+    return mapper.deleteById(id, expectedVersion) == 1;
   }
 
-  private IssueRunDO toDO(IssueRun run) {
-    if (run == null) {
-      return null;
-    }
-    IssueRunDO target = new IssueRunDO();
-    target.setId(run.getId());
-    target.setIssueId(run.getIssueId());
-    target.setOrdinal(run.getOrdinal());
-    target.setRole(run.getRole() != null ? run.getRole().name() : null);
-    target.setAgentName(run.getAgentName());
-    target.setSubmissionRunId(run.getSubmissionRunId());
-    target.setStatus(run.getStatus() != null ? run.getStatus().name() : null);
-    target.setOutcome(run.getOutcome() != null ? run.getOutcome().name() : null);
-    target.setObservedActivitySequence(run.getObservedActivitySequence());
-    target.setContinuationCount(run.getContinuationCount());
-    target.setMaxContinuations(run.getMaxContinuations());
-    target.setDeadline(run.getDeadline());
-    target.setWaitingReason(run.getWaitingReason());
-    target.setResult(run.getResult());
-    target.setTerminalActionId(run.getTerminalActionId());
-    target.setVersion(run.getVersion());
-    target.setCreatedAt(run.getCreatedAt());
-    target.setUpdatedAt(run.getUpdatedAt());
-    target.setCompletedAt(run.getCompletedAt());
-    return target;
+  private static IssueRunDO toDO(IssueRun run) {
+    IssueRunDO row = new IssueRunDO();
+    row.setId(run.getId());
+    row.setIssueId(run.getIssueId());
+    row.setOrdinal(run.getOrdinal());
+    row.setState(run.getState());
+    row.setSessionId(run.getSessionId());
+    row.setThreadId(run.getThreadId());
+    row.setStatus(run.getStatus() != null ? run.getStatus().name() : null);
+    row.setStartEntryId(run.getStartEntryId());
+    row.setEndEntryId(run.getEndEntryId());
+    row.setFinalAnswerEntryId(run.getFinalAnswerEntryId());
+    row.setNextState(run.getNextState());
+    row.setObservedActivitySequence(run.getObservedActivitySequence());
+    row.setRemainingExecutionMs(run.getRemainingExecutionMs());
+    row.setActiveSince(run.getActiveSince());
+    row.setError(run.getError());
+    row.setVersion(run.getVersion());
+    row.setStartedAt(run.getStartedAt());
+    row.setEndedAt(run.getEndedAt());
+    return row;
   }
 
-  private IssueRun toModel(IssueRunDO row) {
+  private static IssueRun toModel(IssueRunDO row) {
     if (row == null) {
       return null;
     }
@@ -122,23 +101,23 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
         .id(row.getId())
         .issueId(row.getIssueId())
         .ordinal(row.getOrdinal() != null ? row.getOrdinal() : 0L)
-        .role(row.getRole() != null ? IssueRunRole.valueOf(row.getRole()) : null)
-        .agentName(row.getAgentName())
-        .submissionRunId(row.getSubmissionRunId())
+        .state(row.getState())
+        .sessionId(row.getSessionId())
+        .threadId(row.getThreadId())
         .status(row.getStatus() != null ? IssueRunStatus.valueOf(row.getStatus()) : null)
-        .outcome(row.getOutcome() != null ? IssueRunOutcome.valueOf(row.getOutcome()) : null)
+        .startEntryId(row.getStartEntryId())
+        .endEntryId(row.getEndEntryId())
+        .finalAnswerEntryId(row.getFinalAnswerEntryId())
+        .nextState(row.getNextState())
         .observedActivitySequence(
             row.getObservedActivitySequence() != null ? row.getObservedActivitySequence() : 0L)
-        .continuationCount(row.getContinuationCount() != null ? row.getContinuationCount() : 0)
-        .maxContinuations(row.getMaxContinuations() != null ? row.getMaxContinuations() : 10)
-        .deadline(row.getDeadline())
-        .waitingReason(row.getWaitingReason())
-        .result(row.getResult())
-        .terminalActionId(row.getTerminalActionId())
+        .remainingExecutionMs(
+            row.getRemainingExecutionMs() != null ? row.getRemainingExecutionMs() : 0L)
+        .activeSince(row.getActiveSince())
+        .error(row.getError())
         .version(row.getVersion() != null ? row.getVersion() : 0L)
-        .createdAt(row.getCreatedAt())
-        .updatedAt(row.getUpdatedAt())
-        .completedAt(row.getCompletedAt())
+        .startedAt(row.getStartedAt())
+        .endedAt(row.getEndedAt())
         .build();
   }
 }

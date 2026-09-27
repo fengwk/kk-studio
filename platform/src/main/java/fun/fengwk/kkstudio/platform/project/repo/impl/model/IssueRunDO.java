@@ -5,26 +5,26 @@ import lombok.Data;
 import java.time.Instant;
 import java.util.UUID;
 
+/** {@code project_issue_run} 行映射。 */
 @Data
 public class IssueRunDO {
 
   private UUID id;
   private UUID issueId;
   private Long ordinal;
-  private String role;
-  private String agentName;
-  private UUID submissionRunId;
+  private String state;
+  private UUID sessionId;
+  private UUID threadId;
   private String status;
-  private String outcome;
+  private UUID startEntryId;
+  private UUID endEntryId;
+  private UUID finalAnswerEntryId;
+  private String nextState;
   private Long observedActivitySequence;
-  private Integer continuationCount;
-  private Integer maxContinuations;
-  private Instant deadline;
-  private String waitingReason;
-  private String result;
-  private String terminalActionId;
+  private Long remainingExecutionMs;
+  private Instant activeSince;
+  private String error;
   private Long version;
-  private Instant createdAt;
-  private Instant updatedAt;
-  private Instant completedAt;
+  private Instant startedAt;
+  private Instant endedAt;
 }

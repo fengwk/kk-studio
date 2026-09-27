@@ -6,7 +6,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.project.model.ClaimedIssueWork;
 import fun.fengwk.kkstudio.platform.project.model.IssueWork;
 import fun.fengwk.kkstudio.platform.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
@@ -16,152 +15,97 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-@AllArgsConstructor
+/**
+ * Issue 调度邮箱用例实现：lease/wake 围栏的薄业务边界。
+ *
+ * <p>只在内存层面校验 lease 与唤醒版本形状，真正的串行化由 {@code project_issue_work} 的行锁与条件更新保证。
+ */
 @Service
+@AllArgsConstructor
 public class IssueWorkStoreImpl implements IssueWorkStore {
+
+  private static final int MAX_LEASE_TOKEN_LENGTH = 128;
 
   private final IssueWorkRepository repository;
 
-  @Transactional
   @Override
+  @Transactional
   public IssueWork requestWork(UUID issueId, Instant dueAt) {
     Objects.requireNonNull(issueId, "issueId");
     Instant targetDue = dueAt != null ? dueAt : Instant.now();
-    IssueWork requested = repository.requestWork(issueId, targetDue);
-    if (requested == null) {
+    IssueWork work = repository.requestWork(issueId, targetDue);
+    if (work == null) {
       throw new AiValidationException("issue_work", "Failed to request issue work");
     }
-    return requested;
+    return work;
   }
 
-  @Transactional
   @Override
-  public Optional<ClaimedIssueWork> claimNext(Instant now, String leaseToken, Instant leaseUntil) {
+  public IssueWork getWork(UUID issueId) {
+    Objects.requireNonNull(issueId, "issueId");
+    IssueWork work = repository.getById(issueId);
+    if (work == null) {
+      throw new AiResourceNotFoundException("issue_work");
+    }
+    return work;
+  }
+
+  @Override
+  @Transactional
+  public Optional<IssueWork> claimNext(Instant now, String leaseToken, Instant leaseUntil) {
     Objects.requireNonNull(now, "now");
-    String trimmedToken =
-        ProjectValidationUtils.trimAndValidate(leaseToken, "leaseToken", 128, true);
+    String token = requireLeaseToken(leaseToken);
     Objects.requireNonNull(leaseUntil, "leaseUntil");
     if (!leaseUntil.isAfter(now)) {
       throw new AiValidationException("issue_work", "leaseUntil must be after now");
     }
-    IssueWork claimed = repository.claimNext(now, trimmedToken, leaseUntil);
-    if (claimed == null) {
-      return Optional.empty();
-    }
-    return Optional.of(
-        ClaimedIssueWork.builder()
-            .issueId(claimed.getIssueId())
-            .claimedWakeVersion(claimed.getWakeVersion())
-            .leaseToken(claimed.getLeaseToken())
-            .leaseUntil(claimed.getLeaseUntil())
-            .build());
+    return Optional.ofNullable(repository.claimNext(now, token, leaseUntil));
   }
 
-  @Transactional
   @Override
+  @Transactional
   public void renewLease(UUID issueId, String leaseToken, Instant now, Instant newLeaseUntil) {
     Objects.requireNonNull(issueId, "issueId");
-    String trimmedToken =
-        ProjectValidationUtils.trimAndValidate(leaseToken, "leaseToken", 128, true);
+    String token = requireLeaseToken(leaseToken);
     Objects.requireNonNull(now, "now");
     Objects.requireNonNull(newLeaseUntil, "newLeaseUntil");
     IssueWork work = repository.lockById(issueId);
     if (work == null) {
       throw new AiResourceNotFoundException("issue_work");
     }
-    if (work.getLeaseToken() == null || !work.getLeaseToken().equals(trimmedToken)) {
+    if (work.getLeaseToken() == null || !work.getLeaseToken().equals(token)) {
       throw new AiValidationException("issue_work", "Lease token mismatch for renewal");
     }
     if (work.getLeaseUntil() == null || !work.getLeaseUntil().isAfter(now)) {
-      throw new AiValidationException("issue_work", "Lease expired at current time");
+      throw new AiValidationException("issue_work", "Lease has already expired");
     }
     if (!newLeaseUntil.isAfter(work.getLeaseUntil())) {
       throw new AiValidationException(
-          "issue_work", "newLeaseUntil must extend beyond current leaseUntil");
+          "issue_work", "newLeaseUntil must extend beyond the current leaseUntil");
     }
-    boolean renewed = repository.renewLease(issueId, trimmedToken, now, newLeaseUntil);
-    if (!renewed) {
+    if (!repository.renewLease(issueId, token, now, newLeaseUntil)) {
       throw new AiValidationException("issue_work", "Failed to renew issue work lease");
     }
   }
 
-  @Transactional
   @Override
+  @Transactional
   public void completeWork(UUID issueId, String leaseToken, long claimedWakeVersion, Instant now) {
     Objects.requireNonNull(issueId, "issueId");
-    String trimmedToken =
-        ProjectValidationUtils.trimAndValidate(leaseToken, "leaseToken", 128, true);
-    if (claimedWakeVersion <= 0) {
-      throw new AiValidationException("issue_work", "claimedWakeVersion must be positive");
-    }
+    String token = requireLeaseToken(leaseToken);
     Objects.requireNonNull(now, "now");
-    IssueWork work = repository.lockById(issueId);
-    if (work == null) {
-      throw new AiResourceNotFoundException("issue_work");
-    }
-    if (work.getLeaseToken() == null || !work.getLeaseToken().equals(trimmedToken)) {
-      throw new AiValidationException("issue_work", "Lease token mismatch for completion");
-    }
-    if (work.getLeaseUntil() == null || !work.getLeaseUntil().isAfter(now)) {
-      throw new AiValidationException("issue_work", "Lease expired at current time");
-    }
-    if (claimedWakeVersion > work.getWakeVersion()) {
-      throw new AiValidationException(
-          "issue_work", "Claimed wake version exceeds current wake version");
-    }
-    if (claimedWakeVersion == work.getWakeVersion()) {
-      boolean deleted =
-          repository.deleteIfWakeMatches(issueId, trimmedToken, claimedWakeVersion, now);
-      if (!deleted) {
-        throw new AiValidationException("issue_work", "Failed to complete issue work");
-      }
-    } else {
-      boolean cleared =
-          repository.clearLeaseIfWakeNewer(issueId, trimmedToken, claimedWakeVersion, now);
-      if (!cleared) {
-        throw new AiValidationException(
-            "issue_work", "Failed to clear expired lease for newer wake");
-      }
+    if (!repository.deleteIfWakeMatches(issueId, token, claimedWakeVersion, now)) {
+      throw new AiValidationException("issue_work", "Failed to complete issue work claim");
     }
   }
 
-  @Transactional
-  @Override
-  public void rescheduleWork(
-      UUID issueId, String leaseToken, long claimedWakeVersion, Instant now, Instant requestedAt) {
-    Objects.requireNonNull(issueId, "issueId");
-    String trimmedToken =
-        ProjectValidationUtils.trimAndValidate(leaseToken, "leaseToken", 128, true);
-    if (claimedWakeVersion <= 0) {
-      throw new AiValidationException("issue_work", "claimedWakeVersion must be positive");
+  private static String requireLeaseToken(String leaseToken) {
+    if (leaseToken == null || leaseToken.isBlank()) {
+      throw new AiValidationException("leaseToken", "leaseToken must not be blank");
     }
-    Objects.requireNonNull(now, "now");
-    Instant targetRequested = requestedAt != null ? requestedAt : now;
-    IssueWork work = repository.lockById(issueId);
-    if (work == null) {
-      throw new AiResourceNotFoundException("issue_work");
+    if (leaseToken.length() > MAX_LEASE_TOKEN_LENGTH) {
+      throw new AiValidationException("leaseToken", "leaseToken is too long");
     }
-    if (work.getLeaseToken() == null || !work.getLeaseToken().equals(trimmedToken)) {
-      throw new AiValidationException("issue_work", "Lease token mismatch for reschedule");
-    }
-    if (work.getLeaseUntil() == null || !work.getLeaseUntil().isAfter(now)) {
-      throw new AiValidationException("issue_work", "Lease expired at current time");
-    }
-    if (claimedWakeVersion > work.getWakeVersion()) {
-      throw new AiValidationException(
-          "issue_work", "Claimed wake version exceeds current wake version");
-    }
-    boolean rescheduled =
-        repository.reschedule(issueId, trimmedToken, claimedWakeVersion, now, targetRequested);
-    if (!rescheduled) {
-      throw new AiValidationException("issue_work", "Failed to reschedule issue work");
-    }
-  }
-
-  @Transactional(readOnly = true)
-  @Override
-  public IssueWork getWork(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    return repository.getById(issueId);
+    return leaseToken;
   }
 }

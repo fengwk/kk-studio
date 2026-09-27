@@ -4,7 +4,6 @@ import fun.fengwk.convention4j.springboot.starter.mybatis.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
 import org.apache.ibatis.annotations.ResultMap;
@@ -17,28 +16,26 @@ import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueRunDO;
 import java.util.List;
 import java.util.UUID;
 
+/** {@code project_issue_run} 表 SQL 入口。 */
 @Mapper
 public interface IssueRunMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, issue_id, ordinal, role, agent_name, submission_run_id, "
-          + "status, outcome, observed_activity_sequence, "
-          + "continuation_count, max_continuations, deadline, waiting_reason, "
-          + "result::text as result, terminal_action_id, version, created_at, updated_at, completed_at";
+      "id, issue_id, ordinal, state, session_id, thread_id, status, start_entry_id, end_entry_id,"
+          + " final_answer_entry_id, next_state, observed_activity_sequence,"
+          + " remaining_execution_ms, active_since, error, version, started_at, ended_at";
 
   @Insert(
       """
       insert into project_issue_run (
-          id, issue_id, ordinal, role, agent_name, submission_run_id,
-          status, outcome, observed_activity_sequence,
-          continuation_count, max_continuations, deadline, waiting_reason,
-          result, terminal_action_id, version, created_at, updated_at, completed_at
+          id, issue_id, ordinal, state, session_id, thread_id, status, start_entry_id,
+          end_entry_id, final_answer_entry_id, next_state, observed_activity_sequence,
+          remaining_execution_ms, active_since, error, version, started_at, ended_at
       ) values (
-          #{id}, #{issueId}, #{ordinal}, #{role}, #{agentName}, #{submissionRunId},
-          #{status}, #{outcome}, #{observedActivitySequence},
-          #{continuationCount}, #{maxContinuations}, #{deadline}, #{waitingReason},
-          cast(#{result, jdbcType=VARCHAR} as jsonb),
-          #{terminalActionId}, 0, clock_timestamp(), clock_timestamp(), #{completedAt}
+          #{id}, #{issueId}, #{ordinal}, #{state}, #{sessionId}, #{threadId}, #{status},
+          #{startEntryId}, #{endEntryId}, #{finalAnswerEntryId}, #{nextState},
+          #{observedActivitySequence}, #{remainingExecutionMs}, #{activeSince}, #{error},
+          0, clock_timestamp(), #{endedAt}
       )
       """)
   int insert(IssueRunDO run);
@@ -50,22 +47,21 @@ public interface IssueRunMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "issue_id", property = "issueId"),
         @Result(column = "ordinal", property = "ordinal"),
-        @Result(column = "role", property = "role"),
-        @Result(column = "agent_name", property = "agentName"),
-        @Result(column = "submission_run_id", property = "submissionRunId"),
+        @Result(column = "state", property = "state"),
+        @Result(column = "session_id", property = "sessionId"),
+        @Result(column = "thread_id", property = "threadId"),
         @Result(column = "status", property = "status"),
-        @Result(column = "outcome", property = "outcome"),
+        @Result(column = "start_entry_id", property = "startEntryId"),
+        @Result(column = "end_entry_id", property = "endEntryId"),
+        @Result(column = "final_answer_entry_id", property = "finalAnswerEntryId"),
+        @Result(column = "next_state", property = "nextState"),
         @Result(column = "observed_activity_sequence", property = "observedActivitySequence"),
-        @Result(column = "continuation_count", property = "continuationCount"),
-        @Result(column = "max_continuations", property = "maxContinuations"),
-        @Result(column = "deadline", property = "deadline"),
-        @Result(column = "waiting_reason", property = "waitingReason"),
-        @Result(column = "result", property = "result"),
-        @Result(column = "terminal_action_id", property = "terminalActionId"),
+        @Result(column = "remaining_execution_ms", property = "remainingExecutionMs"),
+        @Result(column = "active_since", property = "activeSince"),
+        @Result(column = "error", property = "error"),
         @Result(column = "version", property = "version"),
-        @Result(column = "created_at", property = "createdAt"),
-        @Result(column = "updated_at", property = "updatedAt"),
-        @Result(column = "completed_at", property = "completedAt")
+        @Result(column = "started_at", property = "startedAt"),
+        @Result(column = "ended_at", property = "endedAt")
       })
   IssueRunDO getById(@Param("id") UUID id);
 
@@ -76,65 +72,55 @@ public interface IssueRunMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from project_issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN')")
+          + " from project_issue_run where issue_id = #{issueId}"
+          + " and status in ('RUNNING', 'WAITING')")
   @ResultMap("issueRunResultMap")
-  IssueRunDO findActiveByIssueId(@Param("issueId") UUID issueId);
+  IssueRunDO getActiveByIssueId(@Param("issueId") UUID issueId);
 
   @Select(
       "select "
           + COLUMNS
-          + " from project_issue_run where issue_id = #{issueId} and status in ('RUNNING', 'WAITING_HUMAN') for update")
+          + " from project_issue_run where issue_id = #{issueId}"
+          + " and status in ('RUNNING', 'WAITING') for update")
   @ResultMap("issueRunResultMap")
   IssueRunDO lockActiveByIssueId(@Param("issueId") UUID issueId);
 
   @Select(
-      """
-      select exists(
-          select 1
-          from project_issue_run r
-          join project_issue i on i.id = r.issue_id
-          where i.project_id = #{projectId}
-            and r.status in ('RUNNING', 'WAITING_HUMAN'))
-      """)
-  boolean hasActiveByProjectId(@Param("projectId") UUID projectId);
-
-  @Select(
       "select "
           + COLUMNS
-          + " from project_issue_run where terminal_action_id = #{terminalActionId}")
-  @Options(useCache = false, flushCache = Options.FlushCachePolicy.TRUE)
+          + " from project_issue_run where issue_id = #{issueId}"
+          + " order by ordinal desc limit 1")
   @ResultMap("issueRunResultMap")
-  IssueRunDO findByTerminalActionId(@Param("terminalActionId") String terminalActionId);
+  IssueRunDO getLatestByIssueId(@Param("issueId") UUID issueId);
 
   @Select(
       "select "
           + COLUMNS
-          + " from project_issue_run where issue_id = #{issueId} order by ordinal desc limit 1")
-  @ResultMap("issueRunResultMap")
-  IssueRunDO findLatestByIssueId(@Param("issueId") UUID issueId);
-
-  @Select(
-      "select "
-          + COLUMNS
-          + " from project_issue_run where issue_id = #{issueId} order by ordinal asc")
+          + " from project_issue_run where issue_id = #{issueId}"
+          + " order by ordinal asc")
   @ResultMap("issueRunResultMap")
   List<IssueRunDO> listByIssueId(@Param("issueId") UUID issueId);
 
-  @Select("select coalesce(max(ordinal), 0) + 1 from project_issue_run where issue_id = #{issueId}")
-  Long allocateNextOrdinal(@Param("issueId") UUID issueId);
+  @Select(
+      "select count(*) from project_issue_run where issue_id = #{issueId}"
+          + " and state = #{state} and ordinal > #{afterOrdinal}")
+  long countByIssueIdAndStateAfterOrdinal(
+      @Param("issueId") UUID issueId,
+      @Param("state") String state,
+      @Param("afterOrdinal") long afterOrdinal);
 
   @Update(
       """
       update project_issue_run
       set status = #{run.status},
-          outcome = #{run.outcome},
+          end_entry_id = #{run.endEntryId},
+          final_answer_entry_id = #{run.finalAnswerEntryId},
+          next_state = #{run.nextState},
           observed_activity_sequence = #{run.observedActivitySequence},
-          continuation_count = #{run.continuationCount},
-          waiting_reason = #{run.waitingReason},
-          result = cast(#{run.result, jdbcType=VARCHAR} as jsonb),
-          terminal_action_id = #{run.terminalActionId},
-          completed_at = #{run.completedAt},
-          updated_at = clock_timestamp(),
+          remaining_execution_ms = #{run.remainingExecutionMs},
+          active_since = #{run.activeSince},
+          error = #{run.error},
+          ended_at = #{run.endedAt},
           version = version + 1
       where id = #{run.id} and version = #{expectedVersion}
       """)

@@ -5,6 +5,7 @@ import lombok.Data;
 import java.time.Instant;
 import java.util.UUID;
 
+/** {@code project_issue_activity} 行映射。 */
 @Data
 public class IssueActivityDO {
 
@@ -13,11 +14,10 @@ public class IssueActivityDO {
   private String kind;
   private String actorType;
   private String actorAgentName;
-  private String targetRole;
   private UUID runId;
-  private UUID submissionRunId;
-  private String decision;
   private String body;
+  private String data;
   private String idempotencyKey;
+  private String requestHash;
   private Instant createdAt;
 }

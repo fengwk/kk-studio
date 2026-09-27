@@ -5,14 +5,16 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * IssueRun：业务给 Agent 的一次有界指派。
+ * {@code project_issue_run} 行：冻结自己的 Issue/state/Session/Thread 坐标与历史区间。
  *
- * <p>Run 状态只描述执行；SUBMITTED/APPROVED/CHANGES_REQUESTED 是带来源的业务结果。同一 (Issue, Agent) 的后续 Run 复用自己的
- * Session 与工作 Branch，Run 每次新建。
+ * <p>状态语义复用领域 {@link IssueRunStatus}：RUNNING/WAITING 是活动状态且无终态区间，终态必须冻结 {@code endEntryId/endedAt}，
+ * FAILED/UNKNOWN 必须给出原因。{@code version} 是内部回调/收尾 CAS，不是用户配置版本。
  */
 @Data
 @Builder
@@ -23,30 +25,21 @@ public class IssueRun {
   private UUID id;
   private UUID issueId;
   private long ordinal;
-  private IssueRunRole role;
-
-  /** 冻结的 Agent 身份（Issue 参与者身份，不是模型名）。 */
-  private String agentName;
-
-  /** REVIEWER 必填，指向被审查的 EXECUTOR Run。 */
-  private UUID submissionRunId;
-
+  private String state;
+  private UUID sessionId;
+  private UUID threadId;
   private IssueRunStatus status;
-  private IssueRunOutcome outcome;
-
-  /** 已投递给本 Run 的 Activity sequence 游标。 */
+  private UUID startEntryId;
+  private UUID endEntryId;
+  private UUID finalAnswerEntryId;
+  private String nextState;
   private long observedActivitySequence;
-
-  private int continuationCount;
-  private int maxContinuations;
-  private Instant deadline;
-  private String waitingReason;
-  private String result;
-  private String terminalActionId;
+  private long remainingExecutionMs;
+  private Instant activeSince;
+  private String error;
   private long version;
-  private Instant createdAt;
-  private Instant updatedAt;
-  private Instant completedAt;
+  private Instant startedAt;
+  private Instant endedAt;
 
   public boolean isActive() {
     return status != null && status.isActive();
@@ -54,13 +47,5 @@ public class IssueRun {
 
   public boolean isTerminal() {
     return status != null && status.isTerminal();
-  }
-
-  public boolean isExecutor() {
-    return role == IssueRunRole.EXECUTOR;
-  }
-
-  public boolean isReviewer() {
-    return role == IssueRunRole.REVIEWER;
   }
 }

@@ -4,14 +4,12 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.impl.mapper.IssueMapper;
 import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueDO;
 
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @AllArgsConstructor
 @Repository
@@ -42,15 +40,15 @@ public class PostgresqlIssueRepository implements IssueRepository {
   @Override
   public List<Issue> listByProjectId(UUID projectId) {
     return issueMapper.listByProjectId(projectId).stream()
-        .map(this::toModel)
-        .collect(Collectors.toList());
+        .map(PostgresqlIssueRepository::toModel)
+        .toList();
   }
 
   @Override
   public List<Issue> listByProjectIdAndArchived(UUID projectId, boolean archived) {
     return issueMapper.listByProjectIdAndArchived(projectId, archived).stream()
-        .map(this::toModel)
-        .collect(Collectors.toList());
+        .map(PostgresqlIssueRepository::toModel)
+        .toList();
   }
 
   @Override
@@ -63,27 +61,31 @@ public class PostgresqlIssueRepository implements IssueRepository {
     return issueMapper.deleteById(id, expectedVersion) == 1;
   }
 
-  private IssueDO toDO(Issue issue) {
+  private static IssueDO toDO(Issue issue) {
     if (issue == null) {
       return null;
     }
-    IssueDO target = new IssueDO();
-    target.setId(issue.getId());
-    target.setProjectId(issue.getProjectId());
-    target.setNumber(issue.getNumber());
-    target.setTitle(issue.getTitle());
-    target.setDescription(issue.getDescription());
-    target.setStatus(issue.getStatus() != null ? issue.getStatus().name() : null);
-    target.setAssigneeAgentName(issue.getAssigneeAgentName());
-    target.setReviewerAgentName(issue.getReviewerAgentName());
-    target.setVersion(issue.getVersion());
-    target.setArchivedAt(issue.getArchivedAt());
-    target.setCreatedAt(issue.getCreatedAt());
-    target.setUpdatedAt(issue.getUpdatedAt());
-    return target;
+    IssueDO row = new IssueDO();
+    row.setId(issue.getId());
+    row.setProjectId(issue.getProjectId());
+    row.setNumber(issue.getNumber());
+    row.setTitle(issue.getTitle());
+    row.setDescription(issue.getDescription());
+    row.setState(issue.getState());
+    row.setBlockedFromState(issue.getBlockedFromState());
+    row.setBlockReason(issue.getBlockReason());
+    row.setPauseReason(issue.getPauseReason());
+    row.setPauseDetail(issue.getPauseDetail());
+    row.setNextRunOrdinal(issue.getNextRunOrdinal());
+    row.setNextActivitySequence(issue.getNextActivitySequence());
+    row.setVersion(issue.getVersion());
+    row.setArchivedAt(issue.getArchivedAt());
+    row.setCreatedAt(issue.getCreatedAt());
+    row.setUpdatedAt(issue.getUpdatedAt());
+    return row;
   }
 
-  private Issue toModel(IssueDO row) {
+  private static Issue toModel(IssueDO row) {
     if (row == null) {
       return null;
     }
@@ -93,9 +95,14 @@ public class PostgresqlIssueRepository implements IssueRepository {
         .number(row.getNumber() != null ? row.getNumber() : 0L)
         .title(row.getTitle())
         .description(row.getDescription())
-        .status(row.getStatus() != null ? IssueStatus.valueOf(row.getStatus()) : null)
-        .assigneeAgentName(row.getAssigneeAgentName())
-        .reviewerAgentName(row.getReviewerAgentName())
+        .state(row.getState())
+        .blockedFromState(row.getBlockedFromState())
+        .blockReason(row.getBlockReason())
+        .pauseReason(row.getPauseReason())
+        .pauseDetail(row.getPauseDetail())
+        .nextRunOrdinal(row.getNextRunOrdinal() != null ? row.getNextRunOrdinal() : 1L)
+        .nextActivitySequence(
+            row.getNextActivitySequence() != null ? row.getNextActivitySequence() : 1L)
         .version(row.getVersion() != null ? row.getVersion() : 0L)
         .archivedAt(row.getArchivedAt())
         .createdAt(row.getCreatedAt())

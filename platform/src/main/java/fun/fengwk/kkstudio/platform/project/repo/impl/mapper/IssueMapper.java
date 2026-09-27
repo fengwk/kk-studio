@@ -16,24 +16,24 @@ import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueDO;
 import java.util.List;
 import java.util.UUID;
 
+/** {@code project_issue} 表 SQL 入口。 */
 @Mapper
 public interface IssueMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, project_id, number, title, description, status, "
-          + "assignee_agent_name, reviewer_agent_name, version, "
-          + "archived_at, created_at, updated_at";
+      "id, project_id, number, title, description, state, blocked_from_state, block_reason,"
+          + " pause_reason, pause_detail, next_run_ordinal, next_activity_sequence, version,"
+          + " archived_at, created_at, updated_at";
 
   @Insert(
       """
       insert into project_issue (
-          id, project_id, number, title, description, status,
-          assignee_agent_name, reviewer_agent_name, version,
+          id, project_id, number, title, description, state, blocked_from_state, block_reason,
+          pause_reason, pause_detail, next_run_ordinal, next_activity_sequence, version,
           archived_at, created_at, updated_at
       ) values (
-          #{id}, #{projectId}, #{number}, #{title}, #{description}, #{status},
-          #{assigneeAgentName}, #{reviewerAgentName}, 0,
-          null, clock_timestamp(), clock_timestamp()
+          #{id}, #{projectId}, #{number}, #{title}, #{description}, #{state}, null, null,
+          null, null, 1, 1, 0, null, clock_timestamp(), clock_timestamp()
       )
       """)
   int insert(IssueDO issue);
@@ -47,9 +47,13 @@ public interface IssueMapper extends BaseMapper {
         @Result(column = "number", property = "number"),
         @Result(column = "title", property = "title"),
         @Result(column = "description", property = "description"),
-        @Result(column = "status", property = "status"),
-        @Result(column = "assignee_agent_name", property = "assigneeAgentName"),
-        @Result(column = "reviewer_agent_name", property = "reviewerAgentName"),
+        @Result(column = "state", property = "state"),
+        @Result(column = "blocked_from_state", property = "blockedFromState"),
+        @Result(column = "block_reason", property = "blockReason"),
+        @Result(column = "pause_reason", property = "pauseReason"),
+        @Result(column = "pause_detail", property = "pauseDetail"),
+        @Result(column = "next_run_ordinal", property = "nextRunOrdinal"),
+        @Result(column = "next_activity_sequence", property = "nextActivitySequence"),
         @Result(column = "version", property = "version"),
         @Result(column = "archived_at", property = "archivedAt"),
         @Result(column = "created_at", property = "createdAt"),
@@ -64,27 +68,24 @@ public interface IssueMapper extends BaseMapper {
   @Select(
       "select "
           + COLUMNS
-          + " from project_issue where project_id = #{projectId} and number = #{number}")
+          + " from project_issue where project_id = #{projectId}"
+          + " and number = #{number}")
   @ResultMap("issueResultMap")
   IssueDO getByProjectAndNumber(@Param("projectId") UUID projectId, @Param("number") long number);
 
   @Select(
       "select "
           + COLUMNS
-          + " from project_issue where project_id = #{projectId} order by number asc")
+          + " from project_issue where project_id = #{projectId}"
+          + " order by number asc")
   @ResultMap("issueResultMap")
   List<IssueDO> listByProjectId(@Param("projectId") UUID projectId);
 
   @Select(
-      """
-      select id, project_id, number, title, description, status,
-             assignee_agent_name, reviewer_agent_name, version,
-             archived_at, created_at, updated_at
-      from project_issue
-      where project_id = #{projectId}
-        and (archived_at is not null) = #{archived}
-      order by number asc
-      """)
+      "select "
+          + COLUMNS
+          + " from project_issue where project_id = #{projectId}"
+          + " and (archived_at is not null) = #{archived} order by number asc")
   @ResultMap("issueResultMap")
   List<IssueDO> listByProjectIdAndArchived(
       @Param("projectId") UUID projectId, @Param("archived") boolean archived);
@@ -94,9 +95,13 @@ public interface IssueMapper extends BaseMapper {
       update project_issue
       set title = #{issue.title},
           description = #{issue.description},
-          status = #{issue.status},
-          assignee_agent_name = #{issue.assigneeAgentName},
-          reviewer_agent_name = #{issue.reviewerAgentName},
+          state = #{issue.state},
+          blocked_from_state = #{issue.blockedFromState},
+          block_reason = #{issue.blockReason},
+          pause_reason = #{issue.pauseReason},
+          pause_detail = #{issue.pauseDetail},
+          next_run_ordinal = #{issue.nextRunOrdinal},
+          next_activity_sequence = #{issue.nextActivitySequence},
           archived_at = #{issue.archivedAt},
           updated_at = clock_timestamp(),
           version = version + 1

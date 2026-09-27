@@ -17,21 +17,22 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+/** {@code project} 表 SQL 入口。 */
 @Mapper
 public interface ProjectMapper extends BaseMapper {
 
   String COLUMNS =
-      "id, title, description, yolo_enabled, max_review_rejections, next_issue_number, "
-          + "version, archived_at, created_at, updated_at";
+      "id, title, description, workflow, yolo_enabled, next_issue_number, version, "
+          + "archived_at, created_at, updated_at";
 
   @Insert(
       """
       insert into project (
-          id, title, description, yolo_enabled, max_review_rejections, next_issue_number,
-          version, archived_at, created_at, updated_at
+          id, title, description, workflow, yolo_enabled, next_issue_number, version,
+          archived_at, created_at, updated_at
       ) values (
-          #{id}, #{title}, #{description}, #{yoloEnabled}, #{maxReviewRejections}, 1,
-          0, null, clock_timestamp(), clock_timestamp()
+          #{id}, #{title}, #{description}, #{workflowJson}::jsonb, #{yoloEnabled}, 1, 0,
+          null, clock_timestamp(), clock_timestamp()
       )
       """)
   int insert(ProjectDO project);
@@ -43,8 +44,8 @@ public interface ProjectMapper extends BaseMapper {
         @Result(column = "id", property = "id"),
         @Result(column = "title", property = "title"),
         @Result(column = "description", property = "description"),
+        @Result(column = "workflow", property = "workflowJson"),
         @Result(column = "yolo_enabled", property = "yoloEnabled"),
-        @Result(column = "max_review_rejections", property = "maxReviewRejections"),
         @Result(column = "next_issue_number", property = "nextIssueNumber"),
         @Result(column = "version", property = "version"),
         @Result(column = "archived_at", property = "archivedAt"),
@@ -70,13 +71,13 @@ public interface ProjectMapper extends BaseMapper {
       update project
       set title = #{project.title},
           description = #{project.description},
+          workflow = #{project.workflowJson}::jsonb,
           yolo_enabled = #{project.yoloEnabled},
-          max_review_rejections = #{project.maxReviewRejections},
           updated_at = clock_timestamp(),
           version = version + 1
       where id = #{project.id} and version = #{expectedVersion}
       """)
-  int updateById(
+  int updateConfiguration(
       @Param("project") ProjectDO project, @Param("expectedVersion") long expectedVersion);
 
   @Update(
@@ -102,18 +103,15 @@ public interface ProjectMapper extends BaseMapper {
       """)
   Long allocateNextIssueNumber(@Param("projectId") UUID projectId);
 
-  @Select("select " + COLUMNS + " from project order by updated_at desc, created_at desc")
+  @Select("select " + COLUMNS + " from project order by updated_at desc, id asc")
   @ResultMap("projectResultMap")
   List<ProjectDO> listAll();
 
   @Select(
-      """
-      select id, title, description, yolo_enabled, max_review_rejections, next_issue_number,
-             version, archived_at, created_at, updated_at
-      from project
-      where (archived_at is not null) = #{archived}
-      order by updated_at desc, created_at desc
-      """)
+      "select "
+          + COLUMNS
+          + " from project where (archived_at is not null) = #{archived}"
+          + " order by updated_at desc, id asc")
   @ResultMap("projectResultMap")
   List<ProjectDO> listByArchived(@Param("archived") boolean archived);
 
