@@ -114,7 +114,6 @@ public record SystemSettings(
       int subagentMaxDepth,
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
-      long subagentIdleTimeoutMillis,
       int subagentMaxTurns) {
 
     public static final AiRuntime DEFAULT =
@@ -128,7 +127,6 @@ public record SystemSettings(
             2,
             10,
             0,
-            0L,
             50);
 
     public AiRuntime {
@@ -150,8 +148,6 @@ public record SystemSettings(
           subagentMaxConcurrency, 1, "aiRuntime.subagentMaxConcurrency");
       SystemSettingsValidation.requireAtLeast(
           subagentMaxTotalConcurrency, 0, "aiRuntime.subagentMaxTotalConcurrency");
-      SystemSettingsValidation.requireNonNegativeMillis(
-          subagentIdleTimeoutMillis, "aiRuntime.subagentIdleTimeoutMillis");
       SystemSettingsValidation.requireAtLeast(subagentMaxTurns, 1, "aiRuntime.subagentMaxTurns");
     }
   }

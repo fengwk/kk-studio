@@ -2920,7 +2920,7 @@ class DatabaseTurnResolverTest {
       when(roleContextProjector.project(any())).thenReturn(Optional.empty());
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
-      SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
+      SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, 50);
 
       HarnessCatalog catalog;
       if (providedCatalog != null) {

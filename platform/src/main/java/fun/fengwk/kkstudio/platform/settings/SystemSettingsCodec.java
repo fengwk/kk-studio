@@ -216,7 +216,6 @@ public class SystemSettingsCodec {
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
         requiredInt(dto.getSubagentMaxConcurrency(), "aiRuntime.subagentMaxConcurrency"),
         requiredInt(dto.getSubagentMaxTotalConcurrency(), "aiRuntime.subagentMaxTotalConcurrency"),
-        requiredMillis(dto.getSubagentIdleTimeoutMillis(), "aiRuntime.subagentIdleTimeoutMillis"),
         requiredInt(dto.getSubagentMaxTurns(), "aiRuntime.subagentMaxTurns"));
   }
 
@@ -440,7 +439,6 @@ public class SystemSettingsCodec {
     dto.setSubagentMaxDepth(aiRuntime.subagentMaxDepth());
     dto.setSubagentMaxConcurrency(aiRuntime.subagentMaxConcurrency());
     dto.setSubagentMaxTotalConcurrency(aiRuntime.subagentMaxTotalConcurrency());
-    dto.setSubagentIdleTimeoutMillis(aiRuntime.subagentIdleTimeoutMillis());
     dto.setSubagentMaxTurns(aiRuntime.subagentMaxTurns());
     return dto;
   }
