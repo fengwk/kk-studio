@@ -130,8 +130,9 @@ public class IssueRunServiceImpl implements IssueRunService {
     if (issue.isArchived()) {
       throw new AiValidationException("issue", "Cannot accept a run for an archived issue");
     }
-    if (issue.isPaused()) {
-      throw new AiValidationException("issue", "Cannot accept a run while the issue is paused");
+    if (issue.isGateClosed()) {
+      throw new AiValidationException(
+          "issue", "Cannot accept a run while the issue gate is closed");
     }
     ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
     ProjectStateCode stateCode = ProjectStateCode.of(issue.getState());
@@ -318,9 +319,9 @@ public class IssueRunServiceImpl implements IssueRunService {
       throw new AiValidationException("issue_run", "Only a WAITING run can be resumed");
     }
     requireVersion(run, expectedVersion);
-    if (locked.issue().isPaused()) {
+    if (locked.issue().isGateClosed()) {
       throw new AiValidationException(
-          "issue_run", "Cannot resume a run while the issue pause gate is closed");
+          "issue_run", "Cannot resume a run while the issue gate is closed");
     }
     if (run.getRemainingExecutionMs() <= 0) {
       throw new AiValidationException(

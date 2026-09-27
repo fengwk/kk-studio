@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.project;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -19,8 +20,22 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.platform.project.controller.IssueReconcileOutcome;
@@ -33,13 +48,16 @@ import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * {@link IssueReconciler} 状态机调谐器的真实 PostgreSQL（Testcontainers）集成测试。
@@ -55,8 +73,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   @Autowired private IssueTransitionService issueTransitionService;
   @Autowired private HarnessRuntime harnessRuntime;
 
+  private final Map<UUID, EntryPayload> customPayloads = new ConcurrentHashMap<>();
+
   @BeforeEach
   void setUpHarnessSnapshot() {
+    customPayloads.clear();
     when(harnessRuntime.getThreadSnapshot(any(UUID.class)))
         .thenAnswer(invocation -> createSnapshot(invocation.getArgument(0)));
   }
@@ -88,7 +109,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     for (UUID entryId : ids) {
       Entry entry = mock(Entry.class);
       when(entry.id()).thenReturn(entryId);
-      when(entry.payload()).thenReturn(new CustomEntryPayload("test", "test", 1, "{}"));
+      EntryPayload payload =
+          customPayloads.getOrDefault(entryId, new CustomEntryPayload("test", "test", 1, "{}"));
+      when(entry.payload()).thenReturn(payload);
       entries.add(entry);
     }
     EntryPath path = mock(EntryPath.class);
@@ -115,6 +138,41 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         claimed.getLeaseToken(),
         claimed.getLeaseUntil(),
         claimed.getWakeVersion());
+  }
+
+  private void insertStorageBlob(UUID blobId) {
+    String sha256 =
+        UUID.randomUUID().toString().replace("-", "")
+            + UUID.randomUUID().toString().replace("-", "");
+    jdbc.update(
+        "insert into storage_blob (id, sha256, size_bytes, media_type, ref_count, state) "
+            + "values (?, ?, 1024, 'application/pdf', 1, 'ACTIVE')",
+        blobId,
+        sha256);
+  }
+
+  private MessagePayload assistantMessage(AgentMessageContent... contents) {
+    ModelUsage usage = new ModelUsage(0, 0, 0, 0, 0, 0, 0);
+    ModelCost cost =
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO);
+    AssistantMessageMetadata metadata =
+        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, cost);
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(contents)), metadata, null);
+  }
+
+  private ToolInvocation mockTool(ToolInvocationStatus status) {
+    ToolInvocation tool = mock(ToolInvocation.class);
+    when(tool.status()).thenReturn(status);
+    return tool;
   }
 
   /** 测试意图：Claim 记录与调谐输入参数非空校验严格。 */
@@ -338,7 +396,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
 
-  /** 测试意图：活动执行时长耗尽的 Run 会在单事务内失败收尾，并将 Issue 置为 ERROR 暂停门禁，保留 mailbox 等待恢复。 */
+  /** 测试意图：活动执行时长耗尽且处于静止状态的 Run 会在单事务内失败收尾，并将 Issue 置为 ERROR 暂停门禁，保留 mailbox 等待恢复。 */
   @Test
   void activeRunBudgetExhaustedFailsRunAndPausesIssueWithErrorGate() {
     String agent = createAgent();
@@ -737,14 +795,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     ThreadSnapshot base = createSnapshot(run.getThreadId());
+    ModelInvocation model = mock(ModelInvocation.class);
+    when(model.status()).thenReturn(ModelInvocationStatus.RUNNING);
     ThreadSnapshot processing =
-        new ThreadSnapshot(
-            base.thread(),
-            base.entryPath(),
-            List.of(),
-            mock(ModelInvocation.class),
-            List.of(),
-            List.of());
+        new ThreadSnapshot(base.thread(), base.entryPath(), List.of(), model, List.of(), List.of());
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(processing);
 
     IssueWorkClaim claim = claimWork(issue.getId());
@@ -825,5 +879,449 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         new IssueWorkClaim(UUID.randomUUID(), key("token"), Instant.now().plusSeconds(30), 1L);
     IssueReconcileOutcome outcome = reconciler.reconcile(nonExistentClaim);
     assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
+  }
+
+  // ========================== 缺陷 1-8 针对性语义测试 ==========================
+
+  /**
+   * 缺陷 1 测试意图：区分真正在途执行与静止等待。当存在 WAITING_INPUT 或 WAITING_APPROVAL 的工具调用时， 属于安全静止点，Run 必须转入 WAITING
+   * 状态并停止扣减活动执行时长；后续再次调谐时仍维持 WAITING_FOR_GATE 且不扣时长； 当工具回答完成后门禁打开，Run 恢复为 RUNNING。
+   */
+  @Test
+  void motionlessWaitToolTransitionsRunToWaitingAndStopsActiveTime() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("静止工具等待测试", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    // 模拟工具处于 WAITING_INPUT 状态（问卷安全等待）
+    ThreadSnapshot base = createSnapshot(run.getThreadId());
+    ThreadSnapshot waitingSnapshot =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(),
+            null,
+            List.of(mockTool(ToolInvocationStatus.WAITING_INPUT)),
+            List.of());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(waitingSnapshot);
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
+    IssueRun waitingRun = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.WAITING, waitingRun.getStatus());
+    assertNull(waitingRun.getActiveSince());
+    long remainingBudget = waitingRun.getRemainingExecutionMs();
+
+    // 再次调谐：工具仍处于等待，Run 维持 WAITING，剩余执行时长不变
+    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
+    assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, secondOutcome);
+    assertEquals(remainingBudget, issueRunService.getRun(run.getId()).getRemainingExecutionMs());
+
+    // 工具回答完成，进入普通静止点
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(base);
+    IssueWorkClaim resumeClaim = claimWork(issue.getId());
+    IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
+    assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
+    IssueRun resumedRun = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.RUNNING, resumedRun.getStatus());
+    assertNotNull(resumedRun.getActiveSince());
+    assertEquals(run.getId(), resumedRun.getId());
+  }
+
+  /**
+   * 缺陷 1 测试意图：当阶段最大额度为 1 时，Run 接受后阶段已无新建额度；当该 Run 进入 WAITING 后， 门禁解除时恢复的是同一 Run（不新建 Run，不重新扣阶段额度）。
+   */
+  @Test
+  void waitingRunResumesSameRunWhenLastAuthorizedBudget() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("最后额度等待恢复测试", agent, agent, 1);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    assertEquals(1L, run.getOrdinal());
+
+    // 置为 WAITING
+    issueRunService.waitRun(run.getId(), run.getVersion());
+
+    // 调谐：此时 stage budget used == 1 (maxRuns == 1)，但 WAITING 的 Run 必须成功 resume 同一 Run
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    assertEquals(IssueReconcileOutcome.RUN_RESUMED, outcome);
+    IssueRun resumed = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.RUNNING, resumed.getStatus());
+    assertEquals(run.getId(), resumed.getId());
+    assertEquals(
+        1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+  }
+
+  /**
+   * 缺陷 2 测试意图：活动时长耗尽时，如果外部执行仍在途（例如模型调用中），绝不能立即 failRun 杀死可能存在副作用的在途执行； 必须先关闭派发门禁（pause ERROR）并返回
+   * DEFERRED_PROCESSING；只有当执行完全静止后才可安全 failRun。
+   */
+  @Test
+  void budgetExhaustedWithInFlightExecutionPausesIssueAndDefersWithoutFailingRun() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("在途时长耗尽安全停机", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    // 将时长设置为已耗尽
+    jdbc.update(
+        "update project_issue_run set remaining_execution_ms = 100, active_since ="
+            + " current_timestamp - interval '10 seconds' where id = ?",
+        run.getId());
+
+    // 模拟在途模型调用
+    ThreadSnapshot base = createSnapshot(run.getThreadId());
+    ModelInvocation activeModel = mock(ModelInvocation.class);
+    when(activeModel.status()).thenReturn(ModelInvocationStatus.RUNNING);
+    ThreadSnapshot inFlightSnapshot =
+        new ThreadSnapshot(
+            base.thread(), base.entryPath(), List.of(), activeModel, List.of(), List.of());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlightSnapshot);
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    // 1. 在途时不直接失败，而是先关闭 Issue 门禁并返回 DEFERRED_PROCESSING
+    assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
+    Issue pausedIssue = issueService.getIssue(issue.getId());
+    assertEquals("ERROR", pausedIssue.getPauseReason());
+    assertEquals("Run active execution budget is exhausted", pausedIssue.getPauseDetail());
+    // Run 依然保留为 RUNNING，没有被替换或提前终结
+    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+
+    // 2. 模型执行收敛至完全静止
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(base);
+    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
+
+    // 静止后安全收尾为 RUN_BUDGET_EXHAUSTED
+    assertEquals(IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED, secondOutcome);
+    assertEquals(IssueRunStatus.FAILED, issueRunService.getRun(run.getId()).getStatus());
+  }
+
+  /**
+   * 缺陷 3 测试意图：BLOCKED 状态等同于门禁关闭。处于 WAITING 状态的 Run 在 Issue BLOCKED 期间不得自动恢复； 只有通过 recoverIssue
+   * 显式解除业务阻塞后才允许 resumeRun。
+   */
+  @Test
+  void blockedIssueClosesGateAndBlocksWaitingRunResume() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("BLOCKED门禁测试", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    issueRunService.waitRun(run.getId(), run.getVersion());
+
+    issue = issueService.getIssue(issue.getId());
+    issueService.blockIssue(issue.getId(), issue.getVersion(), key("block"), "等待外部依赖");
+    assertTrue(issueService.getIssue(issue.getId()).isBlocked());
+    assertTrue(issueService.getIssue(issue.getId()).isGateClosed());
+
+    // 处于 BLOCKED 时调谐，必须维持 WAITING_FOR_GATE，禁止 resume
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+    assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
+    assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
+
+    // 显式恢复业务阻塞
+    issue = issueService.getIssue(issue.getId());
+    issueService.recoverIssue(issue.getId(), issue.getVersion(), key("recover"));
+    assertFalse(issueService.getIssue(issue.getId()).isGateClosed());
+
+    // 恢复后调谐：Run 恢复为 RUNNING
+    IssueWorkClaim resumeClaim = claimWork(issue.getId());
+    IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
+    assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
+    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+  }
+
+  /** 测试意图：处于 BLOCKED 状态且无活动 Run 的 Issue，reconcileIdle 判定为 CONVERGED_UNDISPATCHABLE 并收敛。 */
+  @Test
+  void blockedIssueInIdleConvergesUndispatchable() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("空闲BLOCKED调谐", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issue = issueService.getIssue(issue.getId());
+    issueService.blockIssue(issue.getId(), issue.getVersion(), key("b"), "业务阻断");
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+    assertEquals(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE, outcome);
+    assertEquals(
+        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+  }
+
+  /**
+   * 缺陷 4 测试意图：即使在 250 条普通评论之后到达的定向 INSTRUCTION，也不会被分页窗口遗漏； 并且交接（next_state）绝不会在 INSTRUCTION
+   * 投递前提前提交，必须先投递全部指示后再交接。
+   */
+  @Test
+  void instructionDeliveredBeforeHandoffAcrossLargeCommentWindow() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("大窗口指示优先交接", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    // 插入 220 条普通评论（超过单页 200 限制）
+    issue = issueService.getIssue(issue.getId());
+    for (int i = 1; i <= 220; i++) {
+      issue =
+          issueService.appendComment(issue.getId(), issue.getVersion(), key("c" + i), "评论 " + i);
+    }
+    // 随后追加一条 INSTRUCTION
+    issue =
+        issueService.appendInstruction(
+            issue.getId(), issue.getVersion(), key("inst"), "第221条是指示，必须先处理");
+    Long instSeq =
+        jdbc.queryForObject(
+            "select sequence from project_issue_activity where issue_id = ? and kind ="
+                + " 'INSTRUCTION'",
+            Long.class,
+            issue.getId());
+
+    // 模拟 Agent 发起交接请求
+    issueTransitionService.accept(run.getThreadId(), "REVIEW");
+    run = issueRunService.getRun(run.getId());
+    assertEquals("REVIEW", run.getNextState());
+
+    // 调谐：必须优先投递指示，绝不能直接交接收尾！
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    assertEquals(IssueReconcileOutcome.INSTRUCTION_DELIVERED, outcome);
+    assertEquals(
+        instSeq,
+        jdbc.queryForObject(
+            "select observed_activity_sequence from project_issue_run where id = ?",
+            Long.class,
+            run.getId()));
+    // Issue 状态依然为 DESIGN，交接尚未提交
+    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+
+    // 指示投递后，模拟生成产出并完全静止
+    UUID newHead = appendHistoryEntry(run.getThreadId());
+    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
+
+    // 此时才安全交接
+    assertEquals(IssueReconcileOutcome.RUN_HANDED_OFF, secondOutcome);
+    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals(IssueRunStatus.COMPLETED, issueRunService.getRun(run.getId()).getStatus());
+  }
+
+  /**
+   * 缺陷 5 测试意图：Run 收尾时自动计算并冻结 final_answer_entry_id，并将其中的 ResourceMessageContent 作为 Issue 证据发布（使用
+   * IssueEvidenceService）。
+   */
+  @Test
+  void closeoutFreezesFinalAnswerAndPublishesReportEvidence() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("收尾报告与证据发布", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    UUID blobId = UUID.randomUUID();
+    insertStorageBlob(blobId);
+
+    UUID assistantEntryId = appendHistoryEntry(run.getThreadId());
+    customPayloads.put(
+        assistantEntryId,
+        assistantMessage(
+            new TextMessageContent("设计方案终稿"),
+            ResourceMessageContent.media(blobId, "architecture-design.pdf")));
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
+    IssueRun completed = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
+    assertEquals(assistantEntryId, completed.getFinalAnswerEntryId());
+    assertEquals(assistantEntryId, completed.getEndEntryId());
+
+    // 验证证据已发布到 project_issue_evidence 表
+    assertEquals(
+        1L,
+        count(
+            "select count(*) from project_issue_evidence where issue_id = ? and blob_id = ? and"
+                + " name = 'architecture-design.pdf' and actor_agent_name = ? and run_id = ?",
+            issue.getId(),
+            blobId,
+            agent,
+            run.getId()));
+  }
+
+  /**
+   * 缺陷 6 测试意图：迟到（stale）的旧 Run 在处于在途执行时不得强制收尾，必须挂起等待（DEFERRED_PROCESSING）； 静止后安全收尾为
+   * COMPLETED，且其原本携带的 next_state 绝对不得推进当前 Issue 的阶段。
+   */
+  @Test
+  void staleInFlightRunDefersAndDoesNotAdvanceIssueStage() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("迟到在途Run安全停机", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    // 将 Issue 强制推进到 REVIEW 阶段，并将 Run 的 next_state 设为 DONE
+    jdbc.update(
+        "update project_issue set state = 'REVIEW', version = version + 1 where id = ?",
+        issue.getId());
+    jdbc.update(
+        "update project_issue_run set next_state = 'DONE', version = version + 1 where id = ?",
+        run.getId());
+
+    // 模拟迟到 Run 正在执行工具调用
+    ThreadSnapshot base = createSnapshot(run.getThreadId());
+    ThreadSnapshot inFlight =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(),
+            null,
+            List.of(mockTool(ToolInvocationStatus.RUNNING)),
+            List.of());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlight);
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    // 1. 在途时不收尾，返回 DEFERRED_PROCESSING
+    assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
+    assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
+    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+
+    // 2. 执行静止且有进展
+    UUID newHead = appendHistoryEntry(run.getThreadId());
+    when(harnessRuntime.getThreadSnapshot(run.getThreadId()))
+        .thenAnswer(inv -> createSnapshot(run.getThreadId()));
+    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
+
+    // 3. 静止后安全收尾，next_state 被丢弃，Issue 状态依然保持在 REVIEW（未被推进到 DONE）
+    assertEquals(IssueReconcileOutcome.STALE_RUN_CLOSED, secondOutcome);
+    IssueRun closedRun = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.COMPLETED, closedRun.getStatus());
+    assertNull(closedRun.getNextState());
+    assertEquals(newHead, closedRun.getEndEntryId());
+    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+  }
+
+  /** 缺陷 8 测试意图：归档的项目（project.isArchived()）不会执行任何派发，reconcile 返回 CONVERGED_ARCHIVED。 */
+  @Test
+  void archivedProjectConvergesAndRemovesWorkRow() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("归档项目调谐", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+
+    jdbc.update("update project set archived_at = current_timestamp where id = ?", projectId);
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
+    assertEquals(
+        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+    assertEquals(
+        0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+  }
+
+  /** 缺陷 8 测试意图：当工作流中的工作阶段没有配置 Agent 时，检查 stage.hasAgent() 绝不抛出 NullPointerException。 */
+  @Test
+  void stageWithoutAgentDoesNotThrowNpeWhenActiveRunChecked() {
+    Project project = projectService.createProject("无Agent阶段防NPE", "描述", true);
+    String wf =
+        "{\"states\":["
+            + "{\"state\":\"INIT\",\"name\":\"待开始\",\"next\":[\"MANUAL\"]},"
+            + "{\"state\":\"MANUAL\",\"name\":\"人工阶段\",\"next\":[\"DONE\"]},"
+            + "{\"state\":\"BLOCKED\",\"name\":\"业务阻塞\"},"
+            + "{\"state\":\"DONE\",\"name\":\"完成\"}"
+            + "]}";
+    projectService.updateWorkflow(project.getId(), project.getVersion(), wf);
+    Issue issue = createIssue(project.getId());
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
+
+    // 验证空闲派发安全收敛为 CONVERGED_NO_AGENT
+    IssueWorkClaim claim = claimWork(issue.getId());
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+    assertEquals(IssueReconcileOutcome.CONVERGED_NO_AGENT, outcome);
+  }
+
+  /**
+   * 缺陷 7 测试意图：reconcileIdle 不再使用 catch(RuntimeException) 吞掉异常；真实的系统或数据库异常必须向外传播，以便 dispatcher 重试。
+   */
+  @Test
+  void reconcileIdlePropagatesRealExceptionsInsteadOfSwallowing() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("异常向外传播测试", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+
+    // 删除 agent_definition 模拟数据损坏或环境异常，验证异常向外传播而不是被吞为 CONVERGED_UNDISPATCHABLE
+    jdbc.update("delete from agent_definition where name = ?", agent);
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    assertThrows(RuntimeException.class, () -> reconciler.reconcile(claim));
+  }
+
+  /**
+   * 缺陷 5/7 增强测试意图：当 Run 产出的历史消息中包含不可用/不存在（或未处于 ACTIVE 状态）的 Resource Blob 引用时，
+   * 调谐器通过预校验安全跳过证据发布，绝不调用可能抛出异常的参与事务方法，不导致物理事务被标记为 rollback-only（不会产生 UnexpectedRollbackException）；
+   * Run 确定性收尾为 COMPLETED，无该未发布证据行，mailbox 正常收敛，后续再次调谐不报错。
+   */
+  @Test
+  void closeoutWithUnpublishableResourceCompletesWithoutTransactionPoisoning() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("不可用资源收尾测试", agent, agent, 1);
+    Issue issue = createIssue(projectId);
+    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+
+    // 构造一个未在 storage_blob 中注册（不存在）的虚假 blobId
+    UUID unpublishableBlobId = UUID.randomUUID();
+
+    UUID assistantEntryId = appendHistoryEntry(run.getThreadId());
+    customPayloads.put(
+        assistantEntryId,
+        assistantMessage(
+            new TextMessageContent("包含无效附件的设计报告"),
+            ResourceMessageContent.media(unpublishableBlobId, "missing-file.pdf")));
+
+    IssueWorkClaim claim = claimWork(issue.getId());
+    // 调谐必须正常完成，绝不能因为内部异常或 rollback-only 抛出 UnexpectedRollbackException
+    IssueReconcileOutcome outcome = reconciler.reconcile(claim);
+
+    assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
+    IssueRun completed = issueRunService.getRun(run.getId());
+    assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
+    assertEquals(assistantEntryId, completed.getFinalAnswerEntryId());
+    assertEquals(assistantEntryId, completed.getEndEntryId());
+
+    // 验证未向 project_issue_evidence 插入无效 Blob 的证据记录
+    assertEquals(
+        0L,
+        count(
+            "select count(*) from project_issue_evidence where issue_id = ? and blob_id = ?",
+            issue.getId(),
+            unpublishableBlobId));
+
+    // 再次调谐已收敛的 Issue，确保状态机和 mailbox 完全健康可重复调用
+    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
+    assertEquals(IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED, secondOutcome);
   }
 }
