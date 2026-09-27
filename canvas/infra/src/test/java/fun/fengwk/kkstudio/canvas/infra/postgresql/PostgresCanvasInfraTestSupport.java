@@ -35,8 +35,8 @@ import java.util.UUID;
  * Canvas Infra 真实 PostgreSQL 测试基座。
  *
  * <p>沿用仓库既有模式：进程级 {@code postgres:17-alpine} Testcontainer、权威 schema 模块中的 Flyway baseline，以及每个测试前
- * drop/recreate public schema。baseline 之后由 {@link CanvasTargetSchemaFixture} 重建 canvas
- * 目标表，使适配器始终面对目标模型。 Docker 不可用时测试直接失败，不以 mock 或跳过掩盖适配器问题。
+ * drop/recreate public schema。只执行生产使用的唯一 Flyway baseline，不额外覆盖表定义。 Docker 不可用时测试直接失败，不以 mock
+ * 或跳过掩盖适配器问题。
  */
 @SpringBootTest(classes = CanvasInfraTestApplication.class)
 public abstract class PostgresCanvasInfraTestSupport {
@@ -150,7 +150,6 @@ public abstract class PostgresCanvasInfraTestSupport {
         .validateMigrationNaming(true)
         .load()
         .migrate();
-    CanvasTargetSchemaFixture.apply(connection);
   }
 
   /** 节点夹具：保持节点行、资源行与领域投影一致，便于测试直接表达目标模型。 */
