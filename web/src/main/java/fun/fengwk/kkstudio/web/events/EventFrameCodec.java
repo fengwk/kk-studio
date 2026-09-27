@@ -108,8 +108,11 @@ final class EventFrameCodec {
   }
 
   /**
-   * 编码 {@code event} 帧：统一 {@code {version,type,resource,name,data}}；version 事件额外携带 canonical {@code
+   * 编码 {@code event} 帧：统一 {@code {version,type,resource,name,data}}；前进事件额外携带 canonical {@code
    * cursor}（本次前进到的值），realtime 事件的 {@code data} 为 realtime codec JSON 对象。
+   *
+   * <p>前进事件的 {@code name} 与 {@code data} 字段名跟随资源坐标系：Thread 是 {@code version}，Canvas 是 {@code
+   * revision}（与 {@code canvas_document.revision} 同名，不保留 version 别名）。
    */
   String event(ResourceKey resource, Signal signal) {
     Objects.requireNonNull(signal, "signal");
@@ -118,12 +121,10 @@ final class EventFrameCodec {
     node.put("type", "event");
     node.set("resource", resourceNode(resource));
     if (signal instanceof Signal.Version version) {
-      if (resource.kind() != ResourceKind.THREAD && resource.kind() != ResourceKind.CANVAS) {
-        throw new IllegalArgumentException("version signal requires a versioned resource");
-      }
-      node.put("name", "version");
+      String coordinate = coordinateName(resource);
+      node.put("name", coordinate);
       node.put("cursor", version.version());
-      node.set("data", dataNode("version", version.version()));
+      node.set("data", dataNode(coordinate, version.version()));
     } else if (signal instanceof Signal.Realtime realtime) {
       if (resource.kind() != ResourceKind.THREAD) {
         throw new IllegalArgumentException("realtime signal requires a thread resource");
@@ -144,6 +145,15 @@ final class EventFrameCodec {
       throw new IllegalArgumentException("unsupported signal: " + signal.getClass().getName());
     }
     return write(node);
+  }
+
+  /** 前进事件在 wire 上的坐标名：Thread 用 {@code version}，Canvas 用 {@code revision}。 */
+  private static String coordinateName(ResourceKey resource) {
+    return switch (resource.kind()) {
+      case THREAD -> "version";
+      case CANVAS -> "revision";
+      default -> throw new IllegalArgumentException("version signal requires a versioned resource");
+    };
   }
 
   /** 编码 {@code resync} 帧。 */

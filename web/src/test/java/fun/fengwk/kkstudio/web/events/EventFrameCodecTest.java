@@ -194,7 +194,7 @@ class EventFrameCodecTest {
     assertEquals(
         "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
             + CANVAS
-            + "\"},\"name\":\"version\",\"cursor\":\"3\",\"data\":{\"version\":\"3\"}}",
+            + "\"},\"name\":\"revision\",\"cursor\":\"3\",\"data\":{\"revision\":\"3\"}}",
         CODEC.event(CANVAS_KEY, new Signal.Version("3")));
 
     RealtimeEvent.ModelDelta delta =

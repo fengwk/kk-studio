@@ -36,7 +36,7 @@ class CanvasVersionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select version from canvas_document where id = ?"))
+    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);
@@ -47,7 +47,7 @@ class CanvasVersionHubTest {
     List<CanvasVersionEventSource.Event> received = new ArrayList<>();
     SourceSubscribed subscribed = hub.subscribe(canvasId, received::add);
 
-    assertEquals(5L, subscribed.cursor(), "ack cursor must be the current canvas version");
+    assertEquals(5L, subscribed.cursor(), "ack cursor must be the current canvas revision");
     verify(statement).setObject(1, canvasId);
     assertTrue(received.isEmpty(), "subscribe must not deliver the current value");
     subscribed.handle().close();
@@ -60,7 +60,7 @@ class CanvasVersionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select version from canvas_document where id = ?"))
+    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);
@@ -90,7 +90,7 @@ class CanvasVersionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select version from canvas_document where id = ?"))
+    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(false);
@@ -110,7 +110,7 @@ class CanvasVersionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select version from canvas_document where id = ?"))
+    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);
@@ -188,7 +188,7 @@ class CanvasVersionHubTest {
     PreparedStatement statement = mock(PreparedStatement.class);
     ResultSet result = mock(ResultSet.class);
     when(dataSource.getConnection()).thenReturn(connection);
-    when(connection.prepareStatement("select version from canvas_document where id = ?"))
+    when(connection.prepareStatement("select revision from canvas_document where id = ?"))
         .thenReturn(statement);
     when(statement.executeQuery()).thenReturn(result);
     when(result.next()).thenReturn(true);

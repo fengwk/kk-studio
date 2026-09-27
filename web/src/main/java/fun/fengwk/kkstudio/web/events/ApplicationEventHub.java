@@ -241,7 +241,7 @@ final class ApplicationEventHub implements AutoCloseable {
     if (event.resync()) {
       fanout(state, new Signal.Resync());
     } else {
-      fanout(state, new Signal.Version(Long.toString(event.version())));
+      fanout(state, new Signal.Version(Long.toString(event.revision())));
     }
   }
 

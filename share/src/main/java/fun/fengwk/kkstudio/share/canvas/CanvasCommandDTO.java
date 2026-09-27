@@ -6,95 +6,98 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import java.util.List;
 
-/** Canvas typed command：创建类命令携带客户端生成的实体 UUID（nodeId/groupId）， 资源上传句柄由共享存储服务生成，命令只引用 uploadIds。 */
+/**
+ * Canvas typed command：与 canvas-core 的 {@code CanvasCommand} 一一对应，每条命令只修改一个语义组。
+ *
+ * <p>前置条件是编辑起点中该语义组的旧值，而不是整图版本：名称用 {@code expectedName}，资源数组用有序 Resource id 列表， Function 用完整 {@code
+ * {name,args}}，布局可选携带 {@code expectedTransform} 以拒绝离线积压的位置重放。批内命令一起校验， 一起提交或一起回滚。命令只引用存储 blob 或既有
+ * Resource，服务端负责生成新 Resource 的 id。
+ */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
 @JsonSubTypes({
-  @JsonSubTypes.Type(value = CanvasCommandDTO.CreateTextNode.class, name = "CREATE_TEXT_NODE"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.UpdateTextNode.class, name = "UPDATE_TEXT_NODE"),
-  @JsonSubTypes.Type(
-      value = CanvasCommandDTO.CreateResourceNode.class,
-      name = "CREATE_RESOURCE_NODE"),
-  @JsonSubTypes.Type(
-      value = CanvasCommandDTO.CreateFunctionNode.class,
-      name = "CREATE_FUNCTION_NODE"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.UpdateFunction.class, name = "UPDATE_FUNCTION"),
+  @JsonSubTypes.Type(value = CanvasCommandDTO.CreateNode.class, name = "CREATE_NODE"),
   @JsonSubTypes.Type(value = CanvasCommandDTO.RenameNode.class, name = "RENAME_NODE"),
-  @JsonSubTypes.Type(
-      value = CanvasCommandDTO.UpdateNodeTransforms.class,
-      name = "UPDATE_NODE_TRANSFORMS"),
+  @JsonSubTypes.Type(value = CanvasCommandDTO.SetNodeResources.class, name = "SET_NODE_RESOURCES"),
+  @JsonSubTypes.Type(value = CanvasCommandDTO.SetNodeFunction.class, name = "SET_NODE_FUNCTION"),
+  @JsonSubTypes.Type(value = CanvasCommandDTO.SetNodeGroup.class, name = "SET_NODE_GROUP"),
   @JsonSubTypes.Type(value = CanvasCommandDTO.DeleteNode.class, name = "DELETE_NODE"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.CreateLink.class, name = "CREATE_LINK"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.DeleteLink.class, name = "DELETE_LINK"),
+  @JsonSubTypes.Type(
+      value = CanvasCommandDTO.UpdateNodeTransform.class,
+      name = "UPDATE_NODE_TRANSFORM"),
   @JsonSubTypes.Type(value = CanvasCommandDTO.CreateGroup.class, name = "CREATE_GROUP"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.MoveGroup.class, name = "MOVE_GROUP"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.Ungroup.class, name = "UNGROUP"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.DeleteGroup.class, name = "DELETE_GROUP"),
-  @JsonSubTypes.Type(value = CanvasCommandDTO.RenameGroup.class, name = "RENAME_GROUP")
+  @JsonSubTypes.Type(value = CanvasCommandDTO.RenameGroup.class, name = "RENAME_GROUP"),
+  @JsonSubTypes.Type(
+      value = CanvasCommandDTO.UpdateGroupTransform.class,
+      name = "UPDATE_GROUP_TRANSFORM"),
+  @JsonSubTypes.Type(value = CanvasCommandDTO.DeleteGroup.class, name = "DELETE_GROUP")
 })
 public sealed interface CanvasCommandDTO
-    permits CanvasCommandDTO.CreateTextNode,
-        CanvasCommandDTO.UpdateTextNode,
-        CanvasCommandDTO.CreateResourceNode,
-        CanvasCommandDTO.CreateFunctionNode,
-        CanvasCommandDTO.UpdateFunction,
+    permits CanvasCommandDTO.CreateNode,
         CanvasCommandDTO.RenameNode,
-        CanvasCommandDTO.UpdateNodeTransforms,
+        CanvasCommandDTO.SetNodeResources,
+        CanvasCommandDTO.SetNodeFunction,
+        CanvasCommandDTO.SetNodeGroup,
         CanvasCommandDTO.DeleteNode,
-        CanvasCommandDTO.CreateLink,
-        CanvasCommandDTO.DeleteLink,
+        CanvasCommandDTO.UpdateNodeTransform,
         CanvasCommandDTO.CreateGroup,
-        CanvasCommandDTO.MoveGroup,
-        CanvasCommandDTO.Ungroup,
-        CanvasCommandDTO.DeleteGroup,
-        CanvasCommandDTO.RenameGroup {
+        CanvasCommandDTO.RenameGroup,
+        CanvasCommandDTO.UpdateGroupTransform,
+        CanvasCommandDTO.DeleteGroup {
 
   @JsonAnySetter
   default void rejectUnknownField(String field, Object value) {
     throw new IllegalArgumentException("unknown field: " + field);
   }
 
-  record CreateTextNode(String nodeId, String name, String markdown, CanvasTransformDTO transform)
+  /** 创建节点：nodeId 由客户端生成，资源数组可为空以便同批再赋予 Function。 */
+  record CreateNode(
+      String nodeId,
+      String name,
+      CanvasTransformDTO transform,
+      List<CanvasResourceInputDTO> resources)
       implements CanvasCommandDTO {}
 
-  record UpdateTextNode(String nodeId, String markdown) implements CanvasCommandDTO {}
+  /** 改名：前置条件是编辑起点的旧名称。 */
+  record RenameNode(String nodeId, String expectedName, String name) implements CanvasCommandDTO {}
 
-  record CreateResourceNode(
-      String nodeId, String name, List<String> uploadIds, CanvasTransformDTO transform)
+  /** 替换资源数组：前置条件是编辑起点的有序 Resource id 列表。 */
+  record SetNodeResources(
+      String nodeId, List<String> expectedResourceIds, List<CanvasResourceInputDTO> resources)
       implements CanvasCommandDTO {}
 
-  record CreateFunctionNode(
-      String nodeId, String name, String modelKey, String configJson, CanvasTransformDTO transform)
+  /** 设置或清除 Function：前置条件是编辑起点的完整 {@code {name,args}}，null 表示编辑起点没有 Function。 */
+  record SetNodeFunction(
+      String nodeId, CanvasFunctionDTO expectedFunction, CanvasFunctionDTO function)
       implements CanvasCommandDTO {}
 
-  record UpdateFunction(String nodeId, String modelKey, String configJson)
+  /** 设置或清除节点分组：前置条件是编辑起点的分组 id，null 表示编辑起点未分组。 */
+  record SetNodeGroup(String nodeId, String expectedGroupId, String groupId)
       implements CanvasCommandDTO {}
 
-  record RenameNode(String nodeId, String name) implements CanvasCommandDTO {}
-
-  record NodeTransformUpdateDTO(String nodeId, CanvasTransformDTO transform) {
-    @JsonAnySetter
-    public void rejectUnknownField(String field, Object value) {
-      throw new IllegalArgumentException("unknown field: " + field);
-    }
-  }
-
-  record UpdateNodeTransforms(List<NodeTransformUpdateDTO> updates) implements CanvasCommandDTO {}
-
-  record DeleteNode(String nodeId) implements CanvasCommandDTO {}
-
-  record CreateLink(String sourceNodeId, String targetNodeId) implements CanvasCommandDTO {}
-
-  record DeleteLink(String sourceNodeId, String targetNodeId) implements CanvasCommandDTO {}
-
-  record CreateGroup(
-      String groupId, String title, CanvasTransformDTO transform, List<String> memberNodeIds)
+  /** 删除节点：前置条件是编辑起点的资源数组与 Function；仍被引用的节点必须先在同一批解除引用。 */
+  record DeleteNode(
+      String nodeId, List<String> expectedResourceIds, CanvasFunctionDTO expectedFunction)
       implements CanvasCommandDTO {}
 
-  record MoveGroup(String groupId, double x, double y) implements CanvasCommandDTO {}
+  /** 更新节点几何：expectedTransform 非空表示重连积压的布局基线，为空表示在线操作。 */
+  record UpdateNodeTransform(
+      String nodeId, CanvasTransformDTO transform, CanvasTransformDTO expectedTransform)
+      implements CanvasCommandDTO {}
 
-  record Ungroup(String groupId, List<String> memberNodeIds) implements CanvasCommandDTO {}
+  /** 创建不嵌套的视觉分组；成员关系由各节点的 {@link SetNodeGroup} 建立。 */
+  record CreateGroup(String groupId, String title, CanvasTransformDTO transform)
+      implements CanvasCommandDTO {}
 
-  record DeleteGroup(String groupId) implements CanvasCommandDTO {}
+  /** 重命名分组：前置条件是编辑起点的旧标题。 */
+  record RenameGroup(String groupId, String expectedTitle, String title)
+      implements CanvasCommandDTO {}
 
-  record RenameGroup(String groupId, String title) implements CanvasCommandDTO {}
+  /** 更新分组几何：expectedTransform 语义与 {@link UpdateNodeTransform} 一致。 */
+  record UpdateGroupTransform(
+      String groupId, CanvasTransformDTO transform, CanvasTransformDTO expectedTransform)
+      implements CanvasCommandDTO {}
+
+  /** 删除分组：前置条件是编辑起点的成员节点集合；成员节点在同批解除分组。 */
+  record DeleteGroup(String groupId, List<String> expectedMemberNodeIds)
+      implements CanvasCommandDTO {}
 }

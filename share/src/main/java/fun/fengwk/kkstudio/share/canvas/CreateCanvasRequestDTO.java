@@ -5,7 +5,8 @@ import lombok.Data;
 
 @Data
 public class CreateCanvasRequestDTO {
-  /** 可选画布标题：trim 后为空白时使用默认标题（未命名画布）。 */
+
+  /** 必填画布标题：trim 后不得为空白，服务端另行拒绝控制字符与超长标题。 */
   private String title;
 
   @JsonAnySetter
