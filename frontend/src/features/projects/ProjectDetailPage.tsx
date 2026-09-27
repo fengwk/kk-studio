@@ -149,10 +149,9 @@ export function ProjectDetailPage({
     if (
       !attempt ||
       attempt.issueId !== issueId ||
-      attempt.expectedVersion !== expectedVersion ||
       attempt.body !== trimmed
     ) {
-      // 内容变更、换了 Issue 或版本流转，启动全新的 attempt
+      // 远端版本推进可能来自已提交但丢响应的请求，不能改变待重试的 payload。
       attempt = {
         issueId,
         expectedVersion,
@@ -162,11 +161,11 @@ export function ProjectDetailPage({
       pendingInstructionRef.current = attempt
     }
 
-    await api.appendIssueActivity(issueId, {
-      expectedVersion,
+    await api.appendIssueActivity(attempt.issueId, {
+      expectedVersion: attempt.expectedVersion,
       requestKey: attempt.requestKey,
       kind: 'INSTRUCTION',
-      body: trimmed,
+      body: attempt.body,
     })
     // 成功后清空挂起的 attempt；若失败抛出异常中断执行，attempt 保留在 ref 中供重试
     pendingInstructionRef.current = null
