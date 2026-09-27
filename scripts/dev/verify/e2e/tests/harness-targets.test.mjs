@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import * as harnessModule from '../lib/harness.mjs'
 import {
   acceptCommandBatch,
   canonicalUuid,
@@ -13,6 +14,27 @@ import {
 import { cid } from '../lib/http.mjs'
 
 const sampleId = () => '00000000-0000-4000-8000-000000000000'
+
+test('harness owner helpers expose only the Chat owner shape', async () => {
+  // Test intent: Canvas 不持有 Harness Session（公共 batch 端点只服务 CHAT），
+  // 因此 canvasOwner 死代码与其 /sessions 查询 helper 必须保持删除状态。
+  const chat = chatOwner(sampleId())
+  assert.deepEqual(chat, { type: 'CHAT', id: sampleId() })
+  assert.equal(Object.hasOwn(harnessModule, 'canvasOwner'), false)
+  assert.equal(Object.hasOwn(harnessModule, 'listCanvasSessions'), false)
+  await assert.rejects(
+    () =>
+      acceptCommandBatch(
+        { call: async () => ({ status: 202, json: { data: {} } }) },
+        {
+          owner: { type: 'CANVAS', id: sampleId() },
+          target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
+          commands: [userMessageCommand('x', sampleId())],
+        },
+      ),
+    /owner\.type must be CHAT/,
+  )
+})
 
 test('newThreadTarget builds the sealed NEW_THREAD wire target with exactly five keys', () => {
   // Test intent: the NEW_THREAD wire shape is sealed — no alias token, no name input.
@@ -89,8 +111,8 @@ test('chatOwner/canonicalUuid keep canonical UUID owner identity', () => {
 })
 
 test('acceptCommandBatch rejects the removed PROJECT owner before any HTTP call', async () => {
-  // Test intent: Project 不再有 Coordinator Session/命令入口，helper 必须在本地就拒绝 PROJECT owner，
-  // 不能把已删除的 owner 判别式重新放行给后端。
+  // Test intent: 后端 owner 判别式只有 CHAT 与 ISSUE_AGENT（Canvas 不持有 Harness Session），
+  // helper 必须在本地就拒绝 PROJECT 等旧判别式，不能把已删除的 owner 放行给后端。
   const calls = []
   const ctx = {
     call: async (...args) => {
@@ -105,7 +127,7 @@ test('acceptCommandBatch rejects the removed PROJECT owner before any HTTP call'
         target: newSessionTarget({ sessionId: sampleId(), threadId: sampleId(), rootSettings: {} }),
         commands: [userMessageCommand('plan', sampleId())],
       }),
-    /owner\.type must be CHAT\|CANVAS/,
+    /owner\.type must be CHAT:/,
   )
   assert.equal(calls.length, 0, 'invalid owner must not reach the HTTP client')
 })

@@ -271,7 +271,25 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
-Project/Issue 的设置、阶段流转与 Activity 分页属于默认 L1 的 `project.issue_lifecycle`；
+免费 L1 覆盖的产品契约面（`requires=-` 即可运行）：
+
+- `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
+  白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
+  幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。
+- `project.issue_stage_budget`：阶段额度只能授权给启用且有 Agent 的工作阶段，首次
+  `budget-reset` 即授权、重放精确、CAS 过期 409、高水位不回退。
+- `canvas.command_revision_contract` / `canvas.command_conflict_contract`：11 种 typed
+  command、`revision` 坐标与 patch 变化集、批量前置条件过期时整批 409 不写入。
+- `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
+  `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
+  物化门禁。
+
+`interaction.pending_input_contract`、`thread.queued_command_batch`、
+`model.attempt_failure_visibility` 依赖 case 内自建的宿主 `127.0.0.1` mock Provider，因此
+属于 `requires=host-mock`：它们不读取真实凭据，但在 distributed 容器拓扑下不可用。
+`canvas.storage_upload_contract` 需要 S3，`canvas.function_fake_runtime` 还需要
+`--with-canvas-function` 打开 fake adapter。
+
 Goal 工具目录与 Branch 设置命令也由 L1 覆盖。真实 Agent 的 Issue 接受、阶段交接与
 Goal 进度链路不能仅靠 API 契约断言，需另行在真实 Runtime 上验收。
 
