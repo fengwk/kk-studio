@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -703,8 +704,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     fixture.store.transaction(
         tx -> {
           EntryPath path = tx.loadEntryPath(turnEnd2);
-          List<ThreadCommand> commands = tx.loadCommandsByThread(childId);
-          int turns = ThreadLifecycleCoordinator.countActualTurns(commands, path, join);
+          int turns = ThreadLifecycleCoordinator.countActualTurns(tx, path, join);
           // 实际应该只有 Turn 1 (INPUT) 和 Turn 2 (CONTINUATION) 计入，COMPACTION 被排除，所以是 2 轮
           assertEquals(2, turns);
           return null;

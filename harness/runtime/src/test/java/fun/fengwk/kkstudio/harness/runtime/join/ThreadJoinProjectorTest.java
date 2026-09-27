@@ -234,8 +234,43 @@ class ThreadJoinProjectorTest {
   }
 
   @Test
-  void appliedTurnStartMissingFromHeadPathProducesCancelledOutcome() {
-    // 测试意图：验证当 appliedTurnStartEntryId 不在 resultHeadEntryId 路径上时判定为执行前取消/历史截断。
+  void unappliedSourceCommandNotCancelledThrowsIllegalStateException() {
+    // 测试意图：验证当已匹配的 Join 所引用的源命令仍未应用 TURN_START 且未被取消时，属于不变量破损，抛出 IllegalStateException。
+    store.transaction(
+        tx -> {
+          seedQueuedCommand(tx, childThreadId, 1L, "unapplied prompt");
+          return null;
+        });
+
+    ThreadJoin join =
+        new ThreadJoin(
+            id(30),
+            VALID_HASH,
+            id(11),
+            childThreadId,
+            1L,
+            0L,
+            "coder",
+            10,
+            0L,
+            1L,
+            rootEntryId,
+            null,
+            T0,
+            T1);
+
+    store.transaction(
+        tx -> {
+          assertThrows(
+              IllegalStateException.class, () -> ThreadJoinProjector.INSTANCE.project(tx, join));
+          return null;
+        });
+  }
+
+  @Test
+  void appliedTurnStartMissingFromHeadPathThrowsIllegalStateException() {
+    // 测试意图：验证当 appliedTurnStartEntryId 不在 resultHeadEntryId 路径上时判定为不变量破损，抛出
+    // IllegalStateException（不伪造 CANCELLED）。
     UUID turnStartOrphan = id(200);
     UUID userOrphan = id(201);
     UUID assistantOrphan = id(202);
@@ -268,7 +303,7 @@ class ThreadJoinProjectorTest {
 
     ThreadJoin join =
         new ThreadJoin(
-            id(30),
+            id(31),
             VALID_HASH,
             id(11),
             childThreadId,
@@ -285,10 +320,8 @@ class ThreadJoinProjectorTest {
 
     store.transaction(
         tx -> {
-          Optional<ThreadJoinReceipt> projected = ThreadJoinProjector.INSTANCE.project(tx, join);
-          assertTrue(projected.isPresent());
-          assertEquals(ThreadJoinOutcome.CANCELLED, projected.get().outcome());
-          assertEquals("Cancelled before execution.", projected.get().error());
+          assertThrows(
+              IllegalStateException.class, () -> ThreadJoinProjector.INSTANCE.project(tx, join));
           return null;
         });
   }
@@ -387,12 +420,104 @@ class ThreadJoinProjectorTest {
   }
 
   @Test
-  void failedTurnProducesErrorOutcomeWithPartialReport() {
-    // 测试意图：验证 FAILED 终态正确分离 error 与 partialResult，且 error 包含失败 reason。
-    UUID turnStart = id(400);
-    UUID user = id(401);
-    UUID assistantError = id(402);
-    UUID turnEnd = id(403);
+  void failedTurnWithAssistantTextAndErrorPayloadSeparatesPartialResultAndError() {
+    // 测试意图：验证 FAILED 终态保留 partial assistant 文本作为 partialResult，且 error 携带 AssistantErrorPayload
+    // 中的错误信息（助手文本不被 AssistantErrorEntry 覆盖）。
+    UUID turnStart1 = id(400);
+    UUID user1 = id(401);
+    UUID assistant1 = id(402);
+    UUID turnEnd1 = id(403);
+    UUID turnStart2 = id(404);
+    UUID assistantError = id(405);
+    UUID turnEnd2 = id(406);
+
+    store.transaction(
+        tx -> {
+          tx.insertEntry(
+              new Entry(
+                  turnStart1,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                  T0));
+          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "run task", T0));
+          tx.insertEntry(
+              new Entry(
+                  assistant1, sessionId, user1, assistantPayload("partial draft solution"), T0));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd1,
+                  sessionId,
+                  assistant1,
+                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
+                  T0));
+          tx.insertEntry(
+              new Entry(
+                  turnStart2,
+                  sessionId,
+                  turnEnd1,
+                  new TurnStartPayload(TurnStartReason.CONTINUATION, SETTINGS, childThreadId),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  assistantError,
+                  sessionId,
+                  turnStart2,
+                  new AssistantErrorPayload(
+                      new AssistantError("TURN_FAILED", "rate limit exceeded"), null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd2,
+                  sessionId,
+                  assistantError,
+                  new TurnEndPayload(
+                      turnStart2, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                  T1));
+
+          seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart1);
+          return null;
+        });
+
+    ThreadJoin join =
+        new ThreadJoin(
+            id(50),
+            VALID_HASH,
+            id(11),
+            childThreadId,
+            1L,
+            0L,
+            "coder",
+            10,
+            0L,
+            1L,
+            turnEnd2,
+            null,
+            T0,
+            T1);
+
+    store.transaction(
+        tx -> {
+          Optional<ThreadJoinReceipt> projected = ThreadJoinProjector.INSTANCE.project(tx, join);
+          assertTrue(projected.isPresent());
+          ThreadJoinReceipt receipt = projected.get();
+
+          assertEquals(ThreadJoinOutcome.ERROR, receipt.outcome());
+          assertEquals("run task", receipt.prompt());
+          assertNull(receipt.report());
+          assertEquals("partial draft solution", receipt.partialResult());
+          assertEquals("rate limit exceeded", receipt.error());
+          return null;
+        });
+  }
+
+  @Test
+  void failedTurnWithErrorPayloadOnlyProducesNullPartialResultAndDurableError() {
+    // 测试意图：验证在无助手文本产出的 FAILED 终态下，partialResult 为 null，error 正确承载 AssistantErrorPayload 中的错误信息。
+    UUID turnStart = id(410);
+    UUID user = id(411);
+    UUID assistantError = id(412);
+    UUID turnEnd = id(413);
 
     store.transaction(
         tx -> {
@@ -426,7 +551,7 @@ class ThreadJoinProjectorTest {
 
     ThreadJoin join =
         new ThreadJoin(
-            id(50),
+            id(51),
             VALID_HASH,
             id(11),
             childThreadId,
@@ -450,8 +575,82 @@ class ThreadJoinProjectorTest {
           assertEquals(ThreadJoinOutcome.ERROR, receipt.outcome());
           assertEquals("run task", receipt.prompt());
           assertNull(receipt.report());
-          assertEquals("rate limit", receipt.partialResult());
-          assertEquals("subagent turn failed: TURN_FAILED", receipt.error());
+          assertNull(receipt.partialResult());
+          assertEquals("rate limit", receipt.error());
+          return null;
+        });
+  }
+
+  @Test
+  void failedTurnWithoutErrorPayloadFallsBackToSynthesizedReason() {
+    // 测试意图：验证在缺少 AssistantErrorPayload 时，FAILED 终态的 error 回退至合成为 subagent turn failed: <reason>。
+    UUID turnStart = id(420);
+    UUID user = id(421);
+    UUID assistant = id(422);
+    UUID turnEnd = id(423);
+
+    store.transaction(
+        tx -> {
+          tx.insertEntry(
+              new Entry(
+                  turnStart,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                  T0));
+          tx.insertEntry(userEntry(user, sessionId, turnStart, "run task", T0));
+          tx.insertEntry(
+              new Entry(
+                  assistant,
+                  sessionId,
+                  user,
+                  assistantPayload("partial progress", GenerationStopReason.LENGTH),
+                  T0));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd,
+                  sessionId,
+                  assistant,
+                  new TurnEndPayload(
+                      turnStart,
+                      TurnEndOutcome.FAILED,
+                      false,
+                      TurnEndReason.OUTPUT_TRUNCATED,
+                      null),
+                  T0));
+
+          seedAppliedCommand(tx, childThreadId, 1L, "run task", turnStart);
+          return null;
+        });
+
+    ThreadJoin join =
+        new ThreadJoin(
+            id(52),
+            VALID_HASH,
+            id(11),
+            childThreadId,
+            1L,
+            0L,
+            "coder",
+            10,
+            0L,
+            1L,
+            turnEnd,
+            null,
+            T0,
+            T1);
+
+    store.transaction(
+        tx -> {
+          Optional<ThreadJoinReceipt> projected = ThreadJoinProjector.INSTANCE.project(tx, join);
+          assertTrue(projected.isPresent());
+          ThreadJoinReceipt receipt = projected.get();
+
+          assertEquals(ThreadJoinOutcome.ERROR, receipt.outcome());
+          assertEquals("run task", receipt.prompt());
+          assertNull(receipt.report());
+          assertEquals("partial progress", receipt.partialResult());
+          assertEquals("subagent turn failed: OUTPUT_TRUNCATED", receipt.error());
           return null;
         });
   }
@@ -525,6 +724,96 @@ class ThreadJoinProjectorTest {
           assertNull(receipt.report());
           assertEquals("halfway done", receipt.partialResult());
           assertEquals("Cancelled by user.", receipt.error());
+          return null;
+        });
+  }
+
+  @Test
+  void stoppedTurnWithErrorPayloadUsesDurableErrorMessage() {
+    // 测试意图：验证带有 AssistantErrorPayload 的 STOPPED 终态优先使用持久化错误信息。
+    UUID turnStart1 = id(510);
+    UUID user1 = id(511);
+    UUID assistant1 = id(512);
+    UUID turnEnd1 = id(513);
+    UUID turnStart2 = id(514);
+    UUID assistantError = id(515);
+    UUID turnEnd2 = id(516);
+
+    store.transaction(
+        tx -> {
+          tx.insertEntry(
+              new Entry(
+                  turnStart1,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, childThreadId),
+                  T0));
+          tx.insertEntry(userEntry(user1, sessionId, turnStart1, "long task", T0));
+          tx.insertEntry(
+              new Entry(assistant1, sessionId, user1, assistantPayload("halfway done"), T0));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd1,
+                  sessionId,
+                  assistant1,
+                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
+                  T0));
+          tx.insertEntry(
+              new Entry(
+                  turnStart2,
+                  sessionId,
+                  turnEnd1,
+                  new TurnStartPayload(TurnStartReason.STOP, SETTINGS, childThreadId),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  assistantError,
+                  sessionId,
+                  turnStart2,
+                  new AssistantErrorPayload(
+                      new AssistantError("CANCELLED", "Stopped by admin."), null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turnEnd2,
+                  sessionId,
+                  assistantError,
+                  new TurnEndPayload(
+                      turnStart2, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, id(888)),
+                  T1));
+
+          seedAppliedCommand(tx, childThreadId, 1L, "long task", turnStart1);
+          return null;
+        });
+
+    ThreadJoin join =
+        new ThreadJoin(
+            id(61),
+            VALID_HASH,
+            id(11),
+            childThreadId,
+            1L,
+            0L,
+            "coder",
+            10,
+            0L,
+            1L,
+            turnEnd2,
+            null,
+            T0,
+            T1);
+
+    store.transaction(
+        tx -> {
+          Optional<ThreadJoinReceipt> projected = ThreadJoinProjector.INSTANCE.project(tx, join);
+          assertTrue(projected.isPresent());
+          ThreadJoinReceipt receipt = projected.get();
+
+          assertEquals(ThreadJoinOutcome.CANCELLED, receipt.outcome());
+          assertEquals("long task", receipt.prompt());
+          assertNull(receipt.report());
+          assertEquals("halfway done", receipt.partialResult());
+          assertEquals("Stopped by admin.", receipt.error());
           return null;
         });
   }
@@ -1113,6 +1402,24 @@ class ThreadJoinProjectorTest {
     tx.updateCommands(List.of(queued.markApplied(turnStartId)));
   }
 
+  private static void seedQueuedCommand(
+      HarnessStore.Transaction tx, UUID threadId, long sequence, String prompt) {
+    tx.lockThread(threadId);
+    ThreadCommand queued =
+        new ThreadCommand(
+            threadId,
+            sequence,
+            new UserMessageCommandPayload(
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(prompt)))),
+            id(sequence * 100),
+            VALID_HASH,
+            null,
+            null,
+            null,
+            T0);
+    tx.insertCommands(List.of(queued));
+  }
+
   private static void seedCancelledCommand(
       HarnessStore.Transaction tx,
       UUID threadId,
@@ -1137,8 +1444,12 @@ class ThreadJoinProjectorTest {
   }
 
   private static AssistantMessageMetadata assistantMetadata() {
+    return assistantMetadata(GenerationStopReason.COMPLETE);
+  }
+
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
     return new AssistantMessageMetadata(
-        GenerationStopReason.COMPLETE,
+        stopReason,
         new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
         new ModelCost(
             "USD",
@@ -1152,9 +1463,13 @@ class ThreadJoinProjectorTest {
   }
 
   private static MessagePayload assistantPayload(String text) {
+    return assistantPayload(text, GenerationStopReason.COMPLETE);
+  }
+
+  private static MessagePayload assistantPayload(String text, GenerationStopReason stopReason) {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
-        assistantMetadata(),
+        assistantMetadata(stopReason),
         null);
   }
 

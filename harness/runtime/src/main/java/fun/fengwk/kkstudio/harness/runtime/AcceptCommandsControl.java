@@ -1,21 +1,17 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
@@ -25,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -109,13 +104,14 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
+          // 只读预读既有 id（未加锁探测）：若本次复用了旧 Thread id，必须把该 Thread 的 Session/Thread 行一并纳入规范
+          // 锁序，否则 replay 阶段会以逆序补锁 child Session（放弃先锁 parent、后补锁低 UUID child 的逆序）。
+          ThreadState probe = tx.findThread(target.threadId()).orElse(null);
+          Set<UUID> prelocked = probe == null ? Set.of() : Set.of(probe.id());
           LockedAncestors lockedAncestors =
               target.parentThreadId() != null
-                  ? lockTreeAndAncestors(tx, target.parentThreadId(), true, null)
-                  : null;
-          if (lockedAncestors == null) {
-            tx.lockTree(target.threadId());
-          }
+                  ? lockTreeAndAncestors(tx, target.parentThreadId(), true, prelocked)
+                  : lockTreeAndAncestors(tx, target.threadId(), false, prelocked);
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
@@ -124,7 +120,7 @@ final class AcceptCommandsControl {
                   target.parentThreadId(),
                   target.yoloEnabled(),
                   commands);
-          ThreadState existing = tx.findThread(target.threadId()).orElse(null);
+          ThreadState existing = lockedAncestors.threads.get(target.threadId());
           if (existing != null) {
             return attachJoin(
                 tx,
@@ -167,17 +163,15 @@ final class AcceptCommandsControl {
                   now);
           tx.insertThread(thread);
 
-          if (lockedAncestors != null) {
-            for (UUID ancestorId : lockedAncestors.chain) {
-              ThreadState ancestor = lockedAncestors.threads.get(ancestorId);
-              if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
-                Instant mutationNow = effectiveMutationTime(now, ancestor);
-                ThreadState updated =
-                    ancestor.changeLifecycleStatus(
-                        ThreadLifecycleStatus.WAITING_CHILDREN, mutationNow);
-                tx.updateThread(updated);
-                lockedAncestors.threads.put(ancestorId, updated);
-              }
+          for (UUID ancestorId : lockedAncestors.chain) {
+            ThreadState ancestor = lockedAncestors.threads.get(ancestorId);
+            if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
+              Instant mutationNow = effectiveMutationTime(now, ancestor);
+              ThreadState updated =
+                  ancestor.changeLifecycleStatus(
+                      ThreadLifecycleStatus.WAITING_CHILDREN, mutationNow);
+              tx.updateThread(updated);
+              lockedAncestors.threads.put(ancestorId, updated);
             }
           }
 
@@ -194,8 +188,9 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
-          tx.lockTree(target.threadId());
-          ThreadState existing = tx.findThread(target.threadId()).orElse(null);
+          // 与 NEW_SESSION 相同：复用既有 Thread id 时先按真实执行树完成规范加锁，避免 replay 阶段逆序补锁。
+          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          ThreadState existing = locked.threads.get(target.threadId());
           if (existing != null) {
             String creationRequestHash =
                 ThreadCreationRequestHash.forNewThread(
@@ -348,34 +343,11 @@ final class AcceptCommandsControl {
 
           if (genuineUserInput && !pending.isEmpty()) {
             for (ThreadJoin pendingJoin : pending) {
-              ThreadJoinReceipt receipt =
-                  ThreadJoinProjector.INSTANCE
-                      .project(tx, pendingJoin)
-                      .orElseThrow(
-                          () ->
-                              new IllegalStateException(
-                                  "cannot project receipt for matched join "
-                                      + pendingJoin.invocationId()));
-              String xml = receipt.renderCompletionXml();
-              CustomMessageCommandPayload payload =
-                  new CustomMessageCommandPayload(AgentMessage.user(xml));
-              String reqHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
-              ThreadCommand deliveryCmd =
-                  new ThreadCommand(
-                      thread.id(),
-                      nextSeq,
-                      payload,
-                      pendingJoin.invocationId(),
-                      reqHash,
-                      null,
-                      null,
-                      null,
-                      parentMutationNow);
-              allInserted.add(deliveryCmd);
-              Instant deliveryMutationNow =
-                  HarnessStoreTime.notBefore(parentMutationNow, pendingJoin.updatedAt());
-              ThreadJoin delivered = pendingJoin.delivered(nextSeq, deliveryMutationNow);
-              deliveries.add(delivered);
+              ThreadJoinCompletion.Delivery delivery =
+                  ThreadJoinCompletion.buildDelivery(
+                      tx, pendingJoin, thread, nextSeq, parentMutationNow);
+              allInserted.add(delivery.command());
+              deliveries.add(delivery.delivered());
               nextSeq++;
             }
           }
@@ -514,7 +486,7 @@ final class AcceptCommandsControl {
           tx.findThread(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
       if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())
-          || stoppedAtHead(tx, parent)) {
+          || ThreadJoinCompletion.isPaused(tx, parent)) {
         throw new IllegalArgumentException("join parent no longer accepts this invocation");
       }
       boolean newActiveChild =
@@ -535,11 +507,6 @@ final class AcceptCommandsControl {
         && tx.countActiveThreadsInTree(root) >= join.maxConcurrentThreads()) {
       throw new IllegalArgumentException("tree join quota exceeded");
     }
-  }
-
-  private static boolean stoppedAtHead(HarnessStore.Transaction tx, ThreadState parent) {
-    return tx.loadEntryPath(parent.headEntryId()).head().payload() instanceof TurnEndPayload end
-        && end.outcome() == TurnEndOutcome.STOPPED;
   }
 
   private static AcceptedCommands attachJoin(

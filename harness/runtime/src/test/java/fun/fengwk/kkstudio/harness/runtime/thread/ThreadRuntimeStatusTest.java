@@ -109,8 +109,71 @@ class ThreadRuntimeStatusTest {
   }
 
   @Test
+  void fromModelStatusMapsNonTerminalStatusesAndRejectsTerminal() {
+    // 测试意图：验证 fromModelStatus 正确映射 READY/DISPATCHING/RUNNING，并对终态和 null fail-closed。
+    assertEquals(
+        ThreadRuntimeStatus.MODEL_READY,
+        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.READY));
+    assertEquals(
+        ThreadRuntimeStatus.MODEL_DISPATCHING,
+        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.DISPATCHING));
+    assertEquals(
+        ThreadRuntimeStatus.MODEL_RUNNING,
+        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.RUNNING));
+    for (ModelInvocationStatus status :
+        List.of(
+            ModelInvocationStatus.SUCCEEDED,
+            ModelInvocationStatus.FAILED,
+            ModelInvocationStatus.CANCELLED,
+            ModelInvocationStatus.UNKNOWN)) {
+      assertThrows(IllegalStateException.class, () -> ThreadRuntimeStatus.fromModelStatus(status));
+    }
+    assertThrows(NullPointerException.class, () -> ThreadRuntimeStatus.fromModelStatus(null));
+  }
+
+  @Test
+  void fromToolSiblingsMapsByPriorityAndRejectsTerminalOrEmpty() {
+    // 测试意图：验证 fromToolSiblings 遵循 WAITING_APPROVAL > RUNNING > DISPATCHING > READY 优先级，且对全终态或空列表
+    // fail-closed。
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
+        ThreadRuntimeStatus.fromToolSiblings(
+            toolInvocations(
+                ToolInvocationStatus.READY,
+                ToolInvocationStatus.DISPATCHING,
+                ToolInvocationStatus.RUNNING,
+                ToolInvocationStatus.WAITING_APPROVAL)));
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_RUNNING,
+        ThreadRuntimeStatus.fromToolSiblings(
+            toolInvocations(
+                ToolInvocationStatus.READY,
+                ToolInvocationStatus.DISPATCHING,
+                ToolInvocationStatus.RUNNING)));
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_DISPATCHING,
+        ThreadRuntimeStatus.fromToolSiblings(
+            toolInvocations(ToolInvocationStatus.READY, ToolInvocationStatus.DISPATCHING)));
+    assertEquals(
+        ThreadRuntimeStatus.TOOL_READY,
+        ThreadRuntimeStatus.fromToolSiblings(toolInvocations(ToolInvocationStatus.READY)));
+    assertThrows(
+        IllegalStateException.class, () -> ThreadRuntimeStatus.fromToolSiblings(List.of()));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            ThreadRuntimeStatus.fromToolSiblings(
+                toolInvocations(
+                    ToolInvocationStatus.SUCCEEDED,
+                    ToolInvocationStatus.FAILED,
+                    ToolInvocationStatus.CANCELLED,
+                    ToolInvocationStatus.UNKNOWN)));
+    assertThrows(NullPointerException.class, () -> ThreadRuntimeStatus.fromToolSiblings(null));
+  }
+
+  @Test
   void onlyIdleIsNotProcessing() {
-    // processing 是 status 的稳定派生，不再由调用方比较 magic string。
+    // processing 是 status 的稳定派生，不再由调用方比较 magic string；除 IDLE 外（含 QUEUED 和 WAITING_CHILDREN）均为 true。
     for (ThreadRuntimeStatus status : ThreadRuntimeStatus.values()) {
       if (status == ThreadRuntimeStatus.IDLE) {
         assertFalse(status.isProcessing());
@@ -118,6 +181,20 @@ class ThreadRuntimeStatusTest {
         assertTrue(status.isProcessing(), status.name());
       }
     }
+    assertFalse(ThreadRuntimeStatus.IDLE.isProcessing());
+    assertTrue(ThreadRuntimeStatus.QUEUED.isProcessing());
+    assertTrue(ThreadRuntimeStatus.WAITING_CHILDREN.isProcessing());
+  }
+
+  private static List<ToolInvocation> toolInvocations(ToolInvocationStatus... statuses) {
+    return Arrays.stream(statuses)
+        .map(
+            status -> {
+              ToolInvocation invocation = mock(ToolInvocation.class);
+              when(invocation.status()).thenReturn(status);
+              return invocation;
+            })
+        .toList();
   }
 
   private static ThreadContext.ContinuationDue continuation() {
@@ -135,15 +212,7 @@ class ThreadRuntimeStatusTest {
   }
 
   private static ThreadContext.ToolActive toolActive(ToolInvocationStatus... statuses) {
-    List<ToolInvocation> siblings =
-        Arrays.stream(statuses)
-            .map(
-                status -> {
-                  ToolInvocation invocation = mock(ToolInvocation.class);
-                  when(invocation.status()).thenReturn(status);
-                  return invocation;
-                })
-            .toList();
+    List<ToolInvocation> siblings = toolInvocations(statuses);
     return new ThreadContext.ToolActive(model(), assistant(), List.of(), siblings);
   }
 

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
@@ -32,5 +33,37 @@ public record ThreadSnapshot(
     toolSiblings = List.copyOf(Objects.requireNonNull(toolSiblings, "toolSiblings"));
     modelAttemptFailures =
         List.copyOf(Objects.requireNonNull(modelAttemptFailures, "modelAttemptFailures"));
+  }
+
+  /**
+   * 派生统一细粒度运行时状态投影。
+   *
+   * <ul>
+   *   <li>lifecycle {@code WAITING_CHILDREN} -&gt; {@link ThreadRuntimeStatus#WAITING_CHILDREN}
+   *   <li>lifecycle {@code IDLE} -&gt; {@link ThreadRuntimeStatus#IDLE}
+   *   <li>lifecycle {@code ACTIVE}：
+   *       <ul>
+   *         <li>非空 {@code toolSiblings} -&gt; {@code TOOL_WAITING_APPROVAL} / {@code TOOL_RUNNING}
+   *             / {@code TOOL_DISPATCHING} / {@code TOOL_READY}
+   *         <li>非空 {@code model} -&gt; {@code MODEL_READY} / {@code MODEL_DISPATCHING} / {@code
+   *             MODEL_RUNNING}
+   *         <li>否则 -&gt; {@link ThreadRuntimeStatus#QUEUED}
+   *       </ul>
+   * </ul>
+   */
+  public ThreadRuntimeStatus runtimeStatus() {
+    return switch (thread.status()) {
+      case WAITING_CHILDREN -> ThreadRuntimeStatus.WAITING_CHILDREN;
+      case IDLE -> ThreadRuntimeStatus.IDLE;
+      case ACTIVE -> {
+        if (!toolSiblings.isEmpty()) {
+          yield ThreadRuntimeStatus.fromToolSiblings(toolSiblings);
+        }
+        if (model != null) {
+          yield ThreadRuntimeStatus.fromModelStatus(model.status());
+        }
+        yield ThreadRuntimeStatus.QUEUED;
+      }
+    };
   }
 }
