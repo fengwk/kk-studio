@@ -216,6 +216,8 @@ Backend 的 cwd 或 HOME。没有 `workdir` 语义的 Platform/MCP 工具不会�
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、摘要装配与提示词 | 规划与评估是纯函数；压缩复用标准 ModelInvocation 与 MODEL 邮箱 |
 | `runtime.entry` | `BranchSettings`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；环境与目录不进入分支历史 |
 | `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验、`SubagentContext` 与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
+| `runtime.input` | `ask_user` 冻结问卷的值契约（`HumanInputQuestionnaire`、`HumanInputAnswers`）、答案规范化与 [HumanInputTool](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/input/HumanInputTool.java) | 纯值对象与校验：不访问 Store、不做 I/O；等待冻结与派发门禁归 `runtime.processor` |
+| `runtime.interaction` | `PendingInteraction` 与 `PendingInteractionPage`：WAITING_INPUT / WAITING_APPROVAL 的只读投影与稳定分页 | 不新增持久化事实，也不持有产品归属；owner 与 Pane 跳转由上层按 Session/Thread 解析 |
 | `runtime.invocation.codec` | Model/Tool 持久化列的严格确定性 JSON 编解码 | 未知、缺失、重复或尾随字段直接拒绝 |
 | `runtime.invocation.model` | `ModelInvocation` 状态机、`ModelRequestSpec`、重试审计与 `ModelRequestMaterializer` | 调度租约归 `runtime.work`；请求使用供应商中立模型 |
 | `runtime.invocation.tool` | `ToolInvocation` 状态机、`ToolBinding`、审批状态与 `ToolEffectBatch` | 不自行执行工具，物理执行委托 `ToolGateway` |

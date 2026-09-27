@@ -114,13 +114,14 @@ result status 对齐。
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
 | Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、命名、运行控制与人工审批；Issue Agent Branch 的公开 YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
+| Interaction | `GET /api/interactions`、`POST /api/interactions/{interactionId}/input` | 问卷等待与审批等待合并的待处理列表（`(createTime, interactionId)` 稳定升序）与唯一人工提交入口；`interactionId` 就是待处理列表给出的 Tool invocation ID，actor 只来自服务端认证上下文 |
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
 | Canvas Function | `/api/canvas-functions`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel`、`/resolve` | 函数目录（name/description/argsSchema/outputs/referencePolicy/available）、start（202）/query/cancel 与 UNKNOWN 人工核查解除（`resolution` + 非空 `verification`） |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
-| Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、YOLO 启动策略与打回阈值配置、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
-| Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities|status|block|recover|dependencies|evidence|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、七态迁移（含人工阻塞与恢复）、Activity 事实流与分页、依赖、人工上传转为公开证据、Run 人工动作与归档；`retry` 对 `UNKNOWN` 的最新 Run 要求 `verification` 人工核对说明 |
+| Project | `/api/projects`、`/{projectId}`、`/{projectId}/workflow|yolo`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、workflow 整体配置与 YOLO 启动策略、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
+| Issue | `POST /api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities`、`/{issueId}/transition|block|recover|pause|resume|stop|resolve-unknown|reopen|budget-reset|archive|unarchive`、`DELETE /{issueId}`、`POST /{issueId}/evidence` | Issue CRUD/CAS、workflow 合法转移与人工阻塞/恢复、控制暂停/继续、阶段额度重置与人工核对解除 `UNKNOWN`、Activity 事实流与分页、人工上传转为公开证据与深删除；`resolve-unknown` 必须携带 `verification` 核对说明 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
 | Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |
 
@@ -128,10 +129,11 @@ result status 对齐。
 返回 `202 Accepted` 只表示 durable acceptance 已提交；Provider/Tool 执行和 Thread
 progression 由 Work dispatcher 异步完成。Canvas
 command 返回带 `baseVersion/version` 的 Patch，实时收敛另走 `/api/events/v1`。
-公开 `command-batches` 仅接纳 Chat/Canvas owner；Issue Agent Session 的用户输入、分叉和停止不能绕过 Issue Activity 与 Run 权限校验。
+公开 `command-batches` 仅接纳 Chat/Canvas owner；Issue Agent 的用户输入、分叉和停止不能绕过 Issue Activity、Run 权限与交互提交入口。
 `POST /api/issues/{issueId}/evidence` 只接收已 READY 的 `uploadId`（浏览器先经 `/api/storage/uploads`
 reserve/PUT/complete），服务端在单个事务内转移引用并返回规范 `kkstudio:/resources/<blobId>`；请求与响应
-都不接受/不暴露客户端声明的文件名、bucket 或对象 key，Issue 详情与 `issue_read` 暴露的是同一份有界证据窗口。
+都不接受/不暴露客户端声明的文件名、bucket 或对象 key；Issue 证据与其它受管资源一样只以规范
+`kkstudio:/resources/<blobId>` 暴露，字节读取仍走 Harness 受管资源入口，不存在客户端自报的对象身份。
 Session/Thread `name` 是独立控制面：`PUT .../name` 只更新命名元数据（可含规范化同名
 no-op），不产生 Command、Entry 或 Work。
 
@@ -434,10 +436,10 @@ HTTP boundary 按目录定位：
 
 | 范围 | 测试目录 | 代表测试 |
 | --- | --- | --- |
-| Controller 与 DTO 解析 | [controller/](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/) | [`StudioHarnessCommandBatchControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchControllerTest.java)、[`StudioMcpRuntimeToolIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioMcpRuntimeToolIntegrationTest.java) |
+| Controller 与 DTO 解析 | [controller/](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/) | [`StudioHarnessCommandBatchControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchControllerTest.java)、[`StudioInteractionControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioInteractionControllerTest.java)、[`StudioMcpRuntimeToolIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/controller/StudioMcpRuntimeToolIntegrationTest.java) |
 | Error advice 与 i18n | [advice/](../../web/src/test/java/fun/fengwk/kkstudio/web/advice/)、[i18n/](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/) | [`StudioProjectErrorAdviceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdviceTest.java)、[`StudioMessageServiceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/i18n/StudioMessageServiceTest.java) |
 | Project snapshot 与 invalidation | [project/](../../web/src/test/java/fun/fengwk/kkstudio/web/project/) | [`ProjectSnapshotAssemblerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectSnapshotAssemblerTest.java)、[`ProjectInvalidationHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/project/ProjectInvalidationHubTest.java) |
-| Harness/Issue 组合与 mapper | [runtime/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/) | [`HarnessRuntimeConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfigurationTest.java)、[`HarnessRuntimeRequestMapperTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapperTest.java)、[`IssueAcceptanceChainRuntimeIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/IssueAcceptanceChainRuntimeIntegrationTest.java) |
+| Harness/Issue 组合与 mapper | [runtime/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/) | [`HarnessRuntimeConfigurationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfigurationTest.java)、[`HarnessRuntimeRequestMapperTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapperTest.java)、[`HarnessRuntimePostgresqlLifecycleIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimePostgresqlLifecycleIntegrationTest.java) |
 | Contributor 装配与 Plugin 管理面 | [runtime/contributor/](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/)、[plugin/](../../web/src/test/java/fun/fengwk/kkstudio/web/plugin/) | [`ContributorCatalogWiringTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/runtime/contributor/ContributorCatalogWiringTest.java)、[`StudioPluginControllerTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/plugin/StudioPluginControllerTest.java) |
 | 通知、Application Event 与 Daemon WebSocket | [events/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/)、[events/postgresql/](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/)、[environment/](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/) | [`PostgresqlNotificationLoopTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/postgresql/PostgresqlNotificationLoopTest.java)、[`ApplicationEventHubTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/events/ApplicationEventHubTest.java)、[`DaemonOutboundSenderTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonOutboundSenderTest.java) |
 | 跨 owner 事务 orchestration | [orchestration/](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/) | [`HarnessCommandAcceptanceOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/HarnessCommandAcceptanceOrchestratorIntegrationTest.java)、[`SessionDeletionOrchestratorIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/orchestration/SessionDeletionOrchestratorIntegrationTest.java) |

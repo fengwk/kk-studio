@@ -271,8 +271,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
-Project/Issue 的设置、七态流转与 Activity 分页属于默认 L1 的 `project.issue_lifecycle`；
-Goal 工具目录与 Branch 设置命令也由 L1 覆盖。真实 Agent 的 Issue 接受、审查打回与
+Project/Issue 的设置、阶段流转与 Activity 分页属于默认 L1 的 `project.issue_lifecycle`；
+Goal 工具目录与 Branch 设置命令也由 L1 覆盖。真实 Agent 的 Issue 接受、阶段交接与
 Goal 进度链路不能仅靠 API 契约断言，需另行在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。

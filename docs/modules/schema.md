@@ -34,13 +34,10 @@ erDiagram
     HARNESS_THREAD ||--o{ HARNESS_THREAD_COMMAND : mailboxes
     HARNESS_THREAD ||--o{ HARNESS_MODEL_INVOCATION : attempts
     HARNESS_MODEL_INVOCATION ||--o{ HARNESS_TOOL_INVOCATION : siblings
-    SESSION_OWNER }o--|| HARNESS_SESSION : binds
-    SESSION_OWNER }o--o| CANVAS_DOCUMENT : canvas_owner
-    SESSION_OWNER }o--o| CHAT : chat_owner
-    SESSION_OWNER }o--o| ISSUE_AGENT_SESSION : issue_agent_session_owner
+    CHAT ||--o{ CHAT_SESSION : owns
+    CHAT_SESSION }o--|| HARNESS_SESSION : binds
     CANVAS_DOCUMENT ||--o{ CANVAS_NODE : contains
     CANVAS_DOCUMENT ||--o{ CANVAS_GROUP : contains
-    CANVAS_NODE ||--o{ CANVAS_LINK : links
     CANVAS_NODE ||--o{ CANVAS_RESOURCE : owns
     CANVAS_NODE ||--o| CANVAS_FUNCTION_RUN : runs
     CANVAS_NODE ||--o{ CANVAS_FUNCTION_RESOURCE_PIN : pins
@@ -49,12 +46,13 @@ erDiagram
     STORAGE_BLOB ||--o{ SESSION_BLOB_REF : retained_by
     STORAGE_BLOB ||--o{ PROJECT_ISSUE_EVIDENCE : published_as
     PROJECT ||--o{ PROJECT_ISSUE : contains
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_DEPENDENCY : blocked_side
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_ACTIVITY : receives
-    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_AGENT_SESSION : binds
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_AGENT_THREAD : binds
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_STAGE_BUDGET : limits
     PROJECT_ISSUE ||--o{ PROJECT_ISSUE_RUN : attempts
+    PROJECT_ISSUE ||--o{ PROJECT_ISSUE_ACTIVITY : receives
     PROJECT_ISSUE ||--o{ PROJECT_ISSUE_EVIDENCE : publishes
     PROJECT_ISSUE ||--o| PROJECT_ISSUE_WORK : schedules
+    PROJECT_ISSUE_AGENT_THREAD }o--|| HARNESS_THREAD : targets
 ```
 
 `storage_upload.completes_to` 表达的是 PENDING → READY 的状态迁移（`blob_id` 由空变非空），不是级联关系：`blob_id` 是 RESTRICT 外键，而 PENDING 时预分配的 `candidate_blob_id` 故意不建外键，因为 blob 行要到 complete 时才创建。同理 `chat.agent_name` 也没有外键，理由写在列注释里。
@@ -63,18 +61,18 @@ erDiagram
 
 | 区域 | durable 事实 |
 | --- | --- |
-| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package`、`comfyui_workflow_api` |
+| Catalog | `agent_provider`、`agent_model`、`agent_definition`、`skill_package` |
 | Plugin | `plugin_credential`（加密凭据、状态与跨节点 refresh lease） |
 | MCP | `mcp_server`、`mcp_tool`（Platform 配置与当前发现结果，按不可变 server name 键控） |
 | Environment | `environment`、`environment_connection` |
-| Chat / Canvas | `chat`、`canvas_document`、`canvas_group`、`canvas_node`、`canvas_link`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
-| Project / Issue | `project`、`project_issue`、`project_issue_dependency`、`project_issue_activity`、`project_issue_agent_session`、`project_issue_run`、`project_issue_work`、`project_issue_evidence` |
+| Chat | `chat`、`chat_session` |
+| Canvas | `canvas_document`、`canvas_group`、`canvas_node`、`canvas_resource`、`canvas_function_run`、`canvas_command_dedup`、`canvas_function_resource_pin` |
+| Project / Issue | `project`、`project_issue`、`project_issue_agent_thread`、`project_issue_stage_budget`、`project_issue_run`、`project_issue_activity`、`project_issue_work`、`project_issue_evidence` |
 | Harness | `harness_session`、`harness_entry`、`harness_thread`、`harness_thread_command`、`harness_model_invocation`、`harness_tool_invocation`、`harness_work` |
-| Session 归属 | 单行排他弧 `session_owner` |
 | Global Storage | `storage_blob`、`storage_upload`、`session_blob_ref` |
 | Settings | 单行 `system_setting(id = 1)` |
 
-`harness_` 前缀只属于 Harness 执行协议的七张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的表集合与这份清单完全相等，多一张少一张都失败）。
+`harness_` 前缀只属于 Harness 执行协议的七张表；`session_blob_ref` 是应用层业务表，刻意不加该前缀（[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 断言 public schema 的 37 张业务表集合与这份清单完全相等，多一张少一张都失败）。
 
 ## 关键表与约束
 
@@ -139,54 +137,58 @@ Plugin opaque payload，不按 provider token 字段建列；管理查询永远�
 
 | 表 | 身份与关键约束 |
 | --- | --- |
-| `canvas_document` | `id` PK；`version >= 0`；标题的规范化由应用负责，DB 侧只要求 `btrim(title) <> ''` |
+| `canvas_document` | `id` PK；`revision >= 0` 单调递增同步位置；标题规范化由应用负责，DB 侧只要求 `btrim(title) <> ''` |
 | `canvas_group` | `id` PK、`(canvas_id, id)` unique；几何 check 要求有限且宽高为正 |
-| `canvas_node` | `id` PK、`(canvas_id, id)` unique；`model_key` 与 `function_config_json` 同存同缺（Function 节点），`function_config_json` 必须是 JSON object |
-| `canvas_link` | PK `(canvas_id, source_node_id, target_node_id)`；`source <> target`；无独立 link id |
-| `canvas_resource` | `id` PK；`owner_node_id` 与 `resource_index` 同存同缺；`blob_id` 与 `text_content` 恰好一个非空；`(canvas_id, owner_node_id, resource_index)` unique；`blob_id` → `storage_blob` RESTRICT |
-| `canvas_function_run` | **PK 是 `node_id`**，所以每个 Function 节点只有一行当前/最后 Run；`(node_id, request_id)` unique；status 五态；`attempt >= 0`；lease token/until 成对；READY 必须有 `available_at` 且无 lease，RUNNING 必须无 `available_at` 且有 lease，终态两者皆空 |
-| `canvas_command_dedup` | PK `(canvas_id, idempotency_key)`；`request_hash` 是 64 位小写 hex |
-| `canvas_function_resource_pin` | PK `(canvas_id, node_id, request_id, role, resource_id)`；`role in ('INPUT','OUTPUT')`；只保护无 owner 资源，不参与 blob refcount |
+| `canvas_node` | `id` PK、`(canvas_id, id)` unique、`(canvas_id, name_key)` unique；`name_key` generated stored 折叠兼容空白与大小写；`group_id` FK 同画布 group；`function` 校验 `{name,args}` 结构 |
+| `canvas_resource` | `id` PK；`owner_node_id` 与 `resource_index` 同存同缺；`blob_id` 与 `text_content` 恰好一个非空（XOR）；`(canvas_id, owner_node_id, resource_index)` unique 槽位；`blob_id` → `storage_blob` RESTRICT |
+| `canvas_function_run` | **PK 是 `node_id`**，每个 Function 节点只有一行当前/最后 Run；`(node_id, request_id)` unique；status 六态（`READY`/`RUNNING`/`SUCCEEDED`/`FAILED`/`CANCELLED`/`UNKNOWN`）；`attempt >= 0`；lease token/until 成对；READY 必须有 `available_at` 且无 lease，RUNNING 必须无 `available_at` 且有 lease，终态两者皆空；FAILED/UNKNOWN 必须有非空 `error` |
+| `canvas_command_dedup` | PK `(canvas_id, idempotency_key)`；`request_hash` 是 64 位小写 hex；`accepted_revision >= 0` 记录首次接受位置 |
+| `canvas_function_resource_pin` | PK `(canvas_id, node_id, request_id, role, resource_id)`；`role in ('INPUT','OUTPUT')`；同画布 Node/Resource FK 与 Run 请求 FK；只保护真实存在资源的生命周期，不参与 blob refcount |
 
-这些约束和 [canvas-core](canvas-core.md) 里领域类型的构造期校验一一对应：领域负责给出清晰错误，数据库负责在并发与旁路写入下兜底。Canvas 的全部 ownership 外键都是 `ON DELETE RESTRICT`，删除顺序由应用显式编排（见 [canvas-infra](canvas-infra.md)），database 不会替应用级联删掉资源或 pin。
+这些约束和 [canvas-core](canvas-core.md) 里领域类型的构造期校验一一对应：领域负责给出清晰错误，数据库负责在并发与旁路写入下兜底。Canvas 的全部 ownership 外键都是 `ON DELETE RESTRICT`，删除顺序由应用显式编排（见 [canvas-infra](canvas-infra.md)），database 不会替应用级联删掉资源或 pin。配置引用限于 `{type: "resource", nodeId, index}`，连线是读取投影，数据库没有 `canvas_link` 表。
 
-### Session 全局唯一归属
+### Session 归属与 Chat 关联
 
-`session_owner` 每行恰好一个非空 owner 列（`ck_session_owner_exactly_one`：`num_nonnulls(chat_id, canvas_id, issue_agent_session_id) = 1`），`session_id` 是 PK，因此一个 Session 全局至多属于一个产品 owner。`project_issue_agent_session` 另有 unique 约束，保证一个 `(issue_id, agent_name)` 至多绑定一个长期 Session；Chat 与 Canvas 可以持有多个 Session。整个约束不需要 guard 表或归属 trigger。
+Chat 通过直接关联表持有多个 Session：`chat_session`（`session_id` PK，`chat_id` FK RESTRICT）。
+`project_issue_agent_thread`（`(issue_id, agent_name)` PK，`thread_id` UK）将 Issue 与 Agent 的稳定工作上下文绑定至单一 Harness Thread。每个 Agent Thread 由应用受控创建独立 Session，不跨 Agent、Issue 或产品共享；绑定行不保存 `session_id` 指针，应用无法随意重绑。全局没有 `session_owner` 弧表。
 
 ### Blob 生命周期
 
 `storage_blob` 是按 `(sha256, size_bytes)` 去重的不可变内容地址，字节在 S3，行只保存媒体事实与 `ref_count`/`state`。`uk_storage_blob_active_hash` 是部分唯一索引（`where state = 'ACTIVE'`），所以同一内容在 DELETING 期间可以重新上传；`ck_storage_blob_state_ref_count` 固定 ACTIVE 必须有正引用、DELETING 必须为零。`storage_upload.blob_id` 为空表示 PENDING（客户端 PUT 到 `uploads/{id}/original`）、非空表示 READY；`session_blob_ref` 让 Session 以显式边持有 blob。所有释放与 `ref_count` 变更都由应用事务完成，不依赖 cascade 或 trigger。
 
-### Issue 公开证据
+### Project、Issue 与 Stage Budget
 
-`project_issue_evidence` 是 Issue 自有的**已发布 Blob 引用**（PK `(issue_id, blob_id)`），与
-`session_blob_ref` 并列而不是替代关系：Issue 引用决定公开面，Session 引用决定读取授权，两者各自
-`retain`/`release` 同一个 `storage_blob`，`ref_count` 因此同时反映两侧持有。`origin` 只有
-`EXECUTOR`（必须带发布该证据的执行 `run_id`，复合 FK `(run_id, issue_id)` 保证 Run 属于同一 Issue）与
-`HUMAN`（`run_id` 必须为空、`name` 必须非空且取自上传行）两种形态，由 shape check 固定；没有 CASCADE，
-Issue/Project 深删除必须按引用逐一释放。发布时按当时已绑定的参与者 Session 幂等补授引用，发布之后
-引导的 Session 在引导事务内补齐，因此「Issue 可见证据永久不可读」不可达。
+| 表 | 身份与关键约束 |
+| --- | --- |
+| `project` | `id` PK；`title` 非空白且无环绕空白；`description` 最多 64 KiB；`workflow` 严格 JSON object 且携带 `states` array；`yolo_enabled`；`next_issue_number >= 1`；`version >= 0` CAS；`archived_at` 可空 |
+| `project_issue` | `id` PK；`project_id` FK；`number >= 1`、`(project_id, number)` unique；`state` 工作阶段；BLOCKED 状态必须成对记录 `blocked_from_state` 与 `block_reason`；控制暂停必须成对记录 `pause_reason`（USER/ERROR/UNKNOWN）与 `pause_detail`；`next_run_ordinal >= 1`；`next_activity_sequence >= 1`；`version >= 0`；`archived_at` 可空 |
+| `project_issue_agent_thread` | PK `(issue_id, agent_name)`；`thread_id` UK；`(issue_id, thread_id)` UK；FK 关联 `project_issue`、`agent_definition`、`harness_thread` |
+| `project_issue_stage_budget` | PK `(issue_id, state)`；`max_runs > 0`；`budget_after_ordinal >= 0`；保留态（INIT/BLOCKED/DONE）不允许建预算行；FK 关联 `project_issue` |
+| `project_issue_run` | `id` PK；`ordinal >= 1`；`(issue_id, ordinal)` unique；`(id, issue_id)` unique；`(issue_id, state)` FK 关联阶段预算；`(issue_id, thread_id)` FK 关联 Agent Thread；`(session_id, thread_id)` FK 关联 Thread；`(session_id, start_entry_id/end_entry_id/final_answer_entry_id)` FK 关联 Entry；status 六态；部分唯一索引 `uk_project_issue_run_active` 保证同 Issue 仅一个主 Run 处于 RUNNING/WAITING；时钟与终态区间约束 |
+| `project_issue_activity` | PK `(issue_id, sequence)`；`(issue_id, idempotency_key)` unique 幂等键；`kind` 六类（COMMENT、RUN、INSTRUCTION、SPEC_CHANGE、STATE_CHANGE、CONTROL）；`actor_type`（HUMAN、AGENT、SYSTEM）；部分唯一索引 `uk_project_activity_run` 保证每 Run 仅一条 RUN 活动 |
+| `project_issue_work` | PK `issue_id`；`wake_version > 0`；`due_at`；`lease_token`/`lease_until` 成对；单行 durable mailbox |
+| `project_issue_evidence` | PK `(issue_id, blob_id)`；`blob_id` FK RESTRICT；`run_id` 复合 FK `(run_id, issue_id)`；`actor_agent_name` FK；`name varchar(512)` not null；`check (run_id is null or actor_agent_name is not null)` |
+
+### Harness 交互与 ToolInvocation
+
+`harness_tool_invocation` 新增 `WAITING_INPUT` 状态及形状约束（`ck_harness_tool_waiting_input`：binding 非空，result 与 error 均为空），与 `WAITING_APPROVAL` 并列表达挂起等待。可空 `input_receipt` jsonb 仅在 SUCCEEDED 且 result 非空时存在，携带 `submissionId`、`actor`、`acceptedAt` 字符串（`ck_harness_tool_input_receipt`）。部分索引 `idx_harness_tool_invocation_pending` 在 `(created_at, id)` 上覆盖 WAITING_APPROVAL 与 WAITING_INPUT，支持统一待处理分页。`harness_thread` 增加 `(session_id, id)` unique 约束，支持同 Session 复合 FK。
 
 ### 应用拥有的版本与提示
 
-- `skill_package` 每个 package 只有一行：不可变 repository URL、用于检查的 branch、人工
-  确认的 `current_commit`、最近观察的 branch HEAD 与从 current commit 派生的
-  `skills` JSON 组成当前发布快照。Skill 正文不进数据库，Package 更新以
-  `expectedVersion` CAS 原子替换 commit 与 JSON；branch 检查只更新观察字段。
+- `skill_package` 每个 package 只有一行：不可变 repository URL、用于检查的 branch、人工确认的 `current_commit`、最近观察的 branch HEAD 与从 current commit 派生的 `skills` JSON 组成当前发布快照。Skill 正文不进数据库，Package 更新以 `expectedVersion` CAS 原子替换 commit 与 JSON；branch 检查只更新观察字段。
 - Harness Entry 的 ROOT 唯一、parent shape 与 `entry_type` 由 check 与部分唯一索引固定；Thread head 必须属于同一 Session；Thread Command 以 `(thread_id, sequence)` 与 `(thread_id, idempotency_key)` 保证顺序与精确回放。
 - `harness_work` 以 `(target_type, target_id)` 唯一表示 THREAD/MODEL/TOOL 调度事实，`wake_version` 为正，lease token 与 until 成对；`target_id` 是多态引用，刻意不建外键，因此 `required_environment_id` 非空时由 check 限定只能出现在 TOOL Work 上。
 - `system_setting` 恒为一行（`ck_system_setting_id` 要求 `id = 1`），`config` 必须是 JSON object，`version` 是非负 CAS 令牌。
-- 七个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`system_settings_changed`（version 文本）、`skill_package_changed`（package name）、`project_issue_work_due`（issue id）、`project_issue_changed`（project id）、`harness_thread_version`（`id:version`）、`canvas_version`（`id:version`）、`canvas_function_work`（空 payload）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。Skill listener 建连或重连后全量回读 Package，弥补通知丢失。
-- V1 全文没有 `IF NOT EXISTS`（文件开头的注释明确说明这一点），任何声明冲突都会让迁移直接失败，而不是留下一个 drift 过的库。业务实体 id 全部由应用生成：仓库里没有 `create sequence`、`serial` 或 generated identity，`PostgresqlSchemaStructureTest` 对此有专门断言。
+- 六个 NOTIFY 通道都只是提交后的回读提示，不是事件日志：`skill_package_changed`（package name）、`canvas_revision`（`id:revision`）、`canvas_function_work`（空 payload）、`system_settings_changed`（version 文本）、`project_issue_work_due`（issue id）、`harness_thread_version`（`id:version`）。触发函数由应用拥有 version，数据库只负责在 version 真正变化或行立刻可调度时发出提示，绝不修改行；`harness_thread_version` 刻意没有子表版本触发器，`canvas_function_work` 只提示「刚写入的行现在可认领」，未来的 READY 与过期租约都靠轮询恢复。Skill listener 建连或重连后全量回读 Package，弥补通知丢失。
+- V1 全文没有 `IF NOT EXISTS`（文件开头的注释明确说明这一点），任何声明冲突都会让迁移直接失败，而不是留下一个 drift 过的库。业务实体 id 全部由应用生成：仓库里没有 `create sequence`、`serial` 或 generated identity，[`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java) 对此有专门断言。
 
 ## Profile seeds
 
 | profile | 资源 | 内容 |
 | --- | --- | --- |
 | dev | [`R__dev_seed.sql`](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql) | 先删除再插入确定性 stub Provider/Model/Agent（`stub` provider、`acceptance-stub` model、`default-assistant` agent），离线开发可直接跑通对话 |
-| e2e | [`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) | 八家 Provider 与真实模型目录（含 pricing/abilities/variants）、四张 Environment Card 与 runtime 行；同时把 `tool.permission` 覆盖为四个 base 分类各 `* -> ask` |
-| canvas-test | [`R__canvas_test_seed.sql`](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) | 只覆盖 Docker Canvas test stack 需要缩短或启用的设置：上传有效期、OpenCLI Hub、GPT Image 2、Seedance |
+| e2e | [`R__e2e_seed.sql`](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) | 八家 Provider 与真实模型目录（含 pricing/abilities/variants）、default-assistant；同时把 `tool.permission` 覆盖为四个 base 分类各 `* -> ask` |
+| canvas-test | [`R__canvas_test_seed.sql`](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) | 只覆盖 Docker Canvas test stack 需要缩短或启用的设置：上传有效期（900s）、OpenCLI Hub、GPT Image 2、Seedance |
 
 三份都是 `R__` repeatable migration，可重复执行：seed 拥有的行按定义同步（`on conflict ... do update` 或先删后插），用户可能改过的行用 `do nothing` 保护。e2e seed **不含**任何真实凭据，密钥在运行时由环境注入；Provider 只有一个 `'stub'` 之类完全公开的占位值。`V1__schema.sql` 自身插入一行安全的 `system_setting` 默认聚合（`tool.permission` 默认只对 `write`/`edit`/`bash` 要求审批，`read` 不受限），[`E2eToolPermissionProfileTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/E2eToolPermissionProfileTest.java) 断言源码内默认值与代码中的 `SystemSettings` 默认完全一致。
 
@@ -207,17 +209,18 @@ Issue/Project 深删除必须按引用逐一释放。发布时按当时已绑定
 
 - 加表/加列/改约束：直接改 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)，保持「按区域分组、cycle-closing 外键后置」的既有顺序；然后按上面的规则重建数据库，再同步 mapper 与领域校验。改完先跑结构测试，它会立刻指出列、约束与表集合的偏差。
 - 加 profile 数据：写进对应的 `R__*.sql`，使用 `on conflict` 或先删后插保证可重跑；不要放真实凭据。
-- 判断约束是否够用：如果一条不变量只写在 Java 里而并发写入可以绕过它，就应该在 SQL 里补 check / unique / FK；反之运行时校验的策略（如 Project DAG 环检测）不要硬塞进数据库。
+- 判断约束是否够用：如果一条不变量只写在 Java 里而并发写入可以绕过它，就应该在 SQL 里补 check / unique / FK；反之运行时校验的策略（如工作流配置合法性）不要硬塞进数据库。
 
 测试入口：
 
-- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 表集合精确相等、Harness 七表限定、列契约、jsonb/timestamptz 用法、无 sequence、NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
-- [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog/Chat/Canvas/Environment 的 check 触发路径、提交后 NOTIFY payload、RESTRICT 删除语义。
+- [`FreshInstallSchemaContractTest.java`](../../schema/src/test/java/fun/fengwk/kkstudio/schema/FreshInstallSchemaContractTest.java)：在隔离 Testcontainer 中真实执行 V1 迁移，断言 37 张业务表、快照一致性、旧对象清除与 135+ 条 SQL 探针。
+- [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)：public schema 37 张业务表集合精确相等、Harness 七表限定、列契约、jsonb/timestamptz 用法、无 sequence、6 个 NOTIFY 触发器清单、FK 全部 NOT DEFERRABLE。
+- [`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java)：Catalog、Canvas、Project/Issue、Chat、Environment 的 check 约束触发路径、提交后 NOTIFY payload 与 RESTRICT 删除语义。
 - [`PostgresqlStorageSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlStorageSchemaTest.java)：blob 与 upload 的非法事实、state/ref_count 不变量、ACTIVE 去重范围、FK 不级联。
 - [`PostgresqlSchemaSeedTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaSeedTest.java)：三份 seed 的幂等性、V1 默认 settings 解码、e2e seed 无凭据。
-- [`ProjectSchemaPostgresTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectSchemaPostgresTest.java) 与 [`ProjectChangeNotificationIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectChangeNotificationIntegrationTest.java)：Project/Issue 约束与提交后/回滚后的通知行为。
+- [`ProjectWorkflowServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/ProjectWorkflowServiceIntegrationTest.java)、[`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueRunAcceptanceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueRunAcceptanceIntegrationTest.java)、[`IssueStageBudgetIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueStageBudgetIntegrationTest.java)、[`IssueWorkStoreIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueWorkStoreIntegrationTest.java)：Project/Issue 工作流、生命周期、Run 接受、阶段预算与 Work 调度。
 - [`FlywayBootstrapArchitectureTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayBootstrapArchitectureTest.java) 与 [`FlywayAutoConfigurationIntegrationTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/FlywayAutoConfigurationIntegrationTest.java)：唯一 V1、受控 seed 清单、各模块依赖 scope，以及在空库里真实执行迁移。
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Canvas Infra](canvas-infra.md)、[Platform](platform.md)、[Web](web.md)、[Harness Infra](harness-infra.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Canvas Infra](canvas-infra.md)、[Platform](platform.md)、[Web](web.md)、[Harness Infra](harness-infra.md)、[Project](project.md)。

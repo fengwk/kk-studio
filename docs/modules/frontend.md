@@ -49,7 +49,7 @@ path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId` 与
 （`PRIMARY_NAV_ITEMS`）声明一次；Escape 只在没有 blocking modal、焦点不在可编辑控件、
 内层 menu 未展开时才关闭导航抽屉。
 
-[createApplicationExtensionHost](../../frontend/src/app/extension-host.ts) 注册五个
+[createApplicationExtensionHost](../../frontend/src/app/extension-host.ts) 注册四个
 内置 extension：
 
 | extension | 页面 | 其他 contribution |
@@ -57,7 +57,6 @@ path 前缀，platform 也不反向依赖 features：合法 `/chats/:chatId` 与
 | `builtin.ai` | `/chats`、`/chats/:chatId`、`/agents`、`/models`、`/providers`、`/skill-packages`、`/environments`、`/mcp-servers` | 创建/编辑/删除 dialog、`task` tool renderer |
 | `builtin.projects` | `/projects`、`/projects/:projectId` | 全局 Project invalidation overlay |
 | `builtin.canvas` | `/canvas`、`/canvas/:canvasId` | lazy 加载 Canvas feature |
-| `builtin.comfyui` | `/comfyui` | workflow editor/delete dialog |
 | `builtin.settings` | `/settings` | lazy 加载 Settings feature |
 
 [ExtensionHost](../../frontend/src/platform/extensions/ExtensionHost.ts) 收敛提供
@@ -94,7 +93,6 @@ contract 按 HTTP 边界分组，全部是严格 wire 类型：
 | [ai-mcp.ts](../../frontend/src/shared/api/contracts/ai-mcp.ts) | MCP Server 安全投影、显式配置与显式 HTTP 创建/更新请求 |
 | [studio.ts](../../frontend/src/shared/api/contracts/studio.ts) | Canvas document、node/resource/group/link、Snapshot、Patch、version event、typed command |
 | [storage.ts](../../frontend/src/shared/api/contracts/storage.ts) | PENDING/READY upload、presigned PUT、render-time presigned URL |
-| [comfyui.ts](../../frontend/src/shared/api/contracts/comfyui.ts) | Workflow、input binding、run、job、cancel |
 | [system-settings.ts](../../frontend/src/shared/api/contracts/system-settings.ts) | schema sections/field types、permission、model selection、apply timing |
 
 service 只做路由映射与严格解码：
@@ -108,7 +106,6 @@ service 只做路由映射与严格解码：
 | [harness-service.ts](../../frontend/src/shared/api/harness-service.ts) | `/harness/command-batches|sessions|threads` |
 | [studio-service.ts](../../frontend/src/shared/api/studio-service.ts) | `/canvases`、Canvas resource 与 Function Run；自带 `canvasRequest`、AbortSignal 与 strict envelope |
 | [storage-service.ts](../../frontend/src/shared/api/storage-service.ts) | upload 生命周期与 blob presigned URL |
-| [comfyui-service.ts](../../frontend/src/shared/api/comfyui-service.ts) | workflow/run 与 `blobId` 文件输入 |
 | [system-settings-service.ts](../../frontend/src/shared/api/system-settings-service.ts) | `/settings` 聚合 GET/PUT 与 schema |
 | [projects-api.ts](../../frontend/src/features/projects/projects-api.ts) | `/projects`、`/issues`；Project 的 DTO 与 codec 就近放在 feature 内 |
 
@@ -401,15 +398,7 @@ Function 参数与 run/cancel，[nodes/](../../frontend/src/features/canvas/node
 Text/Image/Video/Audio Resource node。Agent dock 复用 Bound Thread Pane 语义，不把
 Thread 写进 Canvas graph。
 
-### ComfyUI 与 Settings
-
-[ComfyuiPage](../../frontend/src/features/comfyui/ComfyuiPage.tsx) 通过
-[ComfyuiRuntime](../../frontend/src/features/comfyui/ComfyuiRuntime.tsx) 提供 workflow
-list/edit 与 input binding 校验；run 有 `submit`、`refresh`、`cancel` 三种
-pending operation，poll interval `1500ms`，polling 集合是 `pending`/`in_progress`/
-`running`，terminal 集合覆盖 `succeeded`/`failed`/`cancelled`/`interrupted` 等写法；
-文件输入先走 Storage reserve/直传/complete，再以 `blobId + filename` 提交。workflow
-editor/delete 是 ExtensionHost dialog contribution。
+### Settings
 
 [SettingsPage](../../frontend/src/features/settings/SettingsPage.tsx) 的 General tab
 只保存浏览器偏好（`kkstudio.browser-preferences.v1`），不写入 `/api/settings`；Plugins
@@ -436,7 +425,7 @@ shared UI 传入数据与 callback；[shared/ui/console](../../frontend/src/shar
 
 - [i18n](../../frontend/src/shared/i18n/index.ts) 支持 `zh-CN` 与 `en-US`，locale
   存在 `kk-studio.locale`，默认 `en-US`，`setLocale` 同步 `document.documentElement.lang`；
-  catalog 按 `platform`、`ai`、`canvas`、`comfyui`、`settings`、`shared`、`shortcuts`
+  catalog 按 `platform`、`ai`、`canvas`、`projects`、`settings`、`shared`、`shortcuts`
   分区。
 - [ConflictPresenter](../../frontend/src/shared/conflict/ConflictPresenter.tsx) 统一
   展示 `409` 的 `errors.reason`/`code` 与 detail；controller 成功后 invalidate 目标
@@ -454,7 +443,6 @@ shared UI 传入数据与 callback；[shared/ui/console](../../frontend/src/shar
 | [AI](../../frontend/src/features/ai/) | catalog form/normalizer、Pane target/layout、Composer 与附件上传、command batch、Thread timeline、snapshot/realtime、stop/approval/task |
 | [Projects](../../frontend/src/features/projects/) | list/detail、CAS、Issue Board/actions、BLOCKED 栏、全局 invalidation |
 | [Canvas](../../frontend/src/features/canvas/__tests__/) | page/editor/stage、controller、command queue、entity patch、version events、transform batch、upload、nodes、Function run |
-| [ComfyUI](../../frontend/src/features/comfyui/) | workflow 校验、page/card/panel/editor、run lifecycle、modal |
 | [Settings](../../frontend/src/features/settings/) | schema renderer/validation、draft、permission、browser preference、server CAS |
 | [Shared](../../frontend/src/shared/) | API client/service/codec、application-event protocol/manager、i18n、conflict、shortcuts、blocking overlay、Markdown/media |
 | E2E support | [test-support/](../../frontend/src/test-support/)、[test-setup.ts](../../frontend/src/test-setup.ts) |

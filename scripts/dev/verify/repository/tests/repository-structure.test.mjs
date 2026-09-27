@@ -98,6 +98,7 @@ test('repository structure guard verifies root and harness POM module lists', ()
     'share',
     'schema',
     'canvas',
+    'project',
     'harness',
     'platform',
     'plugins',
@@ -519,6 +520,9 @@ const CORE_STATE_ENUMS = [
       'STOP_REQUEST_ID_REUSED',
       'APPROVAL_NOT_APPLICABLE',
       'APPROVAL_DECISION_MISMATCH',
+      'INPUT_SUBMISSION_NOT_APPLICABLE',
+      'INPUT_SUBMISSION_INVALID',
+      'INPUT_SUBMISSION_MISMATCH',
       'MANUAL_COMPACTION_UNAVAILABLE',
     ],
   },
@@ -533,6 +537,7 @@ const CORE_STATE_ENUMS = [
       'MODEL_RUNNING',
       'APPLYING',
       'TOOL_WAITING_APPROVAL',
+      'TOOL_WAITING_INPUT',
       'TOOL_RUNNING',
       'TOOL_DISPATCHING',
       'TOOL_READY',
@@ -548,6 +553,7 @@ const CORE_STATE_ENUMS = [
     enumName: 'ToolInvocationStatus',
     constants: [
       'WAITING_APPROVAL',
+      'WAITING_INPUT',
       'READY',
       'DISPATCHING',
       'RUNNING',
@@ -687,12 +693,12 @@ const CORE_STATE_ENUMS = [
   {
     path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunStatus.java',
     enumName: 'CanvasFunctionRunStatus',
-    constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'],
+    constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
   },
   {
     path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflictException.java',
     enumName: 'Reason',
-    constants: ['VERSION_CONFLICT', 'IDEMPOTENCY_CONFLICT'],
+    constants: ['CANVAS_NOT_FOUND', 'IDEMPOTENCY_CONFLICT'],
   },
   {
     path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunException.java',
@@ -715,7 +721,7 @@ const CORE_STATE_ENUMS = [
     constants: ['PENDING', 'READY'],
   },
   {
-    path: 'platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/h3/H3ComfyHistory.java',
+    path: 'plugins/canvas-comfyui/src/main/java/fun/fengwk/kkstudio/plugin/canvascomfyui/H3ComfyHistory.java',
     enumName: 'Status',
     constants: ['PENDING', 'SUCCESS', 'ERROR'],
   },
