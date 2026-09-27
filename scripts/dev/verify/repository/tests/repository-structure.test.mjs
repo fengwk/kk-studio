@@ -180,11 +180,10 @@ test('docs check passes against an isolated physical mirror', () => {
   }
 })
 
-test('docs check requires the designated target DDL and rejects unrelated SQL files', () => {
-  // Test intent: admitting the executable design contract must not weaken the fixed docs inventory.
+test('docs check rejects unrelated SQL files next to the fixed documents', () => {
+  // Test intent: the fixed docs inventory admits only the declared documents, so a second
+  // design DDL or any other stray SQL file must be reported instead of silently accepted.
   const mirrorRoot = createRepositoryMirror()
-  const contractPath = path.join(mirrorRoot, 'docs/canvas-project.sql')
-  const contract = readFileSync(contractPath, 'utf8')
   const check = () =>
     execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
       cwd: mirrorRoot,
@@ -192,12 +191,6 @@ test('docs check requires the designated target DDL and rejects unrelated SQL fi
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   try {
-    rmSync(contractPath)
-    assert.throws(
-      check,
-      (error) => (error.stderr || '').includes('missing fixed document: docs/canvas-project.sql'),
-    )
-    writeFileSync(contractPath, contract)
     writeFileSync(path.join(mirrorRoot, 'docs/unrelated.sql'), 'select 1;\n')
     assert.throws(
       check,

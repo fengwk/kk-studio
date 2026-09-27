@@ -254,7 +254,7 @@ function looksLikeCheckablePath(value) {
 }
 
 function checkFixedLayout() {
-  const expected = new Set([...documentPaths, 'docs/canvas-project.sql'])
+  const expected = new Set(documentPaths)
   const expectedDirectories = new Set(['docs', 'docs/modules', 'docs/operations'])
   const actual = new Set(
     walkFiles(docsRoot).map((absolutePath) => relativeFromRoot(absolutePath)),

@@ -36,7 +36,7 @@ worktree 根），因此不受调用者 cwd 影响。任务级细节见
 | 隔离栈端到端 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 还需 python3 | 创建/删除栈与数据卷 | 否 |
 | 真实 Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.sh](dev/verify/smoke/seedance-prepare.sh) | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL` | 只做页面准备，不提交生成、不下载视频 | 否 |
 | 文档与仓库结构检查 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node | 只读 | 是 |
-| Canvas / Project 目标库表验证 | [dev/verify/repository/check-canvas-project-schema.py](dev/verify/repository/check-canvas-project-schema.py) | python3、本机 Docker socket、已有 `postgres:17.10` | 创建并删除无网络/无宿主端口的临时容器，仅操作专用测试库；不访问部署数据库 | 否 |
+| 唯一生产基线库表验证 | [dev/verify/repository/check-canvas-project-schema.py](dev/verify/repository/check-canvas-project-schema.py) | python3、本机 Docker socket、已有 `postgres:17.10` | 创建并删除无网络/无宿主端口的临时容器，只加载唯一 V1 基线、校验 16 张目标表结构并运行共享 SQL 探针；不访问部署数据库 | 否 |
 | 敏感数据门禁 | [dev/verify/repository/check-sensitive-data.py](dev/verify/repository/check-sensitive-data.py) | python3、git | 只读 | 是 |
 
 ## 发布与运维

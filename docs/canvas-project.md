@@ -1,9 +1,11 @@
 # Canvas、Project 与交互技术方案
 
 本方案定义目标职责、数据模型、并发与执行协议，供 Review、实现和验收使用。
-[隔离目标 DDL](canvas-project.sql) 可验证数据库约束，但不是部署迁移，也不表示运行代码
-已经完成重构。当前实现见[系统设计](system-design.md)；实现切换时同步模块文档和唯一
-Flyway 基线，不维护双写或兼容业务模型。
+目标结构只有一份权威 DDL：生产 Flyway 基线
+[`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，把它加载进隔离
+PostgreSQL 即可验证下面的数据库约束；它不是第二份 schema，也不表示运行代码已经完成重构。
+当前实现见[系统设计](system-design.md)；实现切换时同步模块文档与唯一 Flyway 基线，不维护
+双写或兼容业务模型。
 
 核心原则：配置整体保存，执行事实复用 Harness，内容只有一个事实源；可靠性机制服务于
 明确故障场景，不扩展成通用平台。减少维护成本，而不是单纯追求最少表数。
@@ -681,12 +683,14 @@ UNKNOWN 未核查不能作为普通失败清理。归档不删除历史和资源
 端到端入口和开关沿用[开发与测试](operations/development-and-testing.md)，不默认触发
 真实收费模型。
 
-[隔离库表检查](../scripts/dev/verify/repository/check-canvas-project-schema.py)仅使用本机
-已有 `postgres:17.10`，创建自己拥有的无网络、无宿主端口临时容器，不读取部署数据库
-连接变量，不构建镜像。验证器显式清理旧领域对象，不使用 CASCADE，并对共享表的列、
-约束、索引和触发器做前后比对，只允许本文声明的修改；负例验证该门禁确实生效。
-SQL 断言验证 FK/UK/CHECK/索引和数据形状，关键拒绝校验具体约束名；不证明应用状态机、
-权限或浏览器行为已实现。应用级校验必须沉淀为独立自动化测试。
+[唯一基线库表检查](../scripts/dev/verify/repository/check-canvas-project-schema.py)只使用本机
+已有 `postgres:17.10`，在它自己拥有的无网络、无宿主端口临时容器里加载唯一生产基线
+[`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，不读取部署数据库
+连接变量，也不构建镜像。验证器校验 37 张业务表与 16 张目标表的列、外键和索引，并运行与 Java
+契约测试共用的至少 135 条正负 SQL 探针；负例在目标表上制造缺外键、缺索引、缺字段和多余
+对象，要求验证器精确报出该对象，证明门禁不会静默放过结构漂移。SQL 断言只验证
+FK/UK/CHECK/索引与数据形状，关键拒绝校验具体约束名；不证明应用状态机、权限或浏览器行为已
+实现，应用级校验必须沉淀为独立自动化测试。
 
 ```bash
 python3 scripts/dev/verify/repository/check-canvas-project-schema.py

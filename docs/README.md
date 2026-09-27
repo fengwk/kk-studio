@@ -15,7 +15,7 @@
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
-| 实施 Canvas / Project 重构并核对目标表结构 | [重构契约](canvas-project.md)与[隔离目标 DDL](canvas-project.sql)；不作为部署迁移执行 |
+| 实施 Canvas / Project 重构并核对目标表结构 | [重构契约](canvas-project.md)与唯一生产基线 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql) |
 | 报告安全漏洞 | [Security Policy](../SECURITY.md) |
 
 ## 按代码区域理解系统

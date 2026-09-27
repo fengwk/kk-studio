@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
-"""Validate the target contract in an owned, network-isolated PostgreSQL container.
+"""Validate the sole production Flyway baseline in an owned, network-isolated PostgreSQL container.
 
-Besides loading the contract and its database assertions, this runner protects the
-shared baseline it builds on: the preserved Harness/Catalog/Chat/Storage tables are
-snapshotted (columns, constraints, indexes, non-internal triggers) before the old
-domain tables are dropped and again after the target DDL. Only the explicitly
-allowlisted object changes may appear between those snapshots, and negative probes
-mutate a preserved table inside a rolled-back transaction to prove the guard
-actually detects non-allowlisted drift.
+The runner loads exactly one versioned migration, `schema/src/main/resources/db/migration/V1__schema.sql`,
+which is the single authoritative definition of the product schema: there is no second design DDL to keep
+in sync. It then proves three kinds of target facts:
+
+* the 37 business tables of that baseline are present and nothing else was added;
+* the 16 Canvas / Project / Chat-Session target tables expose exactly their declared columns, foreign-key
+  relations and indexes;
+* the shared contract probes (`fresh-install-probes.sql`, also executed by the schema module's Java
+  contract test) reject invalid writes, with at least 135 positive and negative assertions.
+
+Negative probes mutate the loaded target schema inside a rolled-back transaction and require the validator
+to report exactly the mutated object, so a silently broken check (missing FK, index or column) cannot pass.
+
+Isolation: the container is created from a local image on the local Docker unix socket only, never joins a
+network, never publishes a host port, uses a tmpfs data directory and is removed on exit. Deployment
+database connection variables are never read.
 """
 
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -20,12 +30,29 @@ import uuid
 
 FIELD_SEPARATOR = "\x1f"
 
-# Tables the target contract must keep exactly as the baseline defines them.
-PRESERVED_TABLES = (
+MIGRATION_DIRECTORY = "schema/src/main/resources/db/migration"
+BASELINE_FILE = "V1__schema.sql"
+# Single copy of the positive/negative SQL probes, shared with the schema module's Java
+# contract test; the repository keeps no second copy of them.
+PROBE_FILE = "schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-install-probes.sql"
+MINIMUM_PROBE_ASSERTIONS = 135
+IMAGE = "postgres:17.10"
+
+# The 37 business tables of the sole production baseline. Flyway adds its own
+# history table on top, so the accepted table set is exactly this list.
+BUSINESS_TABLES = (
     "agent_definition",
     "agent_model",
     "agent_provider",
+    "canvas_command_dedup",
+    "canvas_document",
+    "canvas_function_resource_pin",
+    "canvas_function_run",
+    "canvas_group",
+    "canvas_node",
+    "canvas_resource",
     "chat",
+    "chat_session",
     "environment",
     "environment_connection",
     "harness_entry",
@@ -38,6 +65,14 @@ PRESERVED_TABLES = (
     "mcp_server",
     "mcp_tool",
     "plugin_credential",
+    "project",
+    "project_issue",
+    "project_issue_activity",
+    "project_issue_agent_thread",
+    "project_issue_evidence",
+    "project_issue_run",
+    "project_issue_stage_budget",
+    "project_issue_work",
     "session_blob_ref",
     "skill_package",
     "storage_blob",
@@ -45,7 +80,8 @@ PRESERVED_TABLES = (
     "system_setting",
 )
 
-# The 16 target domain tables created by the contract.
+# The 16 target tables the Canvas / Project rewrite installs; only these are checked
+# down to their columns, relations and indexes.
 TARGET_TABLES = (
     "canvas_command_dedup",
     "canvas_document",
@@ -65,81 +101,283 @@ TARGET_TABLES = (
     "project_issue_work",
 )
 
-# Domain tables removed from the baseline design. They are dropped as one batch so
-# that no CASCADE can silently delete an object outside this explicit list.
-REMOVED_DOMAIN_TABLES = (
-    "canvas_command_dedup",
-    "canvas_document",
-    "canvas_function_resource_pin",
-    "canvas_function_run",
-    "canvas_group",
-    "canvas_link",
-    "canvas_node",
-    "canvas_resource",
-    "comfyui_workflow_api",
-    "project",
-    "project_issue",
-    "project_issue_activity",
-    "project_issue_agent_session",
-    "project_issue_dependency",
-    "project_issue_evidence",
-    "project_issue_run",
-    "project_issue_work",
-    "session_owner",
-)
-
-# The only preserved-table change allowed while cleaning up the old domain design.
-CLEANUP_REMOVALS = {("trigger", "harness_thread", "trg_project_issue_changed_thread")}
-
-# The only preserved-table objects the target DDL may add or modify.
-CONTRACT_ADDITIONS = {
-    ("column", "chat", "archived_at"),
-    ("index", "chat", "idx_chat_archived"),
-    ("column", "harness_tool_invocation", "input_receipt"),
-    ("constraint", "harness_tool_invocation", "ck_harness_tool_input_receipt"),
-    ("constraint", "harness_tool_invocation", "ck_harness_tool_waiting_input"),
-    ("index", "harness_tool_invocation", "idx_harness_tool_invocation_pending"),
-    ("constraint", "harness_thread", "uk_harness_thread_session"),
-    ("index", "harness_thread", "uk_harness_thread_session"),
+TARGET_COLUMNS = {
+    "canvas_command_dedup": (
+        "canvas_id",
+        "idempotency_key",
+        "request_hash",
+        "accepted_revision",
+    ),
+    "canvas_document": ("id", "title", "revision", "created_at", "updated_at"),
+    "canvas_function_resource_pin": (
+        "canvas_id",
+        "node_id",
+        "request_id",
+        "role",
+        "resource_id",
+    ),
+    "canvas_function_run": (
+        "node_id",
+        "request_id",
+        "status",
+        "attempt",
+        "available_at",
+        "lease_token",
+        "lease_until",
+        "state_json",
+        "error",
+        "created_at",
+        "updated_at",
+    ),
+    "canvas_group": ("id", "canvas_id", "title", "x", "y", "width", "height"),
+    "canvas_node": (
+        "id",
+        "canvas_id",
+        "name",
+        "name_key",
+        "x",
+        "y",
+        "width",
+        "height",
+        "group_id",
+        "function",
+    ),
+    "canvas_resource": (
+        "id",
+        "canvas_id",
+        "owner_node_id",
+        "resource_index",
+        "name",
+        "blob_id",
+        "text_content",
+        "created_at",
+    ),
+    "chat_session": ("session_id", "chat_id", "created_at"),
+    "project": (
+        "id",
+        "title",
+        "description",
+        "workflow",
+        "yolo_enabled",
+        "next_issue_number",
+        "version",
+        "archived_at",
+        "created_at",
+        "updated_at",
+    ),
+    "project_issue": (
+        "id",
+        "project_id",
+        "number",
+        "title",
+        "description",
+        "state",
+        "blocked_from_state",
+        "block_reason",
+        "pause_reason",
+        "pause_detail",
+        "next_run_ordinal",
+        "next_activity_sequence",
+        "version",
+        "archived_at",
+        "created_at",
+        "updated_at",
+    ),
+    "project_issue_activity": (
+        "issue_id",
+        "sequence",
+        "kind",
+        "actor_type",
+        "actor_agent_name",
+        "run_id",
+        "body",
+        "data",
+        "idempotency_key",
+        "request_hash",
+        "created_at",
+    ),
+    "project_issue_agent_thread": ("issue_id", "agent_name", "thread_id", "created_at"),
+    "project_issue_evidence": (
+        "issue_id",
+        "blob_id",
+        "actor_agent_name",
+        "run_id",
+        "name",
+        "created_at",
+    ),
+    "project_issue_run": (
+        "id",
+        "issue_id",
+        "ordinal",
+        "state",
+        "session_id",
+        "thread_id",
+        "status",
+        "start_entry_id",
+        "end_entry_id",
+        "final_answer_entry_id",
+        "next_state",
+        "observed_activity_sequence",
+        "remaining_execution_ms",
+        "active_since",
+        "error",
+        "version",
+        "started_at",
+        "ended_at",
+    ),
+    "project_issue_stage_budget": (
+        "issue_id",
+        "state",
+        "max_runs",
+        "budget_after_ordinal",
+        "created_at",
+        "updated_at",
+    ),
+    "project_issue_work": (
+        "issue_id",
+        "wake_version",
+        "due_at",
+        "lease_token",
+        "lease_until",
+        "created_at",
+        "updated_at",
+    ),
 }
 
-CONTRACT_MODIFICATIONS = {
-    ("constraint", "harness_tool_invocation", "ck_harness_tool_invocation_status"),
-    ("index", "harness_tool_invocation", "idx_harness_tool_invocation_model_nonterminal"),
+TARGET_RELATIONS = {
+    "canvas_command_dedup": ("canvas_command_dedup_canvas_id_fkey",),
+    "canvas_document": (),
+    "canvas_function_resource_pin": (
+        "fk_canvas_pin_node",
+        "fk_canvas_pin_resource",
+        "fk_canvas_pin_run",
+    ),
+    "canvas_function_run": ("canvas_function_run_node_id_fkey",),
+    "canvas_group": ("canvas_group_canvas_id_fkey",),
+    "canvas_node": ("canvas_node_canvas_id_fkey", "fk_canvas_node_group"),
+    "canvas_resource": (
+        "canvas_resource_canvas_id_fkey",
+        "fk_canvas_resource_blob",
+        "fk_canvas_resource_owner",
+    ),
+    "chat_session": ("fk_chat_session_chat", "fk_chat_session_session"),
+    "project": (),
+    "project_issue": ("project_issue_project_id_fkey",),
+    "project_issue_activity": (
+        "fk_project_issue_activity_agent",
+        "fk_project_issue_activity_issue",
+        "fk_project_issue_activity_run",
+    ),
+    "project_issue_agent_thread": (
+        "fk_project_issue_agent_thread_agent",
+        "fk_project_issue_agent_thread_issue",
+        "fk_project_issue_agent_thread_thread",
+    ),
+    "project_issue_evidence": (
+        "fk_project_issue_evidence_agent",
+        "fk_project_issue_evidence_blob",
+        "fk_project_issue_evidence_issue",
+        "fk_project_issue_evidence_run",
+    ),
+    "project_issue_run": (
+        "fk_project_issue_run_agent_thread",
+        "fk_project_issue_run_end_entry",
+        "fk_project_issue_run_final_answer",
+        "fk_project_issue_run_stage_budget",
+        "fk_project_issue_run_start_entry",
+        "fk_project_issue_run_thread_session",
+    ),
+    "project_issue_stage_budget": ("fk_project_issue_stage_budget_issue",),
+    "project_issue_work": ("fk_project_issue_work_issue",),
 }
 
-# Non-allowlisted mutations used as negative evidence for the shared baseline guard.
-GUARD_PROBES = (
+TARGET_INDEXES = {
+    "canvas_command_dedup": ("pk_canvas_command_dedup",),
+    "canvas_document": ("canvas_document_pkey", "idx_canvas_document_updated"),
+    "canvas_function_resource_pin": (
+        "canvas_function_resource_pin_pkey",
+        "idx_canvas_function_pin_resource",
+    ),
+    "canvas_function_run": (
+        "canvas_function_run_node_id_request_id_key",
+        "canvas_function_run_pkey",
+        "idx_canvas_function_run_claim",
+    ),
+    "canvas_group": ("canvas_group_canvas_id_id_key", "canvas_group_pkey"),
+    "canvas_node": (
+        "canvas_node_pkey",
+        "idx_canvas_node_group",
+        "uk_canvas_node_canvas_id",
+        "uk_canvas_node_canvas_name_key",
+    ),
+    "canvas_resource": (
+        "canvas_resource_pkey",
+        "idx_canvas_resource_blob",
+        "idx_canvas_resource_created",
+        "uk_canvas_resource_canvas_id",
+        "uk_canvas_resource_slot",
+    ),
+    "chat_session": ("idx_chat_session_chat", "pk_chat_session"),
+    "project": ("idx_project_updated", "project_pkey"),
+    "project_issue": (
+        "idx_project_issue_board",
+        "project_issue_pkey",
+        "project_issue_project_id_number_key",
+    ),
+    "project_issue_activity": (
+        "idx_project_activity_run",
+        "pk_project_issue_activity",
+        "uk_project_activity_run",
+        "uk_project_issue_activity_request",
+    ),
+    "project_issue_agent_thread": (
+        "pk_project_issue_agent_thread",
+        "uk_project_issue_agent_thread_issue",
+        "uk_project_issue_agent_thread_thread",
+    ),
+    "project_issue_evidence": (
+        "idx_project_issue_evidence_blob",
+        "pk_project_issue_evidence",
+    ),
+    "project_issue_run": (
+        "idx_project_issue_run_budget",
+        "idx_project_issue_run_session",
+        "project_issue_run_pkey",
+        "uk_project_issue_run_active",
+        "uk_project_issue_run_id_issue",
+        "uk_project_issue_run_issue_ordinal",
+    ),
+    "project_issue_stage_budget": ("pk_project_issue_stage_budget",),
+    "project_issue_work": ("idx_project_issue_work_due", "pk_project_issue_work"),
+}
+
+# Negative evidence: each mutation is rolled back, so the validated container state is
+# untouched, yet the validator must report exactly the mutated object and nothing else.
+NEGATIVE_PROBES = (
     (
-        "an added shared column",
-        "alter table storage_blob add column probe_guard text;",
-        {("column", "storage_blob", "probe_guard")},
-        set(),
-        set(),
+        "a dropped target foreign key",
+        "alter table project_issue_run drop constraint fk_project_issue_run_stage_budget;",
+        {("missing relation", "project_issue_run.fk_project_issue_run_stage_budget")},
     ),
     (
-        "a dropped shared constraint",
-        "alter table harness_work drop constraint ck_harness_work_lease_pair;",
-        set(),
-        {("constraint", "harness_work", "ck_harness_work_lease_pair")},
-        set(),
+        "a dropped target index",
+        "drop index idx_project_issue_run_budget;",
+        {("missing index", "project_issue_run.idx_project_issue_run_budget")},
     ),
     (
-        "a redefined shared constraint",
-        """
-        alter table chat drop constraint ck_chat_version_nonneg;
-        alter table chat add constraint ck_chat_version_nonneg check (version >= -1);
-        """,
-        set(),
-        set(),
-        {("constraint", "chat", "ck_chat_version_nonneg")},
+        "a dropped target column",
+        "alter table project_issue_run drop column remaining_execution_ms;",
+        {("missing column", "project_issue_run.remaining_execution_ms")},
     ),
     (
-        "a changed shared column length",
-        "alter table chat alter column title type varchar(1024);",
-        set(),
-        set(),
-        {("column", "chat", "title")},
+        "an added target column",
+        "alter table project_issue_work add column probe_field text;",
+        {("unexpected column", "project_issue_work.probe_field")},
+    ),
+    (
+        "an added table",
+        "create table probe_table (id uuid primary key);",
+        {("unexpected table", "probe_table")},
     ),
 )
 
@@ -154,113 +392,197 @@ def repository_root():
     raise RuntimeError("cannot locate repository root; set KK_STUDIO_REPO_ROOT")
 
 
-def snapshot_query():
-    tables = ", ".join(f"'{name}'" for name in PRESERVED_TABLES)
+def values(rows):
+    """Render literal rows as a SQL `values` list."""
+    return ", ".join("(" + ", ".join(f"'{value}'" for value in row) + ")" for row in rows)
+
+
+def violations_query():
+    """Return every structural difference between the loaded baseline and the target contract."""
+    tables = values((name,) for name in sorted(BUSINESS_TABLES))
+    target_tables = values((name,) for name in sorted(TARGET_TABLES))
+    columns = values(
+        (table, column)
+        for table in sorted(TARGET_COLUMNS)
+        for column in TARGET_COLUMNS[table]
+    )
+    relations = values(
+        (table, name)
+        for table in sorted(TARGET_RELATIONS)
+        for name in TARGET_RELATIONS[table]
+    )
+    indexes = values(
+        (table, name) for table in sorted(TARGET_INDEXES) for name in TARGET_INDEXES[table]
+    )
     return f"""
-        select kind, table_name, object_name, definition from (
-            select 'table' as kind, c.relname::text as table_name,
-                '' as object_name, '' as definition
-                from pg_class c
-                where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'
-                    and c.relname = any(array[{tables}])
+        with expected_table(name) as (values {tables}),
+            target_table(name) as (values {target_tables}),
+            expected_column(table_name, column_name) as (values {columns}),
+            expected_relation(table_name, constraint_name) as (values {relations}),
+            expected_index(table_name, index_name) as (values {indexes}),
+            actual_table as (
+                select tablename from pg_tables where schemaname = 'public'
+            ),
+            target_column as (
+                select c.table_name, c.column_name
+                    from information_schema.columns c
+                    join target_table t on t.name = c.table_name
+                    where c.table_schema = 'public'
+            ),
+            target_relation as (
+                select con.conrelid::regclass::text as table_name, con.conname
+                    from pg_constraint con
+                    join target_table t on t.name = con.conrelid::regclass::text
+                    where con.contype = 'f' and con.connamespace = 'public'::regnamespace
+            ),
+            target_index as (
+                select i.tablename as table_name, i.indexname
+                    from pg_indexes i
+                    join target_table t on t.name = i.tablename
+                    where i.schemaname = 'public'
+            )
+        select problem, object from (
+            select 'missing table' as problem, e.name as object
+                from expected_table e
+                where not exists (select 1 from actual_table a where a.tablename = e.name)
             union all
-            select 'column', c.relname, a.attname,
-                format('type=%s notnull=%s default=%s generated=%s identity=%s collation=%s',
-                    format_type(a.atttypid, a.atttypmod), a.attnotnull,
-                    coalesce(pg_get_expr(d.adbin, d.adrelid), '<null>'),
-                    a.attgenerated, a.attidentity, a.attcollation::regcollation)
-                from pg_attribute a
-                join pg_class c on c.oid = a.attrelid
-                left join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
-                where c.relnamespace = 'public'::regnamespace
-                    and c.relname = any(array[{tables}]) and a.attnum > 0 and not a.attisdropped
+            select 'unexpected table', a.tablename
+                from actual_table a
+                where not exists (select 1 from expected_table e where e.name = a.tablename)
             union all
-            select 'constraint', con.conrelid::regclass::text, con.conname,
-                pg_get_constraintdef(con.oid)
-                from pg_constraint con
-                where con.connamespace = 'public'::regnamespace
-                    and con.conrelid::regclass::text = any(array[{tables}])
+            select 'missing column', e.table_name || '.' || e.column_name
+                from expected_column e
+                where not exists (
+                    select 1 from target_column a
+                        where a.table_name = e.table_name and a.column_name = e.column_name)
             union all
-            select 'index', i.tablename, i.indexname, i.indexdef
-                from pg_indexes i
-                where i.schemaname = 'public' and i.tablename = any(array[{tables}])
+            select 'unexpected column', a.table_name || '.' || a.column_name
+                from target_column a
+                where not exists (
+                    select 1 from expected_column e
+                        where e.table_name = a.table_name and e.column_name = a.column_name)
             union all
-            select 'trigger', c.relname, tg.tgname,
-                pg_get_triggerdef(tg.oid) || ' enabled=' || tg.tgenabled::text
-                from pg_trigger tg
-                join pg_class c on c.oid = tg.tgrelid
-                where not tg.tgisinternal and c.relnamespace = 'public'::regnamespace
-                    and c.relname = any(array[{tables}])
-        ) snapshot
-        order by kind, table_name, object_name;
+            select 'missing relation', e.table_name || '.' || e.constraint_name
+                from expected_relation e
+                where not exists (
+                    select 1 from target_relation a
+                        where a.table_name = e.table_name and a.conname = e.constraint_name)
+            union all
+            select 'unexpected relation', a.table_name || '.' || a.conname
+                from target_relation a
+                where not exists (
+                    select 1 from expected_relation e
+                        where e.table_name = a.table_name and e.constraint_name = a.conname)
+            union all
+            select 'missing index', e.table_name || '.' || e.index_name
+                from expected_index e
+                where not exists (
+                    select 1 from target_index a
+                        where a.table_name = e.table_name and a.indexname = e.index_name)
+            union all
+            select 'unexpected index', a.table_name || '.' || a.indexname
+                from target_index a
+                where not exists (
+                    select 1 from expected_index e
+                        where e.table_name = a.table_name and e.index_name = a.indexname)
+        ) violations
+        order by problem, object;
     """
 
 
-def parse_snapshot(output):
-    objects = {}
+def parse_violations(output):
+    violations = set()
     for line in output.splitlines():
         if not line.strip():
             continue
-        fields = line.split(FIELD_SEPARATOR, 3)
-        if len(fields) != 4:
-            raise RuntimeError("unexpected baseline snapshot row shape")
-        objects[(fields[0], fields[1], fields[2])] = fields[3]
-    return objects
+        fields = line.split(FIELD_SEPARATOR)
+        if len(fields) != 2:
+            raise RuntimeError(f"unexpected violation row shape: {line!r}")
+        violations.add((fields[0], fields[1]))
+    return violations
 
 
-def difference(before, after):
-    added = {key for key in after if key not in before}
-    removed = {key for key in before if key not in after}
-    modified = {key for key in after if key in before and before[key] != after[key]}
-    return added, removed, modified
-
-
-def describe(keys):
-    return sorted("/".join(key) for key in keys)
+def describe(violations):
+    return sorted(f"{problem} {obj}" for problem, obj in violations)
 
 
 def main():
     root = repository_root()
+    baselines = sorted(path.name for path in (root / MIGRATION_DIRECTORY).glob("V*.sql"))
+    if baselines != [BASELINE_FILE]:
+        raise RuntimeError(
+            f"the production schema must be the single {BASELINE_FILE}; found {baselines}"
+        )
+    baseline = root / MIGRATION_DIRECTORY / BASELINE_FILE
+    probes = root / PROBE_FILE
+    if not probes.is_file():
+        raise RuntimeError(f"missing shared contract probes: {PROBE_FILE}")
+    if len(BUSINESS_TABLES) != 37 or len(TARGET_TABLES) != 16:
+        raise RuntimeError("the declared inventory must stay at 37 business and 16 target tables")
+
     # Force the local Unix socket; never inherit a deployment Docker context or PG URL.
     socket = Path("/var/run/docker.sock")
     if not socket.exists():
         raise RuntimeError("requires the local /var/run/docker.sock")
     environment = {
-        key: value for key, value in os.environ.items()
+        key: value
+        for key, value in os.environ.items()
         if key not in {"DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"}
     }
     docker = ["docker", "--host", f"unix://{socket}"]
-    image = "postgres:17.10"
 
     def command(arguments, text=None, check=True, timeout=120):
         result = subprocess.run(
-            docker + arguments, input=text, text=True, capture_output=True,
-            env=environment, timeout=timeout, check=False,
+            docker + arguments,
+            input=text,
+            text=True,
+            capture_output=True,
+            env=environment,
+            timeout=timeout,
+            check=False,
         )
         if check and result.returncode:
             raise RuntimeError(result.stderr.strip() or "local Docker command failed")
         return result
 
-    command(["image", "inspect", image])
+    command(["image", "inspect", IMAGE])
     suffix = uuid.uuid4().hex
-    name = f"kkstudio-design-{suffix}"
-    database = f"kkstudio_design_{suffix}"
-    label = "kkstudio.schema-contract"
+    name = f"kkstudio-v1-{suffix}"
+    database = f"kkstudio_v1_{suffix}"
+    label = "kkstudio.schema-baseline"
     container_id = None
     cleanup_error = None
     try:
-        container_id = command([
-            "run", "--detach", "--rm", "--pull=never", "--name", name,
-            "--label", f"{label}={suffix}",
-            "--network", "none", "--memory", "512m", "--cpus", "1",
-            "--tmpfs", "/var/lib/postgresql/data:rw,size=256m",
-            "--env", "POSTGRES_HOST_AUTH_METHOD=trust",
-            "--env", f"POSTGRES_DB={database}", image,
-        ]).stdout.strip()
+        container_id = command(
+            [
+                "run",
+                "--detach",
+                "--rm",
+                "--pull=never",
+                "--name",
+                name,
+                "--label",
+                f"{label}={suffix}",
+                "--network",
+                "none",
+                "--memory",
+                "512m",
+                "--cpus",
+                "1",
+                "--tmpfs",
+                "/var/lib/postgresql/data:rw,size=256m",
+                "--env",
+                "POSTGRES_HOST_AUTH_METHOD=trust",
+                "--env",
+                f"POSTGRES_DB={database}",
+                IMAGE,
+            ]
+        ).stdout.strip()
         for _ in range(60):
             ready = command(
                 ["exec", container_id, "pg_isready", "-U", "postgres", "-d", database],
-                check=False, timeout=10,
+                check=False,
+                timeout=10,
             )
             if ready.returncode == 0:
                 break
@@ -268,107 +590,112 @@ def main():
         else:
             raise RuntimeError("isolated PostgreSQL did not become ready")
 
+        # The container this script owns must be unreachable: no network, no host port.
+        network = command(
+            ["inspect", "--format", "{{.HostConfig.NetworkMode}}", container_id]
+        ).stdout.strip()
+        published = command(
+            ["inspect", "--format", "{{len .NetworkSettings.Ports}}", container_id]
+        ).stdout.strip()
+        if network != "none" or published != "0":
+            raise RuntimeError(
+                f"container is not isolated: network={network} publishedPorts={published}"
+            )
+
         def sql(source, target=database):
-            return command([
-                "exec", "-i", container_id, "psql", "-X", "-q", "-A", "-t",
-                "-F", FIELD_SEPARATOR, "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", target,
-            ], text=source).stdout
+            return command(
+                [
+                    "exec",
+                    "-i",
+                    container_id,
+                    "psql",
+                    "-X",
+                    "-q",
+                    "-A",
+                    "-t",
+                    "-F",
+                    FIELD_SEPARATOR,
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-U",
+                    "postgres",
+                    "-d",
+                    target,
+                ],
+                text=source,
+            ).stdout
 
-        def public_tables():
-            return set(sql("select tablename from pg_tables where schemaname = 'public';").split())
-
-        baseline = root / "schema/src/main/resources/db/migration/V1__schema.sql"
-        contract = root / "docs/canvas-project.sql"
-        fixtures = root / "scripts/dev/verify/repository/tests/canvas-project-schema.sql"
-        contract_text = contract.read_text(encoding="utf-8")
         sql(baseline.read_text(encoding="utf-8"))
-        baseline_snapshot = parse_snapshot(sql(snapshot_query()))
+        violations = parse_violations(sql(violations_query()))
+        if violations:
+            raise RuntimeError(f"baseline structure mismatch: {describe(violations)}")
+        print(
+            f"PASS sole production {BASELINE_FILE}: "
+            f"{len(BUSINESS_TABLES)} business tables present, no extra table"
+        )
+        print(
+            f"PASS {len(TARGET_TABLES)} target tables expose their declared columns, "
+            f"relations and indexes"
+        )
 
-        # Old domain tables go away as one explicitly listed batch: no CASCADE may
-        # delete a shared object behind our back.
-        sql("drop table " + ", ".join(REMOVED_DOMAIN_TABLES) + ";")
-        # The baseline trigger on the shared harness_thread table belongs to the
-        # removed Project design and is dropped by name, never by cascade.
-        sql("""
-            drop trigger trg_project_issue_changed_thread on harness_thread;
-            drop function project_issue_changed_notify();
-            drop function canvas_document_version_notify();
-            drop function canvas_function_work_notify();
-        """)
-        cleaned_snapshot = parse_snapshot(sql(snapshot_query()))
-        added, removed, modified = difference(baseline_snapshot, cleaned_snapshot)
-        if added or modified or removed != CLEANUP_REMOVALS:
+        probe_result = command(
+            [
+                "exec",
+                "-i",
+                container_id,
+                "psql",
+                "-X",
+                "-q",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                database,
+            ],
+            text=probes.read_text(encoding="utf-8"),
+        )
+        marker = re.search(r"PASS (\d+) database contract assertions", probe_result.stdout)
+        if not marker:
             raise RuntimeError(
-                "shared baseline changed while dropping old domain tables: "
-                f"added={describe(added)} removed={describe(removed)} modified={describe(modified)}"
+                "probe run reported no assertion count:\n" + probe_result.stdout.strip()
             )
-        expected_cleaned = set(PRESERVED_TABLES)
-        if public_tables() != expected_cleaned:
+        reported = int(marker.group(1))
+        if reported < MINIMUM_PROBE_ASSERTIONS:
             raise RuntimeError(
-                f"unexpected preserved table set after cleanup: {sorted(public_tables())}"
+                f"probe run reported only {reported} assertions, "
+                f"expected at least {MINIMUM_PROBE_ASSERTIONS}"
             )
-        print("PASS old domain tables dropped without cascade; only the declared domain trigger removed")
+        print(f"PASS {reported} positive and negative database contract assertions")
 
-        sql(contract_text)
-        target_snapshot = parse_snapshot(sql(snapshot_query()))
-        added, removed, modified = difference(baseline_snapshot, target_snapshot)
-        if removed != CLEANUP_REMOVALS or added != CONTRACT_ADDITIONS or modified != CONTRACT_MODIFICATIONS:
-            raise RuntimeError(
-                "shared baseline changed beyond the allowlist: "
-                f"added={describe(added - CONTRACT_ADDITIONS)} "
-                f"removed={describe(removed - CLEANUP_REMOVALS)} "
-                f"modified={describe(modified - CONTRACT_MODIFICATIONS)} "
-                f"missing={describe(CONTRACT_ADDITIONS - added)} "
-                f"unmodified={describe(CONTRACT_MODIFICATIONS - modified)}"
+        for label_text, mutation, expected in NEGATIVE_PROBES:
+            probed = parse_violations(
+                sql("\n".join(["begin;", mutation, violations_query(), "rollback;"]))
             )
-        expected_target = set(PRESERVED_TABLES) | set(TARGET_TABLES)
-        if public_tables() != expected_target:
-            raise RuntimeError(
-                "target DDL table set mismatch: "
-                f"missing={sorted(expected_target - public_tables())} "
-                f"unexpected={sorted(public_tables() - expected_target)}"
-            )
-        print(sql(fixtures.read_text(encoding="utf-8")).strip())
-
-        # The contract must fail before touching any table in an ordinary database.
-        refusal = command([
-            "exec", "-i", container_id, "psql", "-X", "-q",
-            "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres",
-        ], text=contract_text, check=False)
-        if refusal.returncode == 0 or "requires an isolated" not in refusal.stderr:
-            raise RuntimeError("contract database guard did not reject an ordinary database")
-        # An explicit transaction must also protect clients that continue after SQL errors.
-        continued = command([
-            "exec", "-i", container_id, "psql", "-X", "-q",
-            "-U", "postgres", "-d", "postgres",
-        ], text=contract_text, check=False)
-        if "requires an isolated" not in continued.stderr:
-            raise RuntimeError("contract guard missing when SQL errors are not fatal to the client")
-        if sql("select count(*) from pg_tables where schemaname = 'public';", "postgres").strip() != "0":
-            raise RuntimeError("contract changed the ordinary database before refusing")
-        print("PASS database guard; no ordinary database writes")
-
-        # Negative evidence: every probe is rolled back, so the validated container
-        # state is untouched, yet the guard must report exactly the mutated object.
-        for label_text, mutation, probe_added, probe_removed, probe_modified in GUARD_PROBES:
-            probed = parse_snapshot(sql("\n".join([
-                "begin;", mutation, snapshot_query(), "rollback;",
-            ])))
-            added, removed, modified = difference(target_snapshot, probed)
-            if (added, removed, modified) != (probe_added, probe_removed, probe_modified):
+            if probed != expected:
                 raise RuntimeError(
-                    f"shared baseline guard missed {label_text}: "
-                    f"added={describe(added)} removed={describe(removed)} "
-                    f"modified={describe(modified)}"
+                    f"validator missed {label_text}: expected {describe(expected)}, "
+                    f"got {describe(probed)}"
                 )
-        print(f"PASS shared baseline guard detects {len(GUARD_PROBES)} non-allowlisted object changes")
-        print("PASS shared baseline differs only by the declared contract changes")
+        print(
+            f"PASS validator detects {len(NEGATIVE_PROBES)} non-declared schema changes "
+            "(missing FK, index and column, added column and table)"
+        )
+        if parse_violations(sql(violations_query())):
+            raise RuntimeError("rolled-back negative probes changed the validated baseline")
+        print("PASS rolled-back probes left the validated baseline unchanged")
     finally:
         # A timed-out `docker run` may have created the container before returning its ID.
         if not container_id:
-            owned = command([
-                "inspect", "--format", f'{{{{index .Config.Labels "{label}"}}}}', name,
-            ], check=False)
+            owned = command(
+                [
+                    "inspect",
+                    "--format",
+                    f'{{{{index .Config.Labels "{label}"}}}}',
+                    name,
+                ],
+                check=False,
+            )
             if owned.returncode == 0 and owned.stdout.strip() == suffix:
                 container_id = name
         if container_id:
