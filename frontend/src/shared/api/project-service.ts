@@ -59,6 +59,7 @@ export interface ProjectService {
   unarchiveIssue(issueId: string, request: UnarchiveIssueRequestDTO): Promise<IssueDTO>
   appendActivity(issueId: string, request: AppendIssueActivityRequestDTO): Promise<IssueActivityDTO>
   addEvidence(issueId: string, request: AddIssueEvidenceRequestDTO): Promise<IssueEvidenceDTO>
+  listEvidence(issueId: string): Promise<IssueEvidenceDTO[]>
 }
 
 export function createProjectService(client: HttpClient = apiClient): ProjectService {
@@ -201,6 +202,9 @@ export function createProjectService(client: HttpClient = apiClient): ProjectSer
       request: AddIssueEvidenceRequestDTO,
     ): Promise<IssueEvidenceDTO> =>
       client.post(`/issues/${encodeURIComponent(issueId)}/evidence`, request),
+
+    listEvidence: async (issueId: string): Promise<IssueEvidenceDTO[]> =>
+      client.get(`/issues/${encodeURIComponent(issueId)}/evidence`),
   }
 }
 

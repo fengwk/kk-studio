@@ -1,7 +1,8 @@
 import { Menu, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchRoutes, useLocation, type Location } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
+import { QueryClient, QueryClientContext, useQuery } from '@tanstack/react-query'
+import { useContext } from 'react'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
 import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import type { PageContribution } from '@/platform/extensions/types'
@@ -12,17 +13,23 @@ import { useI18n } from '@/shared/i18n'
 import { LocaleSelector } from '@/shared/i18n/LocaleSelector'
 import { queryKeys } from '@/shared/lib/query-keys'
 
+const fallbackQueryClient = new QueryClient({
+  defaultOptions: { queries: { enabled: false } },
+})
+
 function usePendingInteractionsCount(): number {
-  try {
-    const { data } = useQuery({
+  const contextClient = useContext(QueryClientContext)
+  const client = contextClient ?? fallbackQueryClient
+  const { data } = useQuery(
+    {
       queryKey: queryKeys.interactions.list(null, 50),
       queryFn: () => interactionService.listInteractions(null, 50),
       staleTime: 5000,
-    })
-    return data?.items?.length ?? 0
-  } catch {
-    return 0
-  }
+      enabled: Boolean(contextClient),
+    },
+    client,
+  )
+  return data?.items?.length ?? 0
 }
 
 /** 焦点位于已打开的内层交互作用域（listbox/menu）时返回 true：其 Escape 语义由内层消费。 */

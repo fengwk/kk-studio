@@ -3,9 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
-import type { IssueDetailDTO, IssueEvidenceDTO } from '../types'
+import type { IssueDetailDTO } from '../types'
 import type { StorageService } from '@/shared/api/storage-service'
-import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
+import type { StorageUploadDTO, StorageUploadResultDTO } from '@/shared/api/contracts/storage'
 
 function renderModal(ui: React.ReactElement, client?: QueryClient) {
   const queryClient = client ?? new QueryClient({
@@ -137,9 +137,10 @@ describe('IssueDetailModal', () => {
   const createMockStorageService = (): StorageService => ({
     reserveUpload: vi.fn().mockResolvedValue(mockUploadDTO),
     uploadFile: vi.fn().mockResolvedValue(undefined),
-    completeUpload: vi.fn().mockResolvedValue(undefined),
-    getSignedDownloadUrl: vi.fn().mockResolvedValue({ url: 'https://example.com/download' }),
-    downloadFile: vi.fn(),
+    completeUpload: vi.fn().mockResolvedValue(mockUploadDTO as unknown as StorageUploadResultDTO),
+    deleteUpload: vi.fn().mockResolvedValue(undefined),
+    getBlobDownloadUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/download/blob-1', expiresAt: '2026-09-27T00:00:00Z', sizeBytes: 1024, mediaType: 'image/png' }),
+    getBlobPreviewUrl: vi.fn().mockResolvedValue({ url: 'https://storage.example.com/preview/blob-1', expiresAt: '2026-09-27T00:00:00Z' }),
   })
 
   it('renders issue detail header, tabs, and natural state token', async () => {
@@ -429,5 +430,90 @@ describe('IssueDetailModal', () => {
       expect(onClose).toHaveBeenCalled()
       expect(onIssueUpdated).toHaveBeenCalled()
     })
+  })
+
+  it('authorizes and downloads evidence file via storageService instead of non-existent static path', async () => {
+    // 测试意图：验证公开证据 tab 下上传的交付物通过 storageService 授权获取真实下载 URL，不指向无效的 /api/resources/{blobId}
+    const api = createMockApi({
+      addIssueEvidence: vi.fn().mockResolvedValue({
+        issueId,
+        blobId: 'blob-real-123',
+        name: 'delivered-spec.pdf',
+        actorAgentName: 'pm',
+        uri: '',
+        runId: null,
+        createdAt: '2026-09-27T10:00:00Z',
+      }),
+    })
+    const storageService = createMockStorageService()
+
+    const { container } = renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        api={api}
+        storageService={storageService}
+        hashFile={async () => '0'.repeat(64)}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const evidenceTab = screen.getByText(/公开证据/)
+    fireEvent.click(evidenceTab)
+
+    // 通过隐藏的文件 input 模拟上传交付物
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(['mock content'], 'delivered-spec.pdf', { type: 'application/pdf' })
+    fireEvent.change(fileInput, { target: { files: [file] } })
+
+    expect(await screen.findByText('delivered-spec.pdf')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(storageService.getBlobDownloadUrl).toHaveBeenCalledWith('blob-real-123')
+    })
+
+    const downloadLink = screen.getByTitle('预览或下载')
+    expect(downloadLink).toHaveAttribute('href', 'https://storage.example.com/download/blob-1')
+    expect(downloadLink).not.toHaveAttribute('href', '/api/resources/blob-real-123')
+  })
+
+  it('triggers onOpenThread callback when clicking open button in agent threads tab', async () => {
+    // 测试意图：验证在 Agent 线程 tab 点击“打开”按钮能够触发 onOpenThread 回调并传递对应的 threadId
+    const onOpenThread = vi.fn()
+    const api = createMockApi({
+      getIssue: vi.fn().mockResolvedValue({
+        ...mockActiveIssueDetail,
+        agentThreads: [
+          {
+            issueId,
+            agentName: 'architect',
+            threadId: 'th-arch-001',
+          },
+        ],
+      }),
+    })
+
+    renderModal(
+      <IssueDetailModal
+        isOpen={true}
+        issueId={issueId}
+        onClose={vi.fn()}
+        onOpenThread={onOpenThread}
+        api={api}
+        storageService={createMockStorageService()}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    const threadsTab = screen.getByText(/Agent 线程/)
+    fireEvent.click(threadsTab)
+
+    expect(await screen.findByText('architect')).toBeInTheDocument()
+    expect(screen.getByText('th-arch-001')).toBeInTheDocument()
+
+    const openBtn = screen.getByTitle('打开此 Agent 线程视图')
+    fireEvent.click(openBtn)
+
+    expect(onOpenThread).toHaveBeenCalledWith('th-arch-001')
   })
 })

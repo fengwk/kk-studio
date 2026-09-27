@@ -12,7 +12,6 @@ import {
   decodeIssueRunSummary,
   decodeIssueStageBudget,
   decodeProject,
-  decodeProjectIssueSnapshot,
   decodeProjectList,
   decodeProjectSnapshot,
   decodeProjectWorkflow,

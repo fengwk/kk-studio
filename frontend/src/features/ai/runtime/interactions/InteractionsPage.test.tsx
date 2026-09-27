@@ -4,6 +4,8 @@ import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { interactionService } from '@/shared/api/interaction-service'
+import { projectsApi } from '@/features/projects/projects-api'
+import type { IssueDetailDTO } from '@/features/projects/types'
 import { InteractionsPage } from './InteractionsPage'
 
 const mockedNavigate = vi.fn()
@@ -118,9 +120,27 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('write')).toBeInTheDocument()
     expect(screen.getByText('写代码')).toBeInTheDocument()
 
-    // 点击 Chat 来源按钮，验证跳转
+    // 点击 Chat 来源按钮，验证跳转至目标 Chat 并定位到 thread
     const chatSourceBtn = screen.getByTitle('Chat: chat-abc')
     fireEvent.click(chatSourceBtn)
-    expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc')
+    expect(mockedNavigate).toHaveBeenCalledWith('/chats/chat-abc?thread=th-1')
+
+    // 测试意图：验证点击 ISSUE_AGENT 来源时通过 query issue 解析 projectId 并精准跳转至 /projects/{id}?issue={id}&thread={threadId}
+    vi.spyOn(projectsApi, 'getIssue').mockResolvedValue({
+      issue: {
+        id: 'issue-101',
+        projectId: 'proj-xyz',
+        title: 'Fix issue',
+        description: '',
+        state: 'IN_PROGRESS',
+        version: '1',
+      },
+    } as unknown as IssueDetailDTO)
+
+    const issueSourceBtn = screen.getByTitle('Issue: issue-101 (architect)')
+    fireEvent.click(issueSourceBtn)
+    await waitFor(() => {
+      expect(mockedNavigate).toHaveBeenCalledWith('/projects/proj-xyz?issue=issue-101&thread=th-2')
+    })
   })
 })

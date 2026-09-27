@@ -6,9 +6,10 @@ import {
   RotateCw,
   Workflow,
 } from 'lucide-react'
-import { Link, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/ai/chat/chat-utils'
 import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
+import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
 import { ApprovalCard } from './ApprovalCard'
 import { QuestionnaireCard } from './QuestionnaireCard'
@@ -29,6 +30,16 @@ export function InteractionsPage() {
     removeItem,
   } = useInteractionsController()
 
+  const handleOpenIssueSource = async (issueId: string, threadId: string) => {
+    try {
+      const issueDetail = await projectsApi.getIssue(issueId)
+      const projectId = issueDetail.issue.projectId
+      navigate(`/projects/${encodeURIComponent(projectId)}?issue=${encodeURIComponent(issueId)}&thread=${encodeURIComponent(threadId)}`)
+    } catch {
+      navigate('/projects')
+    }
+  }
+
   const renderOwnerSource = (item: InteractionDTO) => {
     const owner = item.owner
     if (owner.type === 'CHAT' && owner.chatId) {
@@ -36,7 +47,7 @@ export function InteractionsPage() {
         <button
           type="button"
           className="interaction-source-link"
-          onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}`)}
+          onClick={() => navigate(`/chats/${encodeURIComponent(owner.chatId!)}?thread=${encodeURIComponent(item.threadId)}`)}
           title={`Chat: ${owner.chatId}`}
         >
           <MessageSquare size={14} aria-hidden="true" />
@@ -46,11 +57,12 @@ export function InteractionsPage() {
       )
     }
 
-    if (owner.type === 'ISSUE_AGENT') {
+    if (owner.type === 'ISSUE_AGENT' && owner.issueId) {
       return (
-        <Link
-          to={`/projects`}
+        <button
+          type="button"
           className="interaction-source-link"
+          onClick={() => void handleOpenIssueSource(owner.issueId!, item.threadId)}
           title={`Issue: ${owner.issueId || ''} (${owner.agentName || ''})`}
         >
           <Workflow size={14} aria-hidden="true" />
@@ -59,7 +71,7 @@ export function InteractionsPage() {
             <span className="interaction-agent-badge">{owner.agentName}</span>
           ) : null}
           <ExternalLink size={12} aria-hidden="true" />
-        </Link>
+        </button>
       )
     }
 

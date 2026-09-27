@@ -1647,4 +1647,42 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     expect(unboundResult.current.boundEnvironment).toBeNull()
     expect(unboundResult.current.environmentReady).toBeUndefined()
   })
+
+  it('rejects submissions with attachments when controlled by onSubmitInstruction', async () => {
+    // 测试意图：验证在宿主受控指令模式下，提交含有附件的草稿会被明确拦截拒绝并设置 actionError，而非静默丢弃附件
+    const onSubmitInstruction = vi.fn()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    const { result } = renderHook(
+      () =>
+        useAgentPaneController({
+          owner: { type: 'ISSUE_AGENT_SESSION', id: 'issue-1' },
+          paneId: 'p-controlled',
+          target: { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+          agents: [],
+          environments: [],
+          defaults: {},
+          onSubmitInstruction,
+        }),
+      {
+        wrapper: ({ children }) => (
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        ),
+      },
+    )
+
+    act(() => {
+      result.current.composer.onSubmit([
+        { type: 'text', partId: 'p-1', text: 'Here is document' },
+        { type: 'attachment', partId: 'p-2', uploadId: 'up-123', filename: 'doc.pdf' },
+      ])
+    })
+
+    expect(result.current.error).toBe(
+      '受控 Issue 模式暂不支持附件上传，请通过公开证据上传或在正文中说明',
+    )
+    expect(onSubmitInstruction).not.toHaveBeenCalled()
+  })
 })

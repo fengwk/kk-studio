@@ -17,6 +17,7 @@ import {
 } from '@/features/ai/chat/branch-draft'
 import {
   hasMessageContent,
+  partsToText,
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
@@ -105,6 +106,9 @@ export interface RenameTarget {
 export interface AgentPaneCapabilities {
   allowNewSession?: boolean
   readOnly?: boolean
+  allowSwitchAgent?: boolean
+  allowBranching?: boolean
+  allowGenericChat?: boolean
 }
 
 export interface AgentPaneDefaults {
@@ -122,6 +126,8 @@ export interface UseAgentPaneControllerOptions {
   onFocus?: () => void
   initialTarget?: PaneTarget
   capabilities?: AgentPaneCapabilities
+  onSubmitInstruction?: (text: string, parts: ComposerPart[]) => Promise<void> | void
+  onStop?: () => Promise<void> | void
 }
 
 export function useAgentPaneController({
@@ -134,6 +140,8 @@ export function useAgentPaneController({
   onFocus,
   initialTarget,
   capabilities,
+  onSubmitInstruction,
+  onStop,
 }: UseAgentPaneControllerOptions) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -776,6 +784,35 @@ export function useAgentPaneController({
     if (capabilities?.readOnly) {
       return
     }
+    if (onSubmitInstruction) {
+      const partsToSubmit = payloadParts ?? parts
+      const hasNonTextParts = partsToSubmit.some((p) => p.type !== 'text')
+      if (hasNonTextParts) {
+        setActionError('受控 Issue 模式暂不支持附件上传，请通过公开证据上传或在正文中说明')
+        return
+      }
+      const text = partsToText(partsToSubmit).trim()
+      if (!text) {
+        return
+      }
+      onFocus?.()
+      void (async () => {
+        try {
+          await onSubmitInstruction(text, partsToSubmit)
+          setParts([])
+          if (isBoundTarget(target)) {
+            controller.setDraft([])
+          }
+        } catch (error) {
+          setActionError(errorMessage(error, t('ai.runtime.action.requestFailed')))
+        }
+      })()
+      return
+    }
+    if (capabilities?.allowGenericChat === false) {
+      setActionError('当前受控模式下禁止通用 Chat 发送')
+      return
+    }
     if (isBoundTarget(target)) {
       void controller.submitMessage(payloadParts, localDraftParts)
       return
@@ -820,6 +857,10 @@ export function useAgentPaneController({
     }
     switch (command.id) {
       case 'thread':
+        if (capabilities?.allowBranching === false) {
+          setActionError('当前受控模式不支持分支切换或分叉')
+          return
+        }
         if (hasPendingOperation()) {
           setActionError(t('ai.runtime.action.operationPending'))
           return
@@ -827,6 +868,10 @@ export function useAgentPaneController({
         setInteraction('thread-sessions')
         return
       case 'tree':
+        if (capabilities?.allowBranching === false) {
+          setActionError('当前受控模式不支持分支切换或分叉')
+          return
+        }
         if (hasPendingOperation()) {
           setActionError(t('ai.runtime.action.operationPending'))
           return
@@ -839,6 +884,10 @@ export function useAgentPaneController({
         return
       case 'new':
         if (capabilities?.readOnly) {
+          return
+        }
+        if (capabilities?.allowBranching === false) {
+          setActionError('当前受控模式不支持分支切换或分叉')
           return
         }
         if (capabilities?.allowNewSession === false) {
@@ -857,6 +906,10 @@ export function useAgentPaneController({
         changeTarget({ kind: 'NEW_SESSION_DRAFT' }, activeDraft)
         return
       case 'agent':
+        if (capabilities?.allowSwitchAgent === false) {
+          setActionError('当前受控模式不支持切换 Agent')
+          return
+        }
         setInteraction('agent')
         return
       case 'yolo':
@@ -889,7 +942,20 @@ export function useAgentPaneController({
         setInteraction('goal')
         return
       case 'compact':
+        controller.runCommand(command)
+        return
       case 'stop':
+        if (onStop) {
+          onFocus?.()
+          void (async () => {
+            try {
+              await onStop()
+            } catch (error) {
+              setActionError(errorMessage(error, t('ai.runtime.action.stopFailed')))
+            }
+          })()
+          return
+        }
         controller.runCommand(command)
         return
       case 'models':
@@ -899,6 +965,10 @@ export function useAgentPaneController({
   }
 
   function selectAgent(agentName: string): void {
+    if (capabilities?.allowSwitchAgent === false) {
+      setActionError('当前受控模式不支持切换 Agent')
+      return
+    }
     const agent = agents.find((item) => item.name === agentName)
     if (agent == null) {
       setActionError(t('ai.runtime.action.agentUnresolvable', { selectedAgent: agentName }))
@@ -922,6 +992,10 @@ export function useAgentPaneController({
   }
 
   function selectEntry(entry: HarnessSessionEntryDTO): void {
+    if (capabilities?.allowBranching === false) {
+      setActionError('当前受控模式不支持分支切换或分叉')
+      return
+    }
     const draft = branchDraftFromEntry(entry, activeDraft)
     setThreadNavigationSessionId(null)
     changeTarget({
@@ -932,11 +1006,19 @@ export function useAgentPaneController({
   }
 
   function selectSession(session: RuntimeSessionSummaryDTO): void {
+    if (capabilities?.allowBranching === false) {
+      setActionError('当前受控模式不支持分支切换或分叉')
+      return
+    }
     setThreadNavigationSessionId(session.sessionId)
     setInteraction(session.threadCount === 0 ? 'tree' : 'thread-threads')
   }
 
   function selectThread(thread: RuntimeThreadSummaryDTO): void {
+    if (capabilities?.allowBranching === false) {
+      setActionError('当前受控模式不支持分支切换或分叉')
+      return
+    }
     changeTarget({ kind: 'BOUND_THREAD', threadId: thread.threadId }, activeDraft)
   }
 
@@ -966,6 +1048,8 @@ export function useAgentPaneController({
       readOnly: capabilities?.readOnly,
       canBranchFromRoot,
       owner,
+      allowSwitchAgent: capabilities?.allowSwitchAgent,
+      allowBranching: capabilities?.allowBranching,
     },
   )
   const boundGoal = isBoundTarget(target) && controller.thread?.branchSettings?.goal != null
@@ -998,9 +1082,10 @@ export function useAgentPaneController({
     disabled:
       Boolean(capabilities?.readOnly)
       || pending
-      || (isBoundTarget(target)
+      || (!onSubmitInstruction && capabilities?.allowGenericChat === false)
+      || (!onSubmitInstruction && (isBoundTarget(target)
         ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
-        : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null)),
+        : activeDraft == null || (isNewThreadTarget(target) && treeEntriesQuery.data == null))),
     onPartsChange: isBoundTarget(target) ? controller.setDraft : setParts,
     onHistoryPartsChange: isBoundTarget(target)
       ? (next) => controller.setDraft(next, 'history')

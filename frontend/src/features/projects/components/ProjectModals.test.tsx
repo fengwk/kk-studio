@@ -7,6 +7,7 @@ import { CreateProjectModal } from './CreateProjectModal'
 import { EditProjectModal } from './EditProjectModal'
 import { DeleteProjectModal } from './DeleteProjectModal'
 import type { ProjectDTO } from '../types'
+import type { ProjectsApi } from '../projects-api'
 
 function renderWithClient(ui: React.ReactElement) {
   const queryClient = new QueryClient({
@@ -44,7 +45,7 @@ describe('CreateProjectModal', () => {
     const user = userEvent.setup()
     const mockApi = {
       createProject: vi.fn().mockResolvedValue(mockProject),
-    } as any
+    } as unknown as ProjectsApi
     const onSuccess = vi.fn()
     const onClose = vi.fn()
 
@@ -78,7 +79,7 @@ describe('CreateProjectModal', () => {
   it('validates required title', async () => {
     // 测试意图：验证标题为空时拦截并展示错误提示
     const user = userEvent.setup()
-    const mockApi = { createProject: vi.fn() } as any
+    const mockApi = { createProject: vi.fn() } as unknown as ProjectsApi
 
     renderWithClient(
       <CreateProjectModal
@@ -103,7 +104,7 @@ describe('EditProjectModal', () => {
       updateProject: vi.fn().mockResolvedValue({ ...mockProject, version: '2' }),
       updateWorkflow: vi.fn().mockResolvedValue({ ...mockProject, version: '2' }),
       getProject: vi.fn(),
-    } as any
+    } as unknown as ProjectsApi
     const onSuccess = vi.fn()
 
     renderWithClient(
@@ -139,7 +140,7 @@ describe('EditProjectModal', () => {
     const mockApi = {
       updateProject: vi.fn().mockRejectedValueOnce(conflictError).mockResolvedValueOnce(freshProject),
       getProject: vi.fn().mockResolvedValue(freshProject),
-    } as any
+    } as unknown as ProjectsApi
 
     renderWithClient(
       <EditProjectModal
@@ -176,7 +177,7 @@ describe('DeleteProjectModal', () => {
     const user = userEvent.setup()
     const mockApi = {
       deleteProject: vi.fn().mockResolvedValue(undefined),
-    } as any
+    } as unknown as ProjectsApi
     const onSuccess = vi.fn()
 
     renderWithClient(

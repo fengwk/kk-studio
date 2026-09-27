@@ -107,7 +107,7 @@ export function EditProjectModal({
       return
     }
 
-    let parsedWorkflow: ProjectWorkflowDTO | null = null
+    let parsedWorkflow: ProjectWorkflowDTO
     try {
       const raw = JSON.parse(workflowJson)
       parsedWorkflow = decodeProjectWorkflow(raw)
