@@ -21,23 +21,23 @@ import org.springframework.http.converter.json.MappingJackson2HttpMessageConvert
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.PauseReason;
-import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
-import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
-import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivity;
+import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.model.IssueEvidence;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.project.service.IssueRunService;
+import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
@@ -567,7 +567,7 @@ class StudioIssueControllerTest {
     UpdateIssueRequestDTO req =
         UpdateIssueRequestDTO.builder().expectedVersion("1").title("T").build();
     when(issueService.updateIssue(eq(issueId), eq(1L), any(), any()))
-        .thenThrow(new AiVersionConflictException("issue", "1", "2"));
+        .thenThrow(new ProjectVersionConflictException("issue", "1", "2"));
 
     mockMvc
         .perform(

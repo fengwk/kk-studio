@@ -11,15 +11,15 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
-import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.platform.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueRunService;
+import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
 import java.lang.reflect.Field;
@@ -136,7 +136,7 @@ class ProjectSnapshotAssemblerTest {
   void testProjectNotFoundFails() {
     // 测试意图：项目不存在时抛出 404
     when(projectService.getProject(projectId)).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> assembler.assemble(projectId));
+    assertThrows(ProjectNotFoundException.class, () -> assembler.assemble(projectId));
   }
 
   @Test

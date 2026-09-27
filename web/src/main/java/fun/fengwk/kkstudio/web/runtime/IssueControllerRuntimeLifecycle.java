@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import org.springframework.context.SmartLifecycle;
 
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;

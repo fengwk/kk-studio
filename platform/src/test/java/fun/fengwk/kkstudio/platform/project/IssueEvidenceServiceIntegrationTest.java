@@ -12,12 +12,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -25,6 +19,12 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService.ReadyUp
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService.StagedUpload;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueEvidence;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadDTO;
 import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
@@ -190,7 +190,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     insertStorageBlob(blobId);
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueEvidenceService.publishBlob(
                 issue2.getId(), agent, runOfIssue1.getId(), blobId, "evidence.txt"));
@@ -234,7 +234,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     insertStorageBlob(blobId);
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueEvidenceService.publishBlob(
                 issue.getId(), null, UUID.randomUUID(), blobId, "test.txt"));
@@ -252,7 +252,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     insertStorageBlob(blobId);
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueEvidenceService.publishBlob(issue.getId(), null, null, blobId, "test.txt"));
   }
 
@@ -287,7 +287,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID uploadId = UUID.randomUUID();
     UUID nonExistentIssueId = UUID.randomUUID();
     assertThrows(
-        AiResourceNotFoundException.class,
+        ProjectNotFoundException.class,
         () -> issueEvidenceService.publishHumanUpload(nonExistentIssueId, uploadId));
   }
 
@@ -301,7 +301,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID uploadId = UUID.randomUUID();
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueEvidenceService.publishHumanUpload(issue.getId(), uploadId));
   }
 
@@ -312,7 +312,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueEvidenceService.publishBlob(issue.getId(), null, null, null, "test.pdf"));
   }
 
@@ -323,7 +323,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID nonExistentIssueId = UUID.randomUUID();
 
     assertThrows(
-        AiResourceNotFoundException.class,
+        ProjectNotFoundException.class,
         () ->
             issueEvidenceService.publishBlob(nonExistentIssueId, null, null, blobId, "report.pdf"));
   }
@@ -338,7 +338,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     insertStorageBlob(blobId);
 
     assertThrows(
-        AiResourceNotFoundException.class,
+        ProjectNotFoundException.class,
         () ->
             issueEvidenceService.publishBlob(
                 issue.getId(), agent, UUID.randomUUID(), blobId, "report.pdf"));

@@ -7,15 +7,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.PauseReason;
-import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
 
 import java.util.UUID;
 
@@ -65,18 +65,18 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
 
     String selfEdge = workflowJson(agent, agent, 3).replace("[\"DESIGN\"]", "[\"INIT\"]");
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.updateWorkflow(project.getId(), project.getVersion(), selfEdge));
 
     String unknownField =
         workflowJson(agent, agent, 3).replace("\"name\":\"设计\"", "\"name\":\"设计\",\"bogus\":1");
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.updateWorkflow(project.getId(), project.getVersion(), unknownField));
 
     String missingDone = "{\"states\":[{\"state\":\"INIT\",\"name\":\"待开始\"}]}";
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.updateWorkflow(project.getId(), project.getVersion(), missingDone));
 
     assertEquals(0L, projectService.getProject(project.getId()).getVersion());
@@ -92,7 +92,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
 
     assertThrows(
-        AiVersionConflictException.class,
+        ProjectVersionConflictException.class,
         () ->
             projectService.updateWorkflow(
                 project.getId(), project.getVersion(), workflowJson(agent, agent, 5)));
@@ -112,7 +112,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
 
     Project current = projectService.getProject(project.getId());
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             projectService.updateWorkflow(
                 current.getId(), current.getVersion(), workflowJson(agent, agent, 9)));
@@ -171,11 +171,11 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(project.getId());
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.transition(issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
     Issue inDesign = issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     assertThrows(
-        AiVersionConflictException.class,
+        ProjectVersionConflictException.class,
         () -> issueService.transition(issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
     assertEquals("DESIGN", inDesign.getState());
   }
@@ -196,7 +196,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
 
     Issue stillPaused = issueService.getIssue(issue.getId());
     assertThrows(
-        AiDuplicateException.class,
+        ProjectDuplicateException.class,
         () ->
             issueService.pauseIssue(
                 stillPaused.getId(),

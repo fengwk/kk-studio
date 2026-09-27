@@ -8,12 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.PauseReason;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -183,7 +183,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
 
     assertEquals(accepted.getId(), issueRunService.acceptRun(issue.getId(), acceptKey).getId());
     assertThrows(
-        AiValidationException.class, () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+        ProjectValidationException.class,
+        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -212,7 +213,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         "b".repeat(64));
 
     assertThrows(
-        AiDuplicateException.class, () -> issueRunService.acceptRun(issue.getId(), acceptKey));
+        ProjectDuplicateException.class, () -> issueRunService.acceptRun(issue.getId(), acceptKey));
 
     assertEquals(0L, count("select count(*) from harness_session"));
     assertEquals(0L, count("select count(*) from harness_thread"));
@@ -330,12 +331,12 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
 
     long activityCountBeforeRejection = activityCount(run.getIssueId());
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueRunService.completeRun(
                 run.getId(), run.getVersion(), key("complete"), detachedEntryId, null, "REVIEW"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueRunService.completeRun(
                 run.getId(),
@@ -363,7 +364,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueRunService.completeRun(
                 run.getId(),
@@ -432,7 +433,8 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertNull(cancelled.getError());
     assertEquals("USER", issueService.getIssue(issue.getId()).getPauseReason());
     assertThrows(
-        AiValidationException.class, () -> issueRunService.acceptRun(issue.getId(), key("accept")));
+        ProjectValidationException.class,
+        () -> issueRunService.acceptRun(issue.getId(), key("accept")));
   }
 
   /** WAITING/RUNNING 的重复置位是空重放：丢响应后的旧版本重试不再冲突，也不重复消耗额度或推进 Run 版本。 */
@@ -480,7 +482,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         "副作用不明");
 
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueRunService.resumeRun(waiting.getId(), waiting.getVersion()));
 
     IssueRun unchanged = issueRunService.getRun(waiting.getId());

@@ -19,23 +19,23 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.project.controller.IssueReconcileOutcome;
-import fun.fengwk.kkstudio.platform.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.platform.project.controller.IssueReconciler.IssueWorkClaim;
-import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueWork;
-import fun.fengwk.kkstudio.platform.project.model.PauseReason;
-import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
+import fun.fengwk.kkstudio.project.controller.IssueReconciler;
+import fun.fengwk.kkstudio.project.controller.IssueReconciler.IssueWorkClaim;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueActivity;
+import fun.fengwk.kkstudio.project.model.IssueActivityKind;
+import fun.fengwk.kkstudio.project.model.IssueRun;
+import fun.fengwk.kkstudio.project.model.IssueWork;
+import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
+import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -190,40 +190,40 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 1. resumeIssue 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.resumeIssue(unknownIssue.getId(), unknownIssue.getVersion(), key("r")));
 
     // 2. transition 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueService.transition(
                 unknownIssue.getId(), unknownIssue.getVersion(), key("t"), "REVIEW"));
 
     // 3. reopen 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.reopen(unknownIssue.getId(), unknownIssue.getVersion(), key("ro")));
 
     // 4. archive 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.archiveIssue(unknownIssue.getId(), unknownIssue.getVersion()));
 
     // 5. deleteIssue 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.deleteIssue(unknownIssue.getId(), unknownIssue.getVersion()));
 
     // 6. deleteProject 拒绝
     Project project = projectService.getProject(projectId);
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.deleteProject(projectId, project.getVersion()));
 
     // 7. acceptRun 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueRunService.acceptRun(unknownIssue.getId(), key("a")));
   }
 
@@ -249,7 +249,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 空白说明拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueService.resolveUnknown(
                 unknownIssue.getId(), unknownIssue.getVersion(), key("res"), "   "));
@@ -387,7 +387,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     // 1. 项目删除被拒绝（Issue 2 有活动 Run）
     Project project = projectService.getProject(projectId);
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.deleteProject(projectId, project.getVersion()));
 
     // 2. 将 Issue 2 置为 UNKNOWN 门禁
@@ -401,7 +401,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     // 项目删除依然拒绝（Issue 2 有 UNKNOWN 门禁）
     Project projectAfterUnknown = projectService.getProject(projectId);
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> projectService.deleteProject(projectId, projectAfterUnknown.getVersion()));
 
     // 3. 人工核查 Issue 2 并 resolveUnknown -> 转换为 USER 暂停门禁
@@ -530,14 +530,14 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 在已归档 Issue 上尝试修改需求、评论、流转等操作均被拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.updateIssue(archived.getId(), archived.getVersion(), "T", "D"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueService.appendComment(archived.getId(), archived.getVersion(), key("c"), "body"));
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.transition(archived.getId(), archived.getVersion(), key("t"), "DESIGN"));
 
     // 解归档回到可编辑状态
@@ -564,7 +564,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 非活动 Run 时投递指示拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () ->
             issueService.appendInstruction(
                 withComment.getId(), withComment.getVersion(), key("ins"), "Instruction text"));
@@ -576,7 +576,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 非 BLOCKED 状态调用 recover 拒绝
     assertThrows(
-        AiValidationException.class,
+        ProjectValidationException.class,
         () -> issueService.recoverIssue(inDesign.getId(), inDesign.getVersion(), key("rec_err")));
 
     // 业务阻塞
@@ -628,11 +628,11 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
 
     assertThrows(
-        AiVersionConflictException.class, () -> issueService.deleteIssue(issue.getId(), 999L));
+        ProjectVersionConflictException.class, () -> issueService.deleteIssue(issue.getId(), 999L));
 
     Project project = projectService.getProject(projectId);
     assertThrows(
-        AiVersionConflictException.class, () -> projectService.deleteProject(projectId, 999L));
+        ProjectVersionConflictException.class, () -> projectService.deleteProject(projectId, 999L));
   }
 
   private IssueWorkClaim claimWork() {

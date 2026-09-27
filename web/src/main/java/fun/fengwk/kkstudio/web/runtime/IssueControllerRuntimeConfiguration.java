@@ -7,10 +7,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerDispatcher;
-import fun.fengwk.kkstudio.platform.project.controller.IssueControllerProperties;
-import fun.fengwk.kkstudio.platform.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
+import fun.fengwk.kkstudio.project.controller.IssueReconciler;
+import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 
 import java.time.Clock;
 import java.util.concurrent.Executor;

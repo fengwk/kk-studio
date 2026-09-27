@@ -12,10 +12,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
-import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
 
 import java.util.Map;
 
@@ -34,7 +34,7 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void handlesVersionConflict() {
-    AiVersionConflictException ex = new AiVersionConflictException("project", "1", "2");
+    ProjectVersionConflictException ex = new ProjectVersionConflictException("project", "1", "2");
     ResponseEntity<Result<Void>> response = advice.handleVersionConflict(ex);
 
     assertEquals(409, response.getStatusCode().value());
@@ -49,8 +49,8 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void handlesDuplicateConflict() {
-    AiDuplicateException ex =
-        new AiDuplicateException("stage_budget", "Stage budget is already authorized");
+    ProjectDuplicateException ex =
+        new ProjectDuplicateException("stage_budget", "Stage budget is already authorized");
     ResponseEntity<Result<Void>> response = advice.handleDuplicate(ex);
 
     assertEquals(409, response.getStatusCode().value());
@@ -78,7 +78,7 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void handlesResourceNotFound() {
-    AiResourceNotFoundException ex = new AiResourceNotFoundException("issue");
+    ProjectNotFoundException ex = new ProjectNotFoundException("issue");
     ResponseEntity<Result<Void>> response = advice.handleResourceNotFound(ex);
 
     assertEquals(404, response.getStatusCode().value());
@@ -102,7 +102,7 @@ class StudioProjectErrorAdviceTest {
 
   @Test
   void handlesValidationAndRuntime() {
-    AiValidationException ex = new AiValidationException("title", "title is required");
+    ProjectValidationException ex = new ProjectValidationException("title", "title is required");
     ResponseEntity<Result<Void>> response = advice.handleValidation(ex);
 
     assertEquals(400, response.getStatusCode().value());

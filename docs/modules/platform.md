@@ -35,7 +35,7 @@ dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行�
 | [harness/read](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | `PlatformReadToolExecutor`、`PlatformSkillContentReader`、`PlatformResourceContentReader`、`ReadTextWindow` | 统一 `read` 的 path 路由：Skill Git cache 与 Session 授权的 Blob 文本读取，本地路径委托 `BoundEnvironment` |
 | [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | `HarnessCommandAcceptanceOrchestrator`、`SessionDeletionOrchestrator`、`PlatformCanvasCommandService`、`OwnerType` | 跨 owner 的 Harness 命令接受、深删除与 Canvas command |
 | [chat](../../platform/src/main/java/fun/fengwk/kkstudio/platform/chat) | `ChatServiceImpl` | Chat CRUD 与深删除 |
-| [project](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project) | `ProjectServiceImpl`、`IssueServiceImpl`、`IssueRunServiceImpl`、`IssueControllerDispatcher`、`IssueReconciler`、`ProjectHarnessContributor` | Project/Issue 生命周期与确定性 Reconciler |
+| [project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | `PlatformEvidenceBlobPort`、`PlatformHarnessCommandAcceptancePort`、`PlatformAgentBranchSettingsPort`、`PlatformIssueAgentSessionDeletionPort`、`ProjectHarnessContributor`、`IssueTransitionTool` | Project 端口实现与 Issue Agent 工具；领域、用例、持久化与 Reconciler 在 [project](project.md) 模块 |
 | [settings](../../platform/src/main/java/fun/fengwk/kkstudio/platform/settings) | `SystemSettingsServiceImpl`、`SystemSettingsSnapshot`、`SystemSettingsSchemaProvider` | 数据库单行全局设置与其内存快照 |
 | plugin | `StudioPluginRegistry`、`PluginCredentialStore`、`PluginResourceGateway` | 构建期 Plugin 发现、安全管理面、加密凭据与 Session Resource 桥接 |
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
@@ -501,101 +501,37 @@ Chat 本身不持有 Environment；具体 branch 的环境身份由该 branch �
 全部 Session，最后删除 Chat 行；`session_owner` 只表达 owner relation，不绕过 Session
 的 Harness/Blob 清理。
 
-[ProjectServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/ProjectServiceImpl.java)
-与 [IssueServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/IssueServiceImpl.java)
-提供 Project/Issue 的事务边界。Project 持有 `yoloEnabled`、`maxReviewRejections`、项目内单调 Issue
-编号、CAS `version` 与归档状态，没有 Coordinator Agent；Issue 持有七态生命周期、可空
-assignee/reviewer Agent、`version` 与归档状态。`yoloEnabled` 是 Issue Agent Branch 的工作策略快照，
-只要项目仍有活动 Run，或任一 Issue Agent Session 的工作 Branch 上还有未收尾的 Model/Tool 调用
-（`READY`/`DISPATCHING`/`RUNNING` 与 `WAITING_APPROVAL`），切换该策略就整体拒绝且不落地任何字段；
-判定全部来自数据库中的 Run 与 Harness 调用事实，不在 Project 锁内调用 runtime。状态迁移白名单由
-[IssueStatusTransition](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueStatusTransition.java)
-单点维护，action 与状态的对应关系以该类为准：
+Project 的领域规则、Issue/Run/Evidence 用例、PostgreSQL 持久化与 Reconciler 都归
+[Project 模块](project.md) 所有。platform 在这里只提供该模块无法自持的两类东西：
+跨宿主端口的实现，以及把 `Issue + Agent` 归属接入 Harness 的 Agent 工具。
 
-```text
-需求池 --READY--> 待处理 --START_EXECUTION--> 执行中 --SUBMIT--> 评审中 --APPROVE--> 完成
-待处理 <--DEFER-- 需求池         评审中 --REQUEST_CHANGES--> 待处理 / 阻塞
-阻塞 --RECOVER--> 待处理         阻塞 --RECOVER_TO_BACKLOG--> 需求池
-非终态 --CANCEL--> 已取消         完成/已取消 --REOPEN--> 待处理
-```
+### 跨宿主端口实现
 
-`BLOCKED`（阻塞）是七态里的独立状态：自动推进已停止、等待人处理，既不参与自动派发，也不等于「待处理
-但依赖未满足」。正式打回 `REQUEST_CHANGES` 始终是同一个业务动作，项目阈值只决定它的目标是
-待处理还是阻塞；已阻塞的 Issue 不能被自动流程重新唤醒，只能由人恢复或取消。
+[project/adapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter) 实现
+Project 模块声明的 4 个端口；它们都运行在调用方已有的物理事务里，不新开事务、不吞异常：
 
-依赖边只能连接同一 Project 的未归档 Issue，添加时在 Project 图锁下按 UUID 顺序锁两端
-并通过递归 CTE 拒绝环；增删依赖推进目标 Issue 的 `version`。
-`project_issue_activity` 是每 Issue 单调追加的唯一有序事实流（建单/改要求、定向指示、评论、人工
-输入、审查决定、恢复、重试与系统指令），可用 `idempotencyKey` 精确重放，并作为 Agent 的投递游标；
-正文约束 `body = btrim(body)`，只对非 `SPEC_CHANGE`/`REVIEW_DECISION` 要求非空。打回次数不落库，
-按「最近一次 `RECOVERY`/`SPEC_CHANGE` 之后、`REVIEW_DECISION` 且 `REQUEST_CHANGES` 的不同提交 Run」
-实时推导。显式重试最新 `FAILED`/`UNKNOWN` Run 只追加一条 `RETRY` 事实、不复活旧 Run：`UNKNOWN` 表示
-已派发调用的外部副作用是否发生不可判定，请求必须携带人工核对说明并写入该事实正文，同一
-`idempotencyKey` 只在请求完全相同时重放。
+| 端口实现 | 承接的宿主能力 |
+| --- | --- |
+| [`PlatformEvidenceBlobPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformEvidenceBlobPort.java) | 上传 `lockReady`/`delete` 与 Blob `retain`/`release`/`ACTIVE` 判定；storage 的「资源不存在」译为 Project not found，「未 READY/已 cleanup」译为 Project validation |
+| [`PlatformHarnessCommandAcceptancePort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformHarnessCommandAcceptancePort.java) | 以 `OwnerType.ISSUE_AGENT` owner 复用 [orchestration](../../platform/src/main/java/fun/fengwk/kkstudio/platform/orchestration) 的共享命令接受 |
+| [`PlatformAgentBranchSettingsPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformAgentBranchSettingsPort.java) | 复用 `AgentBranchSettingsMaterializer` 物化分支设置 |
+| [`PlatformIssueAgentSessionDeletionPort`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/adapter/PlatformIssueAgentSessionDeletionPort.java) | 复用 `SessionDeletionOrchestrator` 深删除该 owner 的 Harness Session |
 
-每个 `(Issue, Agent)` 由
-[IssueAgentSession](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/model/IssueAgentSession.java)
-绑定唯一 Session 与工作 Branch，并以 `OwnerType.ISSUE_AGENT_SESSION` 拥有 Harness Session：
-归属随 Issue 稳定并跨多次 Run 复用，权限始终随当前 Run 变化。
-[ProjectHarnessSessionBootstrapService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/session/ProjectHarnessSessionBootstrapService.java)
-按 `Project -> Issue -> IssueAgentSession` 锁序，在同一物理事务内原子创建 Session、ROOT、
-Thread、首条 Command、Work 与 owner relation；`project_issue_agent_session` 的 Session/Thread
-外键是 `DEFERRABLE INITIALLY DEFERRED`，让「先登记归属再接受命令」的引导期自引用在同一事务内闭合，
-而 `ON DELETE RESTRICT` 仍立即生效。数据库 `session_owner.session_id` 主键与排他弧 check 保证
-Chat、Canvas、IssueAgentSession 三类 owner 全局互斥。
+端口是两侧唯一的耦合面：Project 不 import platform 的任何类型，
+[ProjectArchitectureTest](../../project/src/test/java/fun/fengwk/kkstudio/project/ProjectArchitectureTest.java)
+守卫这条边界。
 
-[IssueEvidenceServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/service/impl/IssueEvidenceServiceImpl.java)
-管理 Issue **自有的**公开证据：`project_issue_evidence` 一行是 Issue 持有的一个已发布 Blob 引用
-（`origin = EXECUTOR | HUMAN`，PK `(issue_id, blob_id)`），与 Session 引用各自独立计数，不由 Session
-生命周期决定。公开只有两条入口，都发生在调用方业务事务内且都不复制字节：
+### Issue Agent 工具
 
-- **执行者 final**：最终答复里出现规范 `kkstudio:/resources/<blobId>`（严格小写、无查询参数；近似形态
-  一律不解析——`<blobId>/suffix`、`?query`、`#fragment` 或更长的 token 都整体不算引用，绝不从中截断出一个
-  文本里并不存在的标识）且**来源 Run 的 Session 在提交时确实持有该引用**时才发布；任一引用不被持有就让整个
-  `issue_submit` 失败，不产生部分证据，URI 本身不是权限凭据。
-- **人工附件**：人经 Issue 入口提交已 READY 的 `uploadId`，服务端在同一事务内完成
-  `lockReady -> retain Issue 引用 -> delete upload` 的引用转移，展示名取自上传行而不是客户端，并追加一条
-  HUMAN `COMMENT` 事实。
-
-发布与授权都是幂等的：证据行已存在时不再 retain（重复交付不双计），授权对当时已绑定的参与者 Session，
-以及在**发布之后**才引导的 Session（`ProjectHarnessSessionBootstrapService` 在命令接受后调用
-`grantPublishedEvidence`）都只补差集；没有任何通配可见性，未获授权的历史附件仍然不可读。授权失败让引导
-整体回滚，不会留下已接受命令却看不到公开证据的 Session。`issue_read` 以规范 URI 与元数据（来源、发布
-Run、展示名、发布时间）暴露最新的有界证据窗口；`SessionDeletionOrchestrator` 深删除 Session 只释放该
-Session 自己的引用，撤回标记也不回收过去已披露的内容，只有 Issue/Project 深删除才按
-`project_issue_evidence -> Issue 引用释放` 的顺序释放 Issue 持有的引用。
-
-[IssueControllerDispatcher](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueControllerDispatcher.java)
-只负责 `project_issue_work` 的短事务 claim、bounded handoff、合并 wake 与 poll；
-[IssueReconciler](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconciler.java)
-统一按 `Project(FOR UPDATE) -> Issue(FOR UPDATE) -> active Run -> work lease` 锁序与 fencing
-每次推进一个有界动作，处理依赖阻塞、Agent executor/reviewer Run、Harness bootstrap/inspection、
-输入 continuation、人工等待、deadline、continuation budget、retry/cancel 与人工阻塞/恢复；复用工作
-Branch 前先把 Harness Thread 的 YOLO 状态对齐到 Project 的 `yoloEnabled`；`(Issue, Agent)` 归属已
-存在时绝不重建 Session，只把本次 Run 的初始消息作为 Run 级幂等命令投递到既有 Thread，且投递前必须
-确认该 Branch 已收尾旧模型/工具调用与未消费命令。对齐失败、Branch 未收尾或命令游标过期都让本次
-reconcile 整体回滚重试：既不按与项目策略不符的 YOLO 启动 Run，也不把输入排到未收尾的 Branch 上。
-通知与 poll 都只是唤醒，
-数据库 work 行才是可恢复事实；claim/reconcile 由 lease token 与 claimed wake version 双重围栏，
-worker 拒绝、处理失败、节点退出或通知丢失都由归还、延迟重试、lease 过期和 periodic
-poll 收敛。
-
-[ProjectHarnessContributor](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHarnessContributor.java)
-注册 3 个 INTERNAL 角色工具，按 [ProjectRoleToolType](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectRoleToolType.java)
-划分归属：Executor 与 Reviewer 都获得 `issue_read`、`issue_request_input`，只有 Reviewer
-获得 `issue_review`；[ProjectThreadOwnerResolver](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectThreadOwnerResolver.java)
-从 Thread 的唯一 owner relation 解析角色与 Issue，不依赖模型自报；
-[ProjectRoleContextProjector](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectRoleContextProjector.java)
-只把可信 Run 元数据（issue/run/role/agent）注入系统指令，Issue 正文与 Activity 一律作为数据读取，
-绝不提升为指令。Project 深删除先锁 Project、Issues、Runs 并拒绝活动或 UNKNOWN Run，再按
-work -> Agent Session（`deleteSessionsByOwner`）-> Evidence（删证据行并逐行 release Issue 持有的
-Blob 引用，必须先于 Run 行，因为 `project_issue_evidence.run_id` 是 RESTRICT FK）-> Runs（先
-reviewer 后 executor）-> Activities/Dependencies/Issues -> Project 顺序清理，每个 CAS 删除都检查受影响行数。
-这些工具通过
-[ProjectHistoryRenderers](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/ProjectHistoryRenderers.java)
-提供历史语义动作：只保留动作与相关 issue/status/dependency 身份，省略
-`expected_version` 与 `observed_*` 并发游标、`description`/`summary` 等长正文；无法形成
-有意义动作时返回 absent，由 Runtime 中性回退。
+[project/tool](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool) 把 Issue 的
+`(Issue, Agent) -> Thread` 归属投影成受控工具面：`ProjectIssueTurnResolver` 与
+`DatabaseProjectIssueTurnResolver` 从 Harness Thread 解析唯一归属与当前阶段事实，
+`IssueTransitionTool` 是 Issue Agent Thread 唯一的业务写入口（只写
+`project_issue_run.next_state`），`ProjectThreadOwnerResolver` 从 owner relation 解析角色而不依赖
+模型自报，`ProjectHarnessContributor` 与 `ProjectToolConfiguration` 完成注册。校验规则复用 Project
+模块的 `ProjectWorkflowJsonCodec` 与 `IssueStateTransitions` 而不是复制状态机，工具边界把 Project
+错误译成平台错误类型；包级约定见
+[project/tool 包约定](../../platform/src/main/java/fun/fengwk/kkstudio/platform/project/tool/package-info.java)。
 
 ## SystemSettings
 
@@ -1091,7 +1027,7 @@ third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错�
 | --- | --- | --- |
 | Catalog、MCP | [catalog/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/)、[catalog/mcp/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/) | [`McpServerServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/mcp/service/McpServerServiceTest.java)、[`AgentDefinitionConfigCodecTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/catalog/definition/configuration/AgentDefinitionConfigCodecTest.java) |
 | Chat、跨 owner 事务 | [chat/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/)、[orchestration/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/orchestration/) | [`ChatServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/chat/ChatServiceIntegrationTest.java)、[`HarnessCommandAcceptanceOrchestratorTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestratorTest.java) |
-| Project、Issue | [project/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)、[project/controller/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/controller/)、[project/session/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/session/) | [`IssueReconcilerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/controller/IssueReconcilerTest.java)、[`ProjectHarnessSessionBootstrapServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/session/ProjectHarnessSessionBootstrapServiceTest.java) |
+| Project、Issue | [project/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/)、[project/tool/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/tool/) | [`IssueLifecycleIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueLifecycleIntegrationTest.java)、[`IssueReconcilerIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/IssueReconcilerIntegrationTest.java)、[`tool/IssueTransitionIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/project/tool/IssueTransitionIntegrationTest.java) |
 | Model、Tool 执行 | [harness/model/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/)、[harness/tool/gateway/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/) | [`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java) |
 | turn 解析与 prompt 物化 | [harness/thread/command/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/)、[harness/task/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/)、[harness/read/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/read/) | [`DatabaseTurnResolverTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolverTest.java)、[`AgentPromptComposerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposerTest.java) |
 | Environment | [environment/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/)、[environment/registry/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/) | [`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、[`EnvironmentServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImplTest.java) |
