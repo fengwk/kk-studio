@@ -19,15 +19,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonBool;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionStatus;
@@ -40,6 +44,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -60,7 +65,7 @@ class OpenCliCanvasFunctionAdaptersTest {
   private static final UUID RESOURCE_102 = new UUID(0L, 102L);
 
   @Test
-  void disabledAdaptersStillDeclareModelsWithoutLeakingConfiguration() {
+  void disabledAdaptersStillDeclareFunctionsWithoutLeakingConfiguration() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     GptImage2CanvasFunctionAdapter gpt =
         new GptImage2CanvasFunctionAdapter(adapterSnapshot(), client);
@@ -68,10 +73,10 @@ class OpenCliCanvasFunctionAdaptersTest {
         new SeedanceCanvasFunctionAdapter(adapterSnapshot(), client, MAPPER, ignored -> {});
 
     assertFalse(gpt.enabled());
-    assertEquals(1, gpt.models().size());
+    assertEquals(1, gpt.functions().size());
     assertEquals("GPT Image 2 generation is disabled", gpt.unavailableReason());
     assertFalse(seedance.enabled());
-    assertEquals(4, seedance.models().size());
+    assertEquals(4, seedance.functions().size());
     assertEquals("Seedance generation is disabled", seedance.unavailableReason());
   }
 
@@ -79,25 +84,18 @@ class OpenCliCanvasFunctionAdaptersTest {
   void gptImageUploadsInManifestOrderRendersGoldenArgvAndMaterializesExactlyOneImage() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
-    CanvasFunctionModel descriptor = adapter.models().get(0);
-    assertEquals("gpt-image-2", descriptor.key());
-    assertEquals("GPT Image 2", descriptor.label());
-    assertEquals(CanvasResourceKind.IMAGE, descriptor.outputKind());
-    assertEquals(20, descriptor.referencePolicy().maxReferences());
-    assertEquals(
-        List.of("auto", "1:1", "3:4", "9:16", "4:3", "16:9"),
-        descriptor.parameters().get(0).options());
-    assertEquals("auto", descriptor.parameters().get(0).defaultValue());
+    CanvasFunctionDefinition definition = adapter.functions().get(0);
+    assertEquals("gpt-image-2", definition.name());
+    assertEquals("GPT Image 2", definition.description());
+    assertEquals(CanvasResourceKind.IMAGE, definition.outputKind());
+    assertEquals(20, definition.referencePolicy().maxReferences());
+
     CanvasFunctionFrozenReference first = image(10L, 0, 100L, "first.png");
     CanvasFunctionFrozenReference second = image(11L, 0, 101L, "second.png");
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(
-                new TextSegment("Put "),
-                new ReferenceSegment(new UUID(0L, 11), 0),
-                new TextSegment(" behind "),
-                new ReferenceSegment(new UUID(0L, 10), 0)),
+            definition,
+            "Put [Reference image 2] behind [Reference image 1]",
             Map.of("ratio", "16:9"),
             List.of(first, second),
             "QUEUED",
@@ -120,7 +118,25 @@ class OpenCliCanvasFunctionAdaptersTest {
     RecordingContext context =
         new RecordingContext(Map.of(RESOURCE_100, bytes(100), RESOURCE_101, bytes(101)));
 
-    assertEquals(List.of(TARGET), adapter.execute(context, run));
+    adapter.submit(context, run);
+    Map<String, Object> submittedState =
+        Map.of("executionId", "gpt-exec", "uploads", context.lastAdapterState.get("uploads"));
+    CanvasFunctionFrozenRun submittedRun =
+        new CanvasFunctionFrozenRun(
+            CANVAS,
+            NODE,
+            "output",
+            REQUEST,
+            definition,
+            run.args(),
+            run.manifest(),
+            run.outputName(),
+            TARGET,
+            CanvasFunctionSubmitState.SUBMITTED,
+            "GPT_IMAGE_POLLING",
+            submittedState);
+
+    assertEquals(List.of(TARGET), adapter.execute(context, submittedRun));
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<String>> argv = ArgumentCaptor.forClass(List.class);
@@ -152,15 +168,15 @@ class OpenCliCanvasFunctionAdaptersTest {
     GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
     CanvasFunctionFrozenRun unknown =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("draw")),
+            adapter.functions().get(0),
+            "draw",
             Map.of("ratio", "auto"),
             List.of(),
             "GPT_IMAGE_SUBMITTING",
             Map.of());
-    IllegalStateException error =
+    CanvasFunctionUnknownException error =
         assertThrows(
-            IllegalStateException.class,
+            CanvasFunctionUnknownException.class,
             () -> adapter.execute(new RecordingContext(Map.of()), unknown));
     assertTrue(error.getMessage().contains("outcome unknown"));
     verify(client, never()).execute(any(), anyLong());
@@ -169,12 +185,12 @@ class OpenCliCanvasFunctionAdaptersTest {
     GptImage2CanvasFunctionAdapter secondAdapter = gptAdapter(secondClient);
     CanvasFunctionFrozenRun run =
         run(
-            secondAdapter.models().get(0),
-            List.of(new TextSegment("draw")),
+            secondAdapter.functions().get(0),
+            "draw",
             Map.of("ratio", "auto"),
             List.of(),
-            "QUEUED",
-            Map.of());
+            "GPT_IMAGE_POLLING",
+            Map.of("executionId", "bad", "uploads", List.of()));
     Execution bad =
         new Execution(
             "bad",
@@ -184,7 +200,6 @@ class OpenCliCanvasFunctionAdaptersTest {
             List.of(
                 new ExecutionResource("a.png", "image/png", 1L, null, "/api/resources/a"),
                 new ExecutionResource("b.png", "image/png", 1L, null, "/api/resources/b")));
-    when(secondClient.execute(any(), anyLong())).thenReturn(bad);
     when(secondClient.getExecution("bad", 0)).thenReturn(bad);
     assertThrows(
         OpenCliHubException.class,
@@ -215,8 +230,8 @@ class OpenCliCanvasFunctionAdaptersTest {
                 "/resources/date/upload/x.png")));
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("use "), new ReferenceSegment(new UUID(0L, 10), 0)),
+            adapter.functions().get(0),
+            "use it",
             Map.of("ratio", "1:1"),
             List.of(image(10L, 0, 100L, "x.png")),
             "GPT_IMAGE_POLLING",
@@ -245,8 +260,8 @@ class OpenCliCanvasFunctionAdaptersTest {
                 "/resources/safe/%2e%2e/outside.png")));
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("use "), new ReferenceSegment(new UUID(0L, 10), 0)),
+            adapter.functions().get(0),
+            "use it",
             Map.of("ratio", "1:1"),
             List.of(image(10L, 0, 100L, "x.png")),
             "GPT_IMAGE_POLLING",
@@ -264,14 +279,9 @@ class OpenCliCanvasFunctionAdaptersTest {
     SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, sleeps::add);
     assertEquals(
         List.of("seedance2.0", "seedance2.0fast", "seedance2.0_vip", "seedance2.0fast_vip"),
-        adapter.models().stream().map(CanvasFunctionModel::key).toList());
+        adapter.functions().stream().map(CanvasFunctionDefinition::name).toList());
     assertTrue(
-        adapter.models().stream()
-            .allMatch(model -> model.outputKind() == CanvasResourceKind.VIDEO));
-    assertEquals(
-        List.of("1:1", "3:4", "16:9", "4:3", "9:16", "21:9"),
-        adapter.models().get(0).parameters().get(0).options());
-    assertEquals(5, adapter.models().get(0).parameters().get(1).defaultValue());
+        adapter.functions().stream().allMatch(def -> def.outputKind() == CanvasResourceKind.VIDEO));
 
     CanvasFunctionFrozenReference image = image(10L, 0, 100L, "image.png");
     CanvasFunctionFrozenReference video =
@@ -280,14 +290,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         reference(12L, 0, 102L, CanvasResourceKind.AUDIO, "audio.mp3", "audio/mpeg", 3000L);
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(1),
-            List.of(
-                new TextSegment("Start "),
-                new ReferenceSegment(new UUID(0L, 11), 0),
-                new TextSegment(" then "),
-                new ReferenceSegment(new UUID(0L, 10), 0),
-                new TextSegment(" with "),
-                new ReferenceSegment(new UUID(0L, 12), 0)),
+            adapter.functions().get(1),
+            "Start @视频1 then @图片1 with @音频1",
             Map.of("ratio", "9:16", "duration", 4),
             List.of(image, video, audio),
             "QUEUED",
@@ -341,7 +345,28 @@ class OpenCliCanvasFunctionAdaptersTest {
         new RecordingContext(
             Map.of(RESOURCE_100, bytes(1), RESOURCE_101, bytes(2), RESOURCE_102, bytes(3)));
 
-    assertEquals(List.of(TARGET), adapter.execute(context, run));
+    adapter.submit(context, run);
+    Map<String, Object> submittedState =
+        Map.of(
+            "assetId", "0123456789abcdef",
+            "pollStartedAt", Instant.now().toString(),
+            "uploads", context.lastAdapterState.get("uploads"));
+    CanvasFunctionFrozenRun submittedRun =
+        new CanvasFunctionFrozenRun(
+            CANVAS,
+            NODE,
+            "output",
+            REQUEST,
+            adapter.functions().get(1),
+            run.args(),
+            run.manifest(),
+            run.outputName(),
+            TARGET,
+            CanvasFunctionSubmitState.SUBMITTED,
+            "SEEDANCE_STATUS_WAITING",
+            submittedState);
+
+    assertEquals(List.of(TARGET), adapter.execute(context, submittedRun));
 
     @SuppressWarnings("unchecked")
     ArgumentCaptor<List<String>> argv = ArgumentCaptor.forClass(List.class);
@@ -398,7 +423,7 @@ class OpenCliCanvasFunctionAdaptersTest {
   void seedancePreflightRejectsBadFormatDurationTotalsAndUnknownSubmittingOutcome() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
-    CanvasFunctionModel model = adapter.models().get(0);
+    CanvasFunctionDefinition def = adapter.functions().get(0);
     CanvasFunctionFrozenReference badCodec =
         reference(10L, 0, 100L, CanvasResourceKind.VIDEO, "bad.webp", "video/webp", 2000L);
     assertThrows(
@@ -406,8 +431,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         () ->
             adapter.preflight(
                 run(
-                    model,
-                    List.of(new TextSegment("x")),
+                    def,
+                    "x",
                     Map.of("ratio", "16:9", "duration", 5),
                     List.of(badCodec),
                     "QUEUED",
@@ -422,8 +447,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         () ->
             adapter.preflight(
                 run(
-                    model,
-                    List.of(new TextSegment("x")),
+                    def,
+                    "x",
                     Map.of("ratio", "16:9", "duration", 5),
                     tooLong,
                     "QUEUED",
@@ -431,14 +456,14 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     CanvasFunctionFrozenRun unknown =
         run(
-            model,
-            List.of(new TextSegment("x")),
+            def,
+            "x",
             Map.of("ratio", "16:9", "duration", 5),
             List.of(),
             "SEEDANCE_SUBMITTING",
             Map.of());
     assertThrows(
-        IllegalStateException.class,
+        CanvasFunctionUnknownException.class,
         () -> adapter.execute(new RecordingContext(Map.of()), unknown));
     verify(client, never()).execute(any(), anyLong());
 
@@ -451,8 +476,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         () ->
             adapter.preflight(
                 run(
-                    model,
-                    List.of(new TextSegment("x")),
+                    def,
+                    "x",
                     Map.of("ratio", "16:9", "duration", 5),
                     tooManyImages,
                     "QUEUED",
@@ -484,8 +509,8 @@ class OpenCliCanvasFunctionAdaptersTest {
     state.put("pollStartedAt", Instant.now().toString());
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("x")),
+            adapter.functions().get(0),
+            "x",
             Map.of("ratio", "16:9", "duration", 5),
             List.of(),
             "SEEDANCE_STATUS_POLLING",
@@ -519,8 +544,8 @@ class OpenCliCanvasFunctionAdaptersTest {
       state.put("pollStartedAt", Instant.now().toString());
       CanvasFunctionFrozenRun run =
           run(
-              adapter.models().get(0),
-              List.of(new TextSegment("x")),
+              adapter.functions().get(0),
+              "x",
               Map.of("ratio", "16:9", "duration", 5),
               List.of(),
               "SEEDANCE_STATUS_POLLING",
@@ -545,8 +570,8 @@ class OpenCliCanvasFunctionAdaptersTest {
     state.put("pollStartedAt", Instant.now().toString());
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("x")),
+            adapter.functions().get(0),
+            "x",
             Map.of("ratio", "16:9", "duration", 5),
             List.of(),
             "SEEDANCE_STATUS_WAITING",
@@ -566,8 +591,8 @@ class OpenCliCanvasFunctionAdaptersTest {
           .thenReturn(new Execution("existing", status, "", "", List.of()));
       CanvasFunctionFrozenRun run =
           run(
-              adapter.models().get(0),
-              List.of(new TextSegment("draw")),
+              adapter.functions().get(0),
+              "draw",
               Map.of("ratio", "auto"),
               List.of(),
               "GPT_IMAGE_POLLING",
@@ -597,8 +622,8 @@ class OpenCliCanvasFunctionAdaptersTest {
             new HubResourceStream(new ByteArrayInputStream(new byte[] {1}), 1L, "image/png"));
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("draw")),
+            adapter.functions().get(0),
+            "draw",
             Map.of("ratio", "auto"),
             List.of(),
             "GPT_IMAGE_POLLING",
@@ -609,8 +634,8 @@ class OpenCliCanvasFunctionAdaptersTest {
 
     CanvasFunctionFrozenRun noExecution =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("draw")),
+            adapter.functions().get(0),
+            "draw",
             Map.of("ratio", "auto"),
             List.of(),
             "QUEUED",
@@ -623,15 +648,6 @@ class OpenCliCanvasFunctionAdaptersTest {
   void seedanceSubmissionRecoveryUsesNotFoundAsRetryThenMaterializesReadyVideo() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
-    when(client.getExecution("submit-existing", 0))
-        .thenReturn(
-            new Execution(
-                "submit-existing",
-                ExecutionStatus.SUCCEEDED,
-                "{\"status\":\"submitted\",\"submitted\":true,"
-                    + "\"assetId\":\"0123456789abcdef\"}",
-                "",
-                List.of()));
     when(client.execute(any(), anyLong()))
         .thenReturn(
             new Execution("status-1", ExecutionStatus.PENDING, "", "", List.of()),
@@ -659,12 +675,18 @@ class OpenCliCanvasFunctionAdaptersTest {
             new HubResourceStream(new ByteArrayInputStream(new byte[] {8}), 1L, "video/mp4"));
     CanvasFunctionFrozenRun run =
         run(
-            adapter.models().get(0),
-            List.of(new TextSegment("x")),
+            adapter.functions().get(0),
+            "x",
             Map.of("ratio", "16:9", "duration", 5),
             List.of(),
-            "SEEDANCE_SUBMISSION_POLLING",
-            Map.of("executionId", "submit-existing", "uploads", List.of()));
+            "SEEDANCE_STATUS_WAITING",
+            Map.of(
+                "assetId",
+                "0123456789abcdef",
+                "pollStartedAt",
+                Instant.now().toString(),
+                "uploads",
+                List.of()));
     RecordingContext context = new RecordingContext(Map.of());
 
     assertEquals(List.of(TARGET), adapter.execute(context, run));
@@ -683,20 +705,21 @@ class OpenCliCanvasFunctionAdaptersTest {
             "not-json")) {
       OpenCliHubClient client = mock(OpenCliHubClient.class);
       SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
-      when(client.getExecution("submit-existing", 0))
+      when(client.execute(any(), anyLong()))
+          .thenReturn(new Execution("submit-exec", ExecutionStatus.PENDING, "", "", List.of()));
+      when(client.getExecution("submit-exec", 0))
           .thenReturn(
-              new Execution("submit-existing", ExecutionStatus.SUCCEEDED, stdout, "", List.of()));
+              new Execution("submit-exec", ExecutionStatus.SUCCEEDED, stdout, "", List.of()));
       CanvasFunctionFrozenRun run =
           run(
-              adapter.models().get(0),
-              List.of(new TextSegment("x")),
+              adapter.functions().get(0),
+              "x",
               Map.of("ratio", "16:9", "duration", 5),
               List.of(),
-              "SEEDANCE_SUBMISSION_POLLING",
-              Map.of("executionId", "submit-existing", "uploads", List.of()));
+              "QUEUED",
+              Map.of());
       assertThrows(
-          OpenCliHubException.class, () -> adapter.execute(new RecordingContext(Map.of()), run));
-      verify(client, never()).execute(any(), anyLong());
+          OpenCliHubException.class, () -> adapter.submit(new RecordingContext(Map.of()), run));
     }
 
     for (String stdout :
@@ -779,8 +802,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         () ->
             gpt.preflight(
                 run(
-                    gpt.models().get(0),
-                    List.of(new TextSegment("x")),
+                    gpt.functions().get(0),
+                    "x",
                     Map.of("ratio", "auto"),
                     List.of(video),
                     "QUEUED",
@@ -794,8 +817,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         () ->
             seedance.preflight(
                 run(
-                    seedance.models().get(0),
-                    List.of(new TextSegment("x")),
+                    seedance.functions().get(0),
+                    "x",
                     Map.of("ratio", "16:9", "duration", 5),
                     List.of(text),
                     "QUEUED",
@@ -807,8 +830,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         () ->
             seedance.preflight(
                 run(
-                    seedance.models().get(0),
-                    List.of(new TextSegment("x")),
+                    seedance.functions().get(0),
+                    "x",
                     Map.of("ratio", "16:9", "duration", 5),
                     List.of(malformedAudio),
                     "QUEUED",
@@ -823,8 +846,8 @@ class OpenCliCanvasFunctionAdaptersTest {
                 "resourceId", new UUID(0L, 999L).toString(), "resourcePath", "/resources/a.png")));
     CanvasFunctionFrozenRun recovery =
         run(
-            gpt.models().get(0),
-            List.of(new TextSegment("x")),
+            gpt.functions().get(0),
+            "x",
             Map.of("ratio", "auto"),
             List.of(image(10L, 0, 100L, "a.png")),
             "GPT_IMAGE_POLLING",
@@ -855,8 +878,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         .thenReturn(new HubResourceStream(closeFailure, 1L, "image/png"));
     CanvasFunctionFrozenRun gptRun =
         run(
-            gpt.models().get(0),
-            List.of(new TextSegment("x")),
+            gpt.functions().get(0),
+            "x",
             Map.of("ratio", "auto"),
             List.of(),
             "GPT_IMAGE_POLLING",
@@ -905,8 +928,8 @@ class OpenCliCanvasFunctionAdaptersTest {
       state.put("pollStartedAt", pollStartedAt);
     }
     return run(
-        adapter.models().get(0),
-        List.of(new TextSegment("x")),
+        adapter.functions().get(0),
+        "x",
         Map.of("ratio", "16:9", "duration", 5),
         List.of(),
         executionId == null ? "SEEDANCE_STATUS_WAITING" : "SEEDANCE_STATUS_POLLING",
@@ -962,22 +985,38 @@ class OpenCliCanvasFunctionAdaptersTest {
   }
 
   private static CanvasFunctionFrozenRun run(
-      CanvasFunctionModel model,
-      List<CanvasFunctionConfig.PromptSegment> segments,
+      CanvasFunctionDefinition definition,
+      String prompt,
       Map<String, Object> parameters,
       List<CanvasFunctionFrozenReference> manifest,
       String stage,
       Map<String, Object> state) {
+    Map<String, CanvasJson> argsMap = new LinkedHashMap<>();
+    if (prompt != null) {
+      argsMap.put("prompt", new JsonText(prompt));
+    }
+    if (parameters != null) {
+      for (Map.Entry<String, Object> entry : parameters.entrySet()) {
+        if (entry.getValue() instanceof String s) {
+          argsMap.put(entry.getKey(), new JsonText(s));
+        } else if (entry.getValue() instanceof Number n) {
+          argsMap.put(entry.getKey(), new JsonNumber(new BigDecimal(n.toString())));
+        } else if (entry.getValue() instanceof Boolean b) {
+          argsMap.put(entry.getKey(), new JsonBool(b));
+        }
+      }
+    }
     return new CanvasFunctionFrozenRun(
         CANVAS,
         NODE,
         "output",
         REQUEST,
-        model,
-        new CanvasFunctionConfig(segments, parameters),
+        definition,
+        new JsonObject(argsMap),
         manifest,
-        model.outputKind() == CanvasResourceKind.IMAGE ? "output.png" : "output.mp4",
+        definition.outputKind() == CanvasResourceKind.IMAGE ? "output.png" : "output.mp4",
         TARGET,
+        CanvasFunctionSubmitState.SUBMITTED,
         stage,
         state);
   }
@@ -1004,31 +1043,36 @@ class OpenCliCanvasFunctionAdaptersTest {
         kind,
         name,
         mediaType,
-        3L,
-        16L,
-        16L,
+        100L,
+        kind == CanvasResourceKind.IMAGE ? 512L : 512L,
+        kind == CanvasResourceKind.IMAGE ? 512L : 512L,
         durationMs);
   }
 
-  private static byte[] bytes(int value) {
-    return new byte[] {(byte) value, (byte) (value + 1), (byte) (value + 2)};
+  private static byte[] bytes(int length) {
+    return new byte[length];
   }
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {
-
-    private final Map<UUID, byte[]> originals;
-    private final List<UUID> openedResourceIds = new ArrayList<>();
+    private final Map<UUID, byte[]> resources;
     private final List<String> stages = new ArrayList<>();
+    private final List<UUID> openedResourceIds = new ArrayList<>();
+    private Map<String, Object> lastAdapterState = Map.of();
     private byte[] materialized;
     private boolean running = true;
 
-    private RecordingContext(Map<UUID, byte[]> originals) {
-      this.originals = originals;
+    private RecordingContext(Map<UUID, byte[]> resources) {
+      this.resources = resources;
+    }
+
+    void stop() {
+      running = false;
     }
 
     @Override
     public void checkpoint(String stage, Map<String, Object> adapterState) {
       stages.add(stage);
+      this.lastAdapterState = adapterState;
     }
 
     @Override
@@ -1036,19 +1080,15 @@ class OpenCliCanvasFunctionAdaptersTest {
       return running;
     }
 
-    private void stop() {
-      running = false;
-    }
-
     @Override
     public CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference) {
       openedResourceIds.add(reference.resourceId());
-      byte[] bytes = originals.get(reference.resourceId());
-      if (bytes == null) {
-        throw new AssertionError("unexpected original " + reference.resourceId());
+      byte[] data = resources.get(reference.resourceId());
+      if (data == null) {
+        throw new IllegalArgumentException("unknown fixture resource: " + reference.resourceId());
       }
       return new CanvasFunctionResourceStream(
-          new ByteArrayInputStream(bytes), bytes.length, () -> {});
+          new ByteArrayInputStream(data), (long) data.length, () -> {});
     }
 
     @Override
@@ -1061,7 +1101,7 @@ class OpenCliCanvasFunctionAdaptersTest {
       try {
         materialized = content.readAllBytes();
       } catch (IOException exception) {
-        throw new IllegalStateException(exception);
+        throw new UncheckedIOException(exception);
       }
       return targetResourceId;
     }

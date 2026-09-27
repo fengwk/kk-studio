@@ -46,15 +46,15 @@ applyCommands(canvasId, expectedVersion, idempotencyKey, commands)
 
 ## Function：能力与执行边界
 
-Function 能力在启动装配时由 [`CanvasFunctionCatalog.from(...)`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalog.java) 冻结成唯一快照：每个 adapter 的 `enabled()`、`unavailableReason()`、`models()` 各读取一次；model key 去重后按字典序排列；enabled adapter 不得声明 unavailable reason，disabled adapter 必须有非空原因。运行期只通过 `require(modelKey)` 读取已冻结的 `RegisteredModel`，不存在第二份 registry。
+Function 能力在启动装配时由 [`CanvasFunctionCatalog.from(...)`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalog.java) 冻结成唯一快照：每个 adapter 的 `enabled()`、`unavailableReason()`、`functions()` 各读取一次；function name 去重后按字典序排列；enabled adapter 不得声明 unavailable reason，disabled adapter 必须有非空原因。运行期只通过 `require(name)` 读取已冻结的 `RegisteredFunction`，不存在第二份 registry。
 
-[`CanvasFunctionAdapter`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionAdapter.java) 只有 `models/preflight/execute/cancel` 加可用性信息。[`CanvasFunctionModel`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionModel.java) 声明小写 canonical token 形式的 `key`、输出类型与 [`CanvasFunctionReferencePolicy`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionReferencePolicy.java)；v1 的 `outputKind` 只能是 `IMAGE` 或 `VIDEO`，引用策略不允许包含 `TEXT`，`maxByKind` 不得超过 `maxReferences`。参数定义支持 `ENUM` 与 `INTEGER` 两种类型，enum 选项不重复、integer 必须给出有序 `min/max`。
+[`CanvasFunctionAdapter`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionAdapter.java) 提供 `functions/enabled/unavailableReason/preflight/submit/execute/cancel`。[`CanvasFunctionDefinition`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionDefinition.java) 声明小写 canonical token 形式的 `name`、`description`、[`CanvasFunctionArgsSchema`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsSchema.java)、输出类型与 [`CanvasFunctionReferencePolicy`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionReferencePolicy.java)；`outputKind` 为 `IMAGE` 或 `VIDEO`。参数 schema 是严格 JSON Schema 子集（根对象、`additionalProperties: false`，属性关键字支持 `type/description/enum/default/minimum/maximum/items/minItems/maxItems`，类型支持 `object|string|integer|number|boolean|array|resourceReference`，禁止嵌套 object，array 必须声明 `items` 且 `maxItems <= 32`）。
 
-配置与运行状态各有一个严格的 codec port。[`CanvasFunctionConfigCodecPort`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionConfigCodecPort.java) 在解码时按 model 的参数定义拒绝未知字段、重复键、null、未声明参数与类型错误，并按引用首次出现顺序生成 manifest；[`CanvasFunctionRunStateCodecPort`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunStateCodecPort.java) 冻结完整执行计划与 checkpoint，版本号不匹配即拒绝。
+参数与运行状态各有一个严格的 codec port。[`CanvasFunctionArgsCodecPort`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsCodecPort.java) 在解码时按 Function 的 schema 严格校验 `JsonObject` 参数，拒绝未知字段、重复键、null、未声明参数与类型错误，并按引用首次出现顺序生成 manifest；[`CanvasFunctionRunStateCodecPort`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunStateCodecPort.java) 冻结完整执行计划（含 args、[`CanvasFunctionSubmitState`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionSubmitState.java) 与 adapterState）与 checkpoint，版本号不匹配即拒绝。
 
-Run 启动时冻结的东西写在 [`CanvasFunctionFrozenRun`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java) 里：canvas/node identity、model、config、manifest、输出名、**预分配的目标 resource id**、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存的是启动瞬间的 source node、resource 与 blob identity，外加权威媒体事实快照——因此执行期间 graph link、source 资源或 Function 配置的变化都不会改变该 Run 的输入。目标资源先以无 owner 形式物化，成功时再原子挂接。
+Run 启动时冻结的东西写在 [`CanvasFunctionFrozenRun`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java) 里：canvas/node identity、function definition、args、manifest、输出名、**预分配的目标 resource id**、submitState、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存的是启动瞬间的 source node、resource 与 blob identity，外加权威媒体事实快照——因此执行期间 graph link、source 资源或 Function 配置的变化都不会改变该 Run 的输入。目标资源先以无 owner 形式物化，成功时再原子挂接。
 
-Adapter 通过 [`CanvasFunctionExecutionContext`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 拿到最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读 frozen 原件的 `openOriginal`/`presignOriginal`，以及只能写冻结目标 id 的 `materializeTarget`。媒体事实与字节走 [`CanvasFunctionBlobAccess`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionBlobAccess.java)，它只暴露 `BlobFacts`、原件 stream 和短期 URL。adapter 看不到数据库、对象 key 或 pin 表。
+Adapter 分为两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询与物化预分配目标 resource id。Adapter 通过 [`CanvasFunctionExecutionContext`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 拿到最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读 frozen 原件的 `openOriginal`/`presignOriginal`，以及只能写冻结目标 id 的 `materializeTarget`。媒体事实与字节走 [`CanvasFunctionBlobAccess`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionBlobAccess.java)，它只暴露 `BlobFacts`、原件 stream 和短期 URL。adapter 看不到数据库、对象 key 或 pin 表。
 
 [`CanvasFunctionRun`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRun.java) 的状态字段组合由构造期校验固定：
 
@@ -62,16 +62,17 @@ Adapter 通过 [`CanvasFunctionExecutionContext`](../../canvas/core/src/main/jav
 | --- | --- |
 | `READY` | 必须有 `availableAt`，不得持有 lease |
 | `RUNNING` | 必须持有 `leaseToken`/`leaseUntil`，`availableAt` 为空 |
-| `SUCCEEDED` / `FAILED` / `CANCELLED` | 三者皆空，终态不可再被 claim |
+| `SUCCEEDED` / `CANCELLED` | 三者皆空，终态不可再被 claim |
+| `FAILED` / `UNKNOWN` | lease 与 availableAt 皆空，必须持有非空 `error` |
 
-`attempt` 非负，lease token 为 1～128 字符。Run 对资源生命周期的保护由 [`CanvasFunctionResourcePin`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePin.java) 表达：`INPUT` 是启动时冻结的引用资源，`OUTPUT` 是预分配目标资源；pin 按 `(canvasId, nodeId, requestId)` 整体释放，不引入通用引用计数。
+`attempt` 非负，lease token 为 1～128 字符。Run 对资源生命周期的保护由 [`CanvasFunctionResourcePin`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePin.java) 表达：`INPUT` 是启动时冻结的引用资源，`OUTPUT` 是预分配目标资源；pin 按 `(canvasId, nodeId, requestId)` 整体释放，不引入通用引用计数。执行中若提交意图已持久化（`SUBMITTING`）但进程崩溃，租约到期后转为 `UNKNOWN` 状态并保留 pin 与目标资源，退出自动调度，绝不重试提交。人工核对后可通过 [`CanvasFunctionService.resolve`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionService.java) 传入 [`CanvasFunctionUnknownResolution`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownResolution.java)（`RESUME` 回到 READY 继续查询，`FAILED` / `CANCELLED` 释放 pin 与目标资源）。
 
 ## 不变量
 
 - `version >= 0` 且每次成功命令批或 Run 状态前进恰好 +1；CAS 失败或命令非法时不得产生部分 Patch。
 - Resource 内容 XOR、owner/index 成对必须成立；节点内资源同属一个 Canvas、owner 指向本节点、内容类型一致。
 - Function Run 的状态与 available/lease 字段组合必须匹配上表；终态 Run 只允许被新的 requestId 取代，活跃 Run 不允许被第二个 requestId 覆盖。
-- Catalog 是启动期冻结快照，运行期模型能力与可用性不再变化；config/state codec 对未知字段、重复字段与版本漂移一律 fail closed。
+- Catalog 是启动期冻结快照，运行期函数能力与可用性不再变化；args/state codec 对未知字段、重复字段与版本漂移一律 fail closed。
 - Core 只表达可验证的 transition。lease、heartbeat、S3 字节、PostgreSQL 回滚与迟到回调的围栏由 [canvas-infra](canvas-infra.md) 负责；以 token 失效收敛为 no-op 或内部取消。
 
 ## 从哪里改
@@ -84,7 +85,7 @@ Adapter 通过 [`CanvasFunctionExecutionContext`](../../canvas/core/src/main/jav
 
 - [`CanvasCoreArchitectureTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasCoreArchitectureTest.java) 守卫零生产依赖、包边界与 Catalog 单一事实源；新增第三方 import 会直接失败。
 - [`CanvasDomainSmokeTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/CanvasDomainSmokeTest.java) 覆盖 document/resource/node 的构造期不变量、集合 defensive copy、group 命令与 Link 身份。
-- [`CanvasFunctionCatalogTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalogTest.java) 锁定可用性声明与冻结排序；[`CanvasFunctionModelTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionModelTest.java) 与 [`CanvasFunctionFrozenTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenTest.java) 锁定 model key、参数定义与冻结引用的媒体事实。
+- [`CanvasFunctionCatalogTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalogTest.java) 锁定可用性声明与冻结排序；[`CanvasFunctionDefinitionTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionDefinitionTest.java)、[`CanvasFunctionArgsSchemaTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsSchemaTest.java) 与 [`CanvasFunctionFrozenTest.java`](../../canvas/core/src/test/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenTest.java) 锁定 Function 定义、参数 Schema 校验与冻结引用的媒体事实。
 
 ---
 

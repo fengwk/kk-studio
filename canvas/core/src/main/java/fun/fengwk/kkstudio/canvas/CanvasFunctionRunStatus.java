@@ -15,5 +15,12 @@ public enum CanvasFunctionRunStatus {
   FAILED,
 
   /** 函数执行已被主动取消。 */
-  CANCELLED
+  CANCELLED,
+
+  /**
+   * 外部提交结果不明，自动调度已退出。
+   *
+   * <p>保留本次 pin 与冻结计划，只能由人工核查事实后解除：继续查询原任务或确认失败/取消，不得当作新请求重新提交。
+   */
+  UNKNOWN
 }

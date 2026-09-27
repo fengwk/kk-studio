@@ -2,12 +2,13 @@ package fun.fengwk.kkstudio.platform.canvas.function.fake;
 
 import org.springframework.core.io.ClassPathResource;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 
 import java.io.IOException;
@@ -26,42 +27,99 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
   private static final String VIDEO_FIXTURE =
       "fun/fengwk/kkstudio/platform/canvas/function/fake/tiny.mp4";
 
-  private static final CanvasFunctionModel IMAGE_MODEL =
-      new CanvasFunctionModel(
+  private static final JsonObject IMAGE_ARGS_SCHEMA =
+      CanvasJson.parseObject(
+          """
+          {
+            "type": "object",
+            "description": "Fake image parameters",
+            "additionalProperties": false,
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Prompt text"
+              },
+              "ratio": {
+                "type": "string",
+                "description": "Ratio",
+                "enum": ["AUTO", "1:1", "3:4", "9:16", "4:3", "16:9"],
+                "default": "AUTO"
+              },
+              "references": {
+                "type": "array",
+                "description": "References",
+                "items": {
+                  "type": "resourceReference",
+                  "description": "Resource reference"
+                },
+                "minItems": 0,
+                "maxItems": 12
+              }
+            }
+          }
+          """);
+
+  private static final JsonObject VIDEO_ARGS_SCHEMA =
+      CanvasJson.parseObject(
+          """
+          {
+            "type": "object",
+            "description": "Fake video parameters",
+            "additionalProperties": false,
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Prompt text"
+              },
+              "ratio": {
+                "type": "string",
+                "description": "Ratio",
+                "enum": ["1:1", "3:4", "16:9", "4:3", "9:16", "21:9"],
+                "default": "16:9"
+              },
+              "duration": {
+                "type": "integer",
+                "description": "Duration",
+                "minimum": 4,
+                "maximum": 15,
+                "default": 5
+              },
+              "references": {
+                "type": "array",
+                "description": "References",
+                "items": {
+                  "type": "resourceReference",
+                  "description": "Resource reference"
+                },
+                "minItems": 0,
+                "maxItems": 12
+              }
+            }
+          }
+          """);
+
+  private static final CanvasFunctionDefinition IMAGE_FUNCTION =
+      new CanvasFunctionDefinition(
           "fake-image",
           "Fake Image",
+          IMAGE_ARGS_SCHEMA,
           CanvasResourceKind.IMAGE,
-          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 12, Map.of()),
-          List.of(
-              CanvasFunctionParameterDefinition.enumParameter(
-                  "ratio",
-                  "Ratio",
-                  false,
-                  "AUTO",
-                  List.of("AUTO", "1:1", "3:4", "9:16", "4:3", "16:9"))));
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 12, Map.of()));
 
-  private static final CanvasFunctionModel VIDEO_MODEL =
-      new CanvasFunctionModel(
+  private static final CanvasFunctionDefinition VIDEO_FUNCTION =
+      new CanvasFunctionDefinition(
           "fake-video",
           "Fake Video",
+          VIDEO_ARGS_SCHEMA,
           CanvasResourceKind.VIDEO,
           new CanvasFunctionReferencePolicy(
               Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.VIDEO, CanvasResourceKind.AUDIO),
               12,
-              Map.of(CanvasResourceKind.VIDEO, 3, CanvasResourceKind.AUDIO, 3)),
-          List.of(
-              CanvasFunctionParameterDefinition.enumParameter(
-                  "ratio",
-                  "Ratio",
-                  true,
-                  null,
-                  List.of("1:1", "3:4", "16:9", "4:3", "9:16", "21:9")),
-              CanvasFunctionParameterDefinition.integerParameter(
-                  "duration", "Duration", false, 5, 4, 15)));
+              Map.of(CanvasResourceKind.VIDEO, 3, CanvasResourceKind.AUDIO, 3)));
 
   @Override
-  public List<CanvasFunctionModel> models() {
-    return List.of(IMAGE_MODEL, VIDEO_MODEL);
+  public List<CanvasFunctionDefinition> functions() {
+    return List.of(IMAGE_FUNCTION, VIDEO_FUNCTION);
   }
 
   @Override
@@ -76,10 +134,15 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public void preflight(CanvasFunctionFrozenRun run) {
-    if (!run.model().key().equals(IMAGE_MODEL.key())
-        && !run.model().key().equals(VIDEO_MODEL.key())) {
-      throw new IllegalArgumentException("unsupported fake model: " + run.model().key());
+    if (!run.definition().name().equals(IMAGE_FUNCTION.name())
+        && !run.definition().name().equals(VIDEO_FUNCTION.name())) {
+      throw new IllegalArgumentException("unsupported fake function: " + run.definition().name());
     }
+  }
+
+  @Override
+  public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+    context.checkpoint("FAKE_SUBMITTED", Map.of());
   }
 
   @Override
@@ -95,10 +158,8 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   private static String fixture(CanvasFunctionFrozenRun run) {
-    return run.model().outputKind() == CanvasResourceKind.IMAGE ? IMAGE_FIXTURE : VIDEO_FIXTURE;
-  }
-
-  private static String mediaType(CanvasFunctionFrozenRun run) {
-    return run.model().outputKind() == CanvasResourceKind.IMAGE ? "image/png" : "video/mp4";
+    return run.definition().outputKind() == CanvasResourceKind.IMAGE
+        ? IMAGE_FIXTURE
+        : VIDEO_FIXTURE;
   }
 }

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonSubTypes;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -33,10 +34,7 @@ class CanvasDtoContractTest {
     "CanvasResourceDTO.height",
     "CanvasResourceDTO.durationMs",
     "CanvasFunctionRunDTO.error",
-    "CanvasFunctionModelDTO.unavailableReason",
-    "CanvasFunctionParameterDefinitionDTO.defaultValue",
-    "CanvasFunctionParameterDefinitionDTO.min",
-    "CanvasFunctionParameterDefinitionDTO.max"
+    "CanvasFunctionDefinitionDTO.unavailableReason"
   };
 
   /** durable 位置与版本游标在 wire 上永远是十进制字符串，避免 JS 丢精度。 */
@@ -128,6 +126,28 @@ class CanvasDtoContractTest {
     assertEquals(Map.of("Keep", "KEEP", "Text", "TEXT", "Blob", "BLOB"), actual);
   }
 
+  /** Function 目录以 name/description/argsSchema 为身份，不再传 model/prompt/参数类型。 */
+  @Test
+  void functionCatalogExposesNameDescriptionAndArgsSchema() {
+    assertEquals(
+        Map.of(
+            "name", "String",
+            "description", "String",
+            "argsSchema", "Map",
+            "outputKind", "String",
+            "referencePolicy", "CanvasFunctionReferencePolicyDTO",
+            "available", "Boolean",
+            "unavailableReason", "String"),
+        componentTypes(CanvasFunctionDefinitionDTO.class));
+    for (String removed :
+        new String[] {"CanvasFunctionModelDTO", "CanvasFunctionParameterDefinitionDTO"}) {
+      assertThrows(
+          ClassNotFoundException.class,
+          () -> Class.forName("fun.fengwk.kkstudio.share.canvas." + removed),
+          removed + " must not survive as a model/parameter compatibility model");
+    }
+  }
+
   /** Function 只有 name 与自由 args，目录不假设 model/prompt/provider。 */
   @Test
   void functionExposesNameAndArgsOnly() {
@@ -214,10 +234,18 @@ class CanvasDtoContractTest {
         "Canvas document ownership is represented by session_owner relations");
   }
 
-  private static Map<String, String> componentTypes(Class<?> record) {
+  private static Map<String, String> componentTypes(Class<?> type) {
     Map<String, String> components = new LinkedHashMap<>();
-    for (RecordComponent component : record.getRecordComponents()) {
-      components.put(component.getName(), component.getType().getSimpleName());
+    if (type.isRecord()) {
+      for (RecordComponent component : type.getRecordComponents()) {
+        components.put(component.getName(), component.getType().getSimpleName());
+      }
+    } else {
+      for (Field field : type.getDeclaredFields()) {
+        if (!Modifier.isStatic(field.getModifiers())) {
+          components.put(field.getName(), field.getType().getSimpleName());
+        }
+      }
     }
     return components;
   }

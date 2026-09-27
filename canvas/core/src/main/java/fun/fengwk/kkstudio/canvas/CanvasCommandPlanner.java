@@ -550,7 +550,8 @@ public final class CanvasCommandPlanner {
         return false;
       }
       if (node.run.status() == CanvasFunctionRunStatus.READY
-          || node.run.status() == CanvasFunctionRunStatus.RUNNING) {
+          || node.run.status() == CanvasFunctionRunStatus.RUNNING
+          || node.run.status() == CanvasFunctionRunStatus.UNKNOWN) {
         conflicts.add(new CanvasConflict.NodeRunning(node.id, node.run));
         return true;
       }

@@ -117,7 +117,12 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
     ensureRunning();
     CanvasResource resource =
         materializer.materialize(
-            frozen.canvasId(), frozen.targetResourceId(), frozen.outputName(), content);
+            frozen.canvasId(),
+            frozen.nodeId(),
+            frozen.requestId(),
+            frozen.targetResourceId(),
+            frozen.outputName(),
+            content);
     if (!resource.id().equals(frozen.targetResourceId())
         || !resource.canvasId().equals(frozen.canvasId())
         || resource.ownerNodeId() != null
@@ -129,6 +134,19 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
 
   CanvasFunctionFrozenRun currentRun() {
     return current.get();
+  }
+
+  /** Runtime 在提交阶段推进提交事实后刷新进程内冻结计划；只允许同一 Run 的同一目标。 */
+  void replace(CanvasFunctionFrozenRun frozen) {
+    Objects.requireNonNull(frozen, "frozen");
+    CanvasFunctionFrozenRun existing = current.get();
+    if (!existing.canvasId().equals(frozen.canvasId())
+        || !existing.nodeId().equals(frozen.nodeId())
+        || !existing.requestId().equals(frozen.requestId())
+        || !existing.targetResourceId().equals(frozen.targetResourceId())) {
+      throw new IllegalArgumentException("context may only be replaced by the same FunctionRun");
+    }
+    current.set(frozen);
   }
 
   private void ensureRunning() {

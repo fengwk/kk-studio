@@ -1,15 +1,17 @@
 package fun.fengwk.kkstudio.canvas.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /** Function 冻结计划携带 UUID 身份与权威 blob 媒体事实快照。 */
@@ -166,29 +168,25 @@ class CanvasFunctionFrozenTest {
   }
 
   @Test
-  void frozenRunCarriesUuidIdentityAndTarget() {
-    CanvasFunctionModel model =
-        new CanvasFunctionModel(
-            "fake-image",
-            "Fake Image",
-            CanvasResourceKind.IMAGE,
-            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()),
-            List.of());
+  void frozenRunCarriesUuidIdentitySubmitFactAndTarget() {
+    CanvasFunctionDefinition definition = CanvasFunctionCatalogTest.function("fake-image");
     CanvasFunctionFrozenRun run =
         new CanvasFunctionFrozenRun(
             CANVAS_ID,
             NODE_ID,
             "fn",
             REQUEST_ID,
-            model,
-            new CanvasFunctionConfig(List.of(new CanvasFunctionConfig.TextSegment("x")), Map.of()),
+            definition,
+            CanvasJson.parseObject("{}"),
             List.of(),
             "out",
             new UUID(0L, 100),
+            CanvasFunctionSubmitState.PENDING,
             "STARTED",
             Map.of());
     assertEquals(NODE_ID, run.nodeId());
     assertEquals(REQUEST_ID, run.requestId());
+    assertFalse(run.submitted());
     assertThrows(
         NullPointerException.class,
         () ->
@@ -197,13 +195,44 @@ class CanvasFunctionFrozenTest {
                 NODE_ID,
                 "fn",
                 REQUEST_ID,
-                model,
-                new CanvasFunctionConfig(
-                    List.of(new CanvasFunctionConfig.TextSegment("x")), Map.of()),
+                definition,
+                CanvasJson.parseObject("{}"),
                 List.of(),
                 "out",
                 new UUID(0L, 100),
+                CanvasFunctionSubmitState.PENDING,
                 "STARTED",
                 Map.of()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new CanvasFunctionFrozenRun(
+                CANVAS_ID,
+                NODE_ID,
+                "fn",
+                REQUEST_ID,
+                definition,
+                CanvasJson.parseObject("{}"),
+                List.of(),
+                "out",
+                new UUID(0L, 100),
+                null,
+                "STARTED",
+                Map.of()));
+    assertTrue(
+        new CanvasFunctionFrozenRun(
+                CANVAS_ID,
+                NODE_ID,
+                "fn",
+                REQUEST_ID,
+                definition,
+                CanvasJson.parseObject("{}"),
+                List.of(),
+                "out",
+                new UUID(0L, 100),
+                CanvasFunctionSubmitState.SUBMITTED,
+                "STARTED",
+                Map.of())
+            .submitted());
   }
 }

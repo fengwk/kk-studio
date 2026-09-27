@@ -14,16 +14,22 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
-import fun.fengwk.kkstudio.share.canvas.CanvasFunctionModelDTO;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasFunctionUnknownResolutionDTO;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Canvas Function model catalog 与 run 生命周期 HTTP 边界。 */
+/**
+ * Canvas Function 目录、run 生命周期与 UNKNOWN 人工核查的 HTTP 边界。
+ *
+ * <p>目录只报告已安装函数；未安装插件留下的节点配置、引用与输出仍可从 Snapshot 读取，但不会被本目录声明，也无法启动新的执行。
+ */
 @RestController
 @RequestMapping("/api")
 public class StudioCanvasFunctionController {
@@ -39,14 +45,16 @@ public class StudioCanvasFunctionController {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
 
-  @GetMapping("/canvas-function-models")
-  public Result<List<CanvasFunctionModelDTO>> listModels() {
+  @GetMapping("/canvas-functions")
+  public Result<List<CanvasFunctionDefinitionDTO>> listFunctions() {
     return Results.ok(
         catalog.list().stream()
             .map(
                 registered ->
                     mapper.toDto(
-                        registered.model(), registered.enabled(), registered.unavailableReason()))
+                        registered.function(),
+                        registered.enabled(),
+                        registered.unavailableReason()))
             .toList());
   }
 
@@ -101,6 +109,43 @@ public class StudioCanvasFunctionController {
       throw map(exception);
     } catch (IllegalArgumentException exception) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+    }
+  }
+
+  @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run/resolve")
+  public Result<CanvasFunctionRunDTO> resolve(
+      @PathVariable("canvasId") String canvasIdText,
+      @PathVariable("nodeId") String nodeIdText,
+      @RequestBody CanvasFunctionUnknownResolutionDTO request) {
+    if (request == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
+    }
+    try {
+      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
+      return Results.ok(
+          mapper.toDto(
+              runtimeService.resolve(
+                  canvasId,
+                  nodeId,
+                  request.getRequestId(),
+                  resolution(request.getResolution()),
+                  request.getVerification())));
+    } catch (CanvasFunctionRunException exception) {
+      throw map(exception);
+    } catch (IllegalArgumentException exception) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+    }
+  }
+
+  private static CanvasFunctionUnknownResolution resolution(String value) {
+    if (value == null) {
+      throw new IllegalArgumentException("resolution is required");
+    }
+    try {
+      return CanvasFunctionUnknownResolution.valueOf(value);
+    } catch (IllegalArgumentException exception) {
+      throw new IllegalArgumentException("resolution must be RESUME, FAILED or CANCELLED");
     }
   }
 

@@ -114,6 +114,47 @@ public interface CanvasFunctionRunMapper extends BaseMapper {
   @Update(
       """
       update canvas_function_run
+      set status = 'UNKNOWN', state_json = cast(#{run.stateJson} as jsonb), error = #{run.error},
+          available_at = null, lease_token = null, lease_until = null, updated_at = #{run.updatedAt}
+      where node_id = #{run.nodeId}
+        and request_id = #{run.requestId}
+        and status = 'RUNNING'
+        and lease_token = #{leaseToken}
+        and lease_until > #{run.updatedAt}
+      """)
+  int markUnknown(@Param("run") CanvasFunctionRunDO run, @Param("leaseToken") String leaseToken);
+
+  @Update(
+      """
+      update canvas_function_run
+      set status = 'READY', state_json = cast(#{stateJson} as jsonb), error = null,
+          available_at = #{availableAt}, lease_token = null, lease_until = null,
+          updated_at = #{updatedAt}
+      where node_id = #{nodeId}
+        and request_id = #{requestId}
+        and status = 'UNKNOWN'
+      """)
+  int resumeUnknown(
+      @Param("nodeId") UUID nodeId,
+      @Param("requestId") UUID requestId,
+      @Param("stateJson") String stateJson,
+      @Param("availableAt") OffsetDateTime availableAt,
+      @Param("updatedAt") OffsetDateTime updatedAt);
+
+  @Update(
+      """
+      update canvas_function_run
+      set status = #{run.status}, state_json = cast(#{run.stateJson} as jsonb), error = #{run.error},
+          available_at = null, lease_token = null, lease_until = null, updated_at = #{run.updatedAt}
+      where node_id = #{run.nodeId}
+        and request_id = #{run.requestId}
+        and status = 'UNKNOWN'
+      """)
+  int resolveUnknownTerminal(@Param("run") CanvasFunctionRunDO run);
+
+  @Update(
+      """
+      update canvas_function_run
       set status = #{status}, state_json = cast(#{stateJson} as jsonb), error = #{error},
           available_at = null, lease_token = null, lease_until = null, updated_at = #{updatedAt}
       where node_id = #{nodeId}

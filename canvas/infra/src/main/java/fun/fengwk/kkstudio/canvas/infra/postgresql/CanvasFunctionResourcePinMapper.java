@@ -79,21 +79,6 @@ public interface CanvasFunctionResourcePinMapper extends BaseMapper {
       """)
   int countByResource(@Param("canvasId") UUID canvasId, @Param("resourceId") UUID resourceId);
 
-  @Select(
-      """
-      select ref.canvas_id, ref.node_id, ref.request_id, ref.role, ref.resource_id
-      from canvas_function_resource_pin ref
-      join canvas_function_run run
-        on run.node_id = ref.node_id and run.request_id = ref.request_id
-      where ref.canvas_id = #{canvasId}
-        and ref.resource_id = #{resourceId}
-        and ref.role = 'OUTPUT'
-        and run.status = 'RUNNING'
-      """)
-  @ResultMap("canvasFunctionResourcePinMap")
-  List<CanvasFunctionResourcePinDO> findRunningOutputPins(
-      @Param("canvasId") UUID canvasId, @Param("resourceId") UUID resourceId);
-
   @Delete(
       """
       delete from canvas_function_resource_pin

@@ -31,10 +31,10 @@ Snapshot 读路径是 [`PostgresqlCanvasQueryService.findSnapshot`](../../canvas
 lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> requestId 与现有 Run 相同：直接返回既有 Run（不推进版本）
   -> 现有 Run 是 READY/RUNNING 且 requestId 不同：conflict
-  -> Catalog require(modelKey) + requireAvailable；codec 严格解码 config
+  -> Catalog require(name) + requireAvailable；CanvasFunctionArgsCodec 严格解码 args
   -> 冻结 manifest：每个引用节点必须存在、必须有指向本节点的 Link、index 必须在资源范围内且必须是 blob
-  -> 校验 frozen blob facts 与 model reference policy
-  -> 预分配 targetResourceId，构造 stage=QUEUED 的 frozen plan
+  -> 校验 frozen blob facts 与 function reference policy
+  -> 预分配 targetResourceId，构造 submitState=PENDING、stage=QUEUED 的 frozen plan
   -> adapter.preflight(frozen)
   -> 释放上一个 Run 的 pin，写入 INPUT/OUTPUT pin
   -> 插入 READY Run（已有终态 Run 时用 replaceTerminalWithReady 的 CAS 替换）
@@ -65,14 +65,21 @@ update canvas_function_run
 
 postgres 的 NOTIFY 由组合根接进同一个共享 `LISTEN` 连接：[`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java) 把 `CanvasFunctionDispatcher.CHANNEL`（即 `canvas_function_work`）的 handler 指向 `dispatcher.wake()`，断连后由 `dispatcher::wake` 兜底。也就是说 NOTIFY 只提供低延迟，**正确性来自 poll 与 lease**：通知丢失、listener 重连、应用重启都能在下一次 poll 或租约过期后重新 claim。[`canvas_function_work_notify()`](../../schema/src/main/resources/db/migration/V1__schema.sql) 只在提交后行立刻可认领（`READY`、无 lease、`available_at <= now()`）时发空 payload；`canvas_version` 通道只提示 document version，客户端据此回读 Snapshot。
 
-[`CanvasFunctionWorker.run`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorker.java) 的动作是：解析 state 得到 frozen plan、`requireAvailable`、构造 [`CanvasFunctionExecutionContextImpl`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionExecutionContextImpl.java)、调用 adapter 的 `execute`、确认返回值恰好是冻结目标 id、最后 `completeSuccess`。执行期间 heartbeat 按固定间隔续租，**只**更新 `lease_until`，不触碰 document version、Run state 或其他业务事实；续租失败、抛异常、Run 被 cancel、node/document 被删、租约过期都会把 `ownershipLost` 置位，worker 随即停止新的 checkpoint 与 terminal 写入。adapter 抛出其它异常时，worker 用固定文案走 `failIfRunning`。
+[`CanvasFunctionWorker.run`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorker.java) 执行两阶段协议：
+1. 解析版本 3 state JSON 得到 frozen plan、`requireAvailable`；
+2. 若 `submitState == SUBMITTING`，说明提交意图已持久化但进程曾崩溃导致状态不明，绝不重试提交，调用 `markUnknown` 将 Run 转换为 `UNKNOWN` 状态，退出自动调度并保留 pin 与目标资源等待人工核对；
+3. 若 `submitState == PENDING`，在独立事务调用 `beginSubmit` 先行持久化 `SUBMITTING` 意图，随后调用 adapter 的 `submit`，外部确认后再经 `confirmSubmitted` 持久化 `SUBMITTED`；
+4. 调用 adapter 的 `execute`（仅查询和物化预分配目标 resource id），确认返回值恰好是冻结目标 id，最后 `completeSuccess`。
 
-checkpoint 与终态都走 [`CanvasFunctionRunTransactions`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunTransactions.java) 的短事务方法：`start`、`cancel`、`checkpoint`、`completeSuccess`、`failIfRunning`。它们一律先锁 document 与 node，再锁 run，写完后 `advanceDocumentVersion(expectedVersion, expectedVersion + 1)`；CAS 在行锁内失败被视为持久化不变量破坏，直接抛错而不是静默重试。外部计算（adapter 的 HTTP、轮询、媒体处理）永远在事务之外。
+执行期间 heartbeat 按固定间隔续租，**只**更新 `lease_until`，不触碰 document version、Run state 或其他业务事实；续租失败、抛异常、Run 被 cancel、node/document 被删、租约过期都会把 `ownershipLost` 置位，worker 随即停止新的 checkpoint 与 terminal 写入。adapter 抛出其它异常时，worker 用固定文案走 `failIfRunning`。
+
+checkpoint 与终态都走 [`CanvasFunctionRunTransactions`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunTransactions.java) 的短事务方法：`start`、`beginSubmit`、`confirmSubmitted`、`checkpoint`、`markUnknown`、`resolve`、`cancel`、`completeSuccess`、`failIfRunning`。它们一律先锁 document 与 node，再锁 run，写完后 `advanceDocumentVersion(expectedVersion, expectedVersion + 1)`；CAS 在行锁内失败被视为持久化不变量破坏，直接抛错而不是静默重试。外部计算（adapter 的 HTTP、轮询、媒体处理）永远在事务之外。
 
 成功与失败的资源处置不同，这是最容易改错的地方：
 
-- `completeSuccess` 先确认目标资源仍是同画布、无 owner、有 blob 的资源，且媒体类型与冻结 model 的 `outputKind` 匹配，然后由 Resource lifecycle 用 target 替换节点当前 owned 资源（旧资源若仍被其他 Run pin 则只解 owner，否则删行并释放 blob 引用），最后把 Run 置为 `SUCCEEDED` 并释放本次 Run 的全部 pin。
+- `completeSuccess` 先确认目标资源仍是同画布、无 owner、有 blob 的资源，且媒体类型与冻结 function 的 `outputKind` 匹配，然后由 Resource lifecycle 用 target 替换节点当前 owned 资源（旧资源若仍被其他 Run pin 则只解 owner，否则删行并释放 blob 引用），最后把 Run 置为 `SUCCEEDED` 并释放本次 Run 的全部 pin。
 - `failIfRunning` 与 `cancel` 只丢弃「无 owner 的目标资源」，释放本次 Run 的 pin，Run 进入 `FAILED` / `CANCELLED`。`cancelActive` 的 CAS 只要求 `status in ('READY','RUNNING')`，不需要 lease，因为取消来自客户端而不是 worker。
+- `resolve` 处理人工核对：要求非空 `verification` 说明，通过 `RESUME` 将 Run 还回 `READY`（仅重新轮询任务结果，不 resubmit），或指定 `FAILED` / `CANCELLED` 释放 pin 并丢弃未归属的目标资源。
 - 终态 Run 允许被新的 requestId 取代：`replaceTerminalWithReady` 的 `where status in ('SUCCEEDED','FAILED','CANCELLED')` 保证并发下只有一个新 generation 成功。重复 requestId 则直接返回既有 Run（含终态），不重复推进版本。
 
 pin 由 [`CanvasFunctionResourcePinRepository`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePinRepository.java) 持久化，`INPUT` 每个冻结引用一条、`OUTPUT` 一条；pin 只保护「无 owner 资源不被回收」，绝不参与 `storage_blob.ref_count`。blob 引用的增减属于 Platform 的 Resource lifecycle（见 [Platform](platform.md)）。
@@ -110,7 +117,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - [`CanvasFunctionWorkStoreIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStoreIntegrationTest.java) 验证多实例 `SKIP LOCKED` claim、租约恢复、fencing 与 `canvas_function_work` NOTIFY；schema check 的拒绝路径也在这里。
 - [`CanvasFunctionWorkerHeartbeatTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorkerHeartbeatTest.java) 与 [`CanvasFunctionDispatcherTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionDispatcherTest.java) 覆盖续租丢失后阻止旧 worker 写终态、容量耗尽时的归还与 wake 恢复。
 - [`PostgresqlCanvasStoreIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStoreIntegrationTest.java)（含 `FOR UPDATE` 真实阻塞与 CAS 失败）、[`PostgresqlCanvasQueryServiceIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryServiceIntegrationTest.java)、[`PostgresqlCanvasResourceRepositoryIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceRepositoryIntegrationTest.java)、[`PostgresqlCanvasSessionRepositoryIntegrationTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasSessionRepositoryIntegrationTest.java) 覆盖四个 repository 端口契约。
-- codec 与属性：[`CanvasFunctionConfigCodecTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionConfigCodecTest.java)、[`CanvasFunctionRunStateCodecTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunStateCodecTest.java)、[`CanvasFunctionRuntimePropertiesTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimePropertiesTest.java)。
+- codec 与属性：[`CanvasFunctionArgsCodecTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionArgsCodecTest.java)、[`CanvasFunctionRunStateCodecTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRunStateCodecTest.java)、[`CanvasFunctionRuntimePropertiesTest.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimePropertiesTest.java)。
 - 测试基座 [`PostgresCanvasInfraTestSupport.java`](../../canvas/infra/src/test/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresCanvasInfraTestSupport.java) 使用 `postgres:17-alpine` 进程级容器与 schema 模块的 Flyway baseline，并在每个测试前 drop/recreate public schema；Docker 不可用时测试直接失败，不用 mock 掩盖适配器问题。
 
 ---

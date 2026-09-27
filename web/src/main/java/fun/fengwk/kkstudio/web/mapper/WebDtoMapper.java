@@ -19,16 +19,14 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDTO;
-import fun.fengwk.kkstudio.share.canvas.CanvasFunctionModelDTO;
-import fun.fengwk.kkstudio.share.canvas.CanvasFunctionParameterDefinitionDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionReferencePolicyDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasGroupDTO;
@@ -178,24 +176,24 @@ public class WebDtoMapper {
     return conflicts.stream().map(this::toDto).toList();
   }
 
-  public CanvasFunctionModelDTO toDto(
-      CanvasFunctionModel model, boolean available, String unavailableReason) {
-    Objects.requireNonNull(model, "model");
-    CanvasFunctionModelDTO dto = new CanvasFunctionModelDTO();
-    dto.setKey(model.key());
-    dto.setLabel(model.label());
-    dto.setOutputKind(model.outputKind().name());
+  public CanvasFunctionDefinitionDTO toDto(
+      CanvasFunctionDefinition definition, boolean available, String unavailableReason) {
+    Objects.requireNonNull(definition, "definition");
+    CanvasFunctionDefinitionDTO dto = new CanvasFunctionDefinitionDTO();
+    dto.setName(definition.name());
+    dto.setDescription(definition.description());
+    dto.setArgsSchema(toArgs(definition.argsSchema()));
+    dto.setOutputKind(definition.outputKind().name());
     CanvasFunctionReferencePolicyDTO referencePolicy = new CanvasFunctionReferencePolicyDTO();
     referencePolicy.setAllowedKinds(
-        model.referencePolicy().allowedKinds().stream().map(Enum::name).sorted().toList());
-    referencePolicy.setMaxReferences(model.referencePolicy().maxReferences());
+        definition.referencePolicy().allowedKinds().stream().map(Enum::name).sorted().toList());
+    referencePolicy.setMaxReferences(definition.referencePolicy().maxReferences());
     LinkedHashMap<String, Integer> maxByKind = new LinkedHashMap<>();
-    model.referencePolicy().maxByKind().entrySet().stream()
+    definition.referencePolicy().maxByKind().entrySet().stream()
         .sorted(Map.Entry.comparingByKey())
         .forEach(entry -> maxByKind.put(entry.getKey().name(), entry.getValue()));
     referencePolicy.setMaxByKind(maxByKind);
     dto.setReferencePolicy(referencePolicy);
-    dto.setParameters(model.parameters().stream().map(this::toDto).toList());
     dto.setAvailable(available);
     dto.setUnavailableReason(unavailableReason);
     return dto;
@@ -330,19 +328,6 @@ public class WebDtoMapper {
   private static CanvasTransformDTO toDto(CanvasTransform transform) {
     return new CanvasTransformDTO(
         transform.x(), transform.y(), transform.width(), transform.height());
-  }
-
-  private CanvasFunctionParameterDefinitionDTO toDto(CanvasFunctionParameterDefinition definition) {
-    CanvasFunctionParameterDefinitionDTO dto = new CanvasFunctionParameterDefinitionDTO();
-    dto.setKey(definition.key());
-    dto.setLabel(definition.label());
-    dto.setType(definition.type().name());
-    dto.setRequired(definition.required());
-    dto.setDefaultValue(definition.defaultValue());
-    dto.setOptions(definition.options());
-    dto.setMin(definition.min());
-    dto.setMax(definition.max());
-    return dto;
   }
 
   private static CanvasResourceInput toResourceInput(CanvasResourceInputDTO input) {

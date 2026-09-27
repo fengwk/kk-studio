@@ -1,26 +1,30 @@
 package fun.fengwk.kkstudio.platform.canvas.function.fake;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
-/** fake descriptors 精确声明 v1 能力，执行至少 checkpoint 一次并只写 frozen target。 */
+/** fake descriptors 精确声明 v1 能力，执行 submit/execute 并只写 frozen target。 */
 class FakeCanvasFunctionAdapterTest {
 
   private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -30,20 +34,21 @@ class FakeCanvasFunctionAdapterTest {
   private static final UUID VIDEO_TARGET = UUID.fromString("00000000-0000-0000-0000-000000000005");
 
   @Test
-  void exposesExactModelsAndExecutesMainResourceFixture() {
+  void exposesExactFunctionsAndExecutesMainResourceFixture() {
     FakeCanvasFunctionAdapter adapter = new FakeCanvasFunctionAdapter();
     assertEquals(
-        2, new FakeCanvasFunctionConfiguration().fakeCanvasFunctionAdapter().models().size());
-    CanvasFunctionModel image = adapter.models().get(0);
-    CanvasFunctionModel video = adapter.models().get(1);
-    assertEquals("fake-image", image.key());
-    assertEquals(
-        List.of("AUTO", "1:1", "3:4", "9:16", "4:3", "16:9"), image.parameters().get(0).options());
-    assertEquals("fake-video", video.key());
+        2, new FakeCanvasFunctionConfiguration().fakeCanvasFunctionAdapter().functions().size());
+    assertTrue(adapter.enabled());
+    assertNull(adapter.unavailableReason());
+    CanvasFunctionDefinition image = adapter.functions().get(0);
+    CanvasFunctionDefinition video = adapter.functions().get(1);
+    assertEquals("fake-image", image.name());
+    assertEquals(CanvasResourceKind.IMAGE, image.outputKind());
+    assertEquals("fake-video", video.name());
+    assertEquals(CanvasResourceKind.VIDEO, video.outputKind());
     assertEquals(12, video.referencePolicy().maxReferences());
     assertEquals(3, video.referencePolicy().maxFor(CanvasResourceKind.VIDEO));
     assertEquals(3, video.referencePolicy().maxFor(CanvasResourceKind.AUDIO));
-    assertEquals(5, video.parameters().get(1).defaultValue());
 
     RecordingContext context = new RecordingContext();
     CanvasFunctionFrozenRun run =
@@ -53,14 +58,18 @@ class FakeCanvasFunctionAdapterTest {
             "output",
             REQUEST,
             image,
-            new CanvasFunctionConfig(List.of(new TextSegment("prompt")), Map.of("ratio", "AUTO")),
+            CanvasJson.parseObject("{\"prompt\":\"test\",\"ratio\":\"AUTO\"}"),
             List.of(),
             "output.png",
             IMAGE_TARGET,
+            CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
+    adapter.submit(context, run);
+    assertEquals(List.of("FAKE_SUBMITTED"), context.stages);
+
     assertEquals(List.of(IMAGE_TARGET), adapter.execute(context, run));
-    assertEquals(List.of("FAKE_RENDERING"), context.stages);
+    assertEquals(List.of("FAKE_SUBMITTED", "FAKE_RENDERING"), context.stages);
     assertEquals(IMAGE_TARGET, context.targetId);
 
     RecordingContext videoContext = new RecordingContext();
@@ -71,22 +80,24 @@ class FakeCanvasFunctionAdapterTest {
             "output",
             REQUEST,
             video,
-            new CanvasFunctionConfig(
-                List.of(new TextSegment("prompt")), Map.of("ratio", "16:9", "duration", 5)),
+            CanvasJson.parseObject("{\"prompt\":\"test\",\"ratio\":\"16:9\",\"duration\":5}"),
             List.of(),
             "output.mp4",
             VIDEO_TARGET,
+            CanvasFunctionSubmitState.SUBMITTED,
             "QUEUED",
             Map.of());
+    adapter.submit(videoContext, videoRun);
     assertEquals(List.of(VIDEO_TARGET), adapter.execute(videoContext, videoRun));
 
-    CanvasFunctionModel unsupported =
-        new CanvasFunctionModel(
+    CanvasFunctionDefinition unsupported =
+        new CanvasFunctionDefinition(
             "unsupported",
             "Unsupported",
+            CanvasJson.parseObject(
+                "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"),
             CanvasResourceKind.IMAGE,
-            image.referencePolicy(),
-            image.parameters());
+            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
     CanvasFunctionFrozenRun unsupportedRun =
         new CanvasFunctionFrozenRun(
             CANVAS,
@@ -94,10 +105,11 @@ class FakeCanvasFunctionAdapterTest {
             "output",
             REQUEST,
             unsupported,
-            run.config(),
+            CanvasJson.parseObject("{}"),
             List.of(),
             "output.png",
             IMAGE_TARGET,
+            CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
     assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
@@ -106,8 +118,6 @@ class FakeCanvasFunctionAdapterTest {
   private static final class RecordingContext implements CanvasFunctionExecutionContext {
     private final List<String> stages = new ArrayList<>();
     private UUID targetId;
-    private String mediaType;
-    private long size;
 
     @Override
     public void checkpoint(String stage, Map<String, Object> adapterState) {

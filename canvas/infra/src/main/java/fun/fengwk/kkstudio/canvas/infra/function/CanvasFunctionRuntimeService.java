@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -54,11 +55,28 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
     return result;
   }
 
+  @Override
+  public CanvasFunctionRun resolve(
+      UUID canvasId,
+      UUID nodeId,
+      String requestId,
+      CanvasFunctionUnknownResolution resolution,
+      String verification) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
+    CanvasFunctionRun result =
+        transactions.resolve(canvasId, nodeId, requestId, resolution, verification);
+    if (result.status() == CanvasFunctionRunStatus.CANCELLED) {
+      bestEffortAdapterCancel(result);
+    }
+    return result;
+  }
+
   private void bestEffortAdapterCancel(CanvasFunctionRun run) {
     try {
-      CanvasFunctionCatalog.RegisteredModel registered =
-          catalog.require(stateCodec.modelKey(run.stateJson()));
-      CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson(), registered.model());
+      CanvasFunctionCatalog.RegisteredFunction registered =
+          catalog.require(stateCodec.functionName(run.stateJson()));
+      CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson(), registered.function());
       registered.adapter().cancel(frozen);
     } catch (RuntimeException error) {
       log.warn(

@@ -45,6 +45,11 @@ public record CanvasFunctionRun(
     } else if (availableAt != null || leaseToken != null) {
       throw new IllegalArgumentException("terminal run must not be claimable or leased");
     }
+    if (status == CanvasFunctionRunStatus.FAILED || status == CanvasFunctionRunStatus.UNKNOWN) {
+      CanvasValidation.requireNonBlank(error, status + " error");
+    } else if (error != null && status != CanvasFunctionRunStatus.CANCELLED) {
+      throw new IllegalArgumentException(status + " run must not carry an error");
+    }
     CanvasValidation.requireNonBlank(stage, "stage");
     CanvasValidation.requireNonBlank(stateJson, "stateJson");
     Objects.requireNonNull(updatedAt, "updatedAt");

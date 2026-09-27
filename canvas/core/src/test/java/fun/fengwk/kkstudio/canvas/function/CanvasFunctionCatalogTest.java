@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 
 import java.util.ArrayList;
@@ -19,40 +20,40 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Catalog 在 Core 内冻结 model、adapter 与 availability，不依赖 Spring 或其它模块。 */
+/** Catalog 在 Core 内冻结函数定义、adapter 与 availability，不依赖 Spring 或其它模块。 */
 class CanvasFunctionCatalogTest {
 
-  /** 每个 adapter 的 model 与 availability 只采样一次，并在来源集合变化后保持排序与快照不变。 */
+  /** 每个 adapter 的 function 与 availability 只采样一次，并在来源集合变化后保持排序与快照不变。 */
   @Test
   void samplesEachAdapterOnceAndFreezesFactsAndOrder() {
-    CanvasFunctionModel zModel = model("z-model");
-    CanvasFunctionModel aModel = model("a-model");
-    List<CanvasFunctionModel> availableModels = new ArrayList<>(List.of(zModel));
-    List<CanvasFunctionModel> disabledModels = new ArrayList<>(List.of(aModel));
-    CountingAdapter available = new CountingAdapter(availableModels, true, null);
-    CountingAdapter disabled = new CountingAdapter(disabledModels, false, "disabled");
+    CanvasFunctionDefinition zFunction = function("z.fn");
+    CanvasFunctionDefinition aFunction = function("a.fn");
+    List<CanvasFunctionDefinition> availableFunctions = new ArrayList<>(List.of(zFunction));
+    List<CanvasFunctionDefinition> disabledFunctions = new ArrayList<>(List.of(aFunction));
+    CountingAdapter available = new CountingAdapter(availableFunctions, true, null);
+    CountingAdapter disabled = new CountingAdapter(disabledFunctions, false, "disabled");
 
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(available, disabled));
-    availableModels.clear();
-    disabledModels.clear();
+    availableFunctions.clear();
+    disabledFunctions.clear();
 
-    assertEquals(List.of("a-model", "z-model"), keys(catalog));
+    assertEquals(List.of("a.fn", "z.fn"), names(catalog));
     assertEquals(
-        List.of("a-model", "z-model"),
-        keys(
+        List.of("a.fn", "z.fn"),
+        names(
             CanvasFunctionCatalog.from(
                 List.of(
-                    new CountingAdapter(List.of(zModel), true, null),
-                    new CountingAdapter(List.of(aModel), false, "disabled")))));
-    assertEquals(1, available.modelsCalls);
+                    new CountingAdapter(List.of(zFunction), true, null),
+                    new CountingAdapter(List.of(aFunction), false, "disabled")))));
+    assertEquals(1, available.functionsCalls);
     assertEquals(1, available.enabledCalls);
     assertEquals(1, available.reasonCalls);
-    assertEquals(1, disabled.modelsCalls);
+    assertEquals(1, disabled.functionsCalls);
     assertEquals(1, disabled.enabledCalls);
     assertEquals(1, disabled.reasonCalls);
 
-    CanvasFunctionCatalog.RegisteredModel availableEntry = catalog.require("z-model");
-    CanvasFunctionCatalog.RegisteredModel disabledEntry = catalog.require("a-model");
+    CanvasFunctionCatalog.RegisteredFunction availableEntry = catalog.require("z.fn");
+    CanvasFunctionCatalog.RegisteredFunction disabledEntry = catalog.require("a.fn");
     assertSame(available, availableEntry.adapter());
     assertSame(disabled, disabledEntry.adapter());
     assertTrue(availableEntry.enabled());
@@ -62,13 +63,13 @@ class CanvasFunctionCatalogTest {
     assertDoesNotThrow(availableEntry::requireAvailable);
     IllegalArgumentException unavailable =
         assertThrows(IllegalArgumentException.class, disabledEntry::requireAvailable);
-    assertEquals("Canvas Function model is unavailable: disabled", unavailable.getMessage());
+    assertEquals("Canvas Function is unavailable: disabled", unavailable.getMessage());
     assertThrows(UnsupportedOperationException.class, () -> catalog.list().clear());
   }
 
-  /** Catalog 必须在构造期拒绝空输入项、空 model 声明、空 model 和重复 key。 */
+  /** Catalog 必须在构造期拒绝空输入项、空 function 声明、空 function 和重复函数名。 */
   @Test
-  void rejectsNullsEmptyModelsDuplicatesAndUnknownKeys() {
+  void rejectsNullsEmptyFunctionsDuplicatesAndUnknownNames() {
     assertThrows(NullPointerException.class, () -> CanvasFunctionCatalog.from(null));
     assertThrows(
         NullPointerException.class,
@@ -89,18 +90,18 @@ class CanvasFunctionCatalogTest {
         () ->
             CanvasFunctionCatalog.from(
                 List.of(
-                    new CountingAdapter(List.of(model("same")), true, null),
-                    new CountingAdapter(List.of(model("same")), true, null))));
+                    new CountingAdapter(List.of(function("same")), true, null),
+                    new CountingAdapter(List.of(function("same")), true, null))));
 
     CanvasFunctionCatalog catalog =
         CanvasFunctionCatalog.from(
-            List.of(new CountingAdapter(List.of(model("known")), true, null)));
+            List.of(new CountingAdapter(List.of(function("known")), true, null)));
     IllegalArgumentException unknown =
         assertThrows(IllegalArgumentException.class, () -> catalog.require("unknown"));
-    assertEquals("unknown Canvas Function model: unknown", unknown.getMessage());
+    assertEquals("unknown Canvas Function: unknown", unknown.getMessage());
   }
 
-  /** 没有 adapter 时仍返回稳定的空 Catalog，避免把“单个 adapter 不得空 model”误作全局非空约束。 */
+  /** 没有 adapter 时仍返回稳定的空 Catalog，避免把「单个 adapter 不得空 function」误作全局非空约束。 */
   @Test
   void acceptsAnEmptyAdapterCollection() {
     assertTrue(CanvasFunctionCatalog.from(List.of()).list().isEmpty());
@@ -113,52 +114,54 @@ class CanvasFunctionCatalogTest {
         IllegalArgumentException.class,
         () ->
             CanvasFunctionCatalog.from(
-                List.of(new CountingAdapter(List.of(model("enabled")), true, "reason"))));
+                List.of(new CountingAdapter(List.of(function("enabled")), true, "reason"))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CanvasFunctionCatalog.from(
-                List.of(new CountingAdapter(List.of(model("disabled-null")), false, null))));
+                List.of(new CountingAdapter(List.of(function("disabled-null")), false, null))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CanvasFunctionCatalog.from(
-                List.of(new CountingAdapter(List.of(model("disabled-blank")), false, "  "))));
+                List.of(new CountingAdapter(List.of(function("disabled-blank")), false, "  "))));
   }
 
-  private static List<String> keys(CanvasFunctionCatalog catalog) {
-    return catalog.list().stream().map(entry -> entry.model().key()).toList();
+  private static List<String> names(CanvasFunctionCatalog catalog) {
+    return catalog.list().stream().map(entry -> entry.function().name()).toList();
   }
 
-  private static CanvasFunctionModel model(String key) {
-    return new CanvasFunctionModel(
-        key,
-        key,
+  static CanvasFunctionDefinition function(String name) {
+    return new CanvasFunctionDefinition(
+        name,
+        name,
+        CanvasJson.parseObject(
+            "{\"type\":\"object\",\"properties\":{},\"required\":[],"
+                + "\"additionalProperties\":false}"),
         CanvasResourceKind.IMAGE,
-        new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()),
-        List.of());
+        new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
   }
 
   private static final class CountingAdapter implements CanvasFunctionAdapter {
 
-    private final List<CanvasFunctionModel> models;
+    private final List<CanvasFunctionDefinition> functions;
     private boolean enabled;
     private String unavailableReason;
-    private int modelsCalls;
+    private int functionsCalls;
     private int enabledCalls;
     private int reasonCalls;
 
     private CountingAdapter(
-        List<CanvasFunctionModel> models, boolean enabled, String unavailableReason) {
-      this.models = models;
+        List<CanvasFunctionDefinition> functions, boolean enabled, String unavailableReason) {
+      this.functions = functions;
       this.enabled = enabled;
       this.unavailableReason = unavailableReason;
     }
 
     @Override
-    public List<CanvasFunctionModel> models() {
-      modelsCalls++;
-      return models;
+    public List<CanvasFunctionDefinition> functions() {
+      functionsCalls++;
+      return functions;
     }
 
     @Override
@@ -179,6 +182,11 @@ class CanvasFunctionCatalogTest {
 
     @Override
     public void preflight(CanvasFunctionFrozenRun run) {}
+
+    @Override
+    public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+      throw new UnsupportedOperationException();
+    }
 
     @Override
     public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {

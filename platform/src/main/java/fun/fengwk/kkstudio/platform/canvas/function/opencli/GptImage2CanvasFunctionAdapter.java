@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionStatus;
@@ -29,22 +32,50 @@ import java.util.UUID;
 public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   static final long MAX_REFERENCE_SIZE = 20L * 1024 * 1024;
-  static final String MODEL_KEY = "gpt-image-2";
+  public static final String FUNCTION_NAME = "gpt-image-2";
   private static final String UNKNOWN_SUBMISSION =
       "GPT Image submission outcome unknown; automatic resubmission is forbidden";
-  private static final CanvasFunctionModel MODEL =
-      new CanvasFunctionModel(
-          MODEL_KEY,
+
+  private static final JsonObject ARGS_SCHEMA =
+      CanvasJson.parseObject(
+          """
+          {
+            "type": "object",
+            "description": "GPT Image 2 parameters",
+            "additionalProperties": false,
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Prompt text"
+              },
+              "ratio": {
+                "type": "string",
+                "description": "Aspect ratio",
+                "enum": ["auto", "1:1", "3:4", "9:16", "4:3", "16:9"],
+                "default": "auto"
+              },
+              "references": {
+                "type": "array",
+                "description": "Reference images",
+                "items": {
+                  "type": "resourceReference",
+                  "description": "Reference resource"
+                },
+                "minItems": 0,
+                "maxItems": 20
+              }
+            },
+            "required": ["prompt"]
+          }
+          """);
+
+  private static final CanvasFunctionDefinition DEFINITION =
+      new CanvasFunctionDefinition(
+          FUNCTION_NAME,
           "GPT Image 2",
+          ARGS_SCHEMA,
           CanvasResourceKind.IMAGE,
-          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 20, Map.of()),
-          List.of(
-              CanvasFunctionParameterDefinition.enumParameter(
-                  "ratio",
-                  "Ratio",
-                  false,
-                  "auto",
-                  List.of("auto", "1:1", "3:4", "9:16", "4:3", "16:9"))));
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 20, Map.of()));
 
   private final SystemSettings.Integrations integrations;
   private final OpenCliHubClient client;
@@ -57,8 +88,8 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
-  public List<CanvasFunctionModel> models() {
-    return List.of(MODEL);
+  public List<CanvasFunctionDefinition> functions() {
+    return List.of(DEFINITION);
   }
 
   @Override
@@ -73,8 +104,13 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public void preflight(CanvasFunctionFrozenRun run) {
-    if (!MODEL_KEY.equals(run.model().key())) {
-      throw new IllegalArgumentException("unsupported GPT Image model");
+    if (!FUNCTION_NAME.equals(run.definition().name())) {
+      throw new IllegalArgumentException(
+          "unsupported GPT Image function: " + run.definition().name());
+    }
+    String prompt = extractText(run.args(), "prompt");
+    if (prompt == null || prompt.isBlank()) {
+      throw new IllegalArgumentException("GPT Image prompt must not be blank");
     }
     if (run.manifest().size() > 20) {
       throw new IllegalArgumentException("GPT Image accepts at most 20 references");
@@ -91,31 +127,44 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
+  public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+    preflight(run);
+    Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
+    String executionId =
+        OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
+    if (executionId != null) {
+      return;
+    }
+    OpenCliReferenceUploader.UploadResult uploadResult = uploader.uploadAll(context, run, state);
+    List<OpenCliAdapterState.UploadedInput> uploads = uploadResult.uploads();
+    state = uploadResult.state();
+    context.checkpoint("GPT_IMAGE_SUBMITTING", state);
+    Execution submitted;
+    try {
+      submitted =
+          client.execute(
+              buildArgv(run, uploads), integrations.gptImage2().hubExecutionTimeoutMillis());
+    } catch (RuntimeException failure) {
+      throw new CanvasFunctionUnknownException(
+          "GPT Image submission outcome unknown: " + failure.getMessage());
+    }
+    executionId = submitted.id();
+    state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
+    context.checkpoint("GPT_IMAGE_POLLING", state);
+  }
+
+  @Override
   public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
     String executionId =
         OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
-    if ("GPT_IMAGE_SUBMITTING".equals(run.stage()) && executionId == null) {
-      throw new IllegalStateException(UNKNOWN_SUBMISSION);
+    if (executionId == null) {
+      throw new CanvasFunctionUnknownException(UNKNOWN_SUBMISSION);
     }
 
-    List<OpenCliAdapterState.UploadedInput> uploads;
-    if (executionId == null) {
-      OpenCliReferenceUploader.UploadResult uploadResult = uploader.uploadAll(context, run, state);
-      uploads = uploadResult.uploads();
-      state = uploadResult.state();
-      context.checkpoint("GPT_IMAGE_SUBMITTING", state);
-      Execution submitted =
-          client.execute(
-              buildArgv(run, uploads), integrations.gptImage2().hubExecutionTimeoutMillis());
-      executionId = submitted.id();
-      state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
-      context.checkpoint("GPT_IMAGE_POLLING", state);
-    } else {
-      uploads = OpenCliAdapterState.uploads(state);
-      requireCompleteUploads(run, uploads);
-    }
+    List<OpenCliAdapterState.UploadedInput> uploads = OpenCliAdapterState.uploads(state);
+    requireCompleteUploads(run, uploads);
 
     Execution execution =
         awaitTerminal(
@@ -150,8 +199,8 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
   private List<String> buildArgv(
       CanvasFunctionFrozenRun run, List<OpenCliAdapterState.UploadedInput> uploads) {
     requireCompleteUploads(run, uploads);
-    String ratio = (String) run.config().parameters().get("ratio");
-    String rendered = CanvasPromptRenderer.gptImage(run);
+    String ratio = extractText(run.args(), "ratio", "auto");
+    String prompt = extractText(run.args(), "prompt");
     String instruction =
         """
         Use GPT Image 2 to generate exactly one image with aspect ratio %s.
@@ -166,7 +215,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
         %s
         ---
         """
-            .formatted(ratio, rendered)
+            .formatted(ratio, prompt)
             .strip();
     List<String> argv = new ArrayList<>();
     argv.addAll(List.of("chatgpt-agent", "ask", instruction));
@@ -208,5 +257,24 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
         throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
       }
     }
+  }
+
+  private static String extractText(JsonObject args, String field) {
+    CanvasJson json = args.values().get(field);
+    if (json instanceof JsonText text) {
+      return text.value();
+    }
+    throw new IllegalArgumentException(field + " must be a string");
+  }
+
+  private static String extractText(JsonObject args, String field, String defaultValue) {
+    CanvasJson json = args.values().get(field);
+    if (json instanceof JsonText text) {
+      return text.value();
+    }
+    if (json == null) {
+      return defaultValue;
+    }
+    throw new IllegalArgumentException(field + " must be a string");
   }
 }

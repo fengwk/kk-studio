@@ -4,30 +4,33 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
+import fun.fengwk.kkstudio.canvas.CanvasFunction;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
+import fun.fengwk.kkstudio.canvas.CanvasResourceReference;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess.BlobFacts;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.ReferenceSegment;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -42,20 +45,25 @@ import java.util.UUID;
 /**
  * Canvas Function 状态机的短事务边界。
  *
- * <p>外部计算不持有数据库事务。本类只负责启动、检查点、取消和终态收敛，并在同一事务内维护 Run、资源 pin 与画布版本。针对同一画布的写入按 document、node 的固定顺序加锁。
+ * <p>外部计算不持有数据库事务。本类负责启动、提交意图、提交确认、检查点、人工核查解除、取消与终态收敛，并在同一事务内维护 Run、资源 pin 与画布版本；针对同一画布的写入按
+ * document、node、run 的固定顺序加锁。
  *
- * <p>Worker 写回必须同时匹配 {@code requestId} 和 {@code leaseToken}；租约失效后不能再更新状态。启动时会冻结输入资源并创建 INPUT/OUTPUT
- * pin。成功时预分配的输出资源接管节点所有权，失败或取消时丢弃未挂接输出；所有终态都会释放本次 Run 的 pin。
+ * <p>Worker 写回必须同时匹配 {@code requestId} 与 {@code leaseToken}；租约失效后不能再更新状态。启动时冻结输入资源并写入 INPUT pin；输出
+ * Resource 行与 OUTPUT pin 由宿主物化事务同事务写入。成功时预分配的目标资源接管节点所有权；失败或确定取消时释放本次 Run 的 pin 并丢弃未挂接输出。
+ * 外部提交结果不明时收敛为 UNKNOWN，保留 pin 与冻结计划，只能由人工核查后继续查询原任务或确认失败/取消。
  */
 @Component
 public class CanvasFunctionRunTransactions {
+
+  private static final int MAX_UNKNOWN_REASON_LENGTH = 1024;
+  private static final int MAX_VERIFICATION_LENGTH = 1024;
 
   private final CanvasStore canvasStore;
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionResourcePinRepository refRepository;
   private final CanvasFunctionCatalog catalog;
-  private final CanvasFunctionConfigCodecPort configCodec;
+  private final CanvasFunctionArgsCodecPort argsCodec;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasResourceLifecycle resourceLifecycle;
   private final CanvasFunctionBlobAccess blobAccess;
@@ -67,7 +75,7 @@ public class CanvasFunctionRunTransactions {
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionResourcePinRepository refRepository,
       CanvasFunctionCatalog catalog,
-      CanvasFunctionConfigCodecPort configCodec,
+      CanvasFunctionArgsCodecPort argsCodec,
       CanvasFunctionRunStateCodecPort stateCodec,
       CanvasResourceLifecycle resourceLifecycle,
       CanvasFunctionBlobAccess blobAccess,
@@ -77,7 +85,7 @@ public class CanvasFunctionRunTransactions {
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.refRepository = Objects.requireNonNull(refRepository, "refRepository");
     this.catalog = Objects.requireNonNull(catalog, "catalog");
-    this.configCodec = Objects.requireNonNull(configCodec, "configCodec");
+    this.argsCodec = Objects.requireNonNull(argsCodec, "argsCodec");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.blobAccess = Objects.requireNonNull(blobAccess, "blobAccess");
@@ -87,7 +95,7 @@ public class CanvasFunctionRunTransactions {
   /**
    * 启动新的 FunctionRun；相同 {@code requestId} 已存在时直接返回。
    *
-   * <p>事务内冻结输入清单、创建输入和输出 pin，并将画布版本推进一次。
+   * <p>事务内冻结输入清单、创建输入 pin 并构造 {@code PENDING} 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，因此保持节点内容只读且 不会产生新的队列事实。
    */
   @Transactional
   public CanvasFunctionStartResult start(UUID canvasId, UUID nodeId, String requestId) {
@@ -108,17 +116,19 @@ public class CanvasFunctionRunTransactions {
     }
     if (existing != null
         && (existing.status() == CanvasFunctionRunStatus.READY
-            || existing.status() == CanvasFunctionRunStatus.RUNNING)) {
-      throw conflict("another requestId is already active for this node");
+            || existing.status() == CanvasFunctionRunStatus.RUNNING
+            || existing.status() == CanvasFunctionRunStatus.UNKNOWN)) {
+      throw conflict("another requestId is already active or awaiting verification for this node");
     }
 
-    CanvasFunctionCatalog.RegisteredModel registered = catalog.require(node.function().name());
+    CanvasFunctionCatalog.RegisteredFunction registered = catalog.require(node.function().name());
     registered.requireAvailable();
     CanvasFunctionAdapter adapter = registered.adapter();
-    CanvasFunctionModel model = registered.model();
-    CanvasFunctionConfig config = configCodec.decode(node.function().argsJson(), model);
+    CanvasFunctionDefinition definition = registered.function();
+    JsonObject args = argsCodec.decode(node.function().argsJson(), definition);
     List<CanvasFunctionFrozenReference> manifest =
-        freezeManifest(canvasId, nodeId, config, model.referencePolicy());
+        freezeManifest(
+            canvasId, nodeId, node.function().name(), args, definition.referencePolicy());
     UUID targetResourceId = UUID.randomUUID();
     CanvasFunctionFrozenRun frozen =
         new CanvasFunctionFrozenRun(
@@ -126,11 +136,12 @@ public class CanvasFunctionRunTransactions {
             nodeId,
             node.name(),
             UUID.fromString(validatedRequestId),
-            model,
-            config,
+            definition,
+            args,
             manifest,
-            outputName(node.name(), model.outputKind()),
+            outputName(node.name(), definition.outputKind()),
             targetResourceId,
+            CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
     adapter.preflight(frozen);
@@ -153,20 +164,32 @@ public class CanvasFunctionRunTransactions {
     if (existing != null) {
       resourceLifecycle.releaseRunPins(canvasId, nodeId, existing.requestId());
     }
-    boolean created;
     if (existing == null) {
       runRepository.insertReady(ready);
-      created = true;
-    } else if (runRepository.replaceTerminalWithReady(ready)) {
-      created = false;
-    } else {
+    } else if (!runRepository.replaceTerminalWithReady(ready)) {
       throw conflict("terminal FunctionRun was replaced concurrently");
     }
     // pin 引用真实 Run 行，必须在其之后写入，才能由 fk_canvas_pin_run 保证 pin 不会脱离 Run 存活。
     // 这里只 pin 已存在的输入资源：预分配的输出目标此时还没有 Resource 行，OUTPUT pin 由物化事务与 Resource 同事务写入。
     refRepository.addAll(inputPins(canvasId, nodeId, ready.requestId(), manifest));
     bumpVersion(document);
-    return new CanvasFunctionStartResult(ready, created);
+    return new CanvasFunctionStartResult(ready, true);
+  }
+
+  /**
+   * 在外部提交前持久化提交意图。
+   *
+   * <p>之后任何崩溃都会让 Run 以 {@code SUBMITTING} 恢复，从而进入人工核查路径，绝不会被自动重新提交。
+   */
+  @Transactional
+  public CanvasFunctionFrozenRun beginSubmit(CanvasFunctionFrozenRun run, String leaseToken) {
+    return advanceSubmit(run, leaseToken, CanvasFunctionSubmitState.SUBMITTING);
+  }
+
+  /** 外部提交已被确认后持久化可查询的任务身份，使恢复路径只查询原任务。 */
+  @Transactional
+  public CanvasFunctionFrozenRun confirmSubmitted(CanvasFunctionFrozenRun run, String leaseToken) {
+    return advanceSubmit(run, leaseToken, CanvasFunctionSubmitState.SUBMITTED);
   }
 
   /** 将活跃 Run 收敛为 CANCELLED，并清理未挂接输出和本次 Run 的 pin。 */
@@ -186,13 +209,16 @@ public class CanvasFunctionRunTransactions {
     if (!current.requestId().toString().equals(validatedRequestId)) {
       throw conflict("requestId does not match the current FunctionRun");
     }
+    if (current.status() == CanvasFunctionRunStatus.UNKNOWN) {
+      throw conflict("UNKNOWN FunctionRun must be resolved, not cancelled");
+    }
     if (current.status() != CanvasFunctionRunStatus.READY
         && current.status() != CanvasFunctionRunStatus.RUNNING) {
       return current;
     }
     CanvasFunctionFrozenRun frozen = decode(current);
     CanvasFunctionFrozenRun cancelled =
-        stateCodec.checkpoint(frozen, "CANCELLED", frozen.adapterState());
+        stateCodec.transition(frozen, frozen.submitState(), "CANCELLED", frozen.adapterState());
     CanvasFunctionRun terminal =
         terminal(current, CanvasFunctionRunStatus.CANCELLED, cancelled, null);
     if (!runRepository.cancelActive(terminal)) {
@@ -203,6 +229,47 @@ public class CanvasFunctionRunTransactions {
     resourceLifecycle.discardUnownedTarget(canvasId, frozen.targetResourceId());
     bumpVersion(document);
     return terminal;
+  }
+
+  /**
+   * 人工核查 UNKNOWN Run 后解除：继续查询原任务，或确认失败/取消。
+   *
+   * <p>核查事实必须非空并会被持久化；RESUME 只会把提交事实推进为 {@code SUBMITTED} 并重新进入 READY，因此不会重新提交外部任务。
+   */
+  @Transactional
+  public CanvasFunctionRun resolve(
+      UUID canvasId,
+      UUID nodeId,
+      String requestId,
+      CanvasFunctionUnknownResolution resolution,
+      String verification) {
+    Objects.requireNonNull(canvasId, "canvasId");
+    Objects.requireNonNull(nodeId, "nodeId");
+    Objects.requireNonNull(resolution, "resolution");
+    String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
+    String validatedVerification = validateVerification(verification);
+    CanvasDocument document = requireDocumentForUpdate(canvasId);
+    canvasStore
+        .lockNode(canvasId, nodeId)
+        .orElseThrow(() -> notFound("Canvas Function node not found"));
+    CanvasFunctionRun current =
+        runRepository
+            .findByNodeIdForUpdate(nodeId)
+            .orElseThrow(() -> notFound("Canvas Function run not found"));
+    if (!current.requestId().toString().equals(validatedRequestId)) {
+      throw conflict("requestId does not match the current FunctionRun");
+    }
+    if (current.status() != CanvasFunctionRunStatus.UNKNOWN) {
+      throw conflict("only an UNKNOWN FunctionRun can be resolved");
+    }
+    CanvasFunctionFrozenRun frozen = decode(current);
+    return switch (resolution) {
+      case RESUME -> resumeUnknown(document, current, frozen);
+      case FAILED -> resolveUnknownTerminal(
+          document, current, frozen, CanvasFunctionRunStatus.FAILED, validatedVerification);
+      case CANCELLED -> resolveUnknownTerminal(
+          document, current, frozen, CanvasFunctionRunStatus.CANCELLED, validatedVerification);
+    };
   }
 
   /**
@@ -224,53 +291,48 @@ public class CanvasFunctionRunTransactions {
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(stage, "stage");
     Objects.requireNonNull(adapterState, "adapterState");
-    CanvasDocument document = canvasStore.lockDocument(canvasId).orElse(null);
-    if (document == null) {
-      throw new CanvasFunctionInternalCancellation("Canvas document disappeared during checkpoint");
-    }
-    NodeRecord node = canvasStore.lockNode(canvasId, nodeId).orElse(null);
-    if (node == null || node.function() == null) {
-      throw new CanvasFunctionInternalCancellation(
-          "Canvas Function node disappeared during checkpoint");
-    }
-    CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
-    if (!matchesClaim(current, validatedRequestId, leaseToken)) {
-      throw new CanvasFunctionInternalCancellation(
-          "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
-    }
+    CanvasDocument document = requireDocumentForUpdate(canvasId);
+    requireLiveFunctionNode(canvasId, nodeId);
+    CanvasFunctionRun current = requireClaim(nodeId, validatedRequestId, leaseToken);
     CanvasFunctionFrozenRun next = stateCodec.checkpoint(decode(current), stage, adapterState);
-    CanvasFunctionRun updated =
-        new CanvasFunctionRun(
-            current.nodeId(),
-            current.requestId(),
-            CanvasFunctionRunStatus.RUNNING,
-            current.attempt(),
-            null,
-            current.leaseToken(),
-            current.leaseUntil(),
-            next.stage(),
-            stateCodec.encode(next),
-            null,
-            clock.instant(),
-            current.createdAt());
-    if (!runRepository.checkpoint(
-        updated.nodeId(),
-        updated.requestId(),
-        leaseToken,
-        updated.stateJson(),
-        updated.stage(),
-        updated.updatedAt())) {
-      throw new CanvasFunctionInternalCancellation(
-          "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
-    }
+    persistRunningState(current, next, leaseToken);
     bumpVersion(document);
     return next;
+  }
+
+  /** 提交结果不明：收敛为 UNKNOWN，保留 pin 与冻结计划，退出自动调度。 */
+  @Transactional
+  public boolean markUnknown(UUID nodeId, String requestId, String leaseToken, String reason) {
+    Objects.requireNonNull(nodeId, "nodeId");
+    Objects.requireNonNull(requestId, "requestId");
+    String validatedReason = validateUnknownReason(reason);
+    CanvasFunctionRun observed = runRepository.findByNodeId(nodeId).orElse(null);
+    if (!matchesClaim(observed, requestId, leaseToken)) {
+      return false;
+    }
+    CanvasFunctionFrozenRun observedFrozen = decode(observed);
+    CanvasDocument document = requireDocumentForUpdate(observedFrozen.canvasId());
+    if (!functionNodePresent(observedFrozen.canvasId(), nodeId)) {
+      return false;
+    }
+    CanvasFunctionRun current = requireClaim(nodeId, requestId, leaseToken);
+    CanvasFunctionFrozenRun frozen = decode(current);
+    CanvasFunctionFrozenRun unknown =
+        stateCodec.transition(frozen, frozen.submitState(), "UNKNOWN", frozen.adapterState());
+    CanvasFunctionRun terminal =
+        terminal(current, CanvasFunctionRunStatus.UNKNOWN, unknown, validatedReason);
+    if (!runRepository.markUnknown(terminal, leaseToken)) {
+      throw new IllegalStateException("FunctionRun UNKNOWN CAS failed after row lock");
+    }
+    // UNKNOWN 保留本次 pin 与预分配目标：自动调度已退出，未核查前不能按普通失败清理。
+    bumpVersion(document);
+    return true;
   }
 
   /**
    * 将 Run 收敛为 SUCCEEDED。
    *
-   * <p>输出必须是启动时预分配的未挂接资源，且媒体类型与冻结模型一致。
+   * <p>输出必须是启动时预分配的目标资源，且媒体类型与冻结函数定义一致；发布是原子的，不允许部分数组。
    */
   @Transactional
   public boolean completeSuccess(
@@ -299,14 +361,14 @@ public class CanvasFunctionRunTransactions {
           "adapter result must be materialized as an unowned blob Resource");
     }
     BlobFacts outputBlob = blobAccess.findFacts(output.blobId()).orElse(null);
-    if (outputBlob == null || kindOf(outputBlob.mediaType()) != frozen.model().outputKind()) {
+    if (outputBlob == null || kindOf(outputBlob.mediaType()) != frozen.definition().outputKind()) {
       throw new IllegalArgumentException(
           "adapter result blob kind must match the frozen Function output kind");
     }
     resourceLifecycle.replaceOwnedWithTarget(
         frozen.canvasId(), frozen.nodeId(), frozen.targetResourceId());
     CanvasFunctionFrozenRun succeeded =
-        stateCodec.checkpoint(frozen, "SUCCEEDED", frozen.adapterState());
+        stateCodec.transition(frozen, frozen.submitState(), "SUCCEEDED", frozen.adapterState());
     CanvasFunctionRun terminal =
         terminal(current, CanvasFunctionRunStatus.SUCCEEDED, succeeded, null);
     if (!runRepository.transitionTerminal(terminal, leaseToken)) {
@@ -328,16 +390,13 @@ public class CanvasFunctionRunTransactions {
     }
     CanvasFunctionFrozenRun observedFrozen = decode(observed);
     CanvasDocument document = requireDocumentForUpdate(observedFrozen.canvasId());
-    NodeRecord node = canvasStore.lockNode(observedFrozen.canvasId(), nodeId).orElse(null);
-    if (node == null || node.function() == null) {
+    if (!functionNodePresent(observedFrozen.canvasId(), nodeId)) {
       return false;
     }
-    CanvasFunctionRun current = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
-    if (!matchesClaim(current, requestId, leaseToken)) {
-      return false;
-    }
+    CanvasFunctionRun current = requireClaim(nodeId, requestId, leaseToken);
     CanvasFunctionFrozenRun frozen = decode(current);
-    CanvasFunctionFrozenRun failed = stateCodec.checkpoint(frozen, "FAILED", frozen.adapterState());
+    CanvasFunctionFrozenRun failed =
+        stateCodec.transition(frozen, frozen.submitState(), "FAILED", frozen.adapterState());
     CanvasFunctionRun terminal = terminal(current, CanvasFunctionRunStatus.FAILED, failed, error);
     if (!runRepository.transitionTerminal(terminal, leaseToken)) {
       throw new IllegalStateException("FunctionRun failure CAS failed after row lock");
@@ -348,14 +407,86 @@ public class CanvasFunctionRunTransactions {
     return true;
   }
 
+  /** 推进外部提交事实；CAS 与 checkpoint 一致，旧租约只能得到内部取消。 */
+  private CanvasFunctionFrozenRun advanceSubmit(
+      CanvasFunctionFrozenRun run, String leaseToken, CanvasFunctionSubmitState nextState) {
+    Objects.requireNonNull(run, "run");
+    Objects.requireNonNull(leaseToken, "leaseToken");
+    Objects.requireNonNull(nextState, "nextState");
+    CanvasDocument document = requireDocumentForUpdate(run.canvasId());
+    requireLiveFunctionNode(run.canvasId(), run.nodeId());
+    CanvasFunctionRun current = requireClaim(run.nodeId(), run.requestId().toString(), leaseToken);
+    CanvasFunctionFrozenRun observed = decode(current);
+    if (observed.submitState() != CanvasFunctionSubmitState.PENDING
+        && nextState == CanvasFunctionSubmitState.SUBMITTING) {
+      throw new IllegalStateException("submit intent must be persisted once per FunctionRun");
+    }
+    if (observed.submitState() != CanvasFunctionSubmitState.SUBMITTING
+        && nextState == CanvasFunctionSubmitState.SUBMITTED) {
+      throw new IllegalStateException("submission must be confirmed only after its intent");
+    }
+    CanvasFunctionFrozenRun next =
+        stateCodec.transition(observed, nextState, nextState.name(), observed.adapterState());
+    persistRunningState(current, next, leaseToken);
+    bumpVersion(document);
+    return next;
+  }
+
+  private CanvasFunctionRun resumeUnknown(
+      CanvasDocument document, CanvasFunctionRun current, CanvasFunctionFrozenRun frozen) {
+    CanvasFunctionFrozenRun resumed =
+        stateCodec.transition(
+            frozen, CanvasFunctionSubmitState.SUBMITTED, "SUBMITTED", frozen.adapterState());
+    Instant now = clock.instant();
+    CanvasFunctionRun ready =
+        new CanvasFunctionRun(
+            current.nodeId(),
+            current.requestId(),
+            CanvasFunctionRunStatus.READY,
+            current.attempt(),
+            now,
+            null,
+            null,
+            resumed.stage(),
+            stateCodec.encode(resumed),
+            null,
+            now,
+            current.createdAt());
+    if (!runRepository.resumeUnknown(ready)) {
+      throw conflict("FunctionRun changed while resolving");
+    }
+    // RESUME 只重新调度查询原任务，pin 与预分配目标保持不动。
+    bumpVersion(document);
+    return ready;
+  }
+
+  private CanvasFunctionRun resolveUnknownTerminal(
+      CanvasDocument document,
+      CanvasFunctionRun current,
+      CanvasFunctionFrozenRun frozen,
+      CanvasFunctionRunStatus status,
+      String verification) {
+    CanvasFunctionFrozenRun resolved =
+        stateCodec.transition(frozen, frozen.submitState(), status.name(), frozen.adapterState());
+    CanvasFunctionRun terminal = terminal(current, status, resolved, verification);
+    if (!runRepository.resolveUnknownTerminal(terminal)) {
+      throw conflict("FunctionRun changed while resolving");
+    }
+    resourceLifecycle.releaseRunPins(frozen.canvasId(), frozen.nodeId(), frozen.requestId());
+    resourceLifecycle.discardUnownedTarget(frozen.canvasId(), frozen.targetResourceId());
+    bumpVersion(document);
+    return terminal;
+  }
+
   /** 冻结并校验本次运行使用的输入资源清单。 */
   private List<CanvasFunctionFrozenReference> freezeManifest(
       UUID canvasId,
       UUID targetNodeId,
-      CanvasFunctionConfig config,
+      String functionName,
+      JsonObject args,
       CanvasFunctionReferencePolicy policy) {
     List<CanvasFunctionFrozenReference> manifest = new ArrayList<>();
-    for (ReferenceSegment reference : configCodec.uniqueReferences(config)) {
+    for (CanvasResourceReference reference : new CanvasFunction(functionName, args).references()) {
       if (canvasStore.findNode(canvasId, reference.nodeId()).isEmpty()) {
         throw new IllegalArgumentException("referenced source node must belong to the same canvas");
       }
@@ -400,12 +531,12 @@ public class CanvasFunctionRunTransactions {
     for (CanvasFunctionFrozenReference reference : manifest) {
       if (!policy.allowedKinds().contains(reference.kind())) {
         throw new IllegalArgumentException(
-            "reference kind is not allowed by model: " + reference.kind());
+            "reference kind is not allowed by function: " + reference.kind());
       }
       int count = counts.merge(reference.kind(), 1, Integer::sum);
       if (count > policy.maxFor(reference.kind())) {
         throw new IllegalArgumentException(
-            "reference kind exceeds model limit: " + reference.kind());
+            "reference kind exceeds function limit: " + reference.kind());
       }
     }
   }
@@ -434,8 +565,59 @@ public class CanvasFunctionRunTransactions {
   }
 
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
-    CanvasFunctionModel model = catalog.require(stateCodec.modelKey(run.stateJson())).model();
-    return stateCodec.decode(run.stateJson(), model);
+    CanvasFunctionDefinition definition =
+        catalog.require(stateCodec.functionName(run.stateJson())).function();
+    return stateCodec.decode(run.stateJson(), definition);
+  }
+
+  private void persistRunningState(
+      CanvasFunctionRun current, CanvasFunctionFrozenRun next, String leaseToken) {
+    CanvasFunctionRun updated =
+        new CanvasFunctionRun(
+            current.nodeId(),
+            current.requestId(),
+            CanvasFunctionRunStatus.RUNNING,
+            current.attempt(),
+            null,
+            current.leaseToken(),
+            current.leaseUntil(),
+            next.stage(),
+            stateCodec.encode(next),
+            null,
+            clock.instant(),
+            current.createdAt());
+    if (!runRepository.checkpoint(
+        updated.nodeId(),
+        updated.requestId(),
+        leaseToken,
+        updated.stateJson(),
+        updated.stage(),
+        updated.updatedAt())) {
+      throw new CanvasFunctionInternalCancellation(
+          "FunctionRun checkpoint CAS failed because the run is no longer RUNNING");
+    }
+  }
+
+  private void requireLiveFunctionNode(UUID canvasId, UUID nodeId) {
+    NodeRecord node = canvasStore.lockNode(canvasId, nodeId).orElse(null);
+    if (node == null || node.function() == null) {
+      throw new CanvasFunctionInternalCancellation(
+          "Canvas Function node disappeared during FunctionRun write");
+    }
+  }
+
+  private boolean functionNodePresent(UUID canvasId, UUID nodeId) {
+    NodeRecord node = canvasStore.lockNode(canvasId, nodeId).orElse(null);
+    return node != null && node.function() != null;
+  }
+
+  private CanvasFunctionRun requireClaim(UUID nodeId, String requestId, String leaseToken) {
+    CanvasFunctionRun run = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
+    if (!matchesClaim(run, requestId, leaseToken)) {
+      throw new CanvasFunctionInternalCancellation(
+          "FunctionRun is no longer RUNNING under the current lease");
+    }
+    return run;
   }
 
   /** 以冻结执行状态构造终态记录，并清空可调度时间与租约字段。 */
@@ -463,6 +645,41 @@ public class CanvasFunctionRunTransactions {
     return canvasStore
         .lockDocument(canvasId)
         .orElseThrow(() -> notFound("Canvas document not found"));
+  }
+
+  private static String validateUnknownReason(String reason) {
+    if (reason == null || reason.isBlank()) {
+      throw new IllegalArgumentException("unknown reason must not be blank");
+    }
+    String stripped = stripControlCharacters(reason.strip());
+    if (stripped.isEmpty()) {
+      throw new IllegalArgumentException("unknown reason must not be blank");
+    }
+    return stripped.length() > MAX_UNKNOWN_REASON_LENGTH
+        ? stripped.substring(0, MAX_UNKNOWN_REASON_LENGTH)
+        : stripped;
+  }
+
+  private static String validateVerification(String verification) {
+    if (verification == null || verification.isBlank()) {
+      throw new IllegalArgumentException("verification must not be blank");
+    }
+    String stripped = stripControlCharacters(verification.strip());
+    if (stripped.isEmpty()) {
+      throw new IllegalArgumentException("verification must not be blank");
+    }
+    return stripped.length() > MAX_VERIFICATION_LENGTH
+        ? stripped.substring(0, MAX_VERIFICATION_LENGTH)
+        : stripped;
+  }
+
+  private static String stripControlCharacters(String value) {
+    StringBuilder builder = new StringBuilder(value.length());
+    for (int index = 0; index < value.length(); index++) {
+      char character = value.charAt(index);
+      builder.append(Character.isISOControl(character) ? ' ' : character);
+    }
+    return builder.toString().strip();
   }
 
   private static CanvasResourceKind kindOf(String mediaType) {

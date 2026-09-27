@@ -20,6 +20,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePin;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
@@ -37,11 +40,14 @@ class CanvasBlobResourceMaterializerTest {
   private final StorageUploadService uploadService = mock(StorageUploadService.class);
   private final StorageBlobManager blobManager = mock(StorageBlobManager.class);
   private final CanvasStore canvasStore = mock(CanvasStore.class);
+  private final CanvasFunctionRunRepository runRepository = mock(CanvasFunctionRunRepository.class);
   private final CanvasFunctionResourcePinRepository pinRepository =
       mock(CanvasFunctionResourcePinRepository.class);
   private final CanvasResourceRepository resourceRepository = mock(CanvasResourceRepository.class);
   private final TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
   private final UUID canvasId = UUID.randomUUID();
+  private final UUID nodeId = UUID.randomUUID();
+  private final UUID requestId = UUID.randomUUID();
   private final UUID resourceId = UUID.randomUUID();
   private final UUID uploadId = UUID.randomUUID();
   private final UUID blobId = UUID.randomUUID();
@@ -50,6 +56,7 @@ class CanvasBlobResourceMaterializerTest {
           uploadService,
           blobManager,
           canvasStore,
+          runRepository,
           pinRepository,
           resourceRepository,
           transactionTemplate);
@@ -62,8 +69,21 @@ class CanvasBlobResourceMaterializerTest {
             uploadId, blobId, "stored.bin", "image/png", 1L, "a".repeat(64));
     when(uploadService.stage(any(), any(), any(), anyLong())).thenReturn(upload);
     when(canvasStore.lockDocument(canvasId)).thenReturn(Optional.of(mock(CanvasDocument.class)));
-    when(pinRepository.findRunningOutputPins(canvasId, resourceId))
-        .thenReturn(List.of(mock(CanvasFunctionResourcePin.class)));
+    CanvasFunctionRun run =
+        new CanvasFunctionRun(
+            nodeId,
+            requestId,
+            CanvasFunctionRunStatus.RUNNING,
+            0,
+            null,
+            "lease-token-1",
+            Instant.now().plusSeconds(60),
+            "RUNNING",
+            "{}",
+            null,
+            Instant.now(),
+            Instant.now());
+    when(runRepository.findByNodeIdForUpdate(nodeId)).thenReturn(Optional.of(run));
     when(uploadService.lockReady(uploadId))
         .thenReturn(new StorageUploadService.ReadyUpload(blobId, "stored.bin"));
     when(resourceRepository.addIfAbsent(any())).thenReturn(true);
@@ -82,6 +102,15 @@ class CanvasBlobResourceMaterializerTest {
     assertEquals(blobId, resource.blobId());
     verify(blobManager).retain(blobId);
     verify(uploadService).delete(uploadId);
+    verify(pinRepository)
+        .addAll(
+            List.of(
+                new CanvasFunctionResourcePin(
+                    canvasId,
+                    nodeId,
+                    requestId,
+                    resourceId,
+                    CanvasFunctionResourcePin.Role.OUTPUT)));
   }
 
   @Test
@@ -96,12 +125,12 @@ class CanvasBlobResourceMaterializerTest {
   }
 
   @Test
-  void rejectsMissingCanvasOrInvalidRunningPin() {
+  void rejectsMissingCanvasOrInvalidRunningRun() {
     when(canvasStore.lockDocument(canvasId)).thenReturn(Optional.empty());
     assertThrows(IllegalStateException.class, this::materialize);
 
     when(canvasStore.lockDocument(canvasId)).thenReturn(Optional.of(mock(CanvasDocument.class)));
-    when(pinRepository.findRunningOutputPins(canvasId, resourceId)).thenReturn(List.of());
+    when(runRepository.findByNodeIdForUpdate(nodeId)).thenReturn(Optional.empty());
     assertThrows(IllegalStateException.class, this::materialize);
     verify(uploadService, times(2)).delete(uploadId);
   }
@@ -127,6 +156,11 @@ class CanvasBlobResourceMaterializerTest {
 
   private CanvasResource materialize() {
     return materializer.materialize(
-        canvasId, resourceId, "output.bin", new ByteArrayInputStream(new byte[] {1}));
+        canvasId,
+        nodeId,
+        requestId,
+        resourceId,
+        "output.bin",
+        new ByteArrayInputStream(new byte[] {1}));
   }
 }

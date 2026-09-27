@@ -27,8 +27,7 @@
 | [`CanvasResourceNodeDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasResourceNodeDTO.java) | `groupId`、`function`、`run` |
 | [`CanvasResourceDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasResourceDTO.java) | `blobId`、`textContent`、`mediaType`、`sizeBytes`、`width`、`height`、`durationMs` |
 | [`CanvasFunctionRunDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasFunctionRunDTO.java) | `error` |
-| [`CanvasFunctionModelDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasFunctionModelDTO.java) | `unavailableReason` |
-| [`CanvasFunctionParameterDefinitionDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasFunctionParameterDefinitionDTO.java) | `defaultValue`、`min`、`max` |
+| [`CanvasFunctionDefinitionDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasFunctionDefinitionDTO.java) | `unavailableReason` |
 | [`StorageUploadDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/StorageUploadDTO.java)、[`StoragePresignedUrlDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/StoragePresignedUrlDTO.java) | `blobId`、`presignedPut`、`mediaType`、`sizeBytes` |
 
 后端绝不知道 S3 的 bucket 与对象 key：Storage DTO 只给 `url`、`method`、必须原样回传的 `headers` 与 `expiresAt`，[canvas 的预签名端点](canvas-core.md)同理。凭证类字段走 `WRITE_ONLY`（[`AgentProviderEditablePropertiesDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/AgentProviderEditablePropertiesDTO.java) 的 `credential`），只写不读；[`EnvironmentRegistrationTokenDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentRegistrationTokenDTO.java) 是唯一的显式读取端点，不进通用投影，响应禁止缓存。[`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java) 用反射扫描各 DTO 的字段名，任何 secret / bootstrap 名称（key、token、instanceId、endpoint、文件系统路径）出现即失败。
@@ -53,7 +52,6 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 | [ai.environment](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/environment/) | Environment Card CRUD、registration token、最近一次 READY 的 OS/user/HOME 投影与有界运维事件 |
 | [ai.runtime](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/) | Session、Entry、Thread Snapshot、Command batch、Invocation、approval、stop、compaction |
 | [canvas](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/) | Canvas document、Snapshot、Patch、typed command、Resource、Function 与 Run |
-| [comfyui](../../share/src/main/java/fun/fengwk/kkstudio/share/comfyui/) | Workflow API 与运行请求/结果 |
 | [project](../../share/src/main/java/fun/fengwk/kkstudio/share/project/) | Project/Issue Snapshot、Issue 详情、Run 与各类操作请求 |
 | [storage](../../share/src/main/java/fun/fengwk/kkstudio/share/storage/) | Upload、Blob signed URL、S3 presign |
 | [systemsettings](../../share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/) | 六个 settings section、schema 与 update request |

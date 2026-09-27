@@ -8,65 +8,67 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** 启动时冻结的 Canvas Function model 与 adapter 注册目录。 */
+/** 启动时冻结的 Canvas Function 定义与 adapter 注册目录，键是全局唯一的函数名。 */
 public final class CanvasFunctionCatalog {
 
-  private final Map<String, RegisteredModel> byKey;
-  private final List<RegisteredModel> ordered;
+  private final Map<String, RegisteredFunction> byName;
+  private final List<RegisteredFunction> ordered;
 
-  private CanvasFunctionCatalog(Map<String, RegisteredModel> byKey, List<RegisteredModel> ordered) {
-    this.byKey = Map.copyOf(byKey);
+  private CanvasFunctionCatalog(
+      Map<String, RegisteredFunction> byName, List<RegisteredFunction> ordered) {
+    this.byName = Map.copyOf(byName);
     this.ordered = List.copyOf(ordered);
   }
 
   public static CanvasFunctionCatalog from(Collection<? extends CanvasFunctionAdapter> adapters) {
     Objects.requireNonNull(adapters, "adapters");
-    Map<String, RegisteredModel> registered = new LinkedHashMap<>();
+    Map<String, RegisteredFunction> registered = new LinkedHashMap<>();
     for (CanvasFunctionAdapter adapter : adapters) {
       Objects.requireNonNull(adapter, "adapter");
-      List<CanvasFunctionModel> models =
-          List.copyOf(Objects.requireNonNull(adapter.models(), "adapter.models"));
-      if (models.isEmpty()) {
-        throw new IllegalArgumentException("CanvasFunctionAdapter must declare at least one model");
+      List<CanvasFunctionDefinition> functions =
+          List.copyOf(Objects.requireNonNull(adapter.functions(), "adapter.functions"));
+      if (functions.isEmpty()) {
+        throw new IllegalArgumentException(
+            "CanvasFunctionAdapter must declare at least one function");
       }
-      for (CanvasFunctionModel model : models) {
-        Objects.requireNonNull(model, "adapter.models contains null");
+      for (CanvasFunctionDefinition function : functions) {
+        Objects.requireNonNull(function, "adapter.functions contains null");
       }
       boolean enabled = adapter.enabled();
       String unavailableReason = adapter.unavailableReason();
-      for (CanvasFunctionModel model : models) {
-        RegisteredModel registeredModel =
-            new RegisteredModel(model, adapter, enabled, unavailableReason);
-        if (registered.putIfAbsent(model.key(), registeredModel) != null) {
-          throw new IllegalArgumentException("duplicate Canvas Function model key: " + model.key());
+      for (CanvasFunctionDefinition function : functions) {
+        RegisteredFunction entry =
+            new RegisteredFunction(function, adapter, enabled, unavailableReason);
+        if (registered.putIfAbsent(function.name(), entry) != null) {
+          throw new IllegalArgumentException("duplicate Canvas Function name: " + function.name());
         }
       }
     }
-    List<RegisteredModel> ordered = new ArrayList<>(registered.values());
-    ordered.sort(Comparator.comparing(value -> value.model().key()));
+    List<RegisteredFunction> ordered = new ArrayList<>(registered.values());
+    ordered.sort(Comparator.comparing(value -> value.function().name()));
     return new CanvasFunctionCatalog(registered, ordered);
   }
 
-  public List<RegisteredModel> list() {
+  public List<RegisteredFunction> list() {
     return ordered;
   }
 
-  public RegisteredModel require(String modelKey) {
-    RegisteredModel registered = byKey.get(modelKey);
+  public RegisteredFunction require(String name) {
+    RegisteredFunction registered = byName.get(name);
     if (registered == null) {
-      throw new IllegalArgumentException("unknown Canvas Function model: " + modelKey);
+      throw new IllegalArgumentException("unknown Canvas Function: " + name);
     }
     return registered;
   }
 
-  public record RegisteredModel(
-      CanvasFunctionModel model,
+  public record RegisteredFunction(
+      CanvasFunctionDefinition function,
       CanvasFunctionAdapter adapter,
       boolean enabled,
       String unavailableReason) {
 
-    public RegisteredModel {
-      Objects.requireNonNull(model, "model");
+    public RegisteredFunction {
+      Objects.requireNonNull(function, "function");
       Objects.requireNonNull(adapter, "adapter");
       if (enabled && unavailableReason != null) {
         throw new IllegalArgumentException("enabled adapter must not expose unavailableReason");
@@ -78,8 +80,7 @@ public final class CanvasFunctionCatalog {
 
     public void requireAvailable() {
       if (!enabled) {
-        throw new IllegalArgumentException(
-            "Canvas Function model is unavailable: " + unavailableReason);
+        throw new IllegalArgumentException("Canvas Function is unavailable: " + unavailableReason);
       }
     }
   }
