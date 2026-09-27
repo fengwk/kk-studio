@@ -93,6 +93,12 @@ export function ThreadEventView({
     return 'events'
   })
 
+  useEffect(() => {
+    if (debugSelection != null) {
+      setActiveTab('detail')
+    }
+  }, [debugSelection])
+
   // 容器宽度判定：由 ResizeObserver 监听，判定 >= 1100px 为宽模式
   const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
 
@@ -416,7 +422,7 @@ export function ThreadEventView({
           tabIndex={-1}
           className="thread-debug-col thread-debug-col-detail"
         >
-          {debugSelection && debug ? (
+          {debugSelection && (debug || debugSelection.type === 'preview') ? (
             <ThreadDebugInspector
               selection={debugSelection}
               debug={debug}

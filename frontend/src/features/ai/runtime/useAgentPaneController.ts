@@ -11,12 +11,14 @@ import {
 import type { ChatPanelComposerInput } from '@/features/ai/runtime/ChatPanel'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
+  branchDraftsEqual,
   materializeAgentBranchDraft,
   materializeBlankBranchDraft,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
 import {
   hasMessageContent,
+  partsKey,
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
@@ -189,12 +191,34 @@ export function useAgentPaneController({
     unsubscribe: () => void
   } | null>(null)
 
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const previewRequestIdRef = useRef(0)
+  const previewInFlightRef = useRef(false)
+
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
+
+  useEffect(() => {
+    previewRequestIdRef.current += 1
+    previewInFlightRef.current = false
+    setPreviewLoading(false)
+  }, [boundThreadId])
   const branchPanel = useBoundBranchPanel({
     owner,
     threadId: boundThreadId,
   })
   const controller = branchPanel.controller
+  const controllerRef = useRef(controller)
+  controllerRef.current = controller
+  const branchPanelRef = useRef(branchPanel)
+  branchPanelRef.current = branchPanel
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const models = controller.models
 
@@ -846,6 +870,82 @@ export function useAgentPaneController({
     }
   }
 
+  async function handlePreview(payloadParts: ComposerPart[], localDraftParts: ComposerPart[]) {
+    if (capabilities?.readOnly) {
+      return
+    }
+    if (!isBoundTarget(target)) {
+      return
+    }
+    if (previewInFlightRef.current) {
+      return
+    }
+    const currentThreadId = target.threadId
+    const currentThread = controller.thread
+    if (!currentThread || currentThread.threadId !== currentThreadId) {
+      return
+    }
+    const currentPayload = trimMessageParts(payloadParts)
+    if (!hasMessageContent(currentPayload)) {
+      return
+    }
+    if (slashQueryOf(currentPayload) != null) {
+      return
+    }
+    const plan = branchPanel.buildBatch(currentPayload)
+    if (!plan) {
+      return
+    }
+
+    const requestId = ++previewRequestIdRef.current
+    // The transport payload has server uploadIds; the editable draft retains localIds.
+    const requestPartsKey = partsKey(trimMessageParts(localDraftParts))
+    const requestDraft = branchPanel.draft ? cloneDraft(branchPanel.draft) : null
+
+    previewInFlightRef.current = true
+    setPreviewLoading(true)
+    setActionError(null)
+
+    const isCurrentPreview = () => {
+      if (!isMountedRef.current || previewRequestIdRef.current !== requestId) {
+        return false
+      }
+      const latestTarget = targetRef.current
+      if (!isBoundTarget(latestTarget) || latestTarget.threadId !== currentThreadId) {
+        return false
+      }
+      const latestPayload = trimMessageParts(controllerRef.current.draft)
+      const latestDraft = branchPanelRef.current.draft
+      return partsKey(latestPayload) === requestPartsKey
+        && latestDraft != null
+        && requestDraft != null
+        && branchDraftsEqual(latestDraft, requestDraft)
+    }
+
+    try {
+      const response = await harnessService.previewProviderRequest(currentThreadId, plan.request)
+      if (!isCurrentPreview()) {
+        return
+      }
+
+      if (!response || response.kind !== 'DRAFT_REQUEST_PREVIEW') {
+        throw new Error(t('ai.runtime.debug.previewFailed'))
+      }
+
+      boundViews.selectDebugInspector({ type: 'preview', preview: response })
+    } catch (error) {
+      if (!isCurrentPreview()) {
+        return
+      }
+      setActionError(errorMessage(error, t('ai.runtime.debug.previewFailed')))
+    } finally {
+      if (isMountedRef.current && previewRequestIdRef.current === requestId) {
+        previewInFlightRef.current = false
+        setPreviewLoading(false)
+      }
+    }
+  }
+
   function handleCommand(command: ThreadCommand): void {
     onFocus?.()
     if (command.disabled) {
@@ -1029,6 +1129,15 @@ export function useAgentPaneController({
     || controller.stopReplayPending
     || controller.approvalPending
     || controller.replayPending
+  const previewDisabled =
+    Boolean(capabilities?.readOnly)
+    || pending
+    || previewLoading
+    || controller.working
+    || controller.queuedCommands.length > 0
+    || (isBoundTarget(target)
+      ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
+      : true)
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const composer: ChatPanelComposerInput = {
     parts: composerDraft,
@@ -1050,6 +1159,9 @@ export function useAgentPaneController({
     onCommand: handleCommand,
     commands,
     focusOnEscape: focused,
+    onPreview: isBoundTarget(target) ? handlePreview : undefined,
+    previewLoading: isBoundTarget(target) ? previewLoading : false,
+    previewDisabled: isBoundTarget(target) ? previewDisabled : true,
     settings: activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,

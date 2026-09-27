@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.URI;
@@ -36,6 +37,9 @@ public final class GeminiProviderAdapter implements ProviderAdapter {
   private final JdkHttpSseTransport transport;
   private final String apiKey;
 
+  /** 与 {@link #create(ProviderDescriptor)} 的 Provider 使用同一 encoder 的请求编码器，供无网络预览复用。 */
+  private final GeminiRequestEncoder encoder = new GeminiRequestEncoder();
+
   public GeminiProviderAdapter(JdkHttpSseTransport transport, String apiKey) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.apiKey = apiKey;
@@ -64,6 +68,11 @@ public final class GeminiProviderAdapter implements ProviderAdapter {
     }
     URI baseUri = GeminiEndpoints.resolveBaseUri(descriptor.endpoint());
     return new GeminiModelProvider(transport, descriptor, apiKey, baseUri);
+  }
+
+  @Override
+  public byte[] encodeRequestBody(ProviderRequest request, ProviderDescriptor descriptor) {
+    return encoder.encode(request, descriptor).bodyUtf8Bytes();
   }
 
   /** Gemini 仅支持隐式 Prompt Cache（服务端自动评估并报告 cachedContentTokenCount，不发 cache hint）。 */

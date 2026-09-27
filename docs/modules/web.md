@@ -113,7 +113,7 @@ result status 对齐。
 | Chat | `/api/ai/chats` | Chat CRUD 与 owner Session summary |
 | Harness command | `POST /api/harness/command-batches` | Chat/Canvas 唯一用户 command write path（202 accepted） |
 | Harness Session | `/api/harness/sessions/{sessionId}/threads`、`/entries`、`PUT /{sessionId}/name` | Thread summary、Entry tree 查询与 Session 改名 |
-| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、命名、运行控制与人工审批；Issue Agent Branch 的公开 YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
+| Harness Thread | `/api/harness/threads/{threadId}`、`/name`、`/model-request-debug`、`/provider-request-preview`、`/compact`、`/yolo`、`/stop`、`/tool-invocations/{id}/approval` | snapshot、模型请求诊断、草稿协议请求预览、命名、运行控制与人工审批；Issue Agent Branch 的公开预览、YOLO 与 stop 拒绝，YOLO 由 Project/Controller 管理 |
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
@@ -131,6 +131,11 @@ result status 对齐。
 progression 由 Work dispatcher 异步完成。Canvas
 command 返回带 `baseVersion/version` 的 Patch，实时收敛另走 `/api/events/v1`。
 公开 `command-batches` 仅接纳 Chat/Canvas owner；Issue Agent Session 的用户输入、分叉和停止不能绕过 Issue Activity 与 Run 权限校验。
+`POST /api/harness/threads/{threadId}/provider-request-preview` 接收与发送相同的 command batch，
+仅支持 Chat/Canvas 的已有空闲 Thread，以及「设置命令前缀 + 末尾 USER_MESSAGE」。
+返回当前快照的 Provider 协议请求体 JSON、字节数与模型标识，不包含认证 Header；
+草稿、历史和已 READY 的附件参与规划与内联编码，但不提交命令、不消费上传、不调用模型。
+游标漂移、队列未清空、下一步需压缩或附件尚未就绪时返回 409；预览与随后发送不具备原子性。
 `POST /api/issues/{issueId}/evidence` 只接收已 READY 的 `uploadId`（浏览器先经 `/api/storage/uploads`
 reserve/PUT/complete），服务端在单个事务内转移引用并返回规范 `kkstudio:/resources/<blobId>`；请求与响应
 都不接受/不暴露客户端声明的文件名、bucket 或对象 key，Issue 详情与 `issue_read` 暴露的是同一份有界证据窗口。

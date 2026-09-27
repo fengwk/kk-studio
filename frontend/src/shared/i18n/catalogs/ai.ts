@@ -1042,6 +1042,14 @@ export const aiCatalog = {
     'en-US': 'Send message',
     'zh-CN': '发送消息',
   },
+  'ai.runtime.composer.preview': {
+    'en-US': 'Preview request',
+    'zh-CN': '预览请求',
+  },
+  'ai.runtime.composer.previewLoading': {
+    'en-US': 'Generating request preview…',
+    'zh-CN': '正在生成请求预览…',
+  },
   'ai.runtime.composer.openCommands': {
     'en-US': 'Open commands',
     'zh-CN': '打开命令表',
@@ -1910,13 +1918,21 @@ export const aiCatalog = {
     'en-US': 'Subagents:',
     'zh-CN': '子代理：',
   },
+  'ai.runtime.debug.subagentAriaPrefix': {
+    'en-US': 'Subagent',
+    'zh-CN': '子代理',
+  },
   'ai.runtime.debug.cacheLabel': {
     'en-US': 'Cache:',
     'zh-CN': '缓存：',
   },
+  'ai.runtime.debug.cacheAriaPrefix': {
+    'en-US': 'Cache',
+    'zh-CN': '缓存',
+  },
   'ai.runtime.debug.cacheRetention.none': {
-    'en-US': 'No cache (NONE)',
-    'zh-CN': '无缓存 (NONE)',
+    'en-US': 'No cache',
+    'zh-CN': '无缓存',
   },
   'ai.runtime.debug.cacheRetention.short': {
     'en-US': 'Short (SHORT)',
@@ -1951,7 +1967,7 @@ export const aiCatalog = {
     'zh-CN': '技能',
   },
   'ai.runtime.debug.requestLabel': {
-    'en-US': 'Request',
+    'en-US': 'Request Snapshot',
     'zh-CN': '请求快照',
   },
   'ai.runtime.debug.inspectorClose': {
@@ -2030,9 +2046,69 @@ export const aiCatalog = {
     'en-US': 'Prompt XML:',
     'zh-CN': '提示词 XML：',
   },
+  'ai.runtime.debug.inspector.cacheTitle': {
+    'en-US': 'Cache Policy',
+    'zh-CN': '缓存策略',
+  },
+  'ai.runtime.debug.inspector.cacheRetention': {
+    'en-US': 'Retention',
+    'zh-CN': '留存档位',
+  },
+  'ai.runtime.debug.inspector.cacheAffinityKey': {
+    'en-US': 'Affinity Key',
+    'zh-CN': '前缀标识 (Affinity Key)',
+  },
+  'ai.runtime.debug.inspector.cacheBreakpoints': {
+    'en-US': 'Breakpoints',
+    'zh-CN': 'Cache 断点',
+  },
+  'ai.runtime.debug.inspector.cacheProviderDisclaimer': {
+    'en-US': 'Provider automatic caching is not guaranteed',
+    'zh-CN': '不保证 Provider 自动缓存',
+  },
   'ai.runtime.debug.noFrozenInvocation': {
     'en-US': 'No active frozen invocation request. This view displays canonical request JSON only during an active invocation turn.',
     'zh-CN': '当前无活动的冻结调用请求。仅在活动调用回合中显示规范化请求 JSON。',
+  },
+  'ai.runtime.debug.previewFailed': {
+    'en-US': 'Failed to preview request',
+    'zh-CN': '请求预览失败',
+  },
+  'ai.runtime.debug.inspector.draftPreviewTitle': {
+    'en-US': 'Request Preview',
+    'zh-CN': '请求预览',
+  },
+  'ai.runtime.debug.inspector.clickTimeSnapshot': {
+    'en-US': 'Click-time Snapshot',
+    'zh-CN': '点击快照',
+  },
+  'ai.runtime.debug.inspector.providerType': {
+    'en-US': 'Provider Type',
+    'zh-CN': 'Provider 类型',
+  },
+  'ai.runtime.debug.inspector.modelName': {
+    'en-US': 'Model Name',
+    'zh-CN': '模型名称',
+  },
+  'ai.runtime.debug.inspector.bodyByteSize': {
+    'en-US': 'Payload Size',
+    'zh-CN': '载荷大小',
+  },
+  'ai.runtime.debug.inspector.generatedAt': {
+    'en-US': 'Generated At',
+    'zh-CN': '生成时间',
+  },
+  'ai.runtime.debug.inspector.sourceHeadEntryId': {
+    'en-US': 'Base Entry ID',
+    'zh-CN': '基础 Entry ID',
+  },
+  'ai.runtime.debug.inspector.snapshotNotice': {
+    'en-US': 'Notice',
+    'zh-CN': '快照说明',
+  },
+  'ai.runtime.debug.inspector.requestBodyJson': {
+    'en-US': 'Provider Request Body (JSON)',
+    'zh-CN': 'Provider 请求体 (JSON)',
   },
   'ai.runtime.event.detail.entryId': {
     'en-US': 'Entry ID',

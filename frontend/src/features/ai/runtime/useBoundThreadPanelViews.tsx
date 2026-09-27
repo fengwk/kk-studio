@@ -44,6 +44,14 @@ export function useBoundThreadPanelViews(
     internalSwitchMode(nextMode)
   }
 
+  const selectDebugInspector = (selection: DebugInspectorSelection | null) => {
+    selectEvent(null)
+    setDebugSelection(selection)
+    if (selection != null && mode !== 'debug') {
+      internalSwitchMode('debug')
+    }
+  }
+
   const selectedRecord =
     selectedEventId == null
       ? null
@@ -84,6 +92,7 @@ export function useBoundThreadPanelViews(
     debug,
     debugSelection,
     setDebugSelection,
+    selectDebugInspector,
     selectedRecord,
     mainView,
   }

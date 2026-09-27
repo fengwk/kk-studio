@@ -10,7 +10,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Plus, X } from 'lucide-react'
+import { ArrowUp, Eye, LoaderCircle, Plus, X } from 'lucide-react'
 import {
   ThreadCommandPalette,
 } from '@/features/ai/runtime/thread-panel/ThreadCommandPalette'
@@ -37,6 +37,7 @@ import {
   renderPartsToEditor,
 } from '@/features/ai/composer/composer-dom'
 import {
+  hasMessageContent,
   mergeTextParts,
   partsKey,
   removePartsByIds,
@@ -109,6 +110,9 @@ export function ThreadComposer({
   focusOnEscape = false,
   active = true,
   settings,
+  onPreview,
+  previewLoading = false,
+  previewDisabled = false,
 }: {
   parts: ComposerPart[]
   pending: boolean
@@ -136,6 +140,9 @@ export function ThreadComposer({
   active?: boolean
   /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
   settings?: ThreadComposerSettingsInput
+  onPreview?: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
+  previewLoading?: boolean
+  previewDisabled?: boolean
 }) {
   const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -340,6 +347,20 @@ export function ThreadComposer({
     [disabled, isGoalCommand, parts, slashMode, uploads],
   )
 
+  const canPreview = useMemo(() => {
+    if (!onPreview || disabled || previewDisabled || previewLoading) {
+      return false
+    }
+    if (slashMode || isGoalCommand) {
+      return false
+    }
+    if (!canSubmitParts(parts, uploads)) {
+      return false
+    }
+    const trimmed = trimMessageParts(parts)
+    return hasMessageContent(trimmed)
+  }, [onPreview, disabled, previewDisabled, previewLoading, slashMode, isGoalCommand, parts, uploads])
+
   // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。
   const { commit } = useComposerSubmissionSettle({
     parts,
@@ -488,6 +509,24 @@ export function ThreadComposer({
     })
   }
 
+  function localDraftSnapshot() {
+    return trimMessageParts(
+      parts.map((part) => {
+        if (part.type !== 'attachment') {
+          return part
+        }
+        const record = uploads.find(
+          (upload) => upload.localId === part.uploadId || upload.uploadId === part.uploadId,
+        )
+        const imageTier = part.imageTier ?? record?.imageTier
+        return {
+          ...part,
+          ...(imageTier ? { imageTier } : {}),
+        }
+      }),
+    )
+  }
+
   function handleSubmit() {
     if (!canSend) {
       return
@@ -532,23 +571,18 @@ export function ThreadComposer({
     // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
     // 本地草稿（trim 后），与 payload 分开——恢复比对只命中本地 id 草稿。
     const resolved = resolveUploadIds(parts)
-    const localDraft = trimMessageParts(
-      parts.map((part) => {
-        if (part.type !== 'attachment') {
-          return part
-        }
-        const record = uploads.find(
-          (upload) => upload.localId === part.uploadId || upload.uploadId === part.uploadId,
-        )
-        const imageTier = part.imageTier ?? record?.imageTier
-        return {
-          ...part,
-          ...(imageTier ? { imageTier } : {}),
-        }
-      }),
-    )
+    const localDraft = localDraftSnapshot()
     commit(localDraft)
     onSubmit(resolved, localDraft)
+  }
+
+  function handlePreview() {
+    if (!canPreview || !onPreview) {
+      return
+    }
+    setPlusMenuOpen(false)
+    const resolved = resolveUploadIds(parts)
+    onPreview(resolved, localDraftSnapshot())
   }
 
   function handleSelect(command: ThreadCommand) {
@@ -826,6 +860,25 @@ export function ThreadComposer({
               onMenuChange={changeControlMenu}
             />
           ) : <span className="thread-dock-controls-spacer" />}
+          {onPreview ? (
+            <button
+              className="thread-dock-preview"
+              type="button"
+              aria-label={previewLoading ? t('ai.runtime.composer.previewLoading') : t('ai.runtime.composer.preview')}
+              title={previewLoading ? t('ai.runtime.composer.previewLoading') : t('ai.runtime.composer.preview')}
+              disabled={!canPreview}
+              onClick={() => {
+                handlePreview()
+                focusComposer()
+              }}
+            >
+              {previewLoading ? (
+                <LoaderCircle className="preview-icon spin" aria-hidden="true" />
+              ) : (
+                <Eye className="preview-icon" aria-hidden="true" />
+              )}
+            </button>
+          ) : null}
           <button
             className="thread-dock-send"
             type="button"

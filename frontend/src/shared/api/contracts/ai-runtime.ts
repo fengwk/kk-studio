@@ -104,6 +104,20 @@ export interface HarnessModelRequestDebugDTO {
   frozenInvocation: HarnessModelRequestDebugFrozenInvocationDTO | null
 }
 
+/**
+ * 草稿请求预览 (POST /api/harness/threads/{threadId}/provider-request-preview)。
+ */
+export interface ProviderRequestPreviewDTO {
+  kind: 'DRAFT_REQUEST_PREVIEW'
+  providerType: string
+  modelName: string
+  bodyByteSize: number
+  bodyJson: string
+  sourceHeadEntryId: string | null
+  generatedAt: string
+  snapshotNotice?: string | null
+}
+
 /** Session Entry 查询投影；id 均为 canonical UUID string。 */
 export interface HarnessSessionEntryDTO {
   entryId: string
