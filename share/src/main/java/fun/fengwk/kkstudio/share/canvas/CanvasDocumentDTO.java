@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /**
- * Canvas 聚合的持久化头。version 是单调递增的 graph 版本，也是 command expected 游标与 patch base/version 的公共坐标系，wire
- * 为规范非负十进制字符串。
+ * Canvas 聚合的持久化头。{@code revision} 是单调递增的同步位置，也是 command 接受回执与 patch 的公共坐标系，wire 为规范非负十进制字符串；
+ * 它不是普通编辑的整图前置版本。
  */
 @Data
 public class CanvasDocumentDTO {
@@ -14,7 +14,7 @@ public class CanvasDocumentDTO {
 
   private String title;
 
-  private String version;
+  private String revision;
 
   private String createdAt;
 

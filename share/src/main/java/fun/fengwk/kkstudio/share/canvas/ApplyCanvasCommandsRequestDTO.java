@@ -1,34 +1,22 @@
 package fun.fengwk.kkstudio.share.canvas;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
-import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
  * {@code POST /api/canvases/{canvasId}/commands} 的 typed command batch。
  *
- * <p>{@code expectedVersion} 是精确的 graph 版本 CAS 游标，公共契约为规范非负十进制字符串；{@code idempotencyKey}
- * 是整批的幂等键（客户端 UUID）。
+ * <p>{@code idempotencyKey} 是整批的幂等键（客户端 UUID）。重试沿用同一个键与同一批命令：服务端只返回当时记录的接受位置，
+ * 不重新执行，也不把新运行状态冒充旧请求结果；同一键换成不同请求指纹会被拒绝。批内命令的前置条件来自编辑起点，服务端不接受整张旧快照覆盖。
  */
 @Data
 public class ApplyCanvasCommandsRequestDTO {
 
-  private String expectedVersion;
-
-  @JsonSetter("expectedVersion")
-  public void setExpectedVersion(Object value) {
-    if (value != null && !(value instanceof String)) {
-      throw new IllegalArgumentException("expectedVersion must be a JSON string");
-    }
-    this.expectedVersion = (String) value;
-  }
-
   private String idempotencyKey;
 
-  private List<CanvasCommandDTO> commands = new ArrayList<>();
+  private List<CanvasCommandDTO> commands;
 
   @JsonAnySetter
   public void rejectUnknownField(String field, Object value) {

@@ -39,7 +39,7 @@ class PostgresqlNotificationLoopTest {
   private static final String WORK_CHANNEL = HarnessWorkDispatcher.CHANNEL;
   private static final String CANVAS_FUNCTION_WORK_CHANNEL = CanvasFunctionDispatcher.CHANNEL;
   private static final String THREAD_CHANNEL = "harness_thread_version";
-  private static final String CANVAS_CHANNEL = "canvas_version";
+  private static final String CANVAS_CHANNEL = "canvas_revision";
 
   @Test
   void oneConnectionListensToAllChannelsAndIsolatesResyncAndNotificationFailures()
