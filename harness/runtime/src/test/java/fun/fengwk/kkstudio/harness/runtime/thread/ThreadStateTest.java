@@ -41,7 +41,6 @@ class ThreadStateTest {
 
     assertTrue(rootState.status().isActive());
     assertFalse(rootState.status().isIdle());
-    assertFalse(rootState.status().isStopped());
 
     ThreadState childState =
         state(
@@ -58,22 +57,21 @@ class ThreadStateTest {
     assertEquals(ThreadLifecycleStatus.IDLE, childState.status());
     assertTrue(childState.status().isIdle());
     assertFalse(childState.status().isActive());
-    assertFalse(childState.status().isStopped());
 
-    ThreadState stoppedState =
+    ThreadState waitingChildrenState =
         state(
             id(9),
-            null,
+            id(7),
             id(44),
             false,
-            ThreadLifecycleStatus.STOPPED,
+            ThreadLifecycleStatus.WAITING_CHILDREN,
             1L,
             1L,
             CREATED.plusSeconds(3));
-    assertEquals(ThreadLifecycleStatus.STOPPED, stoppedState.status());
-    assertTrue(stoppedState.status().isStopped());
-    assertFalse(stoppedState.status().isIdle());
-    assertFalse(stoppedState.status().isActive());
+    assertEquals(ThreadLifecycleStatus.WAITING_CHILDREN, waitingChildrenState.status());
+    assertTrue(waitingChildrenState.status().isWaitingChildren());
+    assertFalse(waitingChildrenState.status().isIdle());
+    assertFalse(waitingChildrenState.status().isActive());
   }
 
   @Test
@@ -181,8 +179,8 @@ class ThreadStateTest {
   }
 
   @Test
-  void initialConstructorAndFactoryEstablishCanonicalState() {
-    // 测试意图：验证初始构造器与静态 initial 工厂方法正确设置规范初始值（sequence=1, version=0, createdAt=updatedAt=now）。
+  void canonicalConstructorEstablishesCanonicalState() {
+    // 测试意图：验证规范全参构造器正确设置初始值（sequence=1, version=0, createdAt=updatedAt=now）。
     Instant now = CREATED.plusSeconds(10);
     ThreadState initialViaConstructor =
         new ThreadState(
@@ -194,6 +192,9 @@ class ThreadStateTest {
             "child-branch",
             true,
             ThreadLifecycleStatus.ACTIVE,
+            1L,
+            0L,
+            now,
             now);
 
     assertEquals(id(101), initialViaConstructor.id());
@@ -209,8 +210,8 @@ class ThreadStateTest {
     assertEquals(now, initialViaConstructor.createdAt());
     assertEquals(now, initialViaConstructor.updatedAt());
 
-    ThreadState initialViaFactory =
-        ThreadState.initial(
+    ThreadState initialRoot =
+        new ThreadState(
             id(102),
             SESSION_ID,
             null,
@@ -219,15 +220,18 @@ class ThreadStateTest {
             "root-thread",
             false,
             ThreadLifecycleStatus.IDLE,
+            1L,
+            0L,
+            now,
             now);
 
-    assertEquals(id(102), initialViaFactory.id());
-    assertNull(initialViaFactory.parentThreadId());
-    assertEquals(ThreadLifecycleStatus.IDLE, initialViaFactory.status());
-    assertEquals(1L, initialViaFactory.nextCommandSequence());
-    assertEquals(0L, initialViaFactory.version());
-    assertEquals(now, initialViaFactory.createdAt());
-    assertEquals(now, initialViaFactory.updatedAt());
+    assertEquals(id(102), initialRoot.id());
+    assertNull(initialRoot.parentThreadId());
+    assertEquals(ThreadLifecycleStatus.IDLE, initialRoot.status());
+    assertEquals(1L, initialRoot.nextCommandSequence());
+    assertEquals(0L, initialRoot.version());
+    assertEquals(now, initialRoot.createdAt());
+    assertEquals(now, initialRoot.updatedAt());
   }
 
   @Test
@@ -251,11 +255,11 @@ class ThreadStateTest {
     assertEquals(stored.createdAt(), idle.createdAt());
     assertEquals(CREATED.plusSeconds(1), idle.updatedAt());
 
-    ThreadState stopped =
-        idle.changeLifecycleStatus(ThreadLifecycleStatus.STOPPED, CREATED.plusSeconds(2));
-    assertEquals(ThreadLifecycleStatus.STOPPED, stopped.status());
-    assertEquals(7L, stopped.version());
-    assertEquals(id(100), stopped.parentThreadId());
+    ThreadState waiting =
+        idle.changeLifecycleStatus(ThreadLifecycleStatus.WAITING_CHILDREN, CREATED.plusSeconds(2));
+    assertEquals(ThreadLifecycleStatus.WAITING_CHILDREN, waiting.status());
+    assertEquals(7L, waiting.version());
+    assertEquals(id(100), waiting.parentThreadId());
 
     // 拒绝传入 null status
     assertThrows(
@@ -359,7 +363,7 @@ class ThreadStateTest {
     assertEquals(durableNow, stored.renameThread("new name", CREATED).updatedAt());
     assertEquals(
         durableNow,
-        stored.changeLifecycleStatus(ThreadLifecycleStatus.STOPPED, CREATED).updatedAt());
+        stored.changeLifecycleStatus(ThreadLifecycleStatus.WAITING_CHILDREN, CREATED).updatedAt());
   }
 
   @Test
@@ -660,7 +664,7 @@ class ThreadStateTest {
             null,
             id(42),
             false,
-            ThreadLifecycleStatus.STOPPED,
+            ThreadLifecycleStatus.WAITING_CHILDREN,
             3L,
             6L,
             CREATED.plusSeconds(1)));

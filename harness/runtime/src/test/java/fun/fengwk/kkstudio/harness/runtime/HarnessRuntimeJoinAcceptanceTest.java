@@ -5,17 +5,34 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.sett
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -121,5 +138,483 @@ class HarnessRuntimeJoinAcceptanceTest {
                 request(34, parent, root.thread().headEntryId()),
                 AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(39)).isEmpty()));
+  }
+
+  private UUID seedClosedStopTurn(UUID sessionId, UUID rootEntryId, UUID threadId) {
+    return store.transaction(
+        tx -> {
+          UUID turnStartId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnStartId,
+                  sessionId,
+                  rootEntryId,
+                  new TurnStartPayload(TurnStartReason.STOP, settings(), threadId),
+                  T0));
+          UUID barrierId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  barrierId,
+                  sessionId,
+                  turnStartId,
+                  new AssistantErrorPayload(
+                      new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"), null),
+                  T0));
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  sessionId,
+                  barrierId,
+                  new TurnEndPayload(
+                      turnStartId,
+                      TurnEndOutcome.STOPPED,
+                      false,
+                      TurnEndReason.USER_STOP,
+                      TestIds.id(9)),
+                  T0));
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          tx.updateThread(thread.advanceHead(turnEndId, T0));
+          return turnEndId;
+        });
+  }
+
+  @Test
+  void haltedDeliveryFlushOnNextUserInputAndReplayOrder() {
+    // 测试意图：当父线程处于 STOPPED 边界时，子线程空闲匹配的 Join 交付被 hold；
+    // 当父线程收到下一批真实验户输入时，原子刷新所有挂起交付（先合成 CUSTOM_MESSAGE 交付命令，再插入用户命令），
+    // 并支持 client 以原始期望序号进行幂等重放；若重放跳跃非交付命令或乱序则确定性拒绝。
+    AcceptedCommands root =
+        runtime.acceptCommands(session(40, 41, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = root.thread().id();
+    UUID parentHead = root.thread().headEntryId();
+    ThreadJoinRequest joinReq = request(42, parentId, parentHead);
+    AcceptedCommands child =
+        runtime.acceptCommandsAndJoin(
+            session(43, 44, parentId), joinReq, AcceptancePreflight.IDENTITY);
+    UUID childId = child.thread().id();
+
+    // 推进父线程 head 至 STOPPED 屏障
+    UUID stoppedHead = seedClosedStopTurn(root.session().id(), root.rootEntry().id(), parentId);
+
+    // 停止子线程（使子线程命令取消、闭合并达到 IDLE）：触发 settleStoppedTree
+    // 由于父线程处于 STOPPED 边界，子线程的 Join 匹配被成功捕获，但交付被 hold！
+    runtime.stop(new StopCommand(childId, TestIds.id(47), child.thread().version()));
+
+    ThreadJoin heldJoin = runtime.findJoin(joinReq.invocationId()).orElseThrow();
+    assertTrue(heldJoin.matched());
+    assertNull(heldJoin.deliveryCommandSequence());
+    int pendingCount = store.transaction(tx -> tx.loadPendingDeliveries(parentId).size());
+    assertEquals(1, pendingCount);
+
+    // 父线程当前期望的 next sequence 是 2（因初始命令占据 sequence 1）
+    ThreadState parentBeforeInput = store.transaction(tx -> tx.findThread(parentId).orElseThrow());
+    long expectedNextSeq = parentBeforeInput.nextCommandSequence();
+    assertEquals(2L, expectedNextSeq);
+
+    // 父线程收到真实用户输入：触发 pending delivery flush
+    NewThreadCommand userCmd = userMessageCommand(TestIds.id(46), "next prompt");
+    AcceptCommandsCommand inputCmd =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(parentId, stoppedHead, expectedNextSeq),
+            List.of(userCmd));
+    AcceptedCommands accepted = runtime.acceptCommands(inputCmd, AcceptancePreflight.IDENTITY);
+
+    // 验证父线程接收到 delivery (seq 2) + userCmd (seq 3)
+    assertEquals(1, accepted.acceptedCommands().size());
+    assertEquals(3L, accepted.acceptedCommands().get(0).sequence());
+
+    List<ThreadCommand> parentCommands = store.transaction(tx -> tx.loadCommandsByThread(parentId));
+    assertEquals(3, parentCommands.size());
+    ThreadCommand delivery = parentCommands.get(1);
+    assertEquals(2L, delivery.sequence());
+    assertEquals(joinReq.invocationId(), delivery.idempotencyKey());
+    assertEquals(ThreadCommandType.CUSTOM_MESSAGE, delivery.type());
+
+    ThreadCommand user = parentCommands.get(2);
+    assertEquals(3L, user.sequence());
+    assertEquals(TestIds.id(46), user.idempotencyKey());
+
+    // 验证 join 已更新为 delivered
+    ThreadJoin deliveredJoin = runtime.findJoin(joinReq.invocationId()).orElseThrow();
+    assertEquals(2L, deliveredJoin.deliveryCommandSequence());
+
+    // 验证以 client 原初 expectedNextSeq (2) 进行 exact replay 成功（走通 allPrecedingWereDeliveries 路径）
+    AcceptedCommands replayed = runtime.acceptCommands(inputCmd, AcceptancePreflight.IDENTITY);
+    assertTrue(replayed.replayed());
+    assertEquals(1, replayed.acceptedCommands().size());
+    assertEquals(3L, replayed.acceptedCommands().get(0).sequence());
+
+    // 验证若 client 期望的 sequence 大于已持久化命令序号（firstSequence < expected），拒绝重放
+    AcceptCommandsCommand invalidSeqReplay =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(parentId, stoppedHead, 10L), List.of(userCmd));
+    assertThrows(
+        HarnessRuntimeConflictException.class,
+        () -> runtime.acceptCommands(invalidSeqReplay, AcceptancePreflight.IDENTITY));
+  }
+
+  @Test
+  void replayPrecedingNonDeliveryRejectionAndNonContiguousRejection() {
+    // 测试意图：验证线程批次重放时，若跳过的历史前置序号包含普通用户命令（非 Join 交付）则拒绝重放；
+    // 若请求批次内各命令序号不连续同样拒绝。
+    AcceptedCommands root =
+        runtime.acceptCommands(session(50, 51, null), AcceptancePreflight.IDENTITY);
+    UUID threadId = root.thread().id();
+    UUID head = root.thread().headEntryId();
+
+    // 连续写入两条用户命令：seq 2 与 seq 3
+    NewThreadCommand cmd2 = userMessageCommand(TestIds.id(52), "cmd 2");
+    AcceptedCommands acc2 =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(threadId, head, 2L), List.of(cmd2)),
+            AcceptancePreflight.IDENTITY);
+    assertEquals(2L, acc2.acceptedCommands().get(0).sequence());
+
+    NewThreadCommand cmd3 = userMessageCommand(TestIds.id(53), "cmd 3");
+    AcceptedCommands acc3 =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(threadId, head, 3L), List.of(cmd3)),
+            AcceptancePreflight.IDENTITY);
+    assertEquals(3L, acc3.acceptedCommands().get(0).sequence());
+
+    // 尝试重放 cmd3，但传入 expected = 1L（前置 seq 1、seq 2 不是 delivery），触发 allPrecedingWereDeliveries = false
+    // -> 拒绝
+    AcceptCommandsCommand nonDeliveryPreceding =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(threadId, head, 1L), List.of(cmd3));
+    assertThrows(
+        HarnessRuntimeConflictException.class,
+        () -> runtime.acceptCommands(nonDeliveryPreceding, AcceptancePreflight.IDENTITY));
+
+    // 尝试重放不连续的命令批次：[cmd2, cmd4]
+    NewThreadCommand cmd4 = userMessageCommand(TestIds.id(54), "cmd 4");
+    AcceptedCommands acc4 =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(threadId, head, 4L), List.of(cmd4)),
+            AcceptancePreflight.IDENTITY);
+    assertEquals(4L, acc4.acceptedCommands().get(0).sequence());
+
+    AcceptCommandsCommand nonContiguousBatch =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(threadId, head, 2L), List.of(cmd2, cmd4));
+    assertThrows(
+        HarnessRuntimeConflictException.class,
+        () -> runtime.acceptCommands(nonContiguousBatch, AcceptancePreflight.IDENTITY));
+  }
+
+  @Test
+  void ancestorIdleTransitionToWaitingChildrenOnChildSessionAndThreadCommands() {
+    // 测试意图：验证父级/祖先线程处于 IDLE 状态时，接纳新子会话（acceptNewSession）或已有子线程接纳新命令（acceptOnThread）均将 IDLE 祖先原子推进为
+    // WAITING_CHILDREN。
+    AcceptedCommands parent =
+        runtime.acceptCommands(session(60, 61, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = parent.thread().id();
+
+    // 将 parent 置为 IDLE
+    store.transaction(
+        tx -> {
+          ThreadState p = tx.lockThread(parentId).orElseThrow();
+          tx.updateThread(p.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T0));
+          return null;
+        });
+    assertEquals(
+        ThreadLifecycleStatus.IDLE,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+
+    // 1. 创建子会话：触发 lockedAncestors 遍历，将 IDLE parent 推进为 WAITING_CHILDREN
+    ThreadJoinRequest join1 = request(62, parentId, parent.thread().headEntryId());
+    AcceptedCommands child =
+        runtime.acceptCommandsAndJoin(
+            session(63, 64, parentId), join1, AcceptancePreflight.IDENTITY);
+    UUID childId = child.thread().id();
+
+    assertEquals(
+        ThreadLifecycleStatus.WAITING_CHILDREN,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+
+    // 再次将 parent 置为 IDLE
+    store.transaction(
+        tx -> {
+          ThreadState p = tx.lockThread(parentId).orElseThrow();
+          tx.updateThread(p.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T0));
+          return null;
+        });
+    assertEquals(
+        ThreadLifecycleStatus.IDLE,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+
+    // 2. 在 child 上接纳新命令：触发 locked.chain 遍历，将 IDLE parent 推进为 WAITING_CHILDREN
+    ThreadState childCurrent = store.transaction(tx -> tx.findThread(childId).orElseThrow());
+    NewThreadCommand childCmd = userMessageCommand(TestIds.id(65), "child progress");
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                childId, childCurrent.headEntryId(), childCurrent.nextCommandSequence()),
+            List.of(childCmd)),
+        AcceptancePreflight.IDENTITY);
+
+    assertEquals(
+        ThreadLifecycleStatus.WAITING_CHILDREN,
+        store.transaction(tx -> tx.findThread(parentId).orElseThrow().status()));
+  }
+
+  @Test
+  void quotaExistingBusyChildAndHierarchyQuotas() {
+    // 测试意图：验证当已有子线程处于 ACTIVE 忙碌状态时，向该子线程关联 Join 不视为新增活跃子线程，不受 maxConcurrentChildren 额度阻断；
+    // 而当子线程为空闲时超额接纳则确定性拒绝；同时校验深度配额与整树活跃线程配额。
+    AcceptedCommands parent =
+        runtime.acceptCommands(session(70, 71, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = parent.thread().id();
+    UUID parentHead = parent.thread().headEntryId();
+
+    // 创建子线程 child1，限额 maxConcurrentChildren = 1
+    ThreadJoinRequest join1 =
+        new ThreadJoinRequest(TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 3);
+    AcceptedCommands child1 =
+        runtime.acceptCommandsAndJoin(
+            session(73, 74, parentId), join1, AcceptancePreflight.IDENTITY);
+    UUID child1Id = child1.thread().id();
+
+    // 此时 child1 是 ACTIVE 状态，parent 已有 1 个活跃孩子（已达配额 1）
+    int activeCount = store.transaction(tx -> tx.countActiveChildren(parentId));
+    assertEquals(1, activeCount);
+
+    // 向已处于 ACTIVE 的 child1 线程发送新命令并附带 Join（非创建路径且已有活跃线程）：
+    // newActiveChild = false，因此不触发配额超出异常！
+    ThreadState c1Current = store.transaction(tx -> tx.findThread(child1Id).orElseThrow());
+    ThreadJoinRequest join1Second =
+        new ThreadJoinRequest(TestIds.id(75), parentId, parentHead, HASH, "assistant", 3, 3, 1, 3);
+    NewThreadCommand cmd = userMessageCommand(TestIds.id(76), "c1 continue");
+    AcceptedCommands accBusy =
+        runtime.acceptCommandsAndJoin(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(
+                    child1Id, c1Current.headEntryId(), c1Current.nextCommandSequence()),
+                List.of(cmd)),
+            join1Second,
+            AcceptancePreflight.IDENTITY);
+    assertFalse(accBusy.replayed());
+
+    // 将 child1 置为 IDLE
+    store.transaction(
+        tx -> {
+          ThreadState c = tx.lockThread(child1Id).orElseThrow();
+          tx.updateThread(c.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T0));
+          return null;
+        });
+
+    // 创建 child2，占满活跃孩子配额（active = 1）
+    ThreadJoinRequest join2 =
+        new ThreadJoinRequest(TestIds.id(77), parentId, parentHead, HASH, "assistant", 3, 3, 1, 3);
+    runtime.acceptCommandsAndJoin(session(78, 79, parentId), join2, AcceptancePreflight.IDENTITY);
+
+    // 此时 child1 是 IDLE，如果向 child1 接纳带 Join 命令，newActiveChild = true，因配额超限被拒绝
+    ThreadState c1Idle = store.transaction(tx -> tx.findThread(child1Id).orElseThrow());
+    ThreadJoinRequest join1Third =
+        new ThreadJoinRequest(TestIds.id(80), parentId, parentHead, HASH, "assistant", 3, 3, 1, 3);
+    NewThreadCommand cmdIdle = userMessageCommand(TestIds.id(81), "c1 idle try");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.Thread(
+                        child1Id, c1Idle.headEntryId(), c1Idle.nextCommandSequence()),
+                    List.of(cmdIdle)),
+                join1Third,
+                AcceptancePreflight.IDENTITY));
+
+    // 校验整树配额超限（maxConcurrentThreads = 1，而当前活跃线程已有 parent + child2 = 2）
+    ThreadJoinRequest lowTreeQuota =
+        new ThreadJoinRequest(TestIds.id(82), parentId, parentHead, HASH, "assistant", 3, 5, 5, 1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(83, 84, parentId), lowTreeQuota, AcceptancePreflight.IDENTITY));
+
+    // 校验深度配额超限（maxDepth = 1，而新子线程深度为 2）
+    ThreadJoinRequest lowDepthQuota =
+        new ThreadJoinRequest(TestIds.id(85), parentId, parentHead, HASH, "assistant", 3, 1, 5, 5);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(86, 87, parentId), lowDepthQuota, AcceptancePreflight.IDENTITY));
+  }
+
+  @Test
+  void joinAcceptanceBoundaryRejections() {
+    // 测试意图：验证 Join 接纳边界校验：创建子线程必须附带原子 Join、join parent 不匹配、
+    // 父线程处于 STOPPED 边界拒绝接纳、父线程 headEntryId 不匹配、重放命令缺失 Join 以及 Join 凭据重用冲突。
+    AcceptedCommands root =
+        runtime.acceptCommands(session(90, 91, null), AcceptancePreflight.IDENTITY);
+    UUID parentId = root.thread().id();
+    UUID parentHead = root.thread().headEntryId();
+
+    // 1. 创建子会话指定 parentId 但未提供 join -> 拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtime.acceptCommands(session(92, 93, parentId), AcceptancePreflight.IDENTITY));
+
+    // 2. join parent 与 target.parentThreadId 不一致 -> 拒绝
+    ThreadJoinRequest diffParent = request(94, TestIds.id(999), parentHead);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(95, 96, parentId), diffParent, AcceptancePreflight.IDENTITY));
+
+    // 3. parent headEntryId 不匹配 -> 拒绝
+    ThreadJoinRequest wrongHead = request(97, parentId, TestIds.id(888));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(98, 99, parentId), wrongHead, AcceptancePreflight.IDENTITY));
+
+    // 4. parent 在 STOPPED 边界 -> 拒绝
+    UUID stoppedHead = seedClosedStopTurn(root.session().id(), root.rootEntry().id(), parentId);
+    ThreadJoinRequest stoppedParentJoin = request(100, parentId, stoppedHead);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(101, 102, parentId), stoppedParentJoin, AcceptancePreflight.IDENTITY));
+
+    // 5. 不存在 parentId -> 拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(103, 104, TestIds.id(777)),
+                request(105, TestIds.id(777), stoppedHead),
+                AcceptancePreflight.IDENTITY));
+
+    // 6. 源命令重放时缺失 Join：在普通线程先以无 join 接受命令，随后再尝试带 join 重放相同命令 -> 拒绝
+    AcceptedCommands normal =
+        runtime.acceptCommands(session(106, 107, null), AcceptancePreflight.IDENTITY);
+    NewThreadCommand cmdAlone = userMessageCommand(TestIds.id(108), "alone");
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(
+                normal.thread().id(),
+                normal.thread().headEntryId(),
+                normal.thread().nextCommandSequence()),
+            List.of(cmdAlone)),
+        AcceptancePreflight.IDENTITY);
+
+    ThreadJoinRequest newJoinOnReplayed = request(109, null, null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.Thread(
+                        normal.thread().id(), normal.thread().headEntryId(), 2L),
+                    List.of(cmdAlone)),
+                newJoinOnReplayed,
+                AcceptancePreflight.IDENTITY));
+
+    // 7. Join invocation identity 被以不同参数（如不同 agent）重用 -> 拒绝
+    ThreadJoinRequest initialJoin = request(110, null, null);
+    runtime.acceptCommandsAndJoin(
+        session(111, 112, null), initialJoin, AcceptancePreflight.IDENTITY);
+
+    ThreadJoinRequest conflictedJoin =
+        new ThreadJoinRequest(TestIds.id(110), null, null, HASH, "different-agent", 3, 3, 2, 3);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommandsAndJoin(
+                session(113, 114, null), conflictedJoin, AcceptancePreflight.IDENTITY));
+  }
+
+  @Test
+  void goalAndCustomMessageInputRecognition() {
+    // 测试意图：验证 typed GOAL 命令与非 SystemReminder 的 CUSTOM_MESSAGE 正确被识别为真实验户输入，
+    // 并支持从 Goal 正文派生初始会话名称。
+    NewThreadCommand goalCmd =
+        new NewThreadCommand(
+            new GoalCommandPayload("custom goal objective text"), TestIds.id(120), HASH);
+    AcceptedCommands goalAccepted =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewSession(
+                    TestIds.id(121), TestIds.id(122), settings(), null, false),
+                List.of(goalCmd)),
+            AcceptancePreflight.IDENTITY);
+    assertEquals("custom goal objective text", goalAccepted.session().name());
+
+    // 非 SystemReminder 的 CUSTOM_MESSAGE
+    NewThreadCommand customMsgCmd =
+        new NewThreadCommand(
+            new CustomMessageCommandPayload(AgentMessage.user("normal custom")),
+            TestIds.id(123),
+            HASH);
+    AcceptedCommands customAccepted =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.NewSession(
+                    TestIds.id(124), TestIds.id(125), settings(), null, false),
+                List.of(customMsgCmd)),
+            AcceptancePreflight.IDENTITY);
+    assertNotNull(customAccepted);
+  }
+
+  @Test
+  void replayInitialAndAcceptNewThreadValidation() {
+    // 测试意图：验证 acceptNewThread 起始 Entry 不存在或落在未闭合 STOP Turn 内时确定性拒绝，
+    // 以及 replayInitial 中 idempotencyKey 篡改或请求哈希不匹配的冲突拒绝。
+    AcceptedCommands root =
+        runtime.acceptCommands(session(130, 131, null), AcceptancePreflight.IDENTITY);
+    UUID sessionId = root.session().id();
+
+    // 1. acceptNewThread 指定不存在的 startEntryId -> HarnessRuntimeNotFoundException
+    assertThrows(
+        HarnessRuntimeNotFoundException.class,
+        () ->
+            runtime.acceptCommands(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewThread(
+                        sessionId, TestIds.id(999), TestIds.id(132), false),
+                    List.of(userMessageCommand(TestIds.id(133), "fork"))),
+                AcceptancePreflight.IDENTITY));
+
+    // 2. replayInitial idempotencyKey 重用但 requestHash 不一致 -> IDEMPOTENCY_KEY_REUSED
+    NewThreadCommand initCmd = userMessageCommand(TestIds.id(134), "initial message");
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewSession(
+                TestIds.id(135), TestIds.id(136), settings(), null, false),
+            List.of(initCmd)),
+        AcceptancePreflight.IDENTITY);
+
+    NewThreadCommand tamperedHashCmd =
+        new NewThreadCommand(initCmd.payload(), TestIds.id(134), "b".repeat(64));
+    assertThrows(
+        HarnessRuntimeConflictException.class,
+        () ->
+            runtime.acceptCommands(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewSession(
+                        TestIds.id(135), TestIds.id(136), settings(), null, false),
+                    List.of(tamperedHashCmd)),
+                AcceptancePreflight.IDENTITY));
+
+    // 3. replayInitial 不同的 creationRequestHash (不同 sessionId) -> THREAD_ID_REUSED
+    assertThrows(
+        HarnessRuntimeConflictException.class,
+        () ->
+            runtime.acceptCommands(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewSession(
+                        TestIds.id(999), TestIds.id(136), settings(), null, false),
+                    List.of(initCmd)),
+                AcceptancePreflight.IDENTITY));
   }
 }

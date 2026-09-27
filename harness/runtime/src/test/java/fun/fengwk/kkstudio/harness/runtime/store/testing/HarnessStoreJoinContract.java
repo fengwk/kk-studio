@@ -49,6 +49,11 @@ public abstract class HarnessStoreJoinContract {
   abstract HarnessStore createStore();
 
   private UUID createChildThread(UUID parentThreadId, UUID sessionId, UUID rootEntryId) {
+    return createChildThread(parentThreadId, sessionId, rootEntryId, ThreadLifecycleStatus.IDLE);
+  }
+
+  private UUID createChildThread(
+      UUID parentThreadId, UUID sessionId, UUID rootEntryId, ThreadLifecycleStatus status) {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
@@ -61,7 +66,7 @@ public abstract class HarnessStoreJoinContract {
                   CREATION_REQUEST_HASH,
                   "child-thread",
                   false,
-                  ThreadLifecycleStatus.IDLE,
+                  status,
                   1L,
                   0L,
                   T0,
@@ -732,7 +737,7 @@ public abstract class HarnessStoreJoinContract {
 
   @Test
   void deleteJoinsByChildRemovesOnlyTargetChildJoins() {
-    // 测试意图：验证 deleteJoinsByChild 仅删除指定子线程的全部 join，需要子线程锁，并返回删除行数。
+    // 测试意图：验证 deleteJoinsByChild 仅删除指定子线程的全部已完成交付 join，需要子线程锁，并返回删除行数。
     UUID childId1 =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     UUID childId2 =
@@ -740,6 +745,9 @@ public abstract class HarnessStoreJoinContract {
     insertCommand(childId1, 1L, TestIds.id(1));
     insertCommand(childId1, 2L, TestIds.id(2));
     insertCommand(childId2, 1L, TestIds.id(3));
+    insertCommand(baseline.threadId(), 1L, TestIds.id(11));
+    insertCommand(baseline.threadId(), 2L, TestIds.id(12));
+    insertCommand(baseline.threadId(), 3L, TestIds.id(13));
 
     UUID id1 = TestIds.id(401);
     UUID id2 = TestIds.id(402);
@@ -749,10 +757,17 @@ public abstract class HarnessStoreJoinContract {
         store,
         tx -> {
           tx.lockThread(childId1);
-          tx.insertJoin(initialJoin(id1, baseline.threadId(), childId1, 1L, 0L));
-          tx.insertJoin(initialJoin(id2, baseline.threadId(), childId1, 2L, 0L));
+          ThreadJoin j1 = initialJoin(id1, baseline.threadId(), childId1, 1L, 0L);
+          ThreadJoin j2 = initialJoin(id2, baseline.threadId(), childId1, 2L, 0L);
+          tx.insertJoin(j1);
+          tx.insertJoin(j2);
+          tx.updateJoin(j1.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+          tx.updateJoin(j2.match(1L, baseline.rootEntryId(), T1).delivered(2L, T2));
+
           tx.lockThread(childId2);
-          tx.insertJoin(initialJoin(id3, baseline.threadId(), childId2, 1L, 0L));
+          ThreadJoin j3 = initialJoin(id3, baseline.threadId(), childId2, 1L, 0L);
+          tx.insertJoin(j3);
+          tx.updateJoin(j3.match(1L, baseline.rootEntryId(), T1).delivered(3L, T2));
         });
 
     // 未锁定 childId1 时调用 deleteJoinsByChild 抛异常
@@ -760,10 +775,22 @@ public abstract class HarnessStoreJoinContract {
         IllegalStateException.class,
         () -> inTransaction(store, tx -> tx.deleteJoinsByChild(childId1)));
 
-    // 锁定后删除 childId1 的 join
+    // 仅锁定 Thread 但未持有 Tree 锁时调用 deleteJoinsByChild 抛异常
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId1);
+                  tx.deleteJoinsByChild(childId1);
+                }));
+
+    // 持有 Tree 锁及 Thread 锁后删除 childId1 的 join
     int deleted =
         store.transaction(
             tx -> {
+              tx.lockTree(baseline.threadId());
               tx.lockThread(childId1);
               return tx.deleteJoinsByChild(childId1);
             });
@@ -785,6 +812,7 @@ public abstract class HarnessStoreJoinContract {
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
+    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
     UUID invocationId = TestIds.id(501);
 
     inTransaction(
@@ -801,6 +829,7 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
+                  tx.lockTree(baseline.threadId());
                   tx.lockThread(childId);
                   tx.deleteThreads(List.of(childId));
                 }));
@@ -812,20 +841,342 @@ public abstract class HarnessStoreJoinContract {
             inTransaction(
                 store,
                 tx -> {
+                  tx.lockTree(baseline.threadId());
                   tx.lockThread(baseline.threadId());
                   tx.deleteThreads(List.of(baseline.threadId()));
                 }));
 
-    // 显式清理 Join 后，deleteThreads 成功删除
+    // 匹配并交付 Join
     inTransaction(
         store,
         tx -> {
+          tx.lockThread(childId);
+          ThreadJoin join = tx.findJoin(invocationId).orElseThrow();
+          tx.updateJoin(join.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+        });
+
+    // 交付后但尚未调用 deleteJoinsByChild 时，deleteThreads 仍应被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(baseline.threadId());
+                  tx.lockThread(childId);
+                  tx.deleteThreads(List.of(childId));
+                }));
+
+    // 显式清理 Join 后，deleteThreads 成功删除 childId，父线程保留
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockTree(baseline.threadId());
           tx.lockThread(childId);
           tx.deleteJoinsByChild(childId);
           tx.deleteThreads(List.of(childId));
         });
 
     assertTrue(store.transaction(tx -> tx.findThread(childId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isPresent());
+  }
+
+  @Test
+  void deleteJoinsByChildRejectsUnmatchedJoin() {
+    // 测试意图：验证 deleteJoinsByChild 在子线程存在未匹配 Join 时拒绝删除并抛出 IllegalArgumentException。
+    UUID childId =
+        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childId, 1L, TestIds.id(1));
+    UUID invocationId = TestIds.id(502);
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L));
+        });
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(baseline.threadId());
+                  tx.lockThread(childId);
+                  tx.deleteJoinsByChild(childId);
+                }));
+
+    assertTrue(store.transaction(tx -> tx.findJoin(invocationId)).isPresent());
+  }
+
+  @Test
+  void deleteJoinsByChildRejectsMatchedUndeliveredJoin() {
+    // 测试意图：验证 deleteJoinsByChild 在子线程 Join 已匹配但未交付给父线程时拒绝删除，交付后方可安全删除。
+    UUID childId =
+        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childId, 1L, TestIds.id(1));
+    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
+    UUID invocationId = TestIds.id(503);
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, 0L);
+          tx.insertJoin(join);
+          tx.updateJoin(join.match(1L, baseline.rootEntryId(), T1));
+        });
+
+    // 已匹配但未交付时删除失败
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(baseline.threadId());
+                  tx.lockThread(childId);
+                  tx.deleteJoinsByChild(childId);
+                }));
+
+    // 推进为交付
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          ThreadJoin join = tx.findJoin(invocationId).orElseThrow();
+          tx.updateJoin(join.delivered(1L, T2));
+        });
+
+    // 交付后成功删除
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(baseline.threadId());
+              tx.lockThread(childId);
+              return tx.deleteJoinsByChild(childId);
+            });
+    assertEquals(1, deleted);
+    assertTrue(store.transaction(tx -> tx.findJoin(invocationId)).isEmpty());
+  }
+
+  @Test
+  void deleteJoinsByChildSucceedsForMatchedRootTicket() {
+    // 测试意图：验证根 completion ticket（parentThreadId 为 null）在未匹配时拒绝删除，已匹配后允许显式清理。
+    UUID rootId = baseline.threadId();
+    insertCommand(rootId, 1L, TestIds.id(1));
+    UUID ticketId = TestIds.id(504);
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(rootId);
+          tx.insertJoin(initialJoin(ticketId, null, rootId, 1L, 0L));
+        });
+
+    // 未匹配时删除根 ticket 抛出异常
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(rootId);
+                  tx.lockThread(rootId);
+                  tx.deleteJoinsByChild(rootId);
+                }));
+
+    // 匹配根 ticket
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(rootId);
+          ThreadJoin join = tx.findJoin(ticketId).orElseThrow();
+          tx.updateJoin(join.match(1L, baseline.rootEntryId(), T1));
+        });
+
+    // 匹配后成功显式清理
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(rootId);
+              tx.lockThread(rootId);
+              return tx.deleteJoinsByChild(rootId);
+            });
+    assertEquals(1, deleted);
+    assertTrue(store.transaction(tx -> tx.findJoin(ticketId)).isEmpty());
+  }
+
+  @Test
+  void deleteThreadsRejectsParentWhenSurvivingChildExists() {
+    // 测试意图：验证 deleteThreads 在父线程存在存活子线程时拒绝删除，避免底层外键异常并保证清理顺序。
+    UUID rootId = baseline.threadId();
+    UUID childId = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+
+    // 尝试单独删除 parent 线程抛出异常
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(rootId);
+                  tx.lockThread(rootId);
+                  tx.deleteThreads(List.of(rootId));
+                }));
+
+    assertTrue(store.transaction(tx -> tx.findThread(rootId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.findThread(childId)).isPresent());
+
+    // 先删除子线程，再删除父线程均成功
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockTree(rootId);
+          tx.lockThread(childId);
+          tx.deleteThreads(List.of(childId));
+        });
+    assertTrue(store.transaction(tx -> tx.findThread(childId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findThread(rootId)).isPresent());
+
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockTree(rootId);
+          tx.lockThread(rootId);
+          tx.deleteThreads(List.of(rootId));
+        });
+    assertTrue(store.transaction(tx -> tx.findThread(rootId)).isEmpty());
+  }
+
+  @Test
+  void deleteThreadsSucceedsDeletingHierarchyInSingleBatch() {
+    // 测试意图：验证 deleteThreads 在单个批次中同时删除多级父子线程时，内部按子到父的规范拓扑顺序清理。
+    UUID rootId = baseline.threadId();
+    UUID childId = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+    UUID grandChildId = createChildThread(childId, baseline.sessionId(), baseline.rootEntryId());
+
+    insertCommand(rootId, 1L, TestIds.id(1));
+    insertCommand(childId, 1L, TestIds.id(2));
+    insertCommand(grandChildId, 1L, TestIds.id(3));
+
+    List<UUID> allHierarchyThreads =
+        List.of(rootId, childId, grandChildId).stream().sorted(UuidOrder.COMPARATOR).toList();
+
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(rootId);
+              for (UUID threadId : allHierarchyThreads) {
+                tx.lockThread(threadId);
+              }
+              return tx.deleteThreads(List.of(rootId, childId, grandChildId));
+            });
+    assertEquals(3, deleted);
+
+    store.transaction(
+        tx -> {
+          assertTrue(tx.findThread(rootId).isEmpty());
+          assertTrue(tx.findThread(childId).isEmpty());
+          assertTrue(tx.findThread(grandChildId).isEmpty());
+          return null;
+        });
+  }
+
+  @Test
+  void fullCleanupValidDeliveredChildWithParentAndMultiSessionMultiTree() {
+    // 测试意图：验证完整深清理流程（joins -> child threads -> parent -> entries -> sessions）
+    // 在包含交付子线程及多 Session 多树环境下的正确性与隔离性，确保目标 Session 完全清理且非目标 Session 完整保留。
+    UUID sessionA = baseline.sessionId();
+    UUID rootA = baseline.threadId();
+    UUID childA1 = createChildThread(rootA, sessionA, baseline.rootEntryId());
+    UUID childA2 = createChildThread(rootA, sessionA, baseline.rootEntryId());
+    insertCommand(childA1, 1L, TestIds.id(1));
+    insertCommand(childA2, 1L, TestIds.id(2));
+    insertCommand(rootA, 1L, TestIds.id(3));
+    insertCommand(rootA, 2L, TestIds.id(4));
+
+    UUID joinA1 = TestIds.id(601);
+    UUID joinA2 = TestIds.id(602);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childA1);
+          ThreadJoin j1 = initialJoin(joinA1, rootA, childA1, 1L, 0L);
+          tx.insertJoin(j1);
+          tx.updateJoin(j1.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+
+          tx.lockThread(childA2);
+          ThreadJoin j2 = initialJoin(joinA2, rootA, childA2, 1L, 0L);
+          tx.insertJoin(j2);
+          tx.updateJoin(j2.match(1L, baseline.rootEntryId(), T1).delivered(2L, T2));
+        });
+
+    // 建立隔离的 Session B 及关联事实
+    Baseline baselineB = seedThreadBaseline(store);
+    UUID sessionB = baselineB.sessionId();
+    UUID rootB = baselineB.threadId();
+    UUID childB = createChildThread(rootB, sessionB, baselineB.rootEntryId());
+    insertCommand(childB, 1L, TestIds.id(5));
+    insertCommand(rootB, 1L, TestIds.id(6));
+    UUID joinB = TestIds.id(603);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childB);
+          ThreadJoin jb = initialJoin(joinB, rootB, childB, 1L, 0L);
+          tx.insertJoin(jb);
+          tx.updateJoin(jb.match(1L, baselineB.rootEntryId(), T1).delivered(1L, T2));
+        });
+
+    // 对 Session A 执行完整深删除（按规范顺序：joins -> child threads -> parent -> entries -> session）
+    store.transaction(
+        tx -> {
+          List<UUID> allThreadsA =
+              List.of(rootA, childA1, childA2).stream().sorted(UuidOrder.COMPARATOR).toList();
+          tx.lockTree(rootA);
+          for (UUID threadId : allThreadsA) {
+            tx.lockThread(threadId);
+          }
+
+          assertEquals(1, tx.deleteJoinsByChild(childA1));
+          assertEquals(1, tx.deleteJoinsByChild(childA2));
+
+          // 删除子线程
+          assertEquals(2, tx.deleteThreads(List.of(childA1, childA2)));
+
+          // 删除父线程
+          assertEquals(1, tx.deleteThreads(List.of(rootA)));
+
+          // 删除 Session A 的 entries
+          assertTrue(tx.deleteEntries(sessionA) > 0);
+
+          // 删除 Session A
+          assertTrue(tx.deleteSession(sessionA));
+          return null;
+        });
+
+    // 校验 Session A 及其所有级联事实已被彻底清除
+    store.transaction(
+        tx -> {
+          assertTrue(tx.findSession(sessionA).isEmpty());
+          assertThrows(IllegalArgumentException.class, () -> tx.loadEntriesBySessionId(sessionA));
+          assertTrue(tx.findThread(rootA).isEmpty());
+          assertTrue(tx.findThread(childA1).isEmpty());
+          assertTrue(tx.findThread(childA2).isEmpty());
+          assertTrue(tx.findJoin(joinA1).isEmpty());
+          assertTrue(tx.findJoin(joinA2).isEmpty());
+
+          // 校验 Session B 毫发无损
+          assertTrue(tx.findSession(sessionB).isPresent());
+          assertTrue(tx.findThread(rootB).isPresent());
+          assertTrue(tx.findThread(childB).isPresent());
+          assertTrue(tx.findJoin(joinB).isPresent());
+          assertEquals(1, tx.loadCommandsByThread(childB).size());
+          assertEquals(1, tx.loadCommandsByThread(rootB).size());
+          return null;
+        });
   }
 
   @Test
@@ -932,5 +1283,358 @@ public abstract class HarnessStoreJoinContract {
                   tx.lockTree(larger);
                   tx.lockTree(smaller);
                 }));
+  }
+
+  @Test
+  void countActiveChildrenCountsDirectNonIdleChildrenOnly() {
+    // 测试意图：验证 countActiveChildren 只统计指定父线程的直接非空闲（ACTIVE 与 WAITING_CHILDREN）子线程数量。
+    UUID rootId = baseline.threadId();
+    UUID nonExistentId = store.transaction(HarnessStore.Transaction::nextId);
+
+    store.transaction(
+        tx -> {
+          // 不存在的父线程返回 0
+          assertEquals(0, tx.countActiveChildren(nonExistentId));
+          // 无子线程的根线程返回 0
+          assertEquals(0, tx.countActiveChildren(rootId));
+          return null;
+        });
+
+    UUID childIdle =
+        createChildThread(
+            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
+    UUID childActive =
+        createChildThread(
+            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+    UUID childWaiting =
+        createChildThread(
+            rootId,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            ThreadLifecycleStatus.WAITING_CHILDREN);
+    // 间接后代（孙线程）处于 ACTIVE
+    UUID grandChildActive =
+        createChildThread(
+            childIdle, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+
+    store.transaction(
+        tx -> {
+          // root 的直接子线程中只有 childActive 与 childWaiting 处于非空闲状态（数量为 2，不含 grandChildActive）
+          assertEquals(2, tx.countActiveChildren(rootId));
+          // childIdle 的直接子线程包含 grandChildActive（数量为 1）
+          assertEquals(1, tx.countActiveChildren(childIdle));
+          // childActive 无子线程
+          assertEquals(0, tx.countActiveChildren(childActive));
+          return null;
+        });
+  }
+
+  @Test
+  void countActiveThreadsInTreeCountsAllActiveDescendantsExcludingRoot() {
+    // 测试意图：验证 countActiveThreadsInTree 递归统计整棵树中所有非空闲后代（排除 root 自身），并随状态变更动态更新。
+    UUID rootId = baseline.threadId();
+    UUID nonExistentId = store.transaction(HarnessStore.Transaction::nextId);
+
+    store.transaction(
+        tx -> {
+          assertEquals(0, tx.countActiveThreadsInTree(nonExistentId));
+          // 根线程自身即使可能处于 ACTIVE，整树活跃后代数仍为 0
+          assertEquals(0, tx.countActiveThreadsInTree(rootId));
+          return null;
+        });
+
+    // 构造树：Root -> Child1 (WAITING_CHILDREN) -> GrandChild1 (ACTIVE), GrandChild2 (IDLE)
+    //         Root -> Child2 (IDLE)
+    //         Root -> Child3 (ACTIVE)
+    UUID child1 =
+        createChildThread(
+            rootId,
+            baseline.sessionId(),
+            baseline.rootEntryId(),
+            ThreadLifecycleStatus.WAITING_CHILDREN);
+    UUID child2 =
+        createChildThread(
+            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
+    UUID child3 =
+        createChildThread(
+            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+
+    UUID grandChild1 =
+        createChildThread(
+            child1, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+    UUID grandChild2 =
+        createChildThread(
+            child1, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.IDLE);
+
+    store.transaction(
+        tx -> {
+          // root 树活跃后代：child1(WAITING) + grandChild1(ACTIVE) + child3(ACTIVE) = 3
+          assertEquals(3, tx.countActiveThreadsInTree(rootId));
+          // child1 子树活跃后代：grandChild1(ACTIVE) = 1
+          assertEquals(1, tx.countActiveThreadsInTree(child1));
+          // child2 子树活跃后代：0
+          assertEquals(0, tx.countActiveThreadsInTree(child2));
+          // child3 子树活跃后代：0
+          assertEquals(0, tx.countActiveThreadsInTree(child3));
+          return null;
+        });
+
+    // 状态推进：grandChild1 变为空闲
+    inTransaction(
+        store,
+        tx -> {
+          ThreadState grandChild = tx.lockThread(grandChild1).orElseThrow();
+          tx.updateThread(grandChild.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T1));
+        });
+
+    store.transaction(
+        tx -> {
+          // grandChild1 空闲后，root 树活跃后代降为 child1(WAITING) + child3(ACTIVE) = 2
+          assertEquals(2, tx.countActiveThreadsInTree(rootId));
+          assertEquals(0, tx.countActiveThreadsInTree(child1));
+          return null;
+        });
+
+    // child1 变为空闲
+    inTransaction(
+        store,
+        tx -> {
+          ThreadState c1 = tx.lockThread(child1).orElseThrow();
+          tx.updateThread(c1.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T2));
+        });
+
+    store.transaction(
+        tx -> {
+          // child1 空闲后，root 树活跃后代仅剩 child3(ACTIVE) = 1
+          assertEquals(1, tx.countActiveThreadsInTree(rootId));
+          return null;
+        });
+
+    // child3 变为空闲
+    inTransaction(
+        store,
+        tx -> {
+          ThreadState c3 = tx.lockThread(child3).orElseThrow();
+          tx.updateThread(c3.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T3));
+        });
+
+    store.transaction(
+        tx -> {
+          // 全部后代空闲
+          assertEquals(0, tx.countActiveThreadsInTree(rootId));
+          return null;
+        });
+  }
+
+  @Test
+  void busyChildDuplicateJoinsQuotaCountsDistinctActivePermanentThreadsNotJoins() {
+    // 测试意图：验证并发配额原语按活跃永久线程（distinct active permanent threads）计数，
+    // 而非按未匹配 Join 记录数计数。即使忙碌子线程挂载了多个未匹配 Join，活跃线程配额计数仍为 1；
+    // 当子线程变为空闲后，活跃线程配额降为 0，即便 Join 记录仍处于未结算状态。
+    UUID rootId = baseline.threadId();
+    UUID childId =
+        createChildThread(
+            rootId, baseline.sessionId(), baseline.rootEntryId(), ThreadLifecycleStatus.ACTIVE);
+
+    UUID inv1 = store.transaction(HarnessStore.Transaction::nextId);
+    UUID inv2 = store.transaction(HarnessStore.Transaction::nextId);
+
+    // 插入两条针对同一 childId 的未匹配 Join
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.insertCommands(
+              List.of(command(childId, 1L, tx.nextId()), command(childId, 2L, tx.nextId())));
+          tx.insertJoin(initialJoin(inv1, rootId, childId, 1L, 0L));
+          tx.insertJoin(initialJoin(inv2, rootId, childId, 2L, 0L));
+        });
+
+    store.transaction(
+        tx -> {
+          // 活跃子线程原语：只有 1 个活跃子线程，不受 2 条 Join 记录影响
+          assertEquals(1, tx.countActiveChildren(rootId));
+          assertEquals(1, tx.countActiveThreadsInTree(rootId));
+          return null;
+        });
+
+    // 子线程变为 WAITING_CHILDREN：仍被视为活跃（status != IDLE）
+    inTransaction(
+        store,
+        tx -> {
+          ThreadState child = tx.lockThread(childId).orElseThrow();
+          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.WAITING_CHILDREN, T1));
+        });
+
+    store.transaction(
+        tx -> {
+          assertEquals(1, tx.countActiveChildren(rootId));
+          assertEquals(1, tx.countActiveThreadsInTree(rootId));
+          return null;
+        });
+
+    // 子线程变为 IDLE：活跃线程配额立即降为 0（即使未匹配 Join 仍存在）
+    inTransaction(
+        store,
+        tx -> {
+          ThreadState child = tx.lockThread(childId).orElseThrow();
+          tx.updateThread(child.changeLifecycleStatus(ThreadLifecycleStatus.IDLE, T2));
+        });
+
+    store.transaction(
+        tx -> {
+          assertEquals(0, tx.countActiveChildren(rootId));
+          assertEquals(0, tx.countActiveThreadsInTree(rootId));
+          return null;
+        });
+  }
+
+  @Test
+  void countActiveChildrenAndTreeRejectNullArguments() {
+    // 测试意图：验证 countActiveChildren 与 countActiveThreadsInTree 对 null 参数抛出 NullPointerException。
+    assertThrows(
+        NullPointerException.class, () -> inTransaction(store, tx -> tx.countActiveChildren(null)));
+    assertThrows(
+        NullPointerException.class,
+        () -> inTransaction(store, tx -> tx.countActiveThreadsInTree(null)));
+  }
+
+  @Test
+  void deleteJoinsByChildRequiresHeldTreeLockOnSameRoot() {
+    // 测试意图：验证 deleteJoinsByChild 必须在当前事务已获取目标线程所属 execution tree 的 tree lock 下执行；
+    // 未加 tree lock 或持有其他不同 tree 的 lock 时均抛出 IllegalStateException。
+    UUID rootA = baseline.threadId();
+    UUID childA = createChildThread(rootA, baseline.sessionId(), baseline.rootEntryId());
+    insertCommand(childA, 1L, TestIds.id(1));
+    insertCommand(rootA, 1L, TestIds.id(2));
+    UUID joinA = TestIds.id(701);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childA);
+          ThreadJoin j = initialJoin(joinA, rootA, childA, 1L, 0L);
+          tx.insertJoin(j);
+          tx.updateJoin(j.match(1L, baseline.rootEntryId(), T1).delivered(1L, T2));
+        });
+
+    Baseline baselineB = seedThreadBaseline(store);
+    UUID rootB = baselineB.threadId();
+
+    // 1. 无 tree lock：抛出 IllegalStateException
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childA);
+                  tx.deleteJoinsByChild(childA);
+                }));
+
+    // 2. 持有错误 tree 的 lock（rootB 而非 rootA）：抛出 IllegalStateException
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(rootB);
+                  tx.lockThread(childA);
+                  tx.deleteJoinsByChild(childA);
+                }));
+
+    // 3. 正确持有 rootA 的 tree lock：成功删除
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(rootA);
+              tx.lockThread(childA);
+              return tx.deleteJoinsByChild(childA);
+            });
+    assertEquals(1, deleted);
+  }
+
+  @Test
+  void deleteThreadsRequiresHeldTreeLockOnSameRoot() {
+    // 测试意图：验证 deleteThreads 必须在当前事务已获取每个目标线程所属 execution tree 的 tree lock 下执行；
+    // 未加 tree lock 或持有其他不同 tree 的 lock 时均抛出 IllegalStateException。
+    UUID rootA = baseline.threadId();
+    UUID childA = createChildThread(rootA, baseline.sessionId(), baseline.rootEntryId());
+
+    Baseline baselineB = seedThreadBaseline(store);
+    UUID rootB = baselineB.threadId();
+
+    // 1. 无 tree lock：删除 childA 抛出 IllegalStateException
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childA);
+                  tx.deleteThreads(List.of(childA));
+                }));
+
+    // 2. 持有错误 tree 的 lock（rootB 而非 rootA）：抛出 IllegalStateException
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(rootB);
+                  tx.lockThread(childA);
+                  tx.deleteThreads(List.of(childA));
+                }));
+
+    // 3. 正确持有 rootA 的 tree lock：成功删除 childA
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(rootA);
+              tx.lockThread(childA);
+              return tx.deleteThreads(List.of(childA));
+            });
+    assertEquals(1, deleted);
+    assertTrue(store.transaction(tx -> tx.findThread(childA)).isEmpty());
+  }
+
+  @Test
+  void deleteThreadsCrossTreeBatchEnforcesEachTreeLocked() {
+    // 测试意图：验证跨树批次 deleteThreads 要求批内每个线程对应的 tree root 均已被 lockTree 锁定；
+    // 若只锁了部分树，则抛出 IllegalStateException；全锁定后允许原子删除跨树线程。
+    Baseline baselineB = seedThreadBaseline(store);
+    UUID rootA = baseline.threadId();
+    UUID rootB = baselineB.threadId();
+
+    UUID smallerRoot = UuidOrder.COMPARATOR.compare(rootA, rootB) < 0 ? rootA : rootB;
+    UUID largerRoot = smallerRoot.equals(rootA) ? rootB : rootA;
+
+    // 1. 跨树批次只锁了 smallerRoot 的树，未锁 largerRoot 的树：抛出 IllegalStateException
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockTree(smallerRoot);
+                  tx.lockThread(smallerRoot);
+                  tx.lockThread(largerRoot);
+                  tx.deleteThreads(List.of(smallerRoot, largerRoot));
+                }));
+
+    // 2. 跨树批次按 UuidOrder 锁定两棵树及两个线程：成功删除 2 个根线程
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockTree(smallerRoot);
+              tx.lockTree(largerRoot);
+              tx.lockThread(smallerRoot);
+              tx.lockThread(largerRoot);
+              return tx.deleteThreads(List.of(smallerRoot, largerRoot));
+            });
+    assertEquals(2, deleted);
+    assertTrue(store.transaction(tx -> tx.findThread(rootA)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findThread(rootB)).isEmpty());
   }
 }

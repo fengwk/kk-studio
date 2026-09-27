@@ -35,7 +35,7 @@ class ThreadJoinRequestTest {
     assertEquals(10, request.maxTurns());
     assertEquals(4, request.maxDepth());
     assertEquals(8, request.maxConcurrentChildren());
-    assertEquals(16, request.maxConcurrentTreeJoins());
+    assertEquals(16, request.maxConcurrentThreads());
   }
 
   @Test
@@ -53,7 +53,7 @@ class ThreadJoinRequestTest {
     assertNull(request.maxTurns());
     assertEquals(1, request.maxDepth());
     assertEquals(1, request.maxConcurrentChildren());
-    assertEquals(1, request.maxConcurrentTreeJoins());
+    assertEquals(1, request.maxConcurrentThreads());
   }
 
   @Test

@@ -281,6 +281,7 @@ final class ManualCompactionControl {
 
   /** 按 Session KEY SHARE -&gt; Thread FOR UPDATE 获取一致 Thread，避免后续 Entry 外键锁与 Session 深删除形成逆序。 */
   private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
+    ThreadTreeLocks.lockForThread(tx, threadId);
     ThreadState immutable =
         tx.findThread(threadId)
             .orElseThrow(

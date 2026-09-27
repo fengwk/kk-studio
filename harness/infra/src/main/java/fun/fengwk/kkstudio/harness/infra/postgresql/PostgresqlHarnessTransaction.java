@@ -650,7 +650,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     Objects.requireNonNull(thread, "thread");
     requireThreadHeadInSession(thread);
-    requireCanLockThread(thread.id());
+    boolean joinedChild =
+        thread.parentThreadId() != null
+            && !lockedTrees.isEmpty()
+            && locked.contains(LockKey.thread(thread.parentThreadId()));
+    if (!joinedChild) {
+      requireCanLockThread(thread.id());
+    }
     update(
         """
         insert into harness_thread (
@@ -670,7 +676,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         thread.version(),
         PostgresqlHarnessRows.timestamp(thread.createdAt()),
         PostgresqlHarnessRows.timestamp(thread.updatedAt()));
-    recordThreadLock(thread.id());
+    if (joinedChild) {
+      // A newly created child has no pre-existing row to lock in UUID order. Its parent is
+      // already locked inside the same tree transaction; no other tree writer can race it.
+      locked.add(LockKey.thread(thread.id()));
+      if (highestThreadId == null
+          || UuidOrder.COMPARATOR.compare(thread.id(), highestThreadId) > 0) {
+        highestThreadId = thread.id();
+      }
+    } else {
+      recordThreadLock(thread.id());
+    }
   }
 
   /** Thread 的 head Entry 必须属于 Thread 持久化的 Session（由同一 Session 的复合 FK 强制，这里给出更早的显式检查）。 */
@@ -919,15 +935,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public int countUnmatchedJoinsByParent(UUID parentThreadId) {
+  public int countActiveChildren(UUID parentThreadId) {
     checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
     Integer count =
         queryForObject(
             """
             select count(*)
-            from harness_thread_join
-            where parent_thread_id = ? and matched_idle_version is null
+            from harness_thread
+            where parent_thread_id = ? and status <> 'IDLE'
             """,
             Integer.class,
             parentThreadId);
@@ -935,39 +951,37 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public int countUnmatchedJoinsInTree(UUID rootThreadId) {
+  public int countActiveThreadsInTree(UUID rootThreadId) {
     checkOpen();
     Objects.requireNonNull(rootThreadId, "rootThreadId");
-    TreeCountRow result =
+    TreeActiveCountRow result =
         queryOne(
                 """
             with recursive tree as (
-                select id
+                select id, status, 0 as depth
                 from harness_thread
                 where id = ?
                 union all
-                select t.id
+                select t.id, t.status, tree.depth + 1
                 from harness_thread t
                 join tree on t.parent_thread_id = tree.id
             ) cycle id set is_cycle using path
             select
                 coalesce(bool_or(t.is_cycle), false) as has_cycle,
-                count(j.invocation_id) as unmatched_count
+                count(case when t.depth > 0 and t.status <> 'IDLE' then 1 end) as active_count
             from tree t
-            left join harness_thread_join j
-                on j.child_thread_id = t.id and j.matched_idle_version is null
             """,
                 (rs, ignored) ->
-                    new TreeCountRow(rs.getBoolean("has_cycle"), rs.getInt("unmatched_count")),
+                    new TreeActiveCountRow(rs.getBoolean("has_cycle"), rs.getInt("active_count")),
                 rootThreadId)
-            .orElse(new TreeCountRow(false, 0));
+            .orElse(new TreeActiveCountRow(false, 0));
     if (result.hasCycle()) {
       throw new IllegalStateException("thread parent cycle in tree at " + rootThreadId);
     }
-    return result.unmatchedCount();
+    return result.activeCount();
   }
 
-  private record TreeCountRow(boolean hasCycle, int unmatchedCount) {}
+  private record TreeActiveCountRow(boolean hasCycle, int activeCount) {}
 
   @Override
   public void updateJoin(ThreadJoin join) {
@@ -1002,7 +1016,25 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   @Override
   public int deleteJoinsByChild(UUID childThreadId) {
     checkOpen();
+    Objects.requireNonNull(childThreadId, "childThreadId");
     requireLocked(LockKey.thread(childThreadId));
+    if (!isInLockedTree(childThreadId)) {
+      throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
+    }
+    List<ThreadJoin> joins =
+        queryList(
+            "select * from harness_thread_join where child_thread_id = ?",
+            PostgresqlHarnessRows.JOIN,
+            childThreadId);
+    for (ThreadJoin join : joins) {
+      if (!join.matched()) {
+        throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
+      }
+      if (join.parentThreadId() != null && join.deliveryCommandSequence() == null) {
+        throw new IllegalArgumentException(
+            "cannot delete join pending delivery " + join.invocationId());
+      }
+    }
     return update("delete from harness_thread_join where child_thread_id = ?", childThreadId);
   }
 
@@ -1107,6 +1139,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         throw new IllegalArgumentException("thread " + command.threadId() + " does not exist");
       }
       requireLocked(LockKey.thread(command.threadId()));
+      if (highestLockRank == LockRank.WORK) {
+        if (lockedTrees.isEmpty() || !isInLockedTree(command.threadId())) {
+          throw new IllegalStateException(
+              "command on thread "
+                  + command.threadId()
+                  + " after WORK requires held tree lock on the same tree");
+        }
+      }
       requireUniqueCommandKey(command);
     }
     if (!copied.isEmpty()) {
@@ -1605,9 +1645,62 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     for (UUID threadId : copied) {
       requireLocked(LockKey.thread(threadId));
+      if (!isInLockedTree(threadId)) {
+        throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
+      }
     }
     if (copied.isEmpty()) {
       return 0;
+    }
+
+    Map<UUID, UUID> threadParentMap = new HashMap<>();
+    for (UUID threadId : copied) {
+      ThreadState thread =
+          findThread(threadId)
+              .orElseThrow(
+                  () -> new IllegalArgumentException("thread " + threadId + " does not exist"));
+      threadParentMap.put(threadId, thread.parentThreadId());
+    }
+
+    for (UUID threadId : copied) {
+      List<UUID> referencingJoinIds =
+          queryList(
+              """
+              select invocation_id
+              from harness_thread_join
+              where child_thread_id = ? or parent_thread_id = ?
+              limit 1
+              """,
+              (rs, rowNum) -> rs.getObject("invocation_id", UUID.class),
+              threadId,
+              threadId);
+      if (!referencingJoinIds.isEmpty()) {
+        throw new IllegalArgumentException(
+            "cannot delete thread referenced by join " + referencingJoinIds.get(0));
+      }
+    }
+
+    Set<UUID> threadIdSet = Set.copyOf(copied);
+    for (UUID threadId : copied) {
+      List<UUID> childIds =
+          queryList(
+              """
+              select id
+              from harness_thread
+              where parent_thread_id = ?
+              """,
+              (rs, rowNum) -> rs.getObject("id", UUID.class),
+              threadId);
+      for (UUID childId : childIds) {
+        if (!threadIdSet.contains(childId)) {
+          throw new IllegalArgumentException(
+              "cannot delete parent thread "
+                  + threadId
+                  + " while child thread "
+                  + childId
+                  + " still exists");
+        }
+      }
     }
 
     for (UUID threadId : copied) {
@@ -1688,7 +1781,30 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (ModelInvocation model : lockedModels) {
       deleteModelInvocation(model.id());
     }
-    for (UUID threadId : copied) {
+    List<UUID> deletionOrder = new ArrayList<>(copied.size());
+    Set<UUID> remaining = new HashSet<>(copied);
+    while (!remaining.isEmpty()) {
+      UUID leaf = null;
+      for (UUID id : remaining) {
+        boolean isParentOfRemaining = false;
+        for (UUID other : remaining) {
+          if (id.equals(threadParentMap.get(other))) {
+            isParentOfRemaining = true;
+            break;
+          }
+        }
+        if (!isParentOfRemaining) {
+          leaf = id;
+          break;
+        }
+      }
+      if (leaf == null) {
+        throw new IllegalStateException("cycle detected among threads to delete");
+      }
+      deletionOrder.add(leaf);
+      remaining.remove(leaf);
+    }
+    for (UUID threadId : deletionOrder) {
       int deleted = update("delete from harness_thread where id = ?", threadId);
       requireSingleUpdate(deleted, "thread", threadId);
     }
@@ -2472,6 +2588,17 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** 锁阶梯单向递增防御：禁止在已获取高阶锁之后回退获取低阶锁。 */
   private void requireCanLockRank(LockRank rank) {
     if (highestLockRank != null && rank.ordinal() < highestLockRank.ordinal()) {
+      if (rank == LockRank.COMMAND) {
+        if (highestLockRank.ordinal() < LockRank.WORK.ordinal()) {
+          // Parent delivery commands can be enqueued during Model/Tool turn closure before WORK
+          return;
+        }
+        if (highestLockRank == LockRank.WORK && !lockedTrees.isEmpty()) {
+          // Parent delivery commands can be enqueued during Stop post-processing when active parent
+          // delivery occurs after Work fencing, provided the tree lock is held.
+          return;
+        }
+      }
       throw new IllegalStateException(
           "lock order violation: cannot acquire " + rank + " after " + highestLockRank);
     }
@@ -2551,12 +2678,27 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     requireCanLock(key);
     if (highestWorkTarget != null && WORK_LOCK_ORDER.compare(target, highestWorkTarget) <= 0) {
+      if (target.type() == WorkTargetType.THREAD
+          && !lockedTrees.isEmpty()
+          && locked.contains(LockKey.thread(target.id()))
+          && isInLockedTree(target.id())) {
+        return;
+      }
       throw new IllegalStateException(
           "work locks must be acquired by ascending (type, id): "
               + highestWorkTarget
               + " before "
               + target);
     }
+  }
+
+  private boolean isInLockedTree(UUID threadId) {
+    if (lockedTrees.isEmpty()) {
+      return false;
+    }
+    List<UUID> chain = findAncestorChain(threadId);
+    UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
+    return lockedTrees.contains(root);
   }
 
   /** 验证当前事务是否允许执行 claimNextWork：必须先达到 WORK 锁阶梯，且在此之前不能持有任何其他 Work 锁。 */

@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
@@ -24,11 +25,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelAttemptFailureAppender;
+import fun.fengwk.kkstudio.harness.runtime.processor.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -36,6 +37,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -44,15 +47,18 @@ import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -73,6 +79,7 @@ final class StopControl {
   private static final Comparator<WorkTarget> WORK_TARGET_ORDER =
       Comparator.comparingInt((WorkTarget target) -> workTypeRank(target.type()))
           .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR);
+  private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
   private final HarnessStore store;
   private final Clock clock;
@@ -93,128 +100,347 @@ final class StopControl {
     return store.transaction(tx -> stop(tx, command));
   }
 
+  static UUID deriveChildStopRequestId(UUID parentStopRequestId, UUID childThreadId) {
+    Objects.requireNonNull(parentStopRequestId, "parentStopRequestId");
+    Objects.requireNonNull(childThreadId, "childThreadId");
+    return UUID.nameUUIDFromBytes(
+        (parentStopRequestId + ":" + childThreadId).getBytes(StandardCharsets.UTF_8));
+  }
+
+  private record ThreadStopCandidate(ThreadState thread, UUID stopRequestId, boolean isTarget) {}
+
+  private record ThreadStopContext(
+      ThreadState thread,
+      UUID stopRequestId,
+      boolean isTarget,
+      EntryPath path,
+      List<ThreadCommand> queued,
+      ModelInvocation model,
+      List<ToolInvocation> toolSiblings,
+      ThreadContext context) {}
+
   private Commit stop(HarnessStore.Transaction tx, StopCommand command) {
-    // 规范锁序：immutable 快照只用于定位 Session，随后 KEY SHARE Session -> FOR UPDATE Thread 复核。
-    ThreadState immutable =
+    // 树锁必须在任何业务行锁之前获取
+    ThreadTreeLocks.lockForThread(tx, command.threadId());
+
+    ThreadState targetThread =
         tx.findThread(command.threadId())
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException(
                         "thread " + command.threadId() + " does not exist"));
-    Session session =
-        tx.lockSessionForKeyShare(immutable.sessionId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "session " + immutable.sessionId() + " disappeared while thread existed"));
-    ThreadState thread =
-        tx.lockThread(command.threadId())
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException(
-                        "thread " + command.threadId() + " does not exist"));
-    if (!session.id().equals(thread.sessionId())) {
+
+    // 递归收集目标线程及其所有永久后代线程，并派生确定的子 stopRequestId
+    List<ThreadStopCandidate> candidates = new ArrayList<>();
+    candidates.add(new ThreadStopCandidate(targetThread, command.stopRequestId(), true));
+    Map<UUID, UUID> stopRequestIds = new HashMap<>();
+    stopRequestIds.put(targetThread.id(), command.stopRequestId());
+
+    List<UUID> frontier = new ArrayList<>();
+    frontier.add(targetThread.id());
+    Set<UUID> visited = new HashSet<>();
+    visited.add(targetThread.id());
+
+    while (!frontier.isEmpty()) {
+      UUID parentId = frontier.remove(0);
+      UUID parentStopId = stopRequestIds.get(parentId);
+      List<ThreadState> children = tx.listChildren(parentId);
+      for (ThreadState child : children) {
+        if (visited.add(child.id())) {
+          UUID childStopId = deriveChildStopRequestId(parentStopId, child.id());
+          stopRequestIds.put(child.id(), childStopId);
+          candidates.add(new ThreadStopCandidate(child, childStopId, false));
+          frontier.add(child.id());
+        }
+      }
+    }
+
+    ThreadState outsideParent = null;
+    if (targetThread.parentThreadId() != null) {
+      outsideParent = tx.findThread(targetThread.parentThreadId()).orElse(null);
+    }
+
+    // 规范锁序：Sessions (KEY SHARE) -> Threads (FOR UPDATE, UuidOrder) -> Commands -> Models -> Tools
+    // -> Work
+    List<UUID> sessionIdsList = new ArrayList<>();
+    for (ThreadStopCandidate c : candidates) {
+      sessionIdsList.add(c.thread().sessionId());
+    }
+    if (outsideParent != null) {
+      sessionIdsList.add(outsideParent.sessionId());
+    }
+    List<UUID> sessionIds =
+        sessionIdsList.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
+    for (UUID sessionId : sessionIds) {
+      tx.lockSessionForKeyShare(sessionId)
+          .orElseThrow(
+              () ->
+                  new IllegalStateException(
+                      "session " + sessionId + " disappeared while thread existed"));
+    }
+
+    List<UUID> threadIdsToLock = new ArrayList<>();
+    for (ThreadStopCandidate c : candidates) {
+      threadIdsToLock.add(c.thread().id());
+    }
+    if (outsideParent != null) {
+      threadIdsToLock.add(outsideParent.id());
+    }
+    List<UUID> sortedThreadIds =
+        threadIdsToLock.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
+    Map<UUID, ThreadState> lockedThreads = new HashMap<>();
+    for (UUID threadId : sortedThreadIds) {
+      ThreadState locked =
+          tx.lockThread(threadId)
+              .orElseThrow(
+                  () ->
+                      new HarnessRuntimeNotFoundException(
+                          "thread " + threadId + " does not exist"));
+      lockedThreads.put(threadId, locked);
+    }
+
+    ThreadState lockedTarget = lockedThreads.get(command.threadId());
+    if (!targetThread.sessionId().equals(lockedTarget.sessionId())) {
       throw new IllegalStateException(
-          "thread " + thread.id() + " relocated to another session while stopping");
+          "thread " + lockedTarget.id() + " relocated to another session while stopping");
     }
-    EntryPath path = tx.loadEntryPath(thread.headEntryId());
-    StopResult replay = findReplay(tx, thread.sessionId(), command.stopRequestId(), thread);
-    if (replay != null) {
-      return new Commit(replay, null, List.of());
+
+    StopResult targetReplay =
+        findReplay(tx, lockedTarget.sessionId(), command.stopRequestId(), lockedTarget);
+    if (targetReplay != null) {
+      return new Commit(targetReplay, null, List.of());
     }
-    if (thread.version() != command.expectedVersion()) {
+
+    if (lockedTarget.version() != command.expectedVersion()) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.STALE_VERSION,
           "thread "
-              + thread.id()
+              + lockedTarget.id()
               + " version "
-              + thread.version()
+              + lockedTarget.version()
               + " does not match expected "
               + command.expectedVersion());
     }
 
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    LockedThreadContext locked = ThreadContextLock.load(tx, thread, path);
-    ThreadContext context = locked.context();
-    if (context instanceof ThreadContext.ModelTerminalPending
-        || context instanceof ThreadContext.ToolTerminalPending) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.TERMINAL_APPLY_PENDING,
-          "thread " + thread.id() + " has a terminal invocation waiting to be applied");
+    // 筛选待停止候选（过滤已在 child stopRequestId 下停止的子线程重放）
+    List<ThreadStopCandidate> toStop = new ArrayList<>();
+    for (ThreadStopCandidate candidate : candidates) {
+      ThreadState locked = lockedThreads.get(candidate.thread().id());
+      if (candidate.isTarget()) {
+        toStop.add(new ThreadStopCandidate(locked, candidate.stopRequestId(), true));
+      } else {
+        StopResult childReplay =
+            findReplay(tx, locked.sessionId(), candidate.stopRequestId(), locked);
+        if (childReplay == null) {
+          toStop.add(new ThreadStopCandidate(locked, candidate.stopRequestId(), false));
+        }
+      }
     }
 
-    List<WorkTarget> workTargets = workTargets(thread, context);
-    for (WorkTarget target : workTargets) {
+    // Stage 4: Commands 锁（loadQueuedCommands）
+    Map<UUID, List<ThreadCommand>> queuedByThread = new HashMap<>();
+    Map<UUID, EntryPath> pathsByThread = new HashMap<>();
+    for (ThreadStopCandidate candidate : toStop) {
+      EntryPath path = tx.loadEntryPath(candidate.thread().headEntryId());
+      pathsByThread.put(candidate.thread().id(), path);
+      List<ThreadCommand> queued = tx.loadQueuedCommands(candidate.thread().id());
+      queuedByThread.put(candidate.thread().id(), queued);
+    }
+
+    // Stage 5: Models 锁
+    Map<UUID, ModelInvocation> modelsByThread = new HashMap<>();
+    for (ThreadStopCandidate candidate : toStop) {
+      EntryPath path = pathsByThread.get(candidate.thread().id());
+      Optional<Entry> openTurn = path.openTurnStart();
+      if (openTurn.isPresent()) {
+        Optional<ModelInvocation> found =
+            tx.findModelInvocationByTurn(candidate.thread().id(), openTurn.get().id());
+        if (found.isPresent()) {
+          ModelInvocation model =
+              tx.lockModelInvocation(found.get().id())
+                  .orElseThrow(
+                      () ->
+                          new IllegalStateException(
+                              "model "
+                                  + found.get().id()
+                                  + " could not be locked for thread "
+                                  + candidate.thread().id()));
+          modelsByThread.put(candidate.thread().id(), model);
+        }
+      }
+    }
+
+    // Stage 6: Tools 锁与 ThreadContext 分类
+    List<ThreadStopContext> contexts = new ArrayList<>();
+    for (ThreadStopCandidate candidate : toStop) {
+      EntryPath path = pathsByThread.get(candidate.thread().id());
+      List<ThreadCommand> queued = queuedByThread.get(candidate.thread().id());
+      ModelInvocation model = modelsByThread.get(candidate.thread().id());
+      List<ToolInvocation> siblings = List.of();
+      if (model != null
+          && model.resultEntryId() != null
+          && model.resultEntryId().equals(candidate.thread().headEntryId())
+          && path.head().payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT) {
+        siblings = tx.lockToolInvocationsByAssistantEntryId(path.head().id());
+      }
+      ThreadContext context = CLASSIFIER.classify(candidate.thread(), path, model, siblings);
+      if (context instanceof ThreadContext.ModelTerminalPending
+          || context instanceof ThreadContext.ToolTerminalPending) {
+        throw conflict(
+            HarnessRuntimeConflictException.Reason.TERMINAL_APPLY_PENDING,
+            "thread "
+                + candidate.thread().id()
+                + " has a terminal invocation waiting to be applied");
+      }
+      contexts.add(
+          new ThreadStopContext(
+              candidate.thread(),
+              candidate.stopRequestId(),
+              candidate.isTarget(),
+              path,
+              queued,
+              model,
+              siblings,
+              context));
+    }
+
+    // Stage 7: Work 锁与立即删除
+    List<WorkTarget> allWorkTargets = new ArrayList<>();
+    for (ThreadStopContext ctx : contexts) {
+      allWorkTargets.addAll(workTargets(ctx.thread(), ctx.context()));
+    }
+    allWorkTargets.sort(WORK_TARGET_ORDER);
+    for (WorkTarget target : allWorkTargets) {
       tx.lockWork(target);
     }
-    // Work rows 必须在 Invocation 行删除之前清掉：deleteWork 通过所属 Model/Tool 行校验 owner，而收敛步骤
-    // （stopModel/stopTools）会物理删除 Model/Tool 行。整个 Stop 是单事务，提前删除 Work 不改变原子性。
-    for (WorkTarget target : workTargets) {
+    for (WorkTarget target : allWorkTargets) {
       tx.deleteWork(target);
     }
-    Instant now = effectiveNow(clock.instant(), thread, path, queued, context);
 
-    List<ThreadCommand> cancelledCommands =
-        queued.stream()
-            .map(commandToCancel -> commandToCancel.cancel(command.stopRequestId(), now))
-            .toList();
-    if (!cancelledCommands.isEmpty()) {
-      tx.updateCommands(cancelledCommands);
-    }
-    List<CancelledUserMessage> cancelledUserMessages = cancelledUserMessages(cancelledCommands);
-    int cancelledCommandCount = cancelledCommands.size();
-    UUID modelExecutionId =
-        context instanceof ThreadContext.ModelActive active ? active.model().id() : null;
-    List<UUID> toolExecutionIds =
-        context instanceof ThreadContext.ToolActive active
-            ? active.siblings().stream()
+    // 收敛阶段：取消 Commands，写 Entry 屏障，推进 Thread head，删除 Model/Tool 行
+    StopResult targetResult = null;
+    UUID modelExecutionId = null;
+    List<UUID> toolExecutionIds = new ArrayList<>();
+    List<ThreadState> stoppedThreads = new ArrayList<>();
+    Instant lastNow = null;
+
+    List<ThreadStopContext> bottomUpContexts = contexts.reversed();
+    for (ThreadStopContext ctx : bottomUpContexts) {
+      Instant now =
+          effectiveNow(clock.instant(), ctx.thread(), ctx.path(), ctx.queued(), ctx.context());
+      lastNow = now;
+      List<ThreadCommand> cancelledCommands =
+          ctx.queued().stream()
+              .map(commandToCancel -> commandToCancel.cancel(ctx.stopRequestId(), now))
+              .toList();
+      if (!cancelledCommands.isEmpty()) {
+        tx.updateCommands(cancelledCommands);
+      }
+      List<CancelledUserMessage> cancelledUserMessages = cancelledUserMessages(cancelledCommands);
+      int cancelledCommandCount = cancelledCommands.size();
+
+      if (ctx.context() instanceof ThreadContext.ModelActive active) {
+        if (modelExecutionId == null || ctx.isTarget()) {
+          modelExecutionId = active.model().id();
+        }
+      } else if (ctx.context() instanceof ThreadContext.ToolActive active) {
+        List<UUID> activeToolIds =
+            active.siblings().stream()
                 .filter(sibling -> !sibling.status().isTerminal())
                 .map(ToolInvocation::id)
-                .toList()
-            : List.of();
+                .toList();
+        toolExecutionIds.addAll(activeToolIds);
+      }
 
-    StopResult result =
-        switch (context) {
-          case ThreadContext.IdleOrHistorical ignored -> stopIdle(
-              tx,
-              thread,
-              path,
-              command.stopRequestId(),
-              cancelledCommandCount,
-              cancelledUserMessages,
-              now);
-          case ThreadContext.ContinuationDue ignored -> stopContinuation(
-              tx,
-              thread,
-              path,
-              command.stopRequestId(),
-              cancelledCommandCount,
-              cancelledUserMessages,
-              now);
-          case ThreadContext.ModelActive active -> stopModel(
-              tx,
-              thread,
-              path,
-              active.model(),
-              command.stopRequestId(),
-              cancelledCommandCount,
-              cancelledUserMessages,
-              now);
-          case ThreadContext.ToolActive active -> stopTools(
-              tx,
-              thread,
-              path,
-              active,
-              command.stopRequestId(),
-              cancelledCommandCount,
-              cancelledUserMessages,
-              now);
-          case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
-              "terminal Model context escaped the Stop guard");
-          case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
-              "terminal Tool context escaped the Stop guard");
-        };
-    return new Commit(result, modelExecutionId, toolExecutionIds);
+      int activeChildren = tx.countActiveChildren(ctx.thread().id());
+      ThreadLifecycleStatus nextStatus =
+          activeChildren > 0 ? ThreadLifecycleStatus.WAITING_CHILDREN : ThreadLifecycleStatus.IDLE;
+
+      StopResult result =
+          switch (ctx.context()) {
+            case ThreadContext.IdleOrHistorical ignored -> stopIdle(
+                tx,
+                ctx.thread(),
+                ctx.path(),
+                ctx.stopRequestId(),
+                cancelledCommandCount,
+                cancelledUserMessages,
+                nextStatus,
+                now);
+            case ThreadContext.ContinuationDue ignored -> stopContinuation(
+                tx,
+                ctx.thread(),
+                ctx.path(),
+                ctx.stopRequestId(),
+                cancelledCommandCount,
+                cancelledUserMessages,
+                nextStatus,
+                now);
+            case ThreadContext.ModelActive active -> stopModel(
+                tx,
+                ctx.thread(),
+                ctx.path(),
+                active.model(),
+                ctx.stopRequestId(),
+                cancelledCommandCount,
+                cancelledUserMessages,
+                nextStatus,
+                now);
+            case ThreadContext.ToolActive active -> stopTools(
+                tx,
+                ctx.thread(),
+                ctx.path(),
+                active,
+                ctx.stopRequestId(),
+                cancelledCommandCount,
+                cancelledUserMessages,
+                nextStatus,
+                now);
+            case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
+                "terminal Model context escaped the Stop guard");
+            case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
+                "terminal Tool context escaped the Stop guard");
+          };
+
+      stoppedThreads.add(result.thread());
+      if (ctx.isTarget()) {
+        targetResult = result;
+      }
+    }
+
+    if (targetResult == null) {
+      throw new IllegalStateException("target thread result missing after Stop convergence");
+    }
+
+    Instant settleNow = lastNow != null ? lastNow : clock.instant();
+    List<ThreadState> settledThreads =
+        ThreadLifecycleCoordinator.settleStoppedTree(tx, stoppedThreads, settleNow);
+    for (ThreadState settled : settledThreads) {
+      if (settled.id().equals(command.threadId())) {
+        targetResult =
+            new StopResult(
+                targetResult.replayed(),
+                settled,
+                targetResult.stoppedTurnEndEntryId(),
+                targetResult.cancelledCommandCount(),
+                targetResult.cancelledUserMessages());
+        break;
+      }
+    }
+
+    if (modelExecutionId != null && !toolExecutionIds.isEmpty()) {
+      // Commit 仅支持单一类型本地取消，优先保留 target 线程的执行，否则保留 Model
+      if (targetResult.thread() != null
+          && contexts.stream()
+              .anyMatch(c -> c.isTarget() && c.context() instanceof ThreadContext.ToolActive)) {
+        modelExecutionId = null;
+      } else {
+        toolExecutionIds.clear();
+      }
+    }
+
+    return new Commit(targetResult, modelExecutionId, toolExecutionIds);
   }
 
   /**
@@ -383,13 +609,14 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     Optional<Entry> openTurn = path.openTurnStart();
     if (openTurn.isPresent() && !isOwnedBy(openTurn.get(), thread.id())) {
       // 共享历史上属于其它 Thread 的 open Turn：本 Thread 没有自己的 live 执行，也无权替换别人的 Turn，因此没有本 Thread
       // 自己的停止边界可写（所有权各自独立），只取消排队 Command。
       return touchVersionForCancelledCommands(
-          tx, thread, cancelledCommandCount, cancelledUserMessages, now);
+          tx, thread, cancelledCommandCount, cancelledUserMessages, status, now);
     }
     EntryPath base = path;
     if (openTurn.isPresent()) {
@@ -407,16 +634,16 @@ final class StopControl {
             stopRequestId,
             cancelledCommandCount,
             cancelledUserMessages,
+            status,
             now);
       }
       // 前缀不能按 STOPPED 关闭（尚无输入的空 INPUT Turn，或工具结果缺失的 assistant 结果）：先按既有 history normalization
       // 语义收尾（必要时补写 synthetic HISTORY_CUT ToolResult，再以 CANCELLED/HISTORY_CUT 关闭），随后照常写 STOP
-      // boundary
-      // Turn 承载 durable 停止事实。
+      // boundary Turn 承载 durable 停止事实。
       base = normalizeOpenOwnTurn(tx, path, now);
     }
     return appendStopBoundaryTurn(
-        tx, thread, base, stopRequestId, cancelledCommandCount, cancelledUserMessages, now);
+        tx, thread, base, stopRequestId, cancelledCommandCount, cancelledUserMessages, status, now);
   }
 
   /** 本 Thread 拥有、且无 live Invocation 的 open Turn：在其内部收尾，绝不新增 TURN_START。 */
@@ -429,6 +656,7 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     UUID sessionId = path.root().sessionId();
     UUID parentId = path.head().id();
@@ -439,12 +667,12 @@ final class StopControl {
     tx.insertEntry(
         new Entry(
             turnEndId, sessionId, parentId, stoppedTurnEnd(openTurn.id(), stopRequestId), now));
-    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    ThreadState stopped = advanceHeadWithStatus(thread, turnEndId, status, now);
     tx.updateThread(stopped);
     return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
 
-  /** 本 Thread 的 open Turn 前缀不足以按 STOPPED 关闭：按既有 history cut 语义收尾并返回收尾后的 EntryPath。 */
+  /** 本 Thread 的 open Turn 前缀不足以按 STOPPED 关闭：按既有 history cut语义收尾并返回收尾后的 EntryPath。 */
   private static EntryPath normalizeOpenOwnTurn(
       HarnessStore.Transaction tx, EntryPath path, Instant now) {
     List<Entry> suffix = HistoryNormalization.suffix(path, tx::nextId, now);
@@ -465,6 +693,7 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     UUID sessionId = path.root().sessionId();
     UUID turnStartId = tx.nextId();
@@ -480,7 +709,7 @@ final class StopControl {
     tx.insertEntry(
         new Entry(
             turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
-    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    ThreadState stopped = advanceHeadWithStatus(thread, turnEndId, status, now);
     tx.updateThread(stopped);
     return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
@@ -509,10 +738,25 @@ final class StopControl {
       ThreadState thread,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     ThreadState current = thread;
-    if (cancelledCommandCount > 0) {
-      current = thread.touchVersion(now);
+    if (cancelledCommandCount > 0 || current.status() != status) {
+      current =
+          new ThreadState(
+              thread.id(),
+              thread.sessionId(),
+              thread.parentThreadId(),
+              thread.headEntryId(),
+              thread.creationRequestHash(),
+              thread.name(),
+              thread.yoloEnabled(),
+              status,
+              thread.nextCommandSequence(),
+              Math.addExact(thread.version(), 1L),
+              thread.createdAt(),
+              effectiveMutationTime(now, thread));
+      ThreadState.validateTransition(thread, current);
       tx.updateThread(current);
     }
     return new StopResult(false, current, null, cancelledCommandCount, cancelledUserMessages);
@@ -530,6 +774,7 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     UUID sessionId = path.root().sessionId();
     UUID turnStartId = tx.nextId();
@@ -548,7 +793,7 @@ final class StopControl {
     tx.insertEntry(
         new Entry(
             turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
-    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    ThreadState stopped = advanceHeadWithStatus(thread, turnEndId, status, now);
     tx.updateThread(stopped);
     return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
   }
@@ -607,6 +852,7 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     StreamCheckpoint checkpoint = model.streamCheckpoint();
     EntryPayload barrier = modelStopBarrier(checkpoint);
@@ -632,7 +878,7 @@ final class StopControl {
             barrierId,
             stoppedTurnEnd(model.turnStartEntryId(), stopRequestId),
             now));
-    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    ThreadState stopped = advanceHeadWithStatus(thread, turnEndId, status, now);
     tx.updateThread(stopped);
     // 严格校验通过后同事务删除 ModelInvocation（closed turn 不保留 Invocation；Work 由调用方删除）。
     tx.deleteModelInvocation(model.id());
@@ -647,6 +893,7 @@ final class StopControl {
       UUID stopRequestId,
       int cancelledCommandCount,
       List<CancelledUserMessage> cancelledUserMessages,
+      ThreadLifecycleStatus status,
       Instant now) {
     // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
     ModelAttemptMaterialization.validateAttached(active.model(), path);
@@ -671,12 +918,37 @@ final class StopControl {
             parentId,
             stoppedTurnEnd(active.model().turnStartEntryId(), stopRequestId),
             now));
-    ThreadState stopped = thread.advanceHead(turnEndId, now);
+    ThreadState stopped = advanceHeadWithStatus(thread, turnEndId, status, now);
     tx.updateThread(stopped);
     // children 先于 parent 删除（FK 顺序）；Work 由调用方删除。
     tx.deleteToolInvocationsByIds(active.siblings().stream().map(ToolInvocation::id).toList());
     tx.deleteModelInvocation(active.model().id());
     return new StopResult(false, stopped, turnEndId, cancelledCommandCount, cancelledUserMessages);
+  }
+
+  private static ThreadState advanceHeadWithStatus(
+      ThreadState thread, UUID headEntryId, ThreadLifecycleStatus status, Instant now) {
+    ThreadState next =
+        new ThreadState(
+            thread.id(),
+            thread.sessionId(),
+            thread.parentThreadId(),
+            headEntryId,
+            thread.creationRequestHash(),
+            thread.name(),
+            thread.yoloEnabled(),
+            status,
+            thread.nextCommandSequence(),
+            Math.addExact(thread.version(), 1L),
+            thread.createdAt(),
+            effectiveMutationTime(now, thread));
+    ThreadState.validateTransition(thread, next);
+    return next;
+  }
+
+  private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
+    Instant candidate = Objects.requireNonNull(now, "now");
+    return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
   }
 
   /** 按 sequence 升序还原被取消的真实用户输入（USER_MESSAGE 与用户 CUSTOM_MESSAGE）；SET_* 与运行时提醒不返回。 */

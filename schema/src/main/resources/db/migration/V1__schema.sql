@@ -891,12 +891,12 @@ create table harness_thread (
         btrim(name) <> ''
     ),
     constraint ck_harness_thread_status check (
-        status in ('IDLE', 'ACTIVE', 'STOPPED')
+        status in ('IDLE', 'ACTIVE', 'WAITING_CHILDREN')
     ),
     constraint ck_harness_thread_time_order check (updated_at >= created_at)
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，status 维护递归生命周期（IDLE/ACTIVE/STOPPED）';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，status 维护递归生命周期（IDLE/ACTIVE/WAITING_CHILDREN）';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
@@ -904,7 +904,7 @@ comment on column harness_thread.head_entry_id is '当前 head Entry（必须存
 comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.yolo_enabled is '当前 yolo 模式开关';
-comment on column harness_thread.status is '递归生命周期状态（IDLE/ACTIVE/STOPPED）';
+comment on column harness_thread.status is '递归生命周期状态（IDLE/ACTIVE/WAITING_CHILDREN）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
 comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';

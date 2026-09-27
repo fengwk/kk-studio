@@ -209,26 +209,32 @@ public interface HarnessStore {
     List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId);
 
     /**
-     * 统计指定父 Thread 下尚未匹配（{@code matchedIdleVersion == null}）的 join 数量；不产生锁。
+     * 统计指定父 Thread 下当前处于活跃状态（status != IDLE，包含 ACTIVE 与 WAITING_CHILDREN）的直接子 Thread 数量；不产生锁。
      *
      * @param parentThreadId 父 Thread ID，不能为 null
-     * @return 尚未匹配的 join 数量
+     * @return 活跃的直接子 Thread 数量
      */
-    int countUnmatchedJoinsByParent(UUID parentThreadId);
+    int countActiveChildren(UUID parentThreadId);
 
     /**
-     * 递归统计以 rootThreadId 为根的整棵 Thread 树（root 自身及其全部后代 Thread）中尚未匹配（{@code matchedIdleVersion ==
-     * null}）的 join 数量；不产生锁。
+     * 递归统计以 rootThreadId 为根的整棵 Thread 执行树中，所有处于活跃状态（status != IDLE，包含 ACTIVE 与 WAITING_CHILDREN）
+     * 的后代 Thread（descendants，不含 rootThreadId 自身）数量；不产生锁。
      *
      * @param rootThreadId 根 Thread ID，不能为 null
-     * @return 树中尚未匹配的 join 数量
+     * @return 执行树中活跃的后代 Thread 数量
      */
-    int countUnmatchedJoinsInTree(UUID rootThreadId);
+    int countActiveThreadsInTree(UUID rootThreadId);
 
     /** 只允许首次冻结结果与单调推进提醒，以及首次写入交付引用。 */
     void updateJoin(ThreadJoin join);
 
-    /** GC 必须显式收敛和删除 Join 后方可删除其父、子线程和历史。 */
+    /**
+     * GC 删除指定子 Thread 的全部 Join 记录并返回删除行数。要求该子 Thread 已在本事务锁定（未锁定抛 {@link IllegalStateException}）；
+     * 若该子 Thread 下存在任何尚未匹配的 Join（{@code matchedIdleVersion == null}），或存在拥有非空 parentThreadId 且尚未完成向父
+     * Thread 交付结果（{@code deliveryCommandSequence == null}）的 Join，必须抛出 {@link
+     * IllegalArgumentException} 拒绝删除并回滚； 只有已成功交付给父 Thread 的子 Join 以及已匹配完成的根 completion ticket
+     * 方可被显式安全删除。
+     */
     int deleteJoinsByChild(UUID childThreadId);
 
     /** 按 (threadId, idempotencyKey) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */

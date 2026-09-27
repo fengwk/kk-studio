@@ -1,16 +1,23 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -18,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -26,9 +34,13 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -79,6 +91,16 @@ final class AcceptCommandsControl {
     };
   }
 
+  private static final class LockedAncestors {
+    final List<UUID> chain;
+    final Map<UUID, ThreadState> threads;
+
+    LockedAncestors(List<UUID> chain, Map<UUID, ThreadState> threads) {
+      this.chain = chain;
+      this.threads = threads;
+    }
+  }
+
   private AcceptedCommands acceptNewSession(
       AcceptCommandsTarget.NewSession target,
       List<NewThreadCommand> commands,
@@ -87,7 +109,13 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
-          lockAcceptanceTree(tx, target.threadId(), target.parentThreadId());
+          LockedAncestors lockedAncestors =
+              target.parentThreadId() != null
+                  ? lockTreeAndAncestors(tx, target.parentThreadId(), true, null)
+                  : null;
+          if (lockedAncestors == null) {
+            tx.lockTree(target.threadId());
+          }
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
@@ -138,6 +166,21 @@ final class AcceptCommandsControl {
                   now,
                   now);
           tx.insertThread(thread);
+
+          if (lockedAncestors != null) {
+            for (UUID ancestorId : lockedAncestors.chain) {
+              ThreadState ancestor = lockedAncestors.threads.get(ancestorId);
+              if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
+                Instant mutationNow = effectiveMutationTime(now, ancestor);
+                ThreadState updated =
+                    ancestor.changeLifecycleStatus(
+                        ThreadLifecycleStatus.WAITING_CHILDREN, mutationNow);
+                tx.updateThread(updated);
+                lockedAncestors.threads.put(ancestorId, updated);
+              }
+            }
+          }
+
           return attachJoin(
               tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
         });
@@ -151,7 +194,7 @@ final class AcceptCommandsControl {
     validateBatchShape(target, commands);
     return store.transaction(
         tx -> {
-          lockAcceptanceTree(tx, target.threadId(), null);
+          tx.lockTree(target.threadId());
           ThreadState existing = tx.findThread(target.threadId()).orElse(null);
           if (existing != null) {
             String creationRequestHash =
@@ -244,25 +287,25 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
-          lockAcceptanceTree(tx, target.threadId(), null);
-          ThreadState immutable =
-              tx.findThread(target.threadId())
-                  .orElseThrow(
-                      () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + target.threadId() + " does not exist"));
-          UUID sessionId = immutable.sessionId();
-          tx.lockSessionForKeyShare(sessionId)
-              .orElseThrow(
-                  () ->
-                      new IllegalStateException(
-                          "session " + sessionId + " disappeared while thread existed"));
-          ThreadState thread =
-              tx.lockThread(target.threadId())
-                  .orElseThrow(
-                      () ->
-                          new HarnessRuntimeNotFoundException(
-                              "thread " + target.threadId() + " does not exist"));
+          List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
+          boolean genuineUserInput = isGenuineUserInput(commands);
+          Set<UUID> additionalThreads = new LinkedHashSet<>();
+          if (genuineUserInput && !pending.isEmpty()) {
+            for (ThreadJoin pendingJoin : pending) {
+              additionalThreads.add(pendingJoin.childThreadId());
+            }
+          }
+          LockedAncestors locked =
+              lockTreeAndAncestors(tx, target.threadId(), false, additionalThreads);
+          List<ThreadJoin> confirmedPending = tx.loadPendingDeliveries(target.threadId());
+          if (!pending.equals(confirmedPending)) {
+            throw new IllegalStateException("pending deliveries changed while acquiring tree lock");
+          }
+          ThreadState thread = locked.threads.get(target.threadId());
+          if (thread == null) {
+            throw new HarnessRuntimeNotFoundException(
+                "thread " + target.threadId() + " does not exist");
+          }
           // exact replay 查找必须先于 cursor/preflight admission。
           List<Optional<ThreadCommand>> existing = new ArrayList<>(commands.size());
           for (NewThreadCommand request : commands) {
@@ -288,24 +331,166 @@ final class AcceptCommandsControl {
           validateBatchShape(target, commands);
           admitJoin(tx, thread.id(), thread.parentThreadId(), join, false);
           Instant now = clock.instant();
+          Session session =
+              tx.findSession(thread.sessionId())
+                  .orElseThrow(
+                      () ->
+                          new IllegalStateException(
+                              "session "
+                                  + thread.sessionId()
+                                  + " disappeared while thread existed"));
+          List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
+          requirePreflightShape(commands, prepared);
+          Instant parentMutationNow = effectiveMutationTime(now, thread);
+          long nextSeq = thread.nextCommandSequence();
+          List<ThreadCommand> allInserted = new ArrayList<>();
+          List<ThreadJoin> deliveries = new ArrayList<>();
+
+          if (genuineUserInput && !pending.isEmpty()) {
+            for (ThreadJoin pendingJoin : pending) {
+              ThreadJoinReceipt receipt =
+                  ThreadJoinProjector.INSTANCE
+                      .project(tx, pendingJoin)
+                      .orElseThrow(
+                          () ->
+                              new IllegalStateException(
+                                  "cannot project receipt for matched join "
+                                      + pendingJoin.invocationId()));
+              String xml = receipt.renderCompletionXml();
+              CustomMessageCommandPayload payload =
+                  new CustomMessageCommandPayload(AgentMessage.user(xml));
+              String reqHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
+              ThreadCommand deliveryCmd =
+                  new ThreadCommand(
+                      thread.id(),
+                      nextSeq,
+                      payload,
+                      pendingJoin.invocationId(),
+                      reqHash,
+                      null,
+                      null,
+                      null,
+                      parentMutationNow);
+              allInserted.add(deliveryCmd);
+              Instant deliveryMutationNow =
+                  HarnessStoreTime.notBefore(parentMutationNow, pendingJoin.updatedAt());
+              ThreadJoin delivered = pendingJoin.delivered(nextSeq, deliveryMutationNow);
+              deliveries.add(delivered);
+              nextSeq++;
+            }
+          }
+
+          List<ThreadCommand> userCommands = new ArrayList<>(prepared.size());
+          for (int i = 0; i < prepared.size(); i++) {
+            NewThreadCommand request = prepared.get(i);
+            userCommands.add(
+                new ThreadCommand(
+                    thread.id(),
+                    nextSeq + i,
+                    request.payload(),
+                    request.idempotencyKey(),
+                    request.requestHash(),
+                    null,
+                    null,
+                    null,
+                    parentMutationNow));
+          }
+          allInserted.addAll(userCommands);
+
+          tx.insertCommands(allInserted);
+          for (ThreadJoin delivered : deliveries) {
+            tx.updateJoin(delivered);
+          }
+
+          ThreadState advanced =
+              thread.reserveCommandSequences(allInserted.size(), parentMutationNow);
+          tx.updateThread(advanced);
+
+          for (UUID ancestorId : locked.chain) {
+            if (ancestorId.equals(thread.id())) {
+              continue;
+            }
+            ThreadState ancestor = locked.threads.get(ancestorId);
+            if (ancestor != null && ancestor.status() == ThreadLifecycleStatus.IDLE) {
+              Instant ancestorNow = effectiveMutationTime(now, ancestor);
+              ThreadState updated =
+                  ancestor.changeLifecycleStatus(
+                      ThreadLifecycleStatus.WAITING_CHILDREN, ancestorNow);
+              tx.updateThread(updated);
+            }
+          }
+
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
           return attachJoin(
-              tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
+              tx,
+              new AcceptedCommands(
+                  session,
+                  requireRootEntry(tx, session.id()),
+                  advanced,
+                  List.copyOf(userCommands),
+                  false),
+              join);
         });
   }
 
-  private static void lockAcceptanceTree(
-      HarnessStore.Transaction tx, UUID childId, UUID newParentId) {
-    UUID anchor = newParentId == null ? childId : newParentId;
-    List<UUID> chain = tx.findAncestorChain(anchor);
-    if (newParentId != null && chain.isEmpty()) {
+  private static LockedAncestors lockTreeAndAncestors(
+      HarnessStore.Transaction tx,
+      UUID anchorThreadId,
+      boolean anchorIsParent,
+      Set<UUID> additionalThreadIds) {
+    List<UUID> chain = tx.findAncestorChain(anchorThreadId);
+    if (anchorIsParent && chain.isEmpty()) {
       throw new IllegalArgumentException("join parent does not exist");
     }
-    UUID root = chain.isEmpty() ? anchor : chain.get(chain.size() - 1);
+    UUID root = chain.isEmpty() ? anchorThreadId : chain.get(chain.size() - 1);
     tx.lockTree(root);
-    // The initial lookup is only a hint. Re-read immutable ancestry after taking the tree lock.
-    if (!chain.equals(tx.findAncestorChain(anchor))) {
+    if (!chain.equals(tx.findAncestorChain(anchorThreadId))) {
       throw new IllegalStateException("execution tree changed while acquiring its lock");
     }
+    Set<UUID> allThreadIds = new LinkedHashSet<>(chain);
+    if (additionalThreadIds != null) {
+      allThreadIds.addAll(additionalThreadIds);
+    }
+    Map<UUID, ThreadState> immutableThreads = new HashMap<>();
+    Set<UUID> sessionIds = new LinkedHashSet<>();
+    for (UUID id : allThreadIds) {
+      ThreadState state =
+          tx.findThread(id)
+              .orElseThrow(
+                  () ->
+                      anchorIsParent && chain.contains(id)
+                          ? new IllegalArgumentException("join parent does not exist")
+                          : new HarnessRuntimeNotFoundException(
+                              "thread " + id + " does not exist"));
+      immutableThreads.put(id, state);
+      sessionIds.add(state.sessionId());
+    }
+    List<UUID> sortedSessionIds = sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList();
+    for (UUID sessionId : sortedSessionIds) {
+      tx.lockSessionForKeyShare(sessionId)
+          .orElseThrow(
+              () ->
+                  new IllegalStateException(
+                      "session " + sessionId + " disappeared while thread existed"));
+    }
+    List<UUID> sortedThreadIds = allThreadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
+    Map<UUID, ThreadState> lockedThreads = new HashMap<>();
+    for (UUID id : sortedThreadIds) {
+      ThreadState locked =
+          tx.lockThread(id)
+              .orElseThrow(
+                  () ->
+                      anchorIsParent && chain.contains(id)
+                          ? new IllegalArgumentException("join parent does not exist")
+                          : new HarnessRuntimeNotFoundException(
+                              "thread " + id + " does not exist"));
+      if (!locked.sessionId().equals(immutableThreads.get(id).sessionId())) {
+        throw new IllegalStateException(
+            "thread " + id + " relocated while acquiring its session lock");
+      }
+      lockedThreads.put(id, locked);
+    }
+    return new LockedAncestors(chain, lockedThreads);
   }
 
   private static void admitJoin(
@@ -329,10 +514,12 @@ final class AcceptCommandsControl {
           tx.findThread(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
       if (!parent.headEntryId().equals(join.expectedParentHeadEntryId())
-          || parent.status().isStopped()) {
+          || stoppedAtHead(tx, parent)) {
         throw new IllegalArgumentException("join parent no longer accepts this invocation");
       }
-      if (tx.countUnmatchedJoinsByParent(parentId) >= join.maxConcurrentChildren()) {
+      boolean newActiveChild =
+          creating || tx.findThread(childId).map(t -> t.status().isIdle()).orElse(true);
+      if (newActiveChild && tx.countActiveChildren(parentId) >= join.maxConcurrentChildren()) {
         throw new IllegalArgumentException("parent join quota exceeded");
       }
     }
@@ -341,9 +528,18 @@ final class AcceptCommandsControl {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
     UUID root = chain.isEmpty() ? childId : chain.get(chain.size() - 1);
-    if (tx.countUnmatchedJoinsInTree(root) >= join.maxConcurrentTreeJoins()) {
+    boolean newActiveThread =
+        creating || tx.findThread(childId).map(t -> t.status().isIdle()).orElse(true);
+    if (parentId != null
+        && newActiveThread
+        && tx.countActiveThreadsInTree(root) >= join.maxConcurrentThreads()) {
       throw new IllegalArgumentException("tree join quota exceeded");
     }
+  }
+
+  private static boolean stoppedAtHead(HarnessStore.Transaction tx, ThreadState parent) {
+    return tx.loadEntryPath(parent.headEntryId()).head().payload() instanceof TurnEndPayload end
+        && end.outcome() == TurnEndOutcome.STOPPED;
   }
 
   private static AcceptedCommands attachJoin(
@@ -539,14 +735,37 @@ final class AcceptCommandsControl {
     }
     long firstSequence = ordered.get(0).sequence();
     if (firstSequence != target.expectedNextCommandSequence()) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
-          "existing commands on thread "
-              + target.threadId()
-              + " start at sequence "
-              + firstSequence
-              + " while the request expected "
-              + target.expectedNextCommandSequence());
+      long expected = target.expectedNextCommandSequence();
+      boolean allPrecedingWereDeliveries = true;
+      if (firstSequence > expected) {
+        for (long seq = expected; seq < firstSequence; seq++) {
+          long checkSeq = seq;
+          boolean isDelivery =
+              tx.loadCommandsByThread(target.threadId()).stream()
+                  .filter(c -> c.sequence() == checkSeq)
+                  .anyMatch(
+                      c ->
+                          tx.findJoin(c.idempotencyKey())
+                              .map(j -> Objects.equals(j.deliveryCommandSequence(), checkSeq))
+                              .orElse(false));
+          if (!isDelivery) {
+            allPrecedingWereDeliveries = false;
+            break;
+          }
+        }
+      } else {
+        allPrecedingWereDeliveries = false;
+      }
+      if (!allPrecedingWereDeliveries) {
+        throw conflict(
+            HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
+            "existing commands on thread "
+                + target.threadId()
+                + " start at sequence "
+                + firstSequence
+                + " while the request expected "
+                + target.expectedNextCommandSequence());
+      }
     }
     for (int i = 0; i < ordered.size(); i++) {
       if (ordered.get(i).sequence() != Math.addExact(firstSequence, (long) i)) {
@@ -565,6 +784,28 @@ final class AcceptCommandsControl {
                         "session " + thread.sessionId() + " disappeared while thread existed"));
     return new AcceptedCommands(
         session, requireRootEntry(tx, thread.sessionId()), thread, List.copyOf(ordered), true);
+  }
+
+  private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
+    Instant candidate = Objects.requireNonNull(now, "now");
+    return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
+  }
+
+  private static boolean isGenuineUserInput(List<NewThreadCommand> commands) {
+    for (NewThreadCommand command : commands) {
+      if (command.payload() instanceof UserMessageCommandPayload) {
+        return true;
+      }
+      if (command.payload() instanceof GoalCommandPayload) {
+        return true;
+      }
+      if (command.payload() instanceof CustomMessageCommandPayload custom) {
+        if (!SystemReminder.isReminder(custom.message())) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**

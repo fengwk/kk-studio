@@ -132,6 +132,7 @@ public final class ThreadProcessor {
   private final ModelResponsePlanner responsePlanner = new ModelResponsePlanner();
   private final AutomaticCompactionPlanner automaticCompactionPlanner =
       new AutomaticCompactionPlanner();
+  private final ThreadLifecycleCoordinator coordinator;
 
   public ThreadProcessor(
       HarnessStore store,
@@ -159,6 +160,12 @@ public final class ThreadProcessor {
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
+    this.coordinator =
+        new ThreadLifecycleCoordinator(
+            this.threadContextProbe,
+            this.automaticCompactionPlanner,
+            () -> this.config.compactionProvider().compactionConfig(),
+            this.clock);
   }
 
   /**
@@ -276,6 +283,7 @@ public final class ThreadProcessor {
         if (userDemand) {
           yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
         }
+        coordinator.propagateIdle(tx, thread, now);
         completeClaim(tx, claim, now);
         yield null;
       }
@@ -476,9 +484,12 @@ public final class ThreadProcessor {
               mutationNow));
       head = turnEndId;
     }
-    ThreadState advancedThread = thread.advanceHead(head, mutationNow);
+    ThreadState advancedThread;
     boolean requestThread = false;
-    if (!toolPhase) {
+    if (toolPhase) {
+      advancedThread = thread.advanceHead(head, mutationNow);
+      tx.updateThread(advancedThread);
+    } else {
       // 关闭 turn：同事务 attach-then-delete 完成严格物化校验并删除 Model 行（closed turn 不保留 Invocation）。
       tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
       tx.deleteModelInvocation(model.id());
@@ -487,14 +498,23 @@ public final class ThreadProcessor {
       // obligation 并启动续写。
       boolean compactionDue =
           automaticCompactionPlanner.plan(
-                  advancedThread,
+                  thread.advanceHead(head, mutationNow),
                   tx.loadEntryPath(head),
                   config.compactionProvider().compactionConfig(),
                   hasQueuedMessage)
               != null;
       requestThread = continueModel || hasQueuedMessage || compactionDue;
+      if (requestThread) {
+        advancedThread = thread.advanceHead(head, mutationNow);
+        tx.updateThread(advancedThread);
+        if (continueModel) {
+          EntryPath updatedPath = tx.loadEntryPath(head);
+          coordinator.remindSoftBudgetIfDue(tx, advancedThread, updatedPath, mutationNow);
+        }
+      } else {
+        advancedThread = coordinator.advanceHeadAndPropagateIdle(tx, thread, head, mutationNow);
+      }
     }
-    tx.updateThread(advancedThread);
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
@@ -594,20 +614,30 @@ public final class ThreadProcessor {
             mutationNow));
     tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
     tx.deleteModelInvocation(model.id());
-    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
-    tx.updateThread(advanced);
     boolean compactionDue =
         automaticCompactionPlanner.plan(
-                advanced,
+                thread.advanceHead(turnEndId, mutationNow),
                 tx.loadEntryPath(turnEndId),
                 config.compactionProvider().compactionConfig(),
                 hasQueuedUserMessage)
             != null;
     boolean mechanicalWake = outcome == TurnEndOutcome.COMPLETED && continueModel;
+    boolean requestThread = hasQueuedUserMessage || compactionDue || mechanicalWake;
+    ThreadState advanced;
+    if (requestThread) {
+      advanced = thread.advanceHead(turnEndId, mutationNow);
+      tx.updateThread(advanced);
+      if (mechanicalWake) {
+        EntryPath updatedPath = tx.loadEntryPath(turnEndId);
+        coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
+      }
+    } else {
+      advanced = coordinator.advanceHeadAndPropagateIdle(tx, thread, turnEndId, mutationNow);
+    }
     if (tx.lockClaimedWork(claim, workNow).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    if (hasQueuedUserMessage || compactionDue || mechanicalWake) {
+    if (requestThread) {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
     }
     tx.completeWork(claim, workNow);
@@ -672,10 +702,13 @@ public final class ThreadProcessor {
             new TurnEndPayload(
                 model.turnStartEntryId(), TurnEndOutcome.COMPLETED, true, null, null),
             mutationNow));
-    tx.updateThread(thread.advanceHead(turnEndId, mutationNow));
+    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+    tx.updateThread(advanced);
     // children 先于 parent 删除（FK 顺序）。
     tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
     tx.deleteModelInvocation(model.id());
+    EntryPath updatedPath = tx.loadEntryPath(turnEndId);
+    coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
@@ -856,23 +889,29 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               mutationNow));
-      ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
-      tx.updateThread(advanced);
       // Rejected turn 本身没有 resolved budgets；仅 deferred demand 或更早的 fallback/hard-overflow 事实可重建
       // wake。
       boolean deferredUserDemand = plan.hasDeferredUserMessages();
       boolean compactionDue =
           automaticCompactionPlanner.plan(
-                  advanced,
+                  thread.advanceHead(turnEndId, mutationNow),
                   tx.loadEntryPath(turnEndId),
                   config.compactionProvider().compactionConfig(),
                   deferredUserDemand)
               != null;
+      boolean requestThread = deferredUserDemand || compactionDue;
+      ThreadState advanced;
+      if (requestThread) {
+        advanced = thread.advanceHead(turnEndId, mutationNow);
+        tx.updateThread(advanced);
+      } else {
+        advanced = coordinator.advanceHeadAndPropagateIdle(tx, thread, turnEndId, mutationNow);
+      }
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
       }
       // rejected：保留 deferred user 或已确定 compaction obligation 时先请求 THREAD 再 complete。
-      if (deferredUserDemand || compactionDue) {
+      if (requestThread) {
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
       }
       tx.completeWork(claim, now);
@@ -888,22 +927,12 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 先以不可变 Thread 快照定位父 Session，再按 Session KEY SHARE -&gt; Thread FOR UPDATE 复核。
+   * 先获取执行树事务级锁并复核祖先链，再以不可变 Thread 快照定位父 Session，按 Session KEY SHARE -&gt; Thread FOR UPDATE 复核。
    *
-   * <p>Entry 插入会因外键隐式获取 Session KEY SHARE；若先锁 Thread，再遇到深删除持有 Session FOR UPDATE 并等待 Thread，
-   * PostgreSQL 会形成锁环。Session 或 Thread 被并发删除时返回 null，由 claim 路径按 LOST 处理。
+   * <p>在任何 Session/Thread/Work 业务行锁之前先获取 Tree Advisory Lock，防止并发操作或深删除/停止产生逆序或竞态。
    */
-  private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
-    ThreadState immutable = tx.findThread(threadId).orElse(null);
-    if (immutable == null || tx.lockSessionForKeyShare(immutable.sessionId()).isEmpty()) {
-      return null;
-    }
-    ThreadState locked = tx.lockThread(threadId).orElse(null);
-    if (locked != null && !locked.sessionId().equals(immutable.sessionId())) {
-      throw new IllegalStateException(
-          "thread " + threadId + " relocated while acquiring its session lock");
-    }
-    return locked;
+  static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
+    return ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
   }
 
   /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */

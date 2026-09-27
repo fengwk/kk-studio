@@ -14,7 +14,7 @@ public record ThreadJoinRequest(
     Integer maxTurns,
     int maxDepth,
     int maxConcurrentChildren,
-    int maxConcurrentTreeJoins) {
+    int maxConcurrentThreads) {
 
   public ThreadJoinRequest {
     Objects.requireNonNull(invocationId, "invocationId");
@@ -33,7 +33,7 @@ public record ThreadJoinRequest(
     if (maxTurns != null && maxTurns <= 0) {
       throw new IllegalArgumentException("maxTurns must be positive");
     }
-    if (maxDepth < 1 || maxConcurrentChildren < 1 || maxConcurrentTreeJoins < 1) {
+    if (maxDepth < 1 || maxConcurrentChildren < 1 || maxConcurrentThreads < 1) {
       throw new IllegalArgumentException("admission limits must be positive");
     }
   }
