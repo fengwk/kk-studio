@@ -197,17 +197,23 @@ function assertBoxesDoNotOverlap(left, right, label) {
   assert(!overlaps, `${label} bounding boxes overlap`)
 }
 
-async function assertSubbarActionRightAligned(page, action, label) {
-  const [subbarBox, actionBox] = await Promise.all([
-    page.locator('.subbar').boundingBox(),
-    action.boundingBox(),
-  ])
-  assert(subbarBox && actionBox, `${label} bounding box is missing`)
-  const rightGap = subbarBox.x + subbarBox.width - actionBox.x - actionBox.width
-  assert(
-    rightGap >= 16 && rightGap <= 32,
-    `${label} must align to the subbar right edge; gap=${rightGap}`,
-  )
+async function assertLeadingCreateCard(page, action, label) {
+  // Resource creation belongs to the first card in the content grid, not the subbar.
+  const layout = await action.evaluate((element) => {
+    const grid = element.closest('.cards-grid')
+    const bounds = element.getBoundingClientRect()
+    const container = grid?.getBoundingClientRect()
+    return {
+      first: grid?.firstElementChild === element,
+      card: element.classList.contains('create-card'),
+      visible: bounds.width > 0 && bounds.height > 0,
+      contained: container != null
+        && bounds.left >= container.left - 1
+        && bounds.right <= container.right + 1,
+    }
+  })
+  assert(layout.first && layout.card && layout.visible && layout.contained,
+    `${label} must be the visible leading create card: ${JSON.stringify(layout)}`)
 }
 
 function listArtifacts(caseDir, reportDir) {
@@ -553,15 +559,15 @@ async function main(argv) {
     })
     const createButton = page.getByRole('button', { name: /创建环境|Create Environment/ })
     await createButton.waitFor({ state: 'visible' })
-    await assertSubbarActionRightAligned(page, createButton, 'Create Environment')
+    await assertLeadingCreateCard(page, createButton, 'Create Environment')
     const environmentCards = page.locator('.environment-card')
     assert(await environmentCards.count() > 0, 'environments page has no cards')
     for (const card of await environmentCards.all()) {
       const actions = card.locator('.chat-card-foot button')
-      assert(await actions.count() === 2, 'environment card must expose only Edit and Delete')
+      assert(await actions.count() === 4, 'environment card must expose Copy Token, Manage, Rotate Token and Delete')
       assert(
-        await actions.filter({ hasText: /重新生成 Token|Rotate Token/ }).count() === 0,
-        'environment card must not expose Rotate Token',
+        await actions.filter({ hasText: /重新生成 Token|Rotate Token/ }).count() === 1,
+        'environment card must expose one Rotate Token action',
       )
     }
     await shot(caseArt, 'environments')
@@ -743,7 +749,7 @@ async function main(argv) {
           name: /创建 MCP 服务|Create MCP Server/,
         })
         await createButton.waitFor({ state: 'visible' })
-        await assertSubbarActionRightAligned(page, createButton, 'Create MCP Server')
+        await assertLeadingCreateCard(page, createButton, 'Create MCP Server')
       }
       expectNoFatal(pageErrors, consoleErrors)
     }
@@ -770,6 +776,7 @@ async function main(argv) {
     await goto('/models')
     await page.getByText('新建 Model', { exact: true }).click()
     await page.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
+    await page.getByRole('textbox', { name: 'Model ID', exact: true }).fill(name)
     await page.getByRole('button', { name: '确认创建' }).click()
     const modelRef = await resourceCardTitle(page, name)
     await shot(caseArt, 'model-created')
@@ -913,34 +920,19 @@ async function main(argv) {
   })
 
   await run(
-    'ui.chat.create_agent_bound_environment',
-    'Create Chat 仅通过 Agent 绑定 Environment，Chat 不携带任何 workspace 字段',
+    'ui.chat.create_agent_no_implicit_environment',
+    'Create Chat 选择 Agent 不隐式绑定 Environment，Agent 与 Chat 不持有环境字段',
     async (caseArt) => {
       const title = `e2e-ui-create-env-${stamp}`
       const tempAgentName = `e2e-ui-agent-${stamp}`
 
-      // 1. API 找到 args.daemonEnv Card，断言 canonical UUID
-      const envsResponse = await apiJson(args.backendUrl, 'GET', '/api/harness/environments')
-      const envCards = envsResponse.json?.data || []
-      const card = envCards.find((candidate) => candidate.name === args.daemonEnv)
-      assert(
-        card != null,
-        `daemon Environment Card '${args.daemonEnv}' not found in /api/harness/environments: ${JSON.stringify(envCards)}`,
-      )
-      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-      assert(
-        UUID_RE.test(card.id),
-        `daemon Environment Card id must be canonical UUID (got '${card.id}')`,
-      )
-
-      // 2. 创建临时 Agent 并绑定其 environmentId（Environment 归属 Agent，不归属 Chat）
+      // Environment 由运行分支显式绑定，不属于 Agent Definition。
       const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/ai/catalog/agents', {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
         model: REAL_UI_MODEL_ID,
         variant: REAL_UI_MODEL.variant,
-        environmentId: card.id,
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       assert(
@@ -948,8 +940,9 @@ async function main(argv) {
         `failed to create temporary agent '${tempAgentName}' (expected 201, got ${agentCreateRes.status}): ${JSON.stringify(agentCreateRes.json)}`,
       )
       assert(
-        agentCreateRes.json?.data?.environmentId === card.id,
-        `temporary agent did not bind the Environment: ${JSON.stringify(agentCreateRes.json)}`,
+        !Object.hasOwn(agentCreateRes.json.data, 'environmentId')
+          && !Object.hasOwn(agentCreateRes.json.data, 'branchSettings'),
+        'Agent Definition must not own branch environment settings',
       )
 
       try {
@@ -973,15 +966,15 @@ async function main(argv) {
         // createChat 成功后会直接 navigate 到 /chats/:id 空白工作区
         await page.getByLabel('给 AI 发送消息').waitFor({ state: 'visible', timeout: 15_000 })
 
-        // 3. 空白工作区 Footer 只投影 Agent 绑定的 Environment 事实。
+        // 空白工作区没有分支环境，不得猜测宿主或默认 Environment。
         const footer = page.getByLabel('会话状态')
         await footer.waitFor({ state: 'visible', timeout: 15_000 })
         const environmentText = await footer
           .locator('.thread-status-environment .thread-status-seg')
           .innerText()
         assert(
-          environmentText.startsWith(`env:${args.daemonEnv}`),
-          `Footer did not project the agent-bound Environment: ${environmentText}`,
+          environmentText === 'none env',
+          `Footer inferred an implicit Environment: ${environmentText}`,
         )
 
         // 4. Chat 持久化不得携带任何 workspace / environment 字段。

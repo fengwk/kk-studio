@@ -48,6 +48,7 @@ const ISSUE_DETAIL_FIELDS = [
   'dependencies',
   'sessions',
   'activities',
+  'evidence',
   'nextActivityCursor',
   'runs',
   'currentRun',
