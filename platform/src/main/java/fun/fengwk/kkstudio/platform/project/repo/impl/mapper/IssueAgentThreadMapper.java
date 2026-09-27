@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.ResultMap;
 import org.apache.ibatis.annotations.Results;
 import org.apache.ibatis.annotations.Select;
 
@@ -43,6 +44,10 @@ public interface IssueAgentThreadMapper extends BaseMapper {
           + " where issue_id = #{issueId} and agent_name = #{agentName}")
   IssueAgentThreadDO findByIssueIdAndAgentName(
       @Param("issueId") UUID issueId, @Param("agentName") String agentName);
+
+  @Select("select " + COLUMNS + " from project_issue_agent_thread where thread_id = #{threadId}")
+  @ResultMap("issueAgentThreadMap")
+  IssueAgentThreadDO findByThreadId(@Param("threadId") UUID threadId);
 
   @Delete(
       "delete from project_issue_agent_thread"

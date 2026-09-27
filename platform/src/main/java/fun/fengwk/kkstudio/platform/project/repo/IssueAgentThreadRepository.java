@@ -17,6 +17,14 @@ public interface IssueAgentThreadRepository {
   IssueAgentThread findByIssueIdAndAgentName(UUID issueId, String agentName);
 
   /**
+   * 按 Harness Thread 反向读取稳定绑定；该 Thread 未绑定时返回 {@code null}。
+   *
+   * <p>Thread 身份全局唯一（{@code uk_project_issue_agent_thread_thread}），因此这是产品控制面（Turn 规划与交接）把 Harness
+   * Thread 解析回唯一 Issue+Agent 归属的唯一入口；不能靠 Session 或阶段字符串推断归属。
+   */
+  IssueAgentThread findByThreadId(UUID threadId);
+
+  /**
    * 插入稳定绑定；同一 {@code (issueId, agentName)} 或同一 Thread 已被绑定时抛 {@code
    * DataIntegrityViolationException}，绝不静默复用既有绑定。
    *

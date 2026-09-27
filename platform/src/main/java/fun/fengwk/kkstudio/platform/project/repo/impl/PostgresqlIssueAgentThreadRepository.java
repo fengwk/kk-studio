@@ -26,6 +26,12 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
   }
 
   @Override
+  public IssueAgentThread findByThreadId(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    return toModel(mapper.findByThreadId(threadId));
+  }
+
+  @Override
   public boolean insert(IssueAgentThread binding) {
     Objects.requireNonNull(binding, "binding");
     return mapper.insert(binding.issueId(), binding.agentName(), binding.threadId()) == 1;

@@ -68,8 +68,10 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
+import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionTool;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnFacts;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnRejection;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -79,15 +81,19 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
  * {@link ModelRequestSpec}、contextWindow 与 outputTokens。
  *
- * <p>输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection} / 可空
- * environmentName）；实现按这些精确引用读取最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的
+ * <p>Project 归属由 Harness Thread 现读解析：{@link ProjectIssueTurnResolver} 命中稳定 Issue+Agent 绑定时，本 turn 的
+ * Environment、阶段职责上下文与唯一的交接工具都改由当前 Project workflow 的阶段配置决定；归属存在但当前不可执行（Agent 不匹配、阶段改派、Issue
+ * 归档/暂停/不在工作阶段、无活动 Run 或活动 Run 属于别的 Thread/Session/阶段）时确定性拒绝规划，绝不降级为"没有 Project 工具的普通
+ * branch"。未命中绑定的 thread 是普通 branch，行为不变。
+ *
+ * <p>普通 branch 的输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection} /
+ * 可空 environmentName）；实现按这些精确引用读取最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的
  * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 只由
  * {@link BranchSettings#environmentName()} 在每轮 turn 开始时按全局唯一且不可变的 name 解析出当时 的内部路由身份（{@link
  * EnvironmentId}）：要求环境的工具（REQUIRED）在 Branch 未选择 Environment 时从最终模型工具列表过滤，已选择环境时按解析出的环境绑定； OPTIONAL
@@ -117,8 +123,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final SkillPromptPathResolver skillPromptPathResolver;
   private final CompactionConfigProvider compactionConfigProvider;
   private final AgentPromptComposer promptComposer;
-  private final ProjectRoleToolSelector roleToolSelector;
-  private final ProjectRoleContextProjector roleContextProjector;
+  private final ProjectIssueTurnResolver projectIssueTurnResolver;
   private final Clock clock;
   private final SchemaJsonCodec schemaCodec;
   private final PromptCacheAffinityKeyFactory cacheKeyFactory;
@@ -138,8 +143,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       SkillPromptPathResolver skillPromptPathResolver,
       CompactionConfigProvider compactionConfigProvider,
       AgentPromptComposer promptComposer,
-      ProjectRoleToolSelector roleToolSelector,
-      ProjectRoleContextProjector roleContextProjector,
+      ProjectIssueTurnResolver projectIssueTurnResolver,
       Clock clock) {
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
@@ -160,9 +164,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.promptComposer = Objects.requireNonNull(promptComposer, "promptComposer");
-    this.roleToolSelector = Objects.requireNonNull(roleToolSelector, "roleToolSelector");
-    this.roleContextProjector =
-        Objects.requireNonNull(roleContextProjector, "roleContextProjector");
+    this.projectIssueTurnResolver =
+        Objects.requireNonNull(projectIssueTurnResolver, "projectIssueTurnResolver");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.schemaCodec = new SchemaJsonCodec();
     this.cacheKeyFactory = new PromptCacheAffinityKeyFactory();
@@ -207,6 +210,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private LiveTurnPlan.Planned plan(UUID threadId, EntryPath path) {
     BranchSettings settings = path.baseSettings();
     UUID sessionId = path.root().sessionId();
+    ProjectIssueTurnFacts issueFacts =
+        projectIssueTurnFacts(threadId, settings.agentName(), sessionId);
 
     AgentDefinition agent =
         require(
@@ -253,14 +258,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 + ")");
 
     Instant now = clock.instant();
-    Environment selectedEnvironment = resolveEnvironment(settings.environmentName());
+    // Issue Agent turn 的 Environment 由当前 Project workflow 的阶段配置决定：阶段未配置即清除本 turn 的选择，
+    // 绝不沿用 branch 上冻结的历史快照；普通 branch 仍只认 branch settings。
+    String environmentName =
+        issueFacts == null ? settings.environmentName() : issueFacts.environmentName();
+    Environment selectedEnvironment = resolveEnvironment(environmentName);
     CurrentEnvironmentContext currentEnvironment = currentEnvironment(selectedEnvironment, now);
     // 路由身份与 prompt 上下文同源于选中的 Environment，绝不各自回退。
     EnvironmentId environmentId = currentEnvironment.environmentId();
     List<LiveTurnPlan.PlannedSkill> skills = resolveSkills(environmentId, agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
-    List<String> toolNames = resolveToolNames(agentConfig, threadId);
-    PlannedTools tools = resolveTools(environmentId, settings.environmentName(), toolNames);
+    List<String> toolNames = resolveToolNames(agentConfig, issueFacts);
+    PlannedTools tools = resolveTools(environmentId, environmentName, toolNames);
     List<ToolBinding> toolBindings = tools.bindings();
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
@@ -289,12 +298,12 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsedModel.pricing());
     String systemInstruction =
         systemInstruction(
-            threadId,
             agent.getSystemPrompt(),
             currentEnvironment,
             skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
             subagentBindings,
-            path);
+            path,
+            issueFacts);
     int contextWindow = contextWindow(parsedModel);
     int outputTokens =
         outputTokens(
@@ -328,8 +337,21 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
+   * 解析该 Thread 的 Issue Agent turn 事实：命中稳定归属时返回事实，未绑定返回 null；业务门禁关闭时把确定性拒绝收敛为本解析器的 planning
+   * 失败，数据不一致（Issue/Project 行缺失）仍原样传播。
+   */
+  private ProjectIssueTurnFacts projectIssueTurnFacts(
+      UUID threadId, String agentName, UUID sessionId) {
+    try {
+      return projectIssueTurnResolver.resolve(threadId, agentName, sessionId).orElse(null);
+    } catch (ProjectIssueTurnRejection rejected) {
+      throw rejection(rejected.getMessage());
+    }
+  }
+
+  /**
    * Environment 只由当前 branch settings 的可空 name 决定：null 表示未选择环境；非 null 时按全局唯一且不可变的 name 查 Environment
-   * 并取内部路由身份，缺失时确定性拒绝规划。
+   * 并取内部路由身份，缺失时确定性拒绝规划。Issue Agent turn 的 name 来自当前阶段配置，而不是 branch 快照。
    */
   private Environment resolveEnvironment(String environmentName) {
     if (environmentName == null) {
@@ -471,8 +493,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
     }
   }
 
-  /** 从最新 Agent 配置派生本 turn 的模型可见工具名；随后注入 Project 角色工具，Issue Agent Branch 关闭 Goal 工具。 */
-  private List<String> resolveToolNames(AgentDefinitionConfigDTO config, UUID threadId) {
+  /**
+   * 从最新 Agent 配置派生本 turn 的模型可见工具名；Issue Agent Thread 由平台注入唯一的交接工具，并关闭 Goal 工具。
+   *
+   * <p>注入只由稳定归属决定，不看当前是否有活动 Run（没有活动 Run 时事实解析已确定性拒绝，绝不返回"没有工具的普通 branch"）；Agent 自己声明该 INTERNAL
+   * 工具会在上面的 SELECTABLE 校验中拒绝。Catalog 缺该工具时按通用规则拒绝规划， 绝不静默少注入一个受控工具。
+   */
+  private List<String> resolveToolNames(
+      AgentDefinitionConfigDTO config, ProjectIssueTurnFacts issueFacts) {
     LinkedHashSet<String> toolNames = new LinkedHashSet<>();
     for (String toolName : config.getTools()) {
       if (toolName == null || toolName.isBlank()) {
@@ -496,11 +524,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
       // task 只由非空 subagents allowlist 声明：递归深度是调用期 gate，绝不动态裁剪工具面。
       toolNames.add(TaskTool.NAME);
     }
-    List<String> roleTools =
-        Objects.requireNonNull(roleToolSelector.select(threadId), "role tools");
-    toolNames.addAll(roleTools);
-    if (roleToolSelector.isIssueAgentBranch(threadId)) {
-      // Issue Agent Branch 不提供 Goal 工具：Issue 当前要求与活动本身才是权威，Agent 不得读写或报告 Branch Goal。
+    if (issueFacts != null) {
+      toolNames.add(IssueTransitionTool.NAME);
+      // Issue Agent Thread 不提供 Goal 工具：Issue 当前要求与活动本身才是权威，Agent 不得读写或报告 Branch Goal。
       // 这里的裁剪只收敛工具面，真正的拒绝边界是 HarnessCommandAcceptanceOrchestrator 对 GOAL 命令的守卫。
       toolNames.remove(GetGoalTool.NAME);
       toolNames.remove(UpdateGoalTool.NAME);
@@ -717,23 +743,26 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 本轮请求唯一的系统指令：Agent 正文 / Environment / Skills / Subagents 组合段，加上 Project 角色上下文与注册顺序稳定的
+   * 本轮请求唯一的系统指令：Agent 正文 / Environment / Skills / Subagents 组合段，加上 Issue Agent 上下文与注册顺序稳定的
    * Contributor context projector 片段，用空行确定性拼接为一个字符串——不写入任何会话消息。
+   *
+   * <p>Issue Agent 上下文必须由本入口按具体 Thread 注入：context projector 只看到 branch 历史，无法区分"哪个 Issue Agent
+   * Thread"，因此归属事实不可交给通用 projector 投影。
    */
   private String systemInstruction(
-      UUID threadId,
       String systemPrompt,
       CurrentEnvironmentContext currentEnvironment,
       List<SkillPromptEntry> skills,
       List<SubagentBinding> subagentBindings,
-      EntryPath path) {
+      EntryPath path,
+      ProjectIssueTurnFacts issueFacts) {
     List<String> sections = new ArrayList<>();
     addSection(
         sections,
         promptComposer.compose(systemPrompt, currentEnvironment, skills, subagentBindings));
-    Optional<String> roleContext =
-        Objects.requireNonNull(roleContextProjector.project(threadId), "role context");
-    roleContext.ifPresent(context -> addSection(sections, context));
+    if (issueFacts != null) {
+      addSection(sections, issueFacts.contextSection());
+    }
     for (ContextProjectorContribution contribution : harnessCatalog.contextProjectors()) {
       String contributorId = contribution.id().contributorId().value();
       BranchView branch =

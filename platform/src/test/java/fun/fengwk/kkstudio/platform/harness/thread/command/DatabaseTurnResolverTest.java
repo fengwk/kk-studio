@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -123,14 +124,12 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.tool.CompositeRuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.tool.HarnessToolCatalogAdapter;
 import fun.fengwk.kkstudio.platform.harness.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
+import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionTool;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRole;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleContextProjector;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleTool;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolSelector;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolService;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectRoleToolType;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnFacts;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnRejection;
+import fun.fengwk.kkstudio.platform.project.tool.ProjectIssueTurnResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -141,7 +140,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1923,16 +1921,12 @@ class DatabaseTurnResolverTest {
   }
 
   static ProjectHarnessContributor defaultProjectContributor() {
-    List<ProjectRoleTool> tools =
-        Arrays.stream(ProjectRoleToolType.values())
-            .map(
-                type ->
-                    new ProjectRoleTool(
-                        type,
-                        mock(ProjectThreadOwnerResolver.class),
-                        mock(ProjectRoleToolService.class)))
-            .toList();
-    return new ProjectHarnessContributor(tools);
+    return new ProjectHarnessContributor(
+        new IssueTransitionTool(mock(IssueTransitionService.class)));
+  }
+
+  private static List<String> toolNames(List<ToolBinding> bindings) {
+    return bindings.stream().map(binding -> binding.descriptor().name()).toList();
   }
 
   private static ToolDescriptor hostDescriptor(String name) {
@@ -2308,71 +2302,115 @@ class DatabaseTurnResolverTest {
     assertNull(clearedTools.get(1).environmentId());
   }
 
-  @Test
-  void projectRoleThreadsInjectExactRoleTools() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-
-    // 1. Executor: 仅 issue_read 与 issue_request_input
-    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
-    ModelRequestSpec executorSpec = fixture.resolved(fixture.path(settings("default")));
-    List<String> executorTools =
-        executorSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    List<String> expectedExecutorTools = List.of("issue_read", "issue_request_input");
-    assertEquals(expectedExecutorTools, executorTools);
-
-    // 2. Reviewer: 包含 issue_read、issue_request_input 与 issue_review
-    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.REVIEWER));
-    ModelRequestSpec reviewerSpec = fixture.resolved(fixture.path(settings("default")));
-    List<String> reviewerTools =
-        reviewerSpec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
-    List<String> expectedReviewerTools =
-        List.of("issue_read", "issue_request_input", "issue_review");
-    assertEquals(expectedReviewerTools, reviewerTools);
-  }
-
-  @Test
-  void ordinaryThreadHasZeroRoleTools() {
-    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.roleTools(THREAD_ID, List.of());
-
-    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(List.of(), spec.toolBindings());
+  /** 处于 DESIGN 阶段、有活动 Run 的 Issue Agent turn 事实：每个字段都来自本 Thread 当前权威事实。 */
+  private static ProjectIssueTurnFacts stageFacts(String environmentName) {
+    return new ProjectIssueTurnFacts(
+        id(900),
+        id(901),
+        id(902),
+        7L,
+        "fix the issue",
+        "acceptance description",
+        "DESIGN",
+        "设计",
+        "完成可交付方案",
+        List.of("REVIEW"),
+        environmentName,
+        "assistant");
   }
 
   /**
-   * 测试意图：Issue Agent Branch 永不提供 Goal 工具——即使 Agent 配置显式声明 get_goal/update_goal，两者也必须从冻结
-   * toolBindings 中消失（未绑定的 tool call 在 ModelResponsePlanner 中判为 UNKNOWN_TOOL，绝不会执行）。隐藏只由稳定归属决定： 没有活动
-   * Run 时同样成立；同一配置在普通 Branch 上仍完整保留 Goal 工具。
+   * 测试意图：Issue Agent Thread 被注入唯一的受控交接工具，并注入当前 Issue/阶段上下文；两者缺一都等于把控制面交给模型自行猜测，因此必须同时 存在，且工具绑定不依赖任何
+   * Environment（交接只读写 Project 事实）。
+   */
+  @Test
+  void issueAgentThreadInjectsTransitionToolAndIssueContext() {
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+    ProjectIssueTurnFacts facts = stageFacts(ENV_A_NAME);
+    fixture.issueTurnFacts(facts);
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    List<ToolBinding> bindings = spec.toolBindings();
+    assertEquals(List.of("read", IssueTransitionTool.NAME), toolNames(bindings));
+    ToolBinding transition = bindings.get(1);
+    assertEquals(EnvironmentSupport.NONE, transition.environmentSupport());
+    assertNull(transition.environmentId());
+    assertNull(transition.environmentName());
+    assertTrue(spec.systemInstruction().contains(facts.contextSection()), spec.systemInstruction());
+  }
+
+  /** 测试意图：没有稳定归属的 Thread 是普通 branch，绝不获得 Project 工具或 Project 上下文（上下文的注入面与工具面严格同源）。 */
+  @Test
+  void ordinaryThreadNeverReceivesProjectToolOrContext() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    assertEquals(List.of(), spec.toolBindings());
+    assertFalse(spec.systemInstruction().contains("# Issue Agent Context"));
+  }
+
+  /**
+   * 测试意图：Issue Agent turn 的 Environment 由当前阶段配置决定，而不是 branch 上冻结的历史快照；阶段配置的环境必须真正参与工具绑定与环境 上下文，避免
+   * Agent 在错误的环境上执行下一阶段的工作。
+   */
+  @Test
+  void issueAgentTurnEnvironmentComesFromTheLiveStage() {
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+    fixture.issueTurnFacts(stageFacts(ENV_B_NAME));
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    ToolBinding read = spec.toolBindings().get(0);
+    assertEquals("read", read.descriptor().name());
+    assertEquals(ENV_B, read.environmentId());
+    assertEquals(ENV_B_NAME, read.environmentName());
+    assertTrue(
+        spec.systemInstruction().contains("- name: " + ENV_B_NAME), spec.systemInstruction());
+    assertFalse(spec.systemInstruction().contains(ENV_A_NAME));
+  }
+
+  /** 测试意图：阶段未配置 Environment 时必须清除 branch 上的历史选择，不得沿用快照让 Agent 停在旧环境。 */
+  @Test
+  void issueAgentStageWithoutEnvironmentClearsBranchSelection() {
+    Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
+    fixture.issueTurnFacts(stageFacts(null));
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    ToolBinding read = spec.toolBindings().get(0);
+    assertEquals("read", read.descriptor().name());
+    assertNull(read.environmentId());
+    assertNull(read.environmentName());
+    assertTrue(spec.systemInstruction().contains("- name: none"), spec.systemInstruction());
+    assertFalse(spec.systemInstruction().contains(ENV_A_NAME));
+  }
+
+  /**
+   * 测试意图：Issue Agent Thread 永不提供 Goal 工具（Issue 当前要求与活动本身才是权威），并且该裁剪只由稳定归属决定；同一配置在普通 branch 上仍完整保留
+   * Goal 工具。
    */
   @Test
   void issueAgentBranchHidesConfiguredGoalToolsWhileOrdinaryBranchKeepsThem() {
     Fixture fixture = new Fixture(List.of("get_goal", "update_goal", "read"), List.of(), List.of());
-    fixture.issueAgentBranch(THREAD_ID, true);
 
-    // 1. 有活动 Run（注入角色工具）：Goal 工具仍然不可绑定。
-    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
+    fixture.issueTurnFacts(stageFacts(ENV_A_NAME));
     ModelRequestSpec issueSpec = fixture.resolved(fixture.path(settings("default")));
-    List<String> issueTools =
-        issueSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList();
-    assertEquals(List.of("read", "issue_read", "issue_request_input"), issueTools);
+    assertEquals(List.of("read", IssueTransitionTool.NAME), toolNames(issueSpec.toolBindings()));
 
-    // 2. 没有活动 Run（无角色工具）：归属不变，Goal 工具依旧隐藏，不能靠「Run 未开始」绕过。
-    fixture.roleTools(THREAD_ID, List.of());
-    ModelRequestSpec idleSpec = fixture.resolved(fixture.path(settings("default")));
-    assertEquals(
-        List.of("read"),
-        idleSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
-
-    // 3. 普通 Branch（非 Issue 归属）：同一配置的 Goal 工具完整保留。
-    fixture.issueAgentBranch(THREAD_ID, false);
+    fixture.ordinaryThread(THREAD_ID);
     ModelRequestSpec ordinarySpec = fixture.resolved(fixture.path(settings("default")));
     assertEquals(
-        List.of("get_goal", "update_goal", "read"),
-        ordinarySpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
+        List.of("get_goal", "update_goal", "read"), toolNames(ordinarySpec.toolBindings()));
   }
 
+  /**
+   * 测试意图：唯一系统指令按确定性顺序串联——Agent 正文 → Environment → Issue Agent 上下文 → Contributor fragment；Issue
+   * 上下文必须由 Turn 解析器直接注入（通用 context projector 看不到 Thread 归属），普通 branch 上整段省略。
+   */
   @Test
-  void projectRoleDynamicContextAppendedInOrder() {
+  void issueAgentContextAppendedInDeterministicOrder() {
     HarnessContributor contributorWithProjector =
         HarnessContributor.of(
             new ContributorDescriptor(new ContributorId("test"), "Test", "1", Set.of()),
@@ -2400,14 +2438,11 @@ class DatabaseTurnResolverTest {
             catalog,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
-    String roleContextText = "# Issue Execution Context: Executor\n## Directives\n...";
-    fixture.roleContext(THREAD_ID, roleContextText);
+    ProjectIssueTurnFacts facts = stageFacts(ENV_A_NAME);
+    fixture.issueTurnFacts(facts);
 
-    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+    String instruction = fixture.resolved(fixture.path(settings("default"))).systemInstruction();
 
-    // 唯一系统指令按确定性顺序串联：Agent 正文 → Environment → Project role context → Contributor fragment，
-    // 段间恰为空行（composer 对环境段 stripTrailing，因此连接处只有一个空行）。
-    String instruction = spec.systemInstruction();
     assertEquals(
         "agent system prompt\n\n"
             + "<current_environment>\n"
@@ -2417,90 +2452,94 @@ class DatabaseTurnResolverTest {
             + "- date: 2026-08-02\n"
             + "</current_environment>"
             + "\n\n"
-            + roleContextText
+            + facts.contextSection()
             + "\n\n"
             + "contributor-fragment-text",
         instruction);
     int agentAt = instruction.indexOf("agent system prompt");
-    int roleAt = instruction.indexOf(roleContextText);
+    int issueAt = instruction.indexOf("# Issue Agent Context");
     int contributorAt = instruction.indexOf("contributor-fragment-text");
     assertEquals(0, agentAt);
-    assertTrue(roleAt > agentAt, instruction);
-    assertTrue(contributorAt > roleAt, instruction);
+    assertTrue(issueAt > agentAt, instruction);
+    assertTrue(contributorAt > issueAt, instruction);
 
-    // 普通 thread (Optional.empty): 角色 context 段整体省略，顺序与空行分隔不变。
-    fixture.roleContext(THREAD_ID, null);
-    ModelRequestSpec ordinarySpec = fixture.resolved(fixture.path(settings("default")));
-    String ordinaryInstruction = ordinarySpec.systemInstruction();
-    assertFalse(ordinaryInstruction.contains(roleContextText));
+    // 普通 thread：Project 段落整体省略，其余段顺序与空行分隔不变。
+    fixture.ordinaryThread(THREAD_ID);
+    String ordinaryInstruction =
+        fixture.resolved(fixture.path(settings("default"))).systemInstruction();
+    assertFalse(ordinaryInstruction.contains("# Issue Agent Context"));
     assertTrue(ordinaryInstruction.endsWith("\n\ncontributor-fragment-text"), ordinaryInstruction);
     assertTrue(ordinaryInstruction.startsWith("agent system prompt"), ordinaryInstruction);
   }
 
+  /** 测试意图：Catalog 缺失受控交接工具时 fail-closed，不静默少注入一个本应存在的控制工具。 */
   @Test
-  void rejectsWhenCatalogIsMissingRoleTool() {
-    // Catalog 缺失角色工具时 fail-closed。
-    HarnessCatalog catalogWithoutRoleTools =
+  void rejectsWhenCatalogIsMissingIssueTransitionTool() {
+    HarnessCatalog catalogWithoutProjectTools =
         HarnessCatalog.from(List.of(defaultBuiltinContributor()));
-    Fixture fixtureWithoutRoleTools =
-        new Fixture(List.of(), List.of(), List.of(), catalogWithoutRoleTools);
-    fixtureWithoutRoleTools.roleTools(THREAD_ID, List.of("issue_read"));
-    TurnResolver.Rejected rejectedRole =
-        fixtureWithoutRoleTools.rejected(fixtureWithoutRoleTools.path(settings("default")));
-    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedRole.error().code());
-    assertEquals("tool not found: issue_read", rejectedRole.error().message());
-  }
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of(), catalogWithoutProjectTools);
+    fixture.issueTurnFacts(stageFacts(null));
 
-  @Test
-  void rejectsWhenAgentConfiguresInternalProjectTool() {
-    Fixture projectToolInConfig = new Fixture(List.of("issue_read"), List.of(), List.of());
-    TurnResolver.Rejected rejectedProject =
-        projectToolInConfig.rejected(projectToolInConfig.path(settings("default")));
-    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejectedProject.error().code());
-    assertEquals(
-        "internal tool cannot be selected by an Agent: issue_read",
-        rejectedProject.error().message());
-  }
-
-  @Test
-  void rejectsDuplicateToolNameInAgentConfig() {
-    Fixture fixture = new Fixture(List.of("bash"), List.of(), List.of());
-    fixture.agentConfig.setTools(List.of("bash", "bash"));
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
-    assertEquals("duplicate agent tool name: bash", rejected.error().message());
+    assertEquals("tool not found: issue_transition", rejected.error().message());
   }
 
+  /** 测试意图：Agent 不能自己在配置里声明 INTERNAL 的交接工具，工具面只能由平台按归属注入。 */
   @Test
-  void propagatesInconsistentOwnershipException() {
+  void rejectsWhenAgentConfiguresInternalIssueTransitionTool() {
+    Fixture fixture = new Fixture(List.of(IssueTransitionTool.NAME), List.of(), List.of());
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals(
+        "internal tool cannot be selected by an Agent: issue_transition",
+        rejected.error().message());
+  }
+
+  /**
+   * 测试意图：归属存在但当前不可执行时确定性拒绝规划，绝不降级为"没有 Project 工具的普通 branch"——Thread/Agent 不匹配、阶段改派、Issue
+   * 归档/暂停/不在工作阶段、无活动 Run 或活动 Run 属于别的 Thread/Session/阶段都必须 fail closed。
+   */
+  @Test
+  void rejectsIssueAgentTurnWhenFactsResolutionFailsClosed() {
+    for (String message :
+        List.of(
+            "Issue agent thread is bound to agent reviewer, not assistant",
+            "Issue is archived",
+            "Issue is paused: USER",
+            "Issue is not in an executable work stage: INIT",
+            "Issue has no active run",
+            "Active run belongs to a different thread",
+            "Active run belongs to a different session",
+            "Active run stage REVIEW does not match the current issue stage DESIGN")) {
+      Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+      fixture.rejectIssueTurn(message);
+
+      TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+      assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+      assertEquals(message, rejected.error().message());
+    }
+  }
+
+  /** 测试意图：归属解析遇到数据不一致（Issue/Project 行缺失等）时按基础设施异常原样传播，不得伪装成 planning 失败。 */
+  @Test
+  void propagatesIssueTurnInfrastructureException() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.failRoleToolLookup(
-        THREAD_ID, new IllegalStateException("Project thread ownership is inconsistent"));
+    fixture.failIssueTurn(new IllegalStateException("Project thread ownership is inconsistent"));
 
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
             () -> fixture.resolver.resolve(THREAD_ID, fixture.path(settings("default")), null));
     assertEquals("Project thread ownership is inconsistent", error.getMessage());
-
-    Fixture contextFixture = new Fixture(List.of(), List.of(), List.of());
-    contextFixture.failRoleContextLookup(
-        THREAD_ID, new IllegalStateException("Project thread ownership is inconsistent"));
-
-    IllegalStateException contextError =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                contextFixture.resolver.resolve(
-                    THREAD_ID, contextFixture.path(settings("default")), null));
-    assertEquals("Project thread ownership is inconsistent", contextError.getMessage());
   }
 
+  /** 测试意图：压缩路径只冻结 execution model 与预算，不解析 Project 归属、不注入任何工具，也不注入 Agent 组合指令。 */
   @Test
-  void compactionDoesNotInvokeSelectorOrProjectorAndHasZeroTools() {
+  void compactionDoesNotConsultIssueTurnFactsAndHasZeroTools() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.roleTools(THREAD_ID, ProjectRoleToolType.namesForRole(ProjectRole.EXECUTOR));
-    fixture.roleContext(THREAD_ID, "role context");
+    fixture.issueTurnFacts(stageFacts(ENV_A_NAME));
 
     List<AgentMessage> messages =
         List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
@@ -2518,8 +2557,7 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")), preparation);
 
-    verify(fixture.roleToolSelector, never()).select(any());
-    verify(fixture.roleContextProjector, never()).project(any());
+    verify(fixture.projectIssueTurnResolver, never()).resolve(any(), any(), any());
     assertEquals(List.of(), spec.toolBindings());
     // 压缩 spec 的指令是摘要 system prompt，与 live resolver 的 Agent 组合指令完全不同。
     assertEquals(CompactionPrompts.summarizationSystemPrompt(), spec.systemInstruction());
@@ -2738,9 +2776,8 @@ class DatabaseTurnResolverTest {
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private final AgentProvider provider = new AgentProvider();
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
-    private final ProjectRoleToolSelector roleToolSelector = mock(ProjectRoleToolSelector.class);
-    private final ProjectRoleContextProjector roleContextProjector =
-        mock(ProjectRoleContextProjector.class);
+    private final ProjectIssueTurnResolver projectIssueTurnResolver =
+        mock(ProjectIssueTurnResolver.class);
     private final DatabaseTurnResolver resolver;
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
@@ -2924,8 +2961,7 @@ class DatabaseTurnResolverTest {
       when(providerFactory.providerType()).thenReturn(factoryType);
       when(providerFactory.promptCacheCapability()).thenReturn(cacheCapability);
       when(providerFactory.promptCacheCapability(any())).thenReturn(cacheCapability);
-      when(roleToolSelector.select(any())).thenReturn(List.of());
-      when(roleContextProjector.project(any())).thenReturn(Optional.empty());
+      when(projectIssueTurnResolver.resolve(any(), any(), any())).thenReturn(Optional.empty());
       List<ProviderFactory> factories =
           includeProviderFactory ? List.of(providerFactory) : List.of();
       SubagentConfig subagentConfig = new SubagentConfig(2, 10, 0, Duration.ZERO, 50);
@@ -2994,8 +3030,7 @@ class DatabaseTurnResolverTest {
               skillPromptPathResolver,
               () -> new CompactionConfig(20_000, null),
               new AgentPromptComposer(() -> subagentConfig),
-              roleToolSelector,
-              roleContextProjector,
+              projectIssueTurnResolver,
               clock);
     }
 
@@ -3007,25 +3042,26 @@ class DatabaseTurnResolverTest {
       when(environmentRepository.getByName(name)).thenReturn(environment);
     }
 
-    private void roleTools(UUID threadId, List<String> tools) {
-      when(roleToolSelector.select(threadId)).thenReturn(tools);
+    /** 声明该 thread 的 Issue Agent turn 事实；普通 branch 用 {@link #ordinaryThread(UUID)}。 */
+    private void issueTurnFacts(ProjectIssueTurnFacts facts) {
+      when(projectIssueTurnResolver.resolve(any(), any(), any())).thenReturn(Optional.of(facts));
     }
 
-    /** 声明该 thread 的稳定归属：true 表示属于某个 Issue+Agent 归属（与是否有活动 Run 无关）。 */
-    private void issueAgentBranch(UUID threadId, boolean value) {
-      when(roleToolSelector.isIssueAgentBranch(threadId)).thenReturn(value);
+    /** 声明该 thread 不属于任何 Issue+Agent 稳定归属（普通 branch 行为）。 */
+    private void ordinaryThread(UUID threadId) {
+      when(projectIssueTurnResolver.resolve(eq(threadId), any(), any()))
+          .thenReturn(Optional.empty());
     }
 
-    private void roleContext(UUID threadId, String context) {
-      when(roleContextProjector.project(threadId)).thenReturn(Optional.ofNullable(context));
+    /** 声明归属存在但当前不可执行；解析器必须把它收敛为 planning 失败。 */
+    private void rejectIssueTurn(String message) {
+      when(projectIssueTurnResolver.resolve(any(), any(), any()))
+          .thenThrow(new ProjectIssueTurnRejection(message));
     }
 
-    private void failRoleToolLookup(UUID threadId, RuntimeException error) {
-      when(roleToolSelector.select(threadId)).thenThrow(error);
-    }
-
-    private void failRoleContextLookup(UUID threadId, RuntimeException error) {
-      when(roleContextProjector.project(threadId)).thenThrow(error);
+    /** 声明归属解析抛基础设施/数据不一致异常；解析器必须原样传播。 */
+    private void failIssueTurn(RuntimeException error) {
+      when(projectIssueTurnResolver.resolve(any(), any(), any())).thenThrow(error);
     }
 
     private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
