@@ -31,8 +31,10 @@ import java.util.UUID;
  * 加载 root-to-head 历史路径， 定位源命令的 {@code appliedTurnStartEntryId}，并仅对该切片范围内的条目推导终态与报告：
  *
  * <ul>
- *   <li>源命令在执行前被取消（未产生 turnStart 或 turnStart 不在 head 路径上）投影为 {@link
+ *   <li>源命令在执行前被取消（{@code cancelledAt != null} 且 {@code appliedTurnStartEntryId == null}）投影为 {@link
  *       ThreadJoinOutcome#CANCELLED}，且不包含旧的助手文本；
+ *   <li>源命令未被执行（无 {@code appliedTurnStartEntryId} 且未被取消）或其应用的 turnStart 不在 head 路径上属于不变量破损，抛出
+ *       {@link IllegalStateException}；
  *   <li>正常完成投影为 {@link ThreadJoinOutcome#COMPLETED} 与最后一段助手产出的 report；
  *   <li>失败投影为 {@link ThreadJoinOutcome#ERROR}，分离 error 与 partialResult；
  *   <li>用户停止或取消投影为 {@link ThreadJoinOutcome#CANCELLED}，保留 partialResult 与取消说明。
@@ -56,52 +58,49 @@ public final class ThreadJoinProjector {
       return Optional.empty();
     }
 
-    List<ThreadCommand> commands = tx.loadCommandsByThread(join.childThreadId());
-    ThreadCommand sourceCommand = null;
-    for (ThreadCommand cmd : commands) {
-      if (cmd.sequence() == join.sourceCommandSequence()) {
-        sourceCommand = cmd;
-        break;
-      }
-    }
-    if (sourceCommand == null) {
-      throw new IllegalStateException(
-          "source command sequence "
-              + join.sourceCommandSequence()
-              + " not found for child thread "
-              + join.childThreadId());
-    }
+    ThreadCommand sourceCommand =
+        tx.findCommand(join.childThreadId(), join.sourceCommandSequence())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "source command sequence "
+                            + join.sourceCommandSequence()
+                            + " not found for child thread "
+                            + join.childThreadId()));
 
     String prompt = extractPrompt(sourceCommand);
     UUID appliedStart = sourceCommand.appliedTurnStartEntryId();
     if (appliedStart == null) {
-      // 委派在被消费前被取消（或仍未被执行）：不取任何旧的助手输出
-      return Optional.of(
-          new ThreadJoinReceipt(
-              join.invocationId(),
-              join.childThreadId(),
-              join.agent(),
-              ThreadJoinOutcome.CANCELLED,
-              prompt,
-              null,
-              null,
-              "Cancelled before execution."));
+      if (sourceCommand.cancelledAt() != null) {
+        return Optional.of(
+            new ThreadJoinReceipt(
+                join.invocationId(),
+                join.childThreadId(),
+                join.agent(),
+                ThreadJoinOutcome.CANCELLED,
+                prompt,
+                null,
+                null,
+                "Cancelled before execution."));
+      }
+      throw new IllegalStateException(
+          "matched join source command sequence "
+              + join.sourceCommandSequence()
+              + " on child thread "
+              + join.childThreadId()
+              + " has no appliedTurnStartEntryId and is not cancelled");
     }
 
     EntryPath path = tx.loadEntryPath(join.resultHeadEntryId());
     int startIndex = indexOf(path, appliedStart);
     if (startIndex < 0) {
-      // applied turn start 不在 resultHeadEntryId 路径上（历史被回退或截断）
-      return Optional.of(
-          new ThreadJoinReceipt(
-              join.invocationId(),
-              join.childThreadId(),
-              join.agent(),
-              ThreadJoinOutcome.CANCELLED,
-              prompt,
-              null,
-              null,
-              "Cancelled before execution."));
+      throw new IllegalStateException(
+          "applied turn start entry "
+              + appliedStart
+              + " not found on result head path "
+              + join.resultHeadEntryId()
+              + " for child thread "
+              + join.childThreadId());
     }
 
     if (!(path.head().payload() instanceof TurnEndPayload end)) {
@@ -109,7 +108,9 @@ public final class ThreadJoinProjector {
           "result head entry " + join.resultHeadEntryId() + " is not a TurnEndPayload");
     }
 
-    String report = extractLastReport(path, startIndex);
+    String lastAssistantText = extractLastAssistantText(path, startIndex);
+    String lastErrorText = extractLastErrorText(path, startIndex);
+
     ThreadJoinOutcome outcome;
     String reportField = null;
     String partialResultField = null;
@@ -118,22 +119,23 @@ public final class ThreadJoinProjector {
     switch (end.outcome()) {
       case COMPLETED -> {
         outcome = ThreadJoinOutcome.COMPLETED;
-        reportField = report;
+        reportField = lastAssistantText;
       }
       case FAILED -> {
         outcome = ThreadJoinOutcome.ERROR;
-        partialResultField = report;
-        errorField = "subagent turn failed: " + end.reason();
+        partialResultField = lastAssistantText;
+        errorField =
+            lastErrorText != null ? lastErrorText : "subagent turn failed: " + end.reason();
       }
       case STOPPED -> {
         outcome = ThreadJoinOutcome.CANCELLED;
-        partialResultField = report;
-        errorField = "Cancelled by user.";
+        partialResultField = lastAssistantText;
+        errorField = lastErrorText != null ? lastErrorText : "Cancelled by user.";
       }
       case CANCELLED -> {
         outcome = ThreadJoinOutcome.CANCELLED;
-        partialResultField = report;
-        errorField = "Cancelled before completion.";
+        partialResultField = lastAssistantText;
+        errorField = lastErrorText != null ? lastErrorText : "Cancelled before completion.";
       }
       default -> throw new IllegalStateException("unsupported turn end outcome: " + end.outcome());
     }
@@ -176,7 +178,7 @@ public final class ThreadJoinProjector {
     return "";
   }
 
-  private static String extractLastReport(EntryPath path, int startIndex) {
+  private static String extractLastAssistantText(EntryPath path, int startIndex) {
     List<Entry> entries = path.entries();
     String report = null;
     for (int i = startIndex; i < entries.size(); i++) {
@@ -187,11 +189,6 @@ public final class ThreadJoinProjector {
         if (!text.isBlank()) {
           report = text;
         }
-      } else if (payload instanceof AssistantErrorPayload errorPayload) {
-        String text = errorPayload.error().message();
-        if (text != null && !text.isBlank()) {
-          report = text;
-        }
       } else if (payload instanceof AssistantAbortedPayload aborted) {
         String text = extractMessageText(aborted.message());
         if (!text.isBlank()) {
@@ -200,6 +197,21 @@ public final class ThreadJoinProjector {
       }
     }
     return report;
+  }
+
+  private static String extractLastErrorText(EntryPath path, int startIndex) {
+    List<Entry> entries = path.entries();
+    String error = null;
+    for (int i = startIndex; i < entries.size(); i++) {
+      EntryPayload payload = entries.get(i).payload();
+      if (payload instanceof AssistantErrorPayload errorPayload) {
+        String text = errorPayload.error().message();
+        if (text != null && !text.isBlank()) {
+          error = text;
+        }
+      }
+    }
+    return error;
   }
 
   private static String extractMessageText(AgentMessage message) {

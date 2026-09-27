@@ -237,8 +237,20 @@ public interface HarnessStore {
      */
     int deleteJoinsByChild(UUID childThreadId);
 
+    /**
+     * 整体删除一批 Thread 涉及的 Join 记录并返回删除行数（Chat 深删除专用）。要求每个 Thread 已在本事务锁定且位于已加锁的执行树内。
+     *
+     * <p>当 Join 的 child 与（非空）parent 都位于本删除集合内时，两端将在同一事务内被物理删除，任何存活 Thread 都不会再引用该 Join，因此未匹配或未交付的
+     * pending Join 也可一并删除；只有 child 在集合内而 parent 存活时，仍按 {@link #deleteJoinsByChild} 的单边规则拒绝未匹配或未交付的
+     * Join。违反抛 {@link IllegalArgumentException}。
+     */
+    int deleteJoinsForThreads(List<UUID> threadIds);
+
     /** 按 (threadId, idempotencyKey) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */
     Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey);
+
+    /** 按 (threadId, sequence) 直接定位单条 Command；不存在返回 {@link Optional#empty()}。不产生业务行锁。 */
+    Optional<ThreadCommand> findCommand(UUID threadId, long sequence);
 
     /**
      * 读取该 Thread 全部 QUEUED Command，按 sequence 升序。要求该 Thread 已在本事务锁定（{@link #lockThread} 或同事务 {@link
