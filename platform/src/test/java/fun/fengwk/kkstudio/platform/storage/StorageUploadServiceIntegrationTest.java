@@ -114,7 +114,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Test
   void serverStageRegistersAndCompletesRecoverableUploadOutsideTransaction() {
-    // 服务端 staging 应返回与浏览器 complete 相同的 READY upload，供后续短事务原子消费。
+    // 服务端 staging 使用冻结内容的摘要上传；即使临时对象已删除，也能核对 PUT 时的 header。
     byte[] content = "staged".getBytes(StandardCharsets.UTF_8);
 
     StorageUploadService.StagedUpload staged =
@@ -127,6 +127,9 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
         jdbc.queryForObject(
             "select blob_id from storage_upload where id = ?", UUID.class, staged.uploadId()));
     assertArrayEquals(content, s3Storage.download(StorageObjectKeys.blobOriginal(staged.blobId())));
+    assertEquals(
+        Base64.getEncoder().encodeToString(sha256(content)),
+        s3Storage.putChecksumSHA256(StorageObjectKeys.uploadOriginal(staged.uploadId())));
   }
 
   @Test

@@ -7,7 +7,6 @@ import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
@@ -27,6 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.Objects;
 
 /**
@@ -46,15 +46,28 @@ public class S3StorageServiceImpl implements S3StorageService {
 
   @Override
   public PutObjectResponse putObject(
-      String key, InputStream content, long contentLength, String contentType) {
+      String key,
+      InputStream content,
+      long contentLength,
+      String contentType,
+      String checksumSHA256) {
     Objects.requireNonNull(content, "content must not be null");
     Assert.isTrue(contentLength >= 0L, "contentLength must be greater than or equal to 0");
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
     PutObjectRequest.Builder builder =
-        PutObjectRequest.builder()
-            .bucket(properties.getBucket())
-            .key(normalizedKey)
-            .checksumAlgorithm(ChecksumAlgorithm.SHA256);
+        PutObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey);
+    if (checksumSHA256 != null) {
+      byte[] digest;
+      try {
+        digest = Base64.getDecoder().decode(checksumSHA256);
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException("checksumSHA256 must be a Base64 SHA-256 digest", error);
+      }
+      Assert.isTrue(
+          digest.length == 32 && Base64.getEncoder().encodeToString(digest).equals(checksumSHA256),
+          "checksumSHA256 must be a Base64 SHA-256 digest");
+      builder.checksumSHA256(checksumSHA256);
+    }
     if (StringUtils.hasText(contentType)) {
       builder.contentType(contentType);
     }

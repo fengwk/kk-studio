@@ -30,6 +30,7 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
   private final Map<String, String> contentTypes = new ConcurrentHashMap<>();
+  private final Map<String, String> putChecksums = new ConcurrentHashMap<>();
   private final List<NetworkCall> networkCalls = new CopyOnWriteArrayList<>();
   private final Map<String, RuntimeException> deleteFailures = new ConcurrentHashMap<>();
   private volatile Consumer<NetworkCall> networkCallObserver = ignored -> {};
@@ -38,6 +39,7 @@ public class InMemoryS3StorageService implements S3StorageService {
   public void clear() {
     objects.clear();
     contentTypes.clear();
+    putChecksums.clear();
     networkCalls.clear();
     deleteFailures.clear();
     networkCallObserver = ignored -> {};
@@ -61,6 +63,10 @@ public class InMemoryS3StorageService implements S3StorageService {
     return bytes == null ? null : bytes.clone();
   }
 
+  public String putChecksumSHA256(String key) {
+    return putChecksums.get(key);
+  }
+
   public List<NetworkCall> networkCalls() {
     return List.copyOf(networkCalls);
   }
@@ -81,11 +87,23 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   @Override
   public PutObjectResponse putObject(
-      String key, InputStream content, long contentLength, String contentType) {
+      String key,
+      InputStream content,
+      long contentLength,
+      String contentType,
+      String checksumSHA256) {
     record("putObject", key);
     try {
-      objects.put(key, content.readAllBytes());
+      byte[] bytes = content.readAllBytes();
+      if (checksumSHA256 != null
+          && !checksumSHA256.equals(Base64.getEncoder().encodeToString(sha256(bytes)))) {
+        throw new IllegalArgumentException("S3 checksum mismatch");
+      }
+      objects.put(key, bytes);
       contentTypes.put(key, contentType);
+      if (checksumSHA256 != null) {
+        putChecksums.put(key, checksumSHA256);
+      }
       return PutObjectResponse.builder().eTag("fake-etag").build();
     } catch (IOException e) {
       throw new UncheckedIOException(e);

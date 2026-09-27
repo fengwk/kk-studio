@@ -14,7 +14,6 @@ import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.CopyObjectResponse;
@@ -35,6 +34,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -71,9 +71,9 @@ public class S3StorageServiceTest {
     }
   }
 
-  /** 服务端上传必须存储 SHA-256，以便 stage 路径的 checksum HEAD 严格复核。 */
+  /** 显式 SHA-256 必须成为请求 header 参数，而非启用 SDK 自动计算的 trailer；无摘要的预览上传不带校验。 */
   @Test
-  void serverUploadRequestsSha256Checksum() {
+  void serverUploadUsesExplicitSha256Header() {
     AtomicReference<PutObjectRequest> captured = new AtomicReference<>();
     S3StorageServiceImpl service =
         newObservingStorageService(
@@ -82,9 +82,48 @@ public class S3StorageServiceTest {
                 captured.set(request);
               }
             });
+    String checksum = Base64.getEncoder().encodeToString(new byte[32]);
     service.putObject(
-        "staged/output.png", new ByteArrayInputStream(new byte[] {1}), 1, "image/png");
-    assertEquals(ChecksumAlgorithm.SHA256, captured.get().checksumAlgorithm());
+        "staged/output.png", new ByteArrayInputStream(new byte[] {1}), 1, "image/png", checksum);
+    assertEquals(checksum, captured.get().checksumSHA256());
+    assertNull(captured.get().checksumAlgorithm());
+
+    service.putObject("preview.webp", new ByteArrayInputStream(new byte[] {1}), 1, "image/webp");
+    assertNull(captured.get().checksumSHA256());
+    assertNull(captured.get().checksumAlgorithm());
+  }
+
+  /** 非 SHA-256 的 Base64 输入必须在发出 PUT 前失败。 */
+  @Test
+  void rejectsInvalidExplicitSha256BeforePut() {
+    AtomicInteger puts = new AtomicInteger();
+    S3StorageServiceImpl service =
+        newObservingStorageService(
+            (proxy, method, args) -> {
+              if ("putObject".equals(method.getName())) {
+                puts.incrementAndGet();
+              }
+            });
+    for (String invalid :
+        new String[] {"not-base64!", Base64.getEncoder().encodeToString(new byte[31]), "AA=="}) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> service.putObject("file", new ByteArrayInputStream(new byte[1]), 1, null, invalid));
+    }
+    assertEquals(0, puts.get());
+  }
+
+  /** 内存 S3 必须像服务端一样拒绝与实际上传字节不符的摘要，且不留下对象。 */
+  @Test
+  void fakeRejectsChecksumMismatchWithoutStoringObject() {
+    InMemoryS3StorageService fake = new InMemoryS3StorageService();
+    String wrongChecksum = Base64.getEncoder().encodeToString(new byte[32]);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            fake.putObject(
+                "bad", new ByteArrayInputStream(new byte[] {1}), 1, null, wrongChecksum));
+    assertFalse(fake.hasObject("bad"));
   }
 
   @Test

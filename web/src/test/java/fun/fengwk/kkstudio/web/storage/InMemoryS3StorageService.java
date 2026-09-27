@@ -62,9 +62,18 @@ public class InMemoryS3StorageService implements S3StorageService {
 
   @Override
   public PutObjectResponse putObject(
-      String key, InputStream content, long contentLength, String contentType) {
+      String key,
+      InputStream content,
+      long contentLength,
+      String contentType,
+      String checksumSHA256) {
     try {
-      objects.put(key, content.readAllBytes());
+      byte[] bytes = content.readAllBytes();
+      if (checksumSHA256 != null
+          && !checksumSHA256.equals(Base64.getEncoder().encodeToString(sha256(bytes)))) {
+        throw new IllegalArgumentException("S3 checksum mismatch");
+      }
+      objects.put(key, bytes);
       contentTypes.put(key, contentType);
       return PutObjectResponse.builder().eTag("fake-etag").build();
     } catch (IOException e) {

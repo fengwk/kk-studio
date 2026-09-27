@@ -282,7 +282,12 @@ public class StorageUploadServiceImpl implements StorageUploadService {
       String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
       try (InputStream input = Files.newInputStream(content)) {
         // content 是本方法私有 spool：摘要与长度在写完并关闭后冻结，PUT 读取的正是该文件。
-        s3StorageService.putObject(tempKey, input, fileFacts.sizeBytes(), mediaType);
+        s3StorageService.putObject(
+            tempKey,
+            input,
+            fileFacts.sizeBytes(),
+            mediaType,
+            Base64.getEncoder().encodeToString(HexFormat.of().parseHex(fileFacts.sha256())));
       } catch (IOException error) {
         throw new UncheckedIOException("failed to read staged content", error);
       }
