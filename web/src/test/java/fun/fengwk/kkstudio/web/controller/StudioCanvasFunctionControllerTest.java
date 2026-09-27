@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
@@ -378,7 +379,7 @@ class StudioCanvasFunctionControllerTest {
             name,
             "Fake Image",
             argsSchema(),
-            CanvasResourceKind.IMAGE,
+            List.of(new CanvasFunctionOutputSpec(CanvasResourceKind.IMAGE, null)),
             new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 12, Map.of()));
     return new CanvasFunctionAdapter() {
       @Override
