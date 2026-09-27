@@ -7,6 +7,7 @@ import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
@@ -50,7 +51,10 @@ public class S3StorageServiceImpl implements S3StorageService {
     Assert.isTrue(contentLength >= 0L, "contentLength must be greater than or equal to 0");
     String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
     PutObjectRequest.Builder builder =
-        PutObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey);
+        PutObjectRequest.builder()
+            .bucket(properties.getBucket())
+            .key(normalizedKey)
+            .checksumAlgorithm(ChecksumAlgorithm.SHA256);
     if (StringUtils.hasText(contentType)) {
       builder.contentType(contentType);
     }
