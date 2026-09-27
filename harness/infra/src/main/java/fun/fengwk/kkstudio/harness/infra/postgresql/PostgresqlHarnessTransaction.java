@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -1147,6 +1148,50 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       lockTool(invocation);
     }
     return invocations;
+  }
+
+  @Override
+  public List<PendingToolInvocationRow> listPendingToolInvocations(
+      Instant afterCreatedAt, UUID afterId, int limit) {
+    checkOpen();
+    Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
+    Objects.requireNonNull(afterId, "afterId");
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    return queryList(
+        """
+        select t.*, m.thread_id as pending_thread_id, th.session_id as pending_session_id
+        from harness_tool_invocation t
+        join harness_model_invocation m on m.id = t.model_invocation_id
+        join harness_thread th on th.id = m.thread_id
+        where t.status in ('WAITING_APPROVAL', 'WAITING_INPUT')
+          and (t.created_at, t.id) > (?, ?)
+        order by t.created_at, t.id
+        limit ?
+        """,
+        PostgresqlHarnessRows.PENDING_TOOL_INVOCATION,
+        PostgresqlHarnessRows.timestamp(afterCreatedAt),
+        afterId,
+        limit);
+  }
+
+  @Override
+  public Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId) {
+    checkOpen();
+    Objects.requireNonNull(sessionId, "sessionId");
+    Objects.requireNonNull(invocationId, "invocationId");
+    return queryOne(
+        """
+        select *
+        from harness_entry
+        where session_id = ?
+          and entry_type = 'MESSAGE'
+          and payload -> 'toolResultMetadata' ->> 'invocationId' = ?
+        """,
+        PostgresqlHarnessRows.ENTRY,
+        sessionId,
+        invocationId.toString());
   }
 
   @Override

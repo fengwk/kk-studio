@@ -287,7 +287,8 @@ final class ThreadProcessorTestSupport {
                     resultId,
                     sessionId,
                     headEntryId,
-                    realToolResultPayload(assistantEntryId, callIndex, "call-" + callIndex),
+                    realToolResultPayload(
+                        tx.nextId(), assistantEntryId, callIndex, "call-" + callIndex),
                     NOW));
             headEntryId = resultId;
           }
@@ -799,14 +800,22 @@ final class ThreadProcessorTestSupport {
         null);
   }
 
-  /** 真实 ToolResult MESSAGE payload（非 synthetic，status SUCCEEDED）。 */
-  static EntryPayload realToolResultPayload(UUID assistantEntryId, int callIndex, String callId) {
+  /** 真实 ToolResult MESSAGE payload（非 synthetic，status SUCCEEDED），携带产生它的 invocation id。 */
+  static EntryPayload realToolResultPayload(
+      UUID toolInvocationId, UUID assistantEntryId, int callIndex, String callId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
             callId, "bash", "bash", List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
-            assistantEntryId, callId, callIndex, ToolResultStatus.SUCCEEDED, false, null);
+            toolInvocationId,
+            assistantEntryId,
+            callId,
+            callIndex,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }

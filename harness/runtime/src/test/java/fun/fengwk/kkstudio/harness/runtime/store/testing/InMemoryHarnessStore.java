@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -1077,6 +1078,68 @@ public final class InMemoryHarnessStore implements HarnessStore {
         lockTool(invocation);
       }
       return invocations;
+    }
+
+    @Override
+    public List<PendingToolInvocationRow> listPendingToolInvocations(
+        Instant afterCreatedAt, UUID afterId, int limit) {
+      checkOpen();
+      Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
+      Objects.requireNonNull(afterId, "afterId");
+      if (limit <= 0) {
+        throw new IllegalArgumentException("limit must be positive");
+      }
+      List<PendingToolInvocationRow> rows = new ArrayList<>();
+      for (ToolInvocation invocation : state.toolInvocations.values()) {
+        if (invocation.status() != ToolInvocationStatus.WAITING_INPUT
+            && invocation.status() != ToolInvocationStatus.WAITING_APPROVAL) {
+          continue;
+        }
+        if (!isAfterCursor(invocation, afterCreatedAt, afterId)) {
+          continue;
+        }
+        ModelInvocation model = state.modelInvocations.get(invocation.modelInvocationId());
+        ThreadState thread = model == null ? null : state.threads.get(model.threadId());
+        if (thread == null) {
+          throw new IllegalStateException(
+              "pending tool invocation " + invocation.id() + " lost its owning thread");
+        }
+        rows.add(new PendingToolInvocationRow(invocation, thread.id(), thread.sessionId()));
+      }
+      rows.sort(
+          Comparator.comparing((PendingToolInvocationRow row) -> row.invocation().createdAt())
+              .thenComparing(row -> row.invocation().id(), UuidOrder.COMPARATOR));
+      return List.copyOf(rows.size() > limit ? rows.subList(0, limit) : rows);
+    }
+
+    private boolean isAfterCursor(ToolInvocation invocation, Instant afterCreatedAt, UUID afterId) {
+      int timeComparison = invocation.createdAt().compareTo(afterCreatedAt);
+      if (timeComparison != 0) {
+        return timeComparison > 0;
+      }
+      return UuidOrder.COMPARATOR.compare(invocation.id(), afterId) > 0;
+    }
+
+    @Override
+    public Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId) {
+      checkOpen();
+      Objects.requireNonNull(sessionId, "sessionId");
+      Objects.requireNonNull(invocationId, "invocationId");
+      Entry found = null;
+      for (Entry entry : state.entries.values()) {
+        if (!entry.sessionId().equals(sessionId)
+            || !(entry.payload() instanceof MessagePayload message)
+            || message.toolResultMetadata() == null
+            || !invocationId.equals(message.toolResultMetadata().invocationId())) {
+          continue;
+        }
+        if (found != null) {
+          throw new IllegalStateException(
+              "multiple tool result entries reference invocation " + invocationId);
+        }
+        found = entry;
+      }
+      return Optional.ofNullable(found);
     }
 
     @Override

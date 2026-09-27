@@ -64,7 +64,15 @@ class HistoryEntryPayloadJsonCodecTest {
         new MessagePayload(
             toolMessage("call-1"),
             null,
-            new ToolResultMetadata(id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
+            new ToolResultMetadata(
+                new UUID(0L, 41L),
+                id(2L),
+                "call-1",
+                0,
+                ToolResultStatus.SUCCEEDED,
+                false,
+                null,
+                null));
     EntryPayload custom =
         new CustomMessagePayload(
             CustomMessagePayload.CORE_CONTRIBUTOR_ID,
@@ -114,7 +122,14 @@ class HistoryEntryPayloadJsonCodecTest {
             toolMessage("call-1"),
             null,
             new ToolResultMetadata(
-                id(2L), "call-1", 1, ToolResultStatus.UNKNOWN, true, ToolResultReason.HISTORY_CUT));
+                null,
+                id(2L),
+                "call-1",
+                1,
+                ToolResultStatus.UNKNOWN,
+                true,
+                ToolResultReason.HISTORY_CUT,
+                null));
     EntryPayload root = new RootPayload(settings());
     EntryPayload subagentRoot =
         new RootPayload(settings(), new SubagentContext(id(11L), id(10L), id(12L), 2));
@@ -165,6 +180,7 @@ class HistoryEntryPayloadJsonCodecTest {
   void roundTripsAnsweredToolResultReceiptInsideMetadata() {
     ToolResultMetadata metadata =
         new ToolResultMetadata(
+            new UUID(0L, 31L),
             new UUID(0L, 7L),
             "call-1",
             0,
@@ -193,6 +209,7 @@ class HistoryEntryPayloadJsonCodecTest {
     assertTrue(
         encoded.contains(
             "\"inputReceipt\":{\"submissionId\":\"00000000-0000-0000-0000-000000000015\""));
+    assertTrue(encoded.contains("\"invocationId\":\"00000000-0000-0000-0000-00000000001f\""));
     assertEquals(payload, CODEC.decode(EntryType.MESSAGE, encoded));
     // 没有回执的元数据仍然编码为显式 null，并保持往返。
     MessagePayload withoutReceipt =
@@ -209,7 +226,14 @@ class HistoryEntryPayloadJsonCodecTest {
                         "{}"))),
             null,
             new ToolResultMetadata(
-                new UUID(0L, 7L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null));
+                new UUID(0L, 41L),
+                new UUID(0L, 7L),
+                "call-1",
+                0,
+                ToolResultStatus.SUCCEEDED,
+                false,
+                null,
+                null));
     assertEquals(withoutReceipt, CODEC.decode(EntryType.MESSAGE, CODEC.encode(withoutReceipt)));
     assertTrue(CODEC.encode(withoutReceipt).contains("\"inputReceipt\":null"));
   }

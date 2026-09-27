@@ -2,7 +2,11 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputAnswers;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputQuestionnaire;
@@ -10,6 +14,10 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -22,6 +30,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 人工输入提交控制：把一次 {@code ask_user} 回答原子地物化为 ToolResult 与 durable 回执。
@@ -35,8 +44,9 @@ import java.util.Objects;
  * 回执与已存答案精确 replay，绝不追加第二条 ToolResult。审批与问答互不代替：本控制不接受 approval，问卷也不能授权工具。
  *
  * <p>已接受但尚未物化的调用（SUCCEEDED + inputReceipt）只接受相同提交身份与相同规范化答案的精确 replay；另一个提交身份、不同操作者或 不同答案都是 {@link
- * Reason#INPUT_SUBMISSION_MISMATCH}。Stop 已收敛为 CANCELLED 的目标是 {@link
- * Reason#INPUT_SUBMISSION_NOT_APPLICABLE}，迟到回答不会恢复执行。
+ * Reason#INPUT_SUBMISSION_MISMATCH}。当调用行已被结果物化删除时，本控制按 Entry 的 runtime 元数据（{@code
+ * toolResultMetadata.invocationId}）在原 Thread/父链上反查已接受事实并做同样的精确 replay，因此「清理后重试」与「清理前重试」语义一致。 Stop
+ * 已收敛为 CANCELLED 的目标是 {@link Reason#INPUT_SUBMISSION_NOT_APPLICABLE}，迟到回答不会恢复执行。
  */
 final class ToolInputControl {
 
@@ -50,8 +60,8 @@ final class ToolInputControl {
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  /** 在单个短事务内接受或精确 replay 一次人工输入提交，返回已接受（或已物化前）的 invocation。 */
-  ToolInvocation submit(ToolInputSubmissionCommand command) {
+  /** 在单个短事务内接受或精确 replay 一次人工输入提交，返回 durable 接受事实。 */
+  ToolInputAcceptance submit(ToolInputSubmissionCommand command) {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
@@ -61,8 +71,7 @@ final class ToolInputControl {
           }
           ToolInvocation probe = tx.findToolInvocation(command.toolInvocationId()).orElse(null);
           if (probe == null) {
-            throw notApplicable(
-                "tool invocation " + command.toolInvocationId() + " does not exist");
+            return replayMaterialized(tx, thread, command);
           }
           ModelInvocation probeModel =
               tx.findModelInvocation(probe.modelInvocationId()).orElse(null);
@@ -100,10 +109,114 @@ final class ToolInputControl {
   }
 
   /**
-   * 已接受调用的精确 replay：提交身份与操作者必须与回执一致，答案必须与已存结果按规范化结构相等，否则拒绝；replay 不触碰任何 durable 事实（不 bump
+   * 调用行已被结果物化删除后的精确 replay：按原调用 ID 在 owning Session 的 Entry 历史中定位已物化的 ToolResult， 核验它确实属于原 Thread
+   * 的父链，再按回执与规范化答案做与「未物化」路径一致的精确 replay；缺失或非人工输入结果都是 不适用。
+   */
+  private ToolInputAcceptance replayMaterialized(
+      HarnessStore.Transaction tx, ThreadState thread, ToolInputSubmissionCommand command) {
+    Optional<Entry> materialized =
+        tx.findToolResultEntryByInvocationId(thread.sessionId(), command.toolInvocationId());
+    if (materialized.isEmpty()) {
+      throw notApplicable("tool invocation " + command.toolInvocationId() + " does not exist");
+    }
+    Entry entry = materialized.get();
+    if (!onOwnedThreadPath(tx, entry, thread)) {
+      throw notApplicable(
+          "tool invocation "
+              + command.toolInvocationId()
+              + " does not belong to thread "
+              + thread.id());
+    }
+    if (!(entry.payload() instanceof MessagePayload message)
+        || message.toolResultMetadata() == null) {
+      throw notApplicable(
+          "tool invocation " + command.toolInvocationId() + " is not a tool result");
+    }
+    ToolResultMetadata metadata = message.toolResultMetadata();
+    ToolInputReceipt receipt = metadata.inputReceipt();
+    if (receipt == null) {
+      throw notApplicable(
+          "tool invocation " + command.toolInvocationId() + " is not waiting for user input");
+    }
+    if (!receipt.replays(command.submissionId(), command.actor())) {
+      throw mismatch(
+          "tool invocation "
+              + command.toolInvocationId()
+              + " was already answered by another submission");
+    }
+    String canonical = canonicalAnswerJson(materializedQuestionnaire(tx, metadata), command);
+    if (!canonical.equals(materializedDetails(message))) {
+      throw mismatch(
+          "submission "
+              + command.submissionId()
+              + " does not replay the accepted answers of tool invocation "
+              + command.toolInvocationId());
+    }
+    return new ToolInputAcceptance(thread.id(), command.toolInvocationId(), receipt, true);
+  }
+
+  /** 已物化 ToolResult 必须落在原 Thread 发起的 turn 上（沿 Entry 父链找到属于该 Thread 的 TURN_START）。 */
+  private static boolean onOwnedThreadPath(
+      HarnessStore.Transaction tx, Entry entry, ThreadState thread) {
+    EntryPath path;
+    try {
+      path = tx.loadEntryPath(entry.id());
+    } catch (IllegalArgumentException broken) {
+      throw new IllegalStateException(
+          "materialized tool result " + entry.id() + " lost its entry path", broken);
+    }
+    for (Entry ancestor : path.entries()) {
+      if (ancestor.payload() instanceof TurnStartPayload turnStart
+          && turnStart.ownerThreadId().equals(thread.id())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 已物化答案的唯一事实源是 TOOL 消息的 result content detailsJson（与业务 details 同一份）。 */
+  private static String materializedDetails(MessagePayload message) {
+    List<AgentMessageContent> contents = message.message().contents();
+    if (message.message().role() != AgentMessageRole.TOOL
+        || contents.isEmpty()
+        || !(contents.get(0) instanceof ToolResultMessageContent result)) {
+      throw new IllegalStateException("materialized tool result lost its tool result content");
+    }
+    return result.detailsJson();
+  }
+
+  /**
+   * 已物化后冻结问卷仍只在 Assistant ToolCall 里：按 metadata 指向的 Assistant Entry 与 toolCallId 取回原始 arguments
+   * 并解码；缺失或不可解码是持久化不变量被破坏，绝不猜测问卷。
+   */
+  private static HumanInputQuestionnaire materializedQuestionnaire(
+      HarnessStore.Transaction tx, ToolResultMetadata metadata) {
+    Entry assistant =
+        tx.findEntry(metadata.assistantEntryId())
+            .orElseThrow(
+                () ->
+                    new IllegalStateException(
+                        "answered tool result lost its assistant entry "
+                            + metadata.assistantEntryId()));
+    if (!(assistant.payload() instanceof MessagePayload message)
+        || message.message().role() != AgentMessageRole.ASSISTANT) {
+      throw new IllegalStateException(
+          "answered tool result assistant entry is not an assistant message");
+    }
+    for (AgentMessageContent content : message.message().contents()) {
+      if (content instanceof ToolCallMessageContent call
+          && call.toolCallId().equals(metadata.toolCallId())) {
+        return decodeQuestionnaire(call.argumentsJson());
+      }
+    }
+    throw new IllegalStateException("answered tool result lost its frozen tool call");
+  }
+
+  /**
+   * 已接受调用行的精确 replay：提交身份与操作者必须与回执一致，答案必须与已存结果按规范化结构相等，否则拒绝；replay 不触碰任何 durable 事实（不 bump
    * version、不请求 Work）。
    */
-  private static ToolInvocation replayAccepted(
+  private static ToolInputAcceptance replayAccepted(
       ToolInvocation tool, ToolInputSubmissionCommand command) {
     ToolInputReceipt receipt = tool.inputReceipt();
     if (receipt == null) {
@@ -121,11 +234,11 @@ final class ToolInputControl {
               + " does not replay the accepted answers of tool invocation "
               + tool.id());
     }
-    return tool;
+    return new ToolInputAcceptance(command.threadId(), tool.id(), receipt, false);
   }
 
   /** 首次接受：冻结问卷校验通过后写入结果与回执，推进 Thread version 并登记结果物化 Work。 */
-  private ToolInvocation acceptInput(
+  private ToolInputAcceptance acceptInput(
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
@@ -149,16 +262,19 @@ final class ToolInputControl {
     tx.updateToolInvocations(List.of(accepted));
     tx.updateThread(thread.touchVersion(mutationNow));
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
-    return accepted;
+    return new ToolInputAcceptance(thread.id(), accepted.id(), receipt, false);
   }
 
   /** 冻结问卷只来自 Assistant ToolCall：解析失败是持久化不变量被破坏，绝不猜测问卷。 */
   private static HumanInputQuestionnaire questionnaire(ToolInvocation tool) {
+    return decodeQuestionnaire(tool.call().argumentsJson());
+  }
+
+  private static HumanInputQuestionnaire decodeQuestionnaire(String argumentsJson) {
     try {
-      return INPUT_JSON.decodeQuestionnaire(tool.call().argumentsJson());
+      return INPUT_JSON.decodeQuestionnaire(argumentsJson);
     } catch (IllegalArgumentException broken) {
-      throw new IllegalStateException(
-          "tool invocation " + tool.id() + " lost its frozen questionnaire", broken);
+      throw new IllegalStateException("ask_user lost its frozen questionnaire", broken);
     }
   }
 

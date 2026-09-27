@@ -405,7 +405,7 @@ class ModelRequestMaterializerTest {
                             "{}"))),
                 null,
                 new ToolResultMetadata(
-                    id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null))));
+                    id(44L), id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null))));
     return new EntryPath(entries);
   }
 

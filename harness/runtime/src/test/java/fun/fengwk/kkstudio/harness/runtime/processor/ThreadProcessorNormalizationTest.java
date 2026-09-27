@@ -331,7 +331,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
                       id,
                       chain.turn().sessionId(),
                       assistantId,
-                      realToolResultPayload(assistantId, 0, "call-1"),
+                      realToolResultPayload(tx.nextId(), assistantId, 0, "call-1"),
                       NOW));
               return id;
             });

@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.interaction.InteractionService;
 import fun.fengwk.kkstudio.platform.project.tool.ProjectThreadOwnerResolver;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -61,17 +62,20 @@ public class StudioHarnessThreadController {
   private final HarnessRuntime runtime;
   private final ModelRequestDebugService modelRequestDebugService;
   private final ProjectThreadOwnerResolver projectThreadOwnerResolver;
+  private final InteractionService interactionService;
 
   /** 创建 Thread API Controller。 */
   public StudioHarnessThreadController(
       HarnessRuntime runtime,
       ModelRequestDebugService modelRequestDebugService,
-      ProjectThreadOwnerResolver projectThreadOwnerResolver) {
+      ProjectThreadOwnerResolver projectThreadOwnerResolver,
+      InteractionService interactionService) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.modelRequestDebugService =
         Objects.requireNonNull(modelRequestDebugService, "modelRequestDebugService");
     this.projectThreadOwnerResolver =
         Objects.requireNonNull(projectThreadOwnerResolver, "projectThreadOwnerResolver");
+    this.interactionService = Objects.requireNonNull(interactionService, "interactionService");
   }
 
   /** 查询一个一致性的 Thread 快照（单事务）。 */
@@ -177,7 +181,12 @@ public class StudioHarnessThreadController {
             }));
   }
 
-  /** 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。 */
+  /**
+   * 决定一次 Tool approval（decisionId 幂等；冲突 decision 409）。
+   *
+   * <p>审批与问卷回答共用 platform 交互服务的产品锁序与门禁：Issue+Agent Thread 先按 {@code Project SHARE -> Issue UPDATE}
+   * 锁定产品层级，再进入 Harness Runtime 决策，因此审批入口同样不能绕过 Issue 的暂停/归档约束。
+   */
   @PutMapping("/{threadId}/tool-invocations/{toolInvocationId}/approval")
   public Result<ToolInvocationDTO> decideApproval(
       @PathVariable String threadId,
@@ -187,7 +196,7 @@ public class StudioHarnessThreadController {
         withRuntimeTranslation(
             () ->
                 HarnessRuntimeResponseMapper.toToolInvocationDto(
-                    runtime.decideToolApproval(
+                    interactionService.decideApproval(
                         HarnessRuntimeRequestMapper.toToolApprovalCommand(
                             threadId, toolInvocationId, request)))));
   }

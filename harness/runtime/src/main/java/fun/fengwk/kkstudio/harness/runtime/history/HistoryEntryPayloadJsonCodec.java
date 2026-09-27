@@ -72,7 +72,8 @@ public final class HistoryEntryPayloadJsonCodec {
           "status",
           "synthetic",
           "reason",
-          "inputReceipt");
+          "inputReceipt",
+          "invocationId");
 
   private static final ToolInputReceiptJsonCodec INPUT_RECEIPT_CODEC =
       new ToolInputReceiptJsonCodec();
@@ -312,6 +313,11 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.set("inputReceipt", INPUT_RECEIPT_CODEC.encodeNode(metadata.inputReceipt()));
     }
+    if (metadata.invocationId() == null) {
+      node.putNull("invocationId");
+    } else {
+      node.put("invocationId", metadata.invocationId().toString());
+    }
     return node;
   }
 
@@ -529,6 +535,7 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "toolResultMetadata");
     HistoryValueCodecs.requireExactFields(node, TOOL_RESULT_METADATA_FIELDS, "toolResultMetadata");
     return new ToolResultMetadata(
+        HistoryValueCodecs.nullablePositiveId(node, "invocationId", "toolResultMetadata"),
         HistoryValueCodecs.requiredPositiveId(node, "assistantEntryId", "toolResultMetadata"),
         HistoryValueCodecs.text(node, "toolCallId"),
         HistoryValueCodecs.requiredNonNegativeInt(node, "callIndex", "toolResultMetadata"),

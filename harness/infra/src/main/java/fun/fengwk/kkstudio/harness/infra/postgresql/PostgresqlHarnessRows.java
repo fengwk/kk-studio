@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplaySt
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -148,6 +149,13 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
               decodeNullable(resultSet.getString("input_receipt"), TOOL_INPUT_RECEIPTS::decode));
+
+  static final RowMapper<PendingToolInvocationRow> PENDING_TOOL_INVOCATION =
+      (resultSet, rowNumber) ->
+          new PendingToolInvocationRow(
+              TOOL_INVOCATION.mapRow(resultSet, rowNumber),
+              uuid(resultSet, "pending_thread_id"),
+              uuid(resultSet, "pending_session_id"));
 
   static final RowMapper<Work> WORK =
       (resultSet, rowNumber) ->

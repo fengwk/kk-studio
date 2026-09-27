@@ -1108,7 +1108,8 @@ class ModelAttemptMaterializationTest {
                         false,
                         "{}"))),
             null,
-            new ToolResultMetadata(id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
+            new ToolResultMetadata(
+                id(44L), id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null)),
         T3);
   }
 

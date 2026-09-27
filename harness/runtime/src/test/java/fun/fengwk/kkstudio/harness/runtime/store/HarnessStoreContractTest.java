@@ -60,6 +60,8 @@ class HarnessStoreContractTest {
               "lockToolInvocation",
               "loadToolInvocationsByAssistantEntryId",
               "lockToolInvocationsByAssistantEntryId",
+              "listPendingToolInvocations",
+              "findToolResultEntryByInvocationId",
               "insertToolInvocations",
               "updateToolInvocations",
               "findWork",

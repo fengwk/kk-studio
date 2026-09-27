@@ -93,7 +93,7 @@ class CompactionPlannerTest {
                             "{}"))),
                 null,
                 new ToolResultMetadata(
-                    id(1L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
+                    id(9301L), id(1L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null)),
             BASE);
 
     assertEquals(1_200L, CompactionPlanner.estimateTokens(video));
@@ -163,7 +163,7 @@ class CompactionPlannerTest {
                             "{}"))),
                 null,
                 new ToolResultMetadata(
-                    id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null)),
+                    id(9302L), id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null)),
             BASE);
 
     assertEquals(4_806L, CompactionPlanner.estimateTokens(assistant));
@@ -759,11 +759,13 @@ class CompactionPlannerTest {
                                 "{}"))),
                     null,
                     new ToolResultMetadata(
+                        id(9303L + callIndex),
                         assistantEntryId,
                         call.toolCallId(),
                         callIndex++,
                         ToolResultStatus.SUCCEEDED,
                         false,
+                        null,
                         null)),
                 BASE));
       }
@@ -789,7 +791,14 @@ class CompactionPlannerTest {
                               "{}"))),
                   null,
                   new ToolResultMetadata(
-                      assistantEntryId, toolCallId, 0, ToolResultStatus.SUCCEEDED, false, null)),
+                      id(9304L),
+                      assistantEntryId,
+                      toolCallId,
+                      0,
+                      ToolResultStatus.SUCCEEDED,
+                      false,
+                      null,
+                      null)),
               BASE));
       return this;
     }

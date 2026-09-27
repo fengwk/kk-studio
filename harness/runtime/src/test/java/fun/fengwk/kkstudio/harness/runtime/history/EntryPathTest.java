@@ -1252,7 +1252,14 @@ class EntryPathTest {
                         "{}"))),
             null,
             new ToolResultMetadata(
-                assistantEntryId, toolCallId, callIndex, ToolResultStatus.SUCCEEDED, false, null)),
+                id(9001L),
+                assistantEntryId,
+                toolCallId,
+                callIndex,
+                ToolResultStatus.SUCCEEDED,
+                false,
+                null,
+                null)),
         time(id));
   }
 

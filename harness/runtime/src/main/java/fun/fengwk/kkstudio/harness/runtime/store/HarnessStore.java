@@ -264,6 +264,26 @@ public interface HarnessStore {
     List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId);
 
     /**
+     * 按 {@code (created_at, id)} 升序读取两种等待状态（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}）的
+     * ToolInvocation 及其 owning Thread / Session 坐标，用于待处理列表的稳定 keyset 分页。
+     *
+     * <p>{@code afterCreatedAt} / {@code afterId} 是游标下界，返回严格大于该组合的行（首屏使用 {@link
+     * java.time.Instant#EPOCH} 与全零 UUID）；{@code limit} 必须为正，实现按 {@code limit}
+     * 截断。不使用状态拆分的两次查询，也不产生锁；返回不可变列表。
+     */
+    List<PendingToolInvocationRow> listPendingToolInvocations(
+        Instant afterCreatedAt, UUID afterId, int limit);
+
+    /**
+     * 在指定 Session 的不可变 Entry 历史中，按原 ToolInvocation ID 查找已物化的 ToolResult MESSAGE Entry。
+     *
+     * <p>Terminal ToolInvocation 行在结果物化后被物理删除，此时只能靠 Entry 的 runtime 元数据（{@code
+     * toolResultMetadata.invocationId}）反查。命中至多一条；缺失返回 {@link Optional#empty()}；工具结果被合成替换（synthetic）
+     * 时不携带 invocation ID，因此不会被本查询命中。返回不可变 Entry。
+     */
+    Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId);
+
+    /**
      * 批量插入新 ToolInvocation（初始状态只能是 READY，或用于 sibling 静态拒绝的 unattached FAILED；两者均
      * attempt=0、approval=null、effects 为空）；逐条校验 id、{@code (assistantEntryId, callIndex)}
      * 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于 assistantEntryId；assistantEntryId 指向 Assistant
