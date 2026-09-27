@@ -409,11 +409,18 @@ registerCase({
         body: commentRequest.body,
       })
       assert(comment.sequence === '1', JSON.stringify(comment))
+      current = envelopeData((await ctx.call('GET', `/api/issues/${issue.id}`)).json).issue
+      assert(
+        current.version === String(BigInt(commentRequest.expectedVersion) + 1n),
+        JSON.stringify(current),
+      )
 
       const replayedComment = envelopeData(
         (await ctx.call('POST', `/api/issues/${issue.id}/activities`, commentRequest)).json,
       )
       assert(replayedComment.sequence === comment.sequence, JSON.stringify(replayedComment))
+      const afterReplay = envelopeData((await ctx.call('GET', `/api/issues/${issue.id}`)).json).issue
+      assert(afterReplay.version === current.version, JSON.stringify(afterReplay))
       const afterComment = envelopeData(
         (
           await ctx.call(
@@ -428,7 +435,7 @@ registerCase({
       await expectHttpError(
         () =>
           ctx.call('POST', `/api/issues/${issue.id}/activities`, {
-            expectedVersion: commentRequest.expectedVersion,
+            expectedVersion: current.version,
             requestKey: `e2e-instruction-${cid()}`,
             kind: 'INSTRUCTION',
             body: 'Keep the migration reversible.',
@@ -448,7 +455,7 @@ registerCase({
       await expectHttpError(
         () =>
           ctx.call('POST', `/api/issues/${issue.id}/activities`, {
-            expectedVersion: commentRequest.expectedVersion,
+            expectedVersion: current.version,
             requestKey: `e2e-blank-body-${cid()}`,
             kind: 'COMMENT',
             body: '   ',
@@ -466,7 +473,7 @@ registerCase({
           })
         ).json,
       )
-      assert(current.state === 'WORK' && current.version === '2', JSON.stringify(current))
+      assert(current.state === 'WORK' && current.version === '3', JSON.stringify(current))
 
       // 非法转移：未声明状态、非白名单目标、保留状态都不能通过正常边进入。
       for (const toState of ['NOPE', 'BLOCKED', 'INIT', 'DONE_EXTRA']) {
@@ -495,7 +502,7 @@ registerCase({
           })
         ).json,
       )
-      assert(current.state === 'DONE', JSON.stringify(current))
+      assert(current.state === 'DONE' && current.version === '4', JSON.stringify(current))
 
       // DONE 不能被阻塞，只能由显式 reopen 回到 INIT。
       await expectHttpError(
@@ -515,7 +522,7 @@ registerCase({
           })
         ).json,
       )
-      assert(current.state === 'INIT' && current.version === '4', JSON.stringify(current))
+      assert(current.state === 'INIT' && current.version === '5', JSON.stringify(current))
 
       current = envelopeData(
         (
@@ -526,7 +533,7 @@ registerCase({
           })
         ).json,
       )
-      assert(current.state === 'WORK' && current.version === '5', JSON.stringify(current))
+      assert(current.state === 'WORK' && current.version === '6', JSON.stringify(current))
 
       // 业务阻塞：记录原阶段与原因，已在 BLOCKED 时再次阻塞被拒绝。
       const blockReason = 'Waiting for the business decision on scope'
@@ -543,7 +550,7 @@ registerCase({
         current.state === 'BLOCKED'
           && current.blockedFromState === 'WORK'
           && current.blockReason === blockReason
-          && current.version === '6',
+          && current.version === '7',
         JSON.stringify(current),
       )
       await expectHttpError(
@@ -627,6 +634,12 @@ registerCase({
           }),
         { status: 400 },
       )
+      // 只有尚未解除的 UNKNOWN 门禁阻止删除；解除后 USER 门禁不阻止删除。
+      await expectHttpError(
+        () =>
+          ctx.call('DELETE', `/api/issues/${issue.id}?expectedVersion=${current.version}`),
+        { status: 400 },
+      )
       const verification = 'checked the provider console: nothing was dispatched'
       current = envelopeData(
         (
@@ -648,11 +661,6 @@ registerCase({
             requestKey: `e2e-resolve-again-${cid()}`,
             verification: 'second verification',
           }),
-        { status: 400 },
-      )
-      await expectHttpError(
-        () =>
-          ctx.call('DELETE', `/api/issues/${issue.id}?expectedVersion=${current.version}`),
         { status: 400 },
       )
       current = envelopeData(
