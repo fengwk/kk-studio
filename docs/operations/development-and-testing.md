@@ -200,6 +200,19 @@ Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创
 包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
 这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
 
+异步 `task` 的工具结果只表示已接受，完成结果由后续独立的 `<subagent_result>` 消息交付。
+`real.task_delegation` 分别验证 JSON 受理收据与同一子 Thread 的完成消息，不能将受理当作完成。
+受理卡片的 Thread 链接进入 `/threads/:threadId`，复用独立 Thread 面板查看进度并处理工具审批，
+不依赖 Chat 归属，也不开放无 owner 的会话命令发送。
+[`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
+通过真实组件交互验证子 Thread 的允许/拒绝审批目标，并覆盖非法 ID、加载失败与返回入口；
+这些是 jsdom 回归，不替代真实浏览器验证。
+
+真实 `read` 工具的 L4 用例 `tool.read_turn` 断言非 YOLO tool turn 的审批链路，以及 durable
+`tool_result` 内联的完整 `path`/`ends_with_newline`/`range` 投影。read 文本窗口恒在终态链路为 read
+身份加宽的内联预算（320 KiB / 2020 行）内，因此不产生 resource 预览；工具结果外部化到全局 Blob 与
+session 归属由 platform 集成测试守卫，E2E 没有真实模型 tool→blob 端到端证据。
+
 ## Compose、静态资源与文档门禁
 
 ```bash
@@ -326,6 +339,14 @@ SQL/resource、Compose、Dockerfile、image layer、backend/Daemon environment �
 
 真实 Agent 可靠性矩阵使用独立的 `TEST_MINIMAX_BASE_URL` + `TEST_MINIMAX_API_KEY`，只更新其隔离
 database 中的 `minimax` Responses Provider。
+
+两个内建工具 case `real.task_delegation` 与 `tool.read_turn` 默认使用
+`minimax-anthropic/MiniMax-M3`，可用 `E2E_BUILTIN_MODEL` 显式换用另一个**已声明**模型；取值是
+[real-models](../../scripts/dev/verify/e2e/lib/real-models.mjs) 的 `idSuffix`：
+`google_gemini`、`openai_responses`、`minimax_anthropic`（默认）、`deepseek_chat`。非法取值在 case
+开始前直接失败，不自动 fallback、不改 provider identity，实际选择写入 case artifact。该选项只让这两个
+内建工具 case 换模型复用同一套断言，不替代各 provider 的专项验收（`real.text_cache.*`、
+`real.reasoning_levels.*`、`real.tool.*` 仍按各自 provider 运行）。
 
 隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
 不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、

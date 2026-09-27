@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.platform;
 
+import static org.mockito.Mockito.mock;
+
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -8,6 +11,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 
 /**
@@ -33,6 +37,16 @@ public class PlatformHarnessTestConfiguration {
   @Bean
   public HarnessCatalog harnessCatalog(ObjectProvider<HarnessContributor> contributors) {
     return HarnessCatalog.from(contributors.orderedStream().toList());
+  }
+
+  /**
+   * 结算扫描器的锁定复核依赖 Runtime store；platform 测试上下文不装配 harness/infra，这里给出占位 bean 仅为满足装配 （platform
+   * 测试从不触发结算，真实结算路径由 web 的 PostgreSQL 集成测试覆盖）。
+   */
+  @Bean
+  @ConditionalOnMissingBean(HarnessStore.class)
+  public HarnessStore platformHarnessStore() {
+    return mock(HarnessStore.class);
   }
 
   @Bean

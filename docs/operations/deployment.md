@@ -235,7 +235,7 @@ Node `22.19.0`/npm `11.19.0`、bash、git，创建 `kkdaemon` uid/gid `10001`，
 
 - Daemon uid 不是 root；
 - mount 只有 `volume -> /workspace` 且可写、没有 bind mount；
-- JDK/`javap`/Node/npm/git/bash 可执行，`rg`/`fd` 不存在；
+- JDK/Node/npm/git/bash 可执行，`rg`/`fd` 不存在；
 - workspace 可写、Environment `READY`；
 - Compose config 不含 provider credential。
 

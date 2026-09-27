@@ -124,6 +124,7 @@ export function ModelForm({
       <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
         <input
+          aria-label={t('ai.catalog.form.name')}
           value={draft.name}
           onChange={(event) => onChange({ ...draft, name: event.target.value })}
           placeholder="MiniMax-M2.7"

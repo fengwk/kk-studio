@@ -21,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -434,11 +435,15 @@ class DaemonConfigTest {
     assertTrue(error.getMessage().contains("--tool-timeout"), error.getMessage());
   }
 
-  /** 三个本地执行程序参数都有默认值，显式给出时覆盖默认值。 */
+  /** 本地执行程序与 LSP 配置都有默认值，显式给出时覆盖默认值。 */
   @Test
   void resolvesLocalExecutableArguments(@TempDir Path root) throws Exception {
     Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
     String dataDir = root.resolve("data").toString();
+    Path lspConfig = root.resolve("lsp.json");
+    Files.writeString(
+        lspConfig,
+        "{\"servers\":{\"java\":{\"command\":[\"/opt/jdtls/bin/jdtls\"],\"extensions\":[\".java\"]}}}");
 
     DaemonConfig defaults =
         DaemonConfig.fromArgs(
@@ -451,22 +456,50 @@ class DaemonConfigTest {
               dataDir
             });
     assertEquals(DaemonConfig.DEFAULT_BASH_EXECUTABLE, defaults.bashExecutable());
-    assertEquals(DaemonConfig.DEFAULT_JAVAP_EXECUTABLE, defaults.javapExecutable());
-    assertNull(defaults.lspBridgeCommand(), "LSP bridge 省略时必须处于禁用状态");
+    assertTrue(defaults.lsp().servers().isEmpty(), "省略 --lsp-config 时必须没有 LSP 服务器");
 
     DaemonConfig explicit =
         DaemonConfig.fromArgs(
             new String[] {
-              "--gateway-uri", "ws://gateway.example/daemon",
-              "--registration-token-file", tokenFile.toString(),
-              "--data-dir", dataDir,
-              "--bash-executable", "/usr/bin/bash",
-              "--lsp-bridge-command", "lsp-bridge --stdio",
-              "--javap-executable", "/opt/jdk/bin/javap"
+              "--gateway-uri",
+              "ws://gateway.example/daemon",
+              "--registration-token-file",
+              tokenFile.toString(),
+              "--data-dir",
+              dataDir,
+              "--bash-executable",
+              "/usr/bin/bash",
+              "--lsp-config",
+              lspConfig.toString()
             });
     assertEquals("/usr/bin/bash", explicit.bashExecutable());
-    assertEquals("lsp-bridge --stdio", explicit.lspBridgeCommand());
-    assertEquals("/opt/jdk/bin/javap", explicit.javapExecutable());
+    assertEquals("java", explicit.lsp().servers().getFirst().id());
+    assertEquals(List.of(".java"), explicit.lsp().servers().getFirst().extensions());
+  }
+
+  /** 意图：{@code --lsp-config} 最多出现一次，重复提供必须失败关闭。 */
+  @Test
+  void rejectsDuplicateLspConfigArgument(@TempDir Path root) throws Exception {
+    Path tokenFile = ownerOnlyTokenFile(root, TOKEN_TEXT);
+    Path lspConfig = root.resolve("lsp.json");
+    Files.writeString(
+        lspConfig,
+        "{\"servers\":{\"java\":{\"command\":[\"/opt/jdtls/bin/jdtls\"],\"extensions\":[\".java\"]}}}");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                DaemonConfig.fromArgs(
+                    new String[] {
+                      "--gateway-uri", "ws://gateway.example/daemon",
+                      "--registration-token-file", tokenFile.toString(),
+                      "--data-dir", root.resolve("data").toString(),
+                      "--lsp-config", lspConfig.toString(),
+                      "--lsp-config", lspConfig.toString()
+                    }));
+    assertTrue(
+        error.getMessage().contains("--lsp-config may only be specified once"), error.getMessage());
   }
 
   /** 已删除的系统属性不再是配置来源：{@code kkstudio.daemon.*} 必须完全失效。 */

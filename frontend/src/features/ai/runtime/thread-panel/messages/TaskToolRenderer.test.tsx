@@ -1,9 +1,10 @@
 import { render, screen } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { TaskToolRenderer } from '@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'
 import {
   parseTaskArguments,
-  parseTaskFinalText,
+  parseTaskReceipt,
 } from '@/features/ai/runtime/task-tool-parser'
 import type { ToolRendererMessage } from '@/platform/extensions/types'
 
@@ -20,175 +21,173 @@ function message(overrides: Partial<ToolRendererMessage> = {}): ToolRendererMess
   }
 }
 
-const heartbeat =
-  '{"kind":"task.status","threadId":"101","subagentType":"explorer","state":"running_tool",'
-  + '"depth":2,"turns":3,"toolCalls":5,"lastActivity":"running read","approvals":[]}\n'
-
 describe('parseTaskArguments', () => {
-  it('extracts the stable subagent/prompt/session/maxTurns fields', () => {
+  it('extracts canonical subagent_type, prompt, thread_id, max_turns', () => {
     expect(
       parseTaskArguments(
-        '{"subagent_type":"coder","prompt":"fix it","session_id":"7","maxTurns":4}',
+        '{"subagent_type":"coder","prompt":"fix it","thread_id":"00000000-0000-0000-0000-000000000007","max_turns":4}',
       ),
     ).toEqual({
       subagentType: 'coder',
       prompt: 'fix it',
-      sessionId: '7',
+      threadId: '00000000-0000-0000-0000-000000000007',
       maxTurns: 4,
     })
-    // 可选字段缺省时全部为 null。
+    // 可选字段缺省时为 null
     expect(parseTaskArguments('{"subagent_type":"coder","prompt":"fix it"}')).toEqual({
       subagentType: 'coder',
       prompt: 'fix it',
-      sessionId: null,
+      threadId: null,
       maxTurns: null,
     })
   })
 
-  it('drops non-numeric maxTurns and invalid JSON without coercion', () => {
-    expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","maxTurns":"4"}').maxTurns).toBeNull()
-    expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","maxTurns":0}').maxTurns).toBeNull()
+  it('strictly does not recognize legacy session_id or camelCase maxTurns aliases', () => {
+    // 传入旧别名 session_id / maxTurns，解析结果中对应字段必须为 null
+    expect(
+      parseTaskArguments(
+        '{"subagent_type":"coder","prompt":"fix it","session_id":"old-session","maxTurns":4}',
+      ),
+    ).toEqual({
+      subagentType: 'coder',
+      prompt: 'fix it',
+      threadId: null,
+      maxTurns: null,
+    })
+  })
+
+  it('drops non-numeric max_turns and invalid JSON without coercion', () => {
+    expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","max_turns":"4"}').maxTurns).toBeNull()
+    expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","max_turns":0}').maxTurns).toBeNull()
+    expect(parseTaskArguments('{"subagent_type":"coder","prompt":"p","max_turns":-1}').maxTurns).toBeNull()
     expect(parseTaskArguments('not-json')).toEqual({
       subagentType: null,
       prompt: null,
-      sessionId: null,
+      threadId: null,
+      maxTurns: null,
+    })
+    expect(parseTaskArguments('["array"]')).toEqual({
+      subagentType: null,
+      prompt: null,
+      threadId: null,
       maxTurns: null,
     })
   })
 })
 
-describe('parseTaskFinalText', () => {
-  it('parses the completed form and tolerates whitespace/order changes', () => {
-    const text =
-      '<task id="101" state="completed">\n<task_result>\n'
-      + 'report line one\nreport line two\n</task_result>\n</task>'
-    expect(parseTaskFinalText(text)).toEqual({
-      state: 'completed',
-      report: 'report line one\nreport line two',
-      error: null,
-    })
-    const reordered =
-      '<task\n  state = "completed"   id = "101"\n>\n'
-      + '<task_result>report</task_result></task>'
-    expect(parseTaskFinalText(reordered)).toEqual({
-      state: 'completed',
-      report: 'report',
-      error: null,
-    })
-  })
-
-  it('parses the error and cancelled forms with task_error content', () => {
+describe('parseTaskReceipt', () => {
+  it('parses valid accepted receipt JSON with canonical UUID thread_id', () => {
     expect(
-      parseTaskFinalText('<task id="102" state="error">\n<task_error>concurrency limit reached</task_error>\n</task>'),
-    ).toEqual({ state: 'error', report: null, error: 'concurrency limit reached' })
-    expect(
-      parseTaskFinalText('<task id="103" state="cancelled">\n<task_error>Cancelled by user</task_error>\n</task>'),
-    ).toEqual({ state: 'cancelled', report: null, error: 'Cancelled by user' })
-  })
-
-  it('keeps a report that mentions the task_result closing tag', () => {
-    expect(
-      parseTaskFinalText(
-        '<task state="completed"><task_result>mention </task_result> literally'
-        + '</task_result></task>',
-      ),
+      parseTaskReceipt('{"thread_id":"00000000-0000-0000-0000-000000000004","status":"accepted"}'),
     ).toEqual({
-      state: 'completed',
-      report: 'mention </task_result> literally',
-      error: null,
+      status: 'accepted',
+      threadId: '00000000-0000-0000-0000-000000000004',
     })
   })
 
-  it('returns null for anything that is not a task terminal document', () => {
-    expect(parseTaskFinalText('plain text')).toBeNull()
-    expect(parseTaskFinalText('{"kind":"task.status","state":"running"}')).toBeNull()
-    expect(parseTaskFinalText('<task state="running_model">no terminal tags</task>')).toBeNull()
+  it('rejects receipt when thread_id is missing, blank, or not a canonical UUID', () => {
+    // 缺少 thread_id 或非 UUID shape 绝不能隐瞒为成功收据，必须返回 null
+    expect(parseTaskReceipt('{"status":"accepted"}')).toBeNull()
+    expect(parseTaskReceipt('{"status":"accepted","thread_id":"   "}')).toBeNull()
+    expect(parseTaskReceipt('{"status":"accepted","thread_id":"not-a-uuid"}')).toBeNull()
+    expect(parseTaskReceipt('{"status":"accepted","thread_id":123}')).toBeNull()
+  })
+
+  it('strictly rejects completed status and avoids accepted vs completed confusion', () => {
+    // 终态 completed 绝不是受理收据，必须返回 null
+    expect(
+      parseTaskReceipt('{"thread_id":"101","status":"completed"}'),
+    ).toBeNull()
+    expect(
+      parseTaskReceipt('{"status":"completed","report":"done"}'),
+    ).toBeNull()
+    expect(
+      parseTaskReceipt('{"thread_id":"101","status":"error"}'),
+    ).toBeNull()
+    expect(
+      parseTaskReceipt('{"thread_id":"101","status":"cancelled"}'),
+    ).toBeNull()
+  })
+
+  it('rejects legacy XML envelopes and non-JSON text', () => {
+    expect(
+      parseTaskReceipt('<task thread_id="101" state="accepted">delegation accepted</task>'),
+    ).toBeNull()
+    expect(
+      parseTaskReceipt('<task id="101" state="completed"><task_result>report</task_result></task>'),
+    ).toBeNull()
+    expect(parseTaskReceipt('plain text receipt')).toBeNull()
+  })
+
+  it('rejects malformed JSON and non-object inputs', () => {
+    expect(parseTaskReceipt('{bad json')).toBeNull()
+    expect(parseTaskReceipt('{"status":"accepted"')).toBeNull()
+    expect(parseTaskReceipt('["accepted"]')).toBeNull()
+    expect(parseTaskReceipt('123')).toBeNull()
+    expect(parseTaskReceipt('')).toBeNull()
+    expect(parseTaskReceipt('   ')).toBeNull()
   })
 })
 
 describe('TaskToolRenderer call phase', () => {
-  it('returns nothing when a non-streaming call is collapsed and has no live status', () => {
+  it('returns nothing when call is collapsed', () => {
     const { container } = render(<TaskToolRenderer message={message({})} />)
     expect(container.querySelector('.task-tool-renderer')).not.toBeInTheDocument()
   })
 
-  it('keeps the collapsed call to live status and defers task arguments until expanded', () => {
+  it('renders subagent, threadId, maxTurns, and prompt when expanded', () => {
     render(
-      <TaskToolRenderer
-        message={message({
-          status: 'streaming',
-          partial: heartbeat,
-        })}
-      />,
+      <MemoryRouter>
+        <TaskToolRenderer
+          expanded
+          message={message({
+            arguments:
+              '{"subagent_type":"explorer","prompt":"inspect the workspace","thread_id":"00000000-0000-0000-0000-000000000101","max_turns":5}',
+          })}
+        />
+      </MemoryRouter>,
     )
-
-    expect(screen.getByText('工具运行中')).toBeInTheDocument()
-    expect(screen.getByText('3 轮')).toBeInTheDocument()
-    expect(screen.queryByText('inspect the workspace')).not.toBeInTheDocument()
-    expect(screen.queryByText('子代理')).not.toBeInTheDocument()
+    expect(screen.getByText('子代理')).toBeInTheDocument()
+    expect(screen.getByText('explorer')).toBeInTheDocument()
+    expect(screen.getByText('Thread ID')).toBeInTheDocument()
+    const threadLink = screen.getByRole('link', { name: '00000000-0000-0000-0000-000000000101' })
+    expect(threadLink).toBeInTheDocument()
+    expect(threadLink).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000101')
+    expect(screen.getByText('最大轮数')).toBeInTheDocument()
+    expect(screen.getByText('5')).toBeInTheDocument()
+    expect(screen.getByText('任务提示')).toBeInTheDocument()
+    expect(screen.getByText('inspect the workspace')).toBeInTheDocument()
+    // 绝不包含已废弃的 TaskLiveStatus 心跳内容
+    expect(screen.queryByText(/运行中/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\d+\s*轮/)).not.toBeInTheDocument()
   })
 
-  it('renders stable subagent/prompt/session/maxTurns and the latest live status', () => {
+  it('does not render fields for legacy session_id or maxTurns aliases', () => {
     render(
       <TaskToolRenderer
         expanded
         message={message({
           arguments:
-            '{"subagent_type":"explorer","prompt":"inspect the workspace","session_id":"7","maxTurns":4}',
-          partial: heartbeat,
+            '{"subagent_type":"explorer","prompt":"inspect","session_id":"legacy-7","maxTurns":10}',
         })}
       />,
     )
     expect(screen.getByText('子代理')).toBeInTheDocument()
     expect(screen.getByText('explorer')).toBeInTheDocument()
-    expect(screen.getByText('会话')).toBeInTheDocument()
-    expect(screen.getByText('7')).toBeInTheDocument()
-    expect(screen.getByText('最大轮数')).toBeInTheDocument()
-    expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText('任务提示')).toBeInTheDocument()
-    expect(screen.getByText('inspect the workspace')).toBeInTheDocument()
-    // 最新运行状态：标签化展示，绝不是原始 task.status JSON。
-    expect(screen.getByText('工具运行中')).toBeInTheDocument()
-    expect(screen.getByText('3 轮')).toBeInTheDocument()
-    expect(screen.getByText('5 次工具调用')).toBeInTheDocument()
-    expect(screen.getByText('running read')).toBeInTheDocument()
-    expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
+    expect(screen.getByText('inspect')).toBeInTheDocument()
+    // session_id 与 maxTurns 不识别，不应出现 Thread ID 或 最大轮数
+    expect(screen.queryByText('Thread ID')).not.toBeInTheDocument()
+    expect(screen.queryByText('legacy-7')).not.toBeInTheDocument()
+    expect(screen.queryByText('最大轮数')).not.toBeInTheDocument()
+    expect(screen.queryByText('10')).not.toBeInTheDocument()
   })
 
-  it('renders the live strip without optional fields and with a minimal heartbeat', () => {
-    const heartbeat =
-      '{"kind":"task.status","threadId":"101","subagentType":"explorer","state":"running_model",'
-      + '"depth":null,"turns":null,"toolCalls":null,"lastActivity":null,"approvals":[]}\n'
-    render(
-      <TaskToolRenderer
-        message={message({
-          partial: heartbeat,
-          status: 'streaming',
-        })}
-      />,
-    )
-    // state 有文案即可；turns/toolCalls/lastActivity 缺省时不得渲染对应 span。
-    expect(screen.getByText('模型运行中')).toBeInTheDocument()
-    expect(screen.queryByText(/轮/u)).not.toBeInTheDocument()
-    expect(screen.queryByText(/次工具调用/u)).not.toBeInTheDocument()
-  })
-
-  it('renders without the live strip when the partial is not a task.status heartbeat', () => {
+  it('falls back to raw arguments viewport when arguments is not valid JSON', () => {
     render(
       <TaskToolRenderer
         expanded
-        message={message({ partial: '{"kind":"other","text":"delta"}' })}
-      />,
-    )
-    expect(screen.queryByText('工具运行中')).not.toBeInTheDocument()
-    expect(screen.getByText('inspect the workspace')).toBeInTheDocument()
-  })
-
-  it('falls back to the raw arguments when they are not valid JSON', () => {
-    render(
-      <TaskToolRenderer
-        expanded
-        message={message({ arguments: 'not-json', partial: undefined })}
+        message={message({ arguments: 'not-json' })}
       />,
     )
     expect(screen.getByText('not-json')).toBeInTheDocument()
@@ -196,117 +195,122 @@ describe('TaskToolRenderer call phase', () => {
 })
 
 describe('TaskToolRenderer result phase', () => {
-  it('shows the last five report lines while collapsed and the full report when expanded', () => {
-    const report = Array.from({ length: 7 }, (_, index) => `report-${index + 1}`).join('\n')
+  it('renders accepted state and Thread ID for valid accepted receipt JSON', () => {
+    render(
+      <MemoryRouter>
+        <TaskToolRenderer
+          message={message({
+            phase: 'result',
+            status: 'done',
+            text: '{"thread_id":"00000000-0000-0000-0000-000000000202","status":"accepted"}',
+          })}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('已接受 / 后台执行')).toBeInTheDocument()
+    expect(screen.getByText('Thread ID')).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: '00000000-0000-0000-0000-000000000202' })
+    expect(link).toBeInTheDocument()
+    expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
+    // 绝不显示已完成、报告或伪造的终态
+    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
+    expect(screen.queryByText('报告')).not.toBeInTheDocument()
+  })
+
+  it('falls back to raw text when thread_id is missing or invalid UUID', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'done',
+          text: '{"status":"accepted"}',
+        })}
+      />,
+    )
+    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
+    expect(screen.getByText('{"status":"accepted"}')).toBeInTheDocument()
+  })
+
+  it('falls back to raw text and does not claim completed when given completed status', () => {
+    // 即使 tool result 给出了 completed 文本（或旧 XML/JSON），也绝不当收据，原样降级展示且绝不伪造已完成
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'done',
+          text: '{"thread_id":"child-101","status":"completed","report":"done"}',
+        })}
+      />,
+    )
+    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
+    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('{"thread_id":"child-101","status":"completed","report":"done"}'),
+    ).toBeInTheDocument()
+  })
+
+  it('falls back to raw text for malformed JSON or unknown status without swallowing', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'done',
+          text: '{malformed json content',
+        })}
+      />,
+    )
+    expect(screen.getByText('{malformed json content')).toBeInTheDocument()
+    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
+  })
+
+  it('renders error message and raw text cleanly on error result', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'error',
+          text: 'subagent task rejected',
+          errorMessage: 'concurrency limit reached',
+        })}
+      />,
+    )
+    expect(screen.getByText('subagent task rejected')).toBeInTheDocument()
+    expect(screen.getByText('concurrency limit reached')).toBeInTheDocument()
+    expect(screen.queryByText('已接受 / 后台执行')).not.toBeInTheDocument()
+  })
+
+  it('omits separate errorMessage when it equals raw text', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'error',
+          text: 'task failed',
+          errorMessage: 'task failed',
+        })}
+      />,
+    )
+    expect(screen.getByText('task failed')).toBeInTheDocument()
+    expect(screen.queryAllByText('task failed')).toHaveLength(1)
+  })
+
+  it('respects collapsed vs expanded preview for fallback multiline text', () => {
+    const lines = Array.from({ length: 7 }, (_, i) => `fallback-line-${i + 1}`).join('\n')
     const terminal = message({
       phase: 'result',
       status: 'done',
-      text:
-        '<task id="101" state="completed">\n<task_result>\n'
-        + `${report}\n</task_result>\n</task>`,
+      text: lines,
     })
     const { container, rerender } = render(<TaskToolRenderer message={terminal} />)
     const output = container.querySelector('.thread-tool-output')
 
-    expect(output).not.toHaveTextContent('report-1')
-    expect(output).not.toHaveTextContent('report-2')
-    expect(output).toHaveTextContent('report-3')
-    expect(output).toHaveTextContent('report-7')
+    // 收起时截断前两行，只展示后五行
+    expect(output).not.toHaveTextContent('fallback-line-1')
+    expect(output).toHaveTextContent('fallback-line-7')
 
+    // 展开时完整呈现
     rerender(<TaskToolRenderer message={terminal} expanded />)
-    expect(output).toHaveTextContent('report-1')
-    expect(output).toHaveTextContent('report-7')
-  })
-
-  it('renders the final report and completed state instead of raw XML', () => {
-    render(
-      <TaskToolRenderer
-        message={message({
-          phase: 'result',
-          status: 'done',
-          text:
-            '<task id="101" state="completed">\n<task_result>\n'
-            + 'final report\n</task_result>\n</task>',
-        })}
-      />,
-    )
-    expect(screen.getByText('已完成')).toBeInTheDocument()
-    expect(screen.getByText('报告')).toBeInTheDocument()
-    expect(screen.getByText('final report')).toBeInTheDocument()
-    expect(screen.queryByText(/<task_result>/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/task\.status/)).not.toBeInTheDocument()
-  })
-
-  it('renders task final errors (e.g. concurrency limit) from task_error', () => {
-    render(
-      <TaskToolRenderer
-        message={message({
-          phase: 'result',
-          status: 'error',
-          text:
-            '<task id="102" state="error">\n'
-            + '<task_error>subagent concurrency limit reached (3/3)</task_error>\n</task>',
-        })}
-      />,
-    )
-    expect(screen.getByText('失败')).toBeInTheDocument()
-    expect(screen.getByText('错误')).toBeInTheDocument()
-    expect(screen.getByText('subagent concurrency limit reached (3/3)')).toBeInTheDocument()
-  })
-
-  it('renders the cancelled terminal state copy', () => {
-    render(
-      <TaskToolRenderer
-        message={message({
-          phase: 'result',
-          status: 'done',
-          text:
-            '<task id="103" state="cancelled">\n'
-            + '<task_error>Cancelled by user</task_error>\n</task>',
-        })}
-      />,
-    )
-    expect(screen.getByText('已取消')).toBeInTheDocument()
-    expect(screen.getByText('错误')).toBeInTheDocument()
-    expect(screen.getByText('Cancelled by user')).toBeInTheDocument()
-  })
-
-  it('falls back to raw text and surfaces a distinct errorMessage for non-task documents', () => {
-    render(
-      <TaskToolRenderer
-        message={message({
-          phase: 'result',
-          status: 'error',
-          text: 'plain terminal output',
-          errorMessage: 'subagent crashed',
-        })}
-      />,
-    )
-    expect(screen.getByText('plain terminal output')).toBeInTheDocument()
-    expect(screen.getByText('subagent crashed')).toBeInTheDocument()
-  })
-
-  it('omits the error paragraph when errorMessage equals the raw text', () => {
-    render(
-      <TaskToolRenderer
-        message={message({
-          phase: 'result',
-          status: 'error',
-          text: 'same error',
-          errorMessage: 'same error',
-        })}
-      />,
-    )
-    expect(screen.getByText('same error')).toBeInTheDocument()
-    expect(screen.queryAllByText('same error')).toHaveLength(1)
-  })
-
-  it('falls back to the raw text when the terminal text is not a task document', () => {
-    render(
-      <TaskToolRenderer
-        message={message({ phase: 'result', text: 'plain terminal output' })}
-      />,
-    )
-    expect(screen.getByText('plain terminal output')).toBeInTheDocument()
+    expect(output).toHaveTextContent('fallback-line-1')
+    expect(output).toHaveTextContent('fallback-line-7')
   })
 })

@@ -11,24 +11,27 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
-/** 通过可选的本机 LSP bridge 解析符号定义。 */
+/**
+ * 通过 Daemon 管理的 LSP 客户端解析符号定义。 绝对 {@code path} 不需要 workdir；只有相对 {@code path} 必须由本次调用显式给出绝对 workdir。
+ */
 public final class LspGotoDefinitionCapability extends AbstractCodingCapability {
 
-  private final LspBridge bridge;
+  private final LspService lsp;
 
-  public LspGotoDefinitionCapability(CodingToolsConfig config, ExecutorService executor) {
+  public LspGotoDefinitionCapability(
+      CodingToolsConfig config, LspService lsp, ExecutorService executor) {
     super(
         config,
         executor,
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION));
-    this.bridge = new LspBridge(config);
+    this.lsp = lsp;
   }
 
   @Override
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    Path workdir = optionalWorkdir(args);
     Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     if (Files.isDirectory(path)) {
       throw new IllegalArgumentException("path must be a file: " + path);
@@ -38,12 +41,7 @@ public final class LspGotoDefinitionCapability extends AbstractCodingCapability 
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
-    if (!bridge.bridgeAvailable()) {
-      throw new IllegalStateException(LspBridge.UNAVAILABLE_MESSAGE);
-    }
     return success(
-        request.call().id(),
-        bridge.gotoDefinition(
-            workdir, path, line, character, request.timeout(), execution::isCancelled));
+        request.call().id(), lsp.gotoDefinition(path, line, character, request.timeout()));
   }
 }

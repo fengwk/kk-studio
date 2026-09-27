@@ -217,9 +217,11 @@ class TestMacosInstallContract(DarwinInstallTestCase):
     def test_install_writes_the_shared_jar_and_a_direct_launch_agent(self):
         """Install must create the shared Unix JAR and a plist that execs java directly."""
         fixture = self.fixture(jar_body="shaded-jar-payload")
+        lsp_config = fixture.home / "lsp-config.json"
+        lsp_config.write_text('{"servers": {}}', encoding="utf-8")
         result = fixture.install(
             env=darwin_environment(fixture),
-            **{"note": SPECIAL_NOTE, "lsp-bridge-command": "lsp-bridge --stdio"},
+            **{"note": SPECIAL_NOTE, "lsp-config": str(lsp_config)},
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
@@ -253,10 +255,8 @@ class TestMacosInstallContract(DarwinInstallTestCase):
                 SPECIAL_NOTE,
                 "--bash-executable",
                 "/usr/bin/bash",
-                "--lsp-bridge-command",
-                "lsp-bridge --stdio",
-                "--javap-executable",
-                str(fixture.jdk / "bin" / "javap"),
+                "--lsp-config",
+                str(lsp_config),
             ],
             plist["ProgramArguments"],
         )

@@ -328,6 +328,11 @@ registerCase({
       // 回答先物化为 ToolResult，再检查已物化事实的同 submissionId 精确重放。
       // 立即重放可能仍处于 accepted-but-not-materialized，不用时序猜测代替门禁。
       await waitForInteractionGone(ctx, pending.interactionId)
+      // 接受答案即移出待办；必须等 Thread 收敛，才可断言 ToolResult 已持久化。
+      await waitForQuiescentThread(ctx, threadId, {
+        timeoutMs: 60_000,
+        intervalMs: 200,
+      })
       const replayed = envelopeData(
         (
           await ctx.call('POST', inputPath, {

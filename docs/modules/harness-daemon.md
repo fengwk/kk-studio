@@ -72,7 +72,15 @@ Daemon 不注册任何 MCP 能力：MCP 是 Platform 在 Backend 进程内的能
 4. 构造按 schema 校验的执行请求，抢占本地执行资源；
 5. 全部预检通过后才发送 `STARTED`，随后执行能力并调度超时。
 
-参数非法、报文超限、资源持久化失败或流式事件包含非法内容，同样以确定性 `FAILED` 终态收敛。非零超时由调度器触发，抢占终态标记并取消底层句柄；`timeoutMillis` 为 0 表示没有 execution deadline，不调度任何超时终态；收到 `CANCEL` 时，运行中的调用回复 `CANCELLED` 并取消句柄，已终结的调用重放既有终态。协议载荷非法或作用域不匹配时运行时回复 `ERROR` 并保留 journal；`REGISTRATION_REJECTED` 使进程进入 FAILED、停止重连并以非零状态退出，`RETRY_LATER` 触发断线与退避。
+参数非法、报文超限、资源持久化失败或流式事件包含非法内容，同样以确定性 `FAILED` 终态收敛。非零超时由调度器触发，抢占终态标记并按 `TIMED_OUT` 请求能力收尾；`timeoutMillis` 为 0 表示没有 execution deadline，不调度任何超时终态；收到 `CANCEL` 时，运行中的调用按 `CANCELLED` 请求能力收尾，已终结的调用重放既有终态。协议载荷非法或作用域不匹配时运行时回复 `ERROR` 并保留 journal；`REGISTRATION_REJECTED` 使进程进入 FAILED、停止重连并以非零状态退出，`RETRY_LATER` 触发断线与退避。
+
+### 超时与取消收尾
+
+超时与取消的终态类型由运行时裁决，绝不因为能力返回了结果而变成 `COMPLETED`：`FAILED` 表示超时，`CANCELLED` 表示调用方取消。运行时把裁决原因通过 [`EnvironmentCapabilityExecutionHandle#terminate`](harness-environment.md#执行与传输契约) 显式传给能力，能力据此产出与原因一致的收尾事实（例如进程是超时被杀还是被取消）。
+
+能力可以在 `terminationGrace()` 内自行提交终态。运行为此开启一个有界收尾窗口：抢占终态标记后先登记兜底定时器，再请求能力收尾；能力在预算内提交终态时，运行时保留自己的终态类型与裁决原因，并把能力结果的文本正文追加到该终态正文（`FAILED` 用 `message`、`CANCELLED` 用 `reason`）。因此失败日志无需协议变更即可到达调用方，同时 `FAILED`/`CANCELLED` 的单文本字段约束保持不变。
+
+窗口不会引入无界等待：兜底定时器到期立即提交运行时自己的终态；调度器已停机导致兜底定时器无法登记时同样立即提交；停机流程直接把在途调用写成 `CANCELLED` 并清空 journal，不等待能力配合；窗口内到达的迟到回调被 `DaemonInvocationJournal#complete` 的单向跃迁拦截，绝不产生第二个终态。注入正文只取能力结果的文本内容（与同一次调用的工具结果正文一致），超过 16 MiB 载荷上限时整体放弃注入。
 
 ### 实例身份与重连恢复
 
@@ -105,6 +113,8 @@ Branch HEAD 永远不能替代调用参数中的 exact commit。
 
 内联阈值为 50 KiB 或 2000 行；超过阈值转为落盘，达到捕获预算（默认 1 GiB）后只停止文件捕获并继续统计总数。输出体积与本地磁盘状态永远不是终止进程的理由：磁盘写失败只降级为无路径的有界预览，三种情况都让子进程自然退出，退出码始终是权威事实。失败路径在删除中转文件前先关闭文件流，不泄漏文件描述符也不残留幽灵文件。
 
+成功、非零退出、超时与取消四种收尾都先发布已捕获输出，绝不为收尾丢弃唯一副本：中转文件要么被发布为 durable 全文，要么被有界预览替代，`close` 只删除从未发布的中转文件。收尾说明（超时/取消/退出码，以及「已执行的副作用不回滚」的声明）只追加到返回文本，不写入 durable 全文、也不计入 `totalBytes`/`totalLines`。终态同时用 `detailsJson.process.outcome`（`EXITED`/`TIMED_OUT`/`CANCELLED`）与文本说明区分三种失败，且只有自然退出才报告 `exitCode`。
+
 ## 编码能力
 
 ### workdir 语义
@@ -125,17 +135,20 @@ Branch HEAD 永远不能替代调用参数中的 exact commit。
 
 ### 文件读写与检索
 
-`fs.read` 与 `fs.write`/`fs.edit` 共享统一的文件编码、预览截断与修改边界：文本按既有编码、BOM 与行尾表示写回，同一文件的并发修改通过进程内分段锁串行化。
+`fs.read` 与 `fs.write`/`fs.edit` 共享统一的文件编码与修改边界：文本按既有编码、BOM 与行尾表示写回，同一文件的并发修改通过进程内分段锁串行化。
 
-- **流式分页读取**：媒体类型只由文件前缀判定，文本以固定大小字符块流式解码，因此不存在「文本文件超过 N MiB 就拒绝」的上界，`process.exec` 落盘的全文可以直接被分页读取。图片仍是 Resource 语义：探测到受支持的图片签名时整文件字节成为 `BinaryResultContent`，由终态编码阶段直传对象存储。
-- **纯净编号正文**：正文中不保留合成截断标记，`line|` 编号后严格为按 LF 归一化的真实行片段，可直接完整复制为 `fs.edit` 的 `old_string` 做精确比对替换。
-- **长行列分页**：单行超过 2000 码点时按 Unicode 码点切片，不截断代理对；可选参数 `column_offset` 是 1-based 正整数码点偏移，仅限纯文本文件，指定时 `limit` 缺省为 1 且必须等于 1。
-- **精确有界输出**：包含 header、编号正文、分隔空行与续读尾注在内的完整 UTF-8 输出严格受控于 48 KiB；下一行导致超限时按整行有界截断并给出续读 offset。
-- 越界定位元数据与续读提示统一置于非编号尾部，不污染正文编号结构。
+- **流式分页读取**：媒体类型只由文件前缀判定，文本以固定大小字符块流式解码，因此不存在「文本文件超过 N MiB 就拒绝」的上界，`process.exec` 落盘的全文可以直接被分页读取。窗口契约由共享核心 [`common.text.TextReadWindow`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/text/TextReadWindow.java) 定义（本地侧经 [`LocalTextReadWindow`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalTextReadWindow.java) 适配本地编码与中断）：`offset`（默认 1）、`column_offset`（默认 1）都从 1 开始，`limit` 默认且最大 2000，正文累计最多 60000 个 Unicode 码点，不计行号、元数据与行分隔符。为了给出准确的总行数与文件级 `ends_with_newline`，扫描必须读到 EOF，但只驻留窗口内容，因此内存与文件大小无关；超时、取消或线程中断结束扫描，不返回半个窗口。图片仍是 Resource 语义：探测到受支持的图片签名时整文件字节成为 `BinaryResultContent`，由终态编码阶段直传对象存储。
+- **纯净编号正文**：正文不含合成截断标记，`line|` 编号后严格为真实行片段；CRLF、孤立 CR 与 LF 都只作为行边界，不进入正文，因此整个片段可以直接复制为 `fs.edit` 的 `old_string` 做精确比对替换。
+- **长行与列起点**：不限制单行长度，超长行按整行内容返回；`column_offset` 是 1-based 码点偏移，只作用于起始行片段，不要求 `limit` 为 1，也不作用于后续行。
+- **窗口元数据**：header 依次为 `path`、`ends_with_newline`、`range`；截断时追加 `truncated`、`truncation_reason`（`character_limit` 或 `line_limit`）与 `next`，LSP 可用时 `lsp` 作为最后一行。起点越过 EOF 或文件为空输出 `range: empty`，有效目标行上的越界列报错，未截断时省略全部截断字段。
+- **续读位置**：`next` 指向第一个未返回字符，完整行边界归一到下一行第 1 列；正文之后只有一行仅含该位置的 `[TRUNCATED: ...]` 提示，不生成下一次调用教程。
+- **目录与特殊文件**：目录清单保留独立的 `kind: directory` 语义与 48 KiB 展示上界，分页 `limit` 默认和上限都是 2000；设备、FIFO、socket、块设备等非普通节点在任何 I/O 之前拒绝。
 
-`fs.grep` 与 `fs.find` 使用 Java NIO 原生遍历，并用 JGit 规则解析检索目标祖先链上的 `.gitignore`，全部在 JVM 内完成：单行模式流式扫描，不受单文件大小上界限制；只有需要整文件视图的 `multiline` 模式保留 64 MiB 上界。LSP 能力通过可选的本地进程桥接承载，缺少工具链时返回明确的不可用提示，`lsp.java-decompile` 对可解析的 class 目标支持回退到 `javap`。LSP bridge 与 `javap` 子进程经 [`ChildProcessRunner`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunner.java) 并发排空 stdout/stderr：stdout 是调用方载荷故完整保留，stderr 只保留有界诊断尾部；deadline 绑定调用的有效超时，超时或取消都终止整棵进程树。
+`fs.grep` 与 `fs.find` 使用 Java NIO 原生遍历，全部在 JVM 内完成，不依赖外部检索二进制。忽略规则按检索目标自身解析：从目标向上取祖先 `.gitignore`（从外到内、last-match-wins，单条 pattern 由 JGit 的 gitignore 语义匹配）、仓库根的 `.git/info/exclude`（优先级低于同目录 `.gitignore`，`.git` 文件形式的 worktree 经 `gitdir`/`commondir` 解析），与调用 `workdir` 无关，`.git` 元数据始终硬排除。单行模式流式扫描，不受单文件大小上界限制，但单行超过 1 MiB 时无法宣称结果完整，降级为显式失败（目录扫描记为「未搜索路径」，绝不静默返回无匹配）；需要整文件视图的 `multiline` 保留 64 MiB 上界。文本编码与 `fs.read` 共享 `TextStreams`：UTF-8 或缺 BOM 时按 UTF-8、UTF-16LE/BE 由 BOM 判定，其余编码（如 GBK）严格解码失败并按二进制显式报错，不做替换字符降级。
 
-编码能力的参数只有一个配置来源：[`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java) 由 `DaemonMain` 用 CLI 取值与数据目录资源根构建，不再读取任何 `kkstudio.daemon.*` 系统属性。其中 `previewMaxLines = 2000` 与 `previewMaxBytes = 51200` 是固定常量，`bashExecutable`、`javapExecutable` 与可选的 `lspBridgeCommand` 由对应 CLI 选项覆盖。
+LSP 能力由 Daemon 直连外部语言服务器：CLI 的 `--lsp-config` 指向一个绝对路径的 JSON 文件，声明预先安装的服务器命令、扩展名与项目根标记；缺省即禁用 LSP，服务器不会被自动安装。客户端按项目根与配置复用一条常驻 stdio 连接，查询前同步文件，位置编码按服务器声明协商。客户端的协议流与 stderr 各自持续排空：协议流完整解析，stderr 只保留有界诊断尾部，用于在服务器崩溃时报告退出码与诊断。单次请求超时或取消只发送 `$/cancelRequest`，不终止共享客户端；进程收尾才走进程树终止语义——先 `shutdown` 再 `exit`，宽限期后强制终止含后代的整棵树。
+
+编码能力的参数只有一个配置来源：[`CodingToolsConfig`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingToolsConfig.java) 由 `DaemonMain` 用 CLI 取值与数据目录资源根构建，不再读取任何 `kkstudio.daemon.*` 系统属性。其中 `previewMaxLines = 2000` 与 `previewMaxBytes = 51200` 是固定常量，`bashExecutable` 与可选的 `lspConfig`（解析为发现表）由对应 CLI 选项覆盖。
 
 ## 二进制结果直传
 
@@ -178,11 +191,11 @@ PUT 请求完全按票据的已签名事实构造：方法与 headers 与签名�
 - [`DaemonModuleArchitectureTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonModuleArchitectureTest.java)：模块依赖方向、能力实现所需的 import 白名单与线程池所有权边界。
 - [`DaemonConfigTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java)、[`DaemonMainTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonMainTest.java)、[`DaemonTokenFileTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonTokenFileTest.java)：选项默认值与唯一性、凭证不外泄、信息命令、未知参数 fail-closed、token 文件的绝对路径与权限规则。
 - [`DaemonDataDirectoryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonDataDirectoryTest.java)：owner-only 布局、进程内与跨 JVM 独占锁、重启后锁释放、启动期只清理遗留 `.part` 并保留已发布数据。
-- [`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：握手与重连、`REGISTRATION_REJECTED`/`RETRY_LATER` 分支、入站协议校验、超时裁决、取消与终态重放、上传在重连后的恢复与去重、停机收敛。
+- [`DaemonRuntimeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)：握手与重连、`REGISTRATION_REJECTED`/`RETRY_LATER` 分支、入站协议校验、超时裁决与超时/取消收尾窗口（终态类型、已捕获输出注入、兜底收敛、停机收敛）、取消与终态重放、上传在重连后的恢复与去重。
 - [`OkHttpWebSocketTransportTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransportTest.java)：`permessage-deflate` 协商门禁、文本帧传输、二进制拦截与超限关闭。
-- [`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)：显式 workdir 语义、编码能力端到端行为、`.gitignore` 检索、LSP 有效超时与取消终止进程树。
-- [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`ChildProcessRunnerTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ChildProcessRunnerTest.java)：内联与落盘阈值、预览字符边界与重叠去重、行数一致性、捕获预算与磁盘失败降级、原子发布、stdout 完整保留与 stderr 有界诊断。
+- [`WorkdirPathSemanticsTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/WorkdirPathSemanticsTest.java)、[`CodingCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/CodingCapabilitiesTest.java)、[`NativeSearchCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java)、[`FindGrepCapabilitiesTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/FindGrepCapabilitiesTest.java)、[`GitIgnoreDiscoveryTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/GitIgnoreDiscoveryTest.java)：显式 workdir 语义、编码能力端到端行为、原生检索的匹配/上限/失败/超时、`.gitignore` 与 `info/exclude` 的分层解析、LSP 有效超时与取消终止进程树。检索行为的源用例映射见[内置检索测试映射](../operations/builtin-search-tests.md)。
+- [`OutputSpoolTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpoolTest.java)、[`TextOutputStoreTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStoreTest.java)、[`BashCapabilityTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapabilityTest.java)、[`ProcessTreeTest.java`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessTreeTest.java)：内联与落盘阈值、预览字符边界与重叠去重、行数一致性、捕获预算与磁盘失败降级（含 durable 发布失败）、原子发布、合并流的大输出完整捕获、启动前收尾不启动 shell、stdin 立即关闭、超时/取消/退出三种收尾的输出保留与 `process.outcome` 区分、异常路径（调度被拒、监听器抛错）下先收敛进程树再通知终态（读端在收敛后才关闭，后台后代不会提前脱离可达范围）、终止顺序与平台异常状态（句柄不可用、后代枚举失败、信号被拒绝、存活查询失败）下的收敛。
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Harness Environment Server](harness-environment-server.md)、[Harness MCP](harness-mcp.md)、[Harness Common](harness-common.md)、[Platform](platform.md)、[Environment Daemon 安装与运行](../operations/environment-daemon.md)。
+上级：[系统设计](../system-design.md)。相关文档：[内置 Bash 测试映射](../operations/builtin-bash-tests.md)、[Harness Environment](harness-environment.md)、[Harness Environment Server](harness-environment-server.md)、[Harness MCP](harness-mcp.md)、[Harness Common](harness-common.md)、[Platform](platform.md)、[Environment Daemon 安装与运行](../operations/environment-daemon.md)。

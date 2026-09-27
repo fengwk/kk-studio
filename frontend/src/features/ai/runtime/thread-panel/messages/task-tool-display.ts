@@ -1,8 +1,8 @@
-import { parseTaskFinalText } from '@/features/ai/runtime/task-tool-parser'
+import { parseTaskReceipt } from '@/features/ai/runtime/task-tool-parser'
 import { formatToolResultPreview } from '@/features/ai/runtime/thread-panel/messages/tool-display'
 import type { ToolRendererMessage } from '@/platform/extensions/types'
 
-/** task 专属展开判断：call 参数或被折叠的最终报告存在时才需要 toggle。 */
+/** task 专属展开判断：call 参数存在或降级结果被折叠时才需要 toggle。 */
 export function isTaskToolRendererExpandable(
   call: ToolRendererMessage | undefined,
   result: ToolRendererMessage | undefined,
@@ -14,21 +14,18 @@ export function isTaskToolRendererExpandable(
   if (!resultMessage) {
     return false
   }
-  const parsed = parseTaskFinalText(resultMessage.text)
-  if (parsed != null) {
-    return parsed.report != null
-      && formatToolResultPreview(
-        'task',
-        parsed.report,
-        { expanded: false, error: false },
-      ).truncated
+  const isError = resultMessage.status === 'error' || Boolean(resultMessage.errorMessage)
+  const receipt = isError ? null : parseTaskReceipt(resultMessage.text)
+  if (receipt != null) {
+    // 成功受理收据是紧凑展示（状态 + Thread ID），无需展开切换
+    return false
   }
   return formatToolResultPreview(
     'task',
     resultMessage.text,
     {
       expanded: false,
-      error: resultMessage.status === 'error' || Boolean(resultMessage.errorMessage),
+      error: isError,
     },
   ).truncated
 }

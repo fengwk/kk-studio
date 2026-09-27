@@ -1634,29 +1634,9 @@ export const aiCatalog = {
     'en-US': '{{title}}',
     'zh-CN': '{{title}}',
   },
-  'ai.runtime.task.widget': {
-    'en-US': 'Subagent tasks',
-    'zh-CN': '子任务',
-  },
-  'ai.runtime.task.running': {
-    'en-US': '{{count}} running',
-    'zh-CN': '{{count}} 个运行中',
-  },
-  'ai.runtime.task.state.queued': {
-    'en-US': 'queued',
-    'zh-CN': '排队中',
-  },
-  'ai.runtime.task.state.runningModel': {
-    'en-US': 'running model',
-    'zh-CN': '模型运行中',
-  },
-  'ai.runtime.task.state.runningTool': {
-    'en-US': 'running tool',
-    'zh-CN': '工具运行中',
-  },
-  'ai.runtime.task.state.waitingApproval': {
-    'en-US': 'waiting approval',
-    'zh-CN': '等待审批',
+  'ai.runtime.task.state.accepted': {
+    'en-US': 'Accepted / Running in background',
+    'zh-CN': '已接受 / 后台执行',
   },
   'ai.runtime.task.state.completed': {
     'en-US': 'Completed',
@@ -1670,14 +1650,6 @@ export const aiCatalog = {
     'en-US': 'Cancelled',
     'zh-CN': '已取消',
   },
-  'ai.runtime.task.turns': {
-    'en-US': '{{count}} turns',
-    'zh-CN': '{{count}} 轮',
-  },
-  'ai.runtime.task.toolCalls': {
-    'en-US': '{{count}} tool calls',
-    'zh-CN': '{{count}} 次工具调用',
-  },
   'ai.runtime.task.subagent': {
     'en-US': 'Subagent',
     'zh-CN': '子代理',
@@ -1685,6 +1657,10 @@ export const aiCatalog = {
   'ai.runtime.task.prompt': {
     'en-US': 'Prompt',
     'zh-CN': '任务提示',
+  },
+  'ai.runtime.task.thread': {
+    'en-US': 'Thread ID',
+    'zh-CN': 'Thread ID',
   },
   'ai.runtime.task.session': {
     'en-US': 'Session',
@@ -1702,17 +1678,17 @@ export const aiCatalog = {
     'en-US': 'Error',
     'zh-CN': '错误',
   },
-  'ai.runtime.task.approvalRequested': {
-    'en-US': 'Awaiting approval for {{toolName}}',
-    'zh-CN': '等待审批：{{toolName}}',
+  'ai.thread.invalidId': {
+    'en-US': 'Invalid thread ID',
+    'zh-CN': '无效的 Thread ID',
   },
-  'ai.runtime.task.allowTool': {
-    'en-US': 'Allow {{toolName}}',
-    'zh-CN': '允许 {{toolName}}',
+  'ai.thread.loadFailed': {
+    'en-US': 'Failed to load thread',
+    'zh-CN': '加载 Thread 失败',
   },
-  'ai.runtime.task.denyTool': {
-    'en-US': 'Deny {{toolName}}',
-    'zh-CN': '拒绝 {{toolName}}',
+  'ai.thread.workspaceTitle': {
+    'en-US': 'Thread: {{threadId}}',
+    'zh-CN': 'Thread: {{threadId}}',
   },
   'ai.runtime.entry.rootTitle': {
     'en-US': 'Conversation started',

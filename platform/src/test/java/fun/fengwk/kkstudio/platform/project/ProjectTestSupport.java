@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -204,6 +205,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
      * 的归属校验接到真表。
      */
     @Bean
+    @Primary
     public HarnessStore harnessStore(JdbcTemplate jdbc) {
       HarnessStore store = mock(HarnessStore.class);
       HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);

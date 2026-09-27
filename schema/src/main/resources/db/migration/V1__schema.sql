@@ -1205,6 +1205,112 @@ create index idx_harness_work_lease_until
 comment on index idx_harness_work_available is 'claimNextWork 按 (available_at, target_type, target_id) 选取候选';
 comment on index idx_harness_work_lease_until is '过期 lease 扫描索引';
 
+-- 异步 task 委派记录：每次 task Tool invocation 一行，标识本次委派的父子 Thread、本次执行边界
+-- （source_head_entry_id）、执行终态与投递状态。子 Thread 与命令、Work、Entry 一律复用第 2 节既有协议，
+-- 本表只补足「哪个父 Tool 调用委派了哪个子执行、子执行是否终结、结果是否已通知父」这一归属、执行与投递事实。
+--
+-- status 是清晰的三段状态机，把「子执行终结」与「父通知完成」分开：
+--   OPEN      —— 子执行仍在进行（含其子树仍在进行），占并发额度
+--   SETTLED   —— 子执行已终结，终态与报告已持久化（outcome/report/partial_result/error/settled_at），
+--                父通知尚未入队；不占并发额度，停止的父恢复后仍可交付
+--   DELIVERED —— 父通知已与状态在同一 store 事务内入队
+create table harness_subagent_task (
+    invocation_id uuid primary key,
+    parent_thread_id uuid not null,
+    root_thread_id uuid not null,
+    child_session_id uuid not null,
+    child_thread_id uuid not null,
+    source_head_entry_id uuid not null,
+    agent varchar(256) not null,
+    prompt text not null,
+    max_turns integer,
+    status varchar(16) not null,
+    outcome varchar(16),
+    report text,
+    partial_result text,
+    error text,
+    reminder_turn bigint not null default 0,
+    settled_at timestamptz(3),
+    created_at timestamptz(3) not null,
+    updated_at timestamptz(3) not null,
+    constraint fk_harness_subagent_task_parent_thread foreign key (parent_thread_id)
+        references harness_thread (id) on delete cascade,
+    constraint ck_harness_subagent_task_agent check (
+        btrim(agent) <> ''
+    ),
+    constraint ck_harness_subagent_task_prompt check (
+        btrim(prompt) <> ''
+    ),
+    constraint ck_harness_subagent_task_max_turns check (
+        max_turns is null or max_turns > 0
+    ),
+    constraint ck_harness_subagent_task_status check (
+        status in ('OPEN', 'SETTLED', 'DELIVERED')
+    ),
+    constraint ck_harness_subagent_task_outcome check (
+        outcome is null
+        or outcome in ('COMPLETED', 'ERROR', 'CANCELLED')
+    ),
+    constraint ck_harness_subagent_task_state_shape check (
+        (status = 'OPEN' and outcome is null and settled_at is null)
+        or (status <> 'OPEN' and outcome is not null and settled_at is not null)
+    ),
+    constraint ck_harness_subagent_task_reminder_turn check (reminder_turn >= 0),
+    constraint ck_harness_subagent_task_time_order check (
+        updated_at >= created_at
+        and (settled_at is null or settled_at >= created_at)
+    )
+);
+
+comment on table harness_subagent_task is '异步 task 委派：以 task Tool invocation id 为主键记录每次父子委派、本次执行边界、执行终态与父通知状态；同一子 Thread 可有多次执行（多行），但在任一时刻至多一行 OPEN（执行中）';
+comment on column harness_subagent_task.invocation_id is 'task Tool invocation 的 UUID（主键）；同一次 Tool 调用重试复用同一行，避免双开子执行';
+comment on column harness_subagent_task.parent_thread_id is '父 Thread UUID（发起委派的一方）；带级联删除：父 Thread 被删除时委派双方都不复存在，无待交付结果，记录随之清理';
+comment on column harness_subagent_task.root_thread_id is '委派树根 Thread UUID（整棵树并发额度与停止传播的归属键）；不使用外键，根 Thread 删除只影响额度统计而不影响已存在的委派事实';
+comment on column harness_subagent_task.child_session_id is '子 Session UUID（新建委派时由父 invocation 稳定派生）';
+comment on column harness_subagent_task.child_thread_id is '子 Thread UUID（新建委派时由父 invocation 稳定派生；继续既有执行时为被继续的 Thread）；刻意不建外键：子 Session/Thread 被删除时记录必须留存，使父 Thread 仍持有未结清事实并可结清为明确的终态错误，而不是静默丢失委派（父被误判空闲）';
+comment on column harness_subagent_task.source_head_entry_id is '本次执行边界：接受时子 Thread 的 head Entry id，用于把结果限定在本次执行之后';
+comment on column harness_subagent_task.agent is '本次执行的 Agent（subagent_type）名；继续既有 Thread 可切换 Agent';
+comment on column harness_subagent_task.prompt is '本次委派的完整 prompt 原文（结果交付时的权威来源）';
+comment on column harness_subagent_task.max_turns is '本次调用的 max_turns 软预算（null 表示使用当前 policy 默认）';
+comment on column harness_subagent_task.status is '状态机：OPEN（子执行进行中，占额度）→ SETTLED（执行已终结且终态已持久化，父通知待交付，不占额度）→ DELIVERED（父通知已入队）';
+comment on column harness_subagent_task.outcome is '执行终态（COMPLETED/ERROR/CANCELLED）；OPEN 时必须为 null，SETTLED/DELIVERED 时必须非 null';
+comment on column harness_subagent_task.report is '终态报告原文（COMPLETED 时的完整结果；交付内容以本列为准，不重新从子历史推导）';
+comment on column harness_subagent_task.partial_result is '失败/取消时保留的部分输出原文（与 error 分离，供完成消息按契约渲染）';
+comment on column harness_subagent_task.error is '失败或取消的说明文本（与 partial_result 分离）';
+comment on column harness_subagent_task.reminder_turn is '已发出的 max_turns 软提醒轮次计数（用于周期性收敛提醒）';
+comment on column harness_subagent_task.settled_at is '执行终结时间（毫秒精度）；OPEN 时为 null';
+comment on column harness_subagent_task.created_at is '创建时间（毫秒精度）';
+comment on column harness_subagent_task.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+
+create unique index uk_harness_subagent_task_child_open
+    on harness_subagent_task (child_thread_id)
+    where status = 'OPEN';
+
+comment on index uk_harness_subagent_task_child_open is '同一子 Thread 至多一行 OPEN，阻止重叠执行（换 Agent 继续必须等上一次执行终结）';
+
+create index idx_harness_subagent_task_undelivered_scan
+    on harness_subagent_task (created_at, invocation_id)
+    where status <> 'DELIVERED';
+
+comment on index idx_harness_subagent_task_undelivered_scan is '后台扫描待结清/待交付 task 的稳定排序候选';
+
+create index idx_harness_subagent_task_parent
+    on harness_subagent_task (parent_thread_id);
+
+comment on index idx_harness_subagent_task_parent is '按父 Thread 展开委派子树（递归聚合子树内是否仍有未交付委派）';
+
+create index idx_harness_subagent_task_parent_open
+    on harness_subagent_task (parent_thread_id)
+    where status = 'OPEN';
+
+comment on index idx_harness_subagent_task_parent_open is '按父 Thread 统计仍在执行的委派（父级并发额度）';
+
+create index idx_harness_subagent_task_root_open
+    on harness_subagent_task (root_thread_id)
+    where status = 'OPEN';
+
+comment on index idx_harness_subagent_task_root_open is '按根 Thread 统计仍在执行的委派（树级并发额度）';
+
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts
 --

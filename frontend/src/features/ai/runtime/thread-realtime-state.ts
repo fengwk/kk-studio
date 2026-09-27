@@ -3,7 +3,6 @@ import type {
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import { taskStatusFingerprint } from '@/features/ai/runtime/task-status'
 import type { ToolAttachment } from '@/features/ai/runtime/thread-timeline-types'
 import { toResourceAttachment } from '@/features/ai/runtime/thread-timeline/content-utils'
 
@@ -740,7 +739,6 @@ export function reduceRealtimeToolStream(
 ): RealtimeToolStream {
   const chunkText = partialText(partial.payload)
   const processDetails = parseProcessOutputDetails(partial.payload.details)
-  const replaceText = isTaskStatusPartial(partial.payload)
   const isNewAttempt =
     current == null
     || current.threadId !== partial.threadId
@@ -925,25 +923,15 @@ export function reduceRealtimeToolStream(
     }
   }
 
-  const currentTaskStatus = replaceText ? taskStatusFingerprint(current.text) : null
-  if (
-    currentTaskStatus != null
-    && nextError === current.error
-    && currentTaskStatus === taskStatusFingerprint(chunkText)
-  ) {
+  if (!chunkText && nextError === current.error) {
     return current
   }
   return {
     ...current,
-    text: replaceText ? chunkText : current.text + chunkText,
+    text: current.text + chunkText,
     error: nextError,
     createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
   }
-}
-
-function isTaskStatusPartial(payload: Record<string, unknown>): boolean {
-  const details = payload.details
-  return isRecord(details) && details.kind === 'task.status'
 }
 
 /**

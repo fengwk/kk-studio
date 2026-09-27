@@ -93,7 +93,7 @@ export function useBoundBranchPanel({
   initialParts = [],
   initialReplay,
 }: {
-  owner: AgentRuntimeOwnerDTO
+  owner?: AgentRuntimeOwnerDTO
   threadId: string
   initialParts?: ComposerPart[]
   initialReplay?: CommandBatchReplay
@@ -178,7 +178,7 @@ export function useBoundBranchPanel({
 
   const buildBatch = useCallback(
     (parts: ComposerPart[]): CommandBatchPlan | null => {
-      if (boundThread == null || boundBranchState == null || effectiveBase == null) {
+      if (owner == null || boundThread == null || boundBranchState == null || effectiveBase == null) {
         return null
       }
       return buildMessageBatchPlan({

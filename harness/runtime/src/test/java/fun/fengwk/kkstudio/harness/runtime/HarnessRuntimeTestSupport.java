@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -1248,12 +1247,6 @@ final class HarnessRuntimeTestSupport {
   static void assertStopped(StopResult result) {
     assertFalse(result.replayed());
     assertNotNull(result.stoppedTurnEndEntryId());
-  }
-
-  /** Stop 结果为 IDLE（非 replay，未落盘任何 TURN_END）。 */
-  static void assertIdle(StopResult result) {
-    assertFalse(result.replayed());
-    assertNull(result.stoppedTurnEndEntryId());
   }
 
   /** Stop 结果为 replay（幂等重放既有 STOPPED 事实）。 */

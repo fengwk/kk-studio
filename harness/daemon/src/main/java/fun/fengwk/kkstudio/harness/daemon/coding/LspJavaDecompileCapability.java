@@ -10,34 +10,42 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 
-/** 通过 LSP bridge 反编译或反汇编 Java class（可用时），否则对可解析的目标回退到 {@code javap}。 */
+/**
+ * 通过 Daemon 管理的 LSP 客户端获取 Java class 源码（jdtls 反编译），不做 {@code javap} 字节码回退。
+ *
+ * <p>绝对 {@code path} 不需要 workdir；相对 {@code path} 必须显式给出绝对 workdir。{@code target} 推荐 {@code jdt://}
+ * URI 或绝对 class 路径，这两种形态不依赖 workdir；相对 class 路径只在显式 workdir 下解析。
+ */
 public final class LspJavaDecompileCapability extends AbstractCodingCapability {
 
-  private final LspBridge bridge;
+  private final LspService lsp;
 
-  public LspJavaDecompileCapability(CodingToolsConfig config, ExecutorService executor) {
+  public LspJavaDecompileCapability(
+      CodingToolsConfig config, LspService lsp, ExecutorService executor) {
     super(
         config,
         executor,
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE));
-    this.bridge = new LspBridge(config);
+    this.lsp = lsp;
   }
 
   @Override
   EnvironmentCapabilityResult run(
       EnvironmentCapabilityExecutionRequest request, Execution execution) throws Exception {
     JsonNode args = arguments(request);
-    Path workdir = EnvironmentPaths.workdir(string(args, "workdir"));
+    Path workdir = optionalWorkdir(args);
     Path path = EnvironmentPaths.existing(string(args, "path"), workdir);
     String target = string(args, "target");
     if (target.isBlank()) {
       throw new IllegalArgumentException("target must not be blank");
     }
+    if (workdir == null) {
+      LspClient.requireWorkdirForRelativeTarget(target);
+    }
     if (execution.isCancelled()) {
       throw new InterruptedException();
     }
     return success(
-        request.call().id(),
-        bridge.javaDecompile(workdir, path, target, request.timeout(), execution::isCancelled));
+        request.call().id(), lsp.javaDecompile(path, workdir, target, request.timeout()));
   }
 }

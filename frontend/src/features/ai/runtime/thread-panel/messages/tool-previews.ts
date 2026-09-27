@@ -106,7 +106,7 @@ export function generateSimpleDiffLines(oldText: string, newText: string): strin
 function extractPartialObjectFields(raw: string): Record<string, unknown> {
   const values: Record<string, unknown> = {}
   const pattern =
-    /"(path|content|old_string|new_string|replace_all|workdir|offset|limit|pattern|include|ignore_case|literal|multiline|timeout_seconds|command|line|character|query|target|subagent_type|session_id|maxTurns|name|server|tool)"\s*:\s*(true|false|-?\d+(?:\.\d+)?|"((?:\\.|[^"\\])*)("|$))/g
+    /"(path|content|old_string|new_string|replace_all|workdir|offset|limit|pattern|include|ignore_case|literal|multiline|timeout_seconds|command|line|character|query|target|subagent_type|thread_id|max_turns|name|server|tool)"\s*:\s*(true|false|-?\d+(?:\.\d+)?|"((?:\\.|[^"\\])*)("|$))/g
   for (const match of raw.matchAll(pattern)) {
     const key = match[1]
     if (!key) {

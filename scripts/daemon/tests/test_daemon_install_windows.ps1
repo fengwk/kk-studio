@@ -308,6 +308,32 @@ function Test-PureValidation {
     Assert-Throws -Action {
         Assert-NoControlCharacters -Value "line1`nline2" -Name "fixture"
     } -ExpectedMessage "control characters" -Message "newline is rejected"
+
+    Assert-Throws -Action {
+        Assert-LspConfigFile -Path "relative\config.json"
+    } -ExpectedMessage "absolute drive or UNC" -Message "relative lsp-config is rejected"
+    Assert-Throws -Action {
+        Assert-LspConfigFile -Path "C:\path\~dir\config.json"
+    } -ExpectedMessage "~" -Message "tilde in lsp-config is rejected"
+    Assert-Throws -Action {
+        Assert-LspConfigFile -Path "C:\path\%VAR%\config.json"
+    } -ExpectedMessage "environment-variable placeholders" -Message "percent placeholder is rejected"
+    Assert-Throws -Action {
+        Assert-LspConfigFile -Path "C:\path\`$VAR\config.json"
+    } -ExpectedMessage "environment-variable placeholders" -Message "dollar placeholder is rejected"
+    Assert-Throws -Action {
+        Assert-LspConfigFile -Path "C:\nonexistent\config.json"
+    } -ExpectedMessage "existing readable regular file" -Message "missing lsp-config is rejected"
+
+    $tempLspConfig = [IO.Path]::GetTempFileName()
+    try {
+        $validated = Assert-LspConfigFile -Path $tempLspConfig
+        Assert-Equal -Expected (Get-Item -LiteralPath $tempLspConfig).FullName `
+            -Actual $validated -Message "valid lsp config file is accepted"
+    }
+    finally {
+        Remove-Item -LiteralPath $tempLspConfig -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Test-ScheduledTaskDefinition {
@@ -328,8 +354,8 @@ function Test-ScheduledTaskDefinition {
         "C:\Fixture Root\.kk-studio",
         "--bash-executable",
         "C:\Program Files\Git\bin\bash.exe",
-        "--javap-executable",
-        "C:\Program Files\Java\jdk-21\bin\javap.exe"
+        "--lsp-config",
+        "C:\Fixture Root\lsp-config.json"
     )
     $workingDirectory = [Environment]::GetFolderPath(
         [Environment+SpecialFolder]::UserProfile

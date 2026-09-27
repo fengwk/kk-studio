@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.NOW;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.path;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
@@ -12,8 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -26,6 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /** TurnPlan 不可变快照校验：positive id、非负 cutoff、非空引用与 deferred user demand 推导。 */
 class TurnPlanTest {
@@ -136,6 +141,72 @@ class TurnPlanTest {
 
     assertTrue(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, setting));
     assertFalse(TurnPlanBuilder.isConsumed(TurnStartReason.CONTINUATION, custom));
+  }
+
+  /** 测试意图：STOP Turn 只由 StopControl 在其停止事务内完整写入，planner 对 STOP 必须 fail closed，绝不生成模型工作计划。 */
+  @Test
+  void stopReasonIsNeverPlannedByTheProcessor() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var baseline = seedBaseline(store);
+    EntryPath sourcePath = path(store, baseline.threadId());
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new TurnPlanBuilder()
+                    .build(
+                        baseline.threadId(),
+                        sourcePath,
+                        TurnStartReason.STOP,
+                        List.of(),
+                        ids(7_000L),
+                        NOW,
+                        null));
+
+    assertEquals("STOP turns are never planned by the processor", error.getMessage());
+  }
+
+  /** 测试意图：INPUT 计划把被消费的 CUSTOM_MESSAGE 冻结为 CORE CustomMessagePayload Entry，且不改写 settings 快照。 */
+  @Test
+  void consumedCustomMessageIsFrozenAsCoreCustomEntryWithoutChangingSettings() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    var baseline = seedBaseline(store);
+    EntryPath sourcePath = path(store, baseline.threadId());
+    UUID key =
+        seedCommand(
+            store,
+            baseline.threadId(),
+            new CustomMessageCommandPayload(AgentMessage.user("runtime reminder")));
+    ThreadCommand custom = command(store, baseline.threadId(), key);
+
+    TurnPlan plan =
+        new TurnPlanBuilder()
+            .build(
+                baseline.threadId(),
+                sourcePath,
+                TurnStartReason.INPUT,
+                List.of(custom),
+                ids(7_100L),
+                NOW,
+                null);
+
+    assertEquals(List.of(custom), plan.consumedCommands());
+    assertEquals(2, plan.candidateEntries().size());
+    assertEquals(
+        TurnStartReason.INPUT,
+        ((TurnStartPayload) plan.candidateEntries().get(0).payload()).reason());
+    assertEquals(sourcePath.baseSettings(), plan.candidatePath().baseSettings());
+    CustomMessagePayload frozen = (CustomMessagePayload) plan.candidateEntries().get(1).payload();
+    assertEquals(CustomMessagePayload.CORE_CONTRIBUTOR_ID, frozen.contributorId());
+    assertEquals(CustomMessagePayload.CORE_CUSTOM_TYPE, frozen.customType());
+    assertEquals(AgentMessage.user("runtime reminder"), frozen.message());
+  }
+
+  /** 确定性 id 分配器：planner 为 TURN_START 与每个冻结 Entry 各取一个新 id。 */
+  private static Supplier<UUID> ids(long base) {
+    AtomicLong sequence = new AtomicLong();
+    return () -> TestIds.id(base + sequence.incrementAndGet());
   }
 
   @Test

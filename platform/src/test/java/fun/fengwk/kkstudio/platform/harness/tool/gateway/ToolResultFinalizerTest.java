@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -17,6 +18,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -34,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <ul>
  *   <li>50 KiB / 2000 物理行内联判定；
+ *   <li>可信内置 {@code read} 身份的 320 KiB / 2020 物理行加宽内联判定（其他工具与 MCP 同名变体保持默认预算）；
  *   <li>大输出聚合投影（唯一 ResourceResultContent、首文本位置替换、非文本顺序保留）；
  *   <li>严格 UTF-8 与物理行计数、UTF-8/行数安全的 raw preview（无 marker）；
  *   <li>16 MiB 硬上限（OUTPUT_TOO_LARGE）；
@@ -510,6 +513,225 @@ class ToolResultFinalizerTest {
         assertInstanceOf(ToolResultFinalizer.Outcome.Failed.class, oversized).error().kind());
     assertEquals(0, store.reads);
     assertTrue(store.puts.isEmpty());
+  }
+
+  /** 终态化器按模型可见 name 识别可信内置 read；该 name 与内置 read 工具常量一致，是加宽预算的唯一入口。 */
+  @Test
+  void builtinReadIdentityIsTheTrustedNameTheFinalizerWidens() {
+    // 工具身份就是模型可见 name：CompositeRuntimeToolCatalog 对跨源/同源同名 fail-closed，
+    // 因此 "read" 只能解析到内置 read 工具，任意 MCP 同名工具无法借此放宽预算。
+    assertEquals("read", ReadTool.NAME);
+  }
+
+  /** read 契约上限（2000 行、60000 code point 正文）加行号/header 后仍完整内联，不再被 50 KiB 二次外化。 */
+  @Test
+  void inlinesBuiltinReadMaxWindowWithEmojiBodyAndLineNumbers() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    String payload = readWindow(numberedWindow(2000, "\uD83D\uDE00", 30));
+    // 正文 60000 个 4 字节 code point = 240000 字节，加 2000 行行号与 header 仍在 320 KiB 内
+    assertTrue(
+        payload.getBytes(StandardCharsets.UTF_8).length
+            > ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
+    assertTrue(
+        payload.getBytes(StandardCharsets.UTF_8).length
+            < ToolResultFinalizer.READ_INLINE_MAX_UTF8_BYTES);
+    assertTrue(
+        ToolResultFinalizer.countPhysicalLines(payload)
+            <= ToolResultFinalizer.READ_INLINE_MAX_LINES);
+
+    ToolResultFinalizer.Outcome.Success success =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Success.class,
+            finalizer(store)
+                .finalizeResult(
+                    ReadTool.NAME,
+                    new ToolResult(
+                        "call-1", List.of(new TextResultContent(payload)), false, "{}")));
+
+    assertTrue(store.puts.isEmpty());
+    assertEquals(1, success.result().contents().size());
+    assertEquals(payload, ((TextResultContent) success.result().contents().getFirst()).text());
+  }
+
+  /** ASCII 与 CJK 正文同样按 read 加宽预算内联：60 KiB ASCII 文本不再触发 20 行 / 2 KiB 预览外化。 */
+  @Test
+  void inlinesBuiltinReadAsciiAndCjkWindows() {
+    String ascii = readWindow(numberedWindow(2000, "a", 30));
+    String cjk = readWindow(numberedWindow(2000, "\u4E2D", 30));
+    assertTrue(
+        ascii.getBytes(StandardCharsets.UTF_8).length > ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
+    assertTrue(
+        cjk.getBytes(StandardCharsets.UTF_8).length > ToolResultFinalizer.INLINE_MAX_UTF8_BYTES);
+
+    for (String payload : List.of(ascii, cjk)) {
+      RecordingResourceStore store = new RecordingResourceStore();
+      ToolResultFinalizer.Outcome.Success success =
+          assertInstanceOf(
+              ToolResultFinalizer.Outcome.Success.class,
+              finalizer(store)
+                  .finalizeResult(
+                      ReadTool.NAME,
+                      new ToolResult(
+                          "call-1", List.of(new TextResultContent(payload)), false, "{}")));
+      assertTrue(store.puts.isEmpty());
+      assertEquals(payload, ((TextResultContent) success.result().contents().getFirst()).text());
+    }
+  }
+
+  /** 超出 read 加宽预算（字节或物理行）仍按硬约束资源化，且 preview 保持有界。 */
+  @Test
+  void externalizesBuiltinReadWindowBeyondInlineBudget() {
+    // 字节超限：320 KiB + 1
+    RecordingResourceStore byteStore = new RecordingResourceStore();
+    String oversized = "x".repeat(ToolResultFinalizer.READ_INLINE_MAX_UTF8_BYTES + 1);
+    ToolResultFinalizer.Outcome.Success byteSuccess =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Success.class,
+            finalizer(byteStore)
+                .finalizeResult(
+                    ReadTool.NAME,
+                    new ToolResult(
+                        "call-1", List.of(new TextResultContent(oversized)), false, "{}")));
+    assertEquals(1, byteStore.puts.size());
+    ResourceResultContent byteResource =
+        assertInstanceOf(ResourceResultContent.class, byteSuccess.result().contents().getFirst());
+    assertEquals("read-result.txt", byteResource.resource().name());
+    assertEquals(ToolResultFinalizer.extractRawPreview(oversized), byteResource.preview());
+
+    // 物理行超限：2021 行（字节远小于 320 KiB）
+    RecordingResourceStore lineStore = new RecordingResourceStore();
+    String manyLines = "a\n".repeat(ToolResultFinalizer.READ_INLINE_MAX_LINES + 1);
+    ToolResultFinalizer.Outcome.Success lineSuccess =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Success.class,
+            finalizer(lineStore)
+                .finalizeResult(
+                    ReadTool.NAME,
+                    new ToolResult(
+                        "call-2", List.of(new TextResultContent(manyLines)), false, "{}")));
+    assertEquals(1, lineStore.puts.size());
+    ResourceResultContent lineResource =
+        assertInstanceOf(ResourceResultContent.class, lineSuccess.result().contents().getFirst());
+    assertNotNull(lineResource.textMetadata());
+    assertEquals(
+        ToolResultFinalizer.READ_INLINE_MAX_LINES + 1, lineResource.textMetadata().totalLines());
+  }
+
+  /** 加宽预算只属于可信内置 read：普通工具与 MCP 风格的名称变体保持 50 KiB / 2000 行默认预算。 */
+  @Test
+  void widenedInlineBudgetAppliesOnlyToTrustedBuiltinReadIdentity() {
+    String overDefault = "y".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
+
+    RecordingResourceStore readStore = new RecordingResourceStore();
+    assertInstanceOf(
+        ToolResultFinalizer.Outcome.Success.class,
+        finalizer(readStore)
+            .finalizeResult(
+                ReadTool.NAME,
+                new ToolResult(
+                    "call-1", List.of(new TextResultContent(overDefault)), false, "{}")));
+    assertTrue(readStore.puts.isEmpty());
+
+    for (String otherTool : List.of("demo_tool", "read_file", "Read")) {
+      RecordingResourceStore store = new RecordingResourceStore();
+      ToolResultFinalizer.Outcome.Success success =
+          assertInstanceOf(
+              ToolResultFinalizer.Outcome.Success.class,
+              finalizer(store)
+                  .finalizeResult(
+                      otherTool,
+                      new ToolResult(
+                          "call-2", List.of(new TextResultContent(overDefault)), false, "{}")));
+      assertEquals(1, store.puts.size(), otherTool + " must keep the default inline budget");
+      ResourceResultContent resource =
+          assertInstanceOf(ResourceResultContent.class, success.result().contents().getFirst());
+      assertEquals(
+          ToolResultFinalizer.TRUNCATED_PREVIEW_MAX_UTF8_BYTES, resource.preview().length());
+    }
+  }
+
+  /** 加宽内联预算不放宽终态 canonical JSON 硬上限：转义后超过 1 MiB 仍确定性 INVALID_RESULT。 */
+  @Test
+  void builtinReadStillFailsWhenProjectionExceedsTerminalJsonHardLimit() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    // 200000 个 U+0001：UTF-8 仅 200000 字节（低于 320 KiB 内联阈值），JSON 转义后约 1.2 MiB
+    String controlHeavy = "\u0001".repeat(200_000);
+    ToolResult result =
+        new ToolResult("call-1", List.of(new TextResultContent(controlHeavy)), false, "{}");
+    // 前置事实：触发的是 canonical JSON 终态上限，而不是内联阈值
+    assertTrue(
+        controlHeavy.getBytes(StandardCharsets.UTF_8).length
+            <= ToolResultFinalizer.READ_INLINE_MAX_UTF8_BYTES);
+    assertTrue(
+        ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
+            result, ToolResultFinalizer.MAX_TERMINAL_RESULT_UTF8_BYTES));
+
+    ToolResultFinalizer.Outcome.Failed failed =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Failed.class,
+            finalizer(store).finalizeResult(ReadTool.NAME, result));
+
+    assertEquals(ToolResultFinalizer.INVALID_RESULT_KIND, failed.error().kind());
+    assertTrue(store.puts.isEmpty());
+  }
+
+  /** 加宽内联预算不放宽 resourceMaxBytes 硬上限：超过业务上限仍在任何 Store I/O 前 OUTPUT_TOO_LARGE。 */
+  @Test
+  void builtinReadKeepsResourceHardLimit() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    ToolResult oversized =
+        new ToolResult("call-1", List.of(new TextResultContent("x".repeat(101))), false, "{}");
+
+    ToolResultFinalizer.Outcome.Failed failed =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Failed.class,
+            finalizer(store, 100).finalizeResult(ReadTool.NAME, oversized));
+
+    assertEquals(ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND, failed.error().kind());
+    assertTrue(store.puts.isEmpty());
+  }
+
+  /** read 的图片/二进制内容仍走原 Resource 外化分支，不参与文本内联阈值。 */
+  @Test
+  void builtinReadBinaryContentStillUsesResourceBranch() {
+    RecordingResourceStore store = new RecordingResourceStore();
+    byte[] png = new byte[] {1, 2, 3};
+
+    ToolResultFinalizer.Outcome.Success success =
+        assertInstanceOf(
+            ToolResultFinalizer.Outcome.Success.class,
+            finalizer(store)
+                .finalizeResult(
+                    ReadTool.NAME,
+                    new ToolResult(
+                        "call-1",
+                        List.of(new BinaryResultContent("image/png", png)),
+                        false,
+                        "{}")));
+
+    assertEquals(1, store.puts.size());
+    ResourceResultContent resource =
+        assertInstanceOf(ResourceResultContent.class, success.result().contents().getFirst());
+    assertEquals("read-result-1", resource.resource().name());
+    assertNull(resource.textMetadata());
+  }
+
+  /** read header 前缀：真实格式中 header 与正文之间有一个分隔空行，正文行带右对齐行号与 {@code |} 前缀。 */
+  private static String readWindow(String numberedBody) {
+    return "path: /srv/project/example.ts\n"
+        + "ends_with_newline: yes\n"
+        + "range: 1:1-2000:30\n"
+        + "lsp: supported (typescript)\n"
+        + "\n"
+        + numberedBody;
+  }
+
+  private static String numberedWindow(int lineCount, String unit, int unitPerLine) {
+    StringBuilder sb = new StringBuilder();
+    for (int line = 1; line <= lineCount; line++) {
+      sb.append(String.format("%4d|", line)).append(unit.repeat(unitPerLine)).append('\n');
+    }
+    return sb.toString();
   }
 
   private static ToolResultFinalizer finalizer(RecordingResourceStore store) {

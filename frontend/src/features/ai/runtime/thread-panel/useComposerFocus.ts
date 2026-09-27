@@ -78,6 +78,7 @@ export function useComposerFocus({
   const closeOverlayRef = useRef(closeOverlay)
   const onLeaveRegionRef = useRef(onLeaveRegion)
   const mountedRef = useRef(true)
+  const activeRef = useRef(active)
 
   useEffect(() => {
     mountedRef.current = true
@@ -86,11 +87,12 @@ export function useComposerFocus({
     }
   }, [])
 
-  // 每次 render 后在 layout phase 同步最新 closeOverlay 与 onLeaveRegion：
+  // 每次 render 后在 layout phase 同步最新 state 与 callbacks：
   useLayoutEffect(() => {
+    activeRef.current = active
     closeOverlayRef.current = closeOverlay
     onLeaveRegionRef.current = onLeaveRegion
-  }, [closeOverlay, onLeaveRegion])
+  }, [active, closeOverlay, onLeaveRegion])
 
   const isInsideRegion = useCallback((target: Node | null): boolean => {
     if (!target) {
@@ -125,7 +127,7 @@ export function useComposerFocus({
       focusTimerRef.current = window.setTimeout(() => {
         focusTimerRef.current = null
         const el = editorRef.current
-        if (!el || !active) {
+        if (!el || !activeRef.current) {
           return
         }
         if (el.getAttribute('contenteditable') !== 'true') {
@@ -158,7 +160,7 @@ export function useComposerFocus({
       }, delay)
     }
     scheduleFocus(0, 0)
-  }, [active, clearFocusTimer, editorRef])
+  }, [clearFocusTimer, editorRef])
 
   // 区域内的 focusin / focusout 原生监听（仅负责区域焦点状态检测与防抢焦清理）：
   useEffect(() => {
@@ -184,8 +186,21 @@ export function useComposerFocus({
       if (nextTarget && container.contains(nextTarget)) {
         return
       }
+      const target = event.target as Node | null
       queueMicrotask(() => {
         if (!mountedRef.current) {
+          return
+        }
+        // 面板接管期间保留返回 Composer 的焦点意图。
+        if (!activeRef.current) {
+          return
+        }
+        // 菜单卸载或隐藏可能暂时把焦点交还 body；明确聚焦外部控件仍须取消恢复。
+        if (
+          !nextTarget
+          && document.activeElement === document.body
+          && ((target && !target.isConnected) || focusTimerRef.current !== null)
+        ) {
           return
         }
         if (!container.contains(document.activeElement)) {

@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -40,7 +39,6 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -55,8 +53,19 @@ class CodingCapabilitiesTest {
   private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
+  /** LSP capability 的测试门面：本类只验证参数与接线，因此不配置任何服务器。 */
+  private final ExecutorService lspDispatch = Executors.newCachedThreadPool();
+
+  private final ScheduledExecutorService lspScheduler =
+      Executors.newSingleThreadScheduledExecutor();
+  private final LspService lspService =
+      LspService.create(LspDiscovery.empty(), lspDispatch, lspScheduler);
+
   @AfterEach
   void closeExecutors() {
+    lspService.close();
+    lspScheduler.shutdownNow();
+    lspDispatch.shutdownNow();
     scheduler.shutdownNow();
     executor.shutdownNow();
   }
@@ -71,7 +80,7 @@ class CodingCapabilitiesTest {
             workspaceRoot.resolve("cache"),
             workspaceRoot.resolve("staging"),
             workspaceRoot.resolve("backup"));
-    CodingCapabilities.registerAll(registry, config, installer, executor, scheduler);
+    CodingCapabilities.registerAll(registry, config, lspService, installer, executor, scheduler);
 
     assertEquals(
         List.of(
@@ -164,9 +173,9 @@ class CodingCapabilitiesTest {
   }
 
   @Test
-  void readReportsLspBridgeConfigurationStatus() throws Exception {
+  void readReportsLspStatus() throws Exception {
     Files.writeString(workspaceRoot.resolve("lsp-status.txt"), "x\n");
-    CodingToolsConfig bridged = TestCodingConfig.withBridge(workspaceRoot);
+    CodingToolsConfig lspEnabled = TestCodingConfig.withLsp(workspaceRoot);
 
     EnvironmentCapabilityResult disabled =
         invoke(
@@ -174,40 +183,11 @@ class CodingCapabilitiesTest {
             "{\"path\":\"lsp-status.txt\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
     EnvironmentCapabilityResult enabled =
         invoke(
-            read(bridged),
+            read(lspEnabled),
             "{\"path\":\"lsp-status.txt\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
 
-    assertTrue(text(disabled).contains("lsp: unsupported"));
+    assertFalse(text(disabled).contains("lsp:"));
     assertTrue(text(enabled).contains("lsp: supported"));
-  }
-
-  /** LSP bridge 子进程必须使用本次调用的显式 workdir，不能继承 Daemon/JVM 进程目录。 */
-  @Test
-  void lspBridgeRunsInExplicitWorkdir() throws Exception {
-    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
-    Path source = workspaceRoot.resolve("Main.java");
-    Files.writeString(source, "class Main {}\n");
-    Path bridge = workspaceRoot.resolve("bridge.sh");
-    Files.writeString(
-        bridge,
-        """
-        #!/bin/sh
-        cat >/dev/null
-        printf '{"ok":true,"text":"%s"}' "$PWD"
-        """);
-    assertTrue(bridge.toFile().setExecutable(true));
-    CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(workspaceRoot, 2000, 50 * 1024, bridge.toString());
-
-    EnvironmentCapabilityResult result =
-        invoke(
-            new LspGotoDefinitionCapability(config, executor),
-            "{\"path\":\"Main.java\",\"line\":1,\"workdir\":"
-                + json(workspaceRoot.toString())
-                + "}");
-
-    assertFalse(result.error());
-    assertEquals(workspaceRoot.toRealPath().toString(), text(result));
   }
 
   @Test
@@ -346,7 +326,8 @@ class CodingCapabilitiesTest {
         invoke(
             read, "{\"path\":\"binary.bin\",\"workdir\":" + json(workspaceRoot.toString()) + "}");
 
-    assertTrue(text(window).contains("Showing lines 1-1 of 3"));
+    assertTrue(text(window).contains("truncation_reason: line_limit"));
+    assertTrue(text(window).contains("next: 2:1"));
     assertTrue(directory.contents().stream().anyMatch(content -> text(content).contains("a.txt")));
     // 图片不再产生本地 resource 引用：以内存字节进入终态，由 daemon 直传全局对象存储。
     assertTrue(image.contents().stream().anyMatch(BinaryResultContent.class::isInstance));
@@ -461,8 +442,7 @@ class CodingCapabilitiesTest {
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
             "bash",
             smallBudget,
-            null,
-            CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
+            LspDiscovery.empty());
 
     RecordingListener listener =
         invokeAsync(
@@ -529,8 +509,7 @@ class CodingCapabilitiesTest {
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
             "bash",
             brokenStore,
-            null,
-            CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
+            LspDiscovery.empty());
 
     RecordingListener listener =
         invokeAsync(
@@ -556,87 +535,6 @@ class CodingCapabilitiesTest {
     assertTrue(
         listener.result.contents().stream().noneMatch(ResourceResultContent.class::isInstance),
         "降级预览不得变成 Resource");
-  }
-
-  /**
-   * 验证 LSP 子进程使用调用方有效超时而不是隐藏的 30 秒常量：bridge 故意挂住时必须在有效超时内失败返回。
-   *
-   * <p>若实现退回旧的固定 30 秒常量，本测试的 5 秒 await 会超时失败。
-   */
-  @Test
-  void lspBridgeHonoursTheEffectiveTimeoutInsteadOfAHiddenDefault() throws Exception {
-    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
-    Path bridge = workspaceRoot.resolve("hanging-bridge.sh");
-    Files.writeString(bridge, "#!/bin/sh\ncat >/dev/null\nsleep 30\n");
-    assertTrue(bridge.toFile().setExecutable(true));
-    Files.writeString(workspaceRoot.resolve("App.java"), "class App {}\n");
-
-    CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(workspaceRoot, 2000, 50 * 1024, bridge.toString());
-
-    long started = System.nanoTime();
-    RecordingListener listener =
-        invokeAsync(
-            new LspGotoDefinitionCapability(config, executor),
-            "{\"path\":\"App.java\",\"line\":1,\"workdir\":" + json(workspaceRoot.toString()) + "}",
-            Duration.ofMillis(1200));
-    assertTrue(listener.await(), "必须在有效超时内返回，而不是等隐藏常量");
-    long elapsedMillis = (System.nanoTime() - started) / 1_000_000L;
-
-    assertTrue(listener.result.error(), text(listener.result));
-    assertTrue(text(listener.result).contains("timed out"), text(listener.result));
-    assertTrue(elapsedMillis < 10_000, "必须在调用方有效超时附近返回，实际 " + elapsedMillis + "ms");
-  }
-
-  /** 验证 LSP 调用被取消后整棵 bridge 进程树都被终止：后代不再继续写 tick 文件。 */
-  @Test
-  void lspBridgeCancellationTerminatesTheProcessTree() throws Exception {
-    assumeFalse(System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win"));
-    Path marker = workspaceRoot.resolve("bridge-ticks.log");
-    Path bridge = workspaceRoot.resolve("ticking-bridge.sh");
-    Files.writeString(
-        bridge,
-        "#!/bin/sh\n"
-            + "cat >/dev/null\n"
-            + "(while true; do echo child >> "
-            + marker
-            + "; sleep 0.05; done) &\n"
-            + "while true; do echo parent >> "
-            + marker
-            + "; sleep 0.05; done\n");
-    assertTrue(bridge.toFile().setExecutable(true));
-    Files.writeString(workspaceRoot.resolve("App.java"), "class App {}\n");
-
-    CodingToolsConfig config =
-        TestCodingConfig.withBridgeCommand(workspaceRoot, 2000, 50 * 1024, bridge.toString());
-
-    RecordingListener listener =
-        invokeAsync(
-            new LspGotoDefinitionCapability(config, executor),
-            "{\"path\":\"App.java\",\"line\":1,\"workdir\":" + json(workspaceRoot.toString()) + "}",
-            Duration.ofSeconds(30));
-    // 等待 bridge 真正开始产出，再取消。
-    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
-    while (ticks(marker) == 0 && System.nanoTime() < deadline) {
-      Thread.sleep(20);
-    }
-    assertTrue(ticks(marker) > 0, "取消前 bridge 进程树必须已经在产出输出");
-
-    listener.handle.cancel();
-    assertTrue(listener.await());
-    assertTrue(text(listener.result).contains("Operation cancelled"), text(listener.result));
-
-    long ticksAtCancel = ticks(marker);
-    Thread.sleep(700);
-    assertEquals(ticksAtCancel, ticks(marker), "取消必须终止整棵 bridge 进程树，后代不得继续写入");
-  }
-
-  private static long ticks(Path marker) {
-    try {
-      return Files.readAllLines(marker).size();
-    } catch (Exception error) {
-      return 0;
-    }
   }
 
   @Test
@@ -772,8 +670,7 @@ class CodingCapabilitiesTest {
             CodingToolsConfig.DEFAULT_PREVIEW_MAX_BYTES,
             "bash",
             smallBudget,
-            null,
-            CodingToolsConfig.DEFAULT_JAVAP_EXECUTABLE);
+            LspDiscovery.empty());
 
     BashCapability bash = new BashCapability(budgetConfig, executor, scheduler);
     RecordingListener listener =

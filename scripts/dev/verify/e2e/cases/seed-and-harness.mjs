@@ -34,6 +34,7 @@ import {
   waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
+import { canonicalSeedCatalog } from '../lib/fixtures.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
@@ -51,7 +52,7 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/ai/catalog/models：按 providerName/name 完整匹配 Pi 0.82.1 快照与公开字段集合',
+  docs: 'GET /api/ai/catalog/models：按 providerName/name 完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
@@ -64,17 +65,7 @@ registerCase({
         config: model.config,
       }))
       .sort(compareModel)
-    // Pi 的原始快照未包含持久层对空协议选项规范化后必需的 wire 字段。
-    const expectedCatalog = PI_MODEL_CATALOG.map((model) => ({
-      ...model,
-      config: {
-        ...model.config,
-        variants: model.config.variants.map((variant) => ({
-          ...variant,
-          protocolOptionsJson: '{}',
-        })),
-      },
-    })).sort(compareModel)
+    const expectedCatalog = canonicalSeedCatalog(PI_MODEL_CATALOG).sort(compareModel)
     assert(
       actualCatalog.length === expectedCatalog.length,
       `expected ${expectedCatalog.length} Pi models, got ${actualCatalog.length}`,
@@ -1219,10 +1210,10 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.stop_idle_noop',
+  id: 'thread.stop_idle_boundary',
   level: 'L1',
-  title: 'IDLE stop 为 no-op 且 stale version 被拒绝',
-  docs: 'POST /stop body={stopRequestId,expectedVersion}；IDLE 无 queued 时 status=IDLE、stoppedTurnEndEntryId=null、version 不变；同 stopRequestId 再次调用仍为 IDLE no-op（IDLE 不写持久 marker，无 replay）；stale version => 409。真实 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
+  title: 'IDLE stop 写入持久 STOP barrier 且同 stopRequestId exact replay',
+  docs: 'POST /stop body={stopRequestId,expectedVersion}；本线程无 open Turn 时写入完整 STOP barrier Turn（TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, continueModel=false, USER_STOP, closeRequestId)）=> status=STOPPED、stoppedTurnEndEntryId=该 TURN_END 且成为新 head、cancelledCommandCount=0、version 恰好 +1；同 stopRequestId + 原 expectedVersion 再次调用 => status=REPLAYED、同 stoppedTurnEndEntryId、version/head/Entry 集合不变（不写第二条 barrier）；未使用过的 stopRequestId 配 stale version => 409。真实 live Turn 的 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1231,10 +1222,11 @@ registerCase({
       agentName: ctx.vars.agent.name,
       yoloEnabled: false,
     })
+    const sessionId = cid()
     const threadId = cid()
     await createNewSession(ctx, {
       owner: chatOwner(chat.id),
-      sessionId: cid(),
+      sessionId,
       threadId,
       rootSettings: branchSettingsOf(
         { name: `e2e-stop-missing-${cid().slice(0, 8)}` },
@@ -1244,23 +1236,92 @@ registerCase({
       commands: [userMessageCommand(`stop materialize ${cid().slice(0, 8)}`, cid())],
     })
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
+    // 前置事实：确定性失败的 Agent 让首个 Turn 已闭合，Thread 处于无本线程 open Turn 的空闲态。
+    assert(
+      thread.processing === false && thread.status === 'IDLE',
+      `expected quiescent idle Thread: ${JSON.stringify(thread)}`,
+    )
     const stopRequestId = cid()
     const first = await stopThread(ctx, threadId, {
       stopRequestId,
       expectedVersion: thread.version,
     })
-    assert(first.status === 'IDLE', JSON.stringify(first))
-    assert(first.stoppedTurnEndEntryId === null, JSON.stringify(first))
+    // IDLE stop 不是 no-op：它写入 durable STOP barrier Turn，并恰好递增一次 version。
+    assert(first.status === 'STOPPED', JSON.stringify(first))
+    assert(first.stoppedTurnEndEntryId != null, JSON.stringify(first))
     assert(first.cancelledCommandCount === 0, JSON.stringify(first))
-    assert(String(first.thread.version) === String(thread.version), JSON.stringify(first))
-    // IDLE stop 不写持久 marker：同 stopRequestId 再次调用仍是 IDLE no-op（不是 REPLAYED）。
+    assert(
+      Number(first.thread.version) === Number(thread.version) + 1,
+      `idle stop must bump version by one: ${JSON.stringify({ thread, first })}`,
+    )
+    assert(
+      String(first.thread.headEntryId) === String(first.stoppedTurnEndEntryId),
+      `stop barrier TURN_END must become the new head: ${JSON.stringify(first)}`,
+    )
+
+    // barrier Turn 结构：TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED)。
+    const entries = await listSessionEntries(ctx, sessionId)
+    const barrierEnd = entries.find(
+      (entry) => String(entry.entryId) === String(first.stoppedTurnEndEntryId),
+    )
+    assert(
+      barrierEnd && String(barrierEnd.entryType || '').toUpperCase() === 'TURN_END',
+      `missing stop barrier TURN_END: ${JSON.stringify(entries)}`,
+    )
+    const barrierEndPayload = JSON.parse(barrierEnd.payloadJson)
+    assert(
+      barrierEndPayload.outcome === 'STOPPED'
+        && barrierEndPayload.reason === 'USER_STOP'
+        && barrierEndPayload.continueModel === false
+        && String(barrierEndPayload.closeRequestId) === String(stopRequestId),
+      `unexpected stop barrier TURN_END: ${JSON.stringify(barrierEndPayload)}`,
+    )
+    const barrierStart = entries.find(
+      (entry) => String(entry.entryId) === String(barrierEndPayload.turnStartEntryId),
+    )
+    assert(
+      barrierStart && String(barrierStart.entryType || '').toUpperCase() === 'TURN_START',
+      `missing stop barrier TURN_START: ${JSON.stringify(entries)}`,
+    )
+    const barrierStartPayload = JSON.parse(barrierStart.payloadJson)
+    assert(
+      barrierStartPayload.reason === 'STOP'
+        && String(barrierStartPayload.ownerThreadId) === String(threadId),
+      `unexpected stop barrier TURN_START: ${JSON.stringify(barrierStartPayload)}`,
+    )
+    const barrierCancel = entries.find(
+      (entry) => String(entry.entryId) === String(barrierEnd.parentEntryId),
+    )
+    assert(
+      barrierCancel
+        && String(barrierCancel.entryType || '').toUpperCase() === 'ASSISTANT_ERROR'
+        && String(barrierCancel.parentEntryId) === String(barrierStart.entryId)
+        && JSON.parse(barrierCancel.payloadJson).error?.code === 'CANCELLED',
+      `stop barrier must carry one CANCELLED ASSISTANT_ERROR: ${JSON.stringify(entries)}`,
+    )
+
+    // 同 stopRequestId + 原 expectedVersion 精确 replay：同一 stopped TURN_END，不写第二条 barrier。
     const again = await stopThread(ctx, threadId, {
       stopRequestId,
       expectedVersion: thread.version,
     })
-    assert(again.status === 'IDLE', JSON.stringify(again))
-    assert(again.stoppedTurnEndEntryId === null, JSON.stringify(again))
-    assert(String(again.thread.version) === String(thread.version), JSON.stringify(again))
+    assert(again.status === 'REPLAYED', JSON.stringify(again))
+    assert(
+      String(again.stoppedTurnEndEntryId) === String(first.stoppedTurnEndEntryId),
+      `replay must identify the same stopped TURN_END: ${JSON.stringify({ first, again })}`,
+    )
+    assert(again.cancelledCommandCount === 0, JSON.stringify(again))
+    assert(
+      String(again.thread.version) === String(first.thread.version)
+        && String(again.thread.headEntryId) === String(first.thread.headEntryId),
+      `replay must not mutate the Thread: ${JSON.stringify({ first, again })}`,
+    )
+    assert(
+      JSON.stringify(await listSessionEntries(ctx, sessionId)) === JSON.stringify(entries),
+      'replay must not append a second stop barrier',
+    )
+
+    // 未使用过的 stopRequestId 走 version CAS：stale version 必须 409。
     await expectHttpError(
       () =>
         stopThread(ctx, threadId, {

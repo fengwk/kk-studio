@@ -19,35 +19,33 @@ function message(
 
 describe('isTaskToolRendererExpandable', () => {
   it('uses task-owned call/result semantics instead of a host tool-name branch', () => {
+    // call 阶段有参数可供展开查看
     expect(isTaskToolRendererExpandable(message(), undefined)).toBe(true)
 
-    const shortResult = message({
+    // accepted 收据紧凑展示，无需展开切换
+    const receiptResult = message({
       phase: 'result',
       status: 'done',
       arguments: '',
-      text:
-        '<task id="101" state="completed">\n'
-        + '<task_result>short report</task_result>\n</task>',
+      text: '{"thread_id":"child-101","status":"accepted"}',
     })
-    expect(isTaskToolRendererExpandable(undefined, shortResult)).toBe(false)
+    expect(isTaskToolRendererExpandable(undefined, receiptResult)).toBe(false)
 
-    const longReport = Array.from(
+    // 降级场景：超出五行的普通文本被截断，允许展开
+    const longFallbackText = Array.from(
       { length: 7 },
-      (_, index) => `report-${index + 1}`,
+      (_, index) => `line-${index + 1}`,
     ).join('\n')
     expect(isTaskToolRendererExpandable(undefined, {
-      ...shortResult,
-      text:
-        '<task id="101" state="completed">\n<task_result>\n'
-        + `${longReport}\n</task_result>\n</task>`,
+      ...receiptResult,
+      text: longFallbackText,
     })).toBe(true)
 
+    // 降级场景：error 状态默认展示完整错误不截断，无需展开
     expect(isTaskToolRendererExpandable(undefined, {
-      ...shortResult,
+      ...receiptResult,
       status: 'error',
-      text:
-        '<task id="102" state="error">\n'
-        + '<task_error>failed</task_error>\n</task>',
+      text: 'failed to start subagent',
     })).toBe(false)
   })
 })

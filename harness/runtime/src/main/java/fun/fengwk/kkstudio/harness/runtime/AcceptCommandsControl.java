@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -149,6 +151,11 @@ final class AcceptCommandsControl {
                     + " is not in session "
                     + target.sessionId());
           }
+          // STOP Turn 是原子控制屏障：NEW_THREAD 的 head 绝不能落在未闭合的 STOP Turn 内（已关闭的 STOPPED 边界可以正常 fork）。
+          if (endsInsideUnclosedStopTurn(tx, target.startEntryId())) {
+            throw new IllegalArgumentException(
+                "start entry " + target.startEntryId() + " is inside an unclosed STOP turn");
+          }
           String creationRequestHash =
               ThreadCreationRequestHash.forNewThread(
                   target.sessionId(),
@@ -172,6 +179,18 @@ final class AcceptCommandsControl {
           tx.insertThread(thread);
           return acceptNewCommandsOnThread(tx, thread, commands, preflight, now);
         });
+  }
+
+  /** start Entry 的 EntryPath 是否停在未闭合的 STOP Turn 内。 */
+  private static boolean endsInsideUnclosedStopTurn(
+      HarnessStore.Transaction tx, UUID startEntryId) {
+    return tx.loadEntryPath(startEntryId)
+        .openTurnStart()
+        .map(
+            turn ->
+                turn.payload() instanceof TurnStartPayload start
+                    && start.reason() == TurnStartReason.STOP)
+        .orElse(false);
   }
 
   private AcceptedCommands acceptOnThread(

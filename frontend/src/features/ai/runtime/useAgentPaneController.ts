@@ -120,7 +120,7 @@ export interface AgentPaneDefaults {
 }
 
 export interface UseAgentPaneControllerOptions {
-  owner: AgentRuntimeOwnerDTO
+  owner?: AgentRuntimeOwnerDTO
   paneId: string
   agents: AgentDefinitionDTO[]
   environments: EnvironmentCardDTO[]
@@ -149,12 +149,14 @@ export function useAgentPaneController({
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const applicationEvents = useApplicationEvents()
-  const ownerKey = ownerIdentity(owner)
-  const composerScope = `agent-pane:${ownerKey}:${paneId}`
+  const ownerKey = owner ? ownerIdentity(owner) : null
+  const composerScope = ownerKey
+    ? `agent-pane:${ownerKey}:${paneId}`
+    : `agent-pane:thread:${paneId}`
   const [target, setTargetState] = useState<PaneTarget>(
-    () => initialTarget ?? (owner.type === 'CHAT'
-      ? loadPaneTarget(owner, paneId)
-      : { kind: 'NEW_SESSION_DRAFT' }),
+    () => initialTarget ?? (owner
+      ? (owner.type === 'CHAT' ? loadPaneTarget(owner, paneId) : { kind: 'NEW_SESSION_DRAFT' })
+      : { kind: 'BOUND_THREAD', threadId: paneId }),
   )
 
   useEffect(() => {
@@ -169,6 +171,9 @@ export function useAgentPaneController({
   )
   const [pendingAcceptance, setPendingAcceptance] = useState<PendingAcceptance | null>(
     () => {
+      if (!owner) {
+        return null
+      }
       const pending = loadPendingAcceptance(owner, paneId)
       return pending == null ? null : { ...pending, unknownOutcome: true }
     },
@@ -230,7 +235,7 @@ export function useAgentPaneController({
 
   useEffect(() => {
     targetRef.current = target
-    if (owner.type === 'CHAT') {
+    if (owner?.type === 'CHAT') {
       savePaneTarget(owner, paneId, target)
     }
   }, [owner, paneId, target])
@@ -347,12 +352,15 @@ export function useAgentPaneController({
   const sessionsQuery = useQuery<RuntimeSessionSummaryDTO[]>({
     queryKey: ['agent-pane', 'sessions', ownerKey],
     queryFn: () => {
+      if (!owner) {
+        return Promise.resolve([])
+      }
       if (owner.type === 'CHAT') {
         return chatService.listChatSessions(owner.chatId)
       }
       return Promise.resolve([])
     },
-    enabled: owner.type === 'CHAT' && (interaction === 'thread-sessions' || interaction === 'rename-session'),
+    enabled: owner?.type === 'CHAT' && (interaction === 'thread-sessions' || interaction === 'rename-session'),
   })
   const threadsQuery = useQuery({
     queryKey: ['agent-pane', 'threads', threadNavigationSessionId],
@@ -446,7 +454,7 @@ export function useAgentPaneController({
     name: string | null,
     backTo: RenameTarget['backTo'] = null,
   ): void {
-    if (owner.type === 'ISSUE_AGENT') {
+    if (!owner || owner.type === 'ISSUE_AGENT') {
       return
     }
     setRenameTargetState({ kind, id, name, backTo })
@@ -475,7 +483,7 @@ export function useAgentPaneController({
   }
 
   function openRenameForTarget(kind: RenameKind): void {
-    if (owner.type === 'ISSUE_AGENT') {
+    if (!owner || owner.type === 'ISSUE_AGENT') {
       return
     }
     if (hasPendingOperation()) {
@@ -504,7 +512,7 @@ export function useAgentPaneController({
   }
 
   async function submitRename(name: string): Promise<void> {
-    if (owner.type === 'ISSUE_AGENT' || renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
+    if (!owner || owner.type === 'ISSUE_AGENT' || renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
       return
     }
     const trimmed = name.trim()
@@ -548,6 +556,9 @@ export function useAgentPaneController({
    * 直接 setQueryData 到已存在的 key，随后 invalidateAfterRename 做必要失效。
    */
   function patchSessionNameCache(sessionId: string, name: string): void {
+    if (!ownerKey) {
+      return
+    }
     for (const [key, data] of queryClient.getQueriesData<RuntimeSessionSummaryDTO[]>({
       queryKey: ['agent-pane', 'sessions', ownerKey],
     })) {
@@ -564,9 +575,13 @@ export function useAgentPaneController({
   /** 重命名成功后失效相应查询：Session 摘要、Thread 投影与 Chat 列表。 */
   async function invalidateAfterRename(target: RenameTarget): Promise<void> {
     await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: ['agent-pane', 'sessions', ownerKey],
-      }),
+      ...(ownerKey
+        ? [
+            queryClient.invalidateQueries({
+              queryKey: ['agent-pane', 'sessions', ownerKey],
+            }),
+          ]
+        : []),
       ...(target.kind === 'thread'
         ? [
             queryClient.invalidateQueries({
@@ -622,7 +637,7 @@ export function useAgentPaneController({
   }
 
   function changeTarget(next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean {
-    if (owner.type === 'ISSUE_AGENT') {
+    if (!owner || owner.type === 'ISSUE_AGENT') {
       return false
     }
     if (hasPendingOperation()) {
@@ -648,14 +663,16 @@ export function useAgentPaneController({
     generationRef.current += 1
     pendingAcceptanceRef.current = null
     setPendingAcceptance(null)
-    clearPendingAcceptance(owner, paneId)
+    if (owner) {
+      clearPendingAcceptance(owner, paneId)
+    }
     setActionError(null)
     setConflict(null)
   }
 
   function makePending(frozen: FrozenCommandBatchRequest): PendingAcceptance {
     return {
-      owner: { ...owner },
+      owner: owner ? { ...owner } : { type: 'CHAT', chatId: '' },
       target: frozen.target,
       request: frozen.request,
       branchDraft: frozen.branchDraft,
@@ -669,7 +686,9 @@ export function useAgentPaneController({
     const pending = makePending(frozen)
     pendingAcceptanceRef.current = pending
     setPendingAcceptance(pending)
-    savePendingAcceptance(owner, paneId, pending)
+    if (owner) {
+      savePendingAcceptance(owner, paneId, pending)
+    }
     setParts([])
     void submitFrozenAcceptance(pending)
   }
@@ -678,7 +697,9 @@ export function useAgentPaneController({
     const pending = makePending(frozen)
     pendingAcceptanceRef.current = pending
     setPendingAcceptance(pending)
-    savePendingAcceptance(owner, paneId, pending)
+    if (owner) {
+      savePendingAcceptance(owner, paneId, pending)
+    }
     void submitFrozenAcceptance(pending)
   }
 
@@ -691,7 +712,7 @@ export function useAgentPaneController({
     if (capabilities?.readOnly) {
       return
     }
-    if (owner.type !== 'CHAT') {
+    if (owner?.type !== 'CHAT') {
       return
     }
     if (hasPendingOperation()) {
@@ -733,9 +754,13 @@ export function useAgentPaneController({
   async function invalidateAcceptanceResult(threadId: string): Promise<void> {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-      queryClient.invalidateQueries({
-        queryKey: ['agent-pane', 'sessions', ownerKey],
-      }),
+      ...(ownerKey
+        ? [
+            queryClient.invalidateQueries({
+              queryKey: ['agent-pane', 'sessions', ownerKey],
+            }),
+          ]
+        : []),
     ])
   }
 
@@ -753,7 +778,9 @@ export function useAgentPaneController({
       }
       pendingAcceptanceRef.current = null
       setPendingAcceptance(null)
-      clearPendingAcceptance(owner, paneId)
+      if (owner) {
+        clearPendingAcceptance(owner, paneId)
+      }
       generationRef.current += 1
       const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
       targetRef.current = bound
@@ -779,13 +806,17 @@ export function useAgentPaneController({
       if (!isDefiniteAcceptanceFailure(error)) {
         const unknown = { ...pending, unknownOutcome: true }
         setPendingAcceptance(unknown)
-        savePendingAcceptance(owner, paneId, unknown)
+        if (owner) {
+          savePendingAcceptance(owner, paneId, unknown)
+        }
         setActionError(errorMessage(error, t('ai.runtime.action.requestFailed')))
         return
       }
       pendingAcceptanceRef.current = null
       setPendingAcceptance(null)
-      clearPendingAcceptance(owner, paneId)
+      if (owner) {
+        clearPendingAcceptance(owner, paneId)
+      }
       setParts(prependFrozenComposerParts(pending.composerParts, partsRef.current))
       setLocalDraft(preserveCurrentBranchDraft(pending.branchDraft, localDraftRef.current))
       const presented = presentConflict(error)
@@ -809,12 +840,14 @@ export function useAgentPaneController({
     setConflict(null)
     pendingAcceptanceRef.current = retry
     setPendingAcceptance(retry)
-    savePendingAcceptance(owner, paneId, retry)
+    if (owner) {
+      savePendingAcceptance(owner, paneId, retry)
+    }
     void submitFrozenAcceptance(retry)
   }
 
   function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
-    if (capabilities?.readOnly || (owner.type === 'ISSUE_AGENT' && !onSubmitInstruction)) {
+    if (capabilities?.readOnly || !owner || (owner.type === 'ISSUE_AGENT' && !onSubmitInstruction)) {
       return
     }
     if (onSubmitInstruction) {
@@ -853,6 +886,9 @@ export function useAgentPaneController({
       void controller.submitMessage(payloadParts, localDraftParts)
       return
     }
+    if (!owner) {
+      return
+    }
     if (hasPendingOperation()) {
       setActionError(t('ai.runtime.action.operationPending'))
       return
@@ -884,7 +920,7 @@ export function useAgentPaneController({
   }
 
   async function handlePreview(payloadParts: ComposerPart[], localDraftParts: ComposerPart[]) {
-    if (owner.type !== 'CHAT' || capabilities?.readOnly
+    if (owner?.type !== 'CHAT' || capabilities?.readOnly
       || onSubmitInstruction || capabilities?.allowGenericChat === false) {
       return
     }
@@ -962,7 +998,7 @@ export function useAgentPaneController({
 
   function handleCommand(command: ThreadCommand): void {
     onFocus?.()
-    if (owner.type === 'ISSUE_AGENT'
+    if ((!owner || owner.type === 'ISSUE_AGENT')
       && command.id !== 'debug' && command.id !== 'shortcuts'
       && (command.id !== 'stop' || !onStop)) {
       return
@@ -1054,7 +1090,7 @@ export function useAgentPaneController({
         openRenameForTarget('thread')
         return
       case 'goal':
-        if (owner.type !== 'CHAT') {
+        if (owner?.type !== 'CHAT') {
           return
         }
         setInteraction('goal')
@@ -1083,7 +1119,7 @@ export function useAgentPaneController({
   }
 
   function selectAgent(agentName: string): void {
-    if (owner.type === 'ISSUE_AGENT' || capabilities?.allowSwitchAgent === false) {
+    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowSwitchAgent === false) {
       setActionError('当前受控模式不支持切换 Agent')
       return
     }
@@ -1110,7 +1146,7 @@ export function useAgentPaneController({
   }
 
   function selectEntry(entry: HarnessSessionEntryDTO): void {
-    if (owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
+    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
       setActionError('当前受控模式不支持分支切换或分叉')
       return
     }
@@ -1124,7 +1160,7 @@ export function useAgentPaneController({
   }
 
   function selectSession(session: RuntimeSessionSummaryDTO): void {
-    if (owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
+    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
       setActionError('当前受控模式不支持分支切换或分叉')
       return
     }
@@ -1133,7 +1169,7 @@ export function useAgentPaneController({
   }
 
   function selectThread(thread: RuntimeThreadSummaryDTO): void {
-    if (owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
+    if (!owner || owner.type === 'ISSUE_AGENT' || capabilities?.allowBranching === false) {
       setActionError('当前受控模式不支持分支切换或分叉')
       return
     }
@@ -1147,9 +1183,11 @@ export function useAgentPaneController({
         queryKey: queryKeys.threads.snapshot(currentTarget.threadId),
       })
     }
-    await queryClient.invalidateQueries({
-      queryKey: ['agent-pane', 'sessions', ownerKey],
-    })
+    if (ownerKey) {
+      await queryClient.invalidateQueries({
+        queryKey: ['agent-pane', 'sessions', ownerKey],
+      })
+    }
   }
 
   const boundViews = useBoundThreadPanelViews(boundThreadId, controller)
@@ -1163,7 +1201,7 @@ export function useAgentPaneController({
     {
       manualCompaction: isBoundTarget(target) ? controller.manualCompaction : null,
       allowNewSession: capabilities?.allowNewSession,
-      readOnly: capabilities?.readOnly,
+      readOnly: capabilities?.readOnly ?? (!owner ? true : undefined),
       canBranchFromRoot,
       owner,
       allowSwitchAgent: capabilities?.allowSwitchAgent,
@@ -1208,6 +1246,7 @@ export function useAgentPaneController({
     pending,
     disabled:
       Boolean(capabilities?.readOnly)
+      || !owner
       || pending
       || (owner.type === 'ISSUE_AGENT' && (!isBoundTarget(target) || !onSubmitInstruction))
       || (!onSubmitInstruction && capabilities?.allowGenericChat === false)
@@ -1225,11 +1264,11 @@ export function useAgentPaneController({
     onCommand: handleCommand,
     commands,
     focusOnEscape: focused,
-    onPreview: owner.type === 'CHAT' && isBoundTarget(target)
+    onPreview: owner?.type === 'CHAT' && isBoundTarget(target)
       && !onSubmitInstruction && capabilities?.allowGenericChat !== false ? handlePreview : undefined,
     previewLoading,
     previewDisabled,
-    settings: owner.type === 'ISSUE_AGENT' || activeDraft == null ? undefined : {
+    settings: !owner || owner.type === 'ISSUE_AGENT' || activeDraft == null ? undefined : {
       model: activeDraft.model,
       models,
       yoloEnabled: activeDraft.yoloEnabled,
@@ -1338,16 +1377,6 @@ export function useAgentPaneController({
     selectEntry,
     selectSession,
     selectThread,
-    onDecideTaskApproval: (
-      threadId: string,
-      invocationId: string,
-      decision: 'ALLOW' | 'DENY',
-    ) => {
-      if (capabilities?.readOnly) {
-        return
-      }
-      void controller.decideApproval(invocationId, decision, threadId)
-    },
     sessionSelectionItem,
     threadSelectionItem,
     buildBoundThreadTranscript,

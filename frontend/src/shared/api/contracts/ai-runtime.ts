@@ -133,7 +133,8 @@ export interface HarnessSessionEntryDTO {
  *
  * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
  * branch=branch-<uuid 前 8 位>；可经 PUT /harness/threads/{id}/name 修改）；
- * status/processing 是派生的展示字段（只有 IDLE 时 processing 才为 false）；
+ * status/processing 是派生的展示字段：status 只描述该 Thread 自身的执行，processing 是
+ * "自身执行中或委派子树仍有未交付结果"的聚合，因此 status 为 IDLE 时 processing 仍可能为 true；
  * branchSettings 是 head Entry branch 的完整 settings 快照。
  */
 export interface HarnessThreadDTO {
@@ -152,7 +153,7 @@ export interface HarnessThreadDTO {
   version: string
   /** 展示状态（派生）：IDLE / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING。 */
   status: string
-  /** 运行时当前是否正在处理此 Thread（派生字段）。 */
+  /** 该 Thread 及其委派子树当前是否仍在处理（派生字段）；status 为 IDLE 时仍可能为 true。 */
   processing: boolean
   /** head Entry branch 的完整 settings 快照。 */
   branchSettings: HarnessBranchSettingsDTO
@@ -392,7 +393,10 @@ export interface RuntimeThreadSummaryDTO {
   name: string
   createdAt: BackendDateTime
   updatedAt: BackendDateTime
+  /** 该 Thread 自身执行状态的派生展示值。 */
   status: string
+  /** 该 Thread 及其委派子树当前是否仍在处理（派生字段）；status 为 IDLE 时仍可能为 true。 */
+  processing: boolean
   model: HarnessModelSelectionDTO
   headMessagePreview: string | null
 }

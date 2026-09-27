@@ -37,6 +37,25 @@ export function clone(value) {
 }
 
 /**
+ * 把种子目录（持久化形态：variant 允许省略 `protocolOptionsJson`）规范化为公开读取契约的 canonical 形态。
+ *
+ * <p>产品读取路径（`AgentModelRuntimeConfigParser`）对每个 variant 统一返回 `protocolOptionsJson` 字符串，其中 null / 空选项
+ * 等价于 `{}`；既有选项文本原样保留，其它字段一概不改写、不丢弃。
+ */
+export function canonicalSeedCatalog(models) {
+  return models.map((model) => ({
+    ...model,
+    config: {
+      ...model.config,
+      variants: model.config.variants.map((variant) => ({
+        ...variant,
+        protocolOptionsJson: variant.protocolOptionsJson ?? '{}',
+      })),
+    },
+  }))
+}
+
+/**
  * Model config 校验矩阵。
  * ok=true 期望 2xx；ok=false 期望 4xx 且 message 匹配。
  */

@@ -108,22 +108,37 @@ class HarnessRuntimeResponseMapperTest {
     cases.put(ThreadRuntimeStatus.TOOL_READY, toolSnapshot(ToolInvocationStatus.READY));
 
     for (Map.Entry<ThreadRuntimeStatus, ThreadSnapshot> entry : cases.entrySet()) {
-      HarnessThreadDTO dto = HarnessRuntimeResponseMapper.toThreadDto(entry.getValue());
+      HarnessThreadDTO dto = HarnessRuntimeResponseMapper.toThreadDto(entry.getValue(), false);
       assertEquals(entry.getKey().name(), dto.getStatus());
       assertEquals(entry.getKey().isProcessing(), dto.getProcessing());
     }
 
     HarnessThreadDTO terminalTool =
-        HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED));
+        HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED), false);
     assertEquals(ThreadRuntimeStatus.APPLYING.name(), terminalTool.getStatus());
     assertTrue(terminalTool.getProcessing());
+  }
+
+  @Test
+  void aggregatesPendingDelegatedWorkIntoProcessingWithoutChangingStatus() {
+    // 测试意图：父 Thread 自身静止但仍等子结果时，processing 必须为 true 而 status 保持 IDLE：
+    // status 描述自身执行（前端只读展示），processing 才是"工作尚未结束"的权威判断。
+    ThreadSnapshot idle = HarnessRuntimeTestFixtures.idleSnapshot();
+
+    HarnessThreadDTO idleDto = HarnessRuntimeResponseMapper.toThreadDto(idle, false);
+    assertEquals(ThreadRuntimeStatus.IDLE.name(), idleDto.getStatus());
+    assertFalse(idleDto.getProcessing());
+
+    HarnessThreadDTO waitingDto = HarnessRuntimeResponseMapper.toThreadDto(idle, true);
+    assertEquals(ThreadRuntimeStatus.IDLE.name(), waitingDto.getStatus());
+    assertTrue(waitingDto.getProcessing());
   }
 
   @Test
   void projectsThreadIdentityAndSettings() {
     // Thread cursor、version、时间与 branch settings 必须来自同一 snapshot。
     HarnessThreadDTO dto =
-        HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot());
+        HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot(), false);
 
     assertEquals(idText(1), dto.getThreadId());
     assertEquals("thread", dto.getName());
@@ -292,7 +307,8 @@ class HarnessRuntimeResponseMapperTest {
         HarnessRuntimeResponseMapper.toSnapshotDto(
             snapshot,
             ManualCompactionAvailability.disabled(
-                ManualCompactionAvailability.DisabledReason.THREAD_BUSY));
+                ManualCompactionAvailability.DisabledReason.THREAD_BUSY),
+            false);
 
     assertEquals("3", dto.getVersion());
     assertEquals(3, dto.getEntries().size());
@@ -319,7 +335,7 @@ class HarnessRuntimeResponseMapperTest {
 
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeResponseMapper.toSnapshotDto(
-            snapshot, ManualCompactionAvailability.enabled());
+            snapshot, ManualCompactionAvailability.enabled(), false);
 
     assertEquals(4, dto.getEntries().size());
     assertEquals("SUCCEEDED", dto.getModelInvocation().getStatus());
@@ -343,7 +359,7 @@ class HarnessRuntimeResponseMapperTest {
 
     HarnessAcceptedCommandsDTO dto =
         HarnessRuntimeResponseMapper.toAcceptedCommandsDto(
-            accepted, HarnessRuntimeTestFixtures.idleSnapshot());
+            accepted, HarnessRuntimeTestFixtures.idleSnapshot(), false);
 
     assertEquals(idText(1), dto.getSession().getSessionId());
     assertEquals("session", dto.getSession().getName());
@@ -357,7 +373,7 @@ class HarnessRuntimeResponseMapperTest {
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeResponseMapper.toAcceptedCommandsDto(
-                accepted, HarnessRuntimeTestFixtures.idleSnapshot(id(99))));
+                accepted, HarnessRuntimeTestFixtures.idleSnapshot(id(99)), false));
   }
 
   @Test
@@ -367,7 +383,7 @@ class HarnessRuntimeResponseMapperTest {
         new CompactThreadResult(HarnessRuntimeTestFixtures.thread(id(1)), id(2), null);
     HarnessThreadCompactResultDTO rejectedDto =
         HarnessRuntimeResponseMapper.toCompactResultDto(
-            rejected, HarnessRuntimeTestFixtures.idleSnapshot());
+            rejected, HarnessRuntimeTestFixtures.idleSnapshot(), false);
     assertEquals(idText(2), rejectedDto.getTurnStartEntryId());
     assertNull(rejectedDto.getModelInvocationId());
 
@@ -376,13 +392,13 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(
         idText(10),
         HarnessRuntimeResponseMapper.toCompactResultDto(
-                accepted, HarnessRuntimeTestFixtures.idleSnapshot())
+                accepted, HarnessRuntimeTestFixtures.idleSnapshot(), false)
             .getModelInvocationId());
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeResponseMapper.toCompactResultDto(
-                accepted, HarnessRuntimeTestFixtures.idleSnapshot(id(99))));
+                accepted, HarnessRuntimeTestFixtures.idleSnapshot(id(99)), false));
   }
 
   @Test
@@ -402,7 +418,7 @@ class HarnessRuntimeResponseMapperTest {
                     List.of(ResourceMessageContent.media(id(70), "report.txt", "preview")))));
     HarnessThreadStopResultDTO stoppedDto =
         HarnessRuntimeResponseMapper.toStopResultDto(
-            stopped, HarnessRuntimeTestFixtures.idleSnapshot());
+            stopped, HarnessRuntimeTestFixtures.idleSnapshot(), false);
 
     assertEquals("STOPPED", stoppedDto.getStatus());
     assertEquals(idText(5), stoppedDto.getStoppedTurnEndEntryId());
@@ -429,7 +445,7 @@ class HarnessRuntimeResponseMapperTest {
         new StopResult(false, HarnessRuntimeTestFixtures.thread(id(1)), null, 0, List.of());
     HarnessThreadStopResultDTO idleDto =
         HarnessRuntimeResponseMapper.toStopResultDto(
-            idle, HarnessRuntimeTestFixtures.idleSnapshot());
+            idle, HarnessRuntimeTestFixtures.idleSnapshot(), false);
     assertEquals("IDLE", idleDto.getStatus());
     assertNull(idleDto.getStoppedTurnEndEntryId());
     assertTrue(idleDto.getCancelledUserMessages().isEmpty());
@@ -439,7 +455,7 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(
         "REPLAYED",
         HarnessRuntimeResponseMapper.toStopResultDto(
-                replay, HarnessRuntimeTestFixtures.idleSnapshot())
+                replay, HarnessRuntimeTestFixtures.idleSnapshot(), false)
             .getStatus());
   }
 
@@ -452,12 +468,12 @@ class HarnessRuntimeResponseMapperTest {
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeResponseMapper.toStopResultDto(
-                result, HarnessRuntimeTestFixtures.idleSnapshot(id(99))));
+                result, HarnessRuntimeTestFixtures.idleSnapshot(id(99)), false));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             HarnessRuntimeResponseMapper.toStopResultDto(
-                result, withVersion(HarnessRuntimeTestFixtures.idleSnapshot(), 4)));
+                result, withVersion(HarnessRuntimeTestFixtures.idleSnapshot(), 4), false));
   }
 
   /** 测试意图：branch settings 的 goal 投影必须显式 nullable：已设置时输出 {id,text}，未设置或已清除时输出 null。 */
@@ -468,12 +484,13 @@ class HarnessRuntimeResponseMapperTest {
         HarnessRuntimeResponseMapper.toThreadDto(
             idleSnapshot(
                 HarnessRuntimeTestFixtures.settings()
-                    .withGoal(new GoalSetting(goalId, "ship the release"))));
+                    .withGoal(new GoalSetting(goalId, "ship the release"))),
+            false);
     assertEquals(idText(42), withGoal.getBranchSettings().getGoal().getId());
     assertEquals("ship the release", withGoal.getBranchSettings().getGoal().getText());
 
     HarnessThreadDTO cleared =
-        HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot());
+        HarnessRuntimeResponseMapper.toThreadDto(HarnessRuntimeTestFixtures.idleSnapshot(), false);
     assertNull(cleared.getBranchSettings().getGoal());
   }
 

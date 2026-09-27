@@ -474,6 +474,71 @@ class OutputSpoolTest {
     assertTrue(listDirectory(store.stagingDirectory()).isEmpty(), "失败不得留下中转文件");
   }
 
+  /** 终态说明只在显式提供时追加；内联正文不以换行结尾时必须补换行，说明自成一行。 */
+  @Test
+  void finishAppendsTerminalNoteOnlyWhenProvided() throws IOException {
+    try (OutputSpool spool = new OutputSpool(store(), "call-note-absent", 4096, 100, 4096)) {
+      spool.write("payload".getBytes(StandardCharsets.UTF_8));
+      assertEquals("payload", text(spool.finish(false, null)), "null 说明不得被追加");
+    }
+    try (OutputSpool spool = new OutputSpool(store(), "call-note-append", 4096, 100, 4096)) {
+      spool.write("payload".getBytes(StandardCharsets.UTF_8));
+      EnvironmentCapabilityResult result = spool.finish(true, "[note]");
+      assertTrue(result.error(), "错误退出必须保持 error 标记");
+      assertEquals("payload\n[note]", text(result), "说明必须自成一行且不改写已捕获正文");
+    }
+  }
+
+  /**
+   * durable 发布失败必须降级为无路径的有界预览，并清理中转文件。
+   *
+   * <p>用「text 目录被替换为普通文件」构造确定性的发布失败，不需要 mock：它就是本地存储被破坏时的真实形态。
+   */
+  @Test
+  void publishFailureDegradesToPreviewAndRemovesStagingFile() throws IOException {
+    TextOutputStore store = store();
+    Files.delete(store.textDirectory());
+    Files.createFile(store.textDirectory());
+
+    try (OutputSpool spool = new OutputSpool(store, "call-publish-failed", 16, 100, 4096)) {
+      spool.write("z".repeat(64).getBytes(StandardCharsets.UTF_8));
+      assertTrue(spool.isSpilled(), "超阈值输出必须落盘");
+
+      EnvironmentCapabilityResult result = spool.finish(false);
+
+      assertFalse(result.error(), "发布失败不得让调用失败");
+      String preview = text(result);
+      assertTrue(preview.contains("could not be saved to local storage"), preview);
+      assertTrue(preview.contains("64 bytes"), preview);
+      JsonNode textOutput =
+          AbstractCodingCapability.OBJECT_MAPPER.readTree(result.detailsJson()).path("textOutput");
+      assertTrue(textOutput.path("captureFailed").asBoolean(), textOutput.toString());
+      assertTrue(textOutput.path("path").isMissingNode(), "发布失败不得给出不存在的 durable 路径");
+    }
+    assertTrue(listDirectory(store.stagingDirectory()).isEmpty(), "发布失败不得残留中转文件");
+  }
+
+  /** 捕获被预算截断且发布失败时，预览必须同时报告两种降级，并保留终态说明。 */
+  @Test
+  void publishFailurePreviewStillReportsCaptureTruncation() throws IOException {
+    TextOutputStore store = store();
+    Files.delete(store.textDirectory());
+    Files.createFile(store.textDirectory());
+
+    try (OutputSpool spool = new OutputSpool(store, "call-publish-truncated", 16, 100, 32)) {
+      spool.write("q".repeat(128).getBytes(StandardCharsets.UTF_8));
+      assertTrue(spool.isCaptureTruncated(), "超出捕获预算必须标记为截断");
+
+      EnvironmentCapabilityResult result = spool.finish(true, "[Command exited with code 7.]");
+
+      assertTrue(result.error(), "错误退出必须保持 error 标记");
+      String preview = text(result);
+      assertTrue(preview.contains("could not be saved to local storage"), preview);
+      assertTrue(preview.contains("Capture stopped at the local 32-byte daemon budget"), preview);
+      assertTrue(preview.contains("[Command exited with code 7.]"), preview);
+    }
+  }
+
   /** 通过 {@link TextStreams} 逐行扫描统计文件行数，作为行数语义的独立事实源。 */
   private static long textStreamsLineCount(Path file) throws IOException, InterruptedException {
     TextStreams.Encoding encoding = TextStreams.detectEncoding(TextStreams.probe(file));

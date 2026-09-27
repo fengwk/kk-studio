@@ -10,8 +10,13 @@ import {
   buildTextCacheSystemPrompt,
   assertAssistantUsage,
   assertProviderUsageAlgebra,
+  DEFAULT_BUILTIN_MODEL_ID,
+  collectTaskToolResults,
+  resolveBuiltinModelDef,
   sanitizeArtifact,
   safeDiagnosticJson,
+  subagentResultTexts,
+  summarizeThreadHistory,
   resolveRealModel,
   requireRealMiniMaxM3,
 } from '../cases/real.mjs'
@@ -780,4 +785,101 @@ test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 prov
       ),
     /DeepSeek providerTotalTokens algebra mismatch/,
   )
+})
+
+test('task 完成消息只按真实 CUSTOM_MESSAGE/USER 读取，不接受旧 MESSAGE/id= 别名', () => {
+  // 测试意图：完成结果由 settlement 异步交付为 CUSTOM_MESSAGE + role=USER 的 text content；旧实现把同一
+  // 正文放在 MESSAGE 里并用 id="<threadId>" 匹配，都会让父 Thread 永远等不到结果，因此必须严格只认真实 wire。
+  const customMessage = (text) => ({
+    entryId: 'e-custom',
+    entryType: 'CUSTOM_MESSAGE',
+    payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text }] } }),
+  })
+  const assistantMessage = (text) => ({
+    entryId: 'e-assistant',
+    entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text }] } }),
+  })
+
+  assert.deepEqual(
+    subagentResultTexts([
+      customMessage('<subagent_result thread_id="t1" agent="c" state="completed"><task></task><result>M</result></subagent_result>'),
+      assistantMessage('<subagent_result thread_id="t2" agent="c" state="completed"></subagent_result>'),
+      customMessage('{"thread_id":"t3","status":"accepted"}'),
+    ]),
+    ['<subagent_result thread_id="t1" agent="c" state="completed"><task></task><result>M</result></subagent_result>'],
+  )
+})
+
+test('task 即时回执与诊断摘要只读真实 entry payload，错误码可见', () => {
+  // 测试意图：失败时 artifacts 必须能区分「模型没调用 task」与「产品没记录回执/回合报错」，
+  // 因此摘要要投影 role/tool 名/文本前缀/assistant 错误码，而回执只认 MESSAGE + TOOL + tool_result{toolName:"task"}。
+  const entries = [
+    {
+      entryId: 'e1',
+      entryType: 'ASSISTANT_ERROR',
+      payloadJson: JSON.stringify({ error: { code: 'MODEL_CALL_FAILED', message: 'boom' }, attempt: null }),
+    },
+    {
+      entryId: 'e2',
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: {
+          role: 'TOOL',
+          contents: [
+            {
+              type: 'tool_result',
+              toolName: 'task',
+              rendererKey: 'task',
+              error: false,
+              contents: [{ type: 'text', text: '{"thread_id":"t1","status":"accepted"}' }],
+            },
+          ],
+        },
+      }),
+    },
+    { entryId: 'e3', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED', continueModel: false }) },
+  ]
+
+  const results = collectTaskToolResults(entries)
+  assert.equal(results.length, 1)
+  assert.equal(results[0].rendererKey, 'task')
+
+  const summary = summarizeThreadHistory(entries)
+  assert.deepEqual(
+    summary.map((row) => row.entryType),
+    ['ASSISTANT_ERROR', 'MESSAGE', 'TURN_END'],
+  )
+  assert.equal(summary[0].errorCode, 'MODEL_CALL_FAILED')
+  assert.equal(summary[1].role, 'TOOL')
+  assert.equal(summary[1].contents[0].toolName, 'task')
+  assert.equal(summary[2].outcome, 'COMPLETED')
+})
+
+test('E2E_BUILTIN_MODEL 只接受已声明的四个 idSuffix，缺省为 minimax_anthropic，非法值拒绝', () => {
+  // 测试意图：两个内建工具 real case 允许显式换用另一个已声明 provider/model，但必须显式、可枚举、
+  // 非法值直接失败——绝不静默 fallback 到其它 provider 或改写 provider identity。
+  const declaredIds = REAL_MODEL_DEFINITIONS.map((def) => def.idSuffix)
+  assert.deepEqual(declaredIds, [
+    'google_gemini',
+    'openai_responses',
+    'minimax_anthropic',
+    'deepseek_chat',
+  ])
+
+  assert.equal(resolveBuiltinModelDef(null).idSuffix, DEFAULT_BUILTIN_MODEL_ID)
+  assert.equal(resolveBuiltinModelDef('').idSuffix, DEFAULT_BUILTIN_MODEL_ID)
+  assert.equal(DEFAULT_BUILTIN_MODEL_ID, 'minimax_anthropic')
+
+  for (const def of REAL_MODEL_DEFINITIONS) {
+    assert.equal(resolveBuiltinModelDef(def.idSuffix).providerName, def.providerName)
+  }
+
+  for (const invalid of ['google', 'gemini', 'minimax-anthropic', 'google_gemini ', 'openai', 'nope']) {
+    assert.throws(
+      () => resolveBuiltinModelDef(invalid),
+      /E2E_BUILTIN_MODEL must be one of google_gemini, openai_responses, minimax_anthropic, deepseek_chat/,
+      `invalid value must be rejected: ${invalid}`,
+    )
+  }
 })

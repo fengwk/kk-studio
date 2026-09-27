@@ -10,6 +10,7 @@ import {
   createNewSession,
   listEnvironments,
   setAgentCommand,
+  setEnvironmentCommand,
   setModelCommand,
   stopThreadForCleanup,
   threadTarget,
@@ -238,8 +239,8 @@ export async function runWorkspaceContractMatrix(ui) {
           await footer.waitFor({ state: 'visible', timeout: 15_000 })
           const environment = footer.locator('.thread-status-environment .thread-status-seg')
           const environmentText = await environment.innerText()
-          // Environment 归属当前 branch 的 Agent：fixture 已切到绑定另一 Card 的 Agent，
-          // Footer 必须投影那个 Agent 的 Environment（无 daemon 连接 => unavailable），
+          // Environment 由当前 branch settings 显式绑定，fixture 已切到另一 Card，
+          // Footer 必须投影该 Environment（无 daemon 连接 => unavailable），
           // 而不是首个 Environment，也不含任何已删除的 workspace 路径。
           assert(
             environmentText === `env:${fixture.otherEnvironment.name} (unavailable)`,
@@ -476,8 +477,8 @@ export async function runWorkspaceContractMatrix(ui) {
   )
 
   await run(
-    'ui.chat.task_status.bound_widget',
-    'Bound ChatPanel 通过应用事件永久呈现活动 task 状态',
+    'ui.chat.task_status.async_thread_approval',
+    'Task tool 卡片呈现 accepted 回执并链接至 /threads/:threadId，进入子 Thread 可进行独立审批',
     async (caseArt) => {
       await withUiFixture(
         page,
@@ -485,22 +486,94 @@ export async function runWorkspaceContractMatrix(ui) {
         async (fixture) => {
           await bindThreadComposer(page, goto, fixture)
           await fixture.start()
-          const widget = page.locator('.task-status-widget')
-          await widget.waitFor({ state: 'visible', timeout: 20_000 })
-          await widget.getByText(fixture.childAgent.name, { exact: true })
-            .waitFor({ state: 'visible', timeout: 10_000 })
-          await widget.getByText('模型运行中', { exact: true })
-            .waitFor({ state: 'visible', timeout: 10_000 })
-          assert(
-            (await widget.innerText()).includes('1 个运行中'),
-            `TaskStatus did not project the active child: ${await widget.innerText()}`,
-          )
-          assert(
-            (await widget.innerText()).includes('模型运行中'),
-            `TaskStatus did not retain the child state: ${await widget.innerText()}`,
-          )
-          await shot(caseArt, 'bound-task-status-widget')
-          expectNoFatal(pageErrors, consoleErrors)
+
+          const taskCard = page.locator('.thread-tool-surface').filter({
+            has: page.locator('.thread-tool-name', { hasText: 'task' }),
+          }).last()
+          await taskCard.waitFor({ state: 'visible', timeout: 25_000 })
+          await taskCard.getByText('已接受 / 后台执行').waitFor({ state: 'visible', timeout: 15_000 })
+
+          const link = taskCard.locator('.task-tool-thread-link')
+          await link.waitFor({ state: 'visible', timeout: 10_000 })
+          const href = await link.getAttribute('href')
+          const childThreadId = (await link.innerText()).trim()
+          assert(href === `/threads/${childThreadId}`, `unexpected thread link href: ${href}`)
+
+          let resolveApproval
+          const approvalPromise = new Promise((resolve) => {
+            resolveApproval = resolve
+          })
+
+          const snapshotMatcher = (url) => url.pathname === `/api/harness/threads/${childThreadId}`
+          const snapshotHandler = async (route) => {
+            await route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                status: 200,
+                data: childSnapshotWithPendingTool(childThreadId),
+              }),
+            })
+          }
+
+          const approvalMatcher = (url) =>
+            url.pathname.startsWith(`/api/harness/threads/${childThreadId}/tool-invocations/`)
+            && url.pathname.endsWith('/approval')
+          const approvalHandler = async (route) => {
+            const request = route.request()
+            resolveApproval({
+              target: request.url(),
+              body: request.postDataJSON(),
+            })
+            await route.fulfill({
+              status: 200,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                status: 200,
+                data: {
+                  id: 'inv-bash-1',
+                  status: 'RUNNING',
+                },
+              }),
+            })
+          }
+
+          await page.route(snapshotMatcher, snapshotHandler)
+          await page.route(approvalMatcher, approvalHandler)
+
+          try {
+            await link.click()
+            await page.waitForURL(`**/threads/${childThreadId}`)
+            const approval = page.locator('.thread-tool-approval')
+            await approval.waitFor({ state: 'visible', timeout: 15_000 })
+            assert(
+              await approval.getByRole('button', { name: '允许', exact: true }).count() === 1
+              && await approval.getByRole('button', { name: '拒绝', exact: true }).count() === 1,
+              'child thread approval controls missing',
+            )
+
+            await approval.getByRole('button', { name: '允许', exact: true }).click()
+            const { target: approvalTarget, body: approvalBody } = await Promise.race([
+              approvalPromise,
+              sleep(10_000).then(() => {
+                throw new Error('child thread approval request timed out')
+              }),
+            ])
+            assert(
+              approvalTarget.includes(`/threads/${childThreadId}/tool-invocations/inv-bash-1/approval`),
+              `approval did not target the child thread: ${approvalTarget}`,
+            )
+            assert(
+              approvalBody?.decision === 'ALLOW',
+              `unexpected approval payload: ${JSON.stringify(approvalBody)}`,
+            )
+
+            await shot(caseArt, 'child-thread-approval-routed')
+            expectNoFatal(pageErrors, consoleErrors)
+          } finally {
+            await page.unroute(snapshotMatcher, snapshotHandler).catch(() => undefined)
+            await page.unroute(approvalMatcher, approvalHandler).catch(() => undefined)
+          }
         },
       )
     },
@@ -756,7 +829,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       systemPrompt: 'Return the deterministic local response.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      environmentId: state.environment.id,
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
     assert(agentResponse.status === 201, `create usage agent: ${JSON.stringify(agentResponse)}`)
@@ -774,11 +846,15 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       owner,
       sessionId,
       threadId,
-      rootSettings: branchSettingsOf(state.agent, {
-        providerName: state.model.providerName,
-        modelName: state.model.name,
-        variant: 'default',
-      }),
+      rootSettings: branchSettingsOf(
+        state.agent,
+        {
+          providerName: state.model.providerName,
+          modelName: state.model.name,
+          variant: 'default',
+        },
+        state.environment.name,
+      ),
       yoloEnabled: false,
       commands: [userMessageCommand(`footer usage ${stamp}`, cid())],
     })
@@ -788,7 +864,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       timeoutMs: 30_000,
       intervalMs: 100,
     })
-    // Environment 归属 Agent：切换只读 Footer 的 Environment 事实只能通过切换绑定不同 Card 的 Agent 表达。
+    // 切换只读 Footer 的 Environment 事实通过 branch settings 的 setEnvironmentCommand 表达。
     const otherEnvironmentResponse = await apiCtx.call('POST', '/api/harness/environments', {
       name: `offline-alt-${suffix}`,
     })
@@ -803,7 +879,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       systemPrompt: 'Return the deterministic local response.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      environmentId: state.otherEnvironment.id,
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
     assert(
@@ -829,12 +904,13 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
           },
           cid(),
         ),
+        setEnvironmentCommand(state.otherEnvironment.name, cid()),
         userMessageCommand(`footer environment ${stamp}`, cid()),
       ],
     })
     assert(
       switched.acceptedCommands.map((command) => command.type).join(',')
-        === 'SET_AGENT,SET_MODEL,USER_MESSAGE',
+        === 'SET_AGENT,SET_MODEL,SET_ENVIRONMENT,USER_MESSAGE',
       JSON.stringify(switched.acceptedCommands),
     )
     await waitForQuiescentThread(apiCtx, state.threadId, {
@@ -848,6 +924,80 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   } catch (error) {
     await cleanupCompletedUsageFixture(state).catch(() => undefined)
     throw error
+  }
+}
+
+function childSnapshotWithPendingTool(targetThreadId) {
+  const toolEntry = {
+    entryId: 'entry-tool-1',
+    sessionId: 'session-child',
+    parentEntryId: null,
+    entryType: 'MESSAGE',
+    payloadJson: JSON.stringify({
+      message: {
+        role: 'ASSISTANT',
+        contents: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-bash-1',
+            toolName: 'bash',
+            rendererKey: 'bash',
+            argumentsJson: '{"command":"rm -rf /tmp/test"}',
+          },
+        ],
+      },
+    }),
+    createTime: '2026-07-28T10:00:01Z',
+  }
+
+  return {
+    thread: {
+      threadId: targetThreadId,
+      name: 'Child Worker Thread',
+      sessionId: 'session-child',
+      headEntryId: 'entry-tool-1',
+      yoloEnabled: false,
+      nextCommandSequence: '1',
+      version: '1',
+      status: 'TOOL_WAITING_APPROVAL',
+      processing: false,
+      branchSettings: {
+        agentName: 'worker',
+        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        environmentName: null,
+      },
+      createTime: '2026-07-28T10:00:00Z',
+      updateTime: '2026-07-28T10:00:00Z',
+    },
+    entries: [toolEntry],
+    queuedCommands: [],
+    toolInvocations: [
+      {
+        id: 'inv-bash-1',
+        modelInvocationId: 'm-1',
+        assistantEntryId: 'entry-tool-1',
+        callIndex: 0,
+        status: 'WAITING_APPROVAL',
+        attempt: 1,
+        toolCallId: 'call-bash-1',
+        toolName: 'bash',
+        rendererKey: 'bash',
+        environmentId: null,
+        argumentsJson: '{"command":"rm -rf /tmp/test"}',
+        approvalJson: JSON.stringify({
+          required: true,
+          decision: null,
+          decisionId: null,
+          reason: 'Dangerous shell command execution',
+        }),
+        resultJson: null,
+        errorJson: null,
+        createTime: '2026-07-28T10:00:01Z',
+        updateTime: '2026-07-28T10:00:01Z',
+      },
+    ],
+    modelInvocation: null,
+    modelAttemptFailures: [],
   }
 }
 
@@ -954,7 +1104,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     state.sessionId = String(sessionId)
     return {
       ...state,
-      // TOOL_PARTIAL/task.status 是 lossy realtime：浏览器先绑定 Thread，再显式启动 task。
+      // 浏览器先绑定 Thread，再显式启动 task。
       start: async () => {
         const idle = await waitForQuiescentThread(apiCtx, state.threadId, {
           timeoutMs: 60_000,
@@ -1072,7 +1222,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
       model: `${state.model.providerName}/${state.model.name}`,
       variant: 'default',
-      environmentId: matchedEnv.id,
       config: {
         tools: ['write', 'edit', 'bash'],
         skills: [],
@@ -1104,6 +1253,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
           modelName: state.model.name,
           variant: 'default',
         },
+        matchedEnv.name,
       ),
       yoloEnabled: false,
       commands: [userMessageCommand(`tool card materialize ${suffix}`, cid())],
@@ -1602,7 +1752,7 @@ class ToolCardOpenAiMock {
       await sleep(20)
     }
     this.callResponse.streamed = true
-    // TOOL_PARTIAL is lossy; trailing JSON whitespace replays the accumulated call without changing it.
+    // MODEL_DELTA is lossy; trailing JSON whitespace replays the accumulated call without changing it.
     this.heartbeat = setInterval(() => {
       if (!this.callResponse?.streamed) return
       this.writeToolDelta(this.callResponse, ' ', false)
@@ -1625,10 +1775,9 @@ class ToolCardOpenAiMock {
           ...(withRole ? { role: 'assistant' } : {}),
           tool_calls: [{
             index: 0,
-            id: callId,
-            type: 'function',
+            ...(withRole ? { id: callId, type: 'function' } : {}),
             function: {
-              name: toolName,
+              ...(withRole ? { name: toolName } : {}),
               arguments: argumentsChunk,
             },
           }],
@@ -1748,7 +1897,12 @@ class TaskHoldingOpenAiMock {
       response.end(JSON.stringify({ error: { message: `invalid task JSON: ${error.message}` } }))
       return
     }
-    if (JSON.stringify(body.messages || []).includes(this.parentMarker)) {
+    const messages = body.messages || []
+    if (messages.some((m) => m.role === 'tool')) {
+      this.sendCompletion(response, body)
+      return
+    }
+    if (JSON.stringify(messages).includes(this.parentMarker)) {
       this.sendTaskCall(response, body)
       return
     }
@@ -1761,6 +1915,34 @@ class TaskHoldingOpenAiMock {
     this.responses.add(response)
     response.once('close', () => this.responses.delete(response))
     this.resolveChildRequest?.()
+  }
+
+  sendCompletion(response, body) {
+    const created = Math.floor(Date.now() / 1000)
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    })
+    response.write(sseFrame({
+      id: `e2e-ui-task-complete-${cid()}`,
+      object: 'chat.completion.chunk',
+      created,
+      model: body.model || 'e2e-ui-task-model',
+      choices: [{
+        index: 0,
+        delta: { role: 'assistant', content: 'Task delegation initiated.' },
+        finish_reason: null,
+      }],
+    }))
+    response.write(sseFrame({
+      id: `e2e-ui-task-stop-${cid()}`,
+      object: 'chat.completion.chunk',
+      created,
+      model: body.model || 'e2e-ui-task-model',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    }))
+    response.end('data: [DONE]\n\n')
   }
 
   sendTaskCall(response, body) {
@@ -1789,7 +1971,7 @@ class TaskHoldingOpenAiMock {
               arguments: JSON.stringify({
                 subagent_type: this.childName,
                 prompt: 'Remain active while the parent UI renders task status.',
-                maxTurns: 20,
+                max_turns: 20,
               }),
             },
           }],

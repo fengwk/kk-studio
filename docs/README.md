@@ -10,6 +10,7 @@
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
+| 核对内置工具与异步委派的行为迁移 | [文件读取](operations/builtin-read-tests.md)、[文件变更](operations/builtin-mutation-tests.md)、[搜索](operations/builtin-search-tests.md)、[命令](operations/builtin-bash-tests.md)、[LSP](operations/builtin-lsp-tests.md)、[委派](operations/builtin-task-tests.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
@@ -32,6 +33,7 @@
 | [Harness Tool](modules/harness-tool.md) | Tool 的身份、定义、调用、校验和结果采用什么统一契约？ |
 | [Harness Contributor API](modules/harness-contributor-api.md) | Builtin、构建期 Plugin 与 Trusted Contributor 如何在启动时注册并冻结为 catalog？ |
 | [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
+| [内置工具与异步委派](modules/builtin-tools-design.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
 | [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
 | [Harness MCP](modules/harness-mcp.md) | 无状态 MCP client 如何处理总预算、取消与结果映射？ |
 

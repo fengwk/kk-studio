@@ -91,8 +91,7 @@ OPT_JAVA_HOME=
 DATA_DIR=
 NOTE=
 BASH_EXECUTABLE=
-LSP_BRIDGE_COMMAND=
-JAVAP_EXECUTABLE=
+LSP_CONFIG=
 SEEN_OPTIONS=
 
 TEMP_PATHS=()
@@ -135,10 +134,9 @@ Install options:
                                       most 512 characters.
   --bash-executable <value>           Optional. bash for process.exec
                                       (default: the resolved bash path).
-  --lsp-bridge-command <value>        Optional. LSP bridge command; omitted by
+  --lsp-config <path>                 Optional. Absolute path to a JSON file
+                                      declaring language servers. Omitted by
                                       default, which disables LSP queries.
-  --javap-executable <value>          Optional. javap for class decompilation
-                                      (default: <selected JDK>/bin/javap).
 
 Unknown or duplicated options fail closed. Values must not contain control
 characters; tokens, gateway values and notes never reach the Maven build.
@@ -290,7 +288,7 @@ parse_install_options() {
     option=$1
     case "$option" in
       --gateway-uri | --registration-token-file | --java-home | --data-dir | --note | \
-        --bash-executable | --lsp-bridge-command | --javap-executable) ;;
+        --bash-executable | --lsp-config) ;;
       *) fail "unknown option: $option" ;;
     esac
     if option_seen "$option"; then
@@ -310,8 +308,7 @@ parse_install_options() {
       --data-dir) DATA_DIR=$value ;;
       --note) NOTE=$value ;;
       --bash-executable) BASH_EXECUTABLE=$value ;;
-      --lsp-bridge-command) LSP_BRIDGE_COMMAND=$value ;;
-      --javap-executable) JAVAP_EXECUTABLE=$value ;;
+      --lsp-config) LSP_CONFIG=$value ;;
     esac
   done
 }
@@ -365,6 +362,19 @@ validate_note() {
   esac
   if (( ${#NOTE} > 512 )); then
     fail "--note must not exceed 512 characters"
+  fi
+}
+
+validate_lsp_config() {
+  local name=--lsp-config
+  reject_control_characters "$LSP_CONFIG" "$name"
+  case "$LSP_CONFIG" in
+    *'~'*) fail "$name must not contain '~'" ;;
+    *'$'* | *'%'*) fail "$name must not contain environment-variable placeholders" ;;
+  esac
+  require_absolute_path "$LSP_CONFIG" "$name"
+  if [ ! -f "$LSP_CONFIG" ] || [ ! -r "$LSP_CONFIG" ]; then
+    fail "$name must be an existing readable regular file"
   fi
 }
 
@@ -430,16 +440,6 @@ resolve_java_home() {
     return 0
   fi
   fail "JDK 21 not found: set JAVA_HOME_21 or JAVA_HOME, pass --java-home, or put java on PATH"
-}
-
-resolve_javap_executable() {
-  if [ -n "$JAVAP_EXECUTABLE" ]; then
-    return 0
-  fi
-  if [ ! -x "$SELECTED_JAVA_HOME/bin/javap" ]; then
-    fail "the selected JDK has no executable bin/javap: $SELECTED_JAVA_HOME"
-  fi
-  JAVAP_EXECUTABLE="$SELECTED_JAVA_HOME/bin/javap"
 }
 
 # 构建：显式 JAVA_HOME 走 Maven，其余一切（gateway、token 路径、note）都不进入构建，
@@ -512,10 +512,9 @@ build_exec_start() {
     arguments+=(--note "$NOTE")
   fi
   arguments+=(--bash-executable "$BASH_EXECUTABLE")
-  if [ -n "$LSP_BRIDGE_COMMAND" ]; then
-    arguments+=(--lsp-bridge-command "$LSP_BRIDGE_COMMAND")
+  if [ -n "$LSP_CONFIG" ]; then
+    arguments+=(--lsp-config "$LSP_CONFIG")
   fi
-  arguments+=(--javap-executable "$JAVAP_EXECUTABLE")
 
   local argument line=
   for argument in "${arguments[@]}"; do
@@ -606,10 +605,9 @@ append_program_arguments() {
     arguments+=(--note "$NOTE")
   fi
   arguments+=(--bash-executable "$BASH_EXECUTABLE")
-  if [ -n "$LSP_BRIDGE_COMMAND" ]; then
-    arguments+=(--lsp-bridge-command "$LSP_BRIDGE_COMMAND")
+  if [ -n "$LSP_CONFIG" ]; then
+    arguments+=(--lsp-config "$LSP_CONFIG")
   fi
-  arguments+=(--javap-executable "$JAVAP_EXECUTABLE")
 
   local argument
   printf '  <array>\n' >>"$destination"
@@ -800,6 +798,9 @@ prepare_install_inputs() {
   if [ -n "$NOTE" ]; then
     validate_note
   fi
+  if [ -n "$LSP_CONFIG" ]; then
+    validate_lsp_config
+  fi
   resolve_data_dir
   resolve_bash_executable
   resolve_verification_windows
@@ -808,7 +809,6 @@ prepare_install_inputs() {
   # 不受支持的系统也在这里失败：选项错误优先于宿主错误，且此时还没有受管路径被创建。
   require_supported_host
   SELECTED_JAVA_HOME=$(resolve_java_home)
-  resolve_javap_executable
 }
 
 prepare_validated_jar() {

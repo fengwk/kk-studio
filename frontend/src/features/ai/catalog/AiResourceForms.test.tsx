@@ -60,6 +60,7 @@ describe('AiResourceForms', () => {
     render(<ModelFormHarness />)
 
     expect(screen.getByRole('heading', { name: 'Limit' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Name', exact: true })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '功能' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Pricing' })).toBeInTheDocument()
     expect(screen.getByLabelText('Tools')).toBeChecked()

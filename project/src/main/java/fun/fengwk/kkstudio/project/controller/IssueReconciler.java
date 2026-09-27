@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.port.DelegatedWorkActivityPort;
 import fun.fengwk.kkstudio.project.port.EvidenceBlobPort;
 import fun.fengwk.kkstudio.project.port.HarnessCommandAcceptancePort;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -102,6 +103,7 @@ public class IssueReconciler {
   private final EvidenceBlobPort evidenceBlobPort;
   private final IssueWorkStore issueWorkStore;
   private final HarnessCommandAcceptancePort commandAcceptancePort;
+  private final DelegatedWorkActivityPort delegatedWorkActivityPort;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final IssueControllerProperties properties;
@@ -121,6 +123,7 @@ public class IssueReconciler {
       EvidenceBlobPort evidenceBlobPort,
       IssueWorkStore issueWorkStore,
       HarnessCommandAcceptancePort commandAcceptancePort,
+      DelegatedWorkActivityPort delegatedWorkActivityPort,
       ObjectProvider<HarnessRuntime> runtimes,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties) {
@@ -137,6 +140,7 @@ public class IssueReconciler {
         evidenceBlobPort,
         issueWorkStore,
         commandAcceptancePort,
+        delegatedWorkActivityPort,
         runtimes,
         workflowCodec,
         properties,
@@ -156,6 +160,7 @@ public class IssueReconciler {
       EvidenceBlobPort evidenceBlobPort,
       IssueWorkStore issueWorkStore,
       HarnessCommandAcceptancePort commandAcceptancePort,
+      DelegatedWorkActivityPort delegatedWorkActivityPort,
       ObjectProvider<HarnessRuntime> runtimes,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties,
@@ -177,6 +182,8 @@ public class IssueReconciler {
     this.issueWorkStore = Objects.requireNonNull(issueWorkStore, "issueWorkStore");
     this.commandAcceptancePort =
         Objects.requireNonNull(commandAcceptancePort, "commandAcceptancePort");
+    this.delegatedWorkActivityPort =
+        Objects.requireNonNull(delegatedWorkActivityPort, "delegatedWorkActivityPort");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
@@ -647,8 +654,8 @@ public class IssueReconciler {
     return evidenceBlobPort.isBlobActive(res.blobId());
   }
 
-  /** 判断是否存在正在进行中的命令、活跃模型调用或正在执行的工具。 */
-  private static boolean isProcessing(ThreadSnapshot snapshot) {
+  /** 本 Thread 或其委派子树尚未静止时，Run 不得投递指示或收尾。 */
+  private boolean isProcessing(ThreadSnapshot snapshot) {
     if (snapshot == null) {
       return false;
     }
@@ -674,7 +681,7 @@ public class IssueReconciler {
         return true;
       }
     }
-    return false;
+    return delegatedWorkActivityPort.hasPendingDelegatedWork(snapshot.thread().id());
   }
 
   /** 判断是否存在处于安全等待点（等待输入或等待审批）的工具调用。 */
