@@ -108,14 +108,14 @@ describe('AppShell settings navigation', () => {
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(document.querySelector('.app-frame')).not.toHaveClass('chat-immersive')
     expect(document.querySelector('.app-frame')).not.toHaveClass('canvas-immersive')
-    // settings 激活时 AI/Canvas/Tools 一律不误激活。
+    // settings 激活时 AI/Projects/Canvas 一律不误激活。
     expect(screen.getByRole('link', { name: '设置 Settings' })).toHaveClass('active')
     expect(screen.getByRole('link', { name: '智能 AI' })).not.toHaveClass('active')
+    expect(screen.getByRole('link', { name: '项目 Projects' })).not.toHaveClass('active')
     expect(screen.getByRole('link', { name: '画布 Canvas' })).not.toHaveClass('active')
-    expect(screen.getByRole('link', { name: '工具 Tools' })).not.toHaveClass('active')
   })
 
-  it('does not mis-activate Settings on AI, Canvas or Tools routes', () => {
+  it('does not mis-activate Settings on AI, Projects or Canvas routes', () => {
     renderShell('/chats', <div>Content</div>)
     expect(screen.getByRole('link', { name: '设置 Settings' })).not.toHaveClass('active')
     expect(screen.getByRole('link', { name: '智能 AI' })).toHaveClass('active')

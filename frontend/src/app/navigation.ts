@@ -1,4 +1,4 @@
-import { Bot, FolderKanban, Grid2X2, Settings, Wrench } from 'lucide-react'
+import { Bot, FolderKanban, Grid2X2, Settings } from 'lucide-react'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 
 /**
@@ -32,15 +32,6 @@ export const PRIMARY_NAV_ITEMS: readonly PrimaryNavItem[] = [
     ariaKey: 'platform.nav.canvasAria',
     shortLabel: 'Canvas',
     icon: Grid2X2,
-  },
-  {
-    id: 'tools',
-    groupId: 'tools',
-    to: '/comfyui',
-    labelKey: 'platform.nav.tools',
-    ariaKey: 'platform.nav.toolsAria',
-    shortLabel: 'Tools',
-    icon: Wrench,
   },
   {
     id: 'settings',

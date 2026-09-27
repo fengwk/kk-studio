@@ -5,7 +5,6 @@ import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
-import { comfyuiService } from '@/shared/api/comfyui-service'
 import { environmentService } from '@/shared/api/environment-service'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
@@ -23,7 +22,6 @@ vi.mock('@/shared/api/agent-service', () => ({
 }))
 vi.mock('@/shared/api/chat-service', () => ({ chatService: { listChats: vi.fn() } }))
 vi.mock('@/shared/api/environment-service', () => ({ environmentService: { listEnvironments: vi.fn() } }))
-vi.mock('@/shared/api/comfyui-service', () => ({ comfyuiService: { listWorkflows: vi.fn() } }))
 
 const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
 
@@ -36,7 +34,6 @@ describe('App routes', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue(page([]))
     vi.mocked(chatService.listChats).mockResolvedValue([])
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
-    vi.mocked(comfyuiService.listWorkflows).mockResolvedValue(page([]))
   })
 
   it('redirects root to Chat console', async () => {

@@ -20,7 +20,7 @@ describe('Thread snapshot architecture', () => {
     expect(paneController).toContain("interaction === 'tree' || isNewThreadTarget(target)")
     expect(paneController).toContain("['agent-pane', 'entries'")
     expect(paneController).toContain('treeEntriesQuery.data')
-    const threadKeys = keys.slice(keys.indexOf('threads:'), keys.indexOf('comfyui:'))
+    const threadKeys = keys.slice(keys.indexOf('threads:'), keys.indexOf('systemSettings:'))
     expect(threadKeys).toContain('entries:')
     expect(threadKeys).not.toMatch(/detail:|inputs:|events:|toolInvocations:/)
   })

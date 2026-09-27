@@ -48,9 +48,6 @@ export const queryKeys = {
     entries: (threadId: string) => ['threads', 'entries', threadId] as const,
     modelRequestDebug: (threadId: string) => ['threads', 'model-request-debug', threadId] as const,
   },
-  comfyui: {
-    workflows: ['comfyui', 'workflows'] as const,
-  },
   systemSettings: {
     all: ['system-settings', 'aggregate'] as const,
     schema: ['system-settings', 'schema'] as const,
