@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
@@ -56,6 +57,7 @@ import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -178,13 +180,21 @@ public class StudioIssueController {
       runDtos.add(mapper.toDto(run, threadToAgent.get(run.getThreadId())));
     }
 
-    IssueRun activeRun = issueRunService.getActiveRun(issueId);
+    IssueRun activeRun =
+        runs.stream()
+            .filter(
+                run ->
+                    run.getStatus() == IssueRunStatus.RUNNING
+                        || run.getStatus() == IssueRunStatus.WAITING)
+            .findFirst()
+            .orElse(null);
     IssueRunDTO currentRunDto =
         activeRun != null
             ? mapper.toDto(activeRun, threadToAgent.get(activeRun.getThreadId()))
             : null;
 
-    IssueRun latestRun = issueRunService.getLatestRun(issueId);
+    IssueRun latestRun =
+        runs.stream().max(Comparator.comparingLong(IssueRun::getOrdinal)).orElse(null);
     IssueRunDTO latestRunDto =
         latestRun != null
             ? mapper.toDto(latestRun, threadToAgent.get(latestRun.getThreadId()))

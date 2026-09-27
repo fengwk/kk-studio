@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.project;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
@@ -15,6 +16,7 @@ import fun.fengwk.kkstudio.share.project.ProjectIssueSnapshotDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -53,12 +55,24 @@ public class ProjectSnapshotAssembler {
         throw new IllegalStateException("Foreign issue returned for project snapshot");
       }
 
-      IssueRun activeRun = issueRunService.getActiveRun(issue.getId());
-      IssueRun currentOrLatest =
-          activeRun != null ? activeRun : issueRunService.getLatestRun(issue.getId());
-      if (currentOrLatest != null && !currentOrLatest.getIssueId().equals(issue.getId())) {
-        throw new IllegalStateException("Foreign run returned for issue snapshot");
+      List<IssueRun> runs = issueRunService.listRuns(issue.getId());
+      for (IssueRun run : runs) {
+        if (!run.getIssueId().equals(issue.getId())) {
+          throw new IllegalStateException("Foreign run returned for issue snapshot");
+        }
       }
+      IssueRun currentOrLatest =
+          runs.stream()
+              .filter(
+                  run ->
+                      run.getStatus() == IssueRunStatus.RUNNING
+                          || run.getStatus() == IssueRunStatus.WAITING)
+              .findFirst()
+              .orElseGet(
+                  () ->
+                      runs.stream()
+                          .max(Comparator.comparingLong(IssueRun::getOrdinal))
+                          .orElse(null));
 
       String agentName = null;
       if (currentOrLatest != null && currentOrLatest.getThreadId() != null) {

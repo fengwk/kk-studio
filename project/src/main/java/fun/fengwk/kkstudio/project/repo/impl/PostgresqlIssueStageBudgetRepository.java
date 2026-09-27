@@ -16,6 +16,7 @@ import java.util.UUID;
 public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRepository {
 
   private final IssueStageBudgetMapper mapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public IssueStageBudgetRow get(UUID issueId, String state) {
@@ -24,22 +25,38 @@ public class PostgresqlIssueStageBudgetRepository implements IssueStageBudgetRep
 
   @Override
   public boolean insert(IssueStageBudgetRow budget) {
-    return mapper.insert(toDO(budget)) == 1;
+    boolean changed = mapper.insert(toDO(budget)) == 1;
+    if (changed) {
+      notifier.issueChanged(budget.getIssueId());
+    }
+    return changed;
   }
 
   @Override
   public boolean update(IssueStageBudgetRow budget) {
-    return mapper.update(toDO(budget)) == 1;
+    boolean changed = mapper.update(toDO(budget)) == 1;
+    if (changed) {
+      notifier.issueChanged(budget.getIssueId());
+    }
+    return changed;
   }
 
   @Override
   public boolean delete(UUID issueId, String state) {
-    return mapper.delete(issueId, state) == 1;
+    boolean changed = mapper.delete(issueId, state) == 1;
+    if (changed) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
   }
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    return mapper.deleteByIssueId(issueId);
+    int changed = mapper.deleteByIssueId(issueId);
+    if (changed > 0) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
   }
 
   @Override

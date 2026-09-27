@@ -18,10 +18,15 @@ import java.util.UUID;
 public class PostgresqlIssueActivityRepository implements IssueActivityRepository {
 
   private final IssueActivityMapper mapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueActivity activity) {
-    return mapper.insert(toDO(activity)) == 1;
+    boolean changed = mapper.insert(toDO(activity)) == 1;
+    if (changed) {
+      notifier.issueChanged(activity.getIssueId());
+    }
+    return changed;
   }
 
   @Override
@@ -51,7 +56,11 @@ public class PostgresqlIssueActivityRepository implements IssueActivityRepositor
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    return mapper.deleteByIssueId(issueId);
+    int changed = mapper.deleteByIssueId(issueId);
+    if (changed > 0) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
   }
 
   private static IssueActivityDO toDO(IssueActivity activity) {

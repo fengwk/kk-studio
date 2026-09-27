@@ -16,10 +16,15 @@ import java.util.UUID;
 public class PostgresqlIssueRepository implements IssueRepository {
 
   private final IssueMapper issueMapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean create(Issue issue) {
-    return issueMapper.insert(toDO(issue)) == 1;
+    boolean changed = issueMapper.insert(toDO(issue)) == 1;
+    if (changed) {
+      notifier.projectChanged(issue.getProjectId());
+    }
+    return changed;
   }
 
   @Override
@@ -53,12 +58,21 @@ public class PostgresqlIssueRepository implements IssueRepository {
 
   @Override
   public boolean updateById(Issue issue, long expectedVersion) {
-    return issueMapper.updateById(toDO(issue), expectedVersion) == 1;
+    boolean changed = issueMapper.updateById(toDO(issue), expectedVersion) == 1;
+    if (changed) {
+      notifier.projectChanged(issue.getProjectId());
+    }
+    return changed;
   }
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    return issueMapper.deleteById(id, expectedVersion) == 1;
+    Issue issue = getById(id);
+    boolean changed = issueMapper.deleteById(id, expectedVersion) == 1;
+    if (changed) {
+      notifier.projectChanged(issue.getProjectId());
+    }
+    return changed;
   }
 
   private static IssueDO toDO(Issue issue) {

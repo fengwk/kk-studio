@@ -12,8 +12,8 @@ import java.util.function.Consumer;
 /**
  * Project 变更失效信号分发器。
  *
- * <p>数据库 trigger 在 Project/Issue 事实提交后通过 PostgreSQL {@code LISTEN/NOTIFY} 发送 Project id。此 Hub
- * 不复制领域事实；合法 payload 只作为定向刷新提示，非法 payload 与 LISTEN 重连都退化为全量重同步。
+ * <p>Project 持久化仓库在事实事务内通过 PostgreSQL {@code LISTEN/NOTIFY} 发送 Project id，提交后才投递。此 Hub 不复制领域事实；合法
+ * payload 只作为定向刷新提示，非法 payload 与 LISTEN 重连都退化为全量重同步。
  */
 @Slf4j
 @Component

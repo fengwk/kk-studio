@@ -17,10 +17,15 @@ import java.util.UUID;
 public class PostgresqlIssueEvidenceRepository implements IssueEvidenceRepository {
 
   private final IssueEvidenceMapper mapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueEvidence evidence) {
-    return mapper.insert(toDO(evidence)) == 1;
+    boolean changed = mapper.insert(toDO(evidence)) == 1;
+    if (changed) {
+      notifier.issueChanged(evidence.getIssueId());
+    }
+    return changed;
   }
 
   @Override
@@ -38,7 +43,11 @@ public class PostgresqlIssueEvidenceRepository implements IssueEvidenceRepositor
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    return mapper.deleteByIssueId(issueId);
+    int changed = mapper.deleteByIssueId(issueId);
+    if (changed > 0) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
   }
 
   private static IssueEvidenceDO toDO(IssueEvidence evidence) {

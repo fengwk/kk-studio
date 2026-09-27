@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.project;
 
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -160,8 +161,6 @@ class StudioIssueControllerTest {
             .startedAt(now)
             .build();
     when(issueRunService.listRuns(issueId)).thenReturn(List.of(run));
-    when(issueRunService.getActiveRun(issueId)).thenReturn(run);
-    when(issueRunService.getLatestRun(issueId)).thenReturn(run);
 
     mockMvc
         .perform(get("/api/issues/" + issueId))
@@ -169,6 +168,34 @@ class StudioIssueControllerTest {
         .andExpect(jsonPath("$.data.issue.id").value(issueId.toString().toLowerCase()))
         .andExpect(jsonPath("$.data.currentRun.agentName").value("coder"))
         .andExpect(jsonPath("$.data.agentThreads[0].agentName").value("coder"));
+  }
+
+  /** 无 Run 的 Issue 详情仍可读取，缺失的 Run 投影保持 null，不调用精确查询接口。 */
+  @Test
+  void testGetIssueDetailWithoutRun() throws Exception {
+    Issue issue =
+        Issue.builder()
+            .id(issueId)
+            .projectId(projectId)
+            .number(1L)
+            .title("Task")
+            .state("INIT")
+            .version(0L)
+            .createdAt(now)
+            .updatedAt(now)
+            .build();
+    when(issueService.getIssue(issueId)).thenReturn(issue);
+    when(issueService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
+    when(issueService.listAgentThreads(issueId)).thenReturn(List.of());
+    when(issueRunService.listRuns(issueId)).thenReturn(List.of());
+
+    mockMvc
+        .perform(get("/api/issues/" + issueId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.issue.id").value(issueId.toString()))
+        .andExpect(jsonPath("$.data.runs").isEmpty())
+        .andExpect(jsonPath("$.data.currentRun").value(nullValue()))
+        .andExpect(jsonPath("$.data.latestRun").value(nullValue()));
   }
 
   @Test

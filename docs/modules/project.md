@@ -69,6 +69,10 @@ not found、「未 READY/已 cleanup」译为 validation），模块内不做第
 [`IssueServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueServiceImpl.java)、
 [`IssueRunServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueRunServiceImpl.java)
 是写用例的事务边界，`repo/impl` 的 PostgreSQL 实现只做单表读写与 CAS 行数判定。
+成功写入 Project、Issue、Run、Activity、阶段预算、公开证据或 Agent Thread 绑定时，仓库在同一事务内
+用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
+同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
+写入也会覆盖。Work 租约/唤醒只影响内部调度，不产生项目快照失效信号。
 幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放，正文 `body = btrim(body)`）；
 Stage 预算、Work 邮箱与 Evidence 分别落在 `project_issue_stage_budget`、
 `project_issue_work`、`project_issue_evidence`。
