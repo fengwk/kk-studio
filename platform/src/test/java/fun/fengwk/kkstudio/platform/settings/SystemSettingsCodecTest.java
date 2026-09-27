@@ -79,7 +79,6 @@ class SystemSettingsCodecTest {
                 SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
                 SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
                 SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-                SystemSettings.AiRuntime.DEFAULT.subagentIdleTimeoutMillis(),
                 SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns()),
             SystemSettings.DEFAULT.environment(),
             SystemSettings.DEFAULT.integrations(),

@@ -19,8 +19,6 @@ import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskRunner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
-import java.time.Duration;
-
 /**
  * 装配第一方内置工具（{@code read} 与 {@code task}）并暴露唯一 {@link BuiltinHarnessContributor} bean。
  *
@@ -50,7 +48,6 @@ public class BuiltinHarnessContributorConfiguration {
           aiRuntime.subagentMaxDepth(),
           aiRuntime.subagentMaxConcurrency(),
           aiRuntime.subagentMaxTotalConcurrency(),
-          Duration.ZERO,
           aiRuntime.subagentMaxTurns());
     };
   }

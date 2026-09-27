@@ -71,7 +71,6 @@ class SystemSettingsSnapshotTest {
             SystemSettings.AiRuntime.DEFAULT.subagentMaxDepth(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
-            SystemSettings.AiRuntime.DEFAULT.subagentIdleTimeoutMillis(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns()),
         SystemSettings.Environment.DEFAULT,
         SystemSettings.Integrations.DEFAULT,
