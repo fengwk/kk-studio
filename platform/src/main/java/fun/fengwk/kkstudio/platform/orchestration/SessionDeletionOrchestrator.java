@@ -21,8 +21,10 @@ import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -103,6 +105,38 @@ public class SessionDeletionOrchestrator {
     // store 事务（PROPAGATION_REQUIRED）加入本应用事务；blob release 经 SessionBlobRefManager（MANDATORY）。
     store.transaction(
         tx -> {
+          // 树锁必须早于 Session/Thread 锁；并发加入子树时复核删除范围。
+          List<ThreadState> candidates = new ArrayList<>();
+          for (UUID sessionId : sessionIds) {
+            candidates.addAll(tx.listThreadsBySession(sessionId));
+          }
+          List<UUID> roots =
+              candidates.stream()
+                  .map(thread -> tx.findAncestorChain(thread.id()))
+                  .filter(chain -> !chain.isEmpty())
+                  .map(chain -> chain.get(chain.size() - 1))
+                  .distinct()
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList();
+          for (UUID root : roots) {
+            tx.lockTree(root);
+          }
+          // 永久后代属于同一执行树，但 task 使用独立 Session 且没有 owner relation。
+          // 在树锁内扩展删除集合，避免只删父 Session 留下不可达子树及悬挂 join。
+          Set<UUID> visited = new HashSet<>();
+          List<ThreadState> frontier = new ArrayList<>(candidates);
+          for (int index = 0; index < frontier.size(); index++) {
+            ThreadState parent = frontier.get(index);
+            if (visited.add(parent.id())) {
+              frontier.addAll(tx.listChildren(parent.id()));
+            }
+          }
+          for (ThreadState child : frontier) {
+            if (!sessionIds.contains(child.sessionId())) {
+              sessionIds.add(child.sessionId());
+            }
+          }
+          sessionIds.sort(UuidOrder.COMPARATOR);
           // 阶段 1：以规范锁序先行锁定全部目标 Session（SESSION rank）。多 Session 深删若逐个取 SESSION 锁，
           // 第二 Session 开始会因曾取过 THREAD 锁而违反 SESSION -> THREAD 单调锁序。
           List<UUID> presentSessions = new ArrayList<>(sessionIds.size());
@@ -165,10 +199,25 @@ public class SessionDeletionOrchestrator {
     }
     threads.sort(Comparator.comparing(ThreadState::id, UuidOrder.COMPARATOR));
     List<UUID> threadIds = threads.stream().map(ThreadState::id).toList();
+    Set<UUID> deleting = new HashSet<>(threadIds);
+    for (ThreadState thread : threads) {
+      if (thread.parentThreadId() != null && !deleting.contains(thread.parentThreadId())) {
+        throw new IllegalStateException(
+            "cannot delete a child session while its execution parent survives");
+      }
+      if (tx.listChildren(thread.id()).stream().anyMatch(child -> !deleting.contains(child.id()))) {
+        throw new IllegalStateException(
+            "cannot delete a session while its execution children survive");
+      }
+    }
     for (ThreadState thread : threads) {
       tx.lockThread(thread.id())
           .orElseThrow(
               () -> new IllegalStateException("Thread disappeared while deleting session"));
+    }
+    // Join 固定回执引用源 Command/结果 Entry；必须在删 Thread/Entry 前显式删除。
+    for (UUID threadId : threadIds) {
+      tx.deleteJoinsByChild(threadId);
     }
     if (!threadIds.isEmpty() && tx.deleteThreads(threadIds) != threadIds.size()) {
       throw new IllegalStateException("not all locked threads were deleted");

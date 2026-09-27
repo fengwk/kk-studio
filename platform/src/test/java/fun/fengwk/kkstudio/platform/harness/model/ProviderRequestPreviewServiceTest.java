@@ -56,6 +56,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -634,10 +635,12 @@ class ProviderRequestPreviewServiceTest {
     return new ThreadState(
         THREAD_ID,
         SESSION_ID,
+        null,
         headEntryId,
         REQUEST_HASH,
         "thread",
         false,
+        ThreadLifecycleStatus.IDLE,
         nextCommandSequence,
         1L,
         NOW,
