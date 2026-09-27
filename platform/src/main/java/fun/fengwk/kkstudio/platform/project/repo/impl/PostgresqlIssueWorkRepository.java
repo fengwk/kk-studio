@@ -49,23 +49,11 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
   }
 
   @Override
-  public boolean clearLeaseIfWakeNewer(
-      UUID issueId, String leaseToken, long claimedWakeVersion, Instant now) {
-    return mapper.clearLeaseIfWakeNewer(issueId, leaseToken, claimedWakeVersion, now) == 1;
-  }
-
-  @Override
-  public boolean reschedule(
-      UUID issueId, String leaseToken, long claimedWakeVersion, Instant now, Instant requestedAt) {
-    return mapper.reschedule(issueId, leaseToken, claimedWakeVersion, now, requestedAt) == 1;
-  }
-
-  @Override
   public int deleteByIssueId(UUID issueId) {
     return mapper.deleteByIssueId(issueId);
   }
 
-  private IssueWork toModel(IssueWorkDO row) {
+  private static IssueWork toModel(IssueWorkDO row) {
     if (row == null) {
       return null;
     }
@@ -75,6 +63,7 @@ public class PostgresqlIssueWorkRepository implements IssueWorkRepository {
         .dueAt(row.getDueAt())
         .leaseToken(row.getLeaseToken())
         .leaseUntil(row.getLeaseUntil())
+        .createdAt(row.getCreatedAt())
         .updatedAt(row.getUpdatedAt())
         .build();
   }

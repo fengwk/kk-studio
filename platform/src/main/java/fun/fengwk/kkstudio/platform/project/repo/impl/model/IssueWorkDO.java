@@ -5,6 +5,7 @@ import lombok.Data;
 import java.time.Instant;
 import java.util.UUID;
 
+/** {@code project_issue_work} 行映射。 */
 @Data
 public class IssueWorkDO {
 
@@ -13,5 +14,6 @@ public class IssueWorkDO {
   private Instant dueAt;
   private String leaseToken;
   private Instant leaseUntil;
+  private Instant createdAt;
   private Instant updatedAt;
 }

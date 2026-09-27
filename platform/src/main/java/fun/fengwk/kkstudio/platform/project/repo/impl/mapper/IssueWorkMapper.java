@@ -15,10 +15,12 @@ import fun.fengwk.kkstudio.platform.project.repo.impl.model.IssueWorkDO;
 import java.time.Instant;
 import java.util.UUID;
 
+/** {@code project_issue_work} 表 SQL 入口：确定性 wake/lease 围栏。 */
 @Mapper
 public interface IssueWorkMapper extends BaseMapper {
 
-  String COLUMNS = "issue_id, wake_version, due_at, lease_token, lease_until, updated_at";
+  String COLUMNS =
+      "issue_id, wake_version, due_at, lease_token, lease_until, created_at, updated_at";
 
   @Select("select " + COLUMNS + " from project_issue_work where issue_id = #{issueId}")
   @Results(
@@ -29,6 +31,7 @@ public interface IssueWorkMapper extends BaseMapper {
         @Result(column = "due_at", property = "dueAt"),
         @Result(column = "lease_token", property = "leaseToken"),
         @Result(column = "lease_until", property = "leaseUntil"),
+        @Result(column = "created_at", property = "createdAt"),
         @Result(column = "updated_at", property = "updatedAt")
       })
   IssueWorkDO getById(@Param("issueId") UUID issueId);
@@ -40,15 +43,15 @@ public interface IssueWorkMapper extends BaseMapper {
   @Select(
       """
       insert into project_issue_work (
-          issue_id, wake_version, due_at, lease_token, lease_until, updated_at
+          issue_id, wake_version, due_at, lease_token, lease_until, created_at, updated_at
       ) values (
-          #{issueId}, 1, #{dueAt}, null, null, clock_timestamp()
+          #{issueId}, 1, #{dueAt}, null, null, clock_timestamp(), clock_timestamp()
       )
       on conflict (issue_id) do update
       set due_at = least(project_issue_work.due_at, excluded.due_at),
           wake_version = project_issue_work.wake_version + 1,
           updated_at = clock_timestamp()
-      returning issue_id, wake_version, due_at, lease_token, lease_until, updated_at
+      returning issue_id, wake_version, due_at, lease_token, lease_until, created_at, updated_at
       """)
   @ResultMap("issueWorkResultMap")
   IssueWorkDO upsertRequest(@Param("issueId") UUID issueId, @Param("dueAt") Instant dueAt);
@@ -70,7 +73,8 @@ public interface IssueWorkMapper extends BaseMapper {
           updated_at = clock_timestamp()
       from candidate
       where work.issue_id = candidate.issue_id
-      returning work.issue_id, work.wake_version, work.due_at, work.lease_token, work.lease_until, work.updated_at
+      returning work.issue_id, work.wake_version, work.due_at, work.lease_token,
+                work.lease_until, work.created_at, work.updated_at
       """)
   @ResultMap("issueWorkResultMap")
   IssueWorkDO claimNext(
@@ -106,45 +110,6 @@ public interface IssueWorkMapper extends BaseMapper {
       @Param("leaseToken") String leaseToken,
       @Param("claimedWakeVersion") long claimedWakeVersion,
       @Param("now") Instant now);
-
-  @Update(
-      """
-      update project_issue_work
-      set lease_token = null,
-          lease_until = null,
-          updated_at = clock_timestamp()
-      where issue_id = #{issueId}
-        and lease_token = #{leaseToken}
-        and lease_until > #{now}
-        and wake_version > #{claimedWakeVersion}
-      """)
-  int clearLeaseIfWakeNewer(
-      @Param("issueId") UUID issueId,
-      @Param("leaseToken") String leaseToken,
-      @Param("claimedWakeVersion") long claimedWakeVersion,
-      @Param("now") Instant now);
-
-  @Update(
-      """
-      update project_issue_work
-      set lease_token = null,
-          lease_until = null,
-          due_at = case
-              when wake_version = #{claimedWakeVersion} then #{requestedAt}
-              else least(due_at, #{requestedAt})
-          end,
-          updated_at = clock_timestamp()
-      where issue_id = #{issueId}
-        and lease_token = #{leaseToken}
-        and lease_until > #{now}
-        and wake_version >= #{claimedWakeVersion}
-      """)
-  int reschedule(
-      @Param("issueId") UUID issueId,
-      @Param("leaseToken") String leaseToken,
-      @Param("claimedWakeVersion") long claimedWakeVersion,
-      @Param("now") Instant now,
-      @Param("requestedAt") Instant requestedAt);
 
   @Delete("delete from project_issue_work where issue_id = #{issueId}")
   int deleteByIssueId(@Param("issueId") UUID issueId);

@@ -9,10 +9,11 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Issue 核心实体：当前要求、验收依据、七态阶段与执行/审查角色。
+ * Issue 核心实体：workflow state、阻塞恢复点、控制暂停门禁与编号/序号分配器。
  *
- * <p>正文只在 BACKLOG/TODO 编辑；进行中只追加有来源的指示与证据。不另存规格版本或打回计数，投递位置与打回 次数都由 {@link IssueActivity}
- * 有序事实流确定性推导。
+ * <p>{@code state} 是项目内自然状态编码；BLOCKED 与 {@code blockedFromState/blockReason} 同存同缺，人工或执行失败/不确定的暂停由
+ * {@code pauseReason/pauseDetail} 成对表达。{@code nextRunOrdinal} 与 {@code nextActivitySequence}
+ * 是接受事务内分配 的单调游标， {@code version} 是 Issue 行的乐观锁 CAS。
  */
 @Data
 @Builder
@@ -25,14 +26,22 @@ public class Issue {
   private long number;
   private String title;
   private String description;
-  private IssueStatus status;
+  private String state;
 
-  /** EXECUTOR 职责的 Agent 身份。 */
-  private String assigneeAgentName;
+  /** BLOCKED 的恢复目标；非 BLOCKED 状态必须为空。 */
+  private String blockedFromState;
 
-  /** REVIEWER 职责的 Agent 身份；为空表示等待人工审查。 */
-  private String reviewerAgentName;
+  /** BLOCKED 的业务原因；非 BLOCKED 状态必须为空。 */
+  private String blockReason;
 
+  /** 控制暂停原因：USER / ERROR / UNKNOWN；与 {@code pauseDetail} 成对。 */
+  private String pauseReason;
+
+  /** 控制暂停详情（非空白）；与 {@code pauseReason} 成对。 */
+  private String pauseDetail;
+
+  private long nextRunOrdinal;
+  private long nextActivitySequence;
   private long version;
   private Instant archivedAt;
   private Instant createdAt;
@@ -42,16 +51,8 @@ public class Issue {
     return archivedAt != null;
   }
 
-  public boolean isTerminal() {
-    return status != null && status.isTerminal();
-  }
-
-  public boolean canBeArchived() {
-    return status != null && status.canBeArchived();
-  }
-
-  /** 正文（要求/验收依据）是否允许直接编辑。 */
-  public boolean isRequirementEditable() {
-    return status == IssueStatus.BACKLOG || status == IssueStatus.TODO;
+  /** 是否存在阻止新派发的控制暂停门禁。 */
+  public boolean isPaused() {
+    return pauseReason != null;
   }
 }

@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.platform.project.repo.impl.model.ProjectDO;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @AllArgsConstructor
 @Repository
@@ -45,8 +44,8 @@ public class PostgresqlProjectRepository implements ProjectRepository {
   }
 
   @Override
-  public boolean updateById(Project project, long expectedVersion) {
-    return projectMapper.updateById(toDO(project), expectedVersion) == 1;
+  public boolean updateConfiguration(Project project, long expectedVersion) {
+    return projectMapper.updateConfiguration(toDO(project), expectedVersion) == 1;
   }
 
   @Override
@@ -58,21 +57,21 @@ public class PostgresqlProjectRepository implements ProjectRepository {
   public long allocateNextIssueNumber(UUID projectId) {
     Long allocated = projectMapper.allocateNextIssueNumber(projectId);
     if (allocated == null) {
-      throw new IllegalStateException("Failed to allocate next project issue number");
+      throw new IllegalStateException("project " + projectId + " disappeared during allocation");
     }
     return allocated;
   }
 
   @Override
   public List<Project> listAll() {
-    return projectMapper.listAll().stream().map(this::toModel).collect(Collectors.toList());
+    return projectMapper.listAll().stream().map(PostgresqlProjectRepository::toModel).toList();
   }
 
   @Override
   public List<Project> listByArchived(boolean archived) {
     return projectMapper.listByArchived(archived).stream()
-        .map(this::toModel)
-        .collect(Collectors.toList());
+        .map(PostgresqlProjectRepository::toModel)
+        .toList();
   }
 
   @Override
@@ -80,25 +79,25 @@ public class PostgresqlProjectRepository implements ProjectRepository {
     return projectMapper.deleteById(id, expectedVersion) == 1;
   }
 
-  private ProjectDO toDO(Project project) {
+  private static ProjectDO toDO(Project project) {
     if (project == null) {
       return null;
     }
-    ProjectDO target = new ProjectDO();
-    target.setId(project.getId());
-    target.setTitle(project.getTitle());
-    target.setDescription(project.getDescription());
-    target.setYoloEnabled(project.isYoloEnabled());
-    target.setMaxReviewRejections(project.getMaxReviewRejections());
-    target.setNextIssueNumber(project.getNextIssueNumber());
-    target.setVersion(project.getVersion());
-    target.setArchivedAt(project.getArchivedAt());
-    target.setCreatedAt(project.getCreatedAt());
-    target.setUpdatedAt(project.getUpdatedAt());
-    return target;
+    ProjectDO row = new ProjectDO();
+    row.setId(project.getId());
+    row.setTitle(project.getTitle());
+    row.setDescription(project.getDescription());
+    row.setWorkflowJson(project.getWorkflowJson());
+    row.setYoloEnabled(project.isYoloEnabled());
+    row.setNextIssueNumber(project.getNextIssueNumber());
+    row.setVersion(project.getVersion());
+    row.setArchivedAt(project.getArchivedAt());
+    row.setCreatedAt(project.getCreatedAt());
+    row.setUpdatedAt(project.getUpdatedAt());
+    return row;
   }
 
-  private Project toModel(ProjectDO row) {
+  private static Project toModel(ProjectDO row) {
     if (row == null) {
       return null;
     }
@@ -106,9 +105,8 @@ public class PostgresqlProjectRepository implements ProjectRepository {
         .id(row.getId())
         .title(row.getTitle())
         .description(row.getDescription())
-        .yoloEnabled(row.getYoloEnabled() != null ? row.getYoloEnabled() : true)
-        .maxReviewRejections(
-            row.getMaxReviewRejections() != null ? row.getMaxReviewRejections() : 3)
+        .workflowJson(row.getWorkflowJson())
+        .yoloEnabled(row.getYoloEnabled() != null && row.getYoloEnabled())
         .nextIssueNumber(row.getNextIssueNumber() != null ? row.getNextIssueNumber() : 1L)
         .version(row.getVersion() != null ? row.getVersion() : 0L)
         .archivedAt(row.getArchivedAt())

@@ -1,9 +1,13 @@
 package fun.fengwk.kkstudio.platform.project.service.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -11,761 +15,83 @@ import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
-import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatusTransition;
-import fun.fengwk.kkstudio.platform.project.model.IssueTransitionAction;
+import fun.fengwk.kkstudio.platform.project.model.IssueStageBudgetRow;
+import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.platform.project.service.impl.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
+import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
+import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-@AllArgsConstructor
+/**
+ * Issue 用例实现：所有写路径先按 Project SHARE → Issue UPDATE 加锁，再以版本 CAS 提交状态、门禁与分配游标。
+ *
+ * <p>合法的 Issue 写操作与对应 Activity 在同一事务保存（设计 §4.6）。每个动作先按请求键与规范化请求指纹判定：无同键活动才进入版本 CAS
+ * 与业务校验；同键同指纹是丢响应后的精确重试，直接返回原结果而不重复应用；同键异指纹确定性冲突。因此精确重试先于版本校验，重试不会重复改变状态、 门禁或额度。阶段额度直接复用领域 {@link
+ * IssueStageBudget} 的授权/重置语义，不在 platform 复制一份额度规则。
+ */
 @Service
+@AllArgsConstructor
 public class IssueServiceImpl implements IssueService {
+
+  private static final int MAX_REQUEST_KEY_LENGTH = 128;
 
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
-  private final IssueDependencyRepository issueDependencyRepository;
-  private final IssueActivityRepository issueActivityRepository;
   private final IssueRunRepository issueRunRepository;
-  private final IssueWorkStore workStore;
+  private final IssueStageBudgetRepository stageBudgetRepository;
+  private final IssueActivityRepository issueActivityRepository;
+  private final ProjectWorkflowJsonCodec workflowCodec;
+  private final ObjectMapper objectMapper;
 
-  @Transactional
   @Override
-  public Issue createIssue(
-      UUID projectId,
-      String title,
-      String description,
-      String assigneeAgentName,
-      String reviewerAgentName,
-      IssueStatus initialStatus) {
+  @Transactional
+  public Issue createIssue(UUID projectId, String title, String description) {
     Objects.requireNonNull(projectId, "projectId");
-    String trimmedTitle = ProjectValidationUtils.trimAndValidate(title, "title", 255, true);
-    String trimmedAssignee =
-        ProjectValidationUtils.trimAndValidate(assigneeAgentName, "assigneeAgentName", 128, false);
-    String trimmedReviewer =
-        ProjectValidationUtils.trimAndValidate(reviewerAgentName, "reviewerAgentName", 128, false);
-    ProjectValidationUtils.validateUtf8Bytes(description, "description", 65536, false);
-
-    if (trimmedAssignee != null && trimmedAssignee.equals(trimmedReviewer)) {
-      throw new AiValidationException(
-          "issue", "assigneeAgentName and reviewerAgentName must not be the same agent");
-    }
-
-    Project project = projectRepository.lockById(projectId);
+    Project project = projectRepository.getById(projectId);
     if (project == null) {
       throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
-      throw new AiValidationException("project", "Cannot create issue in an archived project");
+      throw new AiValidationException("project", "Cannot create an issue in an archived project");
     }
-
-    IssueStatus status = initialStatus != null ? initialStatus : IssueStatus.BACKLOG;
-    if (status != IssueStatus.BACKLOG && status != IssueStatus.TODO) {
-      throw new AiValidationException(
-          "issue", "Initial issue status must be either BACKLOG or TODO, but was " + status);
-    }
-
+    String validTitle =
+        ProjectValidationUtils.requireDisplayName(
+            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH);
+    String validDescription =
+        ProjectValidationUtils.optionalUtf8Text(
+            description == null ? "" : description,
+            "description",
+            ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
     long number = projectRepository.allocateNextIssueNumber(projectId);
-    UUID issueId = UUID.randomUUID();
-    String body = description != null ? description : "";
     Issue issue =
         Issue.builder()
-            .id(issueId)
+            .id(UUID.randomUUID())
             .projectId(projectId)
             .number(number)
-            .title(trimmedTitle)
-            .description(body)
-            .status(status)
-            .assigneeAgentName(trimmedAssignee)
-            .reviewerAgentName(trimmedReviewer)
-            .version(0L)
-            .archivedAt(null)
+            .title(validTitle)
+            .description(validDescription)
+            .state(ProjectWorkflowReservedState.INIT.code().value())
+            .nextRunOrdinal(1)
+            .nextActivitySequence(1)
             .build();
-
-    boolean created = issueRepository.create(issue);
-    if (!created) {
-      throw new AiValidationException("issue", "Failed to create issue");
+    if (!issueRepository.create(issue)) {
+      throw new IllegalStateException("failed to insert issue");
     }
-
-    IssueActivity initialActivity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.SPEC_CHANGE)
-            .actorType(IssueActivityActorType.HUMAN)
-            .actorAgentName(null)
-            .targetRole(null)
-            .runId(null)
-            .submissionRunId(null)
-            .decision(null)
-            .body(body)
-            .idempotencyKey("initial_spec:" + issueId)
-            .build();
-    issueActivityRepository.appendOrGet(initialActivity);
-
-    if (status == IssueStatus.TODO) {
-      workStore.requestWork(issueId, Instant.now());
-    }
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue updateIssue(
-      UUID issueId,
-      long expectedVersion,
-      String title,
-      String description,
-      String assigneeAgentName,
-      String reviewerAgentName) {
-    Objects.requireNonNull(issueId, "issueId");
-    String trimmedTitle = ProjectValidationUtils.trimAndValidate(title, "title", 255, true);
-    String trimmedAssignee =
-        ProjectValidationUtils.trimAndValidate(assigneeAgentName, "assigneeAgentName", 128, false);
-    String trimmedReviewer =
-        ProjectValidationUtils.trimAndValidate(reviewerAgentName, "reviewerAgentName", 128, false);
-    ProjectValidationUtils.validateUtf8Bytes(description, "description", 65536, false);
-
-    if (trimmedAssignee != null && trimmedAssignee.equals(trimmedReviewer)) {
-      throw new AiValidationException(
-          "issue", "assigneeAgentName and reviewerAgentName must not be the same agent");
-    }
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (current.isArchived()) {
-      throw new AiValidationException("issue", "Archived issue cannot be updated");
-    }
-    if (!current.isRequirementEditable()) {
-      throw new AiValidationException(
-          "issue",
-          "Issue spec and assignment can only be updated in BACKLOG or TODO, but current status is "
-              + current.getStatus());
-    }
-
-    String newDescription = description != null ? description : "";
-    boolean specChanged =
-        !Objects.equals(current.getTitle(), trimmedTitle)
-            || !Objects.equals(current.getDescription(), newDescription)
-            || !Objects.equals(current.getAssigneeAgentName(), trimmedAssignee)
-            || !Objects.equals(current.getReviewerAgentName(), trimmedReviewer);
-
-    current.setTitle(trimmedTitle);
-    current.setDescription(newDescription);
-    current.setAssigneeAgentName(trimmedAssignee);
-    current.setReviewerAgentName(trimmedReviewer);
-
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    if (specChanged) {
-      IssueActivity specActivity =
-          IssueActivity.builder()
-              .issueId(issueId)
-              .kind(IssueActivityKind.SPEC_CHANGE)
-              .actorType(IssueActivityActorType.HUMAN)
-              .actorAgentName(null)
-              .targetRole(null)
-              .runId(null)
-              .submissionRunId(null)
-              .decision(null)
-              .body(newDescription)
-              .build();
-      issueActivityRepository.appendOrGet(specActivity);
-    }
-
-    if (current.getStatus() == IssueStatus.TODO && specChanged) {
-      workStore.requestWork(issueId, Instant.now());
-    }
-
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue setStatus(UUID issueId, long expectedVersion, IssueStatus newStatus) {
-    Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(newStatus, "newStatus");
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (current.isArchived()) {
-      throw new AiValidationException("issue", "Archived issue cannot transition status");
-    }
-
-    IssueStatus oldStatus = current.getStatus();
-    if (oldStatus == newStatus) {
-      return current;
-    }
-
-    IssueTransitionAction action;
-    if (oldStatus == IssueStatus.BACKLOG && newStatus == IssueStatus.TODO) {
-      action = IssueTransitionAction.READY;
-    } else if (oldStatus == IssueStatus.TODO && newStatus == IssueStatus.BACKLOG) {
-      action = IssueTransitionAction.DEFER;
-    } else if ((oldStatus == IssueStatus.DONE || oldStatus == IssueStatus.CANCELED)
-        && newStatus == IssueStatus.TODO) {
-      action = IssueTransitionAction.REOPEN;
-    } else if (oldStatus == IssueStatus.BLOCKED && newStatus == IssueStatus.TODO) {
-      action = IssueTransitionAction.RECOVER;
-    } else if (oldStatus == IssueStatus.BLOCKED && newStatus == IssueStatus.BACKLOG) {
-      action = IssueTransitionAction.RECOVER_TO_BACKLOG;
-    } else {
-      throw new AiValidationException(
-          "issue",
-          "Invalid explicit status transition from " + oldStatus + " to " + newStatus + ".");
-    }
-
-    if (!IssueStatusTransition.isAllowed(oldStatus, newStatus, action)) {
-      throw new AiValidationException(
-          "issue", "Transition from " + oldStatus + " to " + newStatus + " is not allowed");
-    }
-
-    current.setStatus(newStatus);
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    if (action == IssueTransitionAction.REOPEN
-        || action == IssueTransitionAction.RECOVER
-        || action == IssueTransitionAction.RECOVER_TO_BACKLOG) {
-      IssueActivity recoveryActivity =
-          IssueActivity.builder()
-              .issueId(issueId)
-              .kind(IssueActivityKind.RECOVERY)
-              .actorType(IssueActivityActorType.HUMAN)
-              .body(
-                  "Status changed from " + oldStatus + " to " + newStatus + " by action " + action)
-              .build();
-      issueActivityRepository.appendOrGet(recoveryActivity);
-    }
-
-    if (newStatus == IssueStatus.TODO) {
-      workStore.requestWork(issueId, Instant.now());
-    }
-
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue cancelIssue(UUID issueId, long expectedVersion, String reason) {
-    Objects.requireNonNull(issueId, "issueId");
-    String normalizedReason =
-        (reason == null || reason.isBlank()) ? "Issue cancelled" : reason.trim();
-    ProjectValidationUtils.validateUtf8Bytes(normalizedReason, "waiting_reason", 16384, true);
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (!IssueStatusTransition.isAllowed(
-        current.getStatus(), IssueStatus.CANCELED, IssueTransitionAction.CANCEL)) {
-      throw new AiValidationException(
-          "issue", "Cannot cancel an issue in status " + current.getStatus());
-    }
-
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
-    if (activeRun != null) {
-      if (activeRun.getStatus().canTransitionTo(IssueRunStatus.CANCELLED)) {
-        activeRun.setStatus(IssueRunStatus.CANCELLED);
-        activeRun.setWaitingReason(normalizedReason);
-        activeRun.setCompletedAt(Instant.now());
-        boolean runUpdated = issueRunRepository.updateById(activeRun, activeRun.getVersion());
-        if (!runUpdated) {
-          throw new AiValidationException("issue_run", "Failed to cancel active run");
-        }
-      }
-    }
-
-    current.setStatus(IssueStatus.CANCELED);
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    workStore.requestWork(issueId, Instant.now());
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue recoverIssue(UUID issueId, long expectedVersion, boolean toBacklog, String comment) {
-    Objects.requireNonNull(issueId, "issueId");
-    String normalizedComment =
-        (comment != null && !comment.isBlank()) ? comment.trim() : "Issue recovered by human";
-    ProjectValidationUtils.validateUtf8Bytes(normalizedComment, "body", 65536, false);
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (current.getStatus() != IssueStatus.BLOCKED) {
-      throw new AiValidationException(
-          "issue",
-          "Only BLOCKED issues can be recovered, current status is " + current.getStatus());
-    }
-
-    IssueStatus newStatus = toBacklog ? IssueStatus.BACKLOG : IssueStatus.TODO;
-    IssueTransitionAction action =
-        toBacklog ? IssueTransitionAction.RECOVER_TO_BACKLOG : IssueTransitionAction.RECOVER;
-
-    current.setStatus(newStatus);
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    IssueActivity recoveryActivity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.RECOVERY)
-            .actorType(IssueActivityActorType.HUMAN)
-            .body(normalizedComment)
-            .build();
-    issueActivityRepository.appendOrGet(recoveryActivity);
-
-    if (newStatus == IssueStatus.TODO) {
-      workStore.requestWork(issueId, Instant.now());
-    }
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue blockIssue(UUID issueId, long expectedVersion, String reason) {
-    Objects.requireNonNull(issueId, "issueId");
-    String normalizedReason =
-        (reason != null && !reason.isBlank()) ? reason.trim() : "Issue blocked by human";
-    ProjectValidationUtils.validateUtf8Bytes(normalizedReason, "body", 16384, true);
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (current.isTerminal() || current.getStatus() == IssueStatus.BLOCKED) {
-      throw new AiValidationException(
-          "issue", "Cannot block an issue with status " + current.getStatus());
-    }
-
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
-    if (activeRun != null) {
-      if (activeRun.getStatus().canTransitionTo(IssueRunStatus.CANCELLED)) {
-        activeRun.setStatus(IssueRunStatus.CANCELLED);
-        activeRun.setWaitingReason(normalizedReason);
-        activeRun.setCompletedAt(Instant.now());
-        boolean runUpdated = issueRunRepository.updateById(activeRun, activeRun.getVersion());
-        if (!runUpdated) {
-          throw new AiValidationException("issue_run", "Failed to cancel active run");
-        }
-      }
-    }
-
-    current.setStatus(IssueStatus.BLOCKED);
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    IssueActivity activity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.COMMENT)
-            .actorType(IssueActivityActorType.HUMAN)
-            .body("Blocked: " + normalizedReason)
-            .build();
-    issueActivityRepository.appendOrGet(activity);
-
-    workStore.requestWork(issueId, Instant.now());
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue archiveIssue(UUID issueId, long expectedVersion) {
-    Objects.requireNonNull(issueId, "issueId");
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (!current.canBeArchived()) {
-      throw new AiValidationException(
-          "issue",
-          "Only terminal issues (DONE or CANCELED) can be archived, current status is "
-              + current.getStatus());
-    }
-    if (current.isArchived()) {
-      return current;
-    }
-
-    current.setArchivedAt(Instant.now());
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public Issue unarchiveIssue(UUID issueId, long expectedVersion) {
-    Objects.requireNonNull(issueId, "issueId");
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(issueId);
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(current.getVersion()));
-    }
-    if (!current.isArchived()) {
-      return current;
-    }
-
-    current.setArchivedAt(null);
-    boolean updated = issueRepository.updateById(current, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    return issueRepository.getById(issueId);
-  }
-
-  @Transactional
-  @Override
-  public IssueDependency addDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion) {
-    Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(dependsOnIssueId, "dependsOnIssueId");
-    if (issueId.equals(dependsOnIssueId)) {
-      throw new AiValidationException("issue_dependency", "Issue cannot depend on itself");
-    }
-
-    Issue targetPre = issueRepository.getById(issueId);
-    if (targetPre == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    UUID projectId = targetPre.getProjectId();
-
-    Project project = projectRepository.lockById(projectId);
-    if (project == null) {
-      throw new AiResourceNotFoundException("project");
-    }
-    if (project.isArchived()) {
-      throw new AiValidationException("project", "Cannot add dependency in an archived project");
-    }
-
-    UUID first = issueId.compareTo(dependsOnIssueId) < 0 ? issueId : dependsOnIssueId;
-    UUID second = issueId.compareTo(dependsOnIssueId) < 0 ? dependsOnIssueId : issueId;
-    Issue lockFirst = issueRepository.lockById(first);
-    Issue lockSecond = issueRepository.lockById(second);
-
-    Issue targetIssue = issueId.equals(first) ? lockFirst : lockSecond;
-    Issue dependsOnIssue = dependsOnIssueId.equals(first) ? lockFirst : lockSecond;
-
-    if (targetIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (dependsOnIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (!targetIssue.getProjectId().equals(projectId)
-        || !dependsOnIssue.getProjectId().equals(projectId)) {
-      throw new AiValidationException(
-          "issue_dependency", "Dependencies are only allowed between issues in the same project");
-    }
-    if (targetIssue.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(targetIssue.getVersion()));
-    }
-    if (targetIssue.isArchived() || dependsOnIssue.isArchived()) {
-      throw new AiValidationException(
-          "issue_dependency", "Archived issues cannot participate in dependencies");
-    }
-    if (!targetIssue.isRequirementEditable()) {
-      throw new AiValidationException(
-          "issue_dependency",
-          "Dependencies can only be added to issues in BACKLOG or TODO, but target issue status is "
-              + targetIssue.getStatus());
-    }
-
-    List<IssueDependency> existingDeps = issueDependencyRepository.listByIssueId(issueId);
-    boolean alreadyExists =
-        existingDeps.stream().anyMatch(d -> d.getDependsOnIssueId().equals(dependsOnIssueId));
-    if (alreadyExists) {
-      throw new AiValidationException("issue_dependency", "Dependency already exists");
-    }
-
-    boolean createsCycle = issueDependencyRepository.checkHasPath(dependsOnIssueId, issueId);
-    if (createsCycle) {
-      throw new AiValidationException(
-          "issue_dependency",
-          "Cycle detected: adding this dependency would form a cycle in the DAG");
-    }
-
-    IssueDependency dependency =
-        IssueDependency.builder()
-            .issueId(issueId)
-            .dependsOnIssueId(dependsOnIssueId)
-            .projectId(projectId)
-            .build();
-    boolean added = issueDependencyRepository.addDependency(dependency);
-    if (!added) {
-      throw new AiValidationException("issue_dependency", "Failed to add dependency");
-    }
-
-    boolean updated = issueRepository.updateById(targetIssue, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    IssueActivity specActivity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.SPEC_CHANGE)
-            .actorType(IssueActivityActorType.HUMAN)
-            .body("Added dependency on issue " + dependsOnIssue.getNumber())
-            .build();
-    issueActivityRepository.appendOrGet(specActivity);
-
-    if (targetIssue.getStatus() == IssueStatus.TODO) {
-      workStore.requestWork(issueId, Instant.now());
-    }
-    return dependency;
-  }
-
-  @Transactional
-  @Override
-  public void removeDependency(UUID issueId, UUID dependsOnIssueId, long expectedVersion) {
-    Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(dependsOnIssueId, "dependsOnIssueId");
-
-    Issue initial = issueRepository.getById(issueId);
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue targetIssue = issueRepository.lockById(issueId);
-    if (targetIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (targetIssue.getVersion() != expectedVersion) {
-      throw new AiVersionConflictException(
-          "issue", String.valueOf(expectedVersion), String.valueOf(targetIssue.getVersion()));
-    }
-    if (!targetIssue.isRequirementEditable()) {
-      throw new AiValidationException(
-          "issue_dependency",
-          "Dependencies can only be removed from issues in BACKLOG or TODO, but target issue status is "
-              + targetIssue.getStatus());
-    }
-
-    boolean removed = issueDependencyRepository.removeDependency(issueId, dependsOnIssueId);
-    if (!removed) {
-      return;
-    }
-
-    boolean updated = issueRepository.updateById(targetIssue, expectedVersion);
-    if (!updated) {
-      Issue latest = issueRepository.getById(issueId);
-      throw new AiVersionConflictException(
-          "issue",
-          String.valueOf(expectedVersion),
-          String.valueOf(latest != null ? latest.getVersion() : -1));
-    }
-
-    IssueActivity specActivity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.SPEC_CHANGE)
-            .actorType(IssueActivityActorType.HUMAN)
-            .body("Removed dependency on issue " + dependsOnIssueId)
-            .build();
-    issueActivityRepository.appendOrGet(specActivity);
-
-    if (targetIssue.getStatus() == IssueStatus.TODO) {
-      workStore.requestWork(issueId, Instant.now());
-    }
-  }
-
-  @Transactional
-  @Override
-  public IssueActivity appendActivity(IssueActivity activity) {
-    Objects.requireNonNull(activity, "activity");
-    Objects.requireNonNull(activity.getIssueId(), "issueId");
-    Objects.requireNonNull(activity.getKind(), "kind");
-    Objects.requireNonNull(activity.getActorType(), "actorType");
-
-    ProjectValidationUtils.validateUtf8Bytes(activity.getBody(), "body", 1048576, false);
-    String trimmedKey =
-        ProjectValidationUtils.trimAndValidate(
-            activity.getIdempotencyKey(), "idempotencyKey", 128, false);
-    activity.setIdempotencyKey(trimmedKey);
-
-    Issue initial = issueRepository.getById(activity.getIssueId());
-    if (initial == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initial.getProjectId());
-
-    Issue current = issueRepository.lockById(activity.getIssueId());
-    if (current == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (current.isArchived()) {
-      throw new AiValidationException(
-          "issue_activity", "Cannot append activity to an archived issue");
-    }
-
-    IssueActivity appended = issueActivityRepository.appendOrGet(activity);
-    if (appended == null) {
-      throw new AiValidationException("issue_activity", "Failed to append activity");
-    }
-
-    if (activity.getTargetRole() != null
-        || activity.getKind() == IssueActivityKind.INSTRUCTION
-        || activity.getKind() == IssueActivityKind.HUMAN_INPUT
-        || activity.getKind() == IssueActivityKind.RETRY) {
-      workStore.requestWork(activity.getIssueId(), Instant.now());
-    }
-
-    return appended;
-  }
-
-  @Override
-  public boolean isBlocked(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    List<IssueDependency> deps = issueDependencyRepository.listByIssueId(issueId);
-    if (deps.isEmpty()) {
-      return false;
-    }
-    for (IssueDependency dep : deps) {
-      Issue dependencyIssue = issueRepository.getById(dep.getDependsOnIssueId());
-      if (dependencyIssue == null || dependencyIssue.getStatus() != IssueStatus.DONE) {
-        return true;
-      }
-    }
-    return false;
+    return issueRepository.getById(issue.getId());
   }
 
   @Override
@@ -779,58 +105,379 @@ public class IssueServiceImpl implements IssueService {
   }
 
   @Override
-  public Issue getIssueByProjectAndNumber(UUID projectId, long number) {
+  public List<Issue> listIssues(UUID projectId, boolean archived) {
     Objects.requireNonNull(projectId, "projectId");
-    Issue issue = issueRepository.getByProjectAndNumber(projectId, number);
+    return issueRepository.listByProjectIdAndArchived(projectId, archived);
+  }
+
+  @Override
+  @Transactional
+  public Issue blockIssue(UUID issueId, long expectedVersion, String requestKey, String reason) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    String validReason =
+        ProjectValidationUtils.requireUtf8Text(
+            reason, "reason", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "BLOCK", key, validReason);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
+    ProjectValidationUtils.validate(
+        "issue",
+        () -> new IssueStateTransitions(locked.workflow()).requireBlock(from, validReason));
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "BLOCK");
+    data.put("from", locked.issue().getState());
+    data.put("to", ProjectWorkflowReservedState.BLOCKED.code().value());
+    appendActivity(locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
+    locked.issue().setState(ProjectWorkflowReservedState.BLOCKED.code().value());
+    locked.issue().setBlockedFromState(from.value());
+    locked.issue().setBlockReason(validReason);
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue recoverIssue(UUID issueId, long expectedVersion, String requestKey) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RECOVER", key);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    Issue issue = locked.issue();
+    if (!ProjectWorkflowReservedState.BLOCKED.code().value().equals(issue.getState())) {
+      throw new AiValidationException("issue", "Issue is not blocked");
+    }
+    ProjectStateCode recovered =
+        ProjectValidationUtils.resolve(
+            "issue",
+            () ->
+                new IssueStateTransitions(locked.workflow())
+                    .requireRecover(ProjectStateCode.of(issue.getBlockedFromState())));
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "RECOVER");
+    data.put("from", issue.getState());
+    data.put("to", recovered.value());
+    appendActivity(issue, identity, IssueActivityActorType.HUMAN, null, null, null, data);
+    issue.setState(recovered.value());
+    issue.setBlockedFromState(null);
+    issue.setBlockReason(null);
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue pauseIssue(
+      UUID issueId, long expectedVersion, String requestKey, PauseReason reason, String detail) {
+    Objects.requireNonNull(issueId, "issueId");
+    Objects.requireNonNull(reason, "reason");
+    String key = requireRequestKey(requestKey);
+    String validDetail =
+        ProjectValidationUtils.requireUtf8Text(
+            detail, "detail", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL, "PAUSE", key, reason.name(), validDetail);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "PAUSE");
+    data.put("reason", reason.name());
+    appendActivity(locked.issue(), identity, IssueActivityActorType.SYSTEM, null, null, null, data);
+    locked.issue().setPauseReason(reason.name());
+    locked.issue().setPauseDetail(validDetail);
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue resumeIssue(UUID issueId, long expectedVersion, String requestKey) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    Identity identity = IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESUME", key);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "RESUME");
+    data.put("reason", locked.issue().getPauseReason());
+    appendActivity(locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
+    locked.issue().setPauseReason(null);
+    locked.issue().setPauseDetail(null);
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue transition(UUID issueId, long expectedVersion, String requestKey, String toState) {
+    Objects.requireNonNull(issueId, "issueId");
+    Objects.requireNonNull(toState, "toState");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.STATE_CHANGE, "TRANSITION", key, toState);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
+    ProjectStateCode to = ProjectStateCode.of(toState);
+    ProjectValidationUtils.validate(
+        "issue", () -> new IssueStateTransitions(locked.workflow()).requireTransition(from, to));
+    appendStateChange(locked.issue(), identity, "TRANSITION", from.value(), to.value());
+    locked.issue().setState(to.value());
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public Issue reopen(UUID issueId, long expectedVersion, String requestKey) {
+    Objects.requireNonNull(issueId, "issueId");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.STATE_CHANGE, "REOPEN", key);
+    if (replayed(issueId, identity)) {
+      return getIssue(issueId);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    ProjectStateCode from = ProjectStateCode.of(locked.issue().getState());
+    ProjectStateCode to =
+        ProjectValidationUtils.resolve(
+            "issue", () -> new IssueStateTransitions(locked.workflow()).requireReopen(from));
+    appendStateChange(locked.issue(), identity, "REOPEN", from.value(), to.value());
+    locked.issue().setState(to.value());
+    return persist(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
+  public StageBudgetView authorizeStageBudget(
+      UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
+    Objects.requireNonNull(issueId, "issueId");
+    Objects.requireNonNull(state, "state");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL, "AUTHORIZE", key, state, maxRuns);
+    if (replayed(issueId, identity)) {
+      return getStageBudget(issueId, state);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    ProjectStateCode code = ProjectStateCode.of(state);
+    IssueStageBudget authorized =
+        ProjectValidationUtils.resolve(
+            "stage_budget", () -> IssueStageBudget.authorize(locked.workflow(), code, maxRuns));
+    if (stageBudgetRepository.get(issueId, state) != null) {
+      throw new AiDuplicateException("stage_budget", "Stage budget is already authorized");
+    }
+    IssueStageBudgetRow budget =
+        IssueStageBudgetRow.builder()
+            .issueId(issueId)
+            .state(state)
+            .maxRuns(authorized.maxRuns())
+            .budgetAfterOrdinal(authorized.budgetAfterOrdinal())
+            .build();
+    if (!stageBudgetRepository.insert(budget)) {
+      throw new IllegalStateException("failed to insert stage budget");
+    }
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "AUTHORIZE");
+    data.put("state", state);
+    data.put("maxRuns", authorized.maxRuns());
+    data.put("budgetAfterOrdinal", authorized.budgetAfterOrdinal());
+    appendActivity(locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
+    persist(locked, expectedVersion);
+    return view(budget);
+  }
+
+  @Override
+  @Transactional
+  public StageBudgetView resetStageBudget(
+      UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
+    Objects.requireNonNull(issueId, "issueId");
+    Objects.requireNonNull(state, "state");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESET", key, state, maxRuns);
+    if (replayed(issueId, identity)) {
+      return getStageBudget(issueId, state);
+    }
+    Locked locked = lock(issueId, expectedVersion);
+    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
+      throw new AiValidationException(
+          "stage_budget", "Cannot reset stage budget while an active run exists");
+    }
+    ProjectStateCode code = ProjectStateCode.of(state);
+    IssueStageBudgetRow existing = stageBudgetRepository.get(issueId, state);
+    long previousMax = existing != null ? existing.getMaxRuns() : 0;
+    long previousAfter = existing != null ? existing.getBudgetAfterOrdinal() : 0;
+    IssueStageBudget currentBudget =
+        existing == null
+            ? ProjectValidationUtils.resolve(
+                "stage_budget", () -> IssueStageBudget.authorize(locked.workflow(), code, maxRuns))
+            : new IssueStageBudget(code, existing.getMaxRuns(), existing.getBudgetAfterOrdinal());
+    IssueStageBudget reset =
+        ProjectValidationUtils.resolve(
+            "stage_budget",
+            () ->
+                currentBudget.reset(
+                    locked.workflow(), maxRuns, locked.issue().getNextRunOrdinal()));
+    IssueStageBudgetRow budget =
+        IssueStageBudgetRow.builder()
+            .issueId(issueId)
+            .state(state)
+            .maxRuns(reset.maxRuns())
+            .budgetAfterOrdinal(reset.budgetAfterOrdinal())
+            .build();
+    boolean applied =
+        existing == null
+            ? stageBudgetRepository.insert(budget)
+            : stageBudgetRepository.update(budget);
+    if (!applied) {
+      throw new IllegalStateException("failed to reset stage budget");
+    }
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "RESET");
+    data.put("state", state);
+    data.put("previousMaxRuns", previousMax);
+    data.put("maxRuns", reset.maxRuns());
+    data.put("previousBudgetAfterOrdinal", previousAfter);
+    data.put("budgetAfterOrdinal", reset.budgetAfterOrdinal());
+    appendActivity(locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
+    persist(locked, expectedVersion);
+    return view(budget);
+  }
+
+  @Override
+  public StageBudgetView getStageBudget(UUID issueId, String state) {
+    Objects.requireNonNull(issueId, "issueId");
+    Objects.requireNonNull(state, "state");
+    IssueStageBudgetRow budget = stageBudgetRepository.get(issueId, state);
+    if (budget == null) {
+      throw new AiResourceNotFoundException("stage_budget");
+    }
+    return view(budget);
+  }
+
+  private StageBudgetView view(IssueStageBudgetRow budget) {
+    long used =
+        issueRunRepository.countByIssueIdAndStateAfterOrdinal(
+            budget.getIssueId(), budget.getState(), budget.getBudgetAfterOrdinal());
+    long remaining = Math.max(0L, budget.getMaxRuns() - used);
+    return new StageBudgetView(
+        budget.getState(), budget.getMaxRuns(), budget.getBudgetAfterOrdinal(), used, remaining);
+  }
+
+  /** 精确重试判定：命中同键同指纹时跳过版本与业务校验（请求字段校验仍然生效），返回当前事实而不重复应用。 */
+  private boolean replayed(UUID issueId, Identity identity) {
+    if (issueRepository.getById(issueId) == null) {
+      throw new AiResourceNotFoundException("issue");
+    }
+    return IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity) != null;
+  }
+
+  private void appendStateChange(
+      Issue issue, Identity identity, String action, String from, String to) {
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", action);
+    data.put("from", from);
+    data.put("to", to);
+    appendActivity(issue, identity, IssueActivityActorType.SYSTEM, null, null, null, data);
+  }
+
+  /**
+   * 追加一条活动（设计 §4.6 一个动作一条活动）：请求键与指纹来自调用方身份，正文与 Run 引用按动作填写。
+   *
+   * <p>调用方必须在任何外部派发之前完成 {@link IssueActivityIdempotency#findApplied 精确重试判定}；本方法只在首次执行路径调用，
+   * 因此同键活动的出现要么来自并发请求（由主键与唯一键兜底失败关闭），要么是编程错误。写完活动后必须在同一事务内以版本 CAS 写回 Issue 行。
+   */
+  private void appendActivity(
+      Issue issue,
+      Identity identity,
+      IssueActivityActorType actorType,
+      String agentName,
+      UUID runId,
+      String body,
+      ObjectNode data) {
+    long sequence = issue.getNextActivitySequence();
+    IssueActivity activity =
+        IssueActivity.builder()
+            .issueId(issue.getId())
+            .sequence(sequence)
+            .kind(identity.kind())
+            .actorType(actorType)
+            .actorAgentName(agentName)
+            .runId(runId)
+            .body(body)
+            .data(writeJson(data))
+            .idempotencyKey(identity.key())
+            .requestHash(identity.requestHash())
+            .build();
+    if (!issueActivityRepository.insert(activity)) {
+      throw new IllegalStateException("failed to insert issue activity");
+    }
+    issue.setNextActivitySequence(sequence + 1);
+  }
+
+  private String writeJson(ObjectNode node) {
+    try {
+      return objectMapper.writeValueAsString(node);
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException("failed to encode activity data", error);
+    }
+  }
+
+  private Locked lock(UUID issueId, long expectedVersion) {
+    Objects.requireNonNull(issueId, "issueId");
+    Issue initial = issueRepository.getById(issueId);
+    if (initial == null) {
+      throw new AiResourceNotFoundException("issue");
+    }
+    Project project = projectRepository.lockForKeyShare(initial.getProjectId());
+    if (project == null) {
+      throw new AiResourceNotFoundException("project");
+    }
+    if (project.isArchived()) {
+      throw new AiValidationException("project", "Cannot modify an issue in an archived project");
+    }
+    Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
       throw new AiResourceNotFoundException("issue");
     }
-    return issue;
-  }
-
-  @Override
-  public List<Issue> listIssues(UUID projectId, boolean includeArchived) {
-    Objects.requireNonNull(projectId, "projectId");
-    if (includeArchived) {
-      return issueRepository.listByProjectId(projectId);
+    if (!issue.getProjectId().equals(project.getId())) {
+      throw new AiValidationException("issue", "Issue hierarchy is inconsistent");
     }
-    return issueRepository.listByProjectIdAndArchived(projectId, false);
-  }
-
-  @Override
-  public List<IssueDependency> listDependencies(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    return issueDependencyRepository.listByIssueId(issueId);
-  }
-
-  @Override
-  public List<IssueDependency> listProjectDependencies(UUID projectId) {
-    Objects.requireNonNull(projectId, "projectId");
-    return issueDependencyRepository.listByProjectId(projectId);
-  }
-
-  @Override
-  public List<IssueActivity> listActivities(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    return issueActivityRepository.listByIssueId(issueId);
-  }
-
-  @Override
-  public List<IssueActivity> listActivitiesPage(UUID issueId, long afterSequence, int limit) {
-    Objects.requireNonNull(issueId, "issueId");
-    if (afterSequence < 0) {
-      throw new IllegalArgumentException("afterSequence must not be negative");
+    if (issue.isArchived()) {
+      throw new AiValidationException("issue", "Cannot modify an archived issue");
     }
-    if (limit < 1) {
-      throw new IllegalArgumentException("limit must be positive");
+    if (issue.getVersion() != expectedVersion) {
+      throw new AiVersionConflictException(
+          "issue", Long.toString(expectedVersion), Long.toString(issue.getVersion()));
     }
-    return issueActivityRepository.listPage(issueId, afterSequence, limit);
+    return new Locked(issue, project, workflowCodec.decode(project.getWorkflowJson()));
   }
 
-  @Override
-  public long countRejections(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    long windowStart = issueActivityRepository.findReviewWindowStartSequence(issueId);
-    return issueActivityRepository.countRejectionsSince(issueId, windowStart);
+  private Issue persist(Locked locked, long expectedVersion) {
+    if (!issueRepository.updateById(locked.issue(), expectedVersion)) {
+      throw new AiVersionConflictException(
+          "issue", Long.toString(expectedVersion), Long.toString(locked.issue().getVersion()));
+    }
+    return issueRepository.getById(locked.issue().getId());
   }
+
+  private static String requireRequestKey(String requestKey) {
+    return ProjectValidationUtils.requireDisplayName(
+        requestKey, "requestKey", MAX_REQUEST_KEY_LENGTH);
+  }
+
+  private record Locked(Issue issue, Project project, ProjectWorkflow workflow) {}
 }

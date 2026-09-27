@@ -1,807 +1,268 @@
 package fun.fengwk.kkstudio.platform.project.service.impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
-import org.postgresql.util.PSQLException;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatusTransition;
-import fun.fengwk.kkstudio.platform.project.model.IssueTransitionAction;
+import fun.fengwk.kkstudio.platform.project.model.IssueStageBudgetRow;
+import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 import fun.fengwk.kkstudio.platform.project.model.Project;
-import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
 import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueAgentSessionRepository;
-import fun.fengwk.kkstudio.platform.project.repo.IssueDependencyRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.platform.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.platform.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.platform.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.platform.project.service.impl.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
+import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
+import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-@AllArgsConstructor
+/**
+ * Issue Run 用例实现：接受与收尾共用 Project SHARE → Issue UPDATE → 已有预算/Run/绑定 → Harness Session/Thread → Work
+ * 的锁序。
+ *
+ * <p>首次接受时先持有产品锁并完成额度检查，通过 Harness NEW_SESSION 创建 Session/ROOT/Thread 与初始命令，再在同一物理事务写稳定 Thread
+ * 绑定、Run 与 RUN 活动、Issue Work；已有 Thread 则冻结当前 head 后继续接受本次命令。任一步失败整体回滚，包括已接受的 Harness 初始命令与
+ * Work。模型/工具外部调用发生在事务外，锁内不做网络 I/O；部署缺少 Harness Runtime 时确定失败，绝不退回本地假执行。
+ *
+ * <p>幂等（设计 §4.6）：每个写操作都要求调用方请求键，活动身份为 {@code kind:requestKey}，指纹含动作与规范化请求字段。判定在任何版本、 状态、额度校验与
+ * Harness 派发之前完成——同键同指纹按原 RUN 活动精确重放并返回原 Run，不新建 Session/Thread/命令、不重新扣额度、不重复推进
+ * 状态；同键异指纹确定性冲突。行级"已在目标状态"的重试（WAITING/RUNNING）是无写操作的空重放。
+ *
+ * <p>收尾额外复验 Run 身份/版本/合法边/门禁与历史区间：区间按 Entry 父链解释（设计 §4.5），仅靠外键只能保证 Entry 属于同一 Session，不能保证 {@code
+ * (start,end]} 落在该 Thread 的历史路径上。
+ */
 @Service
+@AllArgsConstructor
 public class IssueRunServiceImpl implements IssueRunService {
 
-  /** UNKNOWN 重试的人工核对说明上限：65536 个码点且不超过 65536 UTF-8 字节。 */
-  private static final int MAX_VERIFICATION_CHARS = 65536;
+  /** 新接受 Run 的初始活动执行额度；安全等待不消耗活动时长。 */
+  static final long DEFAULT_RUN_EXECUTION_BUDGET_MS = 30L * 60L * 1000L;
 
-  private static final int MAX_VERIFICATION_UTF8_BYTES = 65536;
+  private static final int MAX_REQUEST_KEY_LENGTH = 128;
 
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
-  private final IssueDependencyRepository issueDependencyRepository;
-  private final IssueActivityRepository issueActivityRepository;
   private final IssueRunRepository issueRunRepository;
-  private final IssueAgentSessionRepository issueAgentSessionRepository;
-  private final IssueWorkStore workStore;
-  private final IssueEvidenceService issueEvidenceService;
+  private final IssueStageBudgetRepository stageBudgetRepository;
+  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final IssueActivityRepository issueActivityRepository;
+  private final IssueWorkStore issueWorkStore;
+  private final ProjectWorkflowJsonCodec workflowCodec;
+  private final AgentBranchSettingsMaterializer settingsMaterializer;
+  private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
+  private final ObjectProvider<HarnessRuntime> runtimes;
   private final ObjectMapper objectMapper;
 
-  @Transactional
   @Override
-  public IssueRun startExecutorRun(
-      UUID issueId, String agentName, Instant deadline, int maxContinuations) {
+  @Transactional
+  public IssueRun acceptRun(UUID issueId, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
-    if (maxContinuations < 0) {
-      throw new AiValidationException("issue_run", "maxContinuations must not be negative");
-    }
-    String trimmedAgent = ProjectValidationUtils.trimAndValidate(agentName, "agentName", 128, true);
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
+    String acceptKey = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(IssueActivityKind.RUN, "ACCEPT_RUN", acceptKey, issueId);
+    if (issueRepository.getById(issueId) == null) {
       throw new AiResourceNotFoundException("issue");
     }
-    UUID projectId = initialIssue.getProjectId();
-
-    Project project = projectRepository.lockById(projectId);
+    IssueActivity applied =
+        IssueActivityIdempotency.findApplied(issueActivityRepository, issueId, identity);
+    if (applied != null) {
+      return replayAcceptedRun(applied);
+    }
+    Issue initial = issueRepository.getById(issueId);
+    Project project = projectRepository.lockForKeyShare(initial.getProjectId());
     if (project == null) {
       throw new AiResourceNotFoundException("project");
     }
     if (project.isArchived()) {
-      throw new AiValidationException("project", "Cannot start run in an archived project");
+      throw new AiValidationException("project", "Cannot accept a run in an archived project");
     }
-
     Issue issue = issueRepository.lockById(issueId);
     if (issue == null) {
       throw new AiResourceNotFoundException("issue");
     }
-    if (!issue.getProjectId().equals(projectId)) {
-      throw new AiValidationException("issue", "Issue project mismatch");
-    }
-    if (issue.getStatus() != IssueStatus.TODO) {
-      throw new AiValidationException(
-          "issue_run",
-          "Cannot start run: issue must be in TODO status, current is " + issue.getStatus());
-    }
-    if (issue.getAssigneeAgentName() == null
-        || !issue.getAssigneeAgentName().equals(trimmedAgent)) {
-      throw new AiValidationException(
-          "issue_run", "Cannot start run: agentName mismatch with issue assignee");
-    }
-
-    List<IssueDependency> deps = issueDependencyRepository.listByIssueId(issueId);
-    List<UUID> depIssueIds =
-        deps.stream().map(IssueDependency::getDependsOnIssueId).sorted().toList();
-    for (UUID depId : depIssueIds) {
-      Issue depIssue = issueRepository.lockById(depId);
-      if (depIssue == null || depIssue.getStatus() != IssueStatus.DONE) {
-        throw new AiValidationException("issue_run", "Cannot start run: dependency is not DONE");
-      }
-    }
-
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
-    if (activeRun != null) {
-      throw new AiValidationException(
-          "issue_run", "Cannot start run: an active run already exists for issue");
-    }
-
-    long ordinal = issueRunRepository.allocateNextOrdinal(issueId);
-    UUID runId = UUID.randomUUID();
-    IssueRun run =
-        IssueRun.builder()
-            .id(runId)
-            .issueId(issueId)
-            .ordinal(ordinal)
-            .role(IssueRunRole.EXECUTOR)
-            .agentName(trimmedAgent)
-            .submissionRunId(null)
-            .status(IssueRunStatus.RUNNING)
-            .outcome(null)
-            .observedActivitySequence(0L)
-            .continuationCount(0)
-            .maxContinuations(maxContinuations)
-            .deadline(deadline)
-            .waitingReason(null)
-            .result(null)
-            .terminalActionId(null)
-            .version(0L)
-            .build();
-
-    boolean runCreated = issueRunRepository.create(run);
-    if (!runCreated) {
-      throw new AiValidationException("issue_run", "Failed to create executor run");
-    }
-
-    issue.setStatus(
-        IssueStatusTransition.transition(issue.getStatus(), IssueTransitionAction.START_EXECUTION));
-    boolean issueUpdated = issueRepository.updateById(issue, issue.getVersion());
-    if (!issueUpdated) {
-      throw new AiValidationException("issue", "Failed to update issue status to IN_PROGRESS");
-    }
-
-    workStore.requestWork(issueId, Instant.now());
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  @Override
-  public IssueRun startReviewerRun(
-      UUID issueId, String agentName, Instant deadline, int maxContinuations) {
-    Objects.requireNonNull(issueId, "issueId");
-    if (maxContinuations < 0) {
-      throw new AiValidationException("issue_run", "maxContinuations must not be negative");
-    }
-    String trimmedAgent = ProjectValidationUtils.trimAndValidate(agentName, "agentName", 128, true);
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    UUID projectId = initialIssue.getProjectId();
-
-    Project project = projectRepository.lockById(projectId);
-    if (project == null) {
-      throw new AiResourceNotFoundException("project");
-    }
-    if (project.isArchived()) {
-      throw new AiValidationException("project", "Cannot start run in an archived project");
-    }
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (!issue.getProjectId().equals(projectId)) {
-      throw new AiValidationException("issue", "Issue project mismatch");
-    }
-    if (issue.getStatus() != IssueStatus.IN_REVIEW) {
-      throw new AiValidationException(
-          "issue_run",
-          "Cannot start reviewer run: issue must be in IN_REVIEW status, current is "
-              + issue.getStatus());
-    }
-    if (issue.getReviewerAgentName() == null
-        || !issue.getReviewerAgentName().equals(trimmedAgent)) {
-      throw new AiValidationException(
-          "issue_run", "Cannot start reviewer run: agentName mismatch with issue reviewer");
-    }
-    if (trimmedAgent.equals(issue.getAssigneeAgentName())) {
-      throw new AiValidationException(
-          "issue_run", "Reviewer agent must differ from executor assignee");
-    }
-
-    List<IssueRun> runs = issueRunRepository.listByIssueId(issueId);
-    UUID submissionRunId = null;
-    for (int i = runs.size() - 1; i >= 0; i--) {
-      IssueRun r = runs.get(i);
-      if (r.getRole() == IssueRunRole.EXECUTOR && r.getOutcome() == IssueRunOutcome.SUBMITTED) {
-        submissionRunId = r.getId();
-        break;
-      }
-    }
-    if (submissionRunId == null) {
-      throw new AiValidationException("issue_run", "No submitted executor run found to review");
-    }
-
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
-    if (activeRun != null) {
-      throw new AiValidationException(
-          "issue_run", "Cannot start run: an active run already exists for issue");
-    }
-
-    long ordinal = issueRunRepository.allocateNextOrdinal(issueId);
-    UUID runId = UUID.randomUUID();
-    IssueRun run =
-        IssueRun.builder()
-            .id(runId)
-            .issueId(issueId)
-            .ordinal(ordinal)
-            .role(IssueRunRole.REVIEWER)
-            .agentName(trimmedAgent)
-            .submissionRunId(submissionRunId)
-            .status(IssueRunStatus.RUNNING)
-            .outcome(null)
-            .observedActivitySequence(0L)
-            .continuationCount(0)
-            .maxContinuations(maxContinuations)
-            .deadline(deadline)
-            .waitingReason(null)
-            .result(null)
-            .terminalActionId(null)
-            .version(0L)
-            .build();
-
-    boolean runCreated = issueRunRepository.create(run);
-    if (!runCreated) {
-      throw new AiValidationException("issue_run", "Failed to create reviewer run");
-    }
-
-    workStore.requestWork(issueId, Instant.now());
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  @Override
-  public IssueRun completeExecutorRun(
-      UUID runId, String terminalActionId, String summary, String verification) {
-    Objects.requireNonNull(runId, "runId");
-    String trimmedActionId =
-        ProjectValidationUtils.trimAndValidate(terminalActionId, "terminalActionId", 255, true);
-
-    String resultJson = toJson(summary, verification);
-
-    IssueRun existingByAction = issueRunRepository.findByTerminalActionId(trimmedActionId);
-    if (existingByAction != null) {
-      return checkExactSubmitReplay(existingByAction, runId, resultJson);
-    }
-
-    IssueRun initialRun = issueRunRepository.getById(runId);
-    if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    UUID issueId = initialRun.getIssueId();
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initialIssue.getProjectId());
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-
-    IssueRun run = issueRunRepository.lockById(runId);
-    if (run == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    if (!issueId.equals(run.getIssueId())) {
-      throw new AiValidationException("issue_run", "Run issue mismatch");
-    }
-
-    existingByAction = issueRunRepository.findByTerminalActionId(trimmedActionId);
-    if (existingByAction != null) {
-      return checkExactSubmitReplay(existingByAction, runId, resultJson);
-    }
-
-    if (run.isTerminal()) {
-      throw new AiValidationException(
-          "issue_run", "Run is already terminal and cannot be submitted");
-    }
-
-    if (run.getRole() != IssueRunRole.EXECUTOR || run.getStatus() != IssueRunStatus.RUNNING) {
-      throw new AiValidationException(
-          "issue_run",
-          "Only RUNNING EXECUTOR run can be completed, current role="
-              + run.getRole()
-              + ", status="
-              + run.getStatus());
-    }
-
-    if (issue.getStatus() != IssueStatus.IN_PROGRESS) {
-      throw new AiValidationException(
-          "issue_run",
-          "Issue must be in IN_PROGRESS for submit, current status=" + issue.getStatus());
-    }
-
-    run.setStatus(IssueRunStatus.COMPLETED);
-    run.setOutcome(IssueRunOutcome.SUBMITTED);
-    run.setTerminalActionId(trimmedActionId);
-    run.setResult(resultJson);
-    run.setWaitingReason(null);
-    run.setCompletedAt(Instant.now());
-
-    try {
-      boolean runUpdated = issueRunRepository.updateById(run, run.getVersion());
-      if (!runUpdated) {
-        throw new AiValidationException("issue_run", "Failed to update run to COMPLETED");
-      }
-    } catch (DataIntegrityViolationException e) {
-      if (isTerminalActionUniqueConflict(e)) {
-        throw new AiValidationException("issue_run", "Terminal action ID conflict");
-      }
-      throw e;
-    }
-
-    issue.setStatus(
-        IssueStatusTransition.transition(issue.getStatus(), IssueTransitionAction.SUBMIT));
-    boolean issueUpdated = issueRepository.updateById(issue, issue.getVersion());
-    if (!issueUpdated) {
-      throw new AiValidationException("issue", "Failed to update issue status to IN_REVIEW");
-    }
-
-    // 与提交同一事务：只公开来源 Session 在提交时确实持有、且 final 正文明确引用的产物；不满足即拒绝整个提交，
-    // 绝不静默公开私有资源。
-    issueEvidenceService.publishExecutorEvidence(issueId, run.getId(), run.getAgentName(), summary);
-
-    workStore.requestWork(issue.getId(), Instant.now());
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  @Override
-  public IssueRun requestInput(UUID runId, String question, String context) {
-    Objects.requireNonNull(runId, "runId");
-    String trimmedQuestion =
-        ProjectValidationUtils.trimAndValidate(question, "question", 16384, true);
-    ProjectValidationUtils.validateUtf8Bytes(trimmedQuestion, "question", 16384, true);
-    String waitingReason;
-    if (context != null && !context.isBlank()) {
-      waitingReason = trimmedQuestion + "\n\nContext:\n" + context.trim();
-    } else {
-      waitingReason = trimmedQuestion;
-    }
-    ProjectValidationUtils.validateUtf8Bytes(waitingReason, "waiting_reason", 16384, true);
-
-    IssueRun initialRun = issueRunRepository.getById(runId);
-    if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    UUID issueId = initialRun.getIssueId();
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initialIssue.getProjectId());
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-
-    IssueRun run = issueRunRepository.lockById(runId);
-    if (run == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    if (!issueId.equals(run.getIssueId())) {
-      throw new AiValidationException("issue_run", "Run issue mismatch");
-    }
-
-    if (run.getStatus() != IssueRunStatus.RUNNING) {
-      throw new AiValidationException(
-          "issue_run", "Only RUNNING run can request input, current status=" + run.getStatus());
-    }
-
-    if (!run.getStatus().canTransitionTo(IssueRunStatus.WAITING_HUMAN)) {
-      throw new AiValidationException(
-          "issue_run", "Cannot transition run from " + run.getStatus() + " to WAITING_HUMAN");
-    }
-
-    run.setStatus(IssueRunStatus.WAITING_HUMAN);
-    run.setWaitingReason(waitingReason);
-    boolean runUpdated = issueRunRepository.updateById(run, run.getVersion());
-    if (!runUpdated) {
-      throw new AiValidationException("issue_run", "Failed to update run to WAITING_HUMAN");
-    }
-
-    IssueActivity activity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.INSTRUCTION)
-            .actorType(IssueActivityActorType.AGENT)
-            .actorAgentName(run.getAgentName())
-            .targetRole(null)
-            .runId(run.getId())
-            .body(waitingReason)
-            .build();
-    issueActivityRepository.appendOrGet(activity);
-
-    workStore.requestWork(issue.getId(), Instant.now());
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  @Override
-  public IssueRun reviewByAgent(
-      UUID runId,
-      String reviewerAgentName,
-      String terminalActionId,
-      ReviewDecision decision,
-      String reason) {
-    Objects.requireNonNull(runId, "runId");
-    Objects.requireNonNull(decision, "decision");
-    String trimmedActionId =
-        ProjectValidationUtils.trimAndValidate(terminalActionId, "terminalActionId", 255, true);
-    String trimmedReviewerAgent =
-        ProjectValidationUtils.trimAndValidate(reviewerAgentName, "reviewerAgentName", 128, true);
-
-    String resultJson = toJson(reason, null);
-    IssueRunOutcome expectedOutcome =
-        decision == ReviewDecision.APPROVE
-            ? IssueRunOutcome.APPROVED
-            : IssueRunOutcome.CHANGES_REQUESTED;
-
-    IssueRun existingByAction = issueRunRepository.findByTerminalActionId(trimmedActionId);
-    if (existingByAction != null) {
-      return checkExactReviewReplay(
-          existingByAction, runId, trimmedReviewerAgent, expectedOutcome, resultJson);
-    }
-
-    IssueRun initialRun = issueRunRepository.getById(runId);
-    if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    UUID issueId = initialRun.getIssueId();
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    UUID projectId = initialIssue.getProjectId();
-    Project project = projectRepository.lockById(projectId);
-    if (project == null) {
-      throw new AiResourceNotFoundException("project");
-    }
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-
-    IssueRun run = issueRunRepository.lockById(runId);
-    if (run == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    if (!issueId.equals(run.getIssueId())) {
-      throw new AiValidationException("issue_run", "Run issue mismatch");
-    }
-
-    existingByAction = issueRunRepository.findByTerminalActionId(trimmedActionId);
-    if (existingByAction != null) {
-      return checkExactReviewReplay(
-          existingByAction, runId, trimmedReviewerAgent, expectedOutcome, resultJson);
-    }
-
-    if (issue.getStatus() != IssueStatus.IN_REVIEW) {
-      throw new AiValidationException(
-          "issue_run",
-          "Issue must be in IN_REVIEW to be reviewed, current is " + issue.getStatus());
-    }
-
-    if (run.isTerminal()) {
-      throw new AiValidationException(
-          "issue_run", "Run is already terminal and cannot be reviewed");
-    }
-
-    if (run.getRole() != IssueRunRole.REVIEWER || run.getStatus() != IssueRunStatus.RUNNING) {
-      throw new AiValidationException(
-          "issue_run",
-          "Agent review requires a RUNNING REVIEWER run, found role="
-              + run.getRole()
-              + ", status="
-              + run.getStatus());
-    }
-
-    String expectedAgent = issue.getReviewerAgentName();
-    if (expectedAgent == null
-        || !expectedAgent.equals(run.getAgentName())
-        || !expectedAgent.equals(trimmedReviewerAgent)) {
-      throw new AiValidationException("issue_run", "Reviewer agent identity mismatch");
-    }
-
-    run.setStatus(IssueRunStatus.COMPLETED);
-    run.setOutcome(expectedOutcome);
-    run.setTerminalActionId(trimmedActionId);
-    run.setResult(resultJson);
-    run.setWaitingReason(null);
-    run.setCompletedAt(Instant.now());
-
-    try {
-      boolean runUpdated = issueRunRepository.updateById(run, run.getVersion());
-      if (!runUpdated) {
-        throw new AiValidationException("issue_run", "Failed to update reviewer run");
-      }
-    } catch (DataIntegrityViolationException e) {
-      if (isTerminalActionUniqueConflict(e)) {
-        throw new AiValidationException("issue_run", "Terminal action ID conflict");
-      }
-      throw e;
-    }
-
-    IssueActivity activity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.REVIEW_DECISION)
-            .actorType(IssueActivityActorType.AGENT)
-            .actorAgentName(trimmedReviewerAgent)
-            .runId(run.getId())
-            .submissionRunId(run.getSubmissionRunId())
-            .decision(decision)
-            .body(reason != null ? reason : "")
-            .idempotencyKey("review:" + trimmedActionId)
-            .build();
-    issueActivityRepository.appendOrGet(activity);
-
-    if (decision == ReviewDecision.APPROVE) {
-      issue.setStatus(
-          IssueStatusTransition.transition(issue.getStatus(), IssueTransitionAction.APPROVE));
-    } else {
-      long windowStart = issueActivityRepository.findReviewWindowStartSequence(issueId);
-      long rejections = issueActivityRepository.countRejectionsSince(issueId, windowStart);
-      if (rejections < project.getMaxReviewRejections()) {
-        issue.setStatus(IssueStatus.TODO);
-      } else {
-        issue.setStatus(IssueStatus.BLOCKED);
-      }
-    }
-
-    boolean issueUpdated = issueRepository.updateById(issue, issue.getVersion());
-    if (!issueUpdated) {
-      throw new AiValidationException("issue", "Failed to update issue status");
-    }
-
-    workStore.requestWork(issueId, Instant.now());
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  @Override
-  public void reviewByHuman(
-      UUID issueId, ReviewDecision decision, String reason, String idempotencyKey) {
-    Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(decision, "decision");
-    String trimmedKey =
-        ProjectValidationUtils.trimAndValidate(idempotencyKey, "idempotencyKey", 128, false);
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    UUID projectId = initialIssue.getProjectId();
-    Project project = projectRepository.lockById(projectId);
-    if (project == null) {
-      throw new AiResourceNotFoundException("project");
-    }
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    if (!trimmedKey.isBlank()) {
-      IssueActivity existing =
-          issueActivityRepository.findByIssueIdAndIdempotencyKey(issueId, trimmedKey);
-      if (existing != null) {
-        // 相同审查动作的幂等重放：业务效果已落地，绝不重复决定、重复计数或改变已提交结果；
-        // 与已落库决定矛盾的请求、非人工决定或非决定记录都必须明确拒绝。
-        if (existing.getKind() != IssueActivityKind.REVIEW_DECISION
-            || existing.getActorType() != IssueActivityActorType.HUMAN
-            || existing.getDecision() != decision) {
-          throw new AiValidationException("issue_activity", "Review decision conflict");
-        }
-        return;
-      }
-    }
-    if (issue.getStatus() != IssueStatus.IN_REVIEW) {
-      throw new AiValidationException(
-          "issue", "Issue must be in IN_REVIEW to be reviewed, current is " + issue.getStatus());
-    }
-
-    List<IssueRun> runs = issueRunRepository.listByIssueId(issueId);
-    UUID submissionRunId = null;
-    for (int i = runs.size() - 1; i >= 0; i--) {
-      IssueRun r = runs.get(i);
-      if (r.getRole() == IssueRunRole.EXECUTOR && r.getOutcome() == IssueRunOutcome.SUBMITTED) {
-        submissionRunId = r.getId();
-        break;
-      }
-    }
-    if (submissionRunId == null) {
-      throw new AiValidationException("issue", "No submitted executor run found to review");
-    }
-
-    IssueActivity activity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(IssueActivityKind.REVIEW_DECISION)
-            .actorType(IssueActivityActorType.HUMAN)
-            .actorAgentName(null)
-            .runId(null)
-            .submissionRunId(submissionRunId)
-            .decision(decision)
-            .body(reason != null ? reason : "")
-            .idempotencyKey(trimmedKey)
-            .build();
-    issueActivityRepository.appendOrGet(activity);
-
-    if (decision == ReviewDecision.APPROVE) {
-      issue.setStatus(
-          IssueStatusTransition.transition(issue.getStatus(), IssueTransitionAction.APPROVE));
-    } else {
-      long windowStart = issueActivityRepository.findReviewWindowStartSequence(issueId);
-      long rejections = issueActivityRepository.countRejectionsSince(issueId, windowStart);
-      if (rejections < project.getMaxReviewRejections()) {
-        issue.setStatus(IssueStatus.TODO);
-      } else {
-        issue.setStatus(IssueStatus.BLOCKED);
-      }
-    }
-
-    boolean issueUpdated = issueRepository.updateById(issue, issue.getVersion());
-    if (!issueUpdated) {
-      throw new AiValidationException("issue", "Failed to update issue status");
-    }
-
-    workStore.requestWork(issueId, Instant.now());
-  }
-
-  @Transactional
-  @Override
-  public IssueRun failRun(UUID runId, IssueRunStatus terminalStatus, String waitingReason) {
-    Objects.requireNonNull(runId, "runId");
-    if (terminalStatus != IssueRunStatus.FAILED && terminalStatus != IssueRunStatus.UNKNOWN) {
-      throw new AiValidationException(
-          "issue_run", "Terminal status must be FAILED or UNKNOWN, but was " + terminalStatus);
-    }
-    String trimmedReason =
-        ProjectValidationUtils.trimAndValidate(waitingReason, "waiting_reason", 16384, true);
-    ProjectValidationUtils.validateUtf8Bytes(trimmedReason, "waiting_reason", 16384, true);
-
-    IssueRun initialRun = issueRunRepository.getById(runId);
-    if (initialRun == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    UUID issueId = initialRun.getIssueId();
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initialIssue.getProjectId());
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-
-    IssueRun run = issueRunRepository.lockById(runId);
-    if (run == null) {
-      throw new AiResourceNotFoundException("issue_run");
-    }
-    if (!issueId.equals(run.getIssueId())) {
-      throw new AiValidationException("issue_run", "Run issue mismatch");
-    }
-
-    if (run.isTerminal()) {
-      throw new AiValidationException("issue_run", "Run is already terminal and cannot be failed");
-    }
-    if (!run.getStatus().canTransitionTo(terminalStatus)) {
-      throw new AiValidationException(
-          "issue_run", "Cannot transition run from " + run.getStatus() + " to " + terminalStatus);
-    }
-
-    run.setStatus(terminalStatus);
-    run.setWaitingReason(trimmedReason);
-    run.setCompletedAt(Instant.now());
-
-    boolean runUpdated = issueRunRepository.updateById(run, run.getVersion());
-    if (!runUpdated) {
-      throw new AiValidationException("issue_run", "Failed to fail run");
-    }
-
-    workStore.requestWork(run.getIssueId(), Instant.now());
-    return issueRunRepository.getById(runId);
-  }
-
-  @Transactional
-  @Override
-  public IssueActivity retryRun(UUID issueId, String idempotencyKey, String verification) {
-    Objects.requireNonNull(issueId, "issueId");
-    String trimmedKey =
-        ProjectValidationUtils.trimAndValidate(idempotencyKey, "idempotencyKey", 128, true);
-
-    Issue initialIssue = issueRepository.getById(issueId);
-    if (initialIssue == null) {
-      throw new AiResourceNotFoundException("issue");
-    }
-    projectRepository.lockById(initialIssue.getProjectId());
-
-    Issue issue = issueRepository.lockById(issueId);
-    if (issue == null) {
-      throw new AiResourceNotFoundException("issue");
+    if (!issue.getProjectId().equals(project.getId())) {
+      throw new AiValidationException("issue", "Issue hierarchy is inconsistent");
     }
     if (issue.isArchived()) {
-      throw new AiValidationException("issue_run", "Cannot retry archived issue");
+      throw new AiValidationException("issue", "Cannot accept a run for an archived issue");
     }
-    if (issue.isTerminal()) {
-      throw new AiValidationException("issue_run", "Cannot retry terminal issue");
+    if (issue.isPaused()) {
+      throw new AiValidationException("issue", "Cannot accept a run while the issue is paused");
     }
-
-    IssueRun latestRun = issueRunRepository.findLatestByIssueId(issueId);
-    if (latestRun == null
-        || (latestRun.getStatus() != IssueRunStatus.FAILED
-            && latestRun.getStatus() != IssueRunStatus.UNKNOWN)) {
+    ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
+    ProjectStateCode stateCode = ProjectStateCode.of(issue.getState());
+    if (ProjectWorkflowReservedState.isReserved(stateCode)) {
       throw new AiValidationException(
-          "issue_run",
-          "Retry is only allowed when the latest run is FAILED or UNKNOWN, but was "
-              + (latestRun != null ? latestRun.getStatus() : "null"));
+          "issue_run", "Issue is not in an executable work stage: " + issue.getState());
+    }
+    ProjectWorkflowState stage = workflow.require(stateCode);
+    if (!stage.enabled() || !stage.hasAgent()) {
+      throw new AiValidationException(
+          "issue_run", "Stage " + issue.getState() + " has no enabled agent");
+    }
+    String agentName = stage.agent();
+    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
+      throw new AiValidationException("issue_run", "Issue already has an active run");
     }
 
-    // UNKNOWN 意味着已派发的调用是否有外部副作用不可判定，必须由人工先核对残留调用并留下说明。
-    String trimmedVerification =
-        ProjectValidationUtils.trimAndValidate(
-            verification,
-            "verification",
-            MAX_VERIFICATION_CHARS,
-            latestRun.getStatus() == IssueRunStatus.UNKNOWN);
-    if (trimmedVerification != null) {
-      ProjectValidationUtils.validateUtf8Bytes(
-          trimmedVerification, "verification", MAX_VERIFICATION_UTF8_BYTES, true);
+    IssueStageBudgetRow budgetRow = stageBudgetRepository.get(issueId, issue.getState());
+    if (budgetRow == null) {
+      IssueStageBudget authorized =
+          IssueStageBudget.authorize(workflow, stateCode, stage.maxRuns());
+      budgetRow =
+          IssueStageBudgetRow.builder()
+              .issueId(issueId)
+              .state(issue.getState())
+              .maxRuns(authorized.maxRuns())
+              .budgetAfterOrdinal(authorized.budgetAfterOrdinal())
+              .build();
+      if (!stageBudgetRepository.insert(budgetRow)) {
+        throw new IllegalStateException("failed to authorize initial stage budget");
+      }
+    }
+    long used =
+        issueRunRepository.countByIssueIdAndStateAfterOrdinal(
+            issueId, issue.getState(), budgetRow.getBudgetAfterOrdinal());
+    if (used >= budgetRow.getMaxRuns()) {
+      throw new AiValidationException(
+          "issue_run", "Stage budget is exhausted; a human must authorize more runs");
     }
 
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issueId);
-    if (activeRun != null) {
-      throw new AiValidationException("issue_run", "Cannot retry while an active run exists");
+    IssueAgentThread binding =
+        issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName);
+    BranchSettings settings = settingsMaterializer.materialize(agentName);
+    NewThreadCommand command = buildInitialCommand(issue, stage);
+    UUID sessionId;
+    UUID threadId;
+    UUID startEntryId;
+    if (binding == null) {
+      sessionId = UUID.randomUUID();
+      threadId = UUID.randomUUID();
+      AcceptedCommands accepted =
+          acceptanceOrchestrator.accept(
+              new OwnerRef.IssueAgent(issueId, agentName),
+              new AcceptCommandsCommand(
+                  new AcceptCommandsTarget.NewSession(
+                      sessionId, threadId, settings, null, project.isYoloEnabled()),
+                  List.of(command)));
+      if (!issueAgentThreadRepository.insert(new IssueAgentThread(issueId, agentName, threadId))) {
+        throw new IllegalStateException("failed to bind issue agent thread");
+      }
+      startEntryId = accepted.rootEntry().id();
+    } else {
+      threadId = binding.threadId();
+      ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(threadId);
+      sessionId = snapshot.thread().sessionId();
+      startEntryId = snapshot.thread().headEntryId();
+      acceptanceOrchestrator.accept(
+          new OwnerRef.IssueAgent(issueId, agentName),
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  threadId, startEntryId, snapshot.thread().nextCommandSequence()),
+              List.of(command)));
     }
 
-    String body = retryActivityBody(latestRun.getId(), trimmedVerification);
-    IssueActivity retryActivity =
-        IssueActivity.builder()
+    long ordinal = issue.getNextRunOrdinal();
+    IssueRun run =
+        IssueRun.builder()
+            .id(UUID.randomUUID())
             .issueId(issueId)
-            .kind(IssueActivityKind.RETRY)
-            .actorType(IssueActivityActorType.HUMAN)
-            .body(body)
-            .idempotencyKey(trimmedKey)
+            .ordinal(ordinal)
+            .state(issue.getState())
+            .sessionId(sessionId)
+            .threadId(threadId)
+            .status(IssueRunStatus.RUNNING)
+            .startEntryId(startEntryId)
+            .observedActivitySequence(issue.getNextActivitySequence() - 1)
+            .remainingExecutionMs(DEFAULT_RUN_EXECUTION_BUDGET_MS)
+            .activeSince(Instant.now())
             .build();
-
-    IssueActivity appended = issueActivityRepository.appendOrGet(retryActivity);
-    // 同一 idempotencyKey 只允许重放同一请求：正文不同说明该键被改写的请求复用，拒绝而不是返回他人的事实。
-    if (appended != null && !body.equals(appended.getBody())) {
-      throw new AiValidationException(
-          "idempotencyKey", "idempotencyKey was already used for a different retry request");
+    if (!issueRunRepository.insert(run)) {
+      throw new IllegalStateException("failed to insert issue run");
     }
-    workStore.requestWork(issueId, Instant.now());
-    return appended;
+    appendActivity(
+        issue,
+        identity,
+        IssueActivityActorType.SYSTEM,
+        null,
+        run.getId(),
+        null,
+        objectMapper.createObjectNode());
+    issue.setNextRunOrdinal(ordinal + 1);
+    if (!issueRepository.updateById(issue, issue.getVersion())) {
+      throw new AiVersionConflictException(
+          "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
+    }
+    issueWorkStore.requestWork(issueId, Instant.now());
+    return issueRunRepository.getById(run.getId());
   }
 
-  /** RETRY 正文由重试目标 Run 与人工核对说明确定性构成，因此相同请求重放必然得到相同正文。 */
-  private static String retryActivityBody(UUID latestRunId, String verification) {
-    if (verification == null) {
-      return "Retry requested for run " + latestRunId;
+  /** 精确重试：返回原 RUN 活动引用的 Run，不新建 Session/Thread/命令，也不重新校验阶段额度或推进 ordinal。 */
+  private IssueRun replayAcceptedRun(IssueActivity applied) {
+    if (applied.getRunId() == null) {
+      throw new IllegalStateException("RUN activity is missing its run reference");
     }
-    return "Retry requested for run " + latestRunId + "\nHuman verification: " + verification;
+    IssueRun run = issueRunRepository.getById(applied.getRunId());
+    if (run == null) {
+      throw new IllegalStateException("accepted run does not exist");
+    }
+    return run;
   }
 
   @Override
   public IssueRun getRun(UUID runId) {
     Objects.requireNonNull(runId, "runId");
-    IssueRun run = issueRunRepository.getById(runId);
+    return requireRun(runId);
+  }
+
+  @Override
+  public IssueRun getActiveRun(UUID issueId) {
+    Objects.requireNonNull(issueId, "issueId");
+    IssueRun run = issueRunRepository.getActiveByIssueId(issueId);
     if (run == null) {
       throw new AiResourceNotFoundException("issue_run");
     }
@@ -809,15 +270,13 @@ public class IssueRunServiceImpl implements IssueRunService {
   }
 
   @Override
-  public IssueRun getActiveRun(UUID issueId) {
-    Objects.requireNonNull(issueId, "issueId");
-    return issueRunRepository.findActiveByIssueId(issueId);
-  }
-
-  @Override
   public IssueRun getLatestRun(UUID issueId) {
     Objects.requireNonNull(issueId, "issueId");
-    return issueRunRepository.findLatestByIssueId(issueId);
+    IssueRun run = issueRunRepository.getLatestByIssueId(issueId);
+    if (run == null) {
+      throw new AiResourceNotFoundException("issue_run");
+    }
+    return run;
   }
 
   @Override
@@ -827,100 +286,400 @@ public class IssueRunServiceImpl implements IssueRunService {
   }
 
   @Override
-  public IssueAgentSession getAgentSession(UUID issueId, String agentName) {
-    Objects.requireNonNull(issueId, "issueId");
-    Objects.requireNonNull(agentName, "agentName");
-    return issueAgentSessionRepository.findByIssueIdAndAgentName(issueId, agentName);
+  @Transactional
+  public IssueRun waitRun(UUID runId, long expectedVersion) {
+    RunLock locked = lockRun(runId);
+    IssueRun run = locked.run();
+    if (run.getStatus() == IssueRunStatus.WAITING) {
+      // 丢响应后的重试：已经是安全等待状态，幂等返回而不重复写行。
+      return issueRunRepository.getById(runId);
+    }
+    requireActive(run);
+    requireVersion(run, expectedVersion);
+    if (run.getRemainingExecutionMs() <= 0) {
+      throw new AiValidationException("issue_run", "Cannot wait: run has no execution budget left");
+    }
+    run.setStatus(IssueRunStatus.WAITING);
+    run.setActiveSince(null);
+    updateRun(run, expectedVersion);
+    return issueRunRepository.getById(runId);
   }
 
   @Override
-  public IssueAgentSession findAgentSession(UUID sessionId) {
-    Objects.requireNonNull(sessionId, "sessionId");
-    return issueAgentSessionRepository.findBySessionId(sessionId);
+  @Transactional
+  public IssueRun resumeRun(UUID runId, long expectedVersion) {
+    RunLock locked = lockRun(runId);
+    IssueRun run = locked.run();
+    if (run.getStatus() == IssueRunStatus.RUNNING) {
+      // 丢响应后的重试：已经是执行状态，幂等返回而不重复写行。
+      return issueRunRepository.getById(runId);
+    }
+    if (run.getStatus() != IssueRunStatus.WAITING) {
+      throw new AiValidationException("issue_run", "Only a WAITING run can be resumed");
+    }
+    requireVersion(run, expectedVersion);
+    if (locked.issue().isPaused()) {
+      throw new AiValidationException(
+          "issue_run", "Cannot resume a run while the issue pause gate is closed");
+    }
+    if (run.getRemainingExecutionMs() <= 0) {
+      throw new AiValidationException(
+          "issue_run", "Cannot resume: run has no execution budget left");
+    }
+    // 恢复消耗的是本次 Run 已接受的活动额度，不新建 Run、不重查阶段额度。
+    run.setStatus(IssueRunStatus.RUNNING);
+    run.setActiveSince(Instant.now());
+    updateRun(run, expectedVersion);
+    return issueRunRepository.getById(runId);
   }
 
   @Override
-  public IssueAgentSession findAgentSessionByThreadId(UUID threadId) {
-    Objects.requireNonNull(threadId, "threadId");
-    return issueAgentSessionRepository.findByThreadId(threadId);
+  @Transactional
+  public IssueRun completeRun(
+      UUID runId,
+      long expectedVersion,
+      String requestKey,
+      UUID endEntryId,
+      UUID finalAnswerEntryId,
+      String nextState) {
+    Objects.requireNonNull(runId, "runId");
+    Objects.requireNonNull(endEntryId, "endEntryId");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.STATE_CHANGE,
+            "HANDOFF",
+            key,
+            runId,
+            endEntryId,
+            finalAnswerEntryId,
+            nextState);
+    if (replayed(runId, identity)) {
+      return requireRun(runId);
+    }
+    RunLock locked = lockRun(runId);
+    IssueRun run = locked.run();
+    requireActive(run);
+    requireVersion(run, expectedVersion);
+    requireWithinRunInterval(
+        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, finalAnswerEntryId, true);
+    Issue issue = locked.issue();
+    boolean issueChanged = false;
+    if (nextState != null) {
+      ProjectWorkflow workflow = workflowCodec.decode(locked.project().getWorkflowJson());
+      ProjectStateCode from = ProjectStateCode.of(run.getState());
+      ProjectStateCode to = ProjectStateCode.of(nextState);
+      ProjectValidationUtils.validate(
+          "issue", () -> new IssueStateTransitions(workflow).requireTransition(from, to));
+      ObjectNode data = objectMapper.createObjectNode();
+      data.put("action", "HANDOFF");
+      data.put("from", from.value());
+      data.put("to", to.value());
+      appendActivity(issue, identity, IssueActivityActorType.SYSTEM, null, null, null, data);
+      issue.setState(to.value());
+      issueChanged = true;
+    }
+    run.setStatus(IssueRunStatus.COMPLETED);
+    run.setEndEntryId(endEntryId);
+    run.setFinalAnswerEntryId(finalAnswerEntryId);
+    run.setNextState(nextState);
+    run.setActiveSince(null);
+    run.setEndedAt(Instant.now());
+    run.setError(null);
+    updateRun(run, expectedVersion);
+    if (issueChanged) {
+      persistIssue(issue, locked.issueVersion());
+    }
+    return issueRunRepository.getById(runId);
   }
 
-  private String toJson(String summary, String verification) {
-    ProjectValidationUtils.validateUtf8Bytes(summary, "summary", 65536, false);
-    ProjectValidationUtils.validateUtf8Bytes(verification, "verification", 65536, false);
+  @Override
+  @Transactional
+  public IssueRun cancelRun(UUID runId, long expectedVersion, String requestKey, UUID endEntryId) {
+    Objects.requireNonNull(runId, "runId");
+    Objects.requireNonNull(endEntryId, "endEntryId");
+    String key = requireRequestKey(requestKey);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL,
+            "CANCEL_RUN",
+            key,
+            runId,
+            endEntryId,
+            PauseReason.USER.name());
+    if (replayed(runId, identity)) {
+      return requireRun(runId);
+    }
+    RunLock locked = lockRun(runId);
+    IssueRun run = locked.run();
+    requireActive(run);
+    requireVersion(run, expectedVersion);
+    requireWithinRunInterval(
+        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, null, false);
+    terminate(run, IssueRunStatus.CANCELLED, endEntryId, null, expectedVersion);
+    applyPauseGate(locked, identity, PauseReason.USER, "Run was stopped by a human");
+    return issueRunRepository.getById(runId);
+  }
+
+  @Override
+  @Transactional
+  public IssueRun failRun(
+      UUID runId, long expectedVersion, String requestKey, UUID endEntryId, String error) {
+    Objects.requireNonNull(runId, "runId");
+    Objects.requireNonNull(endEntryId, "endEntryId");
+    String key = requireRequestKey(requestKey);
+    String validError =
+        ProjectValidationUtils.requireUtf8Text(
+            error, "error", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL, "FAIL_RUN", key, runId, endEntryId, validError);
+    if (replayed(runId, identity)) {
+      return requireRun(runId);
+    }
+    RunLock locked = lockRun(runId);
+    IssueRun run = locked.run();
+    requireActive(run);
+    requireVersion(run, expectedVersion);
+    requireWithinRunInterval(
+        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, null, false);
+    terminate(run, IssueRunStatus.FAILED, endEntryId, validError, expectedVersion);
+    applyPauseGate(locked, identity, PauseReason.ERROR, validError);
+    return issueRunRepository.getById(runId);
+  }
+
+  @Override
+  @Transactional
+  public IssueRun markUnknown(
+      UUID runId, long expectedVersion, String requestKey, UUID endEntryId, String error) {
+    Objects.requireNonNull(runId, "runId");
+    Objects.requireNonNull(endEntryId, "endEntryId");
+    String key = requireRequestKey(requestKey);
+    String validError =
+        ProjectValidationUtils.requireUtf8Text(
+            error, "error", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    Identity identity =
+        IssueActivityIdempotency.identity(
+            IssueActivityKind.CONTROL, "MARK_UNKNOWN", key, runId, endEntryId, validError);
+    if (replayed(runId, identity)) {
+      return requireRun(runId);
+    }
+    RunLock locked = lockRun(runId);
+    IssueRun run = locked.run();
+    requireActive(run);
+    requireVersion(run, expectedVersion);
+    requireWithinRunInterval(
+        entryPath(run.getThreadId()), run.getStartEntryId(), endEntryId, null, false);
+    terminate(run, IssueRunStatus.UNKNOWN, endEntryId, validError, expectedVersion);
+    applyPauseGate(locked, identity, PauseReason.UNKNOWN, validError);
+    return issueRunRepository.getById(runId);
+  }
+
+  private void terminate(
+      IssueRun run, IssueRunStatus status, UUID endEntryId, String error, long expectedVersion) {
+    run.setStatus(status);
+    run.setEndEntryId(endEntryId);
+    run.setFinalAnswerEntryId(null);
+    run.setActiveSince(null);
+    run.setEndedAt(Instant.now());
+    run.setError(error);
+    updateRun(run, expectedVersion);
+  }
+
+  private void applyPauseGate(
+      RunLock locked, Identity identity, PauseReason reason, String detail) {
+    ObjectNode data = objectMapper.createObjectNode();
+    data.put("action", "PAUSE");
+    data.put("reason", reason.name());
+    appendActivity(locked.issue(), identity, IssueActivityActorType.SYSTEM, null, null, null, data);
+    locked.issue().setPauseReason(reason.name());
+    locked.issue().setPauseDetail(detail);
+    persistIssue(locked.issue(), locked.issueVersion());
+  }
+
+  /** 精确重试判定：命中同键同指纹时跳过版本、状态与区间校验，返回当前 Run 而不重复收尾或重复写门禁。 */
+  private boolean replayed(UUID runId, Identity identity) {
+    IssueRun peek = requireRun(runId);
+    return IssueActivityIdempotency.findApplied(
+            issueActivityRepository, peek.getIssueId(), identity)
+        != null;
+  }
+
+  private void requireActive(IssueRun run) {
+    if (!run.isActive()) {
+      throw new AiValidationException("issue_run", "Run is already terminal");
+    }
+  }
+
+  private void requireVersion(IssueRun run, long expectedVersion) {
+    if (run.getVersion() != expectedVersion) {
+      throw new AiVersionConflictException(
+          "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
+    }
+  }
+
+  private void updateRun(IssueRun run, long expectedVersion) {
+    if (!issueRunRepository.updateById(run, expectedVersion)) {
+      throw new AiVersionConflictException(
+          "issue_run", Long.toString(expectedVersion), Long.toString(run.getVersion()));
+    }
+  }
+
+  private void persistIssue(Issue issue, long expectedVersion) {
+    if (!issueRepository.updateById(issue, expectedVersion)) {
+      throw new AiVersionConflictException(
+          "issue", Long.toString(expectedVersion), Long.toString(issue.getVersion()));
+    }
+  }
+
+  /**
+   * 读取该 Thread 的 root-to-head 历史路径（设计 §4.5 区间解释依据）。
+   *
+   * <p>只读快照，不产生锁；部署缺少 Harness Runtime 时确定失败，绝不退化为"无区间校验"的接受。
+   */
+  private EntryPath entryPath(UUID threadId) {
+    return requireRuntime().getThreadSnapshot(threadId).entryPath();
+  }
+
+  /**
+   * 复验 {@code (startEntryId,endEntryId]} 落在该 Thread 的真实历史路径上：end 必须是 start 的后代，final answer
+   * 必须落在同一区间内。
+   *
+   * <p>外键只保证 Entry 属于同一 Session，因此必须沿父链判定，绝不能按时间排序或只看区间序号。{@code requireProgress} 为 true 时要求区间非空
+   * （正常收尾必须真的产出过历史），失败/取消/不明允许空区间：接受之后还没有产出任何 Entry 时也必须能安全收尾。
+   */
+  private static void requireWithinRunInterval(
+      EntryPath path,
+      UUID startEntryId,
+      UUID endEntryId,
+      UUID finalAnswerEntryId,
+      boolean requireProgress) {
+    List<UUID> entryIds = path.entries().stream().map(Entry::id).toList();
+    int start = entryIds.indexOf(startEntryId);
+    if (start < 0) {
+      throw new AiValidationException(
+          "issue_run", "Run start entry is not on the bounded thread history path");
+    }
+    int end = entryIds.indexOf(endEntryId);
+    if (end < start || (requireProgress && end == start)) {
+      throw new AiValidationException(
+          "issue_run", "Run end entry must be a descendant of the run start entry");
+    }
+    if (finalAnswerEntryId != null) {
+      int answer = entryIds.indexOf(finalAnswerEntryId);
+      if (answer <= start || answer > end) {
+        throw new AiValidationException(
+            "issue_run", "Run final answer must be inside the run interval (start, end]");
+      }
+    }
+  }
+
+  private RunLock lockRun(UUID runId) {
+    IssueRun peek = requireRun(runId);
+    Issue peekIssue = issueRepository.getById(peek.getIssueId());
+    if (peekIssue == null) {
+      throw new AiResourceNotFoundException("issue");
+    }
+    Project project = projectRepository.lockForKeyShare(peekIssue.getProjectId());
+    if (project == null) {
+      throw new AiResourceNotFoundException("project");
+    }
+    Issue issue = issueRepository.lockById(peekIssue.getId());
+    if (issue == null) {
+      throw new AiResourceNotFoundException("issue");
+    }
+    IssueRun run = issueRunRepository.lockById(runId);
+    if (run == null) {
+      throw new AiResourceNotFoundException("issue_run");
+    }
+    return new RunLock(run, issue, issue.getVersion(), project);
+  }
+
+  private IssueRun requireRun(UUID runId) {
+    IssueRun run = issueRunRepository.getById(runId);
+    if (run == null) {
+      throw new AiResourceNotFoundException("issue_run");
+    }
+    return run;
+  }
+
+  private NewThreadCommand buildInitialCommand(Issue issue, ProjectWorkflowState stage) {
+    StringBuilder prompt = new StringBuilder();
+    prompt.append("Issue #").append(issue.getNumber()).append(' ').append(issue.getTitle());
+    if (issue.getDescription() != null && !issue.getDescription().isBlank()) {
+      prompt.append("\n\n").append(issue.getDescription());
+    }
+    prompt
+        .append("\n\n当前阶段 ")
+        .append(stage.state().value())
+        .append("（")
+        .append(stage.name())
+        .append("）");
+    if (stage.instructions() != null) {
+      prompt.append("\n").append(stage.instructions());
+    }
+    UserMessageCommandPayload payload =
+        new UserMessageCommandPayload(
+            new AgentMessage(
+                AgentMessageRole.USER, List.of(new TextMessageContent(prompt.toString()))));
+    String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
+    return new NewThreadCommand(payload, UUID.randomUUID(), requestHash);
+  }
+
+  /**
+   * 追加一条业务活动（设计 §4.6 一个动作一条活动）：请求键与指纹来自调用方身份，正文与 Run 引用按动作填写。
+   *
+   * <p>调用方必须在任何 Harness 派发之前完成 {@link IssueActivityIdempotency#findApplied 精确重试判定}；本方法只在首次执行路径调用，
+   * 因此同键活动的出现要么来自并发请求（由主键与唯一键兜底失败关闭），要么是编程错误。写完活动后必须在同一事务内以版本 CAS 写回 Issue 行。
+   */
+  private void appendActivity(
+      Issue issue,
+      Identity identity,
+      IssueActivityActorType actorType,
+      String agentName,
+      UUID runId,
+      String body,
+      ObjectNode data) {
+    long sequence = issue.getNextActivitySequence();
+    IssueActivity activity =
+        IssueActivity.builder()
+            .issueId(issue.getId())
+            .sequence(sequence)
+            .kind(identity.kind())
+            .actorType(actorType)
+            .actorAgentName(agentName)
+            .runId(runId)
+            .body(body)
+            .data(writeJson(data))
+            .idempotencyKey(identity.key())
+            .requestHash(identity.requestHash())
+            .build();
+    if (!issueActivityRepository.insert(activity)) {
+      throw new IllegalStateException("failed to insert issue activity");
+    }
+    issue.setNextActivitySequence(sequence + 1);
+  }
+
+  private String writeJson(ObjectNode node) {
     try {
-      Map<String, String> map = new LinkedHashMap<>();
-      if (summary != null) {
-        map.put("summary", summary);
-      }
-      if (verification != null) {
-        map.put("verification", verification);
-      }
-      String json = objectMapper.writeValueAsString(map);
-      int jsonbFormattingBytes = map.isEmpty() ? 0 : 2 * map.size() - 1;
-      ProjectValidationUtils.validateUtf8Bytes(
-          json + " ".repeat(jsonbFormattingBytes), "result", 65536, false);
-      return json;
-    } catch (JsonProcessingException e) {
-      throw new AiValidationException("issue_run", "Failed to serialize run result to JSON");
+      return objectMapper.writeValueAsString(node);
+    } catch (JsonProcessingException error) {
+      throw new IllegalStateException("failed to encode activity data", error);
     }
   }
 
-  private boolean checkJsonEquivalent(String actualJson, String expectedJson) {
-    if (Objects.equals(actualJson, expectedJson)) {
-      return true;
-    }
-    if (actualJson == null || expectedJson == null) {
-      return false;
-    }
-    try {
-      JsonNode n1 = objectMapper.readTree(actualJson);
-      JsonNode n2 = objectMapper.readTree(expectedJson);
-      return Objects.equals(n1, n2);
-    } catch (JsonProcessingException e) {
-      return false;
-    }
+  private static String requireRequestKey(String requestKey) {
+    return ProjectValidationUtils.requireDisplayName(
+        requestKey, "requestKey", MAX_REQUEST_KEY_LENGTH);
   }
 
-  private IssueRun checkExactSubmitReplay(
-      IssueRun existing, UUID expectedRunId, String expectedResultJson) {
-    if (existing.getId().equals(expectedRunId)
-        && existing.getRole() == IssueRunRole.EXECUTOR
-        && existing.getStatus() == IssueRunStatus.COMPLETED
-        && existing.getOutcome() == IssueRunOutcome.SUBMITTED
-        && checkJsonEquivalent(existing.getResult(), expectedResultJson)) {
-      return existing;
+  private HarnessRuntime requireRuntime() {
+    HarnessRuntime runtime = runtimes.getIfAvailable();
+    if (runtime == null) {
+      throw new IllegalStateException("harness runtime is not available in this deployment");
     }
-    throw new AiValidationException("issue_run", "Terminal action ID conflict");
+    return runtime;
   }
 
-  private IssueRun checkExactReviewReplay(
-      IssueRun existing,
-      UUID expectedRunId,
-      String expectedReviewerAgentName,
-      IssueRunOutcome expectedOutcome,
-      String expectedResultJson) {
-    if (!existing.getId().equals(expectedRunId)
-        || existing.getRole() != IssueRunRole.REVIEWER
-        || existing.getStatus() != IssueRunStatus.COMPLETED
-        || existing.getOutcome() != expectedOutcome
-        || !Objects.equals(existing.getAgentName(), expectedReviewerAgentName)
-        || !checkJsonEquivalent(existing.getResult(), expectedResultJson)) {
-      throw new AiValidationException("issue_run", "Terminal action ID conflict");
-    }
-    return existing;
-  }
-
-  private boolean isTerminalActionUniqueConflict(DataIntegrityViolationException e) {
-    Throwable root = e.getRootCause();
-    if (root instanceof PSQLException pe) {
-      String constraint =
-          pe.getServerErrorMessage() != null ? pe.getServerErrorMessage().getConstraint() : null;
-      if ("uk_issue_run_terminal_action".equals(constraint)) {
-        return true;
-      }
-    }
-    String message = e.getMessage();
-    return message != null && message.contains("uk_issue_run_terminal_action");
-  }
+  private record RunLock(IssueRun run, Issue issue, long issueVersion, Project project) {}
 }

@@ -1,8 +1,13 @@
 package fun.fengwk.kkstudio.platform.project.model;
 
-/** Activity 操作者类型：人可经业务入口直接执行同一业务动作，不伪造 Agent Run。 */
+/** Issue 活动的操作者类型。 */
 public enum IssueActivityActorType {
-  AGENT,
+  /** 人类操作者。 */
   HUMAN,
+
+  /** Agent，必须携带 {@code actorAgentName}。 */
+  AGENT,
+
+  /** 系统生成，不带 Agent 作者。 */
   SYSTEM
 }
