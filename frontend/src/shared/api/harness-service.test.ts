@@ -25,7 +25,7 @@ describe('harnessService', () => {
     const http = createClient()
     const service = createHarnessService(http)
     const request = {
-      owner: { type: 'CANVAS' as const, id: 'canvas-1' },
+      owner: { type: 'CHAT' as const, chatId: 'chat-1' },
       target: {
         type: 'NEW_SESSION' as const,
         sessionId: 's1',

@@ -45,10 +45,6 @@ vi.mock('@/features/canvas/CanvasTextEditor', () => ({
   CanvasTextEditor: () => <div data-testid="text-editor" />,
 }))
 
-vi.mock('@/features/canvas/agent/CanvasAgentDock', () => ({
-  CanvasAgentDock: () => <div data-testid="agent-dock" />,
-}))
-
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   ReactFlow: (props: {
@@ -144,7 +140,6 @@ function renderStage(options: {
   selectedIds?: string[]
   selectedLinks?: Array<{ sourceNodeId: string; targetNodeId: string }>
   viewport?: { x: number; y: number; zoom: number }
-  threadOpen?: boolean
   initialFitPending?: boolean
   positionDrafts?: Record<string, { x: number; y: number }>
 } = {}) {
@@ -179,7 +174,6 @@ function renderStage(options: {
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,
-    threadOpen: options.threadOpen ?? false,
     uploadProgress: {},
     commandPending: false,
     conflictMessage: null,
@@ -274,7 +268,7 @@ describe('CanvasStage ReactFlow wiring', () => {
 
     expect(screen.getByTestId('react-flow')).toBeInTheDocument()
     expect(screen.getByTestId('tool-rail')).toBeInTheDocument()
-    expect(screen.getByTestId('agent-dock')).toBeInTheDocument()
+    expect(screen.queryByTestId('agent-dock')).not.toBeInTheDocument()
     expect(screen.getByTestId('text-editor')).toBeInTheDocument()
     expect(flow().nodes).toHaveLength(3)
     expect(flow().edges).toHaveLength(1)
@@ -534,17 +528,6 @@ describe('CanvasStage conditional rendering and viewport', () => {
     expect(flowHarness.fitView).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the panel fit when the thread is open', async () => {
-    const { actions } = renderStage({ initialFitPending: true, threadOpen: true })
-
-    await waitFor(() => expect(flowHarness.fitView).toHaveBeenCalledWith({
-      padding: 0.08,
-      maxZoom: 1.6,
-      duration: 0,
-    }))
-    await waitFor(() => expect(actions.completeInitialFit).toHaveBeenCalled())
-  })
-
   it('skips the initial fit without pending flag, without initialized nodes, or when fit fails', async () => {
     renderStage({ initialFitPending: false })
     expect(flowHarness.fitView).not.toHaveBeenCalled()
@@ -589,22 +572,21 @@ describe('CanvasStage conditional rendering and viewport', () => {
     })
     expect(actions.setViewport).not.toHaveBeenCalled()
 
-    // 第二次渲染前补上第一帧宽度：effect 依赖 stageMetrics.width，必须先有 960 基线。
+    // 第二次渲染前补上新的容器宽度；使用 stageMetrics 的改变触发宽度 effect。
     widthSpy.mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains('canvas-flow-wrap')) {
         return { x: 0, y: 0, width: 960, height: 640, top: 0, left: 0, bottom: 640, right: 960, toJSON: () => ({}) } as DOMRect
       }
       return { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0, toJSON: () => ({}) } as DOMRect
     })
-    // 首帧发布宽度基线（spy 已生效，publishMetrics 直接读到 788），
-    // 基线宽度记录在 flowWidthRef；随后线程面板渲染使宽度不变时不再平移。
+    // 首帧发布宽度基线（spy 已生效，publishMetrics 直接读到 788）。
     await waitFor(() => expect(actions.setStageMetrics).toHaveBeenCalledWith({
       width: 788,
       height: 640,
       dockTop: 624,
     }))
-    rerenderWith({ threadOpen: true, viewport: { x: 20, y: 50, zoom: 0.9 } })
-    // threadOpen 变化会重跑宽度 effect；基线 788 -> 960（第二轮 spy）时
+    rerenderWith({ viewport: { x: 20, y: 50, zoom: 0.9 } })
+    // 基线 788 -> 960（第二轮 spy）时
     // 平移量 = (960-788)/2 = 86，zoom 保持不变（0.9）。
     await waitFor(() => {
       expect(actions.setViewport).toHaveBeenCalledWith({ x: 106, y: 50, zoom: 0.9 })

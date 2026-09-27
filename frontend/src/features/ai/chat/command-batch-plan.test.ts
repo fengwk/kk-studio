@@ -60,6 +60,7 @@ function plan(
   options: Partial<Parameters<typeof buildMessageBatchPlan>[0]> = {},
 ): CommandBatchPlan {
   return buildMessageBatchPlan({
+    owner: { type: 'CHAT', chatId: 'chat-1' },
     thread: thread(),
     effectiveBase: draftOf(),
     draft: draftOf(),

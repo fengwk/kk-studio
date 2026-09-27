@@ -172,7 +172,7 @@ export function AgentPane({
           className="agent-pane-thread-rename"
           aria-label={t('ai.runtime.rename.titleAria')}
           title={t('ai.runtime.rename.titleAria')}
-          disabled={name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
+          disabled={owner.type === 'ISSUE_AGENT' || name == null || pane.renamePending || Boolean(capabilities?.readOnly)}
           onClick={() => {
             if (name != null && pane.target.kind === 'BOUND_THREAD') {
               pane.renameThread(pane.target.threadId, name)

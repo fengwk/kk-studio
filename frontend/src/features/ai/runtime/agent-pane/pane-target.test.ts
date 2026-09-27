@@ -77,7 +77,7 @@ describe('PaneTarget durable-local FSM', () => {
 
   it('persists only target, while PendingAcceptance remains a separate sidecar', () => {
     const storage = memoryStorage()
-    const owner = { type: 'CHAT' as const, id: 'chat-1' }
+    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const target: PaneTarget = { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' }
     savePaneTarget(owner, 'pane-1', target, storage)
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual(target)
@@ -86,7 +86,7 @@ describe('PaneTarget durable-local FSM', () => {
 
   it('persists an exact pending request independently from the target', () => {
     const storage = memoryStorage()
-    const owner = { type: 'CHAT' as const, id: 'chat-1' }
+    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const pending: PendingAcceptance = {
       owner,
       target: { kind: 'NEW_SESSION_DRAFT' },
@@ -129,22 +129,24 @@ describe('PaneTarget durable-local FSM', () => {
     expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
   })
 
-  it('supports ISSUE_AGENT_SESSION owner type for target storage', () => {
-    // 测试意图：验证 ISSUE_AGENT_SESSION owner 能够正确保存与恢复 PaneTarget
-    const owner = { type: 'ISSUE_AGENT_SESSION' as const, id: 'issue-session-1' }
+  it('isolates ISSUE_AGENT target storage by issue and agent', () => {
+    // 测试意图：同一 Issue 的不同 Agent 不得共享绑定线程草稿。
+    const owner = { type: 'ISSUE_AGENT' as const, issueId: 'issue-1', agentName: 'coder' }
     const storage = memoryStorage()
     savePaneTarget(owner, 'pane-coordinator', { kind: 'BOUND_THREAD', threadId: 'thread-p1' }, storage)
     expect(loadPaneTarget(owner, 'pane-coordinator', storage)).toEqual({
       kind: 'BOUND_THREAD',
       threadId: 'thread-p1',
     })
+    expect(loadPaneTarget({ ...owner, agentName: 'reviewer' }, 'pane-coordinator', storage))
+      .toEqual({ kind: 'NEW_SESSION_DRAFT' })
   })
 
   it('fails closed when browser storage is unavailable or contains malformed pending data', () => {
-    const owner = { type: 'CANVAS' as const, id: 'canvas-1' }
+    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const malformedStorage = memoryStorage()
     malformedStorage.setItem(
-      'kk-studio.agent-pane-acceptance.CANVAS:canvas-1:pane-1',
+      'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1',
       JSON.stringify({ target: { kind: 'BOUND_THREAD', threadId: 't1' }, request: {}}),
     )
     expect(loadPendingAcceptance(owner, 'pane-1', malformedStorage)).toBeNull()
@@ -174,7 +176,7 @@ describe('PaneTarget durable-local FSM', () => {
   })
 
   it('rejects pending storage unless owner, commands, generation, and outcome are valid', () => {
-    const owner = { type: 'CHAT' as const, id: 'chat-1' }
+    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const storage = memoryStorage()
     const key = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
     const valid = {
@@ -212,6 +214,13 @@ describe('PaneTarget durable-local FSM', () => {
     }
     storage.setItem(key, JSON.stringify(valid))
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).not.toBeNull()
+    // 测试意图：旧磁盘 DTO 即使其余字段完整，也绝不静默转换为新的 owner wire。
+    storage.setItem(key, JSON.stringify({
+      ...valid,
+      owner: { type: 'CHAT', id: 'chat-1' },
+      request: { ...valid.request, owner: { type: 'CHAT', id: 'chat-1' } },
+    }))
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
 
     for (const [field, value] of [
       ['owner', { type: 'CHAT' }],
@@ -415,12 +424,12 @@ describe('PaneTarget durable-local FSM', () => {
     setPending({ owner: { type: 'OTHER', id: 'chat-1' } })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
 
-    // 验证外层 pending.owner 匹配但 request.owner 指向其他 Chat/Canvas 时 fail-closed 拒绝返回 null
+    // 外层匹配、内层请求指向其他 owner 时仍拒绝恢复。
     setPending({
       owner,
       request: {
         ...validRequest,
-        owner: { type: 'CHAT', id: 'chat-other' },
+        owner: { type: 'CHAT', chatId: 'chat-other' },
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
@@ -429,7 +438,7 @@ describe('PaneTarget durable-local FSM', () => {
       owner,
       request: {
         ...validRequest,
-        owner: { type: 'CANVAS', id: 'canvas-1' },
+        owner: { type: 'ISSUE_AGENT', issueId: 'issue-1', agentName: 'coder' },
       },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
@@ -499,7 +508,7 @@ describe('PaneTarget durable-local FSM', () => {
     setPending({ composerParts: [{}] })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
     setPending({
-      owner: { type: 'CHAT', id: 'different-owner' },
+      owner: { type: 'CHAT', chatId: 'different-owner' },
     })
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
   })
@@ -511,7 +520,7 @@ describe('PaneTarget durable-local FSM', () => {
    * - SET_ENVIRONMENT 命令必须显式包含 environmentName（可为 null 或非空白字符串），缺少该属性或空白/非字符串必须被拒绝。
    */
   it('enforces exact-shape persistence for environmentName on branchDraft, rootSettings, and SET_ENVIRONMENT', () => {
-    const owner = { type: 'CHAT' as const, id: 'chat-1' }
+    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const storage = memoryStorage()
     const key = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
     const baseValid = {

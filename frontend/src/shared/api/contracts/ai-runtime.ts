@@ -337,10 +337,9 @@ export interface ManualCompactionDTO {
   disabledReason: string | null
 }
 
-export interface AgentRuntimeOwnerDTO {
-  type: 'CHAT' | 'CANVAS' | 'ISSUE_AGENT_SESSION'
-  id: string
-}
+export type AgentRuntimeOwnerDTO =
+  | { type: 'CHAT'; chatId: string }
+  | { type: 'ISSUE_AGENT'; issueId: string; agentName: string }
 
 export interface NewSessionCommandTargetDTO {
   type: 'NEW_SESSION'

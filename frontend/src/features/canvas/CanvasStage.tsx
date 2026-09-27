@@ -14,7 +14,6 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { CanvasAgentDock } from '@/features/canvas/agent/CanvasAgentDock'
 import { CanvasContextMenu } from '@/features/canvas/CanvasContextMenu'
 import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
@@ -37,7 +36,6 @@ import type { UUIDString } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
 
 const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
-const PANEL_FIT = { padding: 0.08, maxZoom: 1.6, duration: 0 }
 const FOCUS_SELECTION_FIT = { padding: 0.22, maxZoom: 1.8, duration: 0 }
 
 function StageInner() {
@@ -136,7 +134,7 @@ function StageInner() {
     const observer = new ResizeObserver(publishMetrics)
     observer.observe(containerRef.current)
     return () => observer.disconnect()
-  }, [publishMetrics, state.threadOpen])
+  }, [publishMetrics])
 
   useEffect(() => {
     const next = state.viewport
@@ -172,7 +170,6 @@ function StageInner() {
     setFlowViewport,
     setViewport,
     stageMetrics.width,
-    state.threadOpen,
     state.viewport,
   ])
 
@@ -204,7 +201,7 @@ function StageInner() {
       return
     }
     initialFitStartedRef.current = true
-    void fitView(state.threadOpen ? PANEL_FIT : INITIAL_FIT).then((fitted) => {
+    void fitView(INITIAL_FIT).then((fitted) => {
       if (!mountedRef.current) {
         return
       }
@@ -232,12 +229,11 @@ function StageInner() {
     nodesInitialized,
     setFlowViewport,
     setViewport,
-    state.threadOpen,
   ])
 
   useEffect(() => {
     fitViewRef.current = () => {
-      void fitView(state.threadOpen ? PANEL_FIT : INITIAL_FIT).then((fitted) => {
+      void fitView(INITIAL_FIT).then((fitted) => {
         if (!fitted) {
           return
         }
@@ -275,7 +271,6 @@ function StageInner() {
     nodes,
     setFlowViewport,
     setViewport,
-    state.threadOpen,
     syncViewport,
     zoomRef,
     zoomTo,
@@ -348,7 +343,7 @@ function StageInner() {
 
   return (
     <section
-      className={`canvas-stage${state.threadOpen ? ' agent-panel-open' : ''}`}
+      className="canvas-stage"
       id="canvasStage"
       tabIndex={0}
       aria-label={t('canvas.stage.ariaLabel')}
@@ -493,7 +488,6 @@ function StageInner() {
         <CanvasToolRail />
       </div>
 
-      <CanvasAgentDock />
       <CanvasTextEditor />
       {contextMenu ? (
         <CanvasContextMenu

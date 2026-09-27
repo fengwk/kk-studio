@@ -309,30 +309,6 @@
   white-space: nowrap;
 }
 
-.canvas-feature .editor-header .thread-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--fg-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.canvas-feature .editor-header .thread-toggle:hover,
-.canvas-feature .editor-header .thread-toggle.active {
-  border-color: var(--green-border);
-  color: var(--fg);
-}
-
-.canvas-feature .editor-header .thread-toggle svg {
-  width: 15px;
-  height: 15px;
-}
-
 .canvas-feature .canvas-editor-state {
   display: grid;
   min-height: 360px;
@@ -1401,100 +1377,6 @@
   animation: canvas-media-action-spin 700ms linear infinite;
 }
 
-.canvas-feature .agent-panel {
-  position: relative;
-  display: flex;
-  width: var(--agent-panel-width, 480px);
-  flex: 0 0 var(--agent-panel-width, 480px);
-  flex-direction: column;
-  min-height: 0;
-  border-left: 1px solid var(--line-strong);
-  background: var(--surface);
-}
-
-.canvas-feature .agent-panel-resize-handle {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -5px;
-  z-index: 3;
-  width: 10px;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.canvas-feature .agent-panel-resize-handle::after {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 4px;
-  width: 1px;
-  background: transparent;
-  content: "";
-  transition: background 120ms ease;
-}
-
-.canvas-feature .agent-panel-resize-handle:hover::after,
-.canvas-feature .agent-panel-resize-handle:focus-visible::after,
-body.canvas-chat-panel-resizing .canvas-feature .agent-panel-resize-handle::after {
-  background: var(--green);
-}
-
-body.canvas-chat-panel-resizing,
-body.canvas-chat-panel-resizing * {
-  cursor: col-resize !important;
-  user-select: none !important;
-}
-
-.canvas-feature .agent-panel-head {
-  display: flex;
-  flex: 0 0 44px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 10px 0 14px;
-  border-bottom: 1px solid var(--line);
-}
-
-.canvas-feature .agent-panel-head strong {
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-feature .agent-panel-head .collapse-thread svg {
-  width: 16px;
-  height: 16px;
-}
-
-.canvas-feature .agent-panel .chat-shell {
-  flex: 1;
-  height: auto;
-  min-height: 0;
-  background: transparent;
-}
-
-.canvas-feature .agent-panel .thread-panel-main {
-  background: transparent;
-}
-
-.canvas-feature .agent-panel .thread-composer {
-  padding: 8px 10px 10px;
-  background: transparent;
-}
-
-.canvas-feature .agent-panel .thread-status-footer {
-  padding: 8px 10px 10px;
-  background: transparent;
-}
-
-.canvas-feature .agent-panel .blank-pane-body {
-  padding: 10px 12px 0;
-}
-
 .canvas-feature .add-menu {
   border: 1px solid var(--line-strong);
   background: var(--overlay-surface-strong);
@@ -1603,23 +1485,6 @@ body.canvas-chat-panel-resizing * {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   color: var(--green);
-}
-
-.canvas-feature .agent-thread {
-  max-height: min(360px, calc(100vh - 190px));
-  margin-bottom: 9px;
-  overflow: hidden;
-  padding: 10px;
-  border-radius: 13px;
-}
-
-.canvas-feature .collapse-thread {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid var(--line-strong) !important;
-  border-radius: 7px;
 }
 
 .canvas-feature .canvas-zoom-controls {
@@ -1775,17 +1640,6 @@ body.canvas-chat-panel-resizing * {
 @media (max-width: 900px) {
   .canvas-feature .project-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .canvas-feature .agent-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    width: min(var(--agent-panel-width, 480px), calc(100vw - 24px));
-    flex: none;
-    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
   }
 
   .canvas-feature .generation-panel,

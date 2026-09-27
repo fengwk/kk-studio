@@ -79,7 +79,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     toast: null,
     addMenuOpen: false,
     addMenuIndex: 0,
-    threadOpen: false,
     uploadProgress: {},
     commandPending: false,
     conflictMessage: null,
@@ -587,7 +586,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       drafts: {},
       storageError: null,
       addMenuOpen: false,
-      threadOpen: false,
       textEditor: null,
     }))
   }, [resetTransformBatch, resetUploads])
@@ -1090,7 +1088,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     setState((current) => ({
       ...current,
       addMenuOpen: !current.addMenuOpen,
-      threadOpen: false,
     }))
   }, [])
   const closeAddMenu = useCallback(() => {
@@ -1099,19 +1096,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   const setAddMenuIndex = useCallback((addMenuIndex: number) => {
     setState((current) => ({ ...current, addMenuIndex }))
   }, [])
-  const openThread = useCallback(() => {
-    setState((current) => ({
-      ...current,
-      threadOpen: true,
-      addMenuOpen: false,
-    }))
-  }, [])
-  const collapseThread = useCallback(() => {
-    setState((current) => ({ ...current, threadOpen: false }))
-  }, [])
-  const focusThread = useCallback(() => {
-    openThread()
-  }, [openThread])
 
   useCanvasKeyboard({
     view: state.view,
@@ -1121,7 +1105,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     zoomRef,
     clearSelection: () => setSelection([]),
     deleteSelection,
-    focusThread,
     createTextNode,
     closeOverlays: () => {
       closeAddMenu()
@@ -1195,9 +1178,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     toggleAddMenu,
     closeAddMenu,
     setAddMenuIndex,
-    openThread,
-    collapseThread,
-    focusThread,
     dismissDraft,
     retryDraft,
     saveDraftAsNewNode,

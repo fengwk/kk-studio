@@ -52,7 +52,7 @@ const thread: HarnessThreadDTO = {
 describe('AgentPane acceptance pipeline', () => {
   it('builds one NEW_SESSION request with root settings and only USER_MESSAGE', () => {
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', id: 'chat-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -60,7 +60,7 @@ describe('AgentPane acceptance pipeline', () => {
       createId: () => 'command-1',
     })
 
-    expect(plan.request.owner).toEqual({ type: 'CHAT', id: 'chat-1' })
+    expect(plan.request.owner).toEqual({ type: 'CHAT', chatId: 'chat-1' })
     expect(plan.request.commands).toHaveLength(1)
     expect(plan.request.commands[0]).toMatchObject({
       type: 'USER_MESSAGE',
@@ -106,7 +106,7 @@ describe('AgentPane acceptance pipeline', () => {
   it('uses the same setting diff for NEW_THREAD and THREAD targets', () => {
     const draft = { ...baseDraft, agentName: 'coder', yoloEnabled: true }
     const entry = buildAcceptanceRequest({
-      owner: { type: 'CANVAS', id: 'canvas-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_THREAD_DRAFT', sessionId: 's1', startEntryId: 'e1' },
       draft,
       base: baseDraft,
@@ -117,7 +117,7 @@ describe('AgentPane acceptance pipeline', () => {
       })(),
     })
     const bound = buildAcceptanceRequest({
-      owner: { type: 'CANVAS', id: 'canvas-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'BOUND_THREAD', threadId: thread.threadId },
       thread,
       draft,
@@ -152,7 +152,7 @@ describe('AgentPane acceptance pipeline', () => {
 
   it('keeps exact unknown retries and fences late success after a target switch', () => {
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', id: 'chat-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -194,7 +194,7 @@ describe('AgentPane acceptance pipeline', () => {
     const resolved = { ...local, uploadId: 'server-upload-id' }
 
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', id: 'chat-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -214,7 +214,7 @@ describe('AgentPane acceptance pipeline', () => {
     const resource = createResourcePart('blob-1', 'report.txt', 'preview')
 
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', id: 'chat-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -236,7 +236,7 @@ describe('AgentPane acceptance pipeline', () => {
 
   it('keeps frozen request identity and handles definite conflict branches explicitly', () => {
     const plan = buildAcceptanceRequest({
-      owner: { type: 'CHAT', id: 'chat-1' },
+      owner: { type: 'CHAT', chatId: 'chat-1' },
       target: { kind: 'NEW_SESSION_DRAFT' },
       draft: baseDraft,
       base: baseDraft,
@@ -280,7 +280,7 @@ describe('AgentPane acceptance pipeline', () => {
         : kind === 'NEW_THREAD_DRAFT'
           ? { kind, sessionId: 's1', startEntryId: 'e1' }
           : { kind, threadId: thread.threadId }
-      const commands = threadCommandsForTarget(target, { owner: { type: 'CHAT', id: 'chat-1' } })
+      const commands = threadCommandsForTarget(target, { owner: { type: 'CHAT', chatId: 'chat-1' } })
       expect(commands.filter((command) => !command.disabled).map((command) => command.id))
         .toEqual(expected[kind])
     }

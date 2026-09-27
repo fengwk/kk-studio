@@ -8,9 +8,9 @@ import type { CanvasView } from '@/features/canvas/types'
  *
  * hook 在 window 上以 capture 相位注册 keydown，全部回调来自 api 参数；
  * 本测试直接构造 api 并派发真实 KeyboardEvent，验证：
- * - 编辑视图快捷键 0/1/f/t 与 Cmd/Ctrl+K、Delete/Backspace 的消费与回调；
+ * - 编辑视图快捷键 0/1/f/t、Delete/Backspace 的消费与回调；
  * - Escape 的 surface 作用域判定（stage 内/编辑器顶层 vs 其他元素）与焦点恢复；
- * - blocking overlay / agent panel / 内层菜单存在时全局 handler 让路；
+ * - blocking overlay / 内层菜单存在时全局 handler 让路；
  * - library 视图下快捷键与 Escape 都不生效。
  */
 interface KeyboardApi {
@@ -21,7 +21,6 @@ interface KeyboardApi {
   zoomRef: { current: ((scale: number) => void) | null }
   clearSelection: ReturnType<typeof vi.fn>
   deleteSelection: ReturnType<typeof vi.fn>
-  focusThread: ReturnType<typeof vi.fn>
   createTextNode: ReturnType<typeof vi.fn>
   closeOverlays: ReturnType<typeof vi.fn>
 }
@@ -35,7 +34,6 @@ function createApi(): KeyboardApi {
     zoomRef: { current: null },
     clearSelection: vi.fn(),
     deleteSelection: vi.fn(),
-    focusThread: vi.fn(),
     createTextNode: vi.fn(),
     closeOverlays: vi.fn(),
   }
@@ -108,16 +106,11 @@ describe('useCanvasKeyboard editor shortcuts', () => {
     expect(api.deleteSelection).toHaveBeenCalledTimes(3)
   })
 
-  it('opens the thread with Cmd/Ctrl+K only in editor view', () => {
-    const { api } = setup()
+  it('does not consume the removed Canvas thread shortcut', () => {
+    // 测试意图：不再为已移除的 Agent dock 劫持浏览器快捷键。
+    setup()
     const meta = fireKey(window, { key: 'k', metaKey: true })
-    expect(meta.defaultPrevented).toBe(true)
-    expect(api.focusThread).toHaveBeenCalledTimes(1)
-    fireKey(window, { key: 'k', ctrlKey: true })
-    expect(api.focusThread).toHaveBeenCalledTimes(2)
-    // 大写 K 同样生效（key.toLowerCase）。
-    fireKey(window, { key: 'K', metaKey: true })
-    expect(api.focusThread).toHaveBeenCalledTimes(3)
+    expect(meta.defaultPrevented).toBe(false)
   })
 })
 
@@ -126,7 +119,7 @@ describe('useCanvasKeyboard scoping', () => {
     document.body.innerHTML = ''
   })
 
-  it('lets blocking overlays, agent panels, and inner menus handle keys first', () => {
+  it('lets blocking overlays and inner menus handle keys first', () => {
     const { api } = setup()
     const blocking = document.createElement('div')
     blocking.className = 'modal-backdrop'
@@ -134,13 +127,6 @@ describe('useCanvasKeyboard scoping', () => {
     fireKey(window, { key: 't' })
     expect(api.createTextNode).not.toHaveBeenCalled()
     blocking.remove()
-
-    const agentPanel = document.createElement('div')
-    agentPanel.className = 'agent-panel'
-    document.body.appendChild(agentPanel)
-    fireKey(agentPanel, { key: 't' })
-    expect(api.createTextNode).not.toHaveBeenCalled()
-    agentPanel.remove()
 
     const menu = document.createElement('div')
     menu.setAttribute('role', 'menu')
@@ -185,12 +171,8 @@ describe('useCanvasKeyboard scoping', () => {
     rerenderWith({ view: 'library' })
     api.closeOverlays.mockClear()
     api.clearSelection.mockClear()
-    api.focusThread.mockClear()
     fireKey(window, { key: 'Escape' })
     expect(api.closeOverlays).not.toHaveBeenCalled()
-    // library 视图下 Cmd+K 不打开对话。
-    fireKey(window, { key: 'k', metaKey: true })
-    expect(api.focusThread).not.toHaveBeenCalled()
     // library 视图下 Delete/0 都不消费。
     const libraryDelete = fireKey(window, { key: 'Delete' })
     expect(libraryDelete.defaultPrevented).toBe(false)

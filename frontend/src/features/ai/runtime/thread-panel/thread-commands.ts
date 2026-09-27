@@ -3,14 +3,13 @@ import type {
   PaneTargetKind,
 } from '@/features/ai/runtime/agent-pane/pane-target'
 
-export interface ThreadCommandOwner {
-  type: string
-  id: string
-}
-
 interface ManualCompactionAvailability {
   available: boolean
   disabledReason: string | null
+}
+
+interface ThreadCommandOwner {
+  type: 'CHAT' | 'ISSUE_AGENT'
 }
 
 export type ThreadCommandId =
@@ -42,7 +41,7 @@ export interface ThreadCommand {
 }
 
 /**
- * The only user-visible command registry. Chat and Canvas project this same
+ * The only user-visible command registry. Chat projects this
  * ordered list from the three durable PaneTarget states.
  */
 export const THREAD_COMMANDS: ThreadCommand[] = [
@@ -120,10 +119,12 @@ export function threadCommandsForTarget(
   const manualCompaction = options.manualCompaction
   const enabled = new Set(TARGET_COMMANDS[target.kind])
 
-  // Ordinary Chat/Canvas only: hide Goal for any non-Chat, non-Canvas owner.
+  // Ordinary Chat only: hide Goal for controlled Issue owners.
   // Default fail-closed: if owner is absent or unknown, goal command is not exposed.
-  const isGoalAllowed = options.owner != null && (options.owner.type === 'CHAT' || options.owner.type === 'CANVAS')
-  const commandList = isGoalAllowed
+  const isGoalAllowed = options.owner?.type === 'CHAT'
+  const commandList = options.owner?.type === 'ISSUE_AGENT'
+    ? THREAD_COMMANDS.filter((item) => item.id === 'stop' || item.id === 'debug' || item.id === 'shortcuts')
+    : isGoalAllowed
     ? THREAD_COMMANDS
     : THREAD_COMMANDS.filter((item) => item.id !== 'goal')
 

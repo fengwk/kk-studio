@@ -134,12 +134,16 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     // 验证输入消息作为 INSTRUCTION 发送并被网络拦截断言，验证受控停止触发 stopIssue
     const interceptedActivities: Array<{ kind?: string; body?: string; requestKey?: string }> = []
     const interceptedStops: Array<{ expectedVersion?: string; detail?: string }> = []
+    const previewRequests: string[] = []
 
     await page.route(
       (url) => new URL(url).pathname.startsWith('/api/'),
       async (route) => {
         const url = route.request().url()
         const method = route.request().method()
+      if (url.includes('provider-request-preview')) {
+        previewRequests.push(url)
+      }
 
       if (url.includes(`/projects/${PROJECT_ID}/snapshot`)) {
         await route.fulfill({ json: createProjectSnapshot() })
@@ -245,6 +249,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     // 6. 在受控输入框中输入指令并提交
     const composer = dock.getByLabel('给 AI 发送消息')
     await expect(composer).toBeVisible()
+    await expect(dock.getByRole('button', { name: '预览请求' })).toHaveCount(0)
     await composer.click()
     await composer.fill('Refactor auth module schema')
 
@@ -256,6 +261,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     expect(interceptedActivities[0]?.kind).toBe('INSTRUCTION')
     expect(interceptedActivities[0]?.body).toBe('Refactor auth module schema')
     expect(interceptedActivities[0]?.requestKey).toBeTruthy()
+    expect(previewRequests).toEqual([])
 
     // 8. 测试关闭 Agent 视图
     const closeBtn = dock.getByLabel('关闭 Agent 视图')

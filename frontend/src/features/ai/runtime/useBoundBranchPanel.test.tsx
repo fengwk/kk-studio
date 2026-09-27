@@ -236,7 +236,7 @@ describe('useBoundBranchPanel', () => {
         queuedCommands: [queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' })],
       }),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -261,7 +261,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('applies draft-local selections with freeze rules and emits the fixed minimal diff order in one batch', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -309,7 +309,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -345,7 +345,7 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
       new Error('STALE_VERSION: version 2 does not match expected 0'),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -378,7 +378,7 @@ describe('useBoundBranchPanel', () => {
         }),
       ),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -428,7 +428,7 @@ describe('useBoundBranchPanel', () => {
         )
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -480,7 +480,7 @@ describe('useBoundBranchPanel', () => {
       ),
     )
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -543,7 +543,7 @@ describe('useBoundBranchPanel', () => {
           resolve(threadFixture(threadId, { yoloEnabled: true, version: '1' }))
       })
     })
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -603,7 +603,7 @@ describe('useBoundBranchPanel', () => {
     )
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -649,7 +649,7 @@ describe('useBoundBranchPanel', () => {
     )
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -687,7 +687,7 @@ describe('useBoundBranchPanel', () => {
     })
     const client = createClient()
     const { result, rerender } = renderHook(
-      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId }),
       { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
     )
 
@@ -741,7 +741,7 @@ describe('useBoundBranchPanel', () => {
 
   it('surfaces raw string and fallback yolo rejection payloads and dismisses them', async () => {
     vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce('plain string failure')
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -770,7 +770,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('ignores yolo toggles while no snapshot is bound yet', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
     act(() => {
@@ -785,7 +785,7 @@ describe('useBoundBranchPanel', () => {
 
   it('follows the base from a newer snapshot while preserving the local draft', async () => {
     const client = createClient()
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(client),
     })
 
@@ -819,7 +819,7 @@ describe('useBoundBranchPanel', () => {
         detail: 'head moved',
       }),
     )
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
@@ -841,7 +841,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('reloads base and draft from an authoritative thread DTO and ignores foreign threads', async () => {
-    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+    const { result } = renderHook(() => useBoundBranchPanel({ owner: { type: 'CHAT', chatId: 'chat-1' }, threadId: THREAD_ID }), {
       wrapper: clientWrapper(createClient()),
     })
 
