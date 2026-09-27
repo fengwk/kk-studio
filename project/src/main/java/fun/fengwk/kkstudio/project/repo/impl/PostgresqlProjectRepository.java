@@ -17,10 +17,15 @@ import java.util.UUID;
 public class PostgresqlProjectRepository implements ProjectRepository {
 
   private final ProjectMapper projectMapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean create(Project project) {
-    return projectMapper.insert(toDO(project)) == 1;
+    boolean changed = projectMapper.insert(toDO(project)) == 1;
+    if (changed) {
+      notifier.projectChanged(project.getId());
+    }
+    return changed;
   }
 
   @Override
@@ -45,12 +50,20 @@ public class PostgresqlProjectRepository implements ProjectRepository {
 
   @Override
   public boolean updateConfiguration(Project project, long expectedVersion) {
-    return projectMapper.updateConfiguration(toDO(project), expectedVersion) == 1;
+    boolean changed = projectMapper.updateConfiguration(toDO(project), expectedVersion) == 1;
+    if (changed) {
+      notifier.projectChanged(project.getId());
+    }
+    return changed;
   }
 
   @Override
   public boolean updateArchivedAt(UUID id, Instant archivedAt, long expectedVersion) {
-    return projectMapper.updateArchivedAt(id, archivedAt, expectedVersion) == 1;
+    boolean changed = projectMapper.updateArchivedAt(id, archivedAt, expectedVersion) == 1;
+    if (changed) {
+      notifier.projectChanged(id);
+    }
+    return changed;
   }
 
   @Override
@@ -76,7 +89,11 @@ public class PostgresqlProjectRepository implements ProjectRepository {
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    return projectMapper.deleteById(id, expectedVersion) == 1;
+    boolean changed = projectMapper.deleteById(id, expectedVersion) == 1;
+    if (changed) {
+      notifier.projectChanged(id);
+    }
+    return changed;
   }
 
   private static ProjectDO toDO(Project project) {

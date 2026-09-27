@@ -17,10 +17,15 @@ import java.util.UUID;
 public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
   private final IssueRunMapper mapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
   @Override
   public boolean insert(IssueRun run) {
-    return mapper.insert(toDO(run)) == 1;
+    boolean changed = mapper.insert(toDO(run)) == 1;
+    if (changed) {
+      notifier.issueChanged(run.getIssueId());
+    }
+    return changed;
   }
 
   @Override
@@ -62,17 +67,30 @@ public class PostgresqlIssueRunRepository implements IssueRunRepository {
 
   @Override
   public boolean updateById(IssueRun run, long expectedVersion) {
-    return mapper.updateById(toDO(run), expectedVersion) == 1;
+    boolean changed = mapper.updateById(toDO(run), expectedVersion) == 1;
+    if (changed) {
+      notifier.issueChanged(run.getIssueId());
+    }
+    return changed;
   }
 
   @Override
   public boolean deleteById(UUID id, long expectedVersion) {
-    return mapper.deleteById(id, expectedVersion) == 1;
+    IssueRun run = getById(id);
+    boolean changed = mapper.deleteById(id, expectedVersion) == 1;
+    if (changed) {
+      notifier.issueChanged(run.getIssueId());
+    }
+    return changed;
   }
 
   @Override
   public int deleteByIssueId(UUID issueId) {
-    return mapper.deleteByIssueId(issueId);
+    int changed = mapper.deleteByIssueId(issueId);
+    if (changed > 0) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
   }
 
   private static IssueRunDO toDO(IssueRun run) {

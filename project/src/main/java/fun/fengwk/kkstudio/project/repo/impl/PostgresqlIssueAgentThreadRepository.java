@@ -16,9 +16,12 @@ import java.util.UUID;
 public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRepository {
 
   private final IssueAgentThreadMapper mapper;
+  private final PostgresqlProjectChangeNotifier notifier;
 
-  public PostgresqlIssueAgentThreadRepository(IssueAgentThreadMapper mapper) {
+  public PostgresqlIssueAgentThreadRepository(
+      IssueAgentThreadMapper mapper, PostgresqlProjectChangeNotifier notifier) {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.notifier = Objects.requireNonNull(notifier, "notifier");
   }
 
   @Override
@@ -43,12 +46,21 @@ public class PostgresqlIssueAgentThreadRepository implements IssueAgentThreadRep
   @Override
   public boolean insert(IssueAgentThread binding) {
     Objects.requireNonNull(binding, "binding");
-    return mapper.insert(binding.issueId(), binding.agentName(), binding.threadId()) == 1;
+    boolean changed =
+        mapper.insert(binding.issueId(), binding.agentName(), binding.threadId()) == 1;
+    if (changed) {
+      notifier.issueChanged(binding.issueId());
+    }
+    return changed;
   }
 
   @Override
   public int deleteByIssueIdAndAgentName(UUID issueId, String agentName) {
-    return mapper.deleteByIssueIdAndAgentName(issueId, agentName);
+    int changed = mapper.deleteByIssueIdAndAgentName(issueId, agentName);
+    if (changed > 0) {
+      notifier.issueChanged(issueId);
+    }
+    return changed;
   }
 
   @Override

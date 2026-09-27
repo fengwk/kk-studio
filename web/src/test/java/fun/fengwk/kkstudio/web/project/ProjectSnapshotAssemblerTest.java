@@ -105,9 +105,8 @@ class ProjectSnapshotAssemblerTest {
             .version(0L)
             .startedAt(now)
             .build();
-    when(issueRunService.getActiveRun(issue1Id)).thenReturn(null);
-    when(issueRunService.getLatestRun(issue1Id)).thenReturn(null);
-    when(issueRunService.getActiveRun(issue2Id)).thenReturn(run);
+    when(issueRunService.listRuns(issue1Id)).thenReturn(List.of());
+    when(issueRunService.listRuns(issue2Id)).thenReturn(List.of(run));
     when(issueService.listAgentThreads(issue2Id))
         .thenReturn(List.of(new IssueAgentThread(issue2Id, "coder", threadId)));
 
@@ -206,7 +205,7 @@ class ProjectSnapshotAssemblerTest {
             .version(0L)
             .startedAt(now)
             .build();
-    when(issueRunService.getActiveRun(issueId)).thenReturn(foreignRun);
+    when(issueRunService.listRuns(issueId)).thenReturn(List.of(foreignRun));
 
     IllegalStateException ex =
         assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));

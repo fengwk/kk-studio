@@ -256,6 +256,8 @@ Loop 只拥有一个专用 JDBC connection 和一个 daemon platform thread：�
 `connection.abort` → interrupt loop thread → 最多 5s join，`SmartLifecycle.close` 幂等。
 前三个 channel 只做 dispatcher wake，version、realtime、settings、Project 与 Skill Package
 handler 负责各自的 snapshot/resync 逻辑，NOTIFY 本身不是 durable event log；
+`project_issue_changed` 由 Project 持久化仓库在写事务中发送 Project id，提交后才投递，
+不依赖 HTTP controller 或数据库 trigger；
 `skill_package_changed` 的 payload 是 package 名，resync 对本节点全部 READY Environment
 做全量对账。
 
