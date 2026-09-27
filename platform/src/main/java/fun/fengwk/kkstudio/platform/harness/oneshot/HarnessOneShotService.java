@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -144,11 +145,7 @@ public final class HarnessOneShotService {
         first = false;
         if (versionWake) {
           // 终态优先：订阅后的首次权威读取与 version/resync 唤醒后都先检查 terminal，再判 timeout。
-          String result =
-              runtime
-                  .projectJoinReceipt(ticket.invocationId())
-                  .map(HarnessOneShotService::terminalText)
-                  .orElse(null);
+          String result = resultIfFinished(runtime, ticket);
           if (result != null) {
             return result;
           }
@@ -156,6 +153,11 @@ public final class HarnessOneShotService {
         // 相对 elapsed 计时：remaining 非负、无绝对 deadline，避免 nanoTime + timeout 溢出。
         long remaining = timeoutNanos - (System.nanoTime() - startedAt);
         if (remaining <= 0L) {
+          // deadline 前的最终权威读：唤醒信号只是提示，漏通知/竞态不能把已匹配的结果误报为 timeout。
+          String result = resultIfFinished(runtime, ticket);
+          if (result != null) {
+            return result;
+          }
           stop(runtime, threadId);
           throw new IllegalStateException("one-shot Harness execution timed out after " + timeout);
         }
@@ -176,8 +178,16 @@ public final class HarnessOneShotService {
     stop(requireRuntime(), threadId);
   }
 
+  /** 读取固定 join 的终态；未匹配返回 null，已匹配则返回报告或抛出具名失败。 */
+  private static String resultIfFinished(HarnessRuntime runtime, OneShotTicket ticket) {
+    return runtime
+        .projectJoinReceipt(ticket.invocationId())
+        .map(HarnessOneShotService::terminalText)
+        .orElse(null);
+  }
+
   private static String terminalText(ThreadJoinReceipt receipt) {
-    if (receipt.outcome() != ThreadJoinReceipt.Outcome.COMPLETED) {
+    if (receipt.outcome() != ThreadJoinOutcome.COMPLETED) {
       throw new IllegalStateException(
           "one-shot Harness execution ended with " + receipt.outcome() + ": " + receipt.error());
     }
