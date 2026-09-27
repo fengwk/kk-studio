@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
@@ -18,6 +20,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Supplier;
 
 /**
  * {@code project_issue_agent_thread} 稳定绑定在真实 PostgreSQL 上的契约：插入/查找/删除、FK 防悬空、Thread 全局唯一，以及存在 Run
@@ -26,6 +29,7 @@ import java.util.concurrent.Future;
 class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
 
   @Autowired private IssueAgentThreadRepository issueAgentThreadRepository;
+  @Autowired private PlatformTransactionManager transactionManager;
 
   /** 插入后可按 (issue, agent) 读取，删除返回受影响行数且重复删除幂等。 */
   @Test
@@ -38,15 +42,41 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     UUID threadId = threadRow(sessionId);
 
     assertTrue(
-        issueAgentThreadRepository.insert(new IssueAgentThread(issueId, agentName, threadId)));
+        write(
+            () ->
+                issueAgentThreadRepository.insert(
+                    new IssueAgentThread(issueId, agentName, threadId))));
     assertEquals(
         new IssueAgentThread(issueId, agentName, threadId),
         issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
     assertNull(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, "other-agent"));
 
-    assertEquals(1, issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName));
-    assertEquals(0, issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName));
+    assertEquals(
+        1, write(() -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName)));
+    assertEquals(
+        0, write(() -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName)));
     assertNull(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
+  }
+
+  /** 无事务时 insert/delete 应在 SQL 执行前拒绝，避免写入已 autocommit 却未通知。 */
+  @Test
+  void writesWithoutTransactionFailBeforeMutation() {
+    UUID projectId = projectRow();
+    UUID issueId = issueRow(projectId);
+    String agentName = agentDefinition();
+    UUID sessionId = uuid();
+    sessionRow(sessionId);
+    UUID threadId = threadRow(sessionId);
+    IssueAgentThread binding = new IssueAgentThread(issueId, agentName, threadId);
+
+    assertThrows(IllegalStateException.class, () -> issueAgentThreadRepository.insert(binding));
+    assertNull(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
+
+    assertTrue(write(() -> issueAgentThreadRepository.insert(binding)));
+    assertThrows(
+        IllegalStateException.class,
+        () -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName));
+    assertEquals(binding, issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName));
   }
 
   /** FK：Issue、AgentDefinition 与 harness_thread 都必须存在，绑定不能凭空悬空。 */
@@ -61,17 +91,27 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
 
     assertThrows(
         DataIntegrityViolationException.class,
-        () -> issueAgentThreadRepository.insert(new IssueAgentThread(uuid(), agentName, threadId)),
+        () ->
+            write(
+                () ->
+                    issueAgentThreadRepository.insert(
+                        new IssueAgentThread(uuid(), agentName, threadId))),
         "missing issue must fail the issue_id FK");
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
-            issueAgentThreadRepository.insert(
-                new IssueAgentThread(issueId, "missing-agent", threadId)),
+            write(
+                () ->
+                    issueAgentThreadRepository.insert(
+                        new IssueAgentThread(issueId, "missing-agent", threadId))),
         "missing agent definition must fail the agent_name FK");
     assertThrows(
         DataIntegrityViolationException.class,
-        () -> issueAgentThreadRepository.insert(new IssueAgentThread(issueId, agentName, uuid())),
+        () ->
+            write(
+                () ->
+                    issueAgentThreadRepository.insert(
+                        new IssueAgentThread(issueId, agentName, uuid()))),
         "missing harness thread must fail the thread_id FK");
   }
 
@@ -90,19 +130,26 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
     UUID secondThread = threadRow(secondSession);
 
     assertTrue(
-        issueAgentThreadRepository.insert(new IssueAgentThread(issueId, firstAgent, firstThread)));
+        write(
+            () ->
+                issueAgentThreadRepository.insert(
+                    new IssueAgentThread(issueId, firstAgent, firstThread))));
 
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
-            issueAgentThreadRepository.insert(
-                new IssueAgentThread(issueId, firstAgent, secondThread)),
+            write(
+                () ->
+                    issueAgentThreadRepository.insert(
+                        new IssueAgentThread(issueId, firstAgent, secondThread))),
         "same (issue, agent) must not rebind to another thread");
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
-            issueAgentThreadRepository.insert(
-                new IssueAgentThread(issueId, secondAgent, firstThread)),
+            write(
+                () ->
+                    issueAgentThreadRepository.insert(
+                        new IssueAgentThread(issueId, secondAgent, firstThread))),
         "same thread must not be shared by another agent");
     assertEquals(
         new IssueAgentThread(issueId, firstAgent, firstThread),
@@ -171,7 +218,8 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
 
     assertThrows(
         DataIntegrityViolationException.class,
-        () -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName),
+        () ->
+            write(() -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName)),
         "bound history must not be deleted while a Run references it");
     assertThrows(
         DataIntegrityViolationException.class,
@@ -188,15 +236,24 @@ class IssueAgentThreadRepositoryIntegrationTest extends OwnerTestSupport {
 
     // 业务清理顺序：先终结并删除 Run，绑定与 Thread 才允许被删除。
     jdbc.update("delete from project_issue_run where issue_id = ?", issueId);
-    assertEquals(1, issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName));
+    assertEquals(
+        1, write(() -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(issueId, agentName)));
     assertEquals(1, jdbc.update("delete from harness_thread where id = ?", threadId));
   }
 
   private boolean tryBind(UUID issueId, String agentName, UUID threadId) {
     try {
-      return issueAgentThreadRepository.insert(new IssueAgentThread(issueId, agentName, threadId));
+      return write(
+          () ->
+              issueAgentThreadRepository.insert(
+                  new IssueAgentThread(issueId, agentName, threadId)));
     } catch (DataIntegrityViolationException expected) {
       return false;
     }
+  }
+
+  /** 每次仓储写入独立提交；并发线程不可共享测试事务，约束异常由事务管理器完整回滚。 */
+  private <T> T write(Supplier<T> action) {
+    return new TransactionTemplate(transactionManager).execute(status -> action.get());
   }
 }
