@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceLifecycle;
@@ -29,16 +31,18 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
 
@@ -53,25 +57,39 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 真实 PostgreSQL 上验证 Runtime 的锁、CAS、pin、资源交换与事务回滚不变量。 */
+/** 真实 PostgreSQL 上验证 Runtime 的锁、两阶段提交、UNKNOWN 收敛、人工解除、CAS、pin 与资源生命周期不变量。 */
 @Import(CanvasFunctionRuntimeFoundationTest.FoundationConfiguration.class)
 class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport {
 
   private static final String REQUEST_1 = "00000000-0000-0000-0000-000000000101";
   private static final String REQUEST_2 = "00000000-0000-0000-0000-000000000102";
   private static final CanvasTransform TRANSFORM = new CanvasTransform(0, 0, 100, 80);
-  private static final CanvasFunctionModel MODEL =
-      new CanvasFunctionModel(
-          "test-model",
+  private static final JsonObject ARGS_SCHEMA =
+      CanvasJson.parseObject(
+          """
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["prompt"],
+            "properties": {
+              "prompt": { "type": "string" },
+              "ratio": { "type": "string", "enum": ["16:9", "1:1"], "default": "16:9" },
+              "source": { "type": "resourceReference" }
+            }
+          }
+          """);
+  private static final CanvasFunctionDefinition DEFINITION =
+      new CanvasFunctionDefinition(
+          "test.image",
           "Test Image",
+          ARGS_SCHEMA,
           CanvasResourceKind.IMAGE,
-          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()),
-          List.of());
+          new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
 
   @Autowired private CanvasResourceRepository resourceRepository;
   @Autowired private CanvasFunctionRunRepository runRepository;
   @Autowired private CanvasFunctionResourcePinRepository pinRepository;
-  @Autowired private CanvasFunctionConfigCodecPort configCodec;
+  @Autowired private CanvasFunctionArgsCodecPort argsCodec;
   @Autowired private Clock clock;
   private CanvasFunctionRunTransactions runtimeTransactions;
 
@@ -85,7 +103,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             runRepository,
             pinRepository,
             catalog,
-            configCodec,
+            argsCodec,
             stateCodec,
             new TestResourceLifecycle(resourceRepository, pinRepository),
             blobAccess,
@@ -161,6 +179,309 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         runRepository.findByNodeId(targetNodeId).orElseThrow().status());
     assertTrue(pinRepository.findByRun(canvasId, targetNodeId, frozen.requestId()).isEmpty());
     assertEquals(2L, version(canvasId), "start and terminal swap each bump once");
+  }
+
+  /** 验收证据 1：提交意图在外部提交前持久化（SUBMITTING -> SUBMITTED -> SUCCEEDED），成功后原子挂接唯一资源并释放全部 pin。 */
+  @Test
+  void submitIntentPersistedBeforeExternalSubmitAndHappyPathReleasesPins() {
+    UUID canvasId = addDocument();
+    UUID sourceNodeId = addPlainNode(canvasId, "source");
+    UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
+    CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
+
+    // 1. start 构造 PENDING 状态并落库 INPUT pin
+    CanvasFunctionRun ready = runtimeTransactions.start(canvasId, targetNodeId, REQUEST_1).run();
+    assertEquals(CanvasFunctionRunStatus.READY, ready.status());
+    CanvasFunctionFrozenRun frozenReady = decode(ready);
+    assertEquals(CanvasFunctionSubmitState.PENDING, frozenReady.submitState());
+    assertEquals("QUEUED", frozenReady.stage());
+    assertEquals(1, pinRepository.findByRun(canvasId, targetNodeId, ready.requestId()).size());
+
+    // 2. Worker 认领 Run
+    ClaimedRun claim =
+        workStore.claimNext(ready.availableAt(), Duration.ofSeconds(30), "worker-1").orElseThrow();
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+
+    // 3. beginSubmit 持久化提交意图 (SUBMITTING)
+    CanvasFunctionFrozenRun submitting =
+        runtimeTransactions.beginSubmit(frozen, claim.leaseToken());
+    assertEquals(CanvasFunctionSubmitState.SUBMITTING, submitting.submitState());
+    assertEquals("SUBMITTING", submitting.stage());
+    CanvasFunctionRun runningInDb = runRepository.findByNodeId(targetNodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, runningInDb.status());
+    assertEquals(CanvasFunctionSubmitState.SUBMITTING, decode(runningInDb).submitState());
+
+    // 4. confirmSubmitted 持久化提交确认 (SUBMITTED)
+    CanvasFunctionFrozenRun submitted =
+        runtimeTransactions.confirmSubmitted(submitting, claim.leaseToken());
+    assertEquals(CanvasFunctionSubmitState.SUBMITTED, submitted.submitState());
+    assertEquals("SUBMITTED", submitted.stage());
+    assertTrue(submitted.submitted());
+
+    // 5. 宿主物化目标资源 (写入 OUTPUT pin 与未挂接 Resource 行)
+    CanvasResource target =
+        materializeTarget(
+            canvasId, targetNodeId, submitted.requestId(), submitted.targetResourceId());
+    assertEquals(2, pinRepository.findByRun(canvasId, targetNodeId, submitted.requestId()).size());
+
+    // 6. completeSuccess 原子收敛为 SUCCEEDED 并释放 pin
+    assertTrue(
+        runtimeTransactions.completeSuccess(
+            submitted, claim.leaseToken(), List.of(submitted.targetResourceId())));
+
+    CanvasFunctionRun completed = runRepository.findByNodeId(targetNodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.SUCCEEDED, completed.status());
+    assertEquals("SUCCEEDED", completed.stage());
+    assertNull(completed.error());
+
+    CanvasResource attached = resourceRepository.findById(canvasId, target.id()).orElseThrow();
+    assertEquals(targetNodeId, attached.ownerNodeId());
+    assertEquals(0, attached.resourceIndex());
+    assertTrue(
+        pinRepository.findByRun(canvasId, targetNodeId, submitted.requestId()).isEmpty(),
+        "both INPUT and OUTPUT pins must be released upon success");
+  }
+
+  /** 验收证据 2：SUBMITTING 崩溃恢复后收敛为 UNKNOWN 且保留 pin 与目标；resolve(RESUME) 回到 READY 且不再重新提交。 */
+  @Test
+  void resumedSubmittingRunConvergesToUnknownAndResumingAllowsQueryExecution() {
+    UUID canvasId = addDocument();
+    UUID sourceNodeId = addPlainNode(canvasId, "source");
+    UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
+    addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
+
+    ClaimedRun claim = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-submitting");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    CanvasResource target =
+        materializeTarget(canvasId, targetNodeId, frozen.requestId(), frozen.targetResourceId());
+
+    // 推进到 SUBMITTING
+    runtimeTransactions.beginSubmit(frozen, claim.leaseToken());
+
+    // 模拟提交结果不明，收敛为 UNKNOWN
+    assertTrue(
+        runtimeTransactions.markUnknown(
+            targetNodeId,
+            REQUEST_1,
+            claim.leaseToken(),
+            "external submission outcome is unknown; manual verification required"));
+
+    CanvasFunctionRun unknownRun = runRepository.findByNodeId(targetNodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.UNKNOWN, unknownRun.status());
+    assertEquals("UNKNOWN", unknownRun.stage());
+    assertEquals(
+        "external submission outcome is unknown; manual verification required", unknownRun.error());
+    assertNull(unknownRun.leaseToken());
+
+    // UNKNOWN 状态下必须保留 INPUT 和 OUTPUT pin，预分配目标资源不能被丢弃
+    assertFalse(pinRepository.findByRun(canvasId, targetNodeId, unknownRun.requestId()).isEmpty());
+    assertTrue(resourceRepository.findById(canvasId, target.id()).isPresent());
+
+    // UNKNOWN 状态下拒绝不同 requestId 的 start，也拒绝直接 cancel
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () -> runtimeTransactions.start(canvasId, targetNodeId, REQUEST_2));
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () -> runtimeTransactions.cancel(canvasId, targetNodeId, REQUEST_1));
+
+    // resolve RESUME 必须要求非空 verification，并使 Run 回到 READY，submitState 推进为 SUBMITTED
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.resolve(
+                canvasId, targetNodeId, REQUEST_1, CanvasFunctionUnknownResolution.RESUME, ""));
+
+    CanvasFunctionRun resumed =
+        runtimeTransactions.resolve(
+            canvasId,
+            targetNodeId,
+            REQUEST_1,
+            CanvasFunctionUnknownResolution.RESUME,
+            "manual verification: external job exists with id job-123");
+    assertEquals(CanvasFunctionRunStatus.READY, resumed.status());
+    assertEquals("SUBMITTED", resumed.stage());
+    assertNull(resumed.error());
+    CanvasFunctionFrozenRun frozenResumed = decode(resumed);
+    assertEquals(CanvasFunctionSubmitState.SUBMITTED, frozenResumed.submitState());
+    assertTrue(frozenResumed.submitted());
+
+    // pin 仍然保留
+    assertFalse(pinRepository.findByRun(canvasId, targetNodeId, resumed.requestId()).isEmpty());
+
+    // 再次领取执行：已处于 SUBMITTED，直接 execute 物化并 completeSuccess
+    ClaimedRun resumedClaim =
+        workStore
+            .claimNext(resumed.availableAt(), Duration.ofSeconds(30), "worker-resumed")
+            .orElseThrow();
+    assertTrue(
+        runtimeTransactions.completeSuccess(
+            decode(resumedClaim.run()),
+            resumedClaim.leaseToken(),
+            List.of(frozenResumed.targetResourceId())));
+
+    CanvasFunctionRun finalRun = runRepository.findByNodeId(targetNodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.SUCCEEDED, finalRun.status());
+    assertTrue(pinRepository.findByRun(canvasId, targetNodeId, resumed.requestId()).isEmpty());
+  }
+
+  /** 验收证据 3：UNKNOWN 状态 resolve 为 FAILED/CANCELLED：终态落库、释放 pin、丢弃未挂接目标并持久化核查文本；重复 resolve 冲突。 */
+  @Test
+  void resolveUnknownTerminalReleasesPinsAndDiscardsUnownedTarget() {
+    UUID canvasId = addDocument();
+    UUID sourceNodeId = addPlainNode(canvasId, "source");
+    UUID targetNodeId = addFunctionNode(canvasId, "target", configWithReference(sourceNodeId));
+    addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
+
+    // 1. 测试 UNKNOWN -> FAILED
+    ClaimedRun claim1 = claimStartedRun(canvasId, targetNodeId, REQUEST_1, "worker-failed");
+    CanvasFunctionFrozenRun frozen1 = decode(claim1.run());
+    CanvasResource target1 =
+        materializeTarget(canvasId, targetNodeId, frozen1.requestId(), frozen1.targetResourceId());
+    runtimeTransactions.beginSubmit(frozen1, claim1.leaseToken());
+    runtimeTransactions.markUnknown(targetNodeId, REQUEST_1, claim1.leaseToken(), "timeout");
+
+    CanvasFunctionRun failedResolved =
+        runtimeTransactions.resolve(
+            canvasId,
+            targetNodeId,
+            REQUEST_1,
+            CanvasFunctionUnknownResolution.FAILED,
+            "external task confirmed not created");
+    assertEquals(CanvasFunctionRunStatus.FAILED, failedResolved.status());
+    assertEquals("FAILED", failedResolved.stage());
+    assertEquals("external task confirmed not created", failedResolved.error());
+
+    // pin 被释放，未挂接目标被丢弃
+    assertTrue(
+        pinRepository.findByRun(canvasId, targetNodeId, UUID.fromString(REQUEST_1)).isEmpty());
+    assertTrue(resourceRepository.findById(canvasId, target1.id()).isEmpty());
+
+    // 再次 resolve 产生冲突
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () ->
+            runtimeTransactions.resolve(
+                canvasId,
+                targetNodeId,
+                REQUEST_1,
+                CanvasFunctionUnknownResolution.FAILED,
+                "again"));
+
+    // 2. 测试 UNKNOWN -> CANCELLED
+    CanvasFunctionRun replacement =
+        runtimeTransactions.start(canvasId, targetNodeId, REQUEST_2).run();
+    ClaimedRun claim2 =
+        workStore
+            .claimNext(replacement.availableAt(), Duration.ofSeconds(30), "worker-cancelled")
+            .orElseThrow();
+    CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
+    CanvasResource target2 =
+        materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.targetResourceId());
+    runtimeTransactions.beginSubmit(frozen2, claim2.leaseToken());
+    runtimeTransactions.markUnknown(targetNodeId, REQUEST_2, claim2.leaseToken(), "timeout-2");
+
+    CanvasFunctionRun cancelledResolved =
+        runtimeTransactions.resolve(
+            canvasId,
+            targetNodeId,
+            REQUEST_2,
+            CanvasFunctionUnknownResolution.CANCELLED,
+            "external task cancelled by operator");
+    assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelledResolved.status());
+    assertEquals("CANCELLED", cancelledResolved.stage());
+    assertEquals("external task cancelled by operator", cancelledResolved.error());
+
+    assertTrue(
+        pinRepository.findByRun(canvasId, targetNodeId, UUID.fromString(REQUEST_2)).isEmpty());
+    assertTrue(resourceRepository.findById(canvasId, target2.id()).isEmpty());
+
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () ->
+            runtimeTransactions.resolve(
+                canvasId,
+                targetNodeId,
+                REQUEST_2,
+                CanvasFunctionUnknownResolution.CANCELLED,
+                "again"));
+  }
+
+  /** 验收证据 4：结果列表不匹配（空或多元素）直接失败且不发布目标；过期租约写回被拒绝。 */
+  @Test
+  void completeSuccessRejectsMismatchAndStaleTokens() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, "worker-fencing");
+    CanvasFunctionFrozenRun frozen = decode(claim.run());
+    CanvasResource target =
+        materializeTarget(canvasId, nodeId, frozen.requestId(), frozen.targetResourceId());
+
+    // 结果列表为空
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtimeTransactions.completeSuccess(frozen, claim.leaseToken(), List.of()));
+
+    // 结果列表包含多余元素
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                frozen, claim.leaseToken(), List.of(frozen.targetResourceId(), UUID.randomUUID())));
+
+    // 结果列表 ID 不匹配预分配目标
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtimeTransactions.completeSuccess(
+                frozen, claim.leaseToken(), List.of(UUID.randomUUID())));
+
+    // 失效租约写回返回 false，状态保持 RUNNING
+    assertFalse(
+        runtimeTransactions.completeSuccess(
+            frozen, "stale-lease-token", List.of(frozen.targetResourceId())));
+    assertFalse(
+        runtimeTransactions.markUnknown(
+            nodeId, REQUEST_1, "stale-lease-token", "stale unknown reason"));
+
+    CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
+    assertEquals(CanvasFunctionRunStatus.RUNNING, runInDb.status());
+    assertEquals(claim.leaseToken(), runInDb.leaseToken());
+
+    // target 仍然保持未挂接
+    CanvasResource unowned = resourceRepository.findById(canvasId, target.id()).orElseThrow();
+    assertNull(unowned.ownerNodeId());
+  }
+
+  /** 验收证据 5：args Schema 校验在 start 阶段拦截未知字段、类型错误与缺失必填，合法输入补齐默认值并冻结到计划中。 */
+  @Test
+  void argsValidationRejectsMalformedAndFillsDefaultsAtStart() {
+    UUID canvasId = addDocument();
+
+    // 未知字段 extra
+    UUID nodeUnknown = addFunctionNode(canvasId, "node1", "{\"prompt\":\"test\",\"extra\":1}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtimeTransactions.start(canvasId, nodeUnknown, REQUEST_1));
+
+    // 缺少必填字段 prompt
+    UUID nodeMissing = addFunctionNode(canvasId, "node2", "{\"ratio\":\"16:9\"}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtimeTransactions.start(canvasId, nodeMissing, REQUEST_1));
+
+    // 类型错误：prompt 应为 string
+    UUID nodeWrongType = addFunctionNode(canvasId, "node3", "{\"prompt\":123}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtimeTransactions.start(canvasId, nodeWrongType, REQUEST_1));
+
+    // 合法输入：只传必填 prompt，默认值 ratio="16:9" 必须被自动补齐并冻结
+    UUID nodeValid = addFunctionNode(canvasId, "node4", "{\"prompt\":\"hello world\"}");
+    CanvasFunctionRun run = runtimeTransactions.start(canvasId, nodeValid, REQUEST_1).run();
+    CanvasFunctionFrozenRun frozen = decode(run);
+    assertEquals(new CanvasJson.JsonText("hello world"), frozen.args().values().get("prompt"));
+    assertEquals(new CanvasJson.JsonText("16:9"), frozen.args().values().get("ratio"));
   }
 
   /** 外层事务回滚必须同时撤销 checkpoint state 与 document version，不能留下部分提交。 */
@@ -305,7 +626,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
                 canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
     jdbc.update("delete from canvas_document where id = ?", canvasId);
     assertThrows(
-        CanvasFunctionInternalCancellation.class,
+        CanvasFunctionRunException.class,
         () ->
             runtimeTransactions.checkpoint(
                 canvasId, nodeId, REQUEST_1, claim.leaseToken(), "LATE", Map.of()));
@@ -332,7 +653,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             name,
             TRANSFORM,
             null,
-            new CanvasFunction(MODEL.key(), CanvasJson.parseObject(config))));
+            new CanvasFunction(DEFINITION.name(), CanvasJson.parseObject(config))));
     return nodeId;
   }
 
@@ -392,7 +713,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
     return stateCodec.decode(
-        run.stateJson(), catalog.require(stateCodec.modelKey(run.stateJson())).model());
+        run.stateJson(), catalog.require(stateCodec.functionName(run.stateJson())).function());
   }
 
   private long version(UUID canvasId) {
@@ -400,15 +721,13 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   }
 
   private static String configWithoutReferences() {
-    return "{\"prompt\":{\"segments\":[{\"type\":\"TEXT\",\"text\":\"prompt\"}]},"
-        + "\"parameters\":{}}";
+    return "{\"prompt\":\"prompt\"}";
   }
 
   private static String configWithReference(UUID sourceNodeId) {
-    return "{\"prompt\":{\"segments\":[{\"type\":\"TEXT\",\"text\":\"use reference\"},"
-        + "{\"type\":\"resource\",\"nodeId\":\""
+    return "{\"prompt\":\"use reference\",\"source\":{\"type\":\"resource\",\"nodeId\":\""
         + sourceNodeId
-        + "\",\"index\":0}]},\"parameters\":{}}";
+        + "\",\"index\":0}}";
   }
 
   @TestConfiguration(proxyBeanMethods = false)
@@ -423,8 +742,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     CanvasFunctionAdapter foundationAdapter() {
       return new CanvasFunctionAdapter() {
         @Override
-        public List<CanvasFunctionModel> models() {
-          return List.of(MODEL);
+        public List<CanvasFunctionDefinition> functions() {
+          return List.of(DEFINITION);
         }
 
         @Override
@@ -439,6 +758,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
         @Override
         public void preflight(CanvasFunctionFrozenRun run) {}
+
+        @Override
+        public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {}
 
         @Override
         public List<UUID> execute(

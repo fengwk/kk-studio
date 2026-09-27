@@ -148,7 +148,8 @@ public class PostgresqlCanvasCommandService implements CanvasCommandService {
     }
     for (CanvasFunctionRun run : runRepository.findByCanvasId(canvasId)) {
       if (run.status() == CanvasFunctionRunStatus.READY
-          || run.status() == CanvasFunctionRunStatus.RUNNING) {
+          || run.status() == CanvasFunctionRunStatus.RUNNING
+          || run.status() == CanvasFunctionRunStatus.UNKNOWN) {
         throw new IllegalStateException("canvas has a non-terminal Function run: " + run.nodeId());
       }
     }

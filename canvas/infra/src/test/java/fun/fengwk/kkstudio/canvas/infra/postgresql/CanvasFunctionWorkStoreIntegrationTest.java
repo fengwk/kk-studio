@@ -23,14 +23,18 @@ import org.springframework.test.util.AopTestUtils;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTransactions;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
@@ -44,6 +48,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -232,9 +237,17 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     when(frozen.requestId()).thenReturn(requestId);
     when(frozen.targetResourceId()).thenReturn(targetResourceId);
     CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
-    CanvasFunctionModel model = mock(CanvasFunctionModel.class);
-    when(model.key()).thenReturn("model");
-    when(adapter.models()).thenReturn(List.of(model));
+    CanvasFunctionDefinition definition =
+        new CanvasFunctionDefinition(
+            "test.function",
+            "Test Function",
+            CanvasJson.parseObject(
+                "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{}}"),
+            CanvasResourceKind.IMAGE,
+            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+    when(frozen.submitted()).thenReturn(true);
+    when(frozen.submitState()).thenReturn(CanvasFunctionSubmitState.SUBMITTED);
+    when(adapter.functions()).thenReturn(List.of(definition));
     when(adapter.enabled()).thenReturn(true);
     when(adapter.unavailableReason()).thenReturn(null);
     CountDownLatch renewalCompleted = new CountDownLatch(1);
@@ -259,8 +272,8 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
             });
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
-    when(stateCodec.modelKey(claim.run().stateJson())).thenReturn("model");
-    when(stateCodec.decode(claim.run().stateJson(), model)).thenReturn(frozen);
+    when(stateCodec.functionName(claim.run().stateJson())).thenReturn("test.function");
+    when(stateCodec.decode(claim.run().stateJson(), definition)).thenReturn(frozen);
     CanvasFunctionRunTransactions runTransactions = mock(CanvasFunctionRunTransactions.class);
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
     when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));

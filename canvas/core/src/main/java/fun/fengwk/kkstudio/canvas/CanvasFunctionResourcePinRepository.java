@@ -16,8 +16,6 @@ public interface CanvasFunctionResourcePinRepository {
 
   int countByResource(UUID canvasId, UUID resourceId);
 
-  List<CanvasFunctionResourcePin> findRunningOutputPins(UUID canvasId, UUID resourceId);
-
   boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId);
 
   int deleteByNode(UUID canvasId, UUID nodeId);

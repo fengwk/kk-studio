@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -17,17 +19,17 @@ import org.springframework.beans.factory.ObjectProvider;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
+import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig.TextSegment;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -66,13 +68,14 @@ class CanvasFunctionExecutionContextImplTest {
     transactions = mock(CanvasFunctionRunTransactions.class);
     blobAccess = mock(CanvasFunctionBlobAccess.class);
     materializer = mock(CanvasResourceMaterializer.class);
-    CanvasFunctionModel model =
-        new CanvasFunctionModel(
-            "test-image",
+    CanvasFunctionDefinition definition =
+        new CanvasFunctionDefinition(
+            "test.image",
             "Test Image",
+            CanvasJson.parseObject(
+                "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{}}"),
             CanvasResourceKind.IMAGE,
-            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()),
-            List.of());
+            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
     CanvasFunctionFrozenReference reference =
         new CanvasFunctionFrozenReference(
             SOURCE_NODE,
@@ -92,11 +95,12 @@ class CanvasFunctionExecutionContextImplTest {
             NODE,
             "output",
             REQUEST,
-            model,
-            new CanvasFunctionConfig(List.of(new TextSegment("prompt")), Map.of()),
+            definition,
+            CanvasJson.parseObject("{}"),
             List.of(reference),
             "output.png",
             TARGET,
+            CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
     CanvasFunctionRun running =
@@ -117,6 +121,7 @@ class CanvasFunctionExecutionContextImplTest {
     when(runs.findByNodeId(NODE)).thenReturn(Optional.of(running));
   }
 
+  /** 只能读取冻结清单内的输入资源，且传递清单锁定的长度。 */
   @Test
   void opensOnlyFrozenOriginalWithFrozenLength() {
     CanvasFunctionResourceStream stream =
@@ -147,9 +152,11 @@ class CanvasFunctionExecutionContextImplTest {
                     null)));
   }
 
+  /** 只能物化预分配的目标资源 ID，且宿主返回不匹配资源时必须报错。 */
   @Test
   void materializesOnlyFrozenTargetAndOutputKind() {
-    when(materializer.materialize(eq(CANVAS), eq(TARGET), anyString(), any(InputStream.class)))
+    when(materializer.materialize(
+            eq(CANVAS), eq(NODE), eq(REQUEST), eq(TARGET), anyString(), any(InputStream.class)))
         .thenReturn(
             new CanvasResource(
                 TARGET, CANVAS, null, null, BLOB, "output.png", null, Instant.EPOCH));
@@ -163,9 +170,16 @@ class CanvasFunctionExecutionContextImplTest {
     assertEquals(
         TARGET, context.materializeTarget(TARGET, new ByteArrayInputStream(new byte[] {1, 2, 3})));
     verify(materializer)
-        .materialize(eq(CANVAS), eq(TARGET), eq("output.png"), any(InputStream.class));
+        .materialize(
+            eq(CANVAS),
+            eq(NODE),
+            eq(REQUEST),
+            eq(TARGET),
+            eq("output.png"),
+            any(InputStream.class));
   }
 
+  /** 只有在 Run 处于 RUNNING 且租约有效时才允许预签名原图 URL。 */
   @Test
   void presignsOnlyFrozenOriginalWhileRunIsRunning() {
     when(blobAccess.originalUrl(BLOB, 120L)).thenReturn("https://s3.example/object");
@@ -198,6 +212,37 @@ class CanvasFunctionExecutionContextImplTest {
         () -> context.presignOriginal(frozen.manifest().get(0), 120L));
   }
 
+  /** isRunning 检查状态、requestId、租约 token 及租约到期时间。 */
+  @Test
+  void isRunningChecksStatusLeaseAndExpiration() {
+    CanvasFunctionExecutionContextImpl context = context();
+    assertTrue(context.isRunning());
+
+    // 租约过期
+    CanvasFunctionRun expired =
+        new CanvasFunctionRun(
+            NODE,
+            REQUEST,
+            CanvasFunctionRunStatus.RUNNING,
+            1,
+            null,
+            LEASE,
+            Instant.EPOCH.minusSeconds(1),
+            "QUEUED",
+            "{\"stage\":\"QUEUED\"}",
+            null,
+            Instant.EPOCH,
+            Instant.EPOCH);
+    when(runs.findByNodeId(NODE)).thenReturn(Optional.of(expired));
+    assertFalse(context.isRunning());
+
+    // 本地 ownership 丢失
+    AtomicBoolean ownershipLost = new AtomicBoolean(true);
+    CanvasFunctionExecutionContextImpl lostContext = context(ownershipLost);
+    assertFalse(lostContext.isRunning());
+  }
+
+  /** checkpoint 委托短事务并更新当前上下文中的 frozen run。 */
   @Test
   void checkpointDelegatesToTransactionsAndUpdatesCurrent() {
     CanvasFunctionFrozenRun next =
@@ -206,11 +251,12 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.nodeId(),
             frozen.nodeName(),
             frozen.requestId(),
-            frozen.model(),
-            frozen.config(),
+            frozen.definition(),
+            frozen.args(),
             frozen.manifest(),
             frozen.outputName(),
             frozen.targetResourceId(),
+            CanvasFunctionSubmitState.SUBMITTING,
             "SUBMITTING",
             Map.of("jobId", "job"));
     when(transactions.checkpoint(
@@ -228,6 +274,7 @@ class CanvasFunctionExecutionContextImplTest {
     assertEquals(next, context.currentRun());
   }
 
+  /** checkpoint CAS 失败抛出取消异常且不更新本地 currentRun。 */
   @Test
   void checkpointCasCancellationPropagatesWithoutUpdatingCurrent() {
     when(transactions.checkpoint(any(), any(), anyString(), anyString(), anyString(), any()))
@@ -242,6 +289,7 @@ class CanvasFunctionExecutionContextImplTest {
         frozen, context.currentRun(), "failed checkpoint must not write back the old frozen run");
   }
 
+  /** 本地 ownership 已丢失时在调用事务前直接快速拒绝。 */
   @Test
   void checkpointRejectsLocallyLostOwnershipBeforeCallingTransactions() {
     CanvasFunctionExecutionContextImpl context = context(new AtomicBoolean(true));
@@ -251,6 +299,45 @@ class CanvasFunctionExecutionContextImplTest {
         () -> context.checkpoint("SUBMITTING", Map.of("jobId", "job")));
     verify(transactions, never())
         .checkpoint(any(), any(), anyString(), anyString(), anyString(), any());
+  }
+
+  /** replace 允许在提交阶段推进提交事实后刷新上下文，但拒绝异构 Run。 */
+  @Test
+  void replaceValidatesSameRunIdentity() {
+    CanvasFunctionExecutionContextImpl context = context();
+    CanvasFunctionFrozenRun updated =
+        new CanvasFunctionFrozenRun(
+            frozen.canvasId(),
+            frozen.nodeId(),
+            frozen.nodeName(),
+            frozen.requestId(),
+            frozen.definition(),
+            frozen.args(),
+            frozen.manifest(),
+            frozen.outputName(),
+            frozen.targetResourceId(),
+            CanvasFunctionSubmitState.SUBMITTED,
+            "SUBMITTED",
+            Map.of());
+
+    context.replace(updated);
+    assertEquals(updated, context.currentRun());
+
+    CanvasFunctionFrozenRun differentRun =
+        new CanvasFunctionFrozenRun(
+            frozen.canvasId(),
+            frozen.nodeId(),
+            frozen.nodeName(),
+            UUID.randomUUID(),
+            frozen.definition(),
+            frozen.args(),
+            frozen.manifest(),
+            frozen.outputName(),
+            frozen.targetResourceId(),
+            CanvasFunctionSubmitState.SUBMITTED,
+            "SUBMITTED",
+            Map.of());
+    assertThrows(IllegalArgumentException.class, () -> context.replace(differentRun));
   }
 
   private CanvasFunctionExecutionContextImpl context() {

@@ -56,11 +56,6 @@ public class PostgresqlCanvasFunctionResourcePinRepository
   }
 
   @Override
-  public List<CanvasFunctionResourcePin> findRunningOutputPins(UUID canvasId, UUID resourceId) {
-    return toDomain(refMapper.findRunningOutputPins(canvasId, resourceId));
-  }
-
-  @Override
   public boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId) {
     return refMapper.deleteByRun(canvasId, nodeId, requestId) >= 0;
   }

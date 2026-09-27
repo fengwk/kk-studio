@@ -16,9 +16,8 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
+import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
-import fun.fengwk.kkstudio.web.controller.StudioComfyuiRuntimeController;
-import fun.fengwk.kkstudio.web.controller.StudioComfyuiWorkflowApiController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
@@ -33,8 +32,7 @@ import java.util.Map;
     assignableTypes = {
       StudioCanvasController.class,
       StudioChatController.class,
-      StudioComfyuiRuntimeController.class,
-      StudioComfyuiWorkflowApiController.class,
+      StudioCanvasFunctionController.class,
       StudioHarnessCommandBatchController.class,
       StudioHarnessSessionController.class,
       StudioHarnessThreadController.class

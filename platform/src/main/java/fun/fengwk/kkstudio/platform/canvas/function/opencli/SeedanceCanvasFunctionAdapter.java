@@ -5,14 +5,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionParameterDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionStatus;
@@ -40,17 +44,63 @@ import java.util.regex.Pattern;
 public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private static final Pattern ASSET_ID = Pattern.compile("[0-9a-f]{16}");
-  private static final Set<String> MODEL_KEYS =
+  private static final Set<String> FUNCTION_NAMES =
       Set.of("seedance2.0", "seedance2.0fast", "seedance2.0_vip", "seedance2.0fast_vip");
-  private static final List<String> RATIOS = List.of("1:1", "3:4", "16:9", "4:3", "9:16", "21:9");
   private static final String UNKNOWN_SUBMISSION =
       "Seedance submission outcome unknown; automatic resubmission is forbidden";
-  private static final List<CanvasFunctionModel> MODELS =
+
+  private static final JsonObject ARGS_SCHEMA =
+      CanvasJson.parseObject(
+          """
+          {
+            "type": "object",
+            "description": "Seedance parameters",
+            "additionalProperties": false,
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "description": "Prompt text"
+              },
+              "ratio": {
+                "type": "string",
+                "description": "Aspect ratio",
+                "enum": ["1:1", "3:4", "16:9", "4:3", "9:16", "21:9"],
+                "default": "16:9"
+              },
+              "duration": {
+                "type": "integer",
+                "description": "Duration in seconds",
+                "minimum": 4,
+                "maximum": 15,
+                "default": 5
+              },
+              "references": {
+                "type": "array",
+                "description": "Reference resources",
+                "items": {
+                  "type": "resourceReference",
+                  "description": "Reference resource"
+                },
+                "minItems": 0,
+                "maxItems": 12
+              }
+            },
+            "required": ["prompt"]
+          }
+          """);
+
+  private static final CanvasFunctionReferencePolicy REFERENCE_POLICY =
+      new CanvasFunctionReferencePolicy(
+          Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.VIDEO, CanvasResourceKind.AUDIO),
+          12,
+          Map.of(CanvasResourceKind.VIDEO, 3, CanvasResourceKind.AUDIO, 3));
+
+  private static final List<CanvasFunctionDefinition> DEFINITIONS =
       List.of(
-          model("seedance2.0", "Seedance 2.0"),
-          model("seedance2.0fast", "Seedance 2.0 Fast"),
-          model("seedance2.0_vip", "Seedance 2.0 VIP"),
-          model("seedance2.0fast_vip", "Seedance 2.0 Fast VIP"));
+          definition("seedance2.0", "Seedance 2.0"),
+          definition("seedance2.0fast", "Seedance 2.0 Fast"),
+          definition("seedance2.0_vip", "Seedance 2.0 VIP"),
+          definition("seedance2.0fast_vip", "Seedance 2.0 Fast VIP"));
 
   private final SystemSettings.Integrations integrations;
   private final OpenCliHubClient client;
@@ -90,8 +140,8 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
-  public List<CanvasFunctionModel> models() {
-    return MODELS;
+  public List<CanvasFunctionDefinition> functions() {
+    return DEFINITIONS;
   }
 
   @Override
@@ -112,8 +162,13 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public void preflight(CanvasFunctionFrozenRun run) {
-    if (!MODEL_KEYS.contains(run.model().key())) {
-      throw new IllegalArgumentException("unsupported Seedance model");
+    if (!FUNCTION_NAMES.contains(run.definition().name())) {
+      throw new IllegalArgumentException(
+          "unsupported Seedance function: " + run.definition().name());
+    }
+    String prompt = extractText(run.args(), "prompt");
+    if (prompt == null || prompt.isBlank()) {
+      throw new IllegalArgumentException("Seedance prompt must not be blank");
     }
     if (run.manifest().size() > 12) {
       throw new IllegalArgumentException("Seedance accepts at most 12 references");
@@ -164,57 +219,68 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   @Override
-  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+  public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
     String assetId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.ASSET_ID);
     String executionId =
         OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
-    if ("SEEDANCE_SUBMITTING".equals(run.stage()) && assetId == null && executionId == null) {
-      throw new IllegalStateException(UNKNOWN_SUBMISSION);
+    if (assetId != null) {
+      return;
     }
 
     List<OpenCliAdapterState.UploadedInput> uploads;
-    if (assetId == null) {
-      if (executionId == null) {
-        OpenCliReferenceUploader.UploadResult uploadResult =
-            uploader.uploadAll(context, run, state);
-        uploads = uploadResult.uploads();
-        state = uploadResult.state();
-        context.checkpoint("SEEDANCE_SUBMITTING", state);
-        Execution submitted =
+    if (executionId == null) {
+      OpenCliReferenceUploader.UploadResult uploadResult = uploader.uploadAll(context, run, state);
+      uploads = uploadResult.uploads();
+      state = uploadResult.state();
+      context.checkpoint("SEEDANCE_SUBMITTING", state);
+      Execution submitted;
+      try {
+        submitted =
             client.execute(
                 buildSubmitArgv(run, uploads), integrations.seedance().hubExecutionTimeoutMillis());
-        executionId = submitted.id();
-        state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
-        context.checkpoint("SEEDANCE_SUBMISSION_POLLING", state);
-      } else {
-        uploads = OpenCliAdapterState.uploads(state);
-        requireCompleteUploads(run, uploads);
+      } catch (RuntimeException failure) {
+        throw new CanvasFunctionUnknownException(
+            "Seedance submission outcome unknown: " + failure.getMessage());
       }
-      Execution submission = awaitHubExecution(context, executionId, seedanceHubExecutionTimeout());
-      if (submission.status() != ExecutionStatus.SUCCEEDED) {
-        throw new OpenCliHubException(
-            "Seedance submission Hub execution ended as " + submission.status());
-      }
-      JsonNode submitted = singleStdoutObject(submission.stdout());
-      if (!requiredBoolean(submitted, "submitted")
-          || !"submitted".equals(requiredText(submitted, "status"))) {
-        throw new OpenCliHubException("Seedance submission stdout did not confirm submitted=true");
-      }
-      assetId = requiredText(submitted, "assetId");
-      if (!ASSET_ID.matcher(assetId).matches()) {
-        throw new OpenCliHubException("Seedance submission stdout contains invalid assetId");
-      }
-      state.remove(OpenCliAdapterState.EXECUTION_ID);
-      state.put(OpenCliAdapterState.ASSET_ID, assetId);
-      state.put(OpenCliAdapterState.POLL_STARTED_AT, clock.instant().toString());
-      context.checkpoint("SEEDANCE_STATUS_WAITING", state);
+      executionId = submitted.id();
+      state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
+      context.checkpoint("SEEDANCE_SUBMISSION_POLLING", state);
     } else {
       uploads = OpenCliAdapterState.uploads(state);
       requireCompleteUploads(run, uploads);
     }
+    Execution submission = awaitHubExecution(context, executionId, seedanceHubExecutionTimeout());
+    if (submission.status() != ExecutionStatus.SUCCEEDED) {
+      throw new OpenCliHubException(
+          "Seedance submission Hub execution ended as " + submission.status());
+    }
+    JsonNode submitted = singleStdoutObject(submission.stdout());
+    if (!requiredBoolean(submitted, "submitted")
+        || !"submitted".equals(requiredText(submitted, "status"))) {
+      throw new OpenCliHubException("Seedance submission stdout did not confirm submitted=true");
+    }
+    assetId = requiredText(submitted, "assetId");
+    if (!ASSET_ID.matcher(assetId).matches()) {
+      throw new OpenCliHubException("Seedance submission stdout contains invalid assetId");
+    }
+    state.remove(OpenCliAdapterState.EXECUTION_ID);
+    state.put(OpenCliAdapterState.ASSET_ID, assetId);
+    state.put(OpenCliAdapterState.POLL_STARTED_AT, clock.instant().toString());
+    context.checkpoint("SEEDANCE_STATUS_WAITING", state);
+  }
 
+  @Override
+  public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+    preflight(run);
+    Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
+    String assetId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.ASSET_ID);
+    if (assetId == null) {
+      throw new CanvasFunctionUnknownException(UNKNOWN_SUBMISSION);
+    }
+
+    String executionId;
     Instant deadline = pollDeadline(state);
     while (true) {
       if (!context.isRunning()) {
@@ -295,6 +361,9 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   private List<String> buildSubmitArgv(
       CanvasFunctionFrozenRun run, List<OpenCliAdapterState.UploadedInput> uploads) {
     requireCompleteUploads(run, uploads);
+    String ratio = extractText(run.args(), "ratio", "16:9");
+    int duration = extractInt(run.args(), "duration", 5);
+    String prompt = extractText(run.args(), "prompt");
     List<String> argv = new ArrayList<>();
     argv.addAll(
         List.of(
@@ -303,17 +372,17 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
             "--workspace",
             integrations.seedance().workspaceId(),
             "--ratio",
-            (String) run.config().parameters().get("ratio"),
+            ratio,
             "--model_version",
-            run.model().key(),
+            run.definition().name(),
             "--duration",
-            Integer.toString((Integer) run.config().parameters().get("duration"))));
+            Integer.toString(duration)));
     for (int index = 0; index < run.manifest().size(); index++) {
       argv.add(referenceFlag(run.manifest().get(index).kind()));
       argv.add(uploads.get(index).resourcePath());
     }
     argv.add("--prompt");
-    argv.add(CanvasPromptRenderer.seedance(run));
+    argv.add(prompt);
     argv.add("--submit");
     argv.add("1");
     argv.add("--retry");
@@ -375,7 +444,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   private MediaMetadata parseMetadata(CanvasFunctionFrozenReference reference, boolean video) {
-    // 权威 blob 事实快照：container 由 mediaType 推导，时长直接取 durationMs；编解码器细节不在冻结快照内。
     String container;
     if (video) {
       container =
@@ -467,20 +535,39 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     return value.booleanValue();
   }
 
-  private static CanvasFunctionModel model(String key, String label) {
-    return new CanvasFunctionModel(
-        key,
-        label,
-        CanvasResourceKind.VIDEO,
-        new CanvasFunctionReferencePolicy(
-            Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.VIDEO, CanvasResourceKind.AUDIO),
-            12,
-            Map.of(CanvasResourceKind.VIDEO, 3, CanvasResourceKind.AUDIO, 3)),
-        List.of(
-            CanvasFunctionParameterDefinition.enumParameter(
-                "ratio", "Ratio", false, "16:9", RATIOS),
-            CanvasFunctionParameterDefinition.integerParameter(
-                "duration", "Duration", false, 5, 4, 15)));
+  private static CanvasFunctionDefinition definition(String key, String label) {
+    return new CanvasFunctionDefinition(
+        key, label, ARGS_SCHEMA, CanvasResourceKind.VIDEO, REFERENCE_POLICY);
+  }
+
+  private static String extractText(JsonObject args, String field) {
+    CanvasJson json = args.values().get(field);
+    if (json instanceof JsonText text) {
+      return text.value();
+    }
+    throw new IllegalArgumentException(field + " must be a string");
+  }
+
+  private static String extractText(JsonObject args, String field, String defaultValue) {
+    CanvasJson json = args.values().get(field);
+    if (json instanceof JsonText text) {
+      return text.value();
+    }
+    if (json == null) {
+      return defaultValue;
+    }
+    throw new IllegalArgumentException(field + " must be a string");
+  }
+
+  private static int extractInt(JsonObject args, String field, int defaultValue) {
+    CanvasJson json = args.values().get(field);
+    if (json instanceof JsonNumber number) {
+      return number.value().intValueExact();
+    }
+    if (json == null) {
+      return defaultValue;
+    }
+    throw new IllegalArgumentException(field + " must be an integer");
   }
 
   private record MediaMetadata(String container, long durationMs) {}

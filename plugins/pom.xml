@@ -15,5 +15,7 @@
 
     <modules>
         <module>minimax-mavis</module>
+        <module>canvas-media</module>
+        <module>canvas-comfyui</module>
     </modules>
 </project>

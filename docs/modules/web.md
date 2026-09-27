@@ -117,14 +117,12 @@ result status 对齐。
 | Harness resource | `GET /api/harness/resources/{sha256}` | content-addressed managed Resource 下载 |
 | Canvas document | `/api/canvases`、`/{canvasId}`、`/{canvasId}/sessions`、`POST /{canvasId}/commands` | document snapshot/list/create/delete、owner Session 与 typed command batch |
 | Canvas resource | `/api/canvases/{canvasId}/resources/{resourceId}/download-url`、`/preview-url` | Blob original/preview presign |
-| Canvas Function | `/api/canvas-function-models`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel` | model catalog、run、query、cancel |
+| Canvas Function | `/api/canvas-functions`、`/api/canvases/{canvasId}/nodes/{nodeId}/function-run`、`/cancel`、`/resolve` | 函数目录（name/description/argsSchema/referencePolicy/available）、start（202）/query/cancel 与 UNKNOWN 人工核查解除（`resolution` + 非空 `verification`） |
 | Storage | `/api/storage`、`/api/storage/blobs/{blobId}/download-url|preview-url` | upload reserve/complete/delete 与 blob 签名 URL |
 | Project | `/api/projects`、`/{projectId}`、`/{projectId}/archive|unarchive|snapshot` | Project CRUD/CAS、YOLO 启动策略与打回阈值配置、归档与权威聚合 Snapshot；Issue Agent 的命令仅经内部业务编排接受，不经公开 command-batches |
 | Issue | `/api/projects/{projectId}/issues`、`/api/issues/{issueId}`、`/{issueId}/activities|status|block|recover|dependencies|evidence|review|cancel|retry|archive|unarchive` | Issue CRUD/CAS、七态迁移（含人工阻塞与恢复）、Activity 事实流与分页、依赖、人工上传转为公开证据、Run 人工动作与归档；`retry` 对 `UNKNOWN` 的最新 Run 要求 `verification` 人工核对说明 |
 | SystemSettings | `/api/settings`、`/api/settings/schema` | 全局设置 GET、schema GET、CAS PUT |
 | Environment | `/api/harness/environments`、`/{id}`、`/{id}/registration-token`、`/{id}/token`、`/{id}/events` | Environment Card 创建/查询/删除与 token 轮换；`name` 是不可变身份（无改名端点），无目录浏览端点；最近一次 READY 宿主信息与最近一条 WARN/ERROR 运维事件直接随 Card 返回，`/{id}/events` 返回最近 200 条事件窗口 |
-| ComfyUI workflow | `/api/comfyui/workflows` | persisted workflow API card CRUD |
-| ComfyUI runtime | `POST /api/comfyui/workflows/{workflowId}/runs`、`/api/comfyui/runs/{runId}` | stateless 202 run、job/cancel/output download，文件输入使用 blobId |
 
 [StudioHarnessCommandBatchController](../../web/src/main/java/fun/fengwk/kkstudio/web/controller/StudioHarnessCommandBatchController.java)
 返回 `202 Accepted` 只表示 durable acceptance 已提交；Provider/Tool 执行和 Thread
@@ -176,7 +174,7 @@ error envelope：
 | advice | controller 范围 | HTTP 映射 |
 | --- | --- | --- |
 | [StudioDomainErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioDomainErrorAdvice.java) | Catalog、Chat、MCP、Environment | validation 400、not found 404、version conflict/duplicate/in-use 409 |
-| [StudioResponseStatusErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioResponseStatusErrorAdvice.java) | Canvas、Chat、ComfyUI、Harness | `ResponseStatusException` 按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
+| [StudioResponseStatusErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioResponseStatusErrorAdvice.java) | Canvas、Canvas Function、Chat、Harness | `ResponseStatusException` 按 status 输出；Runtime not found 404、conflict 409、非法输入 400 |
 | [StudioStorageErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioStorageErrorAdvice.java) | Storage | validation 400、not found 404、verification/conflict 409 |
 | [StudioSystemSettingsErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/advice/StudioSystemSettingsErrorAdvice.java) | SystemSettings | validation 400、row missing 404、CAS conflict 409，并带 expected/actual version |
 | [StudioProjectErrorAdvice](../../web/src/main/java/fun/fengwk/kkstudio/web/project/StudioProjectErrorAdvice.java) | Project、Issue | validation 400、not found 404、version/runtime conflict 409、`IllegalStateException` 500；不回显 Issue Activity 正文、幂等键或认证数据 |
@@ -367,7 +365,7 @@ Web context 自身持有的部署配置：
 | `kk-studio.plugins.resource.*` | Plugin 资源端口边界：`connect-timeout`、`request-timeout`、`upload-timeout`、`max-bytes`（默认 `256MiB`，硬上限 `1GiB`）与 `temp-directory`（留空即 `java.io.tmpdir`）；由 `KK_STUDIO_PLUGINS_RESOURCE_*` 提供 |
 
 其余 `kk-studio.*` 键（dispatcher、execution-admission、runtime resource root、project
-controller、storage、Plugin credential、canvas、comfyui、opencli-hub）由 Platform 与 Canvas Infra 的
+controller、storage、Plugin credential、canvas、plugin）由 Platform、Plugin 与 Canvas Infra 的
 `@ConfigurationProperties` 定义，完整清单见 [Platform 模块配置](platform.md#配置)。
 
 ### 安全边界
@@ -378,7 +376,7 @@ controller、storage、Plugin credential、canvas、comfyui、opencli-hub）由 
   `environment.registration_token`，不进 SystemSettings、DTO 或日志；gateway 在 HELLO
   认证时基于该 token 映射对应 Environment Card，连接失败会清理 live state。
 - 系统不开放公开 S3 预签名端点；Blob 原始与预览访问统一由 Storage/Canvas 签发有限
-  expiry 的 presigned URL，ComfyUI 文件输入直接使用 blobId。
+  expiry 的 presigned URL；构建期 Plugin 的文件输入直接使用 blobId。
 - Trusted JAR 只从显式 canonical directory 加载，不提供远程下载或热加载。
 - Plugin auth callback、明文 credential 与 renewal 参数只在 `no-store` 请求内短暂存在；
   PostgreSQL 只存认证密文。未配置部署级主密钥时认证写入与已存在凭据读取 fail closed，
@@ -413,9 +411,9 @@ controller、storage、Plugin credential、canvas、comfyui、opencli-hub）由 
 10. strict JSON field、canonical UUID、canonical decimal、DTO discriminator 与 duplicate
    detection 在 Web boundary 拒绝不确定输入；error advice 不改领域事实，只映射 status、
    stable code、context 与 locale message。
-11. S3 是应用必配基础设施，启动时严格验证 properties 与 bucket 可访问性；ComfyUI
-    disabled 返回 503，enabled workflow 不存在返回 404，参数/selector/binding 错误返回
-    400。
+11. S3 是应用必配基础设施，启动时严格验证 properties 与 bucket 可访问性；Canvas
+    Function 目录与执行只暴露函数名、args schema 与冻结引用，未安装插件的函数不出现在
+    目录，非法 args 返回 400。
 
 ## 测试入口
 

@@ -10,13 +10,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfig;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionConfigCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionModel;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,7 +33,7 @@ import java.util.regex.Pattern;
 @Component
 public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunStateCodecPort {
 
-  public static final int VERSION = 2;
+  public static final int VERSION = 3;
   public static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
 
   private static final Pattern STAGE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
@@ -43,12 +44,13 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           "nodeId",
           "nodeName",
           "requestId",
-          "modelKey",
+          "functionName",
           "outputKind",
-          "config",
+          "args",
           "manifest",
           "outputName",
-          "targetResourceId");
+          "targetResourceId",
+          "submitState");
   private static final Set<String> REFERENCE_FIELDS =
       Set.of(
           "sourceNodeId",
@@ -64,14 +66,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           "durationMs");
 
   private final ObjectMapper mapper;
-  private final CanvasFunctionConfigCodecPort configCodec;
 
-  public CanvasFunctionRunStateCodec(
-      ObjectMapper objectMapper, CanvasFunctionConfigCodecPort configCodec) {
+  public CanvasFunctionRunStateCodec(ObjectMapper objectMapper) {
     mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
     mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     mapper.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    this.configCodec = Objects.requireNonNull(configCodec, "configCodec");
   }
 
   @Override
@@ -89,13 +88,9 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     plan.put("nodeId", run.nodeId().toString());
     plan.put("nodeName", run.nodeName());
     plan.put("requestId", run.requestId().toString());
-    plan.put("modelKey", run.model().key());
-    plan.put("outputKind", run.model().outputKind().name());
-    try {
-      plan.set("config", mapper.readTree(configCodec.encode(run.config())));
-    } catch (JsonProcessingException exception) {
-      throw new IllegalStateException("cannot encode Function config", exception);
-    }
+    plan.put("functionName", run.definition().name());
+    plan.put("outputKind", run.definition().outputKind().name());
+    plan.set("args", argsNode(run.args()));
     ArrayNode manifest = plan.putArray("manifest");
     for (CanvasFunctionFrozenReference reference : run.manifest()) {
       ObjectNode item = manifest.addObject();
@@ -113,6 +108,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     }
     plan.put("outputName", run.outputName());
     plan.put("targetResourceId", run.targetResourceId().toString());
+    plan.put("submitState", run.submitState().name());
     root.put("stage", run.stage());
     JsonNode adapterState = mapper.valueToTree(run.adapterState());
     if (!adapterState.isObject()) {
@@ -132,7 +128,8 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   }
 
   @Override
-  public CanvasFunctionFrozenRun decode(String json, CanvasFunctionModel model) {
+  public CanvasFunctionFrozenRun decode(String json, CanvasFunctionDefinition definition) {
+    Objects.requireNonNull(definition, "definition");
     try {
       ObjectNode root = object(mapper.readTree(json), "state");
       requireExactFields(root, ROOT_FIELDS, "state");
@@ -142,16 +139,20 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       }
       ObjectNode plan = object(required(root, "plan"), "state.plan");
       requireExactFields(plan, PLAN_FIELDS, "state.plan");
-      String modelKey = text(plan, "modelKey");
-      if (!model.key().equals(modelKey)) {
-        throw invalid("state modelKey does not match registry model");
+      String functionName = text(plan, "functionName");
+      if (!definition.name().equals(functionName)) {
+        throw invalid("state functionName does not match the registered function");
       }
       CanvasResourceKind outputKind = enumKind(text(plan, "outputKind"), "outputKind");
-      if (outputKind != model.outputKind()) {
-        throw invalid("state outputKind does not match registry model");
+      if (outputKind != definition.outputKind()) {
+        throw invalid("state outputKind does not match the registered function");
       }
+      // args 在 state 里是 JSON object（与 adapterState 一致），复用 Core 的严格解析与上限校验。
+      JsonObject args =
+          args(object(required(plan, "args"), "state.plan.args").toString(), "state.plan.args");
       String stage = text(root, "stage");
       validateStage(stage);
+      CanvasFunctionSubmitState submitState = submitState(text(plan, "submitState"));
       ObjectNode adapterStateNode = object(required(root, "adapterState"), "state.adapterState");
       if (mapper.writeValueAsBytes(adapterStateNode).length > MAX_ADAPTER_STATE_BYTES) {
         throw invalid("state.adapterState exceeds maximum size");
@@ -159,18 +160,17 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       Map<String, Object> adapterState =
           mapper.convertValue(
               adapterStateNode, new TypeReference<LinkedHashMap<String, Object>>() {});
-      String configJson = mapper.writeValueAsString(required(plan, "config"));
-      CanvasFunctionConfig config = configCodec.decode(configJson, model);
       return new CanvasFunctionFrozenRun(
           uuid(plan, "canvasId"),
           uuid(plan, "nodeId"),
           text(plan, "nodeName"),
           uuid(plan, "requestId"),
-          model,
-          config,
+          definition,
+          args,
           decodeManifest(required(plan, "manifest")),
           text(plan, "outputName"),
           uuid(plan, "targetResourceId"),
+          submitState,
           stage,
           adapterState);
     } catch (JsonProcessingException exception) {
@@ -191,32 +191,62 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   }
 
   @Override
-  public String modelKey(String json) {
+  public String functionName(String json) {
     try {
       ObjectNode root = object(mapper.readTree(json), "state");
       ObjectNode plan = object(required(root, "plan"), "state.plan");
-      return text(plan, "modelKey");
+      return text(plan, "functionName");
     } catch (JsonProcessingException exception) {
       throw invalid("FunctionRun stateJson must be valid typed JSON", exception);
     }
   }
 
   @Override
-  public CanvasFunctionFrozenRun checkpoint(
-      CanvasFunctionFrozenRun run, String stage, Map<String, Object> adapterState) {
+  public CanvasFunctionFrozenRun transition(
+      CanvasFunctionFrozenRun run,
+      CanvasFunctionSubmitState submitState,
+      String stage,
+      Map<String, Object> adapterState) {
+    Objects.requireNonNull(run, "run");
+    Objects.requireNonNull(submitState, "submitState");
     validateStage(stage);
     return new CanvasFunctionFrozenRun(
         run.canvasId(),
         run.nodeId(),
         run.nodeName(),
         run.requestId(),
-        run.model(),
-        run.config(),
+        run.definition(),
+        run.args(),
         run.manifest(),
         run.outputName(),
         run.targetResourceId(),
+        submitState,
         stage,
         adapterState);
+  }
+
+  private JsonNode argsNode(JsonObject args) {
+    try {
+      return mapper.readTree(args.write());
+    } catch (JsonProcessingException exception) {
+      throw new IllegalArgumentException("args must be JSON serializable", exception);
+    }
+  }
+
+  private JsonObject args(String json, String field) {
+    try {
+      return CanvasJson.parseObject(json);
+    } catch (IllegalArgumentException error) {
+      throw invalid(field + " must be a strict JSON object", error);
+    }
+  }
+
+  private static CanvasFunctionSubmitState submitState(String value) {
+    try {
+      return CanvasFunctionSubmitState.valueOf(value);
+    } catch (IllegalArgumentException exception) {
+      throw invalid("state.plan.submitState is invalid", exception);
+    }
   }
 
   private List<CanvasFunctionFrozenReference> decodeManifest(JsonNode value) {

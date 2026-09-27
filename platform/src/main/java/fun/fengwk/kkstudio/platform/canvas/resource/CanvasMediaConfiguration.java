@@ -9,6 +9,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasBlobReleaser;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionResourcePinRepository;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
@@ -46,6 +47,7 @@ public class CanvasMediaConfiguration {
       StorageUploadService uploadService,
       StorageBlobManager blobManager,
       CanvasStore canvasStore,
+      CanvasFunctionRunRepository runRepository,
       CanvasFunctionResourcePinRepository pinRepository,
       CanvasResourceRepository resourceRepository,
       TransactionTemplate transactionTemplate) {
@@ -53,6 +55,7 @@ public class CanvasMediaConfiguration {
         uploadService,
         blobManager,
         canvasStore,
+        runRepository,
         pinRepository,
         resourceRepository,
         transactionTemplate);

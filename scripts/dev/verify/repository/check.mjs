@@ -517,7 +517,7 @@ function checkRepositoryStructure() {
   }
 
   // plugins 只聚合构建期可选 Plugin；发行物包含哪些 Plugin 由 web 的 runtime dependency 决定。
-  const expectedPluginsModules = ['minimax-mavis']
+  const expectedPluginsModules = ['minimax-mavis', 'canvas-media', 'canvas-comfyui']
   const pluginsRoot = path.join(repositoryRoot, 'plugins')
   if (existsSync(pluginsRoot)) {
     const actualPluginsDirectories = readdirSync(pluginsRoot, { withFileTypes: true })

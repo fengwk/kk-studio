@@ -92,6 +92,36 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   }
 
   @Override
+  public boolean markUnknown(CanvasFunctionRun run, String leaseToken) {
+    requireStatus(run, CanvasFunctionRunStatus.UNKNOWN);
+    return runMapper.markUnknown(toData(run), leaseToken) == 1;
+  }
+
+  @Override
+  public boolean resumeUnknown(CanvasFunctionRun run) {
+    requireStatus(run, CanvasFunctionRunStatus.READY);
+    if (run.availableAt() == null) {
+      throw new IllegalArgumentException("resumed FunctionRun must declare availableAt");
+    }
+    return runMapper.resumeUnknown(
+            run.nodeId(),
+            run.requestId(),
+            run.stateJson(),
+            toOffsetDateTime(run.availableAt()),
+            toOffsetDateTime(run.updatedAt()))
+        == 1;
+  }
+
+  @Override
+  public boolean resolveUnknownTerminal(CanvasFunctionRun run) {
+    if (run.status() != CanvasFunctionRunStatus.FAILED
+        && run.status() != CanvasFunctionRunStatus.CANCELLED) {
+      throw new IllegalArgumentException("resolved FunctionRun must be FAILED or CANCELLED");
+    }
+    return runMapper.resolveUnknownTerminal(toData(run)) == 1;
+  }
+
+  @Override
   public boolean cancelActive(CanvasFunctionRun run) {
     requireStatus(run, CanvasFunctionRunStatus.CANCELLED);
     return runMapper.cancelActive(toData(run)) == 1;

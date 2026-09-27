@@ -41,7 +41,6 @@ dependency 决定，选中的 Plugin JAR 用 `AutoConfiguration.imports` 自行�
 | [storage](../../platform/src/main/java/fun/fengwk/kkstudio/platform/storage) | `StorageUploadServiceImpl`、`StorageBlobManager`、`S3StorageServiceImpl`、`StorageMaintenance`、`StorageObjectKeys` | Blob/upload 生命周期与对象存储 |
 | [environment](../../platform/src/main/java/fun/fengwk/kkstudio/platform/environment) | `EnvironmentDaemonGateway`、`EnvironmentRegistry`、`EnvironmentServerConfiguration` | Environment Card、Daemon 会话装配与宿主元数据保留 |
 | [canvas](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas) | `PlatformCanvasResourceLifecycle`、`CanvasBlobResourceMaterializer`、Canvas Function adapters | Canvas Resource 生命周期与 Function adapter |
-| [comfyui](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui) | `ComfyuiWorkflowApiServiceImpl`、`ComfyuiRuntimeService` | Workflow 卡片与无状态运行 |
 | [error](../../platform/src/main/java/fun/fengwk/kkstudio/platform/error)、[persistence](../../platform/src/main/java/fun/fengwk/kkstudio/platform/persistence) | `DomainErrorCode`、`PostgresqlIntegrityViolationClassifier` | 领域错误分类与 FK/唯一约束到领域错误的映射 |
 
 平台把 PostgreSQL 作为 Catalog、Chat、SystemSettings、Canvas graph、Harness durable
@@ -367,6 +366,23 @@ Platform 在 `fun.fengwk.kkstudio.platform.plugin.resource` 包中提供了开�
 `max-bytes`（默认 `256MiB`，硬上限 `1GiB`）以及临时目录 `temp-directory`（默认空）。在 Tool 执行面，除凭据缺失的
 `KEY_UNAVAILABLE` 外，资源相关失败统一收敛为插件资源不可用（如 Mavis 映射为 `MAVIS_RESOURCE_UNAVAILABLE`），
 作为确定性失败不自动重放。
+
+### Canvas Function Plugin
+
+Canvas Function 也以构建期 Plugin 发布，唯一扩展点是实现 `CanvasFunctionAdapter` 并在
+`AutoConfiguration.imports` 注册：
+
+- [`plugins/canvas-media`](../../plugins/canvas-media)：无模型的本地媒体函数 `image.crop`，
+  只使用 JDK `ImageIO` 与 `CanvasFunctionExecutionContext` 读写 Blob，不访问任何外部服务。
+- [`plugins/canvas-comfyui`](../../plugins/canvas-comfyui)：内置 ComfyUI workflow 模板与
+  `StandardComfyuiClient`，发布 `minimax-h3-ref2va`。`submit` 完成 Harness one-shot prompt、
+  媒体上传与 ComfyUI prompt 提交并把 `promptId` 写进 checkpoint；`execute` 只按
+  `promptId` 轮询 history、下载产物并物化 target。产品不提供独立 workflow CRUD、绑定表或
+  第二套运行 API，因此没有新增任务表。
+
+功能是否可用由 `enabled()`/`unavailableReason()` 决定（未配置 ComfyUI endpoint 时函数仍
+出现在目录里，但 `available=false` 并给出原因）；未安装对应 JAR 时函数完全不出现在目录，
+既有节点内容只读、无法启动新执行。
 
 ### MiniMax Mavis
 
@@ -916,9 +932,8 @@ Function adapter 只实现 `CanvasFunctionAdapter`：
 | adapter | 运行边界 |
 | --- | --- |
 | [FakeCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/fake/FakeCanvasFunctionAdapter.java) | 读取 classpath 的 tiny image/video fixture，仍通过真实 materializer，受 `fake-enabled` property 控制 |
-| [GptImage2CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/GptImage2CanvasFunctionAdapter.java) | OpenCLI Hub + `chatgpt-agent`，image reference 每项最多 20 MiB，checkpoint 覆盖 upload/submit/poll/materialize |
-| [SeedanceCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/SeedanceCanvasFunctionAdapter.java) | OpenCLI Hub，冻结 reference policy、上传和有界 polling，checkpoint 恢复同一 execution |
-| [MiniMaxH3CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/h3/MiniMaxH3CanvasFunctionAdapter.java) | Platform one-shot Harness prompt + Environment + ComfyUI，状态阶段覆盖 prompt、Comfy upload/submit/poll 和 Blob ingest |
+| [GptImage2CanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/GptImage2CanvasFunctionAdapter.java) | OpenCLI Hub + `chatgpt-agent`，image reference 每项最多 20 MiB；`submit` 上传引用并发起 Hub 执行，`execute` 只轮询既有 execution 并物化 target |
+| [SeedanceCanvasFunctionAdapter](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/SeedanceCanvasFunctionAdapter.java) | OpenCLI Hub，冻结 reference policy、上传和有界 polling；`submit` 记录外部 asset id，`execute` 只查询同一 asset |
 
 [PlatformCanvasFunctionBlobAccess](../../platform/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/PlatformCanvasFunctionBlobAccess.java)
 是 Function runtime 读取 Blob facts、打开 original stream 和获取 presign 的唯一 Platform
@@ -926,15 +941,12 @@ storage adapter；Canvas adapter 不直接拼 S3 key，也不直接管理 Canvas
 Function 扩展点是 `CanvasFunctionAdapter` + `CanvasFunctionCatalog`，Catalog 在启动装配
 时冻结能力快照。
 
-[ComfyuiWorkflowApiServiceImpl](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/workflow_api/service/impl/ComfyuiWorkflowApiServiceImpl.java)
-管理 `comfyui_workflow_api` 卡片；bindings parser 严格验证 workflow JSON、
-parameter/file binding、node/input 存在性、value type 和 blobId，只有 enabled workflow
-才能进入运行服务。[ComfyuiRuntimeService](../../platform/src/main/java/fun/fengwk/kkstudio/platform/comfyui/ComfyuiRuntimeService.java)
-是无状态 runtime：读取 enabled binding 并复制 Workflow、校验并按 JsonPath selector 写入
-参数、对 file binding 从全局 Storage 按 blobId 受
-`integrations.comfyui.maxInputFileBytes` 限制地读取后上传 ComfyUI、submit 后以 202 返回
-`runId == prompt/job id`、get/cancel/download 直接查询 ComfyUI job 且运行状态不落本地表。
-ComfyUI client 是否装配由启动时的 `SystemSettings.integrations.comfyui.enabled` 决定。
+外部模型与媒体能力不再由 Platform 自带：ComfyUI/H3 与本地媒体处理都随构建期 Plugin 发布，
+Platform 只保留 `fake`/`opencli` 两个参考 adapter 与 Function runtime 所需的
+`CanvasFunctionBlobAccess`。每个 adapter 只实现
+`CanvasFunctionAdapter`(`functions`/`enabled`/`unavailableReason`/`preflight`/`submit`/`execute`/`cancel`)：
+`submit` 负责一次外部提交并把恢复所需的任务身份写进 checkpoint，`execute` 只查询已提交的
+原任务并物化预分配 target，因此崩溃恢复永远不会重复提交。
 
 ## 关键流程
 
@@ -1047,7 +1059,6 @@ token 或 OpenCLI instance identity。
 | `kk-studio.plugins.refresh.{poll-delay,lease-duration}` | platform | Plugin credential refresh 扫描与互斥 lease，默认 `1h/2m` |
 | `kk-studio.plugins.resource.{connect-timeout,request-timeout,upload-timeout,max-bytes,temp-directory}` | platform | Plugin 资源端口受控下载与暂存边界；默认连接 `5s`、请求与读取整体期限 `30s`、PUT 直传超时 `5m`、单次暂存上限 `256MiB`（硬上限 `1GiB`）、临时目录留空为 `java.io.tmpdir` |
 | `kk-studio.canvas.resource.{ffprobe-binary,ffmpeg-binary,temp-dir}` | platform | 媒体处理本地路径 |
-| `kk-studio.comfyui.api-key` | platform | ComfyUI secret，非 SystemSettings |
 | `kk-studio.opencli-hub.instance-id` | platform | OpenCLI Hub 部署身份 |
 | `kk-studio.canvas.function.minimax-h3.comfy-bearer-token` | platform | H3 ComfyUI bearer secret；启用/路由/timeout 仍由 SystemSettings |
 | `kk-studio.canvas.function.runtime.*` | canvas-infra | Canvas Function 调度容量、lease、heartbeat 与 poll |
@@ -1084,7 +1095,7 @@ third-party/deployment boundary。Platform 对外只传 domain DTO、稳定错�
 | Model、Tool 执行 | [harness/model/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/)、[harness/tool/gateway/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/) | [`PlatformModelGatewayTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/model/PlatformModelGatewayTest.java)、[`ToolExecutionGatewayPreflightTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGatewayPreflightTest.java) |
 | turn 解析与 prompt 物化 | [harness/thread/command/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/)、[harness/task/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/)、[harness/read/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/read/) | [`DatabaseTurnResolverTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolverTest.java)、[`AgentPromptComposerTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/task/AgentPromptComposerTest.java) |
 | Environment | [environment/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/)、[environment/registry/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/) | [`EnvironmentRegistryTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistryTest.java)、[`EnvironmentServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImplTest.java) |
-| Canvas 与 ComfyUI 适配 | [canvas/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/)、[canvas/function/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/)、[comfyui/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/comfyui/) | [`PlatformCanvasResourceLifecycleTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycleTest.java)、[`ComfyuiRuntimeServiceTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/comfyui/ComfyuiRuntimeServiceTest.java) |
+| Canvas 与 Function 适配 | [canvas/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/)、[canvas/function/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/) | [`PlatformCanvasResourceLifecycleTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/resource/PlatformCanvasResourceLifecycleTest.java)、[`OpenCliCanvasFunctionAdaptersTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliCanvasFunctionAdaptersTest.java) |
 | Storage、Blob | [storage/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/)、[storage/service/impl/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/service/impl/) | [`StorageUploadServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadServiceIntegrationTest.java)、[`StorageUploadCleanupLeaseIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/storage/StorageUploadCleanupLeaseIntegrationTest.java) |
 | Settings | [settings/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/) | [`SystemSettingsServiceImplTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceImplTest.java)、[`SystemSettingsServiceIntegrationTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsServiceIntegrationTest.java) |
 | PostgreSQL schema | [harness/persistence/postgresql/](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/) | [`PostgresqlSchemaStructureTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlSchemaStructureTest.java)、[`PostgresqlBusinessSchemaTest.java`](../../platform/src/test/java/fun/fengwk/kkstudio/platform/harness/persistence/postgresql/PostgresqlBusinessSchemaTest.java) |

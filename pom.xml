@@ -193,6 +193,16 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-plugin-canvas-media</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-plugin-canvas-comfyui</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-web</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
