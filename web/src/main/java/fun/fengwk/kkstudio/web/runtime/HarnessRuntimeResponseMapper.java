@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -67,35 +66,32 @@ public final class HarnessRuntimeResponseMapper {
   private static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
   private static final ToolInvocationErrorJsonCodec TOOL_ERRORS =
       new ToolInvocationErrorJsonCodec();
-  private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
   private HarnessRuntimeResponseMapper() {}
 
   /**
    * 映射一个一致的 Thread 快照；DTO 列表为不可变副本。
    *
-   * @param pendingDelegatedWork 委派子树是否仍有未交付委派：异步 task 的父 Thread 在等待子结果时自身已静止，但对外必须仍然是处理中
+   * <p>对外状态完全来自 {@link ThreadSnapshot#runtimeStatus()}：web 层不再自行分类，也不注入任何委派/子树状态，因此 Thread API
+   * 的结果只取决于该 Thread 自己的 durable 事实。
    */
-  public static HarnessThreadDTO toThreadDto(
-      ThreadSnapshot snapshot, boolean pendingDelegatedWork) {
+  public static HarnessThreadDTO toThreadDto(ThreadSnapshot snapshot) {
     Objects.requireNonNull(snapshot, "snapshot");
     HarnessThreadDTO dto = new HarnessThreadDTO();
     dto.setThreadId(snapshot.thread().id().toString());
+    dto.setParentThreadId(
+        snapshot.thread().parentThreadId() == null
+            ? null
+            : snapshot.thread().parentThreadId().toString());
     dto.setName(snapshot.thread().name());
     dto.setSessionId(snapshot.entryPath().root().sessionId().toString());
     dto.setHeadEntryId(snapshot.thread().headEntryId().toString());
     dto.setYoloEnabled(snapshot.thread().yoloEnabled());
     dto.setNextCommandSequence(Long.toString(snapshot.thread().nextCommandSequence()));
     dto.setVersion(Long.toString(snapshot.thread().version()));
-    ThreadRuntimeStatus status =
-        ThreadRuntimeStatus.from(
-            CLASSIFIER.classify(
-                snapshot.thread(),
-                snapshot.entryPath(),
-                snapshot.model(),
-                snapshot.toolSiblings()));
+    ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
-    dto.setProcessing(status.isProcessing() || pendingDelegatedWork);
+    dto.setProcessing(status.isProcessing());
     dto.setBranchSettings(toBranchSettingsDto(snapshot.entryPath().baseSettings()));
     dto.setCreateTime(snapshot.thread().createdAt());
     dto.setUpdateTime(snapshot.thread().updatedAt());
@@ -214,14 +210,12 @@ public final class HarnessRuntimeResponseMapper {
   }
 
   public static HarnessThreadSnapshotDTO toSnapshotDto(
-      ThreadSnapshot snapshot,
-      ManualCompactionAvailability manualCompaction,
-      boolean pendingDelegatedWork) {
+      ThreadSnapshot snapshot, ManualCompactionAvailability manualCompaction) {
     Objects.requireNonNull(snapshot, "snapshot");
     Objects.requireNonNull(manualCompaction, "manualCompaction");
     HarnessThreadSnapshotDTO dto = new HarnessThreadSnapshotDTO();
     dto.setVersion(Long.toString(snapshot.thread().version()));
-    dto.setThread(toThreadDto(snapshot, pendingDelegatedWork));
+    dto.setThread(toThreadDto(snapshot));
     List<HarnessSessionEntryDTO> entries = new ArrayList<>(snapshot.entryPath().entries().size());
     for (Entry entry : snapshot.entryPath().entries()) {
       entries.add(toEntryDto(entry));
@@ -276,7 +270,7 @@ public final class HarnessRuntimeResponseMapper {
 
   /** 映射命令接受结果，并使用接受后重新读取的当前 Thread snapshot 投影 Thread。 */
   public static HarnessAcceptedCommandsDTO toAcceptedCommandsDto(
-      AcceptedCommands accepted, ThreadSnapshot currentSnapshot, boolean pendingDelegatedWork) {
+      AcceptedCommands accepted, ThreadSnapshot currentSnapshot) {
     Objects.requireNonNull(accepted, "accepted");
     Objects.requireNonNull(currentSnapshot, "currentSnapshot");
     if (!accepted.thread().id().equals(currentSnapshot.thread().id())) {
@@ -286,7 +280,7 @@ public final class HarnessRuntimeResponseMapper {
     HarnessAcceptedCommandsDTO dto = new HarnessAcceptedCommandsDTO();
     dto.setSession(toSessionDto(accepted.session()));
     dto.setRootEntry(toEntryDto(accepted.rootEntry()));
-    dto.setThread(toThreadDto(currentSnapshot, pendingDelegatedWork));
+    dto.setThread(toThreadDto(currentSnapshot));
     List<HarnessThreadCommandDTO> commands = new ArrayList<>(accepted.acceptedCommands().size());
     for (ThreadCommand command : accepted.acceptedCommands()) {
       commands.add(toCommandDto(command));
@@ -298,14 +292,14 @@ public final class HarnessRuntimeResponseMapper {
 
   /** 映射手动压缩的提交结果，并使用提交后重新读取的当前 Thread snapshot 投影 Thread。 */
   public static HarnessThreadCompactResultDTO toCompactResultDto(
-      CompactThreadResult result, ThreadSnapshot currentSnapshot, boolean pendingDelegatedWork) {
+      CompactThreadResult result, ThreadSnapshot currentSnapshot) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(currentSnapshot, "currentSnapshot");
     if (!result.thread().id().equals(currentSnapshot.thread().id())) {
       throw new IllegalArgumentException("compact result and current snapshot thread do not match");
     }
     HarnessThreadCompactResultDTO dto = new HarnessThreadCompactResultDTO();
-    dto.setThread(toThreadDto(currentSnapshot, pendingDelegatedWork));
+    dto.setThread(toThreadDto(currentSnapshot));
     dto.setTurnStartEntryId(result.turnStartEntryId().toString());
     dto.setModelInvocationId(
         result.modelInvocationId() == null ? null : result.modelInvocationId().toString());
@@ -314,7 +308,7 @@ public final class HarnessRuntimeResponseMapper {
 
   /** 映射一次 Stop 结果及权威的 stop 后快照。 */
   public static HarnessThreadStopResultDTO toStopResultDto(
-      StopResult result, ThreadSnapshot postStopSnapshot, boolean pendingDelegatedWork) {
+      StopResult result, ThreadSnapshot postStopSnapshot) {
     Objects.requireNonNull(result, "result");
     Objects.requireNonNull(postStopSnapshot, "postStopSnapshot");
     if (!result.thread().id().equals(postStopSnapshot.thread().id())
@@ -326,7 +320,7 @@ public final class HarnessRuntimeResponseMapper {
         result.replayed()
             ? "REPLAYED"
             : result.stoppedTurnEndEntryId() == null ? "IDLE" : "STOPPED");
-    dto.setThread(toThreadDto(postStopSnapshot, pendingDelegatedWork));
+    dto.setThread(toThreadDto(postStopSnapshot));
     dto.setStoppedTurnEndEntryId(
         result.stoppedTurnEndEntryId() == null ? null : result.stoppedTurnEndEntryId().toString());
     dto.setCancelledCommandCount(result.cancelledCommandCount());

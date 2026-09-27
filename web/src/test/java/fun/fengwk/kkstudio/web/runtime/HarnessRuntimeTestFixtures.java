@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLifecycleStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -101,19 +102,46 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ThreadState thread(UUID headEntryId) {
-    return new ThreadState(
-        id(1), id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
+    return thread(id(1), headEntryId);
   }
 
   public static ThreadState thread(UUID id, UUID headEntryId) {
+    return thread(id, null, ThreadLifecycleStatus.IDLE, headEntryId);
+  }
+
+  /** 显式指定不可变执行父关系与递归生命周期状态的 Thread（根 Thread 传 null 父）。 */
+  public static ThreadState thread(
+      UUID id, UUID parentThreadId, ThreadLifecycleStatus status, UUID headEntryId) {
     return new ThreadState(
-        id, id(1), headEntryId, CREATION_REQUEST_HASH, "thread", true, 4, 3, NOW, NOW);
+        id,
+        id(1),
+        parentThreadId,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "thread",
+        true,
+        status,
+        4,
+        3,
+        NOW,
+        NOW);
   }
 
   /** rename 后的 Thread state：name 替换为 "new thread name"、version 由 3 精确递增到 4。 */
   public static ThreadState renamedThread(UUID id) {
     return new ThreadState(
-        id, id(1), id(1), CREATION_REQUEST_HASH, "new thread name", true, 4, 4, NOW, NOW);
+        id,
+        id(1),
+        null,
+        id(1),
+        CREATION_REQUEST_HASH,
+        "new thread name",
+        true,
+        ThreadLifecycleStatus.IDLE,
+        4,
+        4,
+        NOW,
+        NOW);
   }
 
   public static Session session() {
@@ -136,6 +164,33 @@ public final class HarnessRuntimeTestFixtures {
   public static ThreadSnapshot idleSnapshot(UUID threadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(thread(threadId, id(1)), path, List.of(), null, List.of(), List.of());
+  }
+
+  /**
+   * 本地已静止但仍有活跃直接孩子的父 Thread 快照：durable 生命周期为 {@link ThreadLifecycleStatus#WAITING_CHILDREN}， 对外必须是
+   * WAITING_CHILDREN 且 processing，而不是伪装成 IDLE。
+   */
+  public static ThreadSnapshot waitingChildrenSnapshot(UUID parentThreadId) {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(
+        thread(id(1), parentThreadId, ThreadLifecycleStatus.WAITING_CHILDREN, id(1)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of());
+  }
+
+  /** 已有接受但尚未被消费的命令、因此尚未开始执行的 Thread 快照：durable 生命周期为 ACTIVE。 */
+  public static ThreadSnapshot queuedSnapshot() {
+    EntryPath path = new EntryPath(List.of(rootEntry()));
+    return new ThreadSnapshot(
+        thread(id(1), null, ThreadLifecycleStatus.ACTIVE, id(1)),
+        path,
+        List.of(queuedUserMessageCommand()),
+        null,
+        List.of(),
+        List.of());
   }
 
   /** CONTINUATION_DUE 快照：ROOT -> TURN_START -> USER -> ASSISTANT -> continueModel TURN_END。 */
