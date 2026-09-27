@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
@@ -83,22 +82,18 @@ class IssueHarnessController {
   private final ProjectHarnessSessionBootstrapService bootstrapService;
   private final HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator;
   private final ObjectProvider<HarnessRuntime> harnessRuntimes;
-  private final SubagentTaskActivity subagentTaskActivity;
 
   IssueHarnessController(
       IssueAgentSessionRepository issueAgentSessionRepository,
       ProjectHarnessSessionBootstrapService bootstrapService,
       HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
-      ObjectProvider<HarnessRuntime> harnessRuntimes,
-      SubagentTaskActivity subagentTaskActivity) {
+      ObjectProvider<HarnessRuntime> harnessRuntimes) {
     this.issueAgentSessionRepository =
         Objects.requireNonNull(issueAgentSessionRepository, "issueAgentSessionRepository");
     this.bootstrapService = Objects.requireNonNull(bootstrapService, "bootstrapService");
     this.acceptanceOrchestrator =
         Objects.requireNonNull(acceptanceOrchestrator, "acceptanceOrchestrator");
     this.harnessRuntimes = Objects.requireNonNull(harnessRuntimes, "harnessRuntimes");
-    this.subagentTaskActivity =
-        Objects.requireNonNull(subagentTaskActivity, "subagentTaskActivity");
   }
 
   void bootstrap(Project project, Issue issue, IssueRun run) {
@@ -469,8 +464,7 @@ class IssueHarnessController {
     ThreadContext context =
         CONTEXT_CLASSIFIER.classify(
             snapshot.thread(), snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
-    return ThreadRuntimeStatus.from(context).isProcessing()
-        || subagentTaskActivity.hasPendingDelegatedWork(snapshot.thread().id());
+    return ThreadRuntimeStatus.from(context).isProcessing() || !snapshot.thread().status().isIdle();
   }
 
   private void bestEffortStop(UUID sessionId) {

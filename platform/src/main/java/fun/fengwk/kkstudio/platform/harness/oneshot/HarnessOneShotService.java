@@ -15,12 +15,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -60,7 +56,7 @@ public final class HarnessOneShotService {
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
   }
 
-  public UUID submit(String agentName, String systemMessage, AgentMessage userMessage) {
+  public OneShotTicket submit(String agentName, String systemMessage, AgentMessage userMessage) {
     return submit(agentName, systemMessage, userMessage, AcceptancePreflight.IDENTITY);
   }
 
@@ -70,7 +66,7 @@ public final class HarnessOneShotService {
    * idempotencyKey/requestHash 不变。CUSTOM_MESSAGE 请求 hash 只基于 durable 形态计算，因此 USER 消息在提交时不得携带 瞬时
    * media/attachment 内容。
    */
-  public UUID submit(
+  public OneShotTicket submit(
       String agentName,
       String systemMessage,
       AgentMessage userMessage,
@@ -87,14 +83,26 @@ public final class HarnessOneShotService {
     NewThreadCommand command =
         new NewThreadCommand(
             payload, UUID.randomUUID(), ThreadCommandPayloadJsonCodec.requestHash(payload));
+    UUID threadId = UUID.randomUUID();
+    OneShotTicket ticket = OneShotTicket.forThread(threadId);
     AcceptedCommands accepted =
-        runtime.acceptCommands(
+        runtime.acceptCommandsAndJoin(
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.NewSession(
-                    UUID.randomUUID(), UUID.randomUUID(), settings, null, false),
+                    UUID.randomUUID(), threadId, settings, null, false),
                 List.of(command)),
+            new ThreadJoinRequest(
+                ticket.invocationId(),
+                null,
+                null,
+                command.requestHash(),
+                agentName,
+                null,
+                1,
+                1,
+                Integer.MAX_VALUE),
             preflight);
-    return accepted.thread().id();
+    return ticket;
   }
 
   /**
@@ -111,8 +119,9 @@ public final class HarnessOneShotService {
     return new AgentMessage(AgentMessageRole.USER, contents);
   }
 
-  public String await(UUID threadId, Duration timeout, BooleanSupplier continueWaiting) {
-    Objects.requireNonNull(threadId, "threadId");
+  public String await(OneShotTicket ticket, Duration timeout, BooleanSupplier continueWaiting) {
+    Objects.requireNonNull(ticket, "ticket");
+    UUID threadId = ticket.threadId();
     Duration boundedTimeout = requirePositive(timeout, "timeout");
     Objects.requireNonNull(continueWaiting, "continueWaiting");
     long timeoutNanos = boundedTimeout.toNanos();
@@ -135,8 +144,11 @@ public final class HarnessOneShotService {
         first = false;
         if (versionWake) {
           // 终态优先：订阅后的首次权威读取与 version/resync 唤醒后都先检查 terminal，再判 timeout。
-          ThreadSnapshot snapshot = runtime.getThreadSnapshot(threadId);
-          String result = terminalText(snapshot);
+          String result =
+              runtime
+                  .projectJoinReceipt(ticket.invocationId())
+                  .map(HarnessOneShotService::terminalText)
+                  .orElse(null);
           if (result != null) {
             return result;
           }
@@ -164,64 +176,16 @@ public final class HarnessOneShotService {
     stop(requireRuntime(), threadId);
   }
 
-  private static String terminalText(ThreadSnapshot snapshot) {
-    if (!snapshot.queuedCommands().isEmpty()
-        || snapshot.model() != null
-        || !snapshot.toolSiblings().isEmpty()
-        || !(snapshot.entryPath().head().payload() instanceof TurnEndPayload end)
-        || end.continueModel()) {
-      return null;
-    }
-    if (end.outcome() != TurnEndOutcome.COMPLETED) {
+  private static String terminalText(ThreadJoinReceipt receipt) {
+    if (receipt.outcome() != ThreadJoinReceipt.Outcome.COMPLETED) {
       throw new IllegalStateException(
-          "one-shot Harness execution ended with " + end.outcome() + ": " + lastFailure(snapshot));
+          "one-shot Harness execution ended with " + receipt.outcome() + ": " + receipt.error());
     }
-    String text = lastAssistantText(snapshot);
+    String text = receipt.report();
     if (text == null || text.isBlank()) {
       throw new IllegalStateException("one-shot Harness execution returned no Assistant text");
     }
-    return text;
-  }
-
-  private static String lastAssistantText(ThreadSnapshot snapshot) {
-    String result = null;
-    for (Entry entry : snapshot.entryPath().entries()) {
-      if (entry.payload() instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.ASSISTANT) {
-        List<String> parts = new ArrayList<>();
-        for (AgentMessageContent content : message.message().contents()) {
-          if (content instanceof TextMessageContent text) {
-            parts.add(text.text());
-          }
-        }
-        String candidate = String.join("", parts).trim();
-        if (!candidate.isBlank()) {
-          result = candidate;
-        }
-      }
-    }
-    return result;
-  }
-
-  private static String lastFailure(ThreadSnapshot snapshot) {
-    String result = snapshot.entryPath().head().payload().type().name();
-    for (Entry entry : snapshot.entryPath().entries()) {
-      if (entry.payload() instanceof AssistantErrorPayload error) {
-        result = error.error().message();
-      } else if (entry.payload() instanceof AssistantAbortedPayload aborted) {
-        String text =
-            aborted.message().contents().stream()
-                .filter(TextMessageContent.class::isInstance)
-                .map(TextMessageContent.class::cast)
-                .map(TextMessageContent::text)
-                .reduce("", String::concat)
-                .trim();
-        if (!text.isBlank()) {
-          result = text;
-        }
-      }
-    }
-    return result;
+    return text.trim();
   }
 
   private static void stop(HarnessRuntime runtime, UUID threadId) {

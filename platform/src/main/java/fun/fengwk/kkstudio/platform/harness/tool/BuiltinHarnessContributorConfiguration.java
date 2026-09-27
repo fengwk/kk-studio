@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -15,13 +14,8 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.harness.configuration.SubagentTaskProperties;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskActivity;
 import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskRunner;
-import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskSettlementScanner;
-import fun.fengwk.kkstudio.platform.harness.task.repo.SubagentTaskRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -32,11 +26,9 @@ import java.time.Duration;
  *
  * <p>核心内置装配为无条件装配（不使用 {@code @ConditionalOnBean}），确保缺失必要依赖时在启动期明确失败， 而不会静默降级并丢失最小功能集。
  *
- * <p>异步 task 的 {@link SubagentTaskRunner} 只做持久接受，{@link SubagentTaskSettlementScanner}
- * 负责未结清结果的后台交付与停止传播；两者都不持有阻塞等待线程，并发额度来自持久 未结清记录。
+ * <p>异步 task 的 {@link SubagentTaskRunner} 只负责校验并调用 Runtime 的原子接受；匹配与交付由 Runtime 负责。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(SubagentTaskProperties.class)
 public class BuiltinHarnessContributorConfiguration {
 
   @Bean
@@ -58,7 +50,7 @@ public class BuiltinHarnessContributorConfiguration {
           aiRuntime.subagentMaxDepth(),
           aiRuntime.subagentMaxConcurrency(),
           aiRuntime.subagentMaxTotalConcurrency(),
-          Duration.ofMillis(aiRuntime.subagentIdleTimeoutMillis()),
+          Duration.ZERO,
           aiRuntime.subagentMaxTurns());
     };
   }
@@ -68,39 +60,9 @@ public class BuiltinHarnessContributorConfiguration {
   public SubagentRunner subagentRunner(
       ObjectProvider<HarnessRuntime> runtimeProvider,
       AgentBranchSettingsMaterializer settingsMaterializer,
-      SubagentConfigProvider subagentConfigProvider,
-      SubagentTaskRepository subagentTaskRepository) {
+      SubagentConfigProvider subagentConfigProvider) {
     return new SubagentTaskRunner(
-        runtimeProvider::getIfAvailable,
-        settingsMaterializer,
-        subagentConfigProvider,
-        subagentTaskRepository);
-  }
-
-  @Bean
-  @ConditionalOnMissingBean
-  public SubagentTaskActivity subagentTaskActivity(
-      ObjectProvider<HarnessRuntime> runtimeProvider,
-      SubagentTaskRepository subagentTaskRepository) {
-    return new SubagentTaskActivity(subagentTaskRepository, runtimeProvider::getIfAvailable);
-  }
-
-  @Bean
-  @ConditionalOnMissingBean
-  public SubagentTaskSettlementScanner subagentTaskSettlementScanner(
-      ObjectProvider<HarnessRuntime> runtimeProvider,
-      HarnessStore harnessStore,
-      SubagentTaskRepository subagentTaskRepository,
-      SubagentTaskActivity subagentTaskActivity,
-      SubagentConfigProvider subagentConfigProvider,
-      SubagentTaskProperties subagentTaskProperties) {
-    return new SubagentTaskSettlementScanner(
-        runtimeProvider::getIfAvailable,
-        harnessStore,
-        subagentTaskRepository,
-        subagentTaskActivity,
-        subagentConfigProvider,
-        subagentTaskProperties);
+        runtimeProvider::getIfAvailable, settingsMaterializer, subagentConfigProvider);
   }
 
   @Bean
