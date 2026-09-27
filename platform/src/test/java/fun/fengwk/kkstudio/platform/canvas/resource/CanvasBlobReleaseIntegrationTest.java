@@ -25,8 +25,8 @@ import java.util.UUID;
  * Platform 装配的 Canvas → 全局 Storage Blob 引用释放契约。
  *
  * <p>生产上下文里的 {@code CanvasBlobReleaser} 适配真实 {@code StorageBlobManager}：Resource 行删除与 Blob
- * 引用减一必须落在同一个 Canvas 事务里，引用归零时 Blob 只切换为 DELETING（对象字节留给 Storage 维护）。Release 无法完成时必须抛出并使整个
- * Canvas 事务回滚，而不是留下已删除资源却仍被引用的 Blob。
+ * 引用减一必须落在同一个 Canvas 事务里，引用归零时 Blob 只切换为 DELETING（对象字节留给 Storage 维护）。Release 无法完成时必须抛出并使整个 Canvas
+ * 事务回滚，而不是留下已删除资源却仍被引用的 Blob。
  *
  * <p>后台维护被替换为 mock，使「释放只切换 DELETING」与「释放失败回滚」的断言不受并发 DELETING 行清扫影响；对象与行的真实回收不在本契约内。
  */

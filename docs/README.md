@@ -50,6 +50,7 @@
 | [Canvas Core](modules/canvas-core.md) | Graph 聚合、typed command、版本和 Function ports 如何定义？ |
 | [Canvas Infra](modules/canvas-infra.md) | Graph 如何持久化，Function run 如何 claim、heartbeat 和终结？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
+| [Project](modules/project.md) | 工作流状态、Issue 阶段预算与 Agent Thread 身份如何校验？ |
 | [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
 
 ### 应用边界
