@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.environment;
 
 import jakarta.websocket.Session;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -45,7 +46,7 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   public EnvironmentDaemonWebSocketHandler(
       DaemonEndpoint endpoint,
       EnvironmentDaemonTransportProperties transportProperties,
-      ScheduledThreadPoolExecutor deadlineTimer) {
+      @Qualifier("environmentDaemonSendDeadlineTimer") ScheduledThreadPoolExecutor deadlineTimer) {
     this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
     this.deadlineTimer = Objects.requireNonNull(deadlineTimer, "deadlineTimer");
     this.maxMessageBytes =
