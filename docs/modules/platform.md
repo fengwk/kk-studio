@@ -840,6 +840,15 @@ cache control、planning error，以及可空的活动 `FROZEN_INVOCATION` canon
 该查询不检查 branch HEAD、不发布 Package、不触发 Daemon sync，也不回显 credential 或
 Base64 正文。
 
+发送前 `POST /api/harness/threads/{threadId}/provider-request-preview` 使用相同的
+`TurnPlanBuilder`、`DatabaseTurnResolver.planLive`、`ModelRequestMaterializer`、
+`DatabaseProviderResolutionService.resolve` 与协议编码器，在内存中构造末尾 USER_MESSAGE
+的候选历史并返回最终有效请求体。授权复用发送的 owner 归属校验；附件与 RESOURCE 复用
+消息内容转换，但 READY upload 只读查询，绝不消费或增加 Session ref。仅允许空闲、
+无排队且 head/sequence 与客户端游标一致的 Chat/Canvas Thread；下一步为自动压缩时
+明确拒绝精确预览。请求体可包含 Base64 媒体，按最终 wire body 原样返回；无凭据、
+认证 Header、网络传输或 durable 写入。结果是点击时快照，不保证之后发送保持相同。
+
 [AgentBranchSettingsMaterializer](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/task/AgentBranchSettingsMaterializer.java)
 为普通 root 按最新 Agent/Model catalog 物化 `agentName` 与 model，并固定
 `environmentName=null`；为新建或恢复的 subagent 额外读取被调用 Agent 的

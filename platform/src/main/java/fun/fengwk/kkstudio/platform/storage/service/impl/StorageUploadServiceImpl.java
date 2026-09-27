@@ -387,6 +387,22 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   }
 
   @Override
+  public ReadyUpload peekReady(UUID uploadId) {
+    Objects.requireNonNull(uploadId, "uploadId must not be null");
+    // 只读：不起事务、不加行锁、不推进任何 lifecycle marker；最终消费仍由 lockReady 独占。
+    StorageUpload upload = uploadRepository.getById(uploadId);
+    if (upload == null) {
+      throw new StorageResourceNotFoundException("upload", uploadId.toString());
+    }
+    if (upload.getBlobId() == null) {
+      throw new StorageVerificationException(
+          "upload " + uploadId + " is PENDING; complete it before previewing");
+    }
+    requireCleanupAvailable(upload);
+    return new ReadyUpload(upload.getBlobId(), upload.getFilename());
+  }
+
+  @Override
   public int expireOnce() {
     String cleanupToken = UUID.randomUUID().toString();
     Instant now = clock.instant();

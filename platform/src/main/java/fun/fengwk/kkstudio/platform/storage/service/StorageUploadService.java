@@ -63,6 +63,18 @@ public interface StorageUploadService {
    */
   ReadyUpload lockReady(UUID uploadId);
 
+  /**
+   * 只读查看 READY 上传的权威事实（blobId 与权威文件名）：不加行锁、不标记 cleanup、不 release、不产生任何写入，也不需要活动事务。
+   *
+   * <p>与 {@link #lockReady} 共用同一份 READY 可消费判定（PENDING / 过期 / 已请求 cleanup / 已被 claim 一律拒绝），供「点击时快照」
+   * 类只读预览使用；调用方绝不能据此获得 owner 权限——真正的消费仍必须走 {@link #lockReady}。
+   *
+   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException 上传不存在
+   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException 上传仍为
+   *     PENDING、已过期、 已请求 cleanup 或已被 claim
+   */
+  ReadyUpload peekReady(UUID uploadId);
+
   /** READY 上传的权威消费事实。 */
   record ReadyUpload(UUID blobId, String filename) {}
 

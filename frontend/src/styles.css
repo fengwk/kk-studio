@@ -2253,6 +2253,13 @@ div.is-error {
   margin-top: 4px;
 }
 
+.thread-debug-meta-item {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .thread-debug-meta-label {
   font-weight: 600;
 }
@@ -3903,6 +3910,49 @@ div.is-error {
 .composer-toast-dismiss svg {
   width: 14px;
   height: 14px;
+}
+
+.thread-dock-preview {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  color: var(--fg-muted);
+  background: transparent;
+}
+
+.thread-dock-preview:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thread-dock-preview:hover:not(:disabled) {
+  color: var(--fg);
+  background: var(--surface-active);
+  border-color: var(--border-hover, var(--border));
+}
+
+.thread-dock-preview svg {
+  width: 14px;
+  height: 14px;
+}
+
+.thread-dock-preview .preview-icon.spin {
+  animation: thread-preview-spin 700ms linear infinite;
+}
+
+@keyframes thread-preview-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .thread-dock-send {
@@ -6495,8 +6545,16 @@ select.settings-input option {
   padding: 0 8px;
 }
 
-.chat-layout-selector .ui-select-menu {
-  min-width: max(100%, 80px);
+.ui-select.chat-layout-selector.is-compact .ui-select-menu {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  max-height: min(290px, calc(100dvh - 48px));
+}
+
+.ui-select.chat-layout-selector.is-compact .ui-select-option {
+  min-height: 28px;
+  padding: 0 8px;
 }
 
 /*

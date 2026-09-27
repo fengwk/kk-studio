@@ -169,6 +169,14 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                 "cannot create ModelProvider for " + providerName + ": null provider");
           }
           return modelProvider;
+        },
+        // 请求体预览与 openProvider 共用同一 adapter 与同一 descriptor 语义；未实现预览的 adapter 原样抛出
+        // UnsupportedOperationException，由调用方显式拒绝。
+        bodyRequest -> {
+          ProviderDescriptor descriptor =
+              new ProviderDescriptor(
+                  providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
+          return adapter.encodeRequestBody(bodyRequest, descriptor);
         });
   }
 

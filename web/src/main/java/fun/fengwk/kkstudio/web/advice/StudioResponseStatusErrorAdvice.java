@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessCommandBatchController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessProviderRequestPreviewController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
 import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
@@ -35,6 +36,7 @@ import java.util.Map;
       StudioChatController.class,
       StudioCanvasFunctionController.class,
       StudioHarnessCommandBatchController.class,
+      StudioHarnessProviderRequestPreviewController.class,
       StudioHarnessSessionController.class,
       StudioHarnessThreadController.class,
       StudioInteractionController.class

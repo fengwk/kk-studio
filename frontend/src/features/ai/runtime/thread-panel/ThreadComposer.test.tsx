@@ -407,4 +407,143 @@ describe('ThreadComposer and commands', () => {
     expect(screen.getByRole('searchbox', { name: '搜索模型' })).toHaveFocus()
     expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()
   })
+
+  describe('ThreadComposer Request Preview', () => {
+    it('does not render preview button when onPreview is not passed', () => {
+      render(
+        <ThreadComposer
+          parts={[createTextPart('hello')]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+        />,
+      )
+      expect(screen.queryByRole('button', { name: '预览请求' })).not.toBeInTheDocument()
+    })
+
+    it('renders preview button beside send when onPreview is passed', () => {
+      render(
+        <ThreadComposer
+          parts={[createTextPart('hello')]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '预览请求' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '发送消息' })).toBeInTheDocument()
+    })
+
+    it('disables preview button when draft is empty, in slash mode, or goal active', () => {
+      const { rerender } = render(
+        <ThreadComposer
+          parts={[]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '预览请求' })).toBeDisabled()
+
+      // slash mode
+      rerender(
+        <ThreadComposer
+          parts={[createTextPart('/models')]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '预览请求' })).toBeDisabled()
+
+      // slash goal active
+      rerender(
+        <ThreadComposer
+          parts={[createTextPart('/goal Ship feature')]}
+          pending={false}
+          disabled={false}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '预览请求' })).toBeDisabled()
+
+      // previewDisabled or previewLoading
+      rerender(
+        <ThreadComposer
+          parts={[createTextPart('ready')]}
+          pending={false}
+          disabled={false}
+          previewDisabled={true}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '预览请求' })).toBeDisabled()
+
+      rerender(
+        <ThreadComposer
+          parts={[createTextPart('ready')]}
+          pending={false}
+          disabled={false}
+          previewLoading={true}
+          onPartsChange={vi.fn()}
+          onSubmit={vi.fn()}
+          onCommand={vi.fn()}
+          onPreview={vi.fn()}
+        />,
+      )
+      expect(screen.getByRole('button', { name: '正在生成请求预览…' })).toBeDisabled()
+    })
+
+    it('calls onPreview with resolved draft and preserves draft without committing', async () => {
+      const user = userEvent.setup()
+      const onPreview = vi.fn()
+      const onSubmit = vi.fn()
+      const onPartsChange = vi.fn()
+      const parts = [
+        createTextPart('inspect message please'),
+      ]
+
+      render(
+        <ThreadComposer
+          parts={parts}
+          pending={false}
+          disabled={false}
+          onPartsChange={onPartsChange}
+          onSubmit={onSubmit}
+          onCommand={vi.fn()}
+          onPreview={onPreview}
+        />,
+      )
+
+      const previewBtn = screen.getByRole('button', { name: '预览请求' })
+      expect(previewBtn).not.toBeDisabled()
+      await user.click(previewBtn)
+
+      expect(onPreview).toHaveBeenCalledTimes(1)
+      expect(onSubmit).not.toHaveBeenCalled()
+      expect(onPartsChange).not.toHaveBeenCalled()
+      expect(onPreview.mock.calls[0][0]).toHaveLength(1)
+      expect(onPreview.mock.calls[0][0][0]).toMatchObject({
+        type: 'text',
+        text: 'inspect message please',
+      })
+    })
+  })
 })

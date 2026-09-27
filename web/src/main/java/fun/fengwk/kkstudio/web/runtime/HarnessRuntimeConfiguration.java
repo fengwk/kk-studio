@@ -44,9 +44,12 @@ import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrches
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
+import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
+import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.resource.StoragePluginResourceGateway;
@@ -338,6 +341,33 @@ public class HarnessRuntimeConfiguration {
   public ModelRequestDebugService modelRequestDebugService(
       HarnessRuntime runtime, DatabaseTurnResolver turnResolver, Clock clock) {
     return new ModelRequestDebugService(runtime, turnResolver, clock);
+  }
+
+  /**
+   * 发送前请求预览：与正式发送共用同一 candidate 规划、resolver、materializer、Provider 解析与协议编码，因此同样只在完整 Runtime
+   * 装配后创建；压缩判定复用 ThreadProcessor 的同一 {@link ThreadProcessorConfig#compactionProvider()}。
+   */
+  @Bean
+  public ProviderRequestPreviewService providerRequestPreviewService(
+      HarnessRuntime runtime,
+      HarnessCommandAcceptanceOrchestrator acceptanceOrchestrator,
+      DatabaseTurnResolver turnResolver,
+      DatabaseProviderResolutionService providerResolution,
+      ThreadProcessorConfig threadProcessorConfig,
+      SessionBlobRefManager sessionBlobRefManager,
+      StorageBlobManager storageBlobManager,
+      StorageUploadService storageUploadService,
+      Clock clock) {
+    return new ProviderRequestPreviewService(
+        runtime,
+        acceptanceOrchestrator,
+        turnResolver,
+        providerResolution,
+        threadProcessorConfig.compactionProvider(),
+        sessionBlobRefManager,
+        storageBlobManager,
+        storageUploadService,
+        clock);
   }
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */
