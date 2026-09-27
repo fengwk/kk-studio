@@ -25,7 +25,7 @@ import java.util.function.Consumer;
  * 线程派发出去。
  *
  * <p>{@link #close()} 幂等地清空未发送帧并禁止后续入队；外部 {@code sendMessage}/{@code close} 调用都不持有 sender
- * 状态锁。已经进入底层阻塞调用的单帧由 session close/线程中断终止，后续帧绝不会继续发送。
+ * 状态锁。已获发送许可的在途帧可以与 close 并发进入底层调用，由 session close/线程中断终止； 围栏后的排队帧及新入队帧绝不会开始发送。
  */
 final class DaemonOutboundSender implements AutoCloseable {
 
@@ -166,12 +166,11 @@ final class DaemonOutboundSender implements AutoCloseable {
               deadlineTimer.schedule(
                   () -> onDeadline(frame), sendTimeoutMillis, TimeUnit.MILLISECONDS);
         }
-        if (isClosed()) {
-          return;
-        }
         if (!session.isOpen()) {
           throw new IllegalStateException("daemon WebSocket session is closed");
         }
+        // isOpen 是外部调用，期间 close 可以建立围栏；再次检查后才允许在途帧开始 send。
+        // 最后检查与实际 send 之间仍允许 close 并发，无法原子化外部阻塞调用。
         if (isClosed()) {
           return;
         }
@@ -297,16 +296,16 @@ final class DaemonOutboundSender implements AutoCloseable {
   }
 
   private void requestTransportClose(CloseStatus status) {
-    Thread.startVirtualThread(() -> closeTransport(status));
-  }
-
-  private void closeTransport(CloseStatus status) {
     synchronized (lock) {
       if (transportClosed) {
         return;
       }
       transportClosed = true;
     }
+    Thread.startVirtualThread(() -> closeTransport(status));
+  }
+
+  private void closeTransport(CloseStatus status) {
     try {
       session.close(status);
     } catch (IOException ignored) {

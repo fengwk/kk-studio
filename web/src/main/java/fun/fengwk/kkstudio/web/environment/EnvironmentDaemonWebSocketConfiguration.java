@@ -48,6 +48,7 @@ public class EnvironmentDaemonWebSocketConfiguration implements WebSocketConfigu
               return thread;
             });
     timer.setRemoveOnCancelPolicy(true);
+    timer.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
     return timer;
   }
 
