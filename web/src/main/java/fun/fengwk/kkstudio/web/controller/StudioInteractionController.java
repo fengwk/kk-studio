@@ -26,8 +26,8 @@ import java.util.Objects;
 /**
  * 统一人工交互 API：一个入口同时覆盖 Chat 与 Issue+Agent 的问卷回答。
  *
- * <p>客户端不需要预先知道 Interaction 属于哪种产品 owner：只提交 {@code interactionId} 与 {@code threadId}，由 platform 交互服务
- * 解析产品归属、按产品锁序串行化后再写入 Harness。操作者身份只来自服务端认证上下文，请求体永远不能指定 actor。
+ * <p>客户端不需要预先知道 Interaction 属于哪种产品 owner：只提交 {@code interactionId} 与 {@code threadId}，由 platform
+ * 交互服务 解析产品归属、按产品锁序串行化后再写入 Harness。操作者身份只来自服务端认证上下文，请求体永远不能指定 actor。
  */
 @RestController
 @RequestMapping("/api/interactions")
@@ -63,8 +63,8 @@ public class StudioInteractionController {
   /**
    * 提交一次人工问卷回答（或明确拒答）。
    *
-   * <p>{@code interactionId} 是待处理列表给出的 Tool invocation ID；{@code threadId}、{@code submissionId} 与 {@code
-   * answers}/{@code declined} 由请求体给出并严格校验（缺失、形状非法 {@literal ->} 400）。目标不适用或提交身份/答案不匹配
+   * <p>{@code interactionId} 是待处理列表给出的 Tool invocation ID；{@code threadId}、{@code submissionId} 与
+   * {@code answers}/{@code declined} 由请求体给出并严格校验（缺失、形状非法 {@literal ->} 400）。目标不适用或提交身份/答案不匹配
    * {@literal ->} 409；目标不存在 {@literal ->} 404。
    */
   @PostMapping("/{interactionId}/input")
