@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 import java.time.Instant;
@@ -23,6 +24,7 @@ public class HarnessThreadDTO {
   private String threadId;
 
   /** 执行父 Thread（根 Thread 为 null）：canonical UUID string。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private String parentThreadId;
 
   /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
