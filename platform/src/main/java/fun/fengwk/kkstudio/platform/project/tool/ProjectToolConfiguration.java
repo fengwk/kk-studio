@@ -63,4 +63,11 @@ public class ProjectToolConfiguration {
       IssueTransitionTool issueTransitionTool) {
     return new ProjectHarnessContributor(issueTransitionTool);
   }
+
+  @Bean(name = "projectThreadOwnerResolver")
+  @ConditionalOnMissingBean(name = "projectThreadOwnerResolver")
+  public ProjectThreadOwnerResolver projectThreadOwnerResolver(
+      IssueAgentThreadRepository issueAgentThreadRepository) {
+    return new DatabaseProjectThreadOwnerResolver(issueAgentThreadRepository);
+  }
 }

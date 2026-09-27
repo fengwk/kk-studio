@@ -8,12 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-/**
- * Project Snapshot 权威聚合读取面。
- *
- * <p>包含 project、未归档 issues（各含 blocked 与当前/最近 Run）与同项目依赖边；Issue Agent Session 归属通过 Issue 详情按 {@code
- * (issueId, agentName)} 读取。
- */
+/** Project Snapshot 权威聚合读取面 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
@@ -22,7 +17,6 @@ public class ProjectSnapshotDTO {
 
   private ProjectDTO project;
   private List<ProjectIssueSnapshotDTO> issues;
-  private List<IssueDependencyDTO> dependencies;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

@@ -6,17 +6,19 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 项目解归档请求 DTO。 */
+/** Issue Agent 线程绑定 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProjectUnarchiveRequestDTO {
+public class IssueAgentThreadDTO {
 
-  private String expectedVersion;
+  private String issueId;
+  private String agentName;
+  private String threadId;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
-    throw new IllegalArgumentException("Unknown request field");
+    throw new IllegalArgumentException("Unknown response field");
   }
 }

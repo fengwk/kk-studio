@@ -2,11 +2,9 @@ package fun.fengwk.kkstudio.web.project;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -27,29 +25,29 @@ import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
-import fun.fengwk.kkstudio.platform.project.model.IssueEvidenceOrigin;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
-import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.model.PauseReason;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.share.project.AddIssueDependencyRequestDTO;
+import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.platform.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.BlockIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.CancelIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.ChangeIssueStatusRequestDTO;
 import fun.fengwk.kkstudio.share.project.CreateIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.RetryIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.ReviewIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO;
+import fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
 
@@ -57,28 +55,39 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-/** 验证 StudioIssueController 的全部 REST 接口端点、人类 Review/Block/Recover/Cancel/Retry 动作与 CAS 409 处理。 */
+/** 验证 StudioIssueController 的全部 15 个 REST 接口端点与 CAS 409 处理。 */
 class StudioIssueControllerTest {
 
   private IssueService issueService;
   private IssueRunService issueRunService;
   private IssueEvidenceService issueEvidenceService;
+  private ProjectService projectService;
+  private IssueActivityRepository issueActivityRepository;
 
   private MockMvc mockMvc;
   private final ObjectMapper objectMapper = ObjectMapperHolder.getInstance();
   private final UUID projectId = UUID.randomUUID();
   private final UUID issueId = UUID.randomUUID();
   private final Instant now = Instant.now();
+  private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
 
   @BeforeEach
   void setUp() {
     issueService = mock(IssueService.class);
     issueRunService = mock(IssueRunService.class);
     issueEvidenceService = mock(IssueEvidenceService.class);
+    projectService = mock(ProjectService.class);
+    issueActivityRepository = mock(IssueActivityRepository.class);
 
     StudioIssueController controller =
         new StudioIssueController(
-            issueService, issueRunService, issueEvidenceService, new ProjectDtoMapper());
+            issueService,
+            issueRunService,
+            issueEvidenceService,
+            projectService,
+            new ProjectDtoMapper(),
+            issueActivityRepository,
+            codec);
 
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
@@ -95,17 +104,16 @@ class StudioIssueControllerTest {
             .projectId(projectId)
             .number(1L)
             .title("Task")
-            .status(IssueStatus.TODO)
+            .description("Desc")
+            .state("INIT")
             .version(0L)
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.createIssue(
-            eq(projectId), eq("Task"), any(), any(), any(), eq(IssueStatus.TODO)))
-        .thenReturn(created);
+    when(issueService.createIssue(projectId, "Task", "Desc")).thenReturn(created);
 
     CreateIssueRequestDTO req =
-        CreateIssueRequestDTO.builder().title("Task").initialStatus("TODO").build();
+        CreateIssueRequestDTO.builder().title("Task").description("Desc").build();
 
     mockMvc
         .perform(
@@ -114,7 +122,8 @@ class StudioIssueControllerTest {
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.id").value(issueId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.number").value("1"));
+        .andExpect(jsonPath("$.data.number").value("1"))
+        .andExpect(jsonPath("$.data.state").value("INIT"));
   }
 
   @Test
@@ -125,197 +134,38 @@ class StudioIssueControllerTest {
             .projectId(projectId)
             .number(1L)
             .title("Task")
-            .status(IssueStatus.IN_PROGRESS)
-            .assigneeAgentName("coder")
-            .reviewerAgentName("reviewer")
-            .version(0L)
+            .state("WORK")
+            .version(1L)
             .createdAt(now)
             .updatedAt(now)
             .build();
     when(issueService.getIssue(issueId)).thenReturn(issue);
-    when(issueService.isBlocked(issueId)).thenReturn(false);
-    when(issueService.listDependencies(issueId)).thenReturn(List.of());
-    when(issueService.listActivitiesPage(issueId, 0L, 50)).thenReturn(List.of());
+    when(issueService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
+    UUID threadId = UUID.randomUUID();
+    when(issueService.listAgentThreads(issueId))
+        .thenReturn(List.of(new IssueAgentThread(issueId, "coder", threadId)));
 
-    UUID runId = UUID.randomUUID();
-    UUID runSessionId = UUID.randomUUID();
     IssueRun run =
         IssueRun.builder()
-            .id(runId)
+            .id(UUID.randomUUID())
             .issueId(issueId)
             .ordinal(1L)
-            .role(IssueRunRole.EXECUTOR)
-            .agentName("coder")
+            .state("WORK")
+            .threadId(threadId)
             .status(IssueRunStatus.RUNNING)
             .version(0L)
             .createdAt(now)
-            .updatedAt(now)
             .build();
     when(issueRunService.listRuns(issueId)).thenReturn(List.of(run));
     when(issueRunService.getActiveRun(issueId)).thenReturn(run);
     when(issueRunService.getLatestRun(issueId)).thenReturn(run);
 
-    IssueAgentSession coderSession =
-        IssueAgentSession.builder()
-            .id(UUID.randomUUID())
-            .issueId(issueId)
-            .agentName("coder")
-            .sessionId(runSessionId)
-            .threadId(UUID.randomUUID())
-            .createdAt(now)
-            .build();
-    IssueAgentSession reviewerSession =
-        IssueAgentSession.builder()
-            .id(UUID.randomUUID())
-            .issueId(issueId)
-            .agentName("reviewer")
-            .sessionId(UUID.randomUUID())
-            .threadId(UUID.randomUUID())
-            .createdAt(now)
-            .build();
-    when(issueRunService.getAgentSession(issueId, "coder")).thenReturn(coderSession);
-    when(issueRunService.getAgentSession(issueId, "reviewer")).thenReturn(reviewerSession);
-
-    // 已发布证据以规范 URI + 元数据暴露；URI 只是资源标识，读取仍由平台按已发布证据授予的 Session 引用决定
-    UUID evidenceBlobId = UUID.randomUUID();
-    when(issueEvidenceService.listEvidence(issueId))
-        .thenReturn(
-            List.of(
-                IssueEvidence.builder()
-                    .issueId(issueId)
-                    .blobId(evidenceBlobId)
-                    .origin(IssueEvidenceOrigin.EXECUTOR)
-                    .runId(runId)
-                    .createdAt(now)
-                    .build()));
-
     mockMvc
         .perform(get("/api/issues/" + issueId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.issue.id").value(issueId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.blocked").value(false))
-        .andExpect(jsonPath("$.data.sessions[0].agentName").value("coder"))
-        .andExpect(jsonPath("$.data.sessions[0].role").value("EXECUTOR"))
-        .andExpect(jsonPath("$.data.sessions[1].agentName").value("reviewer"))
-        .andExpect(jsonPath("$.data.sessions[1].role").value("REVIEWER"))
-        .andExpect(
-            jsonPath("$.data.runs[0].sessionId").value(runSessionId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.currentRun.id").value(runId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.latestRun.id").value(runId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.evidence[0].blobId").value(evidenceBlobId.toString()))
-        .andExpect(
-            jsonPath("$.data.evidence[0].uri").value("kkstudio:/resources/" + evidenceBlobId))
-        .andExpect(jsonPath("$.data.evidence[0].origin").value("EXECUTOR"))
-        .andExpect(jsonPath("$.data.evidence[0].name").isEmpty())
-        .andExpect(jsonPath("$.data.nextActivityCursor").isEmpty());
-  }
-
-  /** 人工上传转为公开证据：请求只携带 uploadId，响应给出规范 URI，绝不回显对象 key 或字节。 */
-  @Test
-  void testAddIssueEvidence() throws Exception {
-    UUID uploadId = UUID.randomUUID();
-    UUID blobId = UUID.randomUUID();
-    when(issueEvidenceService.publishHumanUpload(issueId, uploadId))
-        .thenReturn(
-            IssueEvidence.builder()
-                .issueId(issueId)
-                .blobId(blobId)
-                .origin(IssueEvidenceOrigin.HUMAN)
-                .name("report.pdf")
-                .createdAt(now)
-                .build());
-
-    AddIssueEvidenceRequestDTO req =
-        AddIssueEvidenceRequestDTO.builder().uploadId(uploadId.toString()).build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/evidence")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.blobId").value(blobId.toString()))
-        .andExpect(jsonPath("$.data.uri").value("kkstudio:/resources/" + blobId))
-        .andExpect(jsonPath("$.data.origin").value("HUMAN"))
-        .andExpect(jsonPath("$.data.name").value("report.pdf"))
-        .andExpect(jsonPath("$.data.runId").isEmpty());
-  }
-
-  @Test
-  void testGetIssueDetailWithNextActivityCursor() throws Exception {
-    Issue issue =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .number(1L)
-            .title("Task")
-            .status(IssueStatus.TODO)
-            .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueService.getIssue(issueId)).thenReturn(issue);
-    when(issueService.isBlocked(issueId)).thenReturn(false);
-    when(issueService.listDependencies(issueId)).thenReturn(List.of());
-    when(issueRunService.listRuns(issueId)).thenReturn(List.of());
-    when(issueRunService.getActiveRun(issueId)).thenReturn(null);
-    when(issueRunService.getLatestRun(issueId)).thenReturn(null);
-
-    IssueActivity act1 =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .sequence(1L)
-            .kind(IssueActivityKind.COMMENT)
-            .createdAt(now)
-            .build();
-    IssueActivity act2 =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .sequence(2L)
-            .kind(IssueActivityKind.COMMENT)
-            .createdAt(now)
-            .build();
-    IssueActivity act3 =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .sequence(3L)
-            .kind(IssueActivityKind.COMMENT)
-            .createdAt(now)
-            .build();
-
-    // limit=2, 返回 2 条
-    when(issueService.listActivitiesPage(issueId, 0L, 2)).thenReturn(List.of(act1, act2));
-    // 探测之后是否有更多：以 lastSequence=2，limit=1 探测，返回第 3 条
-    when(issueService.listActivitiesPage(issueId, 2L, 1)).thenReturn(List.of(act3));
-
-    mockMvc
-        .perform(get("/api/issues/" + issueId + "?limit=2"))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.activities.length()").value(2))
-        .andExpect(jsonPath("$.data.nextActivityCursor").value("2"));
-  }
-
-  @Test
-  void testActivityLimitValidation() throws Exception {
-    mockMvc
-        .perform(get("/api/issues/" + issueId + "?limit=0"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("limit must be between 1 and 200"));
-
-    mockMvc
-        .perform(get("/api/issues/" + issueId + "?limit=201"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("limit must be between 1 and 200"));
-
-    mockMvc
-        .perform(get("/api/issues/" + issueId + "/activities?limit=0"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("limit must be between 1 and 200"));
-
-    mockMvc
-        .perform(get("/api/issues/" + issueId + "/activities?limit=201"))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("limit must be between 1 and 200"));
+        .andExpect(jsonPath("$.data.currentRun.agentName").value("coder"))
+        .andExpect(jsonPath("$.data.agentThreads[0].agentName").value("coder"));
   }
 
   @Test
@@ -323,104 +173,80 @@ class StudioIssueControllerTest {
     IssueActivity act =
         IssueActivity.builder()
             .issueId(issueId)
-            .sequence(11L)
+            .sequence(1L)
             .kind(IssueActivityKind.COMMENT)
             .actorType(IssueActivityActorType.HUMAN)
-            .body("Activity list item")
+            .body("Hello")
             .createdAt(now)
             .build();
-    when(issueService.listActivitiesPage(issueId, 10L, 20)).thenReturn(List.of(act));
+    when(issueService.listActivities(issueId, 0L, 50)).thenReturn(List.of(act));
 
     mockMvc
-        .perform(get("/api/issues/" + issueId + "/activities?afterSequence=10&limit=20"))
+        .perform(get("/api/issues/" + issueId + "/activities"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data[0].sequence").value("11"))
-        .andExpect(jsonPath("$.data[0].kind").value("COMMENT"))
-        .andExpect(jsonPath("$.data[0].body").value("Activity list item"));
+        .andExpect(jsonPath("$.data[0].sequence").value("1"))
+        .andExpect(jsonPath("$.data[0].body").value("Hello"));
   }
 
   @Test
-  void testUpdateIssueAndCasConflict() throws Exception {
-    Issue updated =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .number(1L)
-            .title("Updated Task")
-            .version(2L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueService.updateIssue(eq(issueId), eq(1L), eq("Updated Task"), any(), any(), any()))
-        .thenReturn(updated);
-
+  void testUpdateIssue() throws Exception {
     UpdateIssueRequestDTO req =
-        UpdateIssueRequestDTO.builder().expectedVersion("1").title("Updated Task").build();
-
-    mockMvc
-        .perform(
-            put("/api/issues/" + issueId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.title").value("Updated Task"));
-
-    // CAS 409
-    when(issueService.updateIssue(eq(issueId), eq(99L), any(), any(), any(), any()))
-        .thenThrow(new AiVersionConflictException("issue", "99", "100"));
-
-    mockMvc
-        .perform(
-            put("/api/issues/" + issueId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    objectMapper.writeValueAsString(
-                        UpdateIssueRequestDTO.builder().expectedVersion("99").title("x").build())))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.errors.expectedVersion").value("99"))
-        .andExpect(jsonPath("$.errors.actualVersion").value("100"));
-  }
-
-  @Test
-  void testChangeStatus() throws Exception {
-    Issue updated =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .status(IssueStatus.DONE)
-            .version(3L)
-            .createdAt(now)
-            .updatedAt(now)
+        UpdateIssueRequestDTO.builder()
+            .expectedVersion("1")
+            .title("New Title")
+            .description("New Desc")
             .build();
-    when(issueService.setStatus(issueId, 2L, IssueStatus.DONE)).thenReturn(updated);
-
-    ChangeIssueStatusRequestDTO req =
-        ChangeIssueStatusRequestDTO.builder().expectedVersion("2").status("DONE").build();
+    Issue updated =
+        Issue.builder().id(issueId).version(2L).title("New Title").description("New Desc").build();
+    when(issueService.updateIssue(issueId, 1L, "New Title", "New Desc")).thenReturn(updated);
 
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/status")
+            put("/api/issues/" + issueId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("DONE"));
+        .andExpect(jsonPath("$.data.version").value("2"))
+        .andExpect(jsonPath("$.data.title").value("New Title"));
   }
 
   @Test
-  void testBlockIssue() throws Exception {
+  void testTransition() throws Exception {
+    TransitionIssueRequestDTO req =
+        TransitionIssueRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k1")
+            .toState("DONE")
+            .build();
+    Issue updated = Issue.builder().id(issueId).version(2L).state("DONE").build();
+    when(issueService.transition(issueId, 1L, "k1", "DONE")).thenReturn(updated);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/transition")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.state").value("DONE"));
+  }
+
+  @Test
+  void testBlock() throws Exception {
+    BlockIssueRequestDTO req =
+        BlockIssueRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k1")
+            .reason("need review")
+            .build();
     Issue blocked =
         Issue.builder()
             .id(issueId)
-            .projectId(projectId)
-            .status(IssueStatus.BLOCKED)
             .version(2L)
-            .createdAt(now)
-            .updatedAt(now)
+            .state("BLOCKED")
+            .blockedFromState("WORK")
+            .blockReason("need review")
             .build();
-    when(issueService.blockIssue(issueId, 1L, "Blocked reason")).thenReturn(blocked);
-
-    BlockIssueRequestDTO req =
-        BlockIssueRequestDTO.builder().expectedVersion("1").reason("Blocked reason").build();
+    when(issueService.blockIssue(issueId, 1L, "k1", "need review")).thenReturn(blocked);
 
     mockMvc
         .perform(
@@ -428,323 +254,243 @@ class StudioIssueControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("BLOCKED"))
-        .andExpect(jsonPath("$.data.version").value("2"));
-
-    verify(issueService).blockIssue(issueId, 1L, "Blocked reason");
+        .andExpect(jsonPath("$.data.state").value("BLOCKED"))
+        .andExpect(jsonPath("$.data.blockReason").value("need review"));
   }
 
   @Test
-  void testRecoverIssue() throws Exception {
-    Issue recoveredToBacklog =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .status(IssueStatus.BACKLOG)
-            .version(3L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueService.recoverIssue(issueId, 2L, true, "Need revision"))
-        .thenReturn(recoveredToBacklog);
-
-    RecoverIssueRequestDTO req1 =
-        RecoverIssueRequestDTO.builder()
-            .expectedVersion("2")
-            .toBacklog(true)
-            .comment("Need revision")
-            .build();
+  void testRecover() throws Exception {
+    RecoverIssueRequestDTO req =
+        RecoverIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
+    Issue recovered = Issue.builder().id(issueId).version(2L).state("WORK").build();
+    when(issueService.recoverIssue(issueId, 1L, "k1")).thenReturn(recovered);
 
     mockMvc
         .perform(
             post("/api/issues/" + issueId + "/recover")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req1)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("BACKLOG"));
-
-    verify(issueService).recoverIssue(issueId, 2L, true, "Need revision");
-
-    Issue recoveredToTodo =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .status(IssueStatus.TODO)
-            .version(4L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueService.recoverIssue(issueId, 3L, false, null)).thenReturn(recoveredToTodo);
-
-    RecoverIssueRequestDTO req2 =
-        RecoverIssueRequestDTO.builder().expectedVersion("3").toBacklog(false).build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/recover")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(req2)))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.status").value("TODO"));
-
-    verify(issueService).recoverIssue(issueId, 3L, false, null);
-  }
-
-  @Test
-  void rejectsInvalidEnumWithoutEchoingTheInput() throws Exception {
-    // 测试意图：非法枚举输入返回固定诊断，异常链与响应均不得回显原始输入。
-    ChangeIssueStatusRequestDTO request =
-        ChangeIssueStatusRequestDTO.builder()
-            .expectedVersion("2")
-            .status("sensitive-status-value")
-            .build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/status")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsBytes(request)))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("status is invalid"));
-  }
-
-  @Test
-  void testDependenciesAddAndRemove() throws Exception {
-    UUID depId = UUID.randomUUID();
-    IssueDependency dependency =
-        IssueDependency.builder()
-            .issueId(issueId)
-            .dependsOnIssueId(depId)
-            .projectId(projectId)
-            .createdAt(now)
-            .build();
-    when(issueService.addDependency(issueId, depId, 1L)).thenReturn(dependency);
-    AddIssueDependencyRequestDTO addReq =
-        AddIssueDependencyRequestDTO.builder()
-            .dependsOnIssueId(depId.toString())
-            .expectedVersion("1")
-            .build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/dependencies")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(addReq)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.issueId").value(issueId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.data.dependsOnIssueId").value(depId.toString().toLowerCase()));
-
-    verify(issueService).addDependency(issueId, depId, 1L);
-
-    mockMvc
-        .perform(delete("/api/issues/" + issueId + "/dependencies/" + depId + "?expectedVersion=1"))
-        .andExpect(status().isNoContent());
-
-    verify(issueService).removeDependency(issueId, depId, 1L);
-  }
-
-  @Test
-  void testAppendActivityKindInferenceAndValidation() throws Exception {
-    when(issueService.appendActivity(any(IssueActivity.class)))
-        .thenAnswer(
-            inv -> {
-              IssueActivity arg = inv.getArgument(0);
-              return IssueActivity.builder()
-                  .issueId(arg.getIssueId())
-                  .sequence(1L)
-                  .kind(arg.getKind())
-                  .actorType(arg.getActorType())
-                  .targetRole(arg.getTargetRole())
-                  .body(arg.getBody())
-                  .idempotencyKey(arg.getIdempotencyKey())
-                  .createdAt(now)
-                  .build();
-            });
-
-    // 1. targetRole 有值，kind 省略 -> 自动推导为 INSTRUCTION
-    AppendIssueActivityRequestDTO reqInstruction =
-        AppendIssueActivityRequestDTO.builder()
-            .body("Check line 42")
-            .targetRole("EXECUTOR")
-            .idempotencyKey("idem-1")
-            .build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/activities")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reqInstruction)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"))
-        .andExpect(jsonPath("$.data.actorType").value("HUMAN"))
-        .andExpect(jsonPath("$.data.targetRole").value("EXECUTOR"))
-        .andExpect(jsonPath("$.data.body").value("Check line 42"))
-        .andExpect(jsonPath("$.data.idempotencyKey").value("idem-1"));
-
-    // 2. targetRole 为空，kind 省略 -> 自动推导为 COMMENT
-    AppendIssueActivityRequestDTO reqComment =
-        AppendIssueActivityRequestDTO.builder().body("General note").build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/activities")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reqComment)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.kind").value("COMMENT"))
-        .andExpect(jsonPath("$.data.actorType").value("HUMAN"))
-        .andExpect(jsonPath("$.data.body").value("General note"));
-
-    // 3. 显式指定 HUMAN_INPUT
-    AppendIssueActivityRequestDTO reqHumanInput =
-        AppendIssueActivityRequestDTO.builder().kind("HUMAN_INPUT").body("User answer").build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/activities")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reqHumanInput)))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.kind").value("HUMAN_INPUT"))
-        .andExpect(jsonPath("$.data.actorType").value("HUMAN"));
-
-    // 4. 空 body 拒绝
-    AppendIssueActivityRequestDTO reqBlankBody =
-        AppendIssueActivityRequestDTO.builder().body("   ").build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/activities")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reqBlankBody)))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("body must not be blank"));
-
-    // 5. INSTRUCTION 但缺少 targetRole 拒绝
-    AppendIssueActivityRequestDTO reqInstructionNoRole =
-        AppendIssueActivityRequestDTO.builder().kind("INSTRUCTION").body("Do this").build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/activities")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reqInstructionNoRole)))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("INSTRUCTION requires targetRole"));
-
-    // 6. 不允许人写入的 kind 拒绝（如 RETRY/SYSTEM 事实）
-    AppendIssueActivityRequestDTO reqInvalidKind =
-        AppendIssueActivityRequestDTO.builder().kind("RETRY").body("Retry please").build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/activities")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(reqInvalidKind)))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("kind is invalid"));
-  }
-
-  @Test
-  void testReview() throws Exception {
-    doNothing()
-        .when(issueRunService)
-        .reviewByHuman(eq(issueId), eq(ReviewDecision.APPROVE), eq("Looks good"), eq("idem-rev-1"));
-
-    ReviewIssueRequestDTO req =
-        ReviewIssueRequestDTO.builder()
-            .decision("APPROVE")
-            .reason("Looks good")
-            .idempotencyKey("idem-rev-1")
-            .build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/review")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
-        .andExpect(status().isOk());
-
-    verify(issueRunService)
-        .reviewByHuman(issueId, ReviewDecision.APPROVE, "Looks good", "idem-rev-1");
-
-    // 空 decision 拒绝
-    ReviewIssueRequestDTO blankDecision =
-        ReviewIssueRequestDTO.builder().decision("   ").reason("test").build();
-
-    mockMvc
-        .perform(
-            post("/api/issues/" + issueId + "/review")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(blankDecision)))
-        .andExpect(status().isBadRequest())
-        .andExpect(jsonPath("$.errors.detail").value("decision must not be blank"));
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.state").value("WORK"));
   }
 
   @Test
-  void testCancelRetryArchiveUnarchive() throws Exception {
-    Issue issue = Issue.builder().id(issueId).projectId(projectId).version(1L).build();
-    when(issueService.getIssue(issueId)).thenReturn(issue);
-    when(issueService.cancelIssue(eq(issueId), eq(1L), any())).thenReturn(issue);
-    when(issueService.archiveIssue(issueId, 1L)).thenReturn(issue);
-    when(issueService.unarchiveIssue(issueId, 1L)).thenReturn(issue);
-
-    IssueActivity retriedActivity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .sequence(3L)
-            .kind(IssueActivityKind.RETRY)
-            .body("retry")
-            .createdAt(now)
+  void testPause() throws Exception {
+    PauseIssueRequestDTO req =
+        PauseIssueRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k1")
+            .reason("USER")
+            .detail("manual pause")
             .build();
-    when(issueRunService.retryRun(eq(issueId), any(), any())).thenReturn(retriedActivity);
+    Issue paused =
+        Issue.builder()
+            .id(issueId)
+            .version(2L)
+            .pauseReason("USER")
+            .pauseDetail("manual pause")
+            .build();
+    when(issueService.pauseIssue(issueId, 1L, "k1", PauseReason.USER, "manual pause"))
+        .thenReturn(paused);
 
-    // Cancel
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/cancel")
+            post("/api/issues/" + issueId + "/pause")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    objectMapper.writeValueAsString(
-                        CancelIssueRequestDTO.builder()
-                            .expectedVersion("1")
-                            .reason("test")
-                            .build())))
-        .andExpect(status().isOk());
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.pauseReason").value("USER"));
+  }
 
-    // Retry：UNKNOWN 的人工核对说明必须透传到服务层
+  @Test
+  void testResume() throws Exception {
+    ResumeIssueRequestDTO req =
+        ResumeIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
+    Issue resumed = Issue.builder().id(issueId).version(2L).build();
+    when(issueService.resumeIssue(issueId, 1L, "k1")).thenReturn(resumed);
+
     mockMvc
         .perform(
-            post("/api/issues/" + issueId + "/retry")
+            post("/api/issues/" + issueId + "/resume")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    objectMapper.writeValueAsString(
-                        RetryIssueRequestDTO.builder()
-                            .idempotencyKey("k")
-                            .verification("已核对残留调用")
-                            .build())))
-        .andExpect(status().isCreated())
-        .andExpect(jsonPath("$.data.sequence").value("3"));
-    verify(issueRunService).retryRun(issueId, "k", "已核对残留调用");
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("2"));
+  }
 
-    // Archive
+  @Test
+  void testReopen() throws Exception {
+    ReopenIssueRequestDTO req =
+        ReopenIssueRequestDTO.builder().expectedVersion("1").requestKey("k1").build();
+    Issue reopened = Issue.builder().id(issueId).version(2L).state("INIT").build();
+    when(issueService.reopen(issueId, 1L, "k1")).thenReturn(reopened);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/reopen")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.state").value("INIT"));
+  }
+
+  @Test
+  void testBudgetReset() throws Exception {
+    ResetStageBudgetRequestDTO req =
+        ResetStageBudgetRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k1")
+            .state("WORK")
+            .maxRuns(10)
+            .build();
+    StageBudgetView view = new StageBudgetView("WORK", 10, 5L, 0L, 10L);
+    when(issueService.resetStageBudget(issueId, 1L, "k1", "WORK", 10)).thenReturn(view);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/budget-reset")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.state").value("WORK"))
+        .andExpect(jsonPath("$.data.maxRuns").value(10))
+        .andExpect(jsonPath("$.data.remainingRuns").value("10"));
+  }
+
+  @Test
+  void testArchive() throws Exception {
+    ArchiveIssueRequestDTO req = ArchiveIssueRequestDTO.builder().expectedVersion("1").build();
+    Issue archived = Issue.builder().id(issueId).version(2L).archivedAt(now).build();
+    when(issueService.archiveIssue(issueId, 1L)).thenReturn(archived);
+
     mockMvc
         .perform(
             post("/api/issues/" + issueId + "/archive")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    objectMapper.writeValueAsString(
-                        ArchiveIssueRequestDTO.builder().expectedVersion("1").build())))
-        .andExpect(status().isOk());
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.archivedAt").isNotEmpty());
+  }
 
-    // Unarchive
+  @Test
+  void testUnarchive() throws Exception {
+    UnarchiveIssueRequestDTO req = UnarchiveIssueRequestDTO.builder().expectedVersion("1").build();
+    Issue unarchived = Issue.builder().id(issueId).version(2L).archivedAt(null).build();
+    when(issueService.unarchiveIssue(issueId, 1L)).thenReturn(unarchived);
+
     mockMvc
         .perform(
             post("/api/issues/" + issueId + "/unarchive")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    objectMapper.writeValueAsString(
-                        UnarchiveIssueRequestDTO.builder().expectedVersion("1").build())))
-        .andExpect(status().isOk());
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.archivedAt").isEmpty());
+  }
+
+  @Test
+  void testAppendActivityComment() throws Exception {
+    AppendIssueActivityRequestDTO req =
+        AppendIssueActivityRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k1")
+            .kind("COMMENT")
+            .body("A human comment")
+            .build();
+    IssueActivity act =
+        IssueActivity.builder()
+            .issueId(issueId)
+            .sequence(1L)
+            .kind(IssueActivityKind.COMMENT)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("A human comment")
+            .idempotencyKey("k1")
+            .createdAt(now)
+            .build();
+    when(issueActivityRepository.findByIdempotencyKey(issueId, "k1")).thenReturn(act);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/activities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.body").value("A human comment"))
+        .andExpect(jsonPath("$.data.kind").value("COMMENT"));
+
+    verify(issueService).appendComment(issueId, 1L, "k1", "A human comment");
+  }
+
+  @Test
+  void testAppendActivityInstruction() throws Exception {
+    AppendIssueActivityRequestDTO req =
+        AppendIssueActivityRequestDTO.builder()
+            .expectedVersion("1")
+            .requestKey("k2")
+            .kind("INSTRUCTION")
+            .body("A human instruction")
+            .build();
+    IssueActivity act =
+        IssueActivity.builder()
+            .issueId(issueId)
+            .sequence(2L)
+            .kind(IssueActivityKind.INSTRUCTION)
+            .actorType(IssueActivityActorType.HUMAN)
+            .body("A human instruction")
+            .idempotencyKey("k2")
+            .createdAt(now)
+            .build();
+    when(issueActivityRepository.findByIdempotencyKey(issueId, "k2")).thenReturn(act);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/activities")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.body").value("A human instruction"))
+        .andExpect(jsonPath("$.data.kind").value("INSTRUCTION"));
+
+    verify(issueService).appendInstruction(issueId, 1L, "k2", "A human instruction");
+  }
+
+  @Test
+  void testAddEvidence() throws Exception {
+    UUID uploadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    AddIssueEvidenceRequestDTO req =
+        AddIssueEvidenceRequestDTO.builder().uploadId(uploadId.toString()).build();
+    IssueEvidence evidence =
+        IssueEvidence.builder()
+            .issueId(issueId)
+            .blobId(blobId)
+            .name("upload.png")
+            .createdAt(now)
+            .build();
+    when(issueEvidenceService.publishHumanUpload(issueId, uploadId)).thenReturn(evidence);
+
+    mockMvc
+        .perform(
+            post("/api/issues/" + issueId + "/evidence")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.blobId").value(blobId.toString().toLowerCase()))
+        .andExpect(jsonPath("$.data.name").value("upload.png"));
+  }
+
+  @Test
+  void testVersionConflict() throws Exception {
+    UpdateIssueRequestDTO req =
+        UpdateIssueRequestDTO.builder().expectedVersion("1").title("T").build();
+    when(issueService.updateIssue(eq(issueId), eq(1L), any(), any()))
+        .thenThrow(new AiVersionConflictException("issue", "1", "2"));
+
+    mockMvc
+        .perform(
+            put("/api/issues/" + issueId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("PROJECT_VERSION_CONFLICT"));
   }
 }

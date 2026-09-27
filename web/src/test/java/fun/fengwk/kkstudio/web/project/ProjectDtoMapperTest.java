@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -11,29 +12,37 @@ import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunOutcome;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunStatus;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
+import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
-import fun.fengwk.kkstudio.share.project.IssueAgentSessionDTO;
+import fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
-import fun.fengwk.kkstudio.share.project.IssueDependencyDTO;
+import fun.fengwk.kkstudio.share.project.IssueEvidenceDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunSummaryDTO;
+import fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
+import fun.fengwk.kkstudio.share.project.ProjectWorkflowDTO;
+import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** 验证 ProjectDtoMapper 的严格双向映射与格式校验。 */
 class ProjectDtoMapperTest {
 
   private final ProjectDtoMapper mapper = new ProjectDtoMapper();
+  private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
 
   @Test
   void testParseUuidValidAndInvalid() {
@@ -84,13 +93,44 @@ class ProjectDtoMapperTest {
     // 测试意图：验证 Project 实体到 ProjectDTO 的字段正确映射
     UUID id = UUID.randomUUID();
     Instant now = Instant.now();
+    ProjectWorkflow workflow =
+        new ProjectWorkflow(
+            List.of(
+                new ProjectWorkflowState(
+                    ProjectStateCode.of("INIT"),
+                    "Initial",
+                    null,
+                    null,
+                    null,
+                    null,
+                    true,
+                    List.of(ProjectStateCode.of("DONE"))),
+                new ProjectWorkflowState(
+                    ProjectStateCode.of("BLOCKED"),
+                    "Blocked",
+                    null,
+                    null,
+                    null,
+                    null,
+                    true,
+                    List.of()),
+                new ProjectWorkflowState(
+                    ProjectStateCode.of("DONE"),
+                    "Completed",
+                    null,
+                    null,
+                    null,
+                    null,
+                    true,
+                    List.of())));
+
     Project project =
         Project.builder()
             .id(id)
             .title("Title")
             .description("Desc")
+            .workflowJson(codec.encode(workflow))
             .yoloEnabled(true)
-            .maxReviewRejections(3)
             .nextIssueNumber(10L)
             .version(2L)
             .archivedAt(now)
@@ -102,12 +142,58 @@ class ProjectDtoMapperTest {
     assertEquals(id.toString().toLowerCase(), dto.getId());
     assertEquals("Title", dto.getTitle());
     assertEquals("Desc", dto.getDescription());
+    assertNotNull(dto.getWorkflow());
+    assertEquals(3, dto.getWorkflow().getStates().size());
     assertEquals(Boolean.TRUE, dto.getYoloEnabled());
-    assertEquals("3", dto.getMaxReviewRejections());
     assertEquals("10", dto.getNextIssueNumber());
     assertEquals("2", dto.getVersion());
     assertEquals(now.toString(), dto.getArchivedAt());
     assertEquals(now.toString(), dto.getCreatedAt());
+  }
+
+  @Test
+  void testWorkflowRoundTrip() {
+    // 测试意图：验证 ProjectWorkflowDTO 与 ProjectWorkflow 双向转换
+    ProjectWorkflowStateDTO init =
+        ProjectWorkflowStateDTO.builder()
+            .state("INIT")
+            .name("Start")
+            .enabled(true)
+            .next(List.of("WORK"))
+            .build();
+    ProjectWorkflowStateDTO work =
+        ProjectWorkflowStateDTO.builder()
+            .state("WORK")
+            .name("Working")
+            .agent("coder")
+            .maxRuns("5")
+            .enabled(true)
+            .next(List.of("DONE"))
+            .build();
+    ProjectWorkflowStateDTO blocked =
+        ProjectWorkflowStateDTO.builder()
+            .state("BLOCKED")
+            .name("Blocked")
+            .enabled(true)
+            .next(List.of())
+            .build();
+    ProjectWorkflowStateDTO done =
+        ProjectWorkflowStateDTO.builder()
+            .state("DONE")
+            .name("Done")
+            .enabled(true)
+            .next(List.of())
+            .build();
+
+    ProjectWorkflowDTO dto =
+        ProjectWorkflowDTO.builder().states(List.of(init, work, blocked, done)).build();
+    ProjectWorkflow model = mapper.toWorkflow(dto);
+    assertEquals(4, model.states().size());
+
+    ProjectWorkflowDTO mappedBack = mapper.toWorkflowDto(model);
+    assertEquals(4, mappedBack.getStates().size());
+    assertEquals("5", mappedBack.getStates().get(1).getMaxRuns());
+    assertEquals("coder", mappedBack.getStates().get(1).getAgent());
   }
 
   @Test
@@ -123,9 +209,11 @@ class ProjectDtoMapperTest {
             .number(1L)
             .title("Issue 1")
             .description("Issue Desc")
-            .status(IssueStatus.TODO)
-            .assigneeAgentName("assignee")
-            .reviewerAgentName("reviewer")
+            .state("BLOCKED")
+            .blockedFromState("WORK")
+            .blockReason("Waiting for review")
+            .pauseReason("USER")
+            .pauseDetail("User paused execution")
             .version(3L)
             .archivedAt(null)
             .createdAt(now)
@@ -136,100 +224,109 @@ class ProjectDtoMapperTest {
     assertEquals(id.toString().toLowerCase(), dto.getId());
     assertEquals(projectId.toString().toLowerCase(), dto.getProjectId());
     assertEquals("1", dto.getNumber());
-    assertEquals("TODO", dto.getStatus());
-    assertEquals("assignee", dto.getAssigneeAgentName());
-    assertEquals("reviewer", dto.getReviewerAgentName());
+    assertEquals("BLOCKED", dto.getState());
+    assertEquals("WORK", dto.getBlockedFromState());
+    assertEquals("Waiting for review", dto.getBlockReason());
+    assertEquals("USER", dto.getPauseReason());
+    assertEquals("User paused execution", dto.getPauseDetail());
     assertEquals("3", dto.getVersion());
     assertNull(dto.getArchivedAt());
   }
 
   @Test
-  void testDependencyAndActivityMapping() {
-    // 测试意图：验证 IssueDependency 和 IssueActivity 映射
+  void testActivityMapping() {
+    // 测试意图：验证 IssueActivity 映射及 data JSON 解码
     UUID issueId = UUID.randomUUID();
-    UUID depId = UUID.randomUUID();
-    UUID projectId = UUID.randomUUID();
     Instant now = Instant.now();
-
-    IssueDependency dep =
-        IssueDependency.builder()
-            .issueId(issueId)
-            .dependsOnIssueId(depId)
-            .projectId(projectId)
-            .createdAt(now)
-            .build();
-    IssueDependencyDTO depDto = mapper.toDto(dep);
-    assertEquals(issueId.toString().toLowerCase(), depDto.getIssueId());
-    assertEquals(depId.toString().toLowerCase(), depDto.getDependsOnIssueId());
 
     IssueActivity activity =
         IssueActivity.builder()
             .issueId(issueId)
             .sequence(5L)
-            .kind(IssueActivityKind.HUMAN_INPUT)
+            .kind(IssueActivityKind.COMMENT)
             .actorType(IssueActivityActorType.HUMAN)
             .body("Input body")
+            .data("{\"action\":\"test\",\"count\":42}")
             .idempotencyKey("idem-key")
             .createdAt(now)
             .build();
-    IssueActivityDTO activityDto = mapper.toDto(activity);
-    assertEquals(issueId.toString().toLowerCase(), activityDto.getIssueId());
-    assertEquals("5", activityDto.getSequence());
-    assertEquals("HUMAN_INPUT", activityDto.getKind());
-    assertEquals("HUMAN", activityDto.getActorType());
-    assertNull(activityDto.getActorAgentName());
-    assertNull(activityDto.getTargetRole());
-    assertNull(activityDto.getRunId());
-    assertNull(activityDto.getSubmissionRunId());
-    assertNull(activityDto.getDecision());
-    assertEquals("Input body", activityDto.getBody());
-    assertEquals("idem-key", activityDto.getIdempotencyKey());
-    assertEquals(now.toString(), activityDto.getCreatedAt());
+
+    IssueActivityDTO dto = mapper.toDto(activity);
+    assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());
+    assertEquals("5", dto.getSequence());
+    assertEquals("COMMENT", dto.getKind());
+    assertEquals("HUMAN", dto.getActorType());
+    assertNull(dto.getActorAgentName());
+    assertNull(dto.getRunId());
+    assertEquals("Input body", dto.getBody());
+    assertTrue(dto.getData() instanceof Map);
+    assertEquals(now.toString(), dto.getCreatedAt());
   }
 
   @Test
-  void testAgentSessionMapping() {
-    // 测试意图：验证 IssueAgentSession 映射到 IssueAgentSessionDTO 及其 null 保护
-    assertNull(mapper.toDto((IssueAgentSession) null, "EXECUTOR"));
-
-    UUID bindingId = UUID.randomUUID();
+  void testEvidenceMapping() {
+    // 测试意图：验证 IssueEvidence 映射为 IssueEvidenceDTO
     UUID issueId = UUID.randomUUID();
-    UUID sessionId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    UUID runId = UUID.randomUUID();
     Instant now = Instant.now();
 
-    IssueAgentSession agentSession =
-        IssueAgentSession.builder()
-            .id(bindingId)
+    IssueEvidence evidence =
+        IssueEvidence.builder()
             .issueId(issueId)
-            .agentName("coder")
-            .sessionId(sessionId)
-            .threadId(threadId)
+            .blobId(blobId)
+            .name("evidence.txt")
+            .actorAgentName("coder")
+            .runId(runId)
             .createdAt(now)
-            .updatedAt(now)
             .build();
 
-    IssueAgentSessionDTO dto = mapper.toDto(agentSession, "EXECUTOR");
-    assertNotNull(dto);
-    assertEquals(bindingId.toString().toLowerCase(), dto.getId());
+    IssueEvidenceDTO dto = mapper.toDto(evidence);
+    assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());
+    assertEquals(blobId.toString().toLowerCase(), dto.getBlobId());
+    assertEquals("kkstudio:/resources/" + blobId.toString().toLowerCase(), dto.getUri());
+    assertEquals("evidence.txt", dto.getName());
+    assertEquals("coder", dto.getActorAgentName());
+    assertEquals(runId.toString().toLowerCase(), dto.getRunId());
+    assertEquals(now.toString(), dto.getCreatedAt());
+  }
+
+  @Test
+  void testAgentThreadMapping() {
+    // 测试意图：验证 IssueAgentThread 映射为 IssueAgentThreadDTO
+    UUID issueId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    IssueAgentThread thread = new IssueAgentThread(issueId, "coder", threadId);
+
+    IssueAgentThreadDTO dto = mapper.toDto(thread);
     assertEquals(issueId.toString().toLowerCase(), dto.getIssueId());
     assertEquals("coder", dto.getAgentName());
-    assertEquals("EXECUTOR", dto.getRole());
-    assertEquals(sessionId.toString().toLowerCase(), dto.getSessionId());
-    assertEquals(threadId.toString().toLowerCase(), dto.getBranchId());
-    assertEquals(now.toString(), dto.getCreatedAt());
+    assertEquals(threadId.toString().toLowerCase(), dto.getThreadId());
+  }
+
+  @Test
+  void testStageBudgetMapping() {
+    // 测试意图：验证 StageBudgetView 映射为 IssueStageBudgetDTO
+    StageBudgetView view = new StageBudgetView("WORK", 5, 2L, 1L, 4L);
+    IssueStageBudgetDTO dto = mapper.toDto(view);
+    assertEquals("WORK", dto.getState());
+    assertEquals(5, dto.getMaxRuns());
+    assertEquals("2", dto.getBudgetAfterOrdinal());
+    assertEquals("1", dto.getUsedRuns());
+    assertEquals("4", dto.getRemainingRuns());
   }
 
   @Test
   void testRunMapping() {
     // 测试意图：验证 IssueRunSummaryDTO 与 IssueRunDTO 映射
     assertNull(mapper.toSummaryDto(null));
-    assertNull(mapper.toDetailDto(null, null));
+    assertNull(mapper.toDto((IssueRun) null));
 
     UUID runId = UUID.randomUUID();
     UUID issueId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
-    UUID agentSessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    UUID startEntryId = UUID.randomUUID();
     Instant now = Instant.now();
 
     IssueRun run =
@@ -237,57 +334,31 @@ class ProjectDtoMapperTest {
             .id(runId)
             .issueId(issueId)
             .ordinal(1L)
-            .role(IssueRunRole.EXECUTOR)
-            .agentName("coder")
-            .submissionRunId(null)
-            .status(IssueRunStatus.WAITING_HUMAN)
-            .outcome(IssueRunOutcome.CHANGES_REQUESTED)
+            .state("WORK")
+            .sessionId(sessionId)
+            .threadId(threadId)
+            .status(IssueRunStatus.RUNNING)
+            .startEntryId(startEntryId)
             .observedActivitySequence(2L)
-            .continuationCount(0)
-            .maxContinuations(3)
-            .deadline(now.plusSeconds(3600))
-            .waitingReason("Waiting for review")
-            .result("result text")
-            .terminalActionId("action-1")
+            .remainingExecutionMs(60000L)
             .version(4L)
-            .createdAt(now)
-            .updatedAt(now)
-            .completedAt(null)
+            .startedAt(now)
             .build();
 
-    IssueRunSummaryDTO summary = mapper.toSummaryDto(run);
+    IssueRunSummaryDTO summary = mapper.toSummaryDto(run, "coder");
     assertNotNull(summary);
     assertEquals("1", summary.getOrdinal());
-    assertEquals("EXECUTOR", summary.getRole());
-    assertEquals("WAITING_HUMAN", summary.getStatus());
-    assertEquals("CHANGES_REQUESTED", summary.getOutcome());
-    assertEquals("Waiting for review", summary.getWaitingReason());
+    assertEquals("RUNNING", summary.getStatus());
+    assertEquals("WORK", summary.getState());
+    assertEquals("coder", summary.getAgentName());
 
-    IssueAgentSession agentSession =
-        IssueAgentSession.builder()
-            .id(agentSessionId)
-            .issueId(issueId)
-            .agentName("coder")
-            .sessionId(sessionId)
-            .threadId(UUID.randomUUID())
-            .createdAt(now)
-            .build();
-
-    IssueRunDTO detail = mapper.toDetailDto(run, agentSession);
+    IssueRunDTO detail = mapper.toDto(run, "coder");
     assertNotNull(detail);
-    assertEquals(agentSessionId.toString().toLowerCase(), detail.getAgentSessionId());
-    assertEquals(sessionId.toString().toLowerCase(), detail.getSessionId());
     assertEquals("coder", detail.getAgentName());
+    assertEquals(sessionId.toString().toLowerCase(), detail.getSessionId());
+    assertEquals(threadId.toString().toLowerCase(), detail.getThreadId());
     assertEquals("4", detail.getVersion());
-    assertEquals("action-1", detail.getTerminalActionId());
     assertEquals("2", detail.getObservedActivitySequence());
-    assertEquals(0, detail.getContinuationCount());
-    assertEquals(3, detail.getMaxContinuations());
-
-    // detail null agentSession 保护
-    IssueRunDTO detailWithoutSession = mapper.toDetailDto(run, null);
-    assertNotNull(detailWithoutSession);
-    assertNull(detailWithoutSession.getAgentSessionId());
-    assertNull(detailWithoutSession.getSessionId());
+    assertEquals("60000", detail.getRemainingExecutionMs());
   }
 }

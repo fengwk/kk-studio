@@ -19,6 +19,10 @@ public interface ProjectService {
 
   List<Project> listProjects(boolean archived);
 
+  /** 编辑项目资料（标题与描述）；工作流与执行策略各自用专门操作修改。 */
+  Project updateConfiguration(
+      UUID projectId, long expectedVersion, String title, String description);
+
   /** 以版本 CAS 整体替换 workflow 配置：严格解码 / 校验保留值、唯一编码、边、可达性与引用。 */
   Project updateWorkflow(UUID projectId, long expectedVersion, String workflowJson);
 
@@ -27,4 +31,10 @@ public interface ProjectService {
 
   /** 归档项目：归档后禁止执行，不删除历史与资源。 */
   Project archiveProject(UUID projectId, long expectedVersion);
+
+  /** 恢复归档项目：只回到可编辑状态，不自动新建 Run。 */
+  Project unarchiveProject(UUID projectId, long expectedVersion);
+
+  /** 删除项目：要求项目下已无任何 Issue（含已归档），不删除跨域事实。 */
+  void deleteProject(UUID projectId, long expectedVersion);
 }

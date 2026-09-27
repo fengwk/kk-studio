@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,7 +24,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import fun.fengwk.kkstudio.platform.project.model.Issue;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
 import fun.fengwk.kkstudio.platform.project.model.Project;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
 import fun.fengwk.kkstudio.platform.project.service.ProjectService;
@@ -42,7 +40,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * {@code POST /api/issues/{issueId}/evidence} 的人工上传公开证据端到端测试（真实 PostgreSQL + 内存 S3 假件）。
@@ -68,8 +65,6 @@ import java.util.concurrent.atomic.AtomicLong;
       "kk-studio.storage.s3.secret-key=local-test-secret-key"
     })
 class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
-
-  private static final AtomicLong FIXTURE_COUNTER = new AtomicLong();
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbc;
@@ -109,10 +104,9 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
             .andExpect(jsonPath("$.data.issueId").value(issueId.toString()))
             .andExpect(jsonPath("$.data.blobId").value(blobId.toString()))
             .andExpect(jsonPath("$.data.uri").value(uri))
-            .andExpect(jsonPath("$.data.origin").value("HUMAN"))
             .andExpect(jsonPath("$.data.name").value("acceptance.txt"))
             .andExpect(jsonPath("$.data.runId").value(nullValue()))
-            .andExpect(jsonPath("$.data.publishedAt").isString())
+            .andExpect(jsonPath("$.data.createdAt").isString())
             .andReturn();
 
     // 公开不复制字节：对象 key 集合与最终对象内容在发布前后逐字节一致，响应也不暴露物理 key
@@ -149,15 +143,6 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
                 String.class,
                 issueId)
             .contains(uri));
-
-    // 详情读取面与发布响应同源：同一规范 URI 与元数据
-    mockMvc
-        .perform(get("/api/issues/" + issueId))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.evidence[0].blobId").value(blobId.toString()))
-        .andExpect(jsonPath("$.data.evidence[0].uri").value(uri))
-        .andExpect(jsonPath("$.data.evidence[0].origin").value("HUMAN"))
-        .andExpect(jsonPath("$.data.evidence[0].name").value("acceptance.txt"));
   }
 
   @Test
@@ -224,10 +209,9 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
   void archivedIssueRejectsPublicationWithoutConsumingTheUpload() throws Exception {
     UUID uploadId = support.readyUpload("late.txt", "late body");
     UUID blobId = support.blobIdOf(uploadId);
-    // 已归档 Issue 只读：取消到终态后再归档，任何公开入口都必须拒绝
+    // 已归档 Issue 只读：无活动 Run 时可直接归档，任何公开入口都必须拒绝
     Issue issue = issueService.getIssue(issueId);
-    Issue canceled = issueService.cancelIssue(issueId, issue.getVersion(), "Not needed anymore");
-    issueService.archiveIssue(issueId, canceled.getVersion());
+    issueService.archiveIssue(issueId, issue.getVersion());
 
     mockMvc
         .perform(
@@ -267,44 +251,8 @@ class IssueEvidencePublishIntegrationTest extends WebPostgresTestSupport {
   }
 
   private UUID createIssueFixture() {
-    Project project = projectService.createProject("Evidence HTTP project", "Desc", false, 0);
-    String executor = createTestAgent();
-    Issue issue =
-        issueService.createIssue(
-            project.getId(), "Publish through HTTP", "Desc", executor, null, IssueStatus.TODO);
+    Project project = projectService.createProject("Evidence HTTP project", "Desc", false);
+    Issue issue = issueService.createIssue(project.getId(), "Publish through HTTP", "Desc");
     return issue.getId();
-  }
-
-  private String createTestAgent() {
-    long id = FIXTURE_COUNTER.incrementAndGet();
-    String providerName = "prov-" + id;
-    String modelName = "mod-" + id;
-    String agentName = "agent-" + id;
-    jdbc.update(
-        "insert into agent_provider (name, provider_type, config, connection_generation_id) "
-            + "values (?, 'openai', '{}'::jsonb, ?::uuid)",
-        providerName,
-        UUID.randomUUID());
-    jdbc.update(
-        "insert into agent_model (provider_name, name, model_id, config) values (?, ?, ?, ?::jsonb)",
-        providerName,
-        modelName,
-        "wire-" + id,
-        "{\"limit\":{\"context\":128000,\"output\":8192},"
-            + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
-            + "\"variants\":[{\"id\":\"default\"}],\"defaultVariant\":\"default\","
-            + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"standard\","
-            + "\"serviceTier\":\"standard\",\"serviceTierMultiplier\":1.0,"
-            + "\"version\":\"2026-01-01\",\"inputPerMillionTokens\":0,"
-            + "\"outputPerMillionTokens\":0,\"cacheReadPerMillionTokens\":0,"
-            + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
-            + "\"reasoningPerMillionTokens\":0}}");
-    jdbc.update(
-        "insert into agent_definition (name, model_provider_name, model_name, config) "
-            + "values (?, ?, ?, '{}'::jsonb)",
-        agentName,
-        providerName,
-        modelName);
-    return agentName;
   }
 }

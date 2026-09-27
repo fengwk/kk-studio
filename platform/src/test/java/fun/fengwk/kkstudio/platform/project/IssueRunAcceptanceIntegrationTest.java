@@ -87,10 +87,11 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
                 + " and kind = 'RUN'",
             issue.getId(),
             run.getId()));
+    // 进入有 Agent 的工作阶段即登记 Work（设计 §4.5），接受 Run 时再次唤醒同一 mailbox 行。
     assertEquals(
         1L,
         count(
-            "select count(*) from project_issue_work where issue_id = ? and wake_version = 1",
+            "select count(*) from project_issue_work where issue_id = ? and wake_version >= 1",
             issue.getId()));
   }
 
@@ -106,6 +107,11 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     long nextRunOrdinalAfterAccept =
         jdbc.queryForObject(
             "select next_run_ordinal from project_issue where id = ?", Long.class, issue.getId());
+    long wakeVersionAfterAccept =
+        jdbc.queryForObject(
+            "select wake_version from project_issue_work where issue_id = ?",
+            Long.class,
+            issue.getId());
 
     IssueRun replayed = issueRunService.acceptRun(issue.getId(), acceptKey);
 
@@ -124,10 +130,12 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         count(
             "select count(*) from project_issue_activity where issue_id = ? and kind = 'RUN'",
             issue.getId()));
+    // 重放不推进 Work：mailbox 的唤醒版本保持接受时的值（阶段转移已先行登记同一行）。
     assertEquals(
-        1L,
-        count(
-            "select count(*) from project_issue_work where issue_id = ? and wake_version = 1",
+        wakeVersionAfterAccept,
+        jdbc.queryForObject(
+            "select wake_version from project_issue_work where issue_id = ?",
+            Long.class,
             issue.getId()));
     assertEquals(
         nextRunOrdinalAfterAccept,
@@ -254,8 +262,15 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         0L,
         count("select count(*) from project_issue_stage_budget where issue_id = ?", issue.getId()));
+    // 接受失败整体回滚：不新增 mailbox，也不推进阶段转移已经登记的那一行。
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+    assertEquals(
+        1L,
+        jdbc.queryForObject(
+            "select wake_version from project_issue_work where issue_id = ?",
+            Long.class,
+            issue.getId()));
     assertEquals(
         2L,
         jdbc.queryForObject(

@@ -19,6 +19,9 @@ public interface IssueActivityRepository {
 
   List<IssueActivity> listByIssueId(UUID issueId);
 
+  /** 按序号升序读取有界窗口 {@code (afterSequence, ...]}：投递游标只推进真正检视过的窗口。 */
+  List<IssueActivity> listPage(UUID issueId, long afterSequence, int limit);
+
   long countByIssueId(UUID issueId);
 
   int deleteByIssueId(UUID issueId);

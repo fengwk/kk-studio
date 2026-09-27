@@ -8,9 +8,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * 修改项目请求 DTO，包含 expectedVersion CAS 乐观锁版本。
+ * 修改项目请求 DTO。
  *
- * <p>可空字段省略即保持当前值；{@code maxReviewRejections} 只影响此后的正式审查打回，不追溯已有 {@code BLOCKED}。
+ * <p>可空字段省略即保持当前值。
  */
 @Data
 @Builder
@@ -25,12 +25,6 @@ public class UpdateProjectRequestDTO {
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String description;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Boolean yoloEnabled;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Integer maxReviewRejections;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

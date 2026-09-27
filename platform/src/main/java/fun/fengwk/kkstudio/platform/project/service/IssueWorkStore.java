@@ -22,5 +22,13 @@ public interface IssueWorkStore {
 
   void renewLease(UUID issueId, String leaseToken, Instant now, Instant newLeaseUntil);
 
-  void completeWork(UUID issueId, String leaseToken, long claimedWakeVersion, Instant now);
+  boolean completeWork(UUID issueId, String leaseToken, long claimedWakeVersion, Instant now);
+
+  /**
+   * 归还本次 claim 的 lease 并把下一次检查延后到 {@code dueAt}；mailbox 行保留。
+   *
+   * <p>与 {@link #completeWork} 的区别：完成表示「当前没有仍需自动重检的事实」，归还表示「仍需在未来某个时刻重新检查当前 Issue」。两者都以调用方自己的 lease
+   * token 围栏，因此并发到达的新唤醒不会被旧 Worker 吞掉。
+   */
+  boolean rescheduleWork(UUID issueId, String leaseToken, Instant dueAt);
 }

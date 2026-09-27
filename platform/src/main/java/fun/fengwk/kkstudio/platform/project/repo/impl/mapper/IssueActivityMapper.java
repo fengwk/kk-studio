@@ -66,6 +66,17 @@ public interface IssueActivityMapper extends BaseMapper {
   IssueActivityDO findByIdempotencyKey(
       @Param("issueId") UUID issueId, @Param("idempotencyKey") String idempotencyKey);
 
+  @Select(
+      "select "
+          + COLUMNS
+          + " from project_issue_activity where issue_id = #{issueId}"
+          + " and sequence > #{afterSequence} order by sequence asc limit #{limit}")
+  @ResultMap("issueActivityResultMap")
+  List<IssueActivityDO> listPage(
+      @Param("issueId") UUID issueId,
+      @Param("afterSequence") long afterSequence,
+      @Param("limit") int limit);
+
   @Select("select count(*) from project_issue_activity where issue_id = #{issueId}")
   long countByIssueId(@Param("issueId") UUID issueId);
 

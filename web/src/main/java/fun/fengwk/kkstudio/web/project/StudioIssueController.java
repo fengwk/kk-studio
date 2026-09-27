@@ -2,10 +2,8 @@ package fun.fengwk.kkstudio.web.project;
 
 import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
-import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,38 +13,41 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.project.model.Issue;
 import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityActorType;
-import fun.fengwk.kkstudio.platform.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.platform.project.model.IssueAgentSession;
-import fun.fengwk.kkstudio.platform.project.model.IssueDependency;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.platform.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.platform.project.model.IssueRun;
-import fun.fengwk.kkstudio.platform.project.model.IssueRunRole;
-import fun.fengwk.kkstudio.platform.project.model.IssueStatus;
-import fun.fengwk.kkstudio.platform.project.model.ReviewDecision;
+import fun.fengwk.kkstudio.platform.project.model.PauseReason;
+import fun.fengwk.kkstudio.platform.project.model.Project;
+import fun.fengwk.kkstudio.platform.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.platform.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.platform.project.service.IssueRunService;
 import fun.fengwk.kkstudio.platform.project.service.IssueService;
-import fun.fengwk.kkstudio.share.project.AddIssueDependencyRequestDTO;
+import fun.fengwk.kkstudio.platform.project.service.IssueService.StageBudgetView;
+import fun.fengwk.kkstudio.platform.project.service.ProjectService;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.share.project.AddIssueEvidenceRequestDTO;
 import fun.fengwk.kkstudio.share.project.AppendIssueActivityRequestDTO;
 import fun.fengwk.kkstudio.share.project.ArchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.BlockIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.CancelIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.ChangeIssueStatusRequestDTO;
 import fun.fengwk.kkstudio.share.project.CreateIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.IssueActivityDTO;
-import fun.fengwk.kkstudio.share.project.IssueAgentSessionDTO;
+import fun.fengwk.kkstudio.share.project.IssueAgentThreadDTO;
 import fun.fengwk.kkstudio.share.project.IssueDTO;
-import fun.fengwk.kkstudio.share.project.IssueDependencyDTO;
 import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
 import fun.fengwk.kkstudio.share.project.IssueEvidenceDTO;
 import fun.fengwk.kkstudio.share.project.IssueRunDTO;
+import fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO;
+import fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.RecoverIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.RetryIssueRequestDTO;
-import fun.fengwk.kkstudio.share.project.ReviewIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.ReopenIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.ResetStageBudgetRequestDTO;
+import fun.fengwk.kkstudio.share.project.ResumeIssueRequestDTO;
+import fun.fengwk.kkstudio.share.project.TransitionIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UnarchiveIssueRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateIssueRequestDTO;
 
@@ -56,55 +57,85 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 /**
  * Issue 领域 REST 控制器。
  *
- * <p>人工与 Agent 走同一状态机：人可显式设状态、阻塞/恢复、重试、评审、以及追加带目标职责的定向输入。 Issue 当前要求就是 {@code description}
- * 正文，Activity 是唯一有序事实流，因此读取面用 {@code afterSequence}/{@code limit} 分页而不是全量展开。
+ * <p>提供 Issue 需求事实、工作流流转、阻塞/恢复、控制暂停/继续、阶段额度重置、活动事实流与证据公开的权威 HTTP 操作面。
  */
-@AllArgsConstructor
 @RestController
 @RequestMapping
 public class StudioIssueController {
 
-  /** Issue 详情默认返回的 Activity 窗口大小。 */
   private static final int DEFAULT_ACTIVITY_LIMIT = 50;
-
-  /** Agent 读取 Activity 的上限，与 issue_read 工具一致。 */
   private static final int MAX_ACTIVITY_LIMIT = 200;
-
-  /** 人可写入的 Activity 种类：系统与 Agent 事实（RECOVERY/RETRY/SPEC_CHANGE/REVIEW_DECISION）只能由对应流程产生。 */
-  private static final Set<IssueActivityKind> HUMAN_WRITABLE_KINDS =
-      Set.of(
-          IssueActivityKind.COMMENT, IssueActivityKind.INSTRUCTION, IssueActivityKind.HUMAN_INPUT);
 
   private final IssueService issueService;
   private final IssueRunService issueRunService;
   private final IssueEvidenceService issueEvidenceService;
+  private final ProjectService projectService;
   private final ProjectDtoMapper mapper;
+  private final IssueActivityRepository issueActivityRepository;
+  private final ProjectWorkflowJsonCodec workflowCodec;
+
+  public StudioIssueController(
+      IssueService issueService,
+      IssueRunService issueRunService,
+      IssueEvidenceService issueEvidenceService,
+      ProjectService projectService,
+      ProjectDtoMapper mapper,
+      IssueActivityRepository issueActivityRepository,
+      ProjectWorkflowJsonCodec workflowCodec) {
+    this.issueService = Objects.requireNonNull(issueService, "issueService");
+    this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
+    this.issueEvidenceService =
+        Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
+    this.projectService = projectService;
+    this.mapper = Objects.requireNonNull(mapper, "mapper");
+    this.issueActivityRepository = issueActivityRepository;
+    this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
+  }
+
+  public StudioIssueController(
+      IssueService issueService,
+      IssueRunService issueRunService,
+      IssueEvidenceService issueEvidenceService,
+      ProjectService projectService,
+      ProjectDtoMapper mapper,
+      IssueActivityRepository issueActivityRepository) {
+    this(
+        issueService,
+        issueRunService,
+        issueEvidenceService,
+        projectService,
+        mapper,
+        issueActivityRepository,
+        new ProjectWorkflowJsonCodec());
+  }
+
+  public StudioIssueController(
+      IssueService issueService,
+      IssueRunService issueRunService,
+      IssueEvidenceService issueEvidenceService,
+      ProjectDtoMapper mapper) {
+    this(
+        issueService,
+        issueRunService,
+        issueEvidenceService,
+        null,
+        mapper,
+        null,
+        new ProjectWorkflowJsonCodec());
+  }
 
   @PostMapping("/api/projects/{projectId}/issues")
   public ResponseEntity<Result<IssueDTO>> createIssue(
       @PathVariable("projectId") String projectIdStr, @RequestBody CreateIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
-    IssueStatus initialStatus =
-        request.getInitialStatus() != null && !request.getInitialStatus().isBlank()
-            ? parseEnum(request.getInitialStatus(), IssueStatus.class, "initialStatus")
-            : null;
-
     Issue created =
-        issueService.createIssue(
-            projectId,
-            request.getTitle(),
-            request.getDescription(),
-            request.getAssigneeAgentName(),
-            request.getReviewerAgentName(),
-            initialStatus);
-
+        issueService.createIssue(projectId, request.getTitle(), request.getDescription());
     return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
   }
 
@@ -119,40 +150,73 @@ public class StudioIssueController {
     int activityLimit = parseActivityLimit(limit);
 
     Issue issue = issueService.getIssue(issueId);
-    boolean blocked = issueService.isBlocked(issueId);
-    List<IssueDependency> deps = issueService.listDependencies(issueId);
     List<IssueActivity> activities =
-        issueService.listActivitiesPage(issueId, afterSequence, activityLimit);
-    List<IssueRun> runs = issueRunService.listRuns(issueId);
+        issueService.listActivities(issueId, afterSequence, activityLimit);
+    List<IssueActivityDTO> activityDtos = activities.stream().map(mapper::toDto).toList();
 
-    Map<String, IssueAgentSession> agentSessions = new HashMap<>();
+    String nextActivityCursor = null;
+    if (activities.size() == activityLimit) {
+      long lastSequence = activities.get(activities.size() - 1).getSequence();
+      nextActivityCursor = String.valueOf(lastSequence);
+    }
+
+    List<IssueAgentThread> agentThreads = issueService.listAgentThreads(issueId);
+    List<IssueAgentThreadDTO> agentThreadDtos = agentThreads.stream().map(mapper::toDto).toList();
+    Map<UUID, String> threadToAgent = new HashMap<>();
+    for (IssueAgentThread thread : agentThreads) {
+      threadToAgent.put(thread.threadId(), thread.agentName());
+    }
+
+    List<IssueRun> runs = issueRunService.listRuns(issueId);
     List<IssueRunDTO> runDtos = new ArrayList<>(runs.size());
     for (IssueRun run : runs) {
-      runDtos.add(mapper.toDetailDto(run, resolveAgentSession(agentSessions, run)));
+      runDtos.add(mapper.toDto(run, threadToAgent.get(run.getThreadId())));
     }
 
     IssueRun activeRun = issueRunService.getActiveRun(issueId);
+    IssueRunDTO currentRunDto =
+        activeRun != null
+            ? mapper.toDto(activeRun, threadToAgent.get(activeRun.getThreadId()))
+            : null;
+
     IssueRun latestRun = issueRunService.getLatestRun(issueId);
+    IssueRunDTO latestRunDto =
+        latestRun != null
+            ? mapper.toDto(latestRun, threadToAgent.get(latestRun.getThreadId()))
+            : null;
+
+    List<IssueStageBudgetDTO> stageBudgets = new ArrayList<>();
+    if (projectService != null) {
+      try {
+        Project project = projectService.getProject(issue.getProjectId());
+        if (project != null
+            && project.getWorkflowJson() != null
+            && !project.getWorkflowJson().isBlank()) {
+          ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
+          for (ProjectWorkflowState state : workflow.workStages()) {
+            try {
+              StageBudgetView view = issueService.getStageBudget(issueId, state.state().value());
+              stageBudgets.add(mapper.toDto(view));
+            } catch (AiResourceNotFoundException ignored) {
+              // 阶段额度尚未授权时静默跳过
+            }
+          }
+        }
+      } catch (AiResourceNotFoundException ignored) {
+        // 项目未找到时跳过
+      }
+    }
 
     IssueDetailDTO detail =
         IssueDetailDTO.builder()
             .issue(mapper.toDto(issue))
-            .blocked(blocked)
-            .dependencies(deps.stream().map(mapper::toDto).toList())
-            .sessions(listAgentSessions(issue))
-            .activities(activities.stream().map(mapper::toDto).toList())
-            .evidence(
-                issueEvidenceService.listEvidence(issueId).stream().map(mapper::toDto).toList())
-            .nextActivityCursor(nextActivityCursor(issueId, activities, activityLimit))
+            .activities(activityDtos)
+            .nextActivityCursor(nextActivityCursor)
             .runs(runDtos)
-            .currentRun(
-                activeRun == null
-                    ? null
-                    : mapper.toDetailDto(activeRun, resolveAgentSession(agentSessions, activeRun)))
-            .latestRun(
-                latestRun == null
-                    ? null
-                    : mapper.toDetailDto(latestRun, resolveAgentSession(agentSessions, latestRun)))
+            .currentRun(currentRunDto)
+            .latestRun(latestRunDto)
+            .stageBudgets(stageBudgets)
+            .agentThreads(agentThreadDtos)
             .build();
 
     return Results.ok(detail);
@@ -168,10 +232,9 @@ public class StudioIssueController {
     long afterSequence = parseActivityCursor(afterSequenceStr);
     int activityLimit = parseActivityLimit(limit);
     issueService.getIssue(issueId);
-    return Results.ok(
-        issueService.listActivitiesPage(issueId, afterSequence, activityLimit).stream()
-            .map(mapper::toDto)
-            .toList());
+    List<IssueActivity> activities =
+        issueService.listActivities(issueId, afterSequence, activityLimit);
+    return Results.ok(activities.stream().map(mapper::toDto).toList());
   }
 
   @PutMapping("/api/issues/{issueId}")
@@ -183,30 +246,20 @@ public class StudioIssueController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Issue updated =
         issueService.updateIssue(
-            issueId,
-            expectedVersion,
-            request.getTitle(),
-            request.getDescription(),
-            request.getAssigneeAgentName(),
-            request.getReviewerAgentName());
-
+            issueId, expectedVersion, request.getTitle(), request.getDescription());
     return Results.ok(mapper.toDto(updated));
   }
 
-  @PostMapping("/api/issues/{issueId}/status")
-  public Result<IssueDTO> changeStatus(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestBody ChangeIssueStatusRequestDTO request) {
+  @PostMapping("/api/issues/{issueId}/transition")
+  public Result<IssueDTO> transition(
+      @PathVariable("issueId") String issueIdStr, @RequestBody TransitionIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    if (request.getStatus() == null || request.getStatus().isBlank()) {
-      throw new IllegalArgumentException("status must not be blank");
-    }
-    IssueStatus targetStatus = parseEnum(request.getStatus(), IssueStatus.class, "status");
-    Issue updated = issueService.setStatus(issueId, expectedVersion, targetStatus);
-
+    Issue updated =
+        issueService.transition(
+            issueId, expectedVersion, request.getRequestKey(), request.getToState());
     return Results.ok(mapper.toDto(updated));
   }
 
@@ -217,7 +270,9 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue blocked = issueService.blockIssue(issueId, expectedVersion, request.getReason());
+    Issue blocked =
+        issueService.blockIssue(
+            issueId, expectedVersion, request.getRequestKey(), request.getReason());
     return Results.ok(mapper.toDto(blocked));
   }
 
@@ -228,133 +283,64 @@ public class StudioIssueController {
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue recovered =
-        issueService.recoverIssue(
-            issueId,
-            expectedVersion,
-            Boolean.TRUE.equals(request.getToBacklog()),
-            request.getComment());
+    Issue recovered = issueService.recoverIssue(issueId, expectedVersion, request.getRequestKey());
     return Results.ok(mapper.toDto(recovered));
   }
 
-  @PostMapping("/api/issues/{issueId}/dependencies")
-  public ResponseEntity<Result<IssueDependencyDTO>> addDependency(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestBody AddIssueDependencyRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    UUID dependsOnIssueId =
-        ProjectDtoMapper.parseUuid(request.getDependsOnIssueId(), "dependsOnIssueId");
-    long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-
-    IssueDependency added = issueService.addDependency(issueId, dependsOnIssueId, expectedVersion);
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(added)));
-  }
-
-  @DeleteMapping("/api/issues/{issueId}/dependencies/{dependsOnIssueId}")
-  public ResponseEntity<Void> removeDependency(
-      @PathVariable("issueId") String issueIdStr,
-      @PathVariable("dependsOnIssueId") String dependsOnIssueIdStr,
-      @RequestParam("expectedVersion") String expectedVersionStr) {
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    UUID dependsOnIssueId = ProjectDtoMapper.parseUuid(dependsOnIssueIdStr, "dependsOnIssueId");
-    long expectedVersion =
-        ProjectDtoMapper.parseNonNegativeLong(expectedVersionStr, "expectedVersion");
-
-    issueService.removeDependency(issueId, dependsOnIssueId, expectedVersion);
-    return ResponseEntity.noContent().build();
-  }
-
-  /**
-   * 追加人为 Activity：无 {@code targetRole} 的评论只留痕，设置 {@code targetRole} 即定向补充输入给已有参与者。
-   *
-   * <p>{@code kind} 省略时按是否定向推导：定向为 {@code INSTRUCTION}，否则为 {@code COMMENT}。权限来自 Agent
-   * 身份与目标职责，不由正文内容推导。
-   */
-  @PostMapping("/api/issues/{issueId}/activities")
-  public ResponseEntity<Result<IssueActivityDTO>> appendActivity(
-      @PathVariable("issueId") String issueIdStr,
-      @RequestBody AppendIssueActivityRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    if (request.getBody() == null || request.getBody().isBlank()) {
-      throw new IllegalArgumentException("body must not be blank");
-    }
-    IssueRunRole targetRole =
-        request.getTargetRole() != null && !request.getTargetRole().isBlank()
-            ? parseEnum(request.getTargetRole(), IssueRunRole.class, "targetRole")
-            : null;
-    IssueActivityKind kind = resolveHumanActivityKind(request.getKind(), targetRole);
-
-    IssueActivity activity =
-        IssueActivity.builder()
-            .issueId(issueId)
-            .kind(kind)
-            .actorType(IssueActivityActorType.HUMAN)
-            .targetRole(targetRole)
-            .body(request.getBody().trim())
-            .idempotencyKey(request.getIdempotencyKey())
-            .build();
-
-    IssueActivity appended = issueService.appendActivity(activity);
-
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(appended)));
-  }
-
-  /**
-   * 人工上传转为 Issue 公开证据：请求只携带已 READY 的 {@code uploadId}，服务端在单个事务内 {@code lockReady -> retain Issue 引用
-   * -> delete upload} 原子转移引用，不复制字节，也不信任客户端声明的文件名。
-   */
-  @PostMapping("/api/issues/{issueId}/evidence")
-  public ResponseEntity<Result<IssueEvidenceDTO>> addEvidence(
-      @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    UUID uploadId = ProjectDtoMapper.parseUuid(request.getUploadId(), "uploadId");
-
-    IssueEvidence evidence = issueEvidenceService.publishHumanUpload(issueId, uploadId);
-
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(evidence)));
-  }
-
-  /** 人工评审：被审查提交由服务端按当前 {@code IN_REVIEW} 的合格提交确定，{@code idempotencyKey} 支持安全重放。 */
-  @PostMapping("/api/issues/{issueId}/review")
-  public Result<Void> review(
-      @PathVariable("issueId") String issueIdStr, @RequestBody ReviewIssueRequestDTO request) {
-    Objects.requireNonNull(request, "request");
-    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    if (request.getDecision() == null || request.getDecision().isBlank()) {
-      throw new IllegalArgumentException("decision must not be blank");
-    }
-    ReviewDecision decision = parseEnum(request.getDecision(), ReviewDecision.class, "decision");
-
-    issueRunService.reviewByHuman(
-        issueId, decision, request.getReason(), request.getIdempotencyKey());
-
-    return Results.ok();
-  }
-
-  @PostMapping("/api/issues/{issueId}/cancel")
-  public Result<IssueDTO> cancel(
-      @PathVariable("issueId") String issueIdStr, @RequestBody CancelIssueRequestDTO request) {
+  @PostMapping("/api/issues/{issueId}/pause")
+  public Result<IssueDTO> pause(
+      @PathVariable("issueId") String issueIdStr, @RequestBody PauseIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
-    Issue cancelled = issueService.cancelIssue(issueId, expectedVersion, request.getReason());
-    return Results.ok(mapper.toDto(cancelled));
+    PauseReason reason = parseEnum(request.getReason(), PauseReason.class, "reason");
+    Issue paused =
+        issueService.pauseIssue(
+            issueId, expectedVersion, request.getRequestKey(), reason, request.getDetail());
+    return Results.ok(mapper.toDto(paused));
   }
 
-  /** 重试最新终态 Run；最新 Run 为 UNKNOWN 时请求必须携带人工核对说明 {@code verification}。 */
-  @PostMapping("/api/issues/{issueId}/retry")
-  public ResponseEntity<Result<IssueActivityDTO>> retry(
-      @PathVariable("issueId") String issueIdStr, @RequestBody RetryIssueRequestDTO request) {
+  @PostMapping("/api/issues/{issueId}/resume")
+  public Result<IssueDTO> resume(
+      @PathVariable("issueId") String issueIdStr, @RequestBody ResumeIssueRequestDTO request) {
     Objects.requireNonNull(request, "request");
     UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
-    IssueActivity activity =
-        issueRunService.retryRun(issueId, request.getIdempotencyKey(), request.getVerification());
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(activity)));
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    Issue resumed = issueService.resumeIssue(issueId, expectedVersion, request.getRequestKey());
+    return Results.ok(mapper.toDto(resumed));
+  }
+
+  @PostMapping("/api/issues/{issueId}/reopen")
+  public Result<IssueDTO> reopen(
+      @PathVariable("issueId") String issueIdStr, @RequestBody ReopenIssueRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    Issue reopened = issueService.reopen(issueId, expectedVersion, request.getRequestKey());
+    return Results.ok(mapper.toDto(reopened));
+  }
+
+  @PostMapping("/api/issues/{issueId}/budget-reset")
+  public Result<IssueStageBudgetDTO> resetBudget(
+      @PathVariable("issueId") String issueIdStr, @RequestBody ResetStageBudgetRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    if (request.getMaxRuns() == null) {
+      throw new IllegalArgumentException("maxRuns must not be null");
+    }
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    StageBudgetView view =
+        issueService.resetStageBudget(
+            issueId,
+            expectedVersion,
+            request.getRequestKey(),
+            request.getState(),
+            request.getMaxRuns());
+    return Results.ok(mapper.toDto(view));
   }
 
   @PostMapping("/api/issues/{issueId}/archive")
@@ -379,62 +365,58 @@ public class StudioIssueController {
     return Results.ok(mapper.toDto(unarchived));
   }
 
-  /** 按当前职责配置列出该 Issue 的稳定 Agent 归属；职责变更后旧归属仍可见其原始身份。 */
-  private List<IssueAgentSessionDTO> listAgentSessions(Issue issue) {
-    List<IssueAgentSessionDTO> sessions = new ArrayList<>(2);
-    IssueAgentSession executor =
-        issue.getAssigneeAgentName() == null
-            ? null
-            : issueRunService.getAgentSession(issue.getId(), issue.getAssigneeAgentName());
-    if (executor != null) {
-      sessions.add(mapper.toDto(executor, IssueRunRole.EXECUTOR.name()));
+  @PostMapping("/api/issues/{issueId}/activities")
+  public ResponseEntity<Result<IssueActivityDTO>> appendActivity(
+      @PathVariable("issueId") String issueIdStr,
+      @RequestBody AppendIssueActivityRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    long expectedVersion =
+        ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
+    if (request.getBody() == null || request.getBody().isBlank()) {
+      throw new IllegalArgumentException("body must not be blank");
     }
-    IssueAgentSession reviewer =
-        issue.getReviewerAgentName() == null
-            ? null
-            : issueRunService.getAgentSession(issue.getId(), issue.getReviewerAgentName());
-    if (reviewer != null) {
-      sessions.add(mapper.toDto(reviewer, IssueRunRole.REVIEWER.name()));
-    }
-    return sessions;
-  }
-
-  private IssueAgentSession resolveAgentSession(
-      Map<String, IssueAgentSession> cache, IssueRun run) {
-    if (run == null || run.getAgentName() == null) {
-      return null;
-    }
-    return cache.computeIfAbsent(
-        run.getAgentName(),
-        agentName -> issueRunService.getAgentSession(run.getIssueId(), agentName));
-  }
-
-  /**
-   * 计算下一条 Activity 游标：窗口未取满即已到末尾，取满则精确探测其后是否仍有 Activity。
-   *
-   * <p>返回 null 表示 Activity 已经没有更多，调用方据此停止轮询。
-   */
-  private String nextActivityCursor(UUID issueId, List<IssueActivity> page, int limit) {
-    if (page.size() < limit) {
-      return null;
-    }
-    long lastSequence = page.get(page.size() - 1).getSequence();
-    boolean hasMore = !issueService.listActivitiesPage(issueId, lastSequence, 1).isEmpty();
-    return hasMore ? String.valueOf(lastSequence) : null;
-  }
-
-  private static IssueActivityKind resolveHumanActivityKind(String kind, IssueRunRole targetRole) {
-    if (kind == null || kind.isBlank()) {
-      return targetRole != null ? IssueActivityKind.INSTRUCTION : IssueActivityKind.COMMENT;
-    }
-    IssueActivityKind parsed = parseEnum(kind, IssueActivityKind.class, "kind");
-    if (!HUMAN_WRITABLE_KINDS.contains(parsed)) {
+    String kind = request.getKind();
+    if ("INSTRUCTION".equalsIgnoreCase(kind)) {
+      issueService.appendInstruction(
+          issueId, expectedVersion, request.getRequestKey(), request.getBody());
+    } else if (kind == null || kind.isBlank() || "COMMENT".equalsIgnoreCase(kind)) {
+      issueService.appendComment(
+          issueId, expectedVersion, request.getRequestKey(), request.getBody());
+    } else {
       throw new IllegalArgumentException("kind is invalid");
     }
-    if (parsed == IssueActivityKind.INSTRUCTION && targetRole == null) {
-      throw new IllegalArgumentException("INSTRUCTION requires targetRole");
+
+    IssueActivity activity = null;
+    if (issueActivityRepository != null) {
+      activity = issueActivityRepository.findByIdempotencyKey(issueId, request.getRequestKey());
     }
-    return parsed;
+    if (activity == null) {
+      List<IssueActivity> recent = issueService.listActivities(issueId, 0, MAX_ACTIVITY_LIMIT);
+      for (IssueActivity a : recent) {
+        if (Objects.equals(request.getRequestKey(), a.getIdempotencyKey())) {
+          activity = a;
+          break;
+        }
+      }
+    }
+    if (activity == null) {
+      throw new IllegalStateException("appended activity could not be found");
+    }
+
+    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(activity)));
+  }
+
+  @PostMapping("/api/issues/{issueId}/evidence")
+  public ResponseEntity<Result<IssueEvidenceDTO>> addEvidence(
+      @PathVariable("issueId") String issueIdStr, @RequestBody AddIssueEvidenceRequestDTO request) {
+    Objects.requireNonNull(request, "request");
+    UUID issueId = ProjectDtoMapper.parseUuid(issueIdStr, "issueId");
+    UUID uploadId = ProjectDtoMapper.parseUuid(request.getUploadId(), "uploadId");
+
+    IssueEvidence evidence = issueEvidenceService.publishHumanUpload(issueId, uploadId);
+
+    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(evidence)));
   }
 
   private static long parseActivityCursor(String value) {
@@ -452,6 +434,9 @@ public class StudioIssueController {
   }
 
   private static <E extends Enum<E>> E parseEnum(String value, Class<E> type, String fieldName) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(fieldName + " must not be blank");
+    }
     try {
       return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException error) {

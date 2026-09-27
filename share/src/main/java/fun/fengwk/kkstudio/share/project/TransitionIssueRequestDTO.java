@@ -6,15 +6,16 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** 变更 Issue 状态请求 DTO。 */
+/** 转换 Issue 状态请求 DTO。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ChangeIssueStatusRequestDTO {
+public class TransitionIssueRequestDTO {
 
   private String expectedVersion;
-  private String status;
+  private String requestKey;
+  private String toState;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

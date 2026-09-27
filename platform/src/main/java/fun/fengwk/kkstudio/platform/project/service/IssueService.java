@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.project.service;
 
 import fun.fengwk.kkstudio.platform.project.model.Issue;
+import fun.fengwk.kkstudio.platform.project.model.IssueActivity;
+import fun.fengwk.kkstudio.platform.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.platform.project.model.PauseReason;
 
 import java.util.List;
@@ -22,6 +24,27 @@ public interface IssueService {
   Issue getIssue(UUID issueId);
 
   List<Issue> listIssues(UUID projectId, boolean archived);
+
+  /** 编辑 Issue 需求事实（标题与描述）；当前阶段与执行事实不由本操作改变。 */
+  Issue updateIssue(UUID issueId, long expectedVersion, String title, String description);
+
+  /** 归档：要求没有活动 Run；归档后禁止执行，不删除历史与资源。 */
+  Issue archiveIssue(UUID issueId, long expectedVersion);
+
+  /** 恢复归档：只回到可编辑状态，不自动新建 Run。 */
+  Issue unarchiveIssue(UUID issueId, long expectedVersion);
+
+  /** 追加普通评论：只留痕，不自动唤醒 Agent。 */
+  Issue appendComment(UUID issueId, long expectedVersion, String requestKey, String body);
+
+  /** 追加定向指示：必须投递给明确的当前 Run；没有活动 Run 时先明确启动或恢复，绝不构造隐藏的未来阶段队列。 */
+  Issue appendInstruction(UUID issueId, long expectedVersion, String requestKey, String body);
+
+  /** 读取 Issue 事实流的有界窗口，按序号升序。 */
+  List<IssueActivity> listActivities(UUID issueId, long afterSequence, int limit);
+
+  /** 读取 Issue 的稳定 Agent Thread 归属；绑定不可重绑，因此只需返回事实。 */
+  List<IssueAgentThread> listAgentThreads(UUID issueId);
 
   /** 业务阻塞：原子记录 BLOCKED、原阶段与原因。 */
   Issue blockIssue(UUID issueId, long expectedVersion, String requestKey, String reason);

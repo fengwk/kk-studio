@@ -121,9 +121,29 @@ public class ProjectServiceImpl implements ProjectService {
 
   @Override
   @Transactional
+  public Project updateConfiguration(
+      UUID projectId, long expectedVersion, String title, String description) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireEditable(locked);
+    requireVersion(locked, expectedVersion);
+    locked.setTitle(
+        ProjectValidationUtils.requireDisplayName(
+            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH));
+    locked.setDescription(
+        ProjectValidationUtils.optionalUtf8Text(
+            description == null ? "" : description,
+            "description",
+            ProjectValidationUtils.MAX_DESCRIPTION_BYTES));
+    return applyConfiguration(locked, expectedVersion);
+  }
+
+  @Override
+  @Transactional
   public Project updateWorkflow(UUID projectId, long expectedVersion, String workflowJson) {
     Objects.requireNonNull(projectId, "projectId");
     Project locked = lockProject(projectId);
+    requireEditable(locked);
     requireVersion(locked, expectedVersion);
     requireNoActiveRun(projectId);
     ProjectWorkflow workflow = decodeWorkflow(workflowJson);
@@ -136,6 +156,7 @@ public class ProjectServiceImpl implements ProjectService {
   public Project updateYolo(UUID projectId, long expectedVersion, boolean yoloEnabled) {
     Objects.requireNonNull(projectId, "projectId");
     Project locked = lockProject(projectId);
+    requireEditable(locked);
     requireVersion(locked, expectedVersion);
     locked.setYoloEnabled(yoloEnabled);
     return applyConfiguration(locked, expectedVersion);
@@ -148,10 +169,45 @@ public class ProjectServiceImpl implements ProjectService {
     Project locked = lockProject(projectId);
     requireVersion(locked, expectedVersion);
     requireNoActiveRun(projectId);
+    if (locked.isArchived()) {
+      // 缺少响应后的重试：归档已经是当前事实，不重复写行。
+      return locked;
+    }
     if (!projectRepository.updateArchivedAt(projectId, Instant.now(), expectedVersion)) {
       throw conflict(locked, expectedVersion);
     }
     return projectRepository.getById(projectId);
+  }
+
+  @Override
+  @Transactional
+  public Project unarchiveProject(UUID projectId, long expectedVersion) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireVersion(locked, expectedVersion);
+    if (!locked.isArchived()) {
+      // 缺少响应后的重试：已经是可编辑状态，不重复写行。
+      return locked;
+    }
+    if (!projectRepository.updateArchivedAt(projectId, null, expectedVersion)) {
+      throw conflict(locked, expectedVersion);
+    }
+    return projectRepository.getById(projectId);
+  }
+
+  @Override
+  @Transactional
+  public void deleteProject(UUID projectId, long expectedVersion) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireVersion(locked, expectedVersion);
+    if (!issueRepository.listByProjectId(projectId).isEmpty()) {
+      throw new AiValidationException(
+          "project", "Cannot delete a project while it still owns issues");
+    }
+    if (!projectRepository.deleteById(projectId, expectedVersion)) {
+      throw conflict(locked, expectedVersion);
+    }
   }
 
   private ProjectWorkflow decodeWorkflow(String workflowJson) {
@@ -183,6 +239,13 @@ public class ProjectServiceImpl implements ProjectService {
   private void requireVersion(Project locked, long expectedVersion) {
     if (locked.getVersion() != expectedVersion) {
       throw conflict(locked, expectedVersion);
+    }
+  }
+
+  /** 归档项目禁止任何配置修改；先恢复归档再编辑，避免归档状态下的隐式改动。 */
+  private static void requireEditable(Project locked) {
+    if (locked.isArchived()) {
+      throw new AiValidationException("project", "Cannot modify an archived project");
     }
   }
 
