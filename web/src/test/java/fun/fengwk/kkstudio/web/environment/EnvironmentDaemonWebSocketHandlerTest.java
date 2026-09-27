@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import jakarta.websocket.Session;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.web.socket.CloseStatus;
@@ -24,9 +25,18 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /** Environment Daemon handler 的连接装配、压缩门禁、入站桥接与幂等解绑契约。 */
 class EnvironmentDaemonWebSocketHandlerTest {
+
+  private final ScheduledThreadPoolExecutor timer =
+      EnvironmentDaemonWebSocketConfiguration.environmentDaemonSendDeadlineTimer();
+
+  @AfterEach
+  void shutdownTimer() {
+    timer.shutdownNow();
+  }
 
   private static final WebSocketExtension PERMESSAGE_DEFLATE =
       new WebSocketExtension("permessage-deflate");
@@ -41,7 +51,8 @@ class EnvironmentDaemonWebSocketHandlerTest {
   void forwardsInboundAndDisconnectsGatewayExactlyOnce() throws Exception {
     DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(
+            endpoint, transportProperties(16L * 1024 * 1024), timer);
     WebSocketSession session = deflateSession("connection-id");
     handler.afterConnectionEstablished(session);
     ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);
@@ -60,7 +71,8 @@ class EnvironmentDaemonWebSocketHandlerTest {
   void appliesConfiguredMaxMessageBytesOnEachConnection() {
     DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(4L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(
+            endpoint, transportProperties(4L * 1024 * 1024), timer);
     NativeWebSocketSession session = mock(NativeWebSocketSession.class);
     Session jsrSession = mock(Session.class);
     when(session.getId()).thenReturn("connection-id");
@@ -80,7 +92,8 @@ class EnvironmentDaemonWebSocketHandlerTest {
   void rejectsConnectionWithoutPermessageDeflate() throws Exception {
     DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(
+            endpoint, transportProperties(16L * 1024 * 1024), timer);
     WebSocketSession session = mock(WebSocketSession.class);
     when(session.getId()).thenReturn("connection-id");
     when(session.isOpen()).thenReturn(true);
@@ -98,7 +111,8 @@ class EnvironmentDaemonWebSocketHandlerTest {
   void rejectsConnectionWhenExtensionsAreUnavailable() throws Exception {
     DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(
+            endpoint, transportProperties(16L * 1024 * 1024), timer);
     WebSocketSession session = mock(WebSocketSession.class);
     when(session.getId()).thenReturn("connection-id");
     when(session.isOpen()).thenReturn(true);
@@ -115,7 +129,8 @@ class EnvironmentDaemonWebSocketHandlerTest {
   void mapsBusyOfferResultWithoutClosingChannel() throws Exception {
     DaemonEndpoint endpoint = mock(DaemonEndpoint.class);
     EnvironmentDaemonWebSocketHandler handler =
-        new EnvironmentDaemonWebSocketHandler(endpoint, transportProperties(16L * 1024 * 1024));
+        new EnvironmentDaemonWebSocketHandler(
+            endpoint, transportProperties(16L * 1024 * 1024), timer);
     WebSocketSession session = deflateSession("connection-id");
     handler.afterConnectionEstablished(session);
     ArgumentCaptor<DaemonChannel> connectionCaptor = ArgumentCaptor.forClass(DaemonChannel.class);

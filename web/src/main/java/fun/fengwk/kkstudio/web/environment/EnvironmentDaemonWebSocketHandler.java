@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.environment;
 
 import jakarta.websocket.Session;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -19,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
  * Spring WebSocket 适配器：把物理连接桥接为 {@link DaemonChannel} 并投递入站帧；本层不保存任何协议状态。
@@ -38,11 +40,15 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
   private final int queueCapacity;
   private final int maxBytes;
   private final int sendTimeoutMillis;
+  private final ScheduledThreadPoolExecutor deadlineTimer;
   private final Map<String, SpringWebSocketConnection> connections = new ConcurrentHashMap<>();
 
   public EnvironmentDaemonWebSocketHandler(
-      DaemonEndpoint endpoint, EnvironmentDaemonTransportProperties transportProperties) {
+      DaemonEndpoint endpoint,
+      EnvironmentDaemonTransportProperties transportProperties,
+      @Qualifier("environmentDaemonSendDeadlineTimer") ScheduledThreadPoolExecutor deadlineTimer) {
     this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
+    this.deadlineTimer = Objects.requireNonNull(deadlineTimer, "deadlineTimer");
     this.maxMessageBytes =
         Objects.requireNonNull(transportProperties, "transportProperties").requireMaxMessageBytes();
     this.queueCapacity = transportProperties.requireQueueCapacity();
@@ -149,7 +155,12 @@ public final class EnvironmentDaemonWebSocketHandler extends TextWebSocketHandle
       this.session = Objects.requireNonNull(session, "session");
       this.sender =
           new DaemonOutboundSender(
-              session, queueCapacity, maxBytes, sendTimeoutMillis, error -> disconnect(this));
+              session,
+              queueCapacity,
+              maxBytes,
+              sendTimeoutMillis,
+              deadlineTimer,
+              error -> disconnect(this));
     }
 
     @Override
