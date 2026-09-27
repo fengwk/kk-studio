@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.ASK_
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.TestClock;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.ToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
@@ -27,16 +28,24 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -444,6 +453,181 @@ class HarnessRuntimeToolInputTest {
 
     assertEquals(ASK_USER_QUESTIONNAIRE, waiting.call().argumentsJson());
     assertTrue(waiting.binding().contributor().contributorId().equals("builtin"));
+  }
+
+  /** 提交回答只触发 THREAD Work（由 ThreadProcessor 物化结果并决策下一步），绝不直接触发 MODEL 或 TOOL Work。 */
+  @Test
+  void submittingAnswerRequestsOnlyThreadWorkNotModelOrToolWork() {
+    ToolBaseline baseline = seedAskUserBaseline(store);
+    parkForInput(store, baseline, T3);
+    UUID submissionId = TestIds.id(30);
+
+    runtime.submitToolInput(
+        command(
+            baseline.threadId(),
+            baseline.toolId(),
+            submissionId,
+            "alice",
+            List.of(List.of("fast"), List.of("a"))));
+
+    // MODEL 与 TOOL 的工作认领均为空
+    Optional<ClaimedWork> modelWork =
+        store.transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, T5, "probe-model", T6));
+    assertTrue(modelWork.isEmpty());
+    Optional<ClaimedWork> toolWork =
+        store.transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, T5, "probe-tool", T6));
+    assertTrue(toolWork.isEmpty());
+    // THREAD 的工作认领存在且指向该 thread
+    Optional<ClaimedWork> threadWork =
+        store.transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T5, "probe-thread", T6));
+    assertTrue(threadWork.isPresent());
+    assertEquals(
+        new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), threadWork.get().target());
+  }
+
+  /**
+   * 工具结果物化（物理删除调用行、追加 Entry）后的真实重放： 同一提交身份与等价规范化答案精确 replay 且 materialized=true，不递增 Thread version
+   * 与 wakeVersion； 答案按冻结问卷顺序归一化，多选选项顺序不同但规范化后相同的答案仍精确重放； 其他 submissionId、不同 actor、不同答案报
+   * INPUT_SUBMISSION_MISMATCH； 未知 thread、未知 toolInvocationId 报 INPUT_SUBMISSION_NOT_APPLICABLE。
+   */
+  @Test
+  void materializedToolResultReplaysExactlyAndRejectsMismatches() {
+    ToolBaseline baseline = seedAskUserBaseline(store);
+    parkForInput(store, baseline, T3);
+    UUID submissionId = TestIds.id(15);
+    List<List<String>> answers = List.of(List.of("safe"), List.of("c", "b"));
+    ToolInputSubmissionCommand originalCommand =
+        command(baseline.threadId(), baseline.toolId(), submissionId, "alice", answers);
+
+    // 1. 首次接受回答
+    ToolInputAcceptance initial = runtime.submitToolInput(originalCommand);
+    assertFalse(initial.materialized());
+    assertEquals(baseline.threadId(), initial.threadId());
+    assertEquals(baseline.toolId(), initial.toolInvocationId());
+    assertEquals(submissionId, initial.receipt().submissionId());
+    assertEquals("alice", initial.receipt().actor());
+    assertEquals(T5, initial.receipt().acceptedAt());
+
+    // 2. 模拟生产物化：读取已接受的 ToolInvocation，通过生产 mapper 构建 history payload，
+    // 在单个事务内追加 Entry、推进 Thread head，并物理删除 ToolInvocation 行
+    ToolInvocation acceptedTool =
+        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    HistoryPayloadMapper mapper = new HistoryPayloadMapper();
+    MessagePayload payload = mapper.toolResultPayload(acceptedTool);
+
+    UUID newEntryId = TestIds.id(50);
+    store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
+          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          Instant now =
+              HarnessStoreTime.notBefore(
+                  clock.instant(),
+                  thread.updatedAt(),
+                  path.head().createdAt(),
+                  acceptedTool.updatedAt());
+          tx.insertEntry(
+              new Entry(newEntryId, path.root().sessionId(), thread.headEntryId(), payload, now));
+          tx.updateThread(thread.advanceHead(newEntryId, now));
+          tx.lockToolInvocationsByAssistantEntryId(acceptedTool.assistantEntryId());
+          tx.deleteToolInvocationsByIds(List.of(baseline.toolId()));
+          return null;
+        });
+
+    // 确认 ToolInvocation 行已被删除
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+
+    ThreadState threadBefore =
+        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    Work workBefore =
+        store.transaction(
+            tx ->
+                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    .orElseThrow());
+
+    // 3. 物化后用完全相同的 command 重试：必须返回 materialized=true，相同回执事实，且不产生任何 version/work 变更
+    clock.advance(T6);
+    ToolInputAcceptance replayed = runtime.submitToolInput(originalCommand);
+    assertTrue(replayed.materialized());
+    assertEquals(baseline.threadId(), replayed.threadId());
+    assertEquals(baseline.toolId(), replayed.toolInvocationId());
+    assertEquals(submissionId, replayed.receipt().submissionId());
+    assertEquals("alice", replayed.receipt().actor());
+    assertEquals(initial.receipt().acceptedAt(), replayed.receipt().acceptedAt());
+
+    ThreadState threadAfter =
+        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    Work workAfter =
+        store.transaction(
+            tx ->
+                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    .orElseThrow());
+    assertEquals(threadBefore.version(), threadAfter.version());
+    assertEquals(workBefore.wakeVersion(), workAfter.wakeVersion());
+
+    // 4. 多选选项顺序不同但规范化后相同的答案（["c", "b"] vs ["b", "c"]）：规范化结果相同，成功重放
+    List<List<String>> reorderedAnswers = List.of(List.of("safe"), List.of("b", "c"));
+    ToolInputAcceptance reorderedReplay =
+        runtime.submitToolInput(
+            command(
+                baseline.threadId(), baseline.toolId(), submissionId, "alice", reorderedAnswers));
+    assertTrue(reorderedReplay.materialized());
+    assertEquals(initial.receipt().acceptedAt(), reorderedReplay.receipt().acceptedAt());
+
+    // 5. 其他 submissionId、不同 actor、不同答案报 MISMATCH
+    HarnessRuntimeConflictException anotherSubmission =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.submitToolInput(
+                    command(
+                        baseline.threadId(), baseline.toolId(), TestIds.id(16), "alice", answers)));
+    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherSubmission.reason());
+
+    HarnessRuntimeConflictException anotherActor =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.submitToolInput(
+                    command(baseline.threadId(), baseline.toolId(), submissionId, "bob", answers)));
+    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherActor.reason());
+
+    HarnessRuntimeConflictException differentAnswers =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.submitToolInput(
+                    command(
+                        baseline.threadId(),
+                        baseline.toolId(),
+                        submissionId,
+                        "alice",
+                        List.of(List.of("fast"), List.of("a")))));
+    assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, differentAnswers.reason());
+
+    // 6. 不拥有该物化结果的 foreign threadId -> NOT_APPLICABLE
+    ToolBaseline foreignThread = seedToolBaseline(store);
+    HarnessRuntimeConflictException foreignConflict =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.submitToolInput(
+                    command(
+                        foreignThread.threadId(),
+                        baseline.toolId(),
+                        submissionId,
+                        "alice",
+                        answers)));
+    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, foreignConflict.reason());
+
+    // 7. 从未存在过的未知 toolInvocationId -> NOT_APPLICABLE
+    HarnessRuntimeConflictException unknownToolConflict =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                runtime.submitToolInput(
+                    command(baseline.threadId(), TestIds.id(99), submissionId, "alice", answers)));
+    assertEquals(Reason.INPUT_SUBMISSION_NOT_APPLICABLE, unknownToolConflict.reason());
   }
 
   private ToolInputAcceptance submitAfter(

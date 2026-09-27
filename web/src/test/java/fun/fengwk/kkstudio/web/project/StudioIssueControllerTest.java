@@ -157,7 +157,7 @@ class StudioIssueControllerTest {
             .threadId(threadId)
             .status(IssueRunStatus.RUNNING)
             .version(0L)
-            .createdAt(now)
+            .startedAt(now)
             .build();
     when(issueRunService.listRuns(issueId)).thenReturn(List.of(run));
     when(issueRunService.getActiveRun(issueId)).thenReturn(run);

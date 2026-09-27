@@ -103,8 +103,7 @@ class ProjectSnapshotAssemblerTest {
             .threadId(threadId)
             .status(IssueRunStatus.RUNNING)
             .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
+            .startedAt(now)
             .build();
     when(issueRunService.getActiveRun(issue1Id)).thenReturn(null);
     when(issueRunService.getLatestRun(issue1Id)).thenReturn(null);
@@ -205,8 +204,7 @@ class ProjectSnapshotAssemblerTest {
             .issueId(UUID.randomUUID()) // 不等于 issueId
             .ordinal(1L)
             .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
+            .startedAt(now)
             .build();
     when(issueRunService.getActiveRun(issueId)).thenReturn(foreignRun);
 

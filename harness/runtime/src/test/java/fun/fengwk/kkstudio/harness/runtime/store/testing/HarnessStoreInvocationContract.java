@@ -23,6 +23,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
@@ -50,6 +51,8 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
@@ -74,6 +77,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -86,6 +90,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
 
@@ -2616,5 +2621,336 @@ public abstract class HarnessStoreInvocationContract {
     ModelInvocation stored = store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow());
     assertEquals(turnStart, stored.turnStartEntryId());
     assertEquals(modelRequest(), stored.requestSpec());
+  }
+
+  // ---- 待处理 ToolInvocation 分页与结果反查 ----
+
+  /**
+   * listPendingToolInvocations：只返回 WAITING_INPUT 与 WAITING_APPROVAL 状态的调用行， 严格按 (createdAt, id)
+   * 升序排列，并携带正确的 threadId 与 sessionId 投影。
+   */
+  @Test
+  void listPendingToolInvocationsReturnsOnlyWaitingInputAndWaitingApprovalRows() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    // 1. 在当前 thread 上插入 3 个不同状态的调用
+    ToolInvocation toolWaitingInput =
+        new ToolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            toolCall("call-1"),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T1,
+            T1);
+    ToolInvocation toolWaitingApproval =
+        toolInvocation(
+            TestIds.id(11),
+            TestIds.id(1),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T2);
+    ToolInvocation toolReady =
+        toolInvocation(
+            TestIds.id(12),
+            TestIds.id(1),
+            assistantEntryId,
+            2,
+            "call-3",
+            ToolInvocationStatus.READY,
+            T3);
+    inTransaction(
+        store,
+        tx -> tx.insertToolInvocations(List.of(toolWaitingInput, toolWaitingApproval, toolReady)));
+
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    updateTool(TestIds.id(11), tool -> tool.requestApproval("approval needed", T3));
+
+    // 2. 在第二个 session/thread 上插入一个更早创建的 WAITING_APPROVAL 调用
+    TurnBaseline baseline2 = seedTurnBaseline(store);
+    ModelRequestSpec requestSpec2 = succeededRequest();
+    ProviderResponse response2 = assistantResponse("call-1");
+    UUID userEntryId2 =
+        insertChildEntry(
+            store, baseline2.sessionId(), baseline2.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId2 =
+        insertChildEntry(
+            store, baseline2.sessionId(), userEntryId2, mappedAssistant(requestSpec2, response2));
+    insertTerminalModel(
+        TestIds.id(2),
+        baseline2.threadId(),
+        baseline2.turnStartEntryId(),
+        baseline2.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec2,
+        response2,
+        assistantEntryId2,
+        T0);
+    ToolInvocation tool2 =
+        toolInvocation(
+            TestIds.id(20),
+            TestIds.id(2),
+            assistantEntryId2,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T0);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(tool2)));
+    updateTool(TestIds.id(20), tool -> tool.requestApproval("approval needed on t2", T1));
+
+    // 3. 查询全量待处理：READY 的 toolReady(TestIds.id(12)) 必须被排除，按 (createdAt, id) 升序返回 3 条
+    List<PendingToolInvocationRow> rows =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 10));
+    assertEquals(3, rows.size());
+
+    assertEquals(TestIds.id(20), rows.get(0).invocation().id());
+    assertEquals(baseline2.threadId(), rows.get(0).threadId());
+    assertEquals(baseline2.sessionId(), rows.get(0).sessionId());
+    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, rows.get(0).invocation().status());
+    assertEquals(T0, rows.get(0).invocation().createdAt());
+
+    assertEquals(TestIds.id(10), rows.get(1).invocation().id());
+    assertEquals(baseline.threadId(), rows.get(1).threadId());
+    assertEquals(baseline.sessionId(), rows.get(1).sessionId());
+    assertEquals(ToolInvocationStatus.WAITING_INPUT, rows.get(1).invocation().status());
+    assertEquals(T1, rows.get(1).invocation().createdAt());
+
+    assertEquals(TestIds.id(11), rows.get(2).invocation().id());
+    assertEquals(baseline.threadId(), rows.get(2).threadId());
+    assertEquals(baseline.sessionId(), rows.get(2).sessionId());
+    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, rows.get(2).invocation().status());
+    assertEquals(T2, rows.get(2).invocation().createdAt());
+  }
+
+  /**
+   * listPendingToolInvocations：游标 (afterCreatedAt, afterId) 是严格下界， 传入某行的精确 (createdAt, id)
+   * 时必须严格排除该行。
+   */
+  @Test
+  void listPendingToolInvocationsCursorIsStrictLowerBound() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    // 插入 3 条 WAITING 状态的调用行（同 createdAt 与不同 createdAt 组合）
+    ToolInvocation tool1 =
+        new ToolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            toolCall("call-1"),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T1,
+            T1);
+    ToolInvocation tool2 =
+        toolInvocation(
+            TestIds.id(11),
+            TestIds.id(1),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T1);
+    ToolInvocation tool3 =
+        toolInvocation(
+            TestIds.id(12),
+            TestIds.id(1),
+            assistantEntryId,
+            2,
+            "call-3",
+            ToolInvocationStatus.READY,
+            T2);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(tool1, tool2, tool3)));
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    updateTool(TestIds.id(11), tool -> tool.requestApproval("approval 1", T2));
+    updateTool(TestIds.id(12), tool -> tool.requestApproval("approval 2", T3));
+
+    // 首屏返回 3 条：(T1, id10), (T1, id11), (T2, id12)
+    List<PendingToolInvocationRow> all =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 10));
+    assertEquals(3, all.size());
+
+    // 以第一条 (T1, id10) 为游标：严格排除第一条，返回第二、第三条
+    List<PendingToolInvocationRow> afterFirst =
+        store.transaction(tx -> tx.listPendingToolInvocations(T1, TestIds.id(10), 10));
+    assertEquals(2, afterFirst.size());
+    assertEquals(TestIds.id(11), afterFirst.get(0).invocation().id());
+    assertEquals(TestIds.id(12), afterFirst.get(1).invocation().id());
+
+    // 以第二条 (T1, id11) 为游标：严格排除前两条，返回第三条
+    List<PendingToolInvocationRow> afterSecond =
+        store.transaction(tx -> tx.listPendingToolInvocations(T1, TestIds.id(11), 10));
+    assertEquals(1, afterSecond.size());
+    assertEquals(TestIds.id(12), afterSecond.get(0).invocation().id());
+
+    // 以第三条 (T2, id12) 为游标：返回空
+    List<PendingToolInvocationRow> afterThird =
+        store.transaction(tx -> tx.listPendingToolInvocations(T2, TestIds.id(12), 10));
+    assertTrue(afterThird.isEmpty());
+  }
+
+  /** listPendingToolInvocations：limit 参数截断结果数量且保持排序不变。 */
+  @Test
+  void listPendingToolInvocationsLimitTruncatesWithoutReordering() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    ToolInvocation tool1 =
+        new ToolInvocation(
+            TestIds.id(10),
+            TestIds.id(1),
+            assistantEntryId,
+            0,
+            toolCall("call-1"),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T1,
+            T1);
+    ToolInvocation tool2 =
+        toolInvocation(
+            TestIds.id(11),
+            TestIds.id(1),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T2);
+    ToolInvocation tool3 =
+        toolInvocation(
+            TestIds.id(12),
+            TestIds.id(1),
+            assistantEntryId,
+            2,
+            "call-3",
+            ToolInvocationStatus.READY,
+            T3);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(tool1, tool2, tool3)));
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    updateTool(TestIds.id(11), tool -> tool.requestApproval("approval 1", T3));
+    updateTool(TestIds.id(12), tool -> tool.requestApproval("approval 2", T4));
+
+    List<PendingToolInvocationRow> limit1 =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 1));
+    assertEquals(1, limit1.size());
+    assertEquals(TestIds.id(10), limit1.get(0).invocation().id());
+
+    List<PendingToolInvocationRow> limit2 =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 2));
+    assertEquals(2, limit2.size());
+    assertEquals(TestIds.id(10), limit2.get(0).invocation().id());
+    assertEquals(TestIds.id(11), limit2.get(1).invocation().id());
+
+    List<PendingToolInvocationRow> limit3 =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 3));
+    assertEquals(3, limit3.size());
+    assertEquals(TestIds.id(10), limit3.get(0).invocation().id());
+    assertEquals(TestIds.id(11), limit3.get(1).invocation().id());
+    assertEquals(TestIds.id(12), limit3.get(2).invocation().id());
+  }
+
+  /** listPendingToolInvocations：非法 limit（<= 0）与 null 游标参数抛出异常。 */
+  @Test
+  void listPendingToolInvocationsRejectsInvalidArguments() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 0)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), -1)));
+    assertThrows(
+        NullPointerException.class,
+        () -> store.transaction(tx -> tx.listPendingToolInvocations(null, TestIds.id(0), 10)));
+    assertThrows(
+        NullPointerException.class,
+        () -> store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, null, 10)));
+  }
+
+  /**
+   * findToolResultEntryByInvocationId：当 session 内存在携带真实 invocationId 的 TOOL 结果 Entry 时，返回该 Entry。
+   */
+  @Test
+  void findToolResultEntryByInvocationIdReturnsMatchingEntry() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID toolInvocationId = TestIds.id(10);
+    UUID toolResultEntryId =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            assistantEntryId,
+            toolResultPayload(
+                toolInvocationId, assistantEntryId, 0, "call-1", ToolResultStatus.SUCCEEDED));
+
+    Optional<Entry> found =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline.sessionId(), toolInvocationId));
+    assertTrue(found.isPresent());
+    assertEquals(toolResultEntryId, found.get().id());
+    assertEquals(baseline.sessionId(), found.get().sessionId());
+    assertTrue(found.get().payload() instanceof MessagePayload);
+    MessagePayload message = (MessagePayload) found.get().payload();
+    assertNotNull(message.toolResultMetadata());
+    assertEquals(toolInvocationId, message.toolResultMetadata().invocationId());
+  }
+
+  /**
+   * findToolResultEntryByInvocationId：合成（synthetic）ToolResult Entry 不携带 invocationId，反查返回 empty；未知的
+   * invocationId 也返回 empty。
+   */
+  @Test
+  void findToolResultEntryByInvocationIdReturnsEmptyForSyntheticOrUnknownInvocation() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    insertChildEntry(
+        store,
+        baseline.sessionId(),
+        assistantEntryId,
+        syntheticToolResultPayload(assistantEntryId, 0, "call-1"));
+
+    // 合成 Entry 不携带 invocationId，反查任意 ID 都应返回 empty
+    Optional<Entry> syntheticSearch =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline.sessionId(), TestIds.id(10)));
+    assertTrue(syntheticSearch.isEmpty());
+
+    // 未知 invocationId 返回 empty
+    Optional<Entry> unknownSearch =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline.sessionId(), TestIds.id(999)));
+    assertTrue(unknownSearch.isEmpty());
+  }
+
+  /** findToolResultEntryByInvocationId：在其他 Session 查询相同 invocationId 返回 empty（Session 间严格隔离）。 */
+  @Test
+  void findToolResultEntryByInvocationIdReturnsEmptyForDifferentSession() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID toolInvocationId = TestIds.id(10);
+    insertChildEntry(
+        store,
+        baseline.sessionId(),
+        assistantEntryId,
+        toolResultPayload(
+            toolInvocationId, assistantEntryId, 0, "call-1", ToolResultStatus.SUCCEEDED));
+
+    // 第二个 session
+    TurnBaseline baseline2 = seedTurnBaseline(store);
+    Optional<Entry> foundInOtherSession =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline2.sessionId(), toolInvocationId));
+    assertTrue(foundInOtherSession.isEmpty());
   }
 }

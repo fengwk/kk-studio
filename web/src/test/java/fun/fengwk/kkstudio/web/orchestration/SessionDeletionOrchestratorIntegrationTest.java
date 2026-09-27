@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
-import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -25,7 +24,6 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.ChatService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -62,7 +60,6 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
   @Autowired private ChatService chatService;
   @Autowired private HarnessCommandAcceptanceOrchestrator acceptanceService;
   @Autowired private SessionDeletionOrchestrator deletionService;
-  @Autowired private CanvasCommandService canvasCommandService;
   @Autowired private ChatSessionRepository chatSessionRepository;
   @Autowired private StorageUploadService storageUploadService;
   @Autowired private InMemoryS3StorageService s3Storage;
@@ -78,47 +75,42 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
 
   @Test
   void deepDeleteReleasesOnlyTargetOwnerBlobRefs() {
-    UUID chatId = createChat("delete-chat");
-    UUID canvasId = canvasCommandService.createCanvas("delete-canvas").id();
+    UUID chat1Id = createChat("delete-chat-1");
+    UUID chat2Id = createChat("delete-chat-2");
     byte[] content = "shared blob".getBytes(StandardCharsets.UTF_8);
-    String chatUpload = storage.completeUpload("chat.txt", content);
-    String canvasUpload = storage.completeUpload("canvas.txt", content);
-    UUID chatSession = UUID.randomUUID();
-    UUID canvasSession = UUID.randomUUID();
-    UUID chatThread = UUID.randomUUID();
-    UUID canvasThread = UUID.randomUUID();
+    String upload1 = storage.completeUpload("chat1.txt", content);
+    String upload2 = storage.completeUpload("chat2.txt", content);
+    UUID session1 = UUID.randomUUID();
+    UUID session2 = UUID.randomUUID();
+    UUID thread1 = UUID.randomUUID();
+    UUID thread2 = UUID.randomUUID();
 
-    acceptAttachment(
-        new OwnerRef(OwnerType.CHAT, chatId), chatSession, chatThread, UUID.fromString(chatUpload));
-    acceptAttachment(
-        new OwnerRef(OwnerType.CANVAS, canvasId),
-        canvasSession,
-        canvasThread,
-        UUID.fromString(canvasUpload));
+    acceptAttachment(new OwnerRef.Chat(chat1Id), session1, thread1, UUID.fromString(upload1));
+    acceptAttachment(new OwnerRef.Chat(chat2Id), session2, thread2, UUID.fromString(upload2));
 
     UUID blobId =
         jdbc.queryForObject(
-            "select blob_id from session_blob_ref where session_id = ?", UUID.class, chatSession);
+            "select blob_id from session_blob_ref where session_id = ?", UUID.class, session1);
     assertEquals(
         2L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
 
-    deletionService.deleteSessionsByOwner(new OwnerRef(OwnerType.CHAT, chatId));
+    deletionService.deleteSessionsByOwner(new OwnerRef.Chat(chat1Id));
 
-    assertEquals(0, count("session_owner", "session_id", chatSession));
-    assertEquals(0, count("harness_session", "id", chatSession));
-    assertEquals(0, count("harness_thread", "id", chatThread));
-    assertEquals(0, count("session_blob_ref", "session_id", chatSession));
-    assertEquals(1, count("session_owner", "session_id", canvasSession));
-    assertEquals(1, count("harness_session", "id", canvasSession));
-    assertEquals(1, count("harness_thread", "id", canvasThread));
-    assertEquals(1, count("session_blob_ref", "session_id", canvasSession));
+    assertEquals(0, count("chat_session", "session_id", session1));
+    assertEquals(0, count("harness_session", "id", session1));
+    assertEquals(0, count("harness_thread", "id", thread1));
+    assertEquals(0, count("session_blob_ref", "session_id", session1));
+    assertEquals(1, count("chat_session", "session_id", session2));
+    assertEquals(1, count("harness_session", "id", session2));
+    assertEquals(1, count("harness_thread", "id", thread2));
+    assertEquals(1, count("session_blob_ref", "session_id", session2));
     assertEquals(
         1L,
         jdbc.queryForObject("select ref_count from storage_blob where id = ?", Long.class, blobId));
     assertTrue(
         s3Storage.hasObject(StorageObjectKeys.blobOriginal(blobId)),
-        "the shared blob must remain while the Canvas Session still references it");
+        "the shared blob must remain while the other Chat Session still references it");
   }
 
   @Test
@@ -128,25 +120,25 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
     UUID secondSession = new UUID(0L, 1L);
     UUID firstThread = new UUID(0L, 3L);
     UUID secondThread = new UUID(0L, 4L);
-    acceptText(new OwnerRef(OwnerType.CHAT, chatId), firstSession, firstThread, "first");
-    acceptText(new OwnerRef(OwnerType.CHAT, chatId), secondSession, secondThread, "second");
+    acceptText(new OwnerRef.Chat(chatId), firstSession, firstThread, "first");
+    acceptText(new OwnerRef.Chat(chatId), secondSession, secondThread, "second");
 
     // 归属枚举顺序刻意与 UUID 锁顺序相反；删除服务必须先收集并锁完 Session，再进入 Thread 阶段。
     jdbc.update(
-        "update session_owner set created_at = ? where session_id = ?",
+        "update chat_session set created_at = ? where session_id = ?",
         Timestamp.from(Instant.parse("2026-08-20T00:01:00Z")),
         firstSession);
     jdbc.update(
-        "update session_owner set created_at = ? where session_id = ?",
+        "update chat_session set created_at = ? where session_id = ?",
         Timestamp.from(Instant.parse("2026-08-20T00:00:00Z")),
         secondSession);
 
     // 归属枚举与 Session UUID 顺序相反，按 Session 分组后的 Thread 又是 4 -> 3；实现必须分别全局排序两个 rank。
     assertEquals(
         List.of(firstSession, secondSession), chatSessionRepository.listSessionIds(chatId));
-    deletionService.deleteSessionsByOwner(new OwnerRef(OwnerType.CHAT, chatId));
+    deletionService.deleteSessionsByOwner(new OwnerRef.Chat(chatId));
 
-    assertEquals(0, count("session_owner", "chat_id", chatId));
+    assertEquals(0, count("chat_session", "chat_id", chatId));
     assertEquals(0, count("harness_session", "id", firstSession));
     assertEquals(0, count("harness_session", "id", secondSession));
     assertEquals(0, count("harness_thread", "id", firstThread));

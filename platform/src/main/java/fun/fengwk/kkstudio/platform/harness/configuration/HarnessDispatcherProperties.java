@@ -19,6 +19,7 @@ public class HarnessDispatcherProperties {
   public static final Duration DEFAULT_LEASE_DURATION = Duration.ofSeconds(30);
   public static final Duration DEFAULT_POLL_INTERVAL = Duration.ofSeconds(1);
   public static final Duration DEFAULT_REJECTION_DELAY = Duration.ofSeconds(1);
+  public static final Duration DEFAULT_ADMISSION_DEFERRAL = Duration.ofSeconds(5);
   public static final int DEFAULT_MAX_DISPATCH_TASKS = 64;
   public static final int DEFAULT_WORKER_CONCURRENCY = 16;
   public static final int DEFAULT_WORKER_QUEUE_CAPACITY = 64;
@@ -26,6 +27,7 @@ public class HarnessDispatcherProperties {
   private Duration leaseDuration = DEFAULT_LEASE_DURATION;
   private Duration pollInterval = DEFAULT_POLL_INTERVAL;
   private Duration rejectionDelay = DEFAULT_REJECTION_DELAY;
+  private Duration admissionDeferral = DEFAULT_ADMISSION_DEFERRAL;
   private int maxDispatchTasks = DEFAULT_MAX_DISPATCH_TASKS;
   private Worker worker = new Worker();
 
@@ -99,6 +101,15 @@ public class HarnessDispatcherProperties {
   public void setRejectionDelay(Duration rejectionDelay) {
     this.rejectionDelay =
         validateDuration(rejectionDelay, "kk-studio.harness.dispatcher.rejection-delay");
+  }
+
+  public Duration getAdmissionDeferral() {
+    return validateDuration(admissionDeferral, "kk-studio.harness.dispatcher.admission-deferral");
+  }
+
+  public void setAdmissionDeferral(Duration admissionDeferral) {
+    this.admissionDeferral =
+        validateDuration(admissionDeferral, "kk-studio.harness.dispatcher.admission-deferral");
   }
 
   public int getMaxDispatchTasks() {

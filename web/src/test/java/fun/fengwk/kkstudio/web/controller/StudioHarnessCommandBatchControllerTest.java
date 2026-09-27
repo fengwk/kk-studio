@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -114,7 +115,9 @@ class StudioHarnessCommandBatchControllerTest {
     verify(acceptanceService, times(3))
         .accept(ownerCaptor.capture(), any(AcceptCommandsCommand.class));
     assertEquals(OwnerType.CHAT, ownerCaptor.getAllValues().get(0).type());
-    assertEquals(UUID.fromString(OWNER_ID), ownerCaptor.getAllValues().get(0).id());
+    assertInstanceOf(OwnerRef.Chat.class, ownerCaptor.getAllValues().get(0));
+    assertEquals(
+        UUID.fromString(OWNER_ID), ((OwnerRef.Chat) ownerCaptor.getAllValues().get(0)).chatId());
   }
 
   @Test
@@ -433,17 +436,31 @@ class StudioHarnessCommandBatchControllerTest {
   }
 
   @Test
-  void rejectsIssueAgentSessionCommandsAtPublicHttpBoundary() throws Exception {
-    // 测试意图：Issue Agent 的用户输入和分叉必须经 Issue 业务工作流，不能直接以 ownerId 伪造公共命令批。
+  void rejectsIssueAgentCommandsAtPublicHttpBoundary() throws Exception {
+    // 测试意图：Issue Agent 的用户输入和分叉必须经 Issue 业务工作流，不能直接以 owner 伪造公共命令批，返回 409 Conflict。
     for (String target : List.of(newSessionTarget(), newThreadTarget(), threadTarget())) {
       String request =
-          batch(target).replace("\"type\":\"CHAT\"", "\"type\":\"ISSUE_AGENT_SESSION\"");
+          batchWithCommands(
+                  target,
+                  """
+                  [{
+                    "type":"USER_MESSAGE",
+                    "idempotencyKey":"%s",
+                    "contents":[{"type":"TEXT","text":"hello"}]
+                  }]
+                  """
+                      .formatted(IDEMPOTENCY_KEY))
+              .replace(
+                  "\"owner\":{\"type\":\"CHAT\",\"chatId\":\"" + OWNER_ID + "\"}",
+                  "\"owner\":{\"type\":\"ISSUE_AGENT\",\"issueId\":\""
+                      + OWNER_ID
+                      + "\",\"agentName\":\"default-assistant\"}");
       mockMvc
           .perform(
               post("/api/harness/command-batches")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(request))
-          .andExpect(status().isBadRequest());
+          .andExpect(status().isConflict());
     }
     verifyNoInteractions(acceptanceService, runtime);
   }
@@ -464,7 +481,7 @@ class StudioHarnessCommandBatchControllerTest {
   private static String batchWithCommands(String target, String commands) {
     return """
         {
-          "owner":{"type":"CHAT","id":"%s"},
+          "owner":{"type":"CHAT","chatId":"%s"},
           "target":%s,
           "commands":%s
         }

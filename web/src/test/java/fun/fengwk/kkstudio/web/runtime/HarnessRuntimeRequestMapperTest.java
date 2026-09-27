@@ -90,18 +90,23 @@ class HarnessRuntimeRequestMapperTest {
   @Test
   void mapsOwnerAndAllThreeTargets() {
     // 产品公开的 owner/target union 必须映射为精确的 sealed domain 类型。
-    HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
-    owner.setType("CANVAS");
-    owner.setId(idText(10));
-    OwnerRef mappedOwner = HarnessRuntimeRequestMapper.toOwner(owner);
-    assertEquals(OwnerType.CANVAS, mappedOwner.type());
-    assertEquals(id(10), mappedOwner.id());
+    HarnessCommandOwnerDTO chatOwner = new HarnessCommandOwnerDTO();
+    chatOwner.setType("CHAT");
+    chatOwner.setChatId(idText(10));
+    OwnerRef mappedChatOwner = HarnessRuntimeRequestMapper.toOwner(chatOwner);
+    assertEquals(OwnerType.CHAT, mappedChatOwner.type());
+    assertInstanceOf(OwnerRef.Chat.class, mappedChatOwner);
+    assertEquals(id(10), ((OwnerRef.Chat) mappedChatOwner).chatId());
 
-    owner.setType("ISSUE_AGENT_SESSION");
-    owner.setId(idText(11));
-    OwnerRef issueAgentSessionOwner = HarnessRuntimeRequestMapper.toOwner(owner);
-    assertEquals(OwnerType.ISSUE_AGENT_SESSION, issueAgentSessionOwner.type());
-    assertEquals(id(11), issueAgentSessionOwner.id());
+    HarnessCommandOwnerDTO issueAgentOwner = new HarnessCommandOwnerDTO();
+    issueAgentOwner.setType("ISSUE_AGENT");
+    issueAgentOwner.setIssueId(idText(11));
+    issueAgentOwner.setAgentName("assistant");
+    OwnerRef mappedIssueAgentOwner = HarnessRuntimeRequestMapper.toOwner(issueAgentOwner);
+    assertEquals(OwnerType.ISSUE_AGENT, mappedIssueAgentOwner.type());
+    assertInstanceOf(OwnerRef.IssueAgent.class, mappedIssueAgentOwner);
+    assertEquals(id(11), ((OwnerRef.IssueAgent) mappedIssueAgentOwner).issueId());
+    assertEquals("assistant", ((OwnerRef.IssueAgent) mappedIssueAgentOwner).agentName());
 
     AcceptCommandsCommand newSession =
         HarnessRuntimeRequestMapper.toAcceptCommandsCommand(
@@ -119,8 +124,16 @@ class HarnessRuntimeRequestMapperTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> {
-          owner.setType("UNKNOWN");
-          HarnessRuntimeRequestMapper.toOwner(owner);
+          HarnessCommandOwnerDTO unknown = new HarnessCommandOwnerDTO();
+          unknown.setType("UNKNOWN");
+          HarnessRuntimeRequestMapper.toOwner(unknown);
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          HarnessCommandOwnerDTO missingChatId = new HarnessCommandOwnerDTO();
+          missingChatId.setType("CHAT");
+          HarnessRuntimeRequestMapper.toOwner(missingChatId);
         });
   }
 
@@ -727,7 +740,7 @@ class HarnessRuntimeRequestMapperTest {
     HarnessCommandBatchDTO request = new HarnessCommandBatchDTO();
     HarnessCommandOwnerDTO owner = new HarnessCommandOwnerDTO();
     owner.setType("CHAT");
-    owner.setId(idText(10));
+    owner.setChatId(idText(10));
     request.setOwner(owner);
     request.setTarget(target);
     request.setCommands(List.of(commands));

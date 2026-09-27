@@ -91,26 +91,28 @@ class FlywayAutoConfigurationIntegrationTest {
         assertTrue(seed.next());
         assertEquals(1L, seed.getLong(1), "dev seed must be visible through the data-source");
       }
-      try (ResultSet ownerSessionTable =
+      try (ResultSet chatSessionTable =
           st.executeQuery(
               "select count(*) from information_schema.tables"
                   + " where table_schema = 'public'"
-                  + " and table_name = 'session_owner'")) {
-        assertTrue(ownerSessionTable.next());
+                  + " and table_name = 'chat_session'")) {
+        assertTrue(chatSessionTable.next());
         assertEquals(
-            1L, ownerSessionTable.getLong(1), "the product Session owner arc must be part of V1");
+            1L,
+            chatSessionTable.getLong(1),
+            "the product Chat Session association must be part of V1");
       }
-      try (ResultSet ownerSessionForeignKeys =
+      try (ResultSet chatSessionForeignKeys =
           st.executeQuery(
               "select count(*) from information_schema.table_constraints"
                   + " where table_schema = 'public'"
-                  + " and table_name = 'session_owner'"
+                  + " and table_name = 'chat_session'"
                   + " and constraint_type = 'FOREIGN KEY'")) {
-        assertTrue(ownerSessionForeignKeys.next());
+        assertTrue(chatSessionForeignKeys.next());
         assertEquals(
-            4L,
-            ownerSessionForeignKeys.getLong(1),
-            "the owner arc keeps the Harness Session FK and exactly three owner FKs");
+            2L,
+            chatSessionForeignKeys.getLong(1),
+            "the chat_session association keeps the Harness Session FK and Chat FK");
       }
     }
   }

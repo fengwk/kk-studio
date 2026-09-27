@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJs
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
-import fun.fengwk.kkstudio.platform.orchestration.OwnerType;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
@@ -101,24 +100,18 @@ public final class HarnessRuntimeRequestMapper {
     }
   }
 
-  /** 映射 owner，并只允许产品公开的 CHAT/CANVAS/ISSUE_AGENT_SESSION discriminator。 */
+  /** 映射 owner，只允许 CHAT 与 ISSUE_AGENT：Canvas 不持有 Harness Session，公共 batch 端点不接受 Issue+Agent。 */
   public static OwnerRef toOwner(HarnessCommandOwnerDTO dto) {
     requireNonNull(dto, "owner");
     String type = requireText(dto.getType(), "owner.type");
-    OwnerType ownerType;
-    try {
-      ownerType = OwnerType.valueOf(type);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          "owner.type must be CHAT, CANVAS, or ISSUE_AGENT_SESSION: " + type, error);
-    }
-    if (ownerType != OwnerType.CHAT
-        && ownerType != OwnerType.CANVAS
-        && ownerType != OwnerType.ISSUE_AGENT_SESSION) {
-      throw new IllegalArgumentException(
-          "owner.type must be CHAT, CANVAS, or ISSUE_AGENT_SESSION: " + type);
-    }
-    return new OwnerRef(ownerType, parseUuid(dto.getId(), "owner.id"));
+    return switch (type) {
+      case "CHAT" -> new OwnerRef.Chat(parseUuid(dto.getChatId(), "owner.chatId"));
+      case "ISSUE_AGENT" -> new OwnerRef.IssueAgent(
+          parseUuid(dto.getIssueId(), "owner.issueId"),
+          requireText(dto.getAgentName(), "owner.agentName"));
+      default -> throw new IllegalArgumentException(
+          "owner.type must be CHAT or ISSUE_AGENT: " + type);
+    };
   }
 
   /** 将唯一产品 HTTP 写请求映射为 sealed target 与有序 commands。 */
