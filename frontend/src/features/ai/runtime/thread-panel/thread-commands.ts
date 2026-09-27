@@ -98,13 +98,15 @@ export interface ThreadCommandOptions {
   readOnly?: boolean
   canBranchFromRoot?: boolean
   owner?: ThreadCommandOwner
+  allowSwitchAgent?: boolean
+  allowBranching?: boolean
 }
 
 function isThreadCommandOptions(value: unknown): value is ThreadCommandOptions {
   return (
     value != null
     && typeof value === 'object'
-    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value || 'owner' in value)
+    && ('allowNewSession' in value || 'readOnly' in value || 'canBranchFromRoot' in value || 'owner' in value || 'allowSwitchAgent' in value || 'allowBranching' in value)
   )
 }
 
@@ -144,7 +146,15 @@ export function threadCommandsForTarget(
       && options.allowNewSession === false
       && options.canBranchFromRoot === false
 
-    const disabled = !targetEnabled || compactDisabled || readOnlyDisabled || newDisabled
+    const agentDisabled =
+      options.allowSwitchAgent === false
+      && item.id === 'agent'
+
+    const branchingDisabled =
+      options.allowBranching === false
+      && (item.id === 'thread' || item.id === 'tree' || item.id === 'new')
+
+    const disabled = !targetEnabled || compactDisabled || readOnlyDisabled || newDisabled || agentDisabled || branchingDisabled
     let disabledReason: string | undefined
     if (readOnlyDisabled) {
       disabledReason = '只读模式'
@@ -152,6 +162,10 @@ export function threadCommandsForTarget(
       disabledReason = manualCompaction?.disabledReason ?? undefined
     } else if (newDisabled) {
       disabledReason = '当前项目仅支持单会话'
+    } else if (agentDisabled) {
+      disabledReason = '当前受控模式不支持切换 Agent'
+    } else if (branchingDisabled) {
+      disabledReason = '当前受控模式不支持分支切换或分叉'
     }
 
     return {
@@ -159,7 +173,7 @@ export function threadCommandsForTarget(
       disabled,
       disabledReason,
       disabledReasonKey:
-        disabled && !compactDisabled && !readOnlyDisabled && !newDisabled ? DISABLED_KEY : undefined,
+        disabled && !compactDisabled && !readOnlyDisabled && !newDisabled && !agentDisabled && !branchingDisabled ? DISABLED_KEY : undefined,
     }
   })
 }

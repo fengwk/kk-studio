@@ -5,6 +5,7 @@ import {
   decodeIssueActivityList,
   decodeIssueDetail,
   decodeIssueEvidence,
+  decodeIssueEvidenceList,
   decodeIssueStageBudget,
   decodeProject,
   decodeProjectList,
@@ -309,6 +310,13 @@ export function createProjectsApi(options: ProjectsApiOptions = {}) {
         request,
       )
       return decodeIssueEvidence(raw)
+    },
+
+    listIssueEvidence: async (issueId: string): Promise<IssueEvidenceDTO[]> => {
+      const raw = await client.get<unknown>(
+        `/issues/${encodeURIComponent(issueId)}/evidence`,
+      )
+      return decodeIssueEvidenceList(raw)
     },
   }
 }

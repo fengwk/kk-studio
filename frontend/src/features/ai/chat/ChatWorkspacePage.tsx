@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 import { ChatWorkspacePane } from '@/features/ai/chat/ChatWorkspacePane'
 import {
@@ -59,6 +59,8 @@ export function ChatLayoutSelector({
 
 export function ChatWorkspacePage() {
   const { chatId = '' } = useParams()
+  const [searchParams] = useSearchParams()
+  const targetThreadId = searchParams.get('thread')
   const navigate = useNavigate()
   const { t } = useI18n()
   const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chatId))
@@ -127,17 +129,21 @@ export function ChatWorkspacePage() {
         </div>
       </header>
       <div className={`chat-pane-grid layout-${paneState.layout}`}>
-        {visiblePanes.map((pane) => (
-          <ChatWorkspacePane
-            key={`${chat.id}:${pane.id}`}
-            chat={chat}
-            agents={agentsQuery.data?.results ?? []}
-            environments={environmentsQuery.data ?? []}
-            pane={pane}
-            focused={paneState.focusedPaneId === pane.id}
-            onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
-          />
-        ))}
+        {visiblePanes.map((pane, index) => {
+          const isFocused = paneState.focusedPaneId === pane.id || (index === 0 && !paneState.focusedPaneId)
+          return (
+            <ChatWorkspacePane
+              key={`${chat.id}:${pane.id}`}
+              chat={chat}
+              agents={agentsQuery.data?.results ?? []}
+              environments={environmentsQuery.data ?? []}
+              pane={pane}
+              focused={isFocused}
+              onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
+              initialTarget={targetThreadId && isFocused ? { kind: 'BOUND_THREAD', threadId: targetThreadId } : undefined}
+            />
+          )
+        })}
       </div>
     </section>
   )

@@ -21,6 +21,8 @@ import { useI18n } from '@/shared/i18n'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
 
+import type { ComposerPart } from '@/features/ai/composer/composer-parts'
+
 export type { AgentPaneCapabilities, AgentPaneDefaults }
 
 export function AgentPane({
@@ -33,6 +35,8 @@ export function AgentPane({
   onFocus,
   initialTarget,
   capabilities,
+  onSubmitInstruction,
+  onStop,
 }: {
   owner: AgentRuntimeOwnerDTO
   paneId: string
@@ -43,6 +47,8 @@ export function AgentPane({
   onFocus?: () => void
   initialTarget?: PaneTarget
   capabilities?: AgentPaneCapabilities
+  onSubmitInstruction?: (text: string, parts: ComposerPart[]) => Promise<void> | void
+  onStop?: () => Promise<void> | void
 }) {
   const { t } = useI18n()
   const pane = useAgentPaneController({
@@ -55,6 +61,8 @@ export function AgentPane({
     onFocus,
     initialTarget,
     capabilities,
+    onSubmitInstruction,
+    onStop,
   })
   const interactionPanel = renderInteractionPanel()
   const onDismissActionError = () => {
@@ -198,6 +206,9 @@ export function AgentPane({
       )
     }
     if (pane.interaction === 'agent') {
+      if (capabilities?.allowSwitchAgent === false) {
+        return null
+      }
       return (
         <AgentSelectionPanel
           agents={agents.map((agent) => ({ name: agent.name, description: agent.description }))}
@@ -225,6 +236,9 @@ export function AgentPane({
       )
     }
     if (pane.interaction === 'tree') {
+      if (capabilities?.allowBranching === false) {
+        return null
+      }
       return (
         <HistoryBranchPanel
           entries={pane.treeEntries}
@@ -243,6 +257,9 @@ export function AgentPane({
       )
     }
     if (pane.interaction === 'thread-sessions') {
+      if (capabilities?.allowBranching === false) {
+        return null
+      }
       return (
         <SelectionPanel
           title={t('ai.chat.selectSession')}
@@ -267,6 +284,9 @@ export function AgentPane({
       )
     }
     if (pane.interaction === 'thread-threads') {
+      if (capabilities?.allowBranching === false) {
+        return null
+      }
       return (
         <SelectionPanel
           title={t('ai.chat.selectThread')}

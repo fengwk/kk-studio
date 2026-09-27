@@ -957,3 +957,57 @@
   color: var(--fg-dim);
   font-size: 0.875rem;
 }
+
+/* Controlled Issue Agent Dock */
+.project-agent-dock {
+  display: flex;
+  flex-direction: column;
+  width: 480px;
+  min-width: 380px;
+  max-width: 600px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.project-agent-dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  gap: 8px;
+}
+
+.project-agent-dock-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.project-agent-dock-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-agent-dock-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  position: relative;
+}
+
+.project-agent-dock-content .chat-pane {
+  height: 100%;
+  border: none;
+}

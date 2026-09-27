@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
@@ -81,6 +81,76 @@ async function calculateFileSha256(file: File, customHasher?: HashFile): Promise
   return '0'.repeat(64)
 }
 
+interface EvidenceRowProps {
+  evidence: IssueEvidenceDTO
+  storageService: StorageService
+}
+
+function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
+  const { data: presignedUrl, isLoading } = useQuery({
+    queryKey: ['storage', 'blob', 'download-url', evidence.blobId],
+    queryFn: async () => {
+      try {
+        return await storageService.getBlobDownloadUrl(evidence.blobId)
+      } catch {
+        return await storageService.getBlobPreviewUrl(evidence.blobId)
+      }
+    },
+    enabled: Boolean(evidence.blobId),
+    staleTime: 60_000,
+  })
+
+  const [isOpening, setIsOpening] = useState(false)
+
+  const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (presignedUrl?.url) {
+      return
+    }
+    e.preventDefault()
+    setIsOpening(true)
+    try {
+      let res: { url: string } | null = null
+      try {
+        res = await storageService.getBlobDownloadUrl(evidence.blobId)
+      } catch {
+        res = await storageService.getBlobPreviewUrl(evidence.blobId)
+      }
+      if (res?.url) {
+        window.open(res.url, '_blank', 'noreferrer')
+      }
+    } catch {
+      // 容错处理
+    } finally {
+      setIsOpening(false)
+    }
+  }
+
+  return (
+    <div key={evidence.blobId} className="evidence-card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <Paperclip size={14} aria-hidden="true" />
+        <strong>{evidence.name || evidence.blobId}</strong>
+        {evidence.actorAgentName && (
+          <span className="badge badge-agent">{evidence.actorAgentName}</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <a
+          href={presignedUrl?.url || '#'}
+          target="_blank"
+          rel="noreferrer"
+          className="ghost-btn"
+          onClick={handleClick}
+          title="预览或下载"
+        >
+          <Download size={14} className={isLoading || isOpening ? 'animate-spin' : ''} aria-hidden="true" />
+          <span>{isLoading || isOpening ? '获取中...' : '下载/查看'}</span>
+        </a>
+      </div>
+    </div>
+  )
+}
+
 export function IssueDetailModal({
   isOpen,
   issueId,
@@ -109,6 +179,13 @@ export function IssueDetailModal({
   } = useQuery({
     queryKey: issueQueryKey,
     queryFn: () => api.getIssue(issueId!),
+    enabled: isOpen && Boolean(issueId),
+  })
+
+  const evidenceQueryKey = queryKeys.projects.evidence(issueId ?? '')
+  const { data: serverEvidences = [] } = useQuery({
+    queryKey: evidenceQueryKey,
+    queryFn: () => (api.listIssueEvidence ? api.listIssueEvidence(issueId!) : Promise.resolve([])),
     enabled: isOpen && Boolean(issueId),
   })
 
@@ -157,6 +234,19 @@ export function IssueDetailModal({
   const [localEvidences, setLocalEvidences] = useState<IssueEvidenceDTO[]>([])
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const allEvidences = useMemo(() => {
+    const seen = new Set<string>()
+    const merged: IssueEvidenceDTO[] = []
+    for (const ev of [...localEvidences, ...serverEvidences]) {
+      const key = `${ev.blobId}-${ev.name ?? ''}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        merged.push(ev)
+      }
+    }
+    return merged
+  }, [localEvidences, serverEvidences])
 
   // 初始化草稿
   useEffect(() => {
@@ -544,6 +634,7 @@ export function IssueDetailModal({
         uploadId: upload.id,
       })
       setLocalEvidences((prev) => [published, ...prev])
+      await queryClient.invalidateQueries({ queryKey: evidenceQueryKey })
       await queryClient.invalidateQueries({ queryKey: issueQueryKey })
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '上传证据失败')
@@ -554,8 +645,6 @@ export function IssueDetailModal({
       }
     }
   }
-
-  const allEvidences = [...localEvidences]
 
   return (
     <div
@@ -1180,27 +1269,11 @@ export function IssueDetailModal({
                   ) : (
                     <div className="evidence-list">
                       {allEvidences.map((ev) => (
-                        <div key={ev.blobId} className="evidence-card">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <Paperclip size={14} aria-hidden="true" />
-                            <strong>{ev.name || ev.blobId}</strong>
-                            {ev.actorAgentName && (
-                              <span className="badge badge-agent">{ev.actorAgentName}</span>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <a
-                              href={`/api/resources/${ev.blobId}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="ghost-btn"
-                              title="预览或下载"
-                            >
-                              <Download size={14} aria-hidden="true" />
-                              <span>下载/查看</span>
-                            </a>
-                          </div>
-                        </div>
+                        <EvidenceRow
+                          key={ev.blobId}
+                          evidence={ev}
+                          storageService={storageService}
+                        />
                       ))}
                     </div>
                   )}

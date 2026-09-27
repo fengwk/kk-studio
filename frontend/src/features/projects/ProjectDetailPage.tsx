@@ -1,20 +1,27 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router'
 import {
   AlertTriangle,
   Archive,
   ArrowLeft,
+  Bot,
   Calendar,
+  FileText,
   Layers,
   Pencil,
   RefreshCw,
   Trash2,
+  X,
 } from 'lucide-react'
 import { CreateIssueModal } from './components/CreateIssueModal'
 import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
 import { IssueBoard } from './components/IssueBoard'
 import { IssueDetailModal } from './components/IssueDetailModal'
+import { AgentPane } from '@/features/ai/runtime/AgentPane'
+import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
 import { createUuid } from '@/shared/lib/uuid'
@@ -27,12 +34,23 @@ export interface ProjectDetailPageProps {
   api?: ProjectsApi
 }
 
+interface PendingInstructionAttempt {
+  issueId: string
+  expectedVersion: string
+  body: string
+  requestKey: string
+}
+
 export function ProjectDetailPage({
   projectId,
   onBack,
   api = projectsApi,
 }: ProjectDetailPageProps) {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const queryIssueId = searchParams.get('issue')
+  const queryThreadId = searchParams.get('thread')
 
   // 权威聚合状态
   const {
@@ -52,6 +70,125 @@ export function ProjectDetailPage({
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null)
+  const [isManualModalOpen, setIsManualModalOpen] = useState(false)
+
+  const effectiveIssueId = queryIssueId || selectedIssueId
+
+  // Issue 详情查询（用于受控 AgentPane 门禁验证与元数据）
+  const issueQuery = useQuery({
+    queryKey: queryKeys.projects.issue(projectId, effectiveIssueId ?? ''),
+    queryFn: () => api.getIssue(effectiveIssueId!),
+    enabled: Boolean(effectiveIssueId),
+  })
+  const issueDetail = issueQuery.data
+
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents.list,
+    queryFn: () => agentService.listAgents(),
+    enabled: Boolean(queryThreadId),
+  })
+
+  const environmentsQuery = useQuery({
+    queryKey: queryKeys.environments.list,
+    queryFn: () => environmentService.listEnvironments(),
+    enabled: Boolean(queryThreadId),
+  })
+
+  // 门禁验证：目标 thread 必须属于 detail.agentThreads 或 detail.runs
+  const matchedAgentThread = issueDetail?.agentThreads?.find((t) => t.threadId === queryThreadId)
+  const matchedRun = issueDetail?.runs?.find((r) => r.threadId === queryThreadId)
+  const isThreadValid = Boolean(matchedAgentThread || matchedRun)
+  const matchedAgentName = matchedAgentThread?.agentName || matchedRun?.agentName || null
+
+  const handleSelectIssue = (id: string | null) => {
+    setSelectedIssueId(id)
+    setIsManualModalOpen(false)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (id) {
+        next.set('issue', id)
+      } else {
+        next.delete('issue')
+        next.delete('thread')
+      }
+      return next
+    })
+  }
+
+  const handleOpenThread = (threadId: string) => {
+    setIsManualModalOpen(false)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      if (effectiveIssueId) {
+        next.set('issue', effectiveIssueId)
+      }
+      next.set('thread', threadId)
+      return next
+    })
+  }
+
+  const handleCloseThread = () => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('thread')
+      return next
+    })
+  }
+
+  const pendingInstructionRef = useRef<PendingInstructionAttempt | null>(null)
+
+  const handleSubmitInstruction = async (text: string) => {
+    if (!issueDetail) return
+    const trimmed = text.trim()
+    if (!trimmed) return
+
+    const issueId = issueDetail.issue.id
+    const expectedVersion = issueDetail.issue.version
+
+    let attempt = pendingInstructionRef.current
+    if (
+      !attempt ||
+      attempt.issueId !== issueId ||
+      attempt.expectedVersion !== expectedVersion ||
+      attempt.body !== trimmed
+    ) {
+      // 内容变更、换了 Issue 或版本流转，启动全新的 attempt
+      attempt = {
+        issueId,
+        expectedVersion,
+        body: trimmed,
+        requestKey: createUuid(),
+      }
+      pendingInstructionRef.current = attempt
+    }
+
+    await api.appendIssueActivity(issueId, {
+      expectedVersion,
+      requestKey: attempt.requestKey,
+      kind: 'INSTRUCTION',
+      body: trimmed,
+    })
+    // 成功后清空挂起的 attempt；若失败抛出异常中断执行，attempt 保留在 ref 中供重试
+    pendingInstructionRef.current = null
+    await invalidateSnapshot()
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.projects.issue(projectId, issueDetail.issue.id),
+    })
+  }
+
+  const handleStopIssue = async () => {
+    if (!issueDetail) return
+    const requestKey = createUuid()
+    await api.stopIssue(issueDetail.issue.id, {
+      expectedVersion: issueDetail.issue.version,
+      requestKey,
+      detail: '用户在 Agent 视图中终止执行',
+    })
+    await invalidateSnapshot()
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.projects.issue(projectId, issueDetail.issue.id),
+    })
+  }
 
   const invalidateSnapshot = async () => {
     await queryClient.invalidateQueries({
@@ -77,7 +214,7 @@ export function ProjectDetailPage({
   }
 
   const handleBlockIssue = async (issueId: string, _expectedVersion: string) => {
-    setSelectedIssueId(issueId)
+    handleSelectIssue(issueId)
   }
 
   const handleRecoverIssue = async (issueId: string, expectedVersion: string) => {
@@ -103,7 +240,7 @@ export function ProjectDetailPage({
   }
 
   const handleResolveUnknownIssue = async (issueId: string, _expectedVersion: string) => {
-    setSelectedIssueId(issueId)
+    handleSelectIssue(issueId)
   }
 
   const handleArchiveIssue = async (issueId: string, expectedVersion: string) => {
@@ -146,6 +283,8 @@ export function ProjectDetailPage({
   }
 
   const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
+
+  const isIssueDetailModalOpen = Boolean(effectiveIssueId && (!queryThreadId || isManualModalOpen))
 
   if (isLoading && !snapshot) {
     return (
@@ -290,12 +429,12 @@ export function ProjectDetailPage({
         </div>
       )}
 
-      {/* 状态自然 token 看板 */}
+      {/* 状态自然 token 看板 + 受控 AgentPane */}
       <div className="project-detail-body">
         <IssueBoard
           workflow={project.workflow}
           issues={snapshot.issues}
-          onSelectIssue={(id) => setSelectedIssueId(id)}
+          onSelectIssue={(id) => handleSelectIssue(id)}
           onCreateIssue={() => setIsCreateIssueOpen(true)}
           onTransitionIssue={handleTransitionIssue}
           onBlockIssue={handleBlockIssue}
@@ -305,6 +444,72 @@ export function ProjectDetailPage({
           onArchiveIssue={handleArchiveIssue}
           onUnarchiveIssue={handleUnarchiveIssue}
         />
+
+        {queryThreadId && (
+          <aside className="project-agent-dock" data-testid="project-agent-dock">
+            <div className="project-agent-dock-header">
+              <div className="project-agent-dock-meta">
+                <Bot size={16} aria-hidden="true" />
+                <span className="project-agent-dock-title">
+                  {issueDetail?.issue.title ?? 'Agent 线程'}
+                </span>
+                {matchedAgentName && <span className="badge badge-agent">{matchedAgentName}</span>}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => setIsManualModalOpen(true)}
+                  title="查看完整 Issue 详情"
+                  aria-label="查看完整 Issue 详情"
+                >
+                  <FileText size={14} aria-hidden="true" />
+                  <span>Issue 详情</span>
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={handleCloseThread}
+                  title="关闭 Agent 视图"
+                  aria-label="关闭 Agent 视图"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+
+            <div className="project-agent-dock-content">
+              {issueQuery.isLoading ? (
+                <div className="empty-tip">加载 Issue 与 Agent 线程中...</div>
+              ) : !isThreadValid ? (
+                <div style={{ padding: '24px' }}>
+                  <div className="form-error-banner" role="alert">
+                    <AlertTriangle size={16} aria-hidden="true" />
+                    <span>目标 Thread 不属于该 Issue 绑定的 Agent 线程或 Run 记录，已拒绝接入</span>
+                  </div>
+                </div>
+              ) : (
+                <AgentPane
+                  key={queryThreadId}
+                  owner={{ type: 'ISSUE_AGENT_SESSION', id: issueDetail!.issue.id }}
+                  paneId={`project-issue-${queryThreadId}`}
+                  agents={agentsQuery.data?.results ?? []}
+                  environments={environmentsQuery.data ?? []}
+                  initialTarget={{ kind: 'BOUND_THREAD', threadId: queryThreadId }}
+                  capabilities={{
+                    allowNewSession: false,
+                    allowSwitchAgent: false,
+                    allowBranching: false,
+                    allowGenericChat: false,
+                  }}
+                  onSubmitInstruction={handleSubmitInstruction}
+                  onStop={handleStopIssue}
+                  focused
+                />
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
       {/* Modals */}
@@ -333,12 +538,13 @@ export function ProjectDetailPage({
       />
 
       <IssueDetailModal
-        isOpen={Boolean(selectedIssueId)}
+        isOpen={isIssueDetailModalOpen}
         projectId={projectId}
-        issueId={selectedIssueId}
+        issueId={effectiveIssueId}
         workflow={project.workflow}
-        onClose={() => setSelectedIssueId(null)}
+        onClose={() => handleSelectIssue(null)}
         onUpdated={() => void invalidateSnapshot()}
+        onOpenThread={handleOpenThread}
         api={api}
       />
     </div>
